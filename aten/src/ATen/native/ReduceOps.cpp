@@ -744,7 +744,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool
   return at::logsumexp_out(result, self, dimnames_to_positions(self, dims), keepdim);
 }
 
-static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
+static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scalar>& opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0).to<double>();
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
@@ -771,7 +771,7 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt
   return result;
 }
 
-static inline Tensor _norm(const Tensor &self, Scalar p) {
+static inline Tensor _norm(const Tensor &self, const Scalar& p) {
   if (self.is_sparse()) {
     // Sparse tensors need a different implementation because their values
     // are accessed with a different API than strided tensors
@@ -789,15 +789,15 @@ static inline Tensor _norm(const Tensor &self, Scalar p) {
   }
 }
 
-Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
+Tensor &norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::norm_out(result, self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
 
-Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim) {
+Tensor &norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim) {
   return at::native::norm_out(result, self, p, dim, keepdim, c10::nullopt);
 }
 
-static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim,
+static Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim,
             optional<ScalarType> opt_dtype) {
   if (self.is_sparse()) {
     // Sparse tensors need a different implementation because their values
@@ -809,15 +809,15 @@ static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool
   }
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::norm(self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, ScalarType dtype) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, ScalarType dtype) {
   return at::native::norm(self, p, IntArrayRef{}, false, optional<ScalarType>(dtype));
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim) {
   return at::native::norm(self, p, dim, keepdim, c10::nullopt);
 }
 
@@ -1308,19 +1308,19 @@ std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim, bool unb
   return at::std_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
-Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {
+Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype) {
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
+Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim) {
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim);
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype) {
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim) {
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim);
 }
 
@@ -1373,7 +1373,7 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
   return at::cummin_out(values, indices, self, dimname_to_position(self, dim));
 }
 
-Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
+Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
 }
 

@@ -118,7 +118,7 @@ void sinc_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void logit_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
+void logit_kernel_cuda(TensorIterator& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
@@ -169,7 +169,7 @@ void erfinv_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value) {
+void clamp_kernel_cuda(TensorIterator& iter, const Scalar& min_value, const Scalar& max_value) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     auto upper = max_value.to<scalar_t>();
@@ -184,7 +184,7 @@ void clamp_kernel_cuda(TensorIterator& iter, Scalar min_value, Scalar max_value)
   });
 }
 
-void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
+void clamp_min_kernel_cuda(TensorIterator& iter, const Scalar& min_value) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_min_cuda", [&]() {
     auto lower = min_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {
@@ -198,7 +198,7 @@ void clamp_min_kernel_cuda(TensorIterator& iter, Scalar min_value) {
   });
 }
 
-void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
+void clamp_max_kernel_cuda(TensorIterator& iter, const Scalar& max_value) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "clamp_max_cuda", [&]() {
     auto upper = max_value.to<scalar_t>();
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t v) -> scalar_t {

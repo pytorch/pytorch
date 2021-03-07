@@ -379,8 +379,8 @@ Tensor _bincount_cuda(
 Tensor _histc_cuda(
     const Tensor& self,
     int64_t nbins,
-    Scalar min,
-    Scalar max) {
+    const Scalar& min,
+    const Scalar& max) {
   if (self.scalar_type() == ScalarType::Half) {
     AT_ERROR("HalfTensor is not supported");
   }
@@ -392,7 +392,7 @@ Tensor _histc_cuda(
   });
 }
 
-Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, Scalar min, Scalar max) {
+Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max) {
   auto ret = _histc_cuda(self, bins, min, max);
   result.resize_as_(ret);
   result.copy_(ret);

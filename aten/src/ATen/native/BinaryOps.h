@@ -27,11 +27,11 @@ inline void sub_check(const Tensor& self, const Tensor& other) {
 
 using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
 
-using binary_fn_alpha = void(*)(TensorIterator&, Scalar alpha);
+using binary_fn_alpha = void(*)(TensorIterator&, const Scalar& alpha);
 using binary_fn_double = void(*)(TensorIterator&, double);
 using binary_fn = void(*)(TensorIterator&);
 using binary_clamp_fn_alpha =
-    void(*)(TensorIterator&, Scalar alpha, Scalar min_val, Scalar max_val);
+    void(*)(TensorIterator&, const Scalar& alpha, const Scalar& min_val, const Scalar& max_val);
 
 DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
 DECLARE_DISPATCH(binary_clamp_fn_alpha, add_clamp_stub);

@@ -822,17 +822,17 @@ class ShapePropagator {
             "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
             "aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)",
             "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
-            "aten::celu(Tensor self, Scalar alpha) -> Tensor",
+            "aten::celu(Tensor self, const Scalar& alpha) -> Tensor",
             "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
-            "aten::clamp_max(Tensor self, Scalar max) -> Tensor",
-            "aten::clamp_min(Tensor self, Scalar min) -> Tensor",
+            "aten::clamp_max(Tensor self, const Scalar& max) -> Tensor",
+            "aten::clamp_min(Tensor self, const Scalar& min) -> Tensor",
             "aten::alpha_dropout(Tensor input, float p, bool train) -> Tensor",
             "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
             "aten::cos(Tensor self) -> Tensor",
             "aten::cosh(Tensor self) -> Tensor",
             "aten::digamma(Tensor self) -> Tensor",
             "aten::dropout(Tensor input, float p, bool train) -> Tensor",
-            "aten::elu(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale) -> Tensor",
+            "aten::elu(Tensor self, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) -> Tensor",
             "aten::erf(Tensor self) -> Tensor",
             "aten::erfc(Tensor self) -> Tensor",
             "aten::erfinv(Tensor self) -> Tensor",
@@ -848,11 +848,11 @@ class ShapePropagator {
             "aten::flip(Tensor self, int[] dims) -> Tensor",
             "aten::feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor",
             "aten::feature_dropout(Tensor input, float p, bool train) -> Tensor",
-            "aten::hardshrink(Tensor self, Scalar lambd) -> Tensor",
-            "aten::hardtanh(Tensor self, Scalar min_val, Scalar max_val) -> Tensor",
+            "aten::hardshrink(Tensor self, const Scalar& lambd) -> Tensor",
+            "aten::hardtanh(Tensor self, const Scalar& min_val, const Scalar& max_val) -> Tensor",
             "aten::glu(Tensor self, int dim) -> Tensor",
             "aten::inverse(Tensor self) -> Tensor",
-            "aten::leaky_relu(Tensor self, Scalar negative_slope) -> Tensor",
+            "aten::leaky_relu(Tensor self, const Scalar& negative_slope) -> Tensor",
             "aten::lgamma(Tensor self) -> Tensor",
             "aten::mvlgamma(Tensor self, int p) -> Tensor",
             "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
@@ -863,7 +863,7 @@ class ShapePropagator {
             "aten::reciprocal(Tensor self) -> Tensor",
             "aten::relu(Tensor self) -> Tensor",
             "aten::round(Tensor self) -> Tensor",
-            "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
+            "aten::rrelu(Tensor self, const Scalar& lower, const Scalar& upper, bool training, Generator? generator) -> Tensor",
             "aten::rsqrt(Tensor self) -> Tensor",
             "aten::selu(Tensor self) -> Tensor",
             "aten::gelu(Tensor self) -> Tensor",
@@ -871,12 +871,12 @@ class ShapePropagator {
             "aten::sign(Tensor self) -> Tensor",
             "aten::sin(Tensor self) -> Tensor",
             "aten::sinh(Tensor self) -> Tensor",
-            "aten::softplus(Tensor self, Scalar beta, Scalar threshold) -> Tensor",
-            "aten::softshrink(Tensor self, Scalar lambd) -> Tensor",
+            "aten::softplus(Tensor self, const Scalar& beta, const Scalar& threshold) -> Tensor",
+            "aten::softshrink(Tensor self, const Scalar& lambd) -> Tensor",
             "aten::sqrt(Tensor self) -> Tensor",
             "aten::tan(Tensor self) -> Tensor",
             "aten::tanh(Tensor self) -> Tensor",
-            "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
+            "aten::threshold(Tensor self, const Scalar& threshold, const Scalar& value) -> Tensor",
             "aten::transpose(Tensor self, int dim0, int dim1) -> Tensor",
             "aten::tril(Tensor self, int diagonal) -> Tensor",
             "aten::triu(Tensor self, int diagonal) -> Tensor",
@@ -930,8 +930,8 @@ class ShapePropagator {
     static const register_formula_for broadcasting_ops_arithmetic{
         {
             // Tensor-Tensor operators
-            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-            "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+            "aten::add(Tensor self, Tensor other, *, const Scalar& alpha) -> Tensor",
+            "aten::sub(Tensor self, Tensor other, *, const Scalar& alpha) -> Tensor",
             "aten::mul(Tensor self, Tensor other) -> Tensor",
             "aten::div(Tensor self, Tensor other) -> Tensor",
         },
@@ -955,7 +955,7 @@ class ShapePropagator {
             "aten::pow(Tensor self, Tensor exponent) -> Tensor",
             "aten::fmod(Tensor self, Tensor other) -> Tensor",
             "aten::remainder(Tensor self, Tensor other) -> Tensor",
-            "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
+            "aten::lerp(Tensor self, Tensor end, const Scalar& weight) -> Tensor",
             "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor",
             "aten::max(Tensor self, Tensor other) -> Tensor",
             "aten::min(Tensor self, Tensor other) -> Tensor",
@@ -995,8 +995,8 @@ class ShapePropagator {
     static const register_formula_for fused_accum_binary_ops{
         {
             // Non-binary ops
-            "aten::addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value) -> Tensor",
-            "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value) -> Tensor",
+            "aten::addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, const Scalar& value) -> Tensor",
+            "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, const Scalar& value) -> Tensor",
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
@@ -1012,10 +1012,10 @@ class ShapePropagator {
     static const register_formula_for broadcasting_tensor_scalar_ops_arithmetic{
         {
             // Tensor-Scalar operators
-            "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-            "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-            "aten::mul(Tensor self, Scalar other) -> Tensor",
-            "aten::div(Tensor self, Scalar other) -> Tensor",
+            "aten::add(Tensor self, const Scalar& other, const Scalar& alpha) -> Tensor",
+            "aten::sub(Tensor self, const Scalar& other, const Scalar& alpha) -> Tensor",
+            "aten::mul(Tensor self, const Scalar& other) -> Tensor",
+            "aten::div(Tensor self, const Scalar& other) -> Tensor",
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
@@ -1046,20 +1046,20 @@ class ShapePropagator {
     static const register_formula_for broadcasting_tensor_scalar_ops{
         {
 
-            "aten::pow(Tensor self, Scalar exponent) -> Tensor",
-            "aten::fmod(Tensor self, Scalar other) -> Tensor",
-            "aten::remainder(Tensor self, Scalar other) -> Tensor",
-            "aten::pow(Scalar self, Tensor exponent) -> Tensor",
-            "aten::__and__(Tensor self, Scalar other) -> Tensor",
-            "aten::__or__(Tensor self, Scalar other) -> Tensor",
-            "aten::__xor__(Tensor self, Scalar other) -> Tensor",
-            "aten::__lshift__(Tensor self, Scalar other) -> Tensor",
-            "aten::__rshift__(Tensor self, Scalar other) -> Tensor",
-            "aten::__iand__(Tensor self, Scalar other) -> Tensor",
-            "aten::__ior__(Tensor self, Scalar other) -> Tensor",
-            "aten::__ixor__(Tensor self, Scalar other) -> Tensor",
-            "aten::__ilshift__(Tensor self, Scalar other) -> Tensor",
-            "aten::__irshift__(Tensor self, Scalar other) -> Tensor",
+            "aten::pow(Tensor self, const Scalar& exponent) -> Tensor",
+            "aten::fmod(Tensor self, const Scalar& other) -> Tensor",
+            "aten::remainder(Tensor self, const Scalar& other) -> Tensor",
+            "aten::pow(const Scalar& self, Tensor exponent) -> Tensor",
+            "aten::__and__(Tensor self, const Scalar& other) -> Tensor",
+            "aten::__or__(Tensor self, const Scalar& other) -> Tensor",
+            "aten::__xor__(Tensor self, const Scalar& other) -> Tensor",
+            "aten::__lshift__(Tensor self, const Scalar& other) -> Tensor",
+            "aten::__rshift__(Tensor self, const Scalar& other) -> Tensor",
+            "aten::__iand__(Tensor self, const Scalar& other) -> Tensor",
+            "aten::__ior__(Tensor self, const Scalar& other) -> Tensor",
+            "aten::__ixor__(Tensor self, const Scalar& other) -> Tensor",
+            "aten::__ilshift__(Tensor self, const Scalar& other) -> Tensor",
+            "aten::__irshift__(Tensor self, const Scalar& other) -> Tensor",
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
@@ -1127,12 +1127,12 @@ class ShapePropagator {
             "aten::ge(Tensor self, Tensor other) -> Tensor",
             "aten::eq(Tensor self, Tensor other) -> Tensor",
             "aten::ne(Tensor self, Tensor other) -> Tensor",
-            "aten::lt(Tensor self, Scalar other) -> Tensor",
-            "aten::le(Tensor self, Scalar other) -> Tensor",
-            "aten::gt(Tensor self, Scalar other) -> Tensor",
-            "aten::ge(Tensor self, Scalar other) -> Tensor",
-            "aten::eq(Tensor self, Scalar other) -> Tensor",
-            "aten::ne(Tensor self, Scalar other) -> Tensor",
+            "aten::lt(Tensor self, const Scalar& other) -> Tensor",
+            "aten::le(Tensor self, const Scalar& other) -> Tensor",
+            "aten::gt(Tensor self, const Scalar& other) -> Tensor",
+            "aten::ge(Tensor self, const Scalar& other) -> Tensor",
+            "aten::eq(Tensor self, const Scalar& other) -> Tensor",
+            "aten::ne(Tensor self, const Scalar& other) -> Tensor",
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
@@ -1210,7 +1210,7 @@ class ShapePropagator {
             "aten::min(Tensor self) -> Tensor",
             "aten::median(Tensor self) -> Tensor",
             "aten::nanmedian(Tensor self) -> Tensor",
-            "aten::norm(Tensor self, Scalar p) -> Tensor",
+            "aten::norm(Tensor self, const Scalar& p) -> Tensor",
             "aten::std(Tensor self, bool unbiased) -> Tensor",
             "aten::trace(Tensor self) -> Tensor",
             "aten::var(Tensor self, bool unbiased) -> Tensor",
@@ -1495,7 +1495,7 @@ class ShapePropagator {
     static const register_formula_for like_factories_with_options{
         {
             "aten::empty_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::full_like(Tensor self, Scalar fill_value, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::full_like(Tensor self, const Scalar& fill_value, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
             "aten::ones_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
             "aten::rand_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
             "aten::randint_like(Tensor self, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
@@ -1525,7 +1525,7 @@ class ShapePropagator {
     static const register_formula_for size_factories_with_options{
         {
             "aten::empty(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
-            "aten::full(int[] size, Scalar fill_value, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::full(int[] size, const Scalar& fill_value, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
             "aten::ones(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
             "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
             "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
@@ -1644,25 +1644,25 @@ class ShapePropagator {
     } else if (
         node->matches("aten::mv(Tensor self, Tensor vec) -> Tensor") ||
         node->matches(
-            "aten::addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta, Scalar alpha) -> Tensor")) {
+            "aten::addmv(Tensor self, Tensor mat, Tensor vec, *, const Scalar& beta, const Scalar& alpha) -> Tensor")) {
       if (auto type = any_tensor_type(node)) {
         node->output()->setType(type->withDim(1));
         return true;
       }
     } else if (
         node->matches(
-            "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor") ||
+            "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, const Scalar& beta, const Scalar& alpha) -> Tensor") ||
         node->matches(
-            "aten::addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta, Scalar alpha) -> Tensor") ||
+            "aten::addbmm(Tensor self, Tensor batch1, Tensor batch2, *, const Scalar& beta, const Scalar& alpha) -> Tensor") ||
         node->matches(
-            "aten::addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta, Scalar alpha) -> Tensor")) {
+            "aten::addr(Tensor self, Tensor vec1, Tensor vec2, *, const Scalar& beta, const Scalar& alpha) -> Tensor")) {
       if (auto type = any_tensor_type(node)) {
         node->output()->setType(type->withDim(2));
         return true;
       }
     } else if (
         node->matches(
-            "aten::baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta, Scalar alpha) -> Tensor")) {
+            "aten::baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, const Scalar& beta, const Scalar& alpha) -> Tensor")) {
       if (auto type = any_tensor_type(node)) {
         node->output()->setType(type->withDim(3));
         return true;
@@ -1721,7 +1721,7 @@ class ShapePropagator {
       }
     } else if (
         node->matches(
-            "aten::dist(Tensor self, Tensor other, Scalar p) -> Tensor")) {
+            "aten::dist(Tensor self, Tensor other, const Scalar& p) -> Tensor")) {
       if (auto type = any_tensor_type(node)) {
         node->output()->setType(type->withDim(0));
         return true;
@@ -1899,9 +1899,9 @@ class ShapePropagator {
     // here, otherwise we fallback to running a fake version of the op
     // to get a quick and dirty propagation.
     if (node->matches(
-            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
+            "aten::add(Tensor self, Tensor other, *, const Scalar& alpha) -> Tensor") ||
         node->matches(
-            "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
+            "aten::sub(Tensor self, Tensor other, *, const Scalar& alpha) -> Tensor") ||
         node->matches("aten::mul(Tensor self, Tensor other) -> Tensor")) {
       // These nodes handle tensors of different shapes internally, so there's
       // no need to insert explicit expand nodes.
@@ -1918,16 +1918,16 @@ class ShapePropagator {
                     ->getOperation();
       return PropagateShapeOnNodeByRunningIt(node, op);
     } else if (node->matches(
-                   "aten::pow(Tensor self, Scalar exponent) -> Tensor")) {
+                   "aten::pow(Tensor self, const Scalar& exponent) -> Tensor")) {
       node->output()->setType(tensor_types.at(0));
       return true;
     } else if (
         node->matches(
-            "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
+            "aten::add(Tensor self, const Scalar& other, const Scalar& alpha) -> Tensor") ||
         node->matches(
-            "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
-        node->matches("aten::div(Tensor self, Scalar other) -> Tensor") ||
-        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor")) {
+            "aten::sub(Tensor self, const Scalar& other, const Scalar& alpha) -> Tensor") ||
+        node->matches("aten::div(Tensor self, const Scalar& other) -> Tensor") ||
+        node->matches("aten::mul(Tensor self, const Scalar& other) -> Tensor")) {
       auto first_scalar_type = (tensor_types)[0]->scalarType();
       auto second_scalar_type =
           tryScalarTypeFromJitType(node->inputs()[1]->type());

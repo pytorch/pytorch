@@ -26,10 +26,10 @@ using gemm_fn = void(*)(
     at::ScalarType type,
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
-    Scalar alpha,
+    const Scalar& alpha,
     const void *a, int64_t lda,
     const void *b, int64_t ldb,
-    Scalar beta,
+    const Scalar& beta,
     void *c, int64_t ldc);
 
 DECLARE_DISPATCH(gemm_fn, gemm_stub);
@@ -94,7 +94,7 @@ void gemm(
     int64_t beta,
     int64_t *c, int64_t ldc);
 
-using axpy_fn = void(*)(at::ScalarType type, int64_t n, Scalar a, const void *x, int64_t incx, void *y, int64_t incy);
+using axpy_fn = void(*)(at::ScalarType type, int64_t n, const Scalar& a, const void *x, int64_t incx, void *y, int64_t incy);
 
 DECLARE_DISPATCH(axpy_fn, axpy_stub);
 

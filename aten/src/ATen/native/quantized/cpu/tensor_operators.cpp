@@ -19,13 +19,13 @@ TODO: This is an inefficient implementation that uses `.dequantize`.
 
 #define DEFINE_COMPARATOR(at_op) \
 Tensor& at_op##_out_quantized_cpu(Tensor& out, const Tensor& self, \
-                                Scalar other) { \
+                                const Scalar& other) { \
   TORCH_CHECK(out.dtype() == at::ScalarType::Bool, \
               "The 'out' tensor must have dtype 'torch.bool'"); \
   auto self_dq = self.dequantize(); \
   return at:: at_op##_out(out, self_dq, other); \
 } \
-Tensor at_op##_quantized_cpu(const Tensor& self, Scalar other) { \
+Tensor at_op##_quantized_cpu(const Tensor& self, const Scalar& other) { \
   auto self_dq = self.dequantize(); \
   return at:: at_op(self_dq, other); \
 } \

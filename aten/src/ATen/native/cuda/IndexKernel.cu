@@ -218,7 +218,7 @@ static void index_fill_kernel(
   int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride,
-  Scalar source) {
+  const Scalar& source) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "index_fill_cuda", [&] {

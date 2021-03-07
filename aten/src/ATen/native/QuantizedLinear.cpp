@@ -43,8 +43,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
     const Tensor& weight,
     const Tensor& packed,
     const Tensor& col_offsets,
-    Scalar weight_scale,
-    Scalar weight_zero_point,
+    const Scalar& weight_scale,
+    const Scalar& weight_zero_point,
     const Tensor& bias) {
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
@@ -171,8 +171,8 @@ Tensor fbgemm_linear_int8_weight(
     const Tensor& weight,
     const Tensor& packed,
     const Tensor& col_offsets,
-    Scalar weight_scale,
-    Scalar weight_zero_point,
+    const Scalar& weight_scale,
+    const Scalar& weight_zero_point,
     const Tensor& bias) {
   // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
   // TORCH_WARN(

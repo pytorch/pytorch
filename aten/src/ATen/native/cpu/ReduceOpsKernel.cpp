@@ -187,7 +187,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
 
 static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
-    Scalar p) {
+    const Scalar& p) {
   float val;
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();

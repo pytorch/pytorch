@@ -52,7 +52,7 @@ namespace {
 // wired at all)
 
 template <typename scalar_t>
-void s_addmm_out_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int64_t k, Tensor& r_, Scalar beta, const Tensor& t, Scalar alpha, Tensor& indices, Tensor& values, const Tensor& dense) {
+void s_addmm_out_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int64_t k, Tensor& r_, const Scalar& beta, const Tensor& t, const Scalar& alpha, Tensor& indices, Tensor& values, const Tensor& dense) {
   scalar_t cast_beta = beta.to<scalar_t>();
   scalar_t cast_alpha = alpha.to<scalar_t>();
   Tensor rowIndices = indices.select(0, 0);
@@ -118,7 +118,7 @@ void s_addmm_out_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n, int
 // addmm(Tensor, SparseTensor, Tensor, Scalar, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 
-Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseTensor& sparse_, const Tensor& dense, Scalar beta, Scalar alpha) {
+Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseTensor& sparse_, const Tensor& dense, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(t.is_cuda(), "addmm: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "addmm: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(sparse_.is_cuda(), "addmm: expected 'mat1' to be CUDA, but got CPU");
@@ -166,8 +166,8 @@ Tensor& addmm_out_sparse_dense_cuda(
     const Tensor& self,
     const SparseTensor& mat1,
     const Tensor& mat2,
-    Scalar beta,
-    Scalar alpha
+    const Scalar& beta,
+    const Scalar& alpha
 ) {
   Tensor b_self;
   std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
@@ -178,8 +178,8 @@ Tensor s_addmm_sparse_dense_cuda(
     const Tensor& t,
     const SparseTensor& sparse,
     const Tensor& dense,
-    Scalar beta,
-    Scalar alpha
+    const Scalar& beta,
+    const Scalar& alpha
 ) {
   Tensor r = at::empty({0}, t.options());
   s_addmm_out_sparse_dense_cuda(r, t, sparse, dense, beta, alpha);
@@ -190,8 +190,8 @@ Tensor addmm_sparse_dense_cuda(
     const Tensor& self,
     const SparseTensor& mat1,
     const Tensor& mat2,
-    Scalar beta,
-    Scalar alpha
+    const Scalar& beta,
+    const Scalar& alpha
 ) {
   Tensor b_self;
   std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
@@ -202,8 +202,8 @@ Tensor& s_addmm_sparse_dense_cuda_(
     Tensor& t,
     const SparseTensor& sparse,
     const Tensor& dense,
-    Scalar beta,
-    Scalar alpha
+    const Scalar& beta,
+    const Scalar& alpha
 ) {
   return s_addmm_out_sparse_dense_cuda(t, t, sparse, dense, beta, alpha);
 }
@@ -216,7 +216,7 @@ Tensor& s_addmm_sparse_dense_cuda_(
 // hspmm(SparseTensor mat1, Tensor mat2)
 // --------------------------------------------------------------------
 
-SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse_, const Tensor& dense/* , Scalar alpha */) {
+SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse_, const Tensor& dense/* , const Scalar& alpha */) {
   TORCH_CHECK(sparse_.is_cuda(), "hspmm: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "hspmm: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(dense.is_cuda(), "hspmm: expected 'mat2' to be CUDA, but got CPU");
@@ -285,7 +285,7 @@ SparseTensor hspmm_sparse_cuda(const SparseTensor& sparse, const Tensor& dense) 
 //    formerly known as spcadd
 // --------------------------------------------------------------------
 
-Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseTensor& sparse, at::Scalar value) {
+Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseTensor& sparse, at::const Scalar& value) {
   TORCH_CHECK(dense.is_cuda(), "add: expected 'self' to be a CUDA tensor, but got a CPU tensor");
   TORCH_CHECK(sparse.is_cuda(), "add: expected 'other' to be a CUDA tensor, but got a CPU tensor");
   TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be a CUDA tensor, but got a CPU tensor");
@@ -399,9 +399,9 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 // add(SparseTensor, SparseTensor, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 
-Tensor& add_out_dense_sparse_cuda(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, Scalar value);
+Tensor& add_out_dense_sparse_cuda(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, const Scalar& value);
 
-SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src, Scalar value, SparseTensor& r_) {
+SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src, const Scalar& value, SparseTensor& r_) {
   if (!t.is_sparse()) {
     return add_out_dense_sparse_cuda(r_, t, src, value);
   }

@@ -44,7 +44,7 @@ inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo
   return torch::linalg_eigvalsh_out(result, self, uplo);
 }
 
-inline Tensor norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -52,7 +52,7 @@ inline Tensor norm(const Tensor& self, std::string ord, optional<IntArrayRef> op
   return torch::linalg_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -168,7 +168,7 @@ inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo
   return detail::eigvalsh_out(result, self, uplo);
 }
 
-inline Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -176,7 +176,7 @@ inline Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArray
   return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 

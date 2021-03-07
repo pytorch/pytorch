@@ -9,10 +9,10 @@
 
 namespace at { namespace native {
 
-DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar, Scalar, Scalar), arange_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar, Scalar, int64_t), linspace_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, const Scalar&), arange_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, int64_t), linspace_stub);
 
-Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps) {
+Tensor& linspace_cpu_out(Tensor& result, const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -43,7 +43,7 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional
   return result;
 }
 
-Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps, double base) {
+Tensor& logspace_cpu_out(Tensor& result, const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -112,7 +112,7 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional
   return result;
 }
 
-Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+Tensor& range_cpu_out(Tensor& result, const Scalar& start, const Scalar& end, const Scalar& step) {
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "range_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
@@ -146,7 +146,7 @@ Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   return result;
 }
 
-Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+Tensor& arange_cpu_out(Tensor& result, const Scalar& start, const Scalar& end, const Scalar& step) {
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();

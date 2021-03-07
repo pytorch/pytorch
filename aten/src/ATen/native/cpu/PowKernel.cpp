@@ -34,7 +34,7 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
   }
 }
 
-void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
+void pow_tensor_scalar_kernel(TensorIterator& iter, const Scalar& exp_scalar) {
   if (isFloatingType(iter.dtype())) {
     const auto exp = exp_scalar.to<double>();
     // Floating types allow AVX2 vector optimizations for pow/sqrt/rsqrt:

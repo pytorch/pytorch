@@ -43,9 +43,9 @@ static void CanonicalizeOps(Block* block) {
     for (auto sub : it->blocks())
       CanonicalizeOps(sub);
     if (it->matches(
-            "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
+            "aten::add(Tensor self, Tensor other, *, const Scalar& alpha) -> Tensor") ||
         it->matches(
-            "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
+            "aten::sub(Tensor self, Tensor other, *, const Scalar& alpha) -> Tensor") ||
         it->matches("aten::mul(Tensor self, Tensor other) -> Tensor") ||
         it->matches("aten::div(Tensor self, Tensor other) -> Tensor")) {
       if (auto other = it->get<at::Tensor>(attr::other)) {

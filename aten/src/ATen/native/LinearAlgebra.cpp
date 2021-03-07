@@ -258,7 +258,7 @@ static void check_1d(const Tensor& t, const char* arg, const char* fn) {
 }
 
 static void check_addr_scalar(const ScalarType dtype,
-                              const Scalar scalar,
+                              const Scalar& scalar,
                               const std::string& scalar_name) {
   TORCH_CHECK(
     !scalar.isBoolean() || dtype == ScalarType::Bool,
@@ -309,7 +309,7 @@ static TensorIterator build_addr_iter(Tensor& result,
 
 Tensor addr(const Tensor& self,
             const Tensor& vec1, const Tensor& vec2,
-            Scalar beta, Scalar alpha) {
+            const Scalar& beta, const Scalar& alpha) {
   Tensor result;
   auto iter = build_addr_iter(result, self, vec1, vec2);
 
@@ -322,14 +322,14 @@ Tensor addr(const Tensor& self,
 
 Tensor& addr_(Tensor& self,
               const Tensor& vec1, const Tensor& vec2,
-              Scalar beta, Scalar alpha) {
+              const Scalar& beta, const Scalar& alpha) {
   return at::addr_out(self, self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_out(Tensor &result,
                  const Tensor& self,
                  const Tensor& vec1, const Tensor& vec2,
-                 Scalar beta, Scalar alpha) {
+                 const Scalar& beta, const Scalar& alpha) {
   auto iter = build_addr_iter(result, self, vec1, vec2);
 
   check_addr_scalar(iter.dtype(), beta, "beta");
@@ -344,7 +344,7 @@ Tensor& addr_out(Tensor &result,
 // They are implemented using the composition of existing ops
 Tensor math_addr(const Tensor& self,
                  const Tensor& vec1, const Tensor& vec2,
-                 Scalar beta, Scalar alpha) {
+                 const Scalar& beta, const Scalar& alpha) {
   // when beta==0, values in self should be ignored,
   // nans and infs in self should not propagate.
   if (beta.toComplexDouble() == 0.0) {
@@ -370,7 +370,7 @@ Tensor math_addr(const Tensor& self,
 Tensor& math_addr_out(Tensor &result,
                       const Tensor& self,
                       const Tensor& vec1, const Tensor& vec2,
-                      Scalar beta, Scalar alpha) {
+                      const Scalar& beta, const Scalar& alpha) {
   auto addr_result = at::addr(self, vec1, vec2, beta, alpha);
 
   // Validates safe casting
@@ -452,7 +452,7 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 }
 
 static void addmm_impl_cpu_(
-    Tensor &result, const Tensor &self, Tensor m1, Tensor m2, Scalar beta, Scalar alpha) {
+    Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
 
   // Array access is faster than .size(n) and .stride(n)
@@ -568,7 +568,7 @@ static void addmm_impl_cpu_(
 }
 
 static void addbmm_impl_(
-    Tensor &result, const Tensor &self, const Tensor &batch1, const Tensor &batch2, Scalar beta, Scalar alpha) {
+    Tensor &result, const Tensor &self, const Tensor &batch1, const Tensor &batch2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
   TORCH_CHECK(batch1.size(0) == batch2.size(0),
@@ -607,7 +607,7 @@ static void addbmm_impl_(
   }
 }
 
-Tensor& addbmm_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& addbmm_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   Tensor b_self = std::get<0>(expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out"));
   {
     at::NoNamesGuard guard;
@@ -617,16 +617,16 @@ Tensor& addbmm_out(Tensor& result, const Tensor& self, const Tensor& batch1, con
   return result;
 }
 
-Tensor &addbmm_(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor &addbmm_(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   return native::addbmm_out(self, self, batch1, batch2, beta, alpha);
 }
 
-Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   Tensor result = at::empty({0}, self.options());
   return native::addbmm_out(result, self, batch1, batch2, beta, alpha);
 }
 
-Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
   Tensor b_self = std::get<0>(expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out"));
@@ -638,12 +638,12 @@ Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, co
   return result;
 }
 
-Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   Tensor result = at::empty({0}, self.options());
   return addmm_cpu_out(result, self, mat1, mat2, beta, alpha);
 }
 
-Tensor &addmm_cpu_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+Tensor &addmm_cpu_(Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   return addmm_cpu_out(self, self, mat1, mat2, beta, alpha);
 }
 
@@ -662,7 +662,7 @@ Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
 }
 
 template <typename scalar_t, bool is_bmm>
-inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
+inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, const Scalar& beta_, const Scalar& alpha_) {
   int64_t bs = result.size(0);
   int64_t is = result.size(1);
   int64_t js = result.size(2);
@@ -712,7 +712,7 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
 // optimization, it likely depends on the characteristics of the CPU, MKL will be different from non-MKL etc.,
 // but this seems to be a first starting point.
 
-static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha, bool is_bmm_out) {
+static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
   CheckedFrom c = (is_bmm_out ? "bmm" : "baddbmm");
@@ -803,12 +803,12 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
 }
 
 
-Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   Tensor result = at::empty({0}, self.options());
   return at::native::baddbmm_out_cpu(result, self, batch1, batch2, beta, alpha);
 }
 
-Tensor& baddbmm_out_cpu(Tensor &result, const Tensor& self_, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& baddbmm_out_cpu(Tensor &result, const Tensor& self_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   Tensor self;
   std::tie(self) = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
   result.resize_(self.sizes());
@@ -816,7 +816,7 @@ Tensor& baddbmm_out_cpu(Tensor &result, const Tensor& self_, const Tensor& batch
   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha);
 }
 
-Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   return bmm_out_or_baddbmm_(self, batch1, batch2, beta, alpha, false);
 }
 
@@ -1699,7 +1699,7 @@ static Tensor _norm_min_max(Tensor& self, double ord, int64_t dim, bool keepdim)
 }
 
 // Performs matrix norm
-static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, optional<Scalar> opt_ord,
+static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const optional<Scalar>& opt_ord,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   Tensor result_;
   auto ord = opt_ord.value_or(2.0).toDouble();
@@ -1771,7 +1771,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, optio
 // This function mostly serves as a wrapper for at::norm, but it overrides a few cases
 // for numpy compatibility. These cases are corrected within this wrapper, rather than
 // in at::norm itself, to avoid breaking backward compatibility.
-static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, std::vector<int64_t> dim, bool keepdim, optional<ScalarType> opt_dtype) {
+static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, std::vector<int64_t> dim, bool keepdim, optional<ScalarType> opt_dtype) {
   Tensor result_;
   bool case_was_overridden = false;
   if (opt_ord.has_value()) {
@@ -1812,7 +1812,7 @@ static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, optio
   return result;
 }
 
-static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional<Scalar> opt_num_ord, optional<std::string> opt_str_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const optional<Scalar>& opt_num_ord, optional<std::string> opt_str_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   // Callers must give the ord argument as either a number, a string, or neither.
   // Since the user-facing API has no direct control over how this function is called, this is an internal assert.
   TORCH_INTERNAL_ASSERT(!(opt_num_ord.has_value() && opt_str_ord.has_value()));
@@ -1852,7 +1852,7 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional
 }
 
 // Numerical or None norms
-Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : toValueType(self.scalar_type())).device(self.device());
   Tensor result = at::empty({0}, options);
   return at::native::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
@@ -1866,7 +1866,7 @@ Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> op
 }
 
 // Numerical or None norms
-Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return linalg_norm_out_impl(result, self, opt_ord, c10::nullopt, opt_dim, keepdim, opt_dtype);
 }
 
@@ -1942,7 +1942,7 @@ void _linalg_cond_check_ord(c10::variant<Scalar, std::string> ord_variant) {
 }
 
 // Numerical or None norms
-Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
+Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
     self.dim(), " dimensions.");
 
@@ -1983,7 +1983,7 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
   return _linalg_cond_helper(self, ord_variant);
 }
 
-Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord) {
+Tensor& linalg_cond_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord) {
   checkSameDevice("linalg_cond", result, self);
   ScalarType real_dtype = toValueType(self.scalar_type());
   checkLinalgCompatibleDtype("linalg_cond", result.scalar_type(), real_dtype);

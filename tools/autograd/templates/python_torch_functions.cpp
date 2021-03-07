@@ -61,23 +61,23 @@ namespace torch { namespace autograd {
 
 static PyObject* THPVariableFunctionsModule = NULL;
 
-inline Tensor dispatch_arange(Scalar end, Tensor result) {
+inline Tensor dispatch_arange(const Scalar& end, Tensor result) {
   pybind11::gil_scoped_release no_gil;
   return at::arange_out(result, end);
 }
 
-inline Tensor dispatch_arange(Scalar end, const TensorOptions& options) {
+inline Tensor dispatch_arange(const Scalar& end, const TensorOptions& options) {
   torch::utils::maybe_initialize_cuda(options);
   pybind11::gil_scoped_release no_gil;
   return torch::arange(end, options);
 }
 
-inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, Tensor result) {
+inline Tensor dispatch_arange(const Scalar& start, const Scalar& end, const Scalar& step, Tensor result) {
   pybind11::gil_scoped_release no_gil;
   return at::arange_out(result, start, end, step);
 }
 
-inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
+inline Tensor dispatch_arange(const Scalar& start, const Scalar& end, const Scalar& step, const TensorOptions& options) {
   torch::utils::maybe_initialize_cuda(options);
   pybind11::gil_scoped_release no_gil;
   return torch::arange(start, end, step, options);
@@ -87,8 +87,8 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "arange(Scalar end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
-    "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "arange(const Scalar& end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "arange(const Scalar& start, const Scalar& end, const Scalar& step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<9> parsed_args;
@@ -141,13 +141,13 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
   END_HANDLE_TH_ERRORS
 }
 
-inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, Tensor result) {
+inline Tensor dispatch_range(const Scalar& start, const Scalar& end, const Scalar& step, Tensor result) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(result));
   return at::range_out(result, start, end, step);
 }
 
-inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
+inline Tensor dispatch_range(const Scalar& start, const Scalar& end, const Scalar& step, const TensorOptions& options) {
   torch::utils::maybe_initialize_cuda(options);
   pybind11::gil_scoped_release no_gil;
   DeviceGuard device_guard(options.device());
@@ -158,7 +158,7 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "range(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "range(const Scalar& start, const Scalar& end, const Scalar& step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<8> parsed_args;
@@ -191,7 +191,7 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 
 inline Tensor dispatch_full(
     IntArrayRef size,
-    Scalar fill_val,
+    const Scalar& fill_val,
     const TensorOptions& options) {
   torch::utils::maybe_initialize_cuda(options);
   pybind11::gil_scoped_release no_gil;
@@ -200,7 +200,7 @@ inline Tensor dispatch_full(
 
 inline Tensor dispatch_full(
     IntArrayRef size,
-    Scalar fill_val,
+    const Scalar& fill_val,
     c10::optional<DimnameList> names,
     const TensorOptions& options) {
   torch::utils::maybe_initialize_cuda(options);
@@ -210,7 +210,7 @@ inline Tensor dispatch_full(
 
 inline Tensor dispatch_full(
     IntArrayRef size,
-    Scalar fill_val,
+    const Scalar& fill_val,
     Tensor result) {
   pybind11::gil_scoped_release no_gil;
   return at::full_out(result, size, fill_val);
@@ -220,8 +220,8 @@ static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwa
   HANDLE_TH_ERRORS
 
   static PythonArgParser parser({
-    "full(IntArrayRef size, Scalar fill_value, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
-    "full(IntArrayRef size, Scalar fill_value, *, DimnameList names=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "full(IntArrayRef size, const Scalar& fill_value, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "full(IntArrayRef size, const Scalar& fill_value, *, DimnameList names=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   // Acquires (common) arguments

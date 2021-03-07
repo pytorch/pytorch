@@ -61,7 +61,7 @@ void add_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
   }
 }
 
-void add_clamp_kernel(TensorIterator& iter, Scalar alpha_scalar, Scalar min_val, Scalar max_val) {
+void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Scalar& min_val, const Scalar& max_val) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_clamp_cpu", [&]() {
     auto alpha = alpha_scalar.to<scalar_t>();
     auto alpha_vec = Vec256<scalar_t>(alpha);
@@ -95,7 +95,7 @@ void atan2_kernel(TensorIterator& iter) {
 
 // Note: Undefined behavior when performing subtraction is intentionally
 // ignored.
-void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) __ubsan_ignore_undefined__ {
+void sub_kernel(TensorIterator& iter, const Scalar& alpha_scalar) __ubsan_ignore_undefined__ {
   add_kernel(iter, -alpha_scalar);
 }
 
@@ -683,7 +683,7 @@ void sigmoid_backward_kernel(TensorIterator& iter) {
   });
 }
 
-void logit_backward_kernel(TensorIterator& iter, Scalar eps_scalar) {
+void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.dtype(), "logit_backward_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();

@@ -114,11 +114,11 @@ void FoldFrozenConvBatchnorm(Block* b) {
 
 bool supportedAddOrSub(Node* n) {
   static const OperatorSet add_set{
-      "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
-      "aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
+      "aten::add.Tensor(Tensor self, Tensor other, *, const Scalar& alpha=1) -> Tensor",
+      "aten::add.Scalar(Tensor self, const Scalar& other, const Scalar& alpha=1) -> Tensor",
       // sub is equivalent to add
-      "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
-      "aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
+      "aten::sub.Tensor(Tensor self, Tensor other, *, const Scalar& alpha=1) -> Tensor",
+      "aten::sub.Scalar(Tensor self, const Scalar& other, const Scalar& alpha=1) -> Tensor",
   };
   return n->isMemberOf(add_set);
 }
@@ -272,10 +272,10 @@ void FoldFrozenConvAddOrSub(Block* b) {
 bool supportedMulOrDiv(Node* n) {
   static const OperatorSet add_set{
       "aten::mul.Tensor(Tensor self, Tensor other) -> Tensor",
-      "aten::mul.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::mul.Scalar(Tensor self, const Scalar& other) -> Tensor",
       // div is equivalent to mul
       "aten::div.Tensor(Tensor self, Tensor other) -> Tensor",
-      "aten::div.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::div.Scalar(Tensor self, const Scalar& other) -> Tensor",
   };
   return n->isMemberOf(add_set);
 }

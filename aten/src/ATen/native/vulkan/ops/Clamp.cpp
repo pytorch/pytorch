@@ -11,8 +11,8 @@ using namespace api::utils;
 
 Tensor clamp(
     const Tensor& self_arg,
-    const c10::optional<Scalar> min,
-    const c10::optional<Scalar> max) {
+    const c10::optional<Scalar>& min,
+    const c10::optional<Scalar>& max) {
   TORCH_CHECK(
       min || max,
       "At least one of 'min' or 'max' must not be None");
@@ -81,8 +81,8 @@ Tensor clamp(
 
 Tensor& clamp_(
     Tensor& self,
-    const c10::optional<Scalar> min,
-    const c10::optional<Scalar> max) {
+    const c10::optional<Scalar>& min,
+    const c10::optional<Scalar>& max) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
@@ -142,15 +142,15 @@ Tensor& clamp_(
 
 Tensor hardtanh(
     const Tensor& self,
-    const Scalar min,
-    const Scalar max) {
+    const Scalar& min,
+    const Scalar& max) {
   return ops::clamp(self, min, max);
 }
 
 Tensor& hardtanh_(
     Tensor& self,
-    const Scalar min,
-    const Scalar max) {
+    const Scalar& min,
+    const Scalar& max) {
   return ops::clamp_(self, min, max);
 }
 

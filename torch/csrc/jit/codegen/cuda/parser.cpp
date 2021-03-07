@@ -173,10 +173,10 @@ class IrParser {
     // OperatorRegistry.
 
     std::array<const char*, kNumBinaryOpsWithAlpha> BinaryOpWithAlpha = {
-        "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-        "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-        "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-        "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor"};
+        "aten::add(Tensor self, Tensor other, *, const Scalar& alpha) -> Tensor",
+        "aten::add(Tensor self, const Scalar& other, const Scalar& alpha) -> Tensor",
+        "aten::sub(Tensor self, Tensor other, *, const Scalar& alpha) -> Tensor",
+        "aten::sub(Tensor self, const Scalar& other, const Scalar& alpha) -> Tensor"};
     for (auto signature : BinaryOpWithAlpha) {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(
@@ -213,29 +213,29 @@ class IrParser {
 
     std::array<const char*, kNumBinaryOps> BinaryOp = {
         "aten::div(Tensor self, Tensor other) -> Tensor",
-        "aten::div(Tensor self, Scalar other) -> Tensor",
+        "aten::div(Tensor self, const Scalar& other) -> Tensor",
         "aten::mul(Tensor self, Tensor other) -> Tensor",
-        "aten::mul(Tensor self, Scalar other) -> Tensor",
+        "aten::mul(Tensor self, const Scalar& other) -> Tensor",
         "aten::atan2(Tensor self, Tensor other) -> Tensor",
         "aten::max(Tensor self, Tensor other) -> Tensor",
         "aten::min(Tensor self, Tensor other) -> Tensor",
         "aten::pow(Tensor self, Tensor exponent) -> Tensor",
-        "aten::pow(Tensor self, Scalar exponent) -> Tensor",
-        "aten::pow(Scalar self, Tensor exponent) -> Tensor",
+        "aten::pow(Tensor self, const Scalar& exponent) -> Tensor",
+        "aten::pow(const Scalar& self, Tensor exponent) -> Tensor",
         "aten::remainder(Tensor self, Tensor other) -> Tensor",
         "aten::fmod(Tensor self, Tensor other) -> Tensor",
         "aten::eq(Tensor self, Tensor other) -> Tensor",
-        "aten::eq(Tensor self, Scalar other) -> Tensor",
+        "aten::eq(Tensor self, const Scalar& other) -> Tensor",
         "aten::ne(Tensor self, Tensor other) -> Tensor",
-        "aten::ne(Tensor self, Scalar other) -> Tensor",
+        "aten::ne(Tensor self, const Scalar& other) -> Tensor",
         "aten::ge(Tensor self, Tensor other) -> Tensor",
-        "aten::ge(Tensor self, Scalar other) -> Tensor",
+        "aten::ge(Tensor self, const Scalar& other) -> Tensor",
         "aten::gt(Tensor self, Tensor other) -> Tensor",
-        "aten::gt(Tensor self, Scalar other) -> Tensor",
+        "aten::gt(Tensor self, const Scalar& other) -> Tensor",
         "aten::le(Tensor self, Tensor other) -> Tensor",
-        "aten::le(Tensor self, Scalar other) -> Tensor",
+        "aten::le(Tensor self, const Scalar& other) -> Tensor",
         "aten::lt(Tensor self, Tensor other) -> Tensor",
-        "aten::lt(Tensor self, Scalar other) -> Tensor"};
+        "aten::lt(Tensor self, const Scalar& other) -> Tensor"};
     for (auto signature : BinaryOp) {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(
@@ -363,7 +363,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor");
+          "aten::threshold(Tensor self, const Scalar& threshold, const Scalar& value) -> Tensor");
       registerParseRule(
           ptr_op,
           [](const Node* node,
@@ -416,7 +416,7 @@ class IrParser {
 
     {
       std::array<const char*, kNumLerpOps> LerpOp = {
-          "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
+          "aten::lerp(Tensor self, Tensor end, const Scalar& weight) -> Tensor",
           "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor"};
       for (auto signature : LerpOp) {
         auto ptr_op = getOperatorForLiteral(signature);
@@ -436,7 +436,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor");
+          "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, const Scalar& value=1) -> Tensor");
       registerParseRule(
           ptr_op,
           [](const Node* node,

@@ -19,8 +19,8 @@ c10::intrusive_ptr<Conv2dOpContext> unpack(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   const Tensor weightContig = weight.contiguous();
   const auto ws = weightContig.sizes();
   auto packed_buffer = permuteWeights(weightContig.data_ptr<float>(), ws.vec());
@@ -78,8 +78,8 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   TORCH_CHECK(weight.dim() == 4);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(weight),

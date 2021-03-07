@@ -8,6 +8,6 @@
 
 namespace at { namespace native {
 
-DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar), fill_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&), fill_stub);
 
 }} // namespace at::native

@@ -483,9 +483,9 @@ class TORCH_API Tensor {
   Tensor index(std::initializer_list<at::indexing::TensorIndex> indices) const;
 
   Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor const & rhs);
-  Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar v);
+  Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, const Scalar& v);
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs);
-  Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Scalar v);
+  Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, const Scalar& v);
 
   Tensor cpu() const;
   Tensor cuda() const;

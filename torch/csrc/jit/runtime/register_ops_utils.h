@@ -517,7 +517,7 @@ void listSetItem(Stack* stack);
 // in unintended implicit conversions
 #define DEFINE_SCALAR_BINARY_OP(aten_op, int_op, float_op, result)         \
   OperatorGenerator(                                                       \
-      TORCH_SELECTIVE_SCHEMA(#aten_op "(Scalar a, Scalar b) -> " #result), \
+      TORCH_SELECTIVE_SCHEMA(#aten_op "(const Scalar& a, const Scalar& b) -> " #result), \
       [](Stack* stack) {                                                   \
         IValue x, y;                                                       \
         pop(stack, x, y);                                                  \
@@ -548,7 +548,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_SCALAR_SCALAR_BINARY_OP(aten_op, int_op, float_op, result) \
   OperatorGenerator(                                                      \
       TORCH_SELECTIVE_SCHEMA(                                             \
-          #aten_op ".Scalar_Scalar(Scalar a, Scalar b) -> " #result),     \
+          #aten_op ".Scalar_Scalar(const Scalar& a, const Scalar& b) -> " #result),     \
       [](Stack* stack) {                                                  \
         IValue x, y;                                                      \
         pop(stack, x, y);                                                 \
@@ -616,7 +616,7 @@ void listSetItem(Stack* stack);
   DEFINE_UNARY_INT_OP(aten_op, op, int_result),                           \
       DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),                   \
       OperatorGenerator(                                                  \
-          TORCH_SELECTIVE_SCHEMA(#aten_op ".Scalar(Scalar a) -> Scalar"), \
+          TORCH_SELECTIVE_SCHEMA(#aten_op ".Scalar(const Scalar& a) -> Scalar"), \
           [](Stack* stack) {                                              \
             IValue x;                                                     \
             pop(stack, x);                                                \

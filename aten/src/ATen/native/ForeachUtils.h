@@ -88,7 +88,7 @@ bool has_same_attributes(Device expected_device, TensorList tensors) {
   return true;
 }
 
-bool will_promote_tensor(const Tensor& tensor, Scalar scalar) {
+bool will_promote_tensor(const Tensor& tensor, const Scalar& scalar) {
   auto result_dtype = at::result_type(tensor, scalar);
   return result_dtype != tensor.scalar_type();
 }
@@ -109,7 +109,7 @@ bool can_use_fast_route(TensorList tensors) {
 #endif
 }
 
-bool can_use_fast_route(TensorList tensors, Scalar scalar) {
+bool can_use_fast_route(TensorList tensors, const Scalar& scalar) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else
@@ -164,7 +164,7 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
 #endif
 }
 
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2, Scalar scalar) {
+bool can_use_fast_route(TensorList tensors1, TensorList tensors2, const Scalar& scalar) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else
@@ -198,7 +198,7 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
 #endif
 }
 
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3, Scalar scalar) {
+bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3, const Scalar& scalar) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else

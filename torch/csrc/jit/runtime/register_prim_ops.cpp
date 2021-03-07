@@ -293,7 +293,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Int.Scalar(Scalar a) -> int"),
+         TORCH_SELECTIVE_SCHEMA("aten::Int.Scalar(const Scalar& a) -> int"),
          [](Stack* stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -330,7 +330,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Float.Scalar(Scalar a) -> float"),
+         TORCH_SELECTIVE_SCHEMA("aten::Float.Scalar(const Scalar& a) -> float"),
          [](Stack* stack) {
            IValue scalar;
            pop(stack, scalar);
@@ -381,7 +381,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("prim::NumToTensor.Scalar(Scalar a) -> Tensor"),
+         TORCH_SELECTIVE_SCHEMA("prim::NumToTensor.Scalar(const Scalar& a) -> Tensor"),
          [](Stack* stack) {
            at::Scalar s;
            pop(stack, s);

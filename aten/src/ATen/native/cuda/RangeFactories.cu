@@ -51,7 +51,7 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
 namespace at {
 namespace native {
 
-Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps) {
+Tensor& linspace_cuda_out(Tensor& result, const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -110,7 +110,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optiona
   return result;
 }
 
-Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> optional_steps, double base) {
+Tensor& logspace_cuda_out(Tensor& result, const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -172,7 +172,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optiona
   return result;
 }
 
-Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+Tensor& range_cuda_out(Tensor& result, const Scalar& start, const Scalar& end, const Scalar& step) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "range_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
@@ -208,7 +208,7 @@ Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   return result;
 }
 
-Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+Tensor& arange_cuda_out(Tensor& result, const Scalar& start, const Scalar& end, const Scalar& step) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "arange_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();

@@ -55,7 +55,7 @@ Tensor& lerp_cuda_tensor_out(Tensor& result, const Tensor& self,
 }
 
 Tensor& lerp_cuda_scalar_out(Tensor& result, const Tensor& self,
-                            const Tensor& end, Scalar weight) {
+                            const Tensor& end, const Scalar& weight) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_out_cuda");
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "lerp_out_cuda", [&]{
@@ -74,7 +74,7 @@ Tensor& lerp_cuda_tensor_(Tensor& self, const Tensor& end, const Tensor& weight)
   return self;
 }
 
-Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, Scalar weight) {
+Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, const Scalar& weight) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp__cuda");
   TORCH_CHECK(b_self.sizes() == self.sizes(),
@@ -94,7 +94,7 @@ Tensor lerp_cuda_tensor(const Tensor& self, const Tensor& end, const Tensor& wei
   return result;
 }
 
-Tensor lerp_cuda_scalar(const Tensor& self, const Tensor& end, Scalar weight) {
+Tensor lerp_cuda_scalar(const Tensor& self, const Tensor& end, const Scalar& weight) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_cuda");
   Tensor result = at::empty_like(b_self, b_self.suggest_memory_format());

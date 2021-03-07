@@ -444,7 +444,7 @@ void scatter_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const T
     "scatter_cuda_", tensor_assign);
 }
 
-void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
+void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Scalar& src) {
   cuda_scatter_fill_base_kernel<>()(
     self, dim, index, src,
     "scatter_fill_cuda_", tensor_assign);

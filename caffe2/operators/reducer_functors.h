@@ -637,7 +637,7 @@ struct WeightedSumReducerDef {
     schema.Input(
         1,
         "SCALARS",
-        "Scalar multipliers for the input slices. Must be a vector with the "
+        "const Scalar& multipliers for the input slices. Must be a vector with the "
         "length matching the number of slices");
     schema.Arg(
         "grad_on_weights",

@@ -14,16 +14,16 @@ namespace at { namespace native {
 enum class SCATTER_GATHER_OP: uint8_t {REDUCE_ADD, REDUCE_MULTIPLY};
 
 using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
-using index_fill_fn = void(*)(TensorIterator & iter, int64_t dim, int64_t self_dim_size, int64_t self_dim_stride, Scalar source);
+using index_fill_fn = void(*)(TensorIterator & iter, int64_t dim, int64_t self_dim_size, int64_t self_dim_stride, const Scalar& source);
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
 using index_put_accum_fn = void(*)(Tensor &, const c10::List<c10::optional<Tensor>> &, const Tensor &, bool unsafe);
-using masked_fill_fn = void(*)(TensorIterator &, Scalar scalar);
+using masked_fill_fn = void(*)(TensorIterator &, const Scalar& scalar);
 using masked_select_fn = void(*)(TensorIterator &, int64_t orig_stride);
 using masked_scatter_fn = void(*)(TensorIterator &, const Tensor &);
 
 using gather_fn = void (*)(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index);
 using scatter_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
-using scatter_fill_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, Scalar src);
+using scatter_fill_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Scalar& src);
 using scatter_add_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
 using scatter_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
                                   const Tensor& src, const SCATTER_GATHER_OP& reduce);

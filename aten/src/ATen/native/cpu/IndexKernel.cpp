@@ -140,7 +140,7 @@ void index_fill_kernel(
   int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride,
-  Scalar source) {
+  const Scalar& source) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "index_fill_cpu", [&] {
     auto fill_val = source.to<scalar_t>();
@@ -214,7 +214,7 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
   iter.for_each(loop);
 }
 
-void masked_fill_kernel(TensorIterator& iter, Scalar value) {
+void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
     iter.dtype(), "masked_fill", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
