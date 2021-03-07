@@ -19,6 +19,14 @@ void testGetSet(std::string prefix = "") {
     c10d::test::check(store, "key0", "value0");
     c10d::test::check(store, "key1", "value1");
     c10d::test::check(store, "key2", "value2");
+    
+    // Check compareSet, does not check return value
+    c10d::test::compareSet(
+        store, "key0", "wrongCurrentValue", "newValue");
+    c10d::test::check(store, "key0", "value0");
+    c10d::test::compareSet(store, "key0", "value0", "newValue");
+    c10d::test::check(store, "key0", "newValue");
+
     auto numKeys = store.getNumKeys();
     EXPECT_EQ(numKeys, 3);
     auto delSuccess = store.deleteKey("key0");

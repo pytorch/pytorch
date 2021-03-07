@@ -51,6 +51,13 @@ void testGetSet(std::string path, std::string prefix = "") {
     c10d::test::check(store, "key2", "value2");
     auto numKeys = fileStore->getNumKeys();
     EXPECT_EQ(numKeys, 3);
+
+    // Check compareSet, does not check return value
+    c10d::test::compareSet(
+        store, "key0", "wrongCurrentValue", "newValue");
+    c10d::test::check(store, "key0", "value0");
+    c10d::test::compareSet(store, "key0", "value0", "newValue");
+    c10d::test::check(store, "key0", "newValue");
   }
 
   // Perform get on new instance

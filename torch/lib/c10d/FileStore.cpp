@@ -298,6 +298,19 @@ void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
   file.write(value);
 }
 
+std::vector<uint8_t> FileStore::compareSet(
+    const std::string& key,
+    const std::vector<uint8_t>& currentValue,
+    const std::vector<uint8_t>& newValue) {
+  if (get(key) == currentValue){
+    set(key, newValue);
+    return newValue;
+  }
+  else{
+    return get(key);
+  }
+}
+
 std::vector<uint8_t> FileStore::get(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
   const auto start = std::chrono::steady_clock::now();
