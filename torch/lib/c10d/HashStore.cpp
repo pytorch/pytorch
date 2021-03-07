@@ -18,6 +18,19 @@ void HashStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   cv_.notify_all();
 }
 
+std::vector<uint8_t> HashStore::compareSet(
+    const std::string& key,
+    const std::vector<uint8_t>& currentValue,
+    const std::vector<uint8_t>& newValue) {
+  if (get(key) == currentValue){
+    set(key, newValue);
+    return newValue;
+  }
+  else{
+    return get(key);
+  }
+}
+
 std::vector<uint8_t> HashStore::get(const std::string& key) {
   std::unique_lock<std::mutex> lock(m_);
   auto it = map_.find(key);
