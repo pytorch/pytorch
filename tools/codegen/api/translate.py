@@ -181,6 +181,12 @@ Check this module for more information.
             options = direct_solve(options_ctype)
             return f'{options}.pinned_memory_opt()'
 
+        elif isinstance(goal, OptionalCType) and goal.elem.type == "Scalar":
+            return goal.name
+
+        elif goal.type == "Scalar":
+            return goal.name
+
         unsat(goal)
 
     return [Expr(solve(g, direct=False), g) for g in goal_ctypes]

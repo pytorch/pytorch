@@ -21,7 +21,7 @@ namespace c10 {
 
 // FIXME: this should be (and was) Scalar::toTensor, but there is currently no way
 // to implement this without going through Derived Types (which are not part of core).
-inline at::Tensor scalar_to_tensor(Scalar s, const Device device = at::kCPU) {
+inline at::Tensor scalar_to_tensor(const Scalar& s, const Device device = at::kCPU) {
   // This is the fast track we have for CPU scalar tensors.
   if (device == at::kCPU) {
     if (s.isFloatingPoint()) {

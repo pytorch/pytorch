@@ -822,7 +822,7 @@ Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdi
 }
 
 // leave it so we support sparse tensors
-Tensor norm(const Tensor& self, Scalar p) {
+Tensor norm(const Tensor& self, const Scalar& p) {
   return at::native::_norm(self, p);
 }
 

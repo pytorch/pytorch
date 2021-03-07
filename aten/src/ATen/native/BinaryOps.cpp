@@ -14,7 +14,7 @@ namespace at {
 namespace meta {
 
 TORCH_META_FUNC2(add, Tensor) (
-  const Tensor& self, const Tensor& other, Scalar alpha
+  const Tensor& self, const Tensor& other, const Scalar& alpha
 ) {
   build_binary_op(maybe_get_output(), self, other);
   native::alpha_check(dtype(), alpha);
@@ -68,14 +68,14 @@ DEFINE_DISPATCH(heaviside_stub);
 DEFINE_DISPATCH(copysign_stub);
 DEFINE_DISPATCH(xlogy_stub);
 
-static Tensor wrapped_scalar_tensor(Scalar scalar) {
+static Tensor wrapped_scalar_tensor(const Scalar& scalar) {
   auto tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
 
 TORCH_IMPL_FUNC(add_out) (
-  const Tensor& self, const Tensor& other, Scalar alpha, const Tensor& result
+  const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
 ) {
   add_stub(device_type(), *this, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
@@ -527,7 +527,7 @@ static void check_convert(Scalar scalar, ScalarType scalarType) {
   });
 }
 
-static Tensor wrapped_scalar_tensor_and_check_convert(Scalar scalar, Tensor tensor) {
+static Tensor wrapped_scalar_tensor_and_check_convert(const Scalar& scalar, Tensor tensor) {
   check_convert(scalar, tensor.scalar_type());
   return wrapped_scalar_tensor(scalar);
 }
@@ -535,11 +535,11 @@ static Tensor wrapped_scalar_tensor_and_check_convert(Scalar scalar, Tensor tens
 // TODO: Make this structured to undo the perf regression from native:: removal
 // in call here
 
-Tensor add(const Tensor& self, Scalar other, Scalar alpha) {
+Tensor add(const Tensor& self, const Scalar& other, const Scalar& alpha) {
   return at::add(self, wrapped_scalar_tensor(other), alpha);
 }
 
-Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
+Tensor& add_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return self.add_(wrapped_scalar_tensor(other), alpha);
 }
 
