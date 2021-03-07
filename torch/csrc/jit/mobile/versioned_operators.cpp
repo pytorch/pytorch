@@ -4,10 +4,34 @@
 
 #include <unordered_map>
 
+// This file is to handle operator versioning in mobile.
+// How does it work?
+// At top level, with a tuple of (operator_name, op_version_in_model,
+// bytecode_version_in_model), check the compatibility for that operator. If
+// it's not compatible, throw an error with reason. If it's compatible, do
+// compatibility treatments if necessary and return the corresponding operator
+// functor that is compatible to this runtime. The logic is implemented in
+// function operator_resolver().
+//
+// Under the hood, a static table,
+// op_version_table, is saved for current runtime. The keys are the operator
+// names and values are a container with version numbers and their metadata. The
+// incoming operator with version is searched in the table to find the match.
+// Note that the size of op_version_table is small because it only contains
+// operators that have more than one versions. For most of the operators, they
+// fall through to the existing implementation with default version 0.
+
 namespace torch {
 namespace jit {
 namespace mobile {
 namespace {
+
+// The version info is limited to combinations of two situations:
+//   * Route to another op name
+//   * Push additional default values
+// It’s fine to update the content of version info, to handle more situations in
+// fugure. Since it’s implementation details, it should not affect
+// compatibility.
 struct VersionInfo {
   VersionInfo(
       int64_t version,
@@ -91,7 +115,6 @@ static const std::unordered_map<std::string, VersionInfoContainer>
         {{"aten::_convolution",
           VersionInfoContainer(
               {{0, c10::OperatorName("aten::_convolution", ""), true}})}});
-
 } // namespace
 
 OperatorFunctor findOperatorFromName(const c10::OperatorName& opname) {
