@@ -9,7 +9,10 @@ namespace torch {
 namespace jit {
 namespace mobile {
 using OperatorFunctor = std::function<void(Stack&)>;
-TORCH_API OperatorFunctor operator_resolver(const c10::OperatorName& opname, int64_t op_version, int64_t model_version);
-}
+TORCH_API OperatorFunctor operator_resolver(
+    const c10::OperatorName& opname,
+    int64_t op_version,
+    int64_t model_version);
+} // namespace mobile
 } // namespace jit
 } // namespace torch

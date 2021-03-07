@@ -584,7 +584,7 @@ Tensor& copy_from_vulkan_(Tensor& self, const Tensor& src) {
       src.device().type() == DeviceType::Vulkan,
       "copy_from_vulkan input tensor's device is not Vulkan");
   TORCH_INTERNAL_ASSERT(
-      self.device().type() == DeviceType::CPU,
+      self.device().is_cpu(),
       "copy_from_vulkan is implemented only for CPU device output");
   TORCH_INTERNAL_ASSERT(
       self.layout() == Layout::Strided,
@@ -607,7 +607,7 @@ Tensor& copy_to_vulkan_(Tensor& self, const Tensor& src) {
       self.device().type() == DeviceType::Vulkan,
       "copy_to_vulkan output tensor's device is not Vulkan");
   TORCH_INTERNAL_ASSERT(
-      src.device().type() == DeviceType::CPU,
+      src.device().is_cpu(),
       "copy_to_vulkan is implemented only for CPU device input");
   TORCH_INTERNAL_ASSERT(
       src.layout() == Layout::Strided,

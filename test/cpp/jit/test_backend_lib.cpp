@@ -61,15 +61,15 @@ class TestBackend : public PyTorchBackendInterface {
   }
 };
 
+namespace {
 c10::IValue preprocess(
     const Module& mod,
     const c10::Dict<IValue, IValue>& method_compile_spec) {
   return mod._ivalue();
 }
 
-namespace {
 static auto cls = torch::jit::backend<TestBackend>("test_backend", preprocess);
-}
+} // namespace
 
 } // namespace jit
 } // namespace torch

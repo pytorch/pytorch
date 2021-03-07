@@ -1,6 +1,6 @@
 #include "versioned_operators.h"
-#include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/jit/frontend/versioned_symbols.h>
 
 #include <unordered_map>
 
@@ -72,6 +72,8 @@ VersionInfo getVersioninfo(
     return VersionInfo(op_version, name, c10::nullopt);
   }
 
+  // The situation where op_version is in [min_version, max_version + 1], but
+  // not in the container, which should not happen.
   TORCH_CHECK(
       true,
       "The version number of ",
@@ -84,10 +86,11 @@ VersionInfo getVersioninfo(
       0, c10::OperatorName("aten::_convolution", ""), c10::nullopt);
 }
 
-static std::unordered_map<std::string, VersionInfoContainer> op_version_table(
-    {{"aten::_convolution",
-      VersionInfoContainer(
-          {{0, c10::OperatorName("aten::_convolution", ""), true}})}});
+static const std::unordered_map<std::string, VersionInfoContainer>
+    op_version_table(
+        {{"aten::_convolution",
+          VersionInfoContainer(
+              {{0, c10::OperatorName("aten::_convolution", ""), true}})}});
 
 } // namespace
 
@@ -107,7 +110,10 @@ OperatorFunctor findOperatorFromName(const c10::OperatorName& opname) {
   return nullptr;
 }
 
-OperatorFunctor operator_resolver(const c10::OperatorName& opname, int64_t op_version, int64_t model_version) {
+OperatorFunctor operator_resolver(
+    const c10::OperatorName& opname,
+    int64_t op_version,
+    int64_t model_version) {
   if (model_version > 0x3LL) {
     auto it = op_version_table.find(toString(opname));
     if (it == op_version_table.end()) {
@@ -116,7 +122,7 @@ OperatorFunctor operator_resolver(const c10::OperatorName& opname, int64_t op_ve
       return findOperatorFromName(opname);
     } else {
       auto opinfo = getVersioninfo(it->second, opname, op_version);
-      auto fn =  findOperatorFromName(opinfo.name);
+      auto fn = findOperatorFromName(opinfo.name);
       if (opinfo.default_val) {
         fn = [fn, opinfo](Stack& stack) {
           stack.push_back(opinfo.default_val.value());
@@ -125,8 +131,7 @@ OperatorFunctor operator_resolver(const c10::OperatorName& opname, int64_t op_ve
       }
       return fn;
     }
-  }
-  else if (model_version == 0x3LL) {
+  } else if (model_version == 0x3LL) {
     auto fn = findOperatorFromName(opname);
     if (opname == c10::OperatorName("aten::_convolution", "")) {
       // Since byte-code versions 0x4L, convolution has an additional

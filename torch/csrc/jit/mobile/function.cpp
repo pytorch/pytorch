@@ -10,7 +10,6 @@
 namespace torch {
 namespace jit {
 
-
 char const* toString(OpCode op);
 namespace mobile {
 Function::Function(c10::QualifiedName name)
