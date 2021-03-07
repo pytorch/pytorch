@@ -14,6 +14,9 @@
 
 namespace c10 {
 
+struct Scalar;
+using ScalarList = ArrayRef<Scalar>;
+
 /**
  * Scalar represents a 0-dimensional tensor which contains a single element.
  * Unlike a tensor, numeric literals (in C++) are implicitly convertible to
