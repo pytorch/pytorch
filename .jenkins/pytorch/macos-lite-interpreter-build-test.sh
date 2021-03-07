@@ -20,12 +20,12 @@ if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
     rm -rf "${CPP_BUILD}"
     mkdir -p "${CPP_BUILD}/caffe2"
 
+    # It looks libtorch need to be built in "${CPP_BUILD}/caffe2"
+    # folder.
     BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
     pushd "${CPP_BUILD}/caffe2" || exit
     VERBOSE=1 DEBUG=1 python "${BUILD_LIBTORCH_PY}"
     popd || exit
-
-    # python tools/download_mnist.py --quiet -d test/cpp/api/mnist
 
     # Unfortunately it seems like the test can't load from miniconda3
     # without these paths being set
