@@ -1,6 +1,5 @@
-#include "versioned_operators.h"
 #include <c10/util/Optional.h>
-#include <torch/csrc/jit/frontend/versioned_symbols.h>
+#include <torch/csrc/jit/mobile/versioned_operators.h>
 
 #include <unordered_map>
 
