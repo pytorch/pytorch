@@ -129,7 +129,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
         torch.empty,
-        torch.empty_meta,
         torch.empty_strided,
         torch.empty_quantized,
         torch.eye,
@@ -273,6 +272,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.argmin: lambda input: -1,
         torch.argsort: lambda input, dim=None: -1,
         torch.asin: lambda input, out=None: -1,
+        torch._assert_async: lambda input: -1,
         torch.arcsin: lambda input, out=None: -1,
         torch.asinh: lambda input, out=None: -1,
         torch.arcsinh: lambda input, out=None: -1,
@@ -287,7 +287,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.avg_pool1d: lambda input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True: -1,
         torch.baddbmm: lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1,
         torch.batch_norm: lambda input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled: -1,
-        torch.batch_norm_backward_elemt: lambda grad_out, input, mean, invstd, weight, mean_dy, mean_dy_xmu: -1,
+        torch.batch_norm_backward_elemt: lambda grad_out, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count_tensor: -1,
         torch.batch_norm_backward_reduce: lambda grad_out, input, mean, invstd, weight, input_g, weight_g, bias_g: -1,
         torch.batch_norm_elemt: lambda input, weight, bias, mean, invstd, eps: -1,
         torch.batch_norm_gather_stats: lambda input, mean, invstd, running_mean, running_var, momentum, eps, count: -1,
@@ -1029,7 +1029,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
-        torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1
     }
 
     ret2 = {}

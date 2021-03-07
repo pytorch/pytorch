@@ -19,7 +19,7 @@ sudo apt-get install -y --no-install-recommends \
       libprotobuf-dev \
       protobuf-compiler \
       python-dev \
-      python-pip                          
+      python-pip
 sudo pip install numpy protobuf
 ```
 
