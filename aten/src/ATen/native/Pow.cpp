@@ -105,8 +105,8 @@ Tensor& float_power_out(Tensor& result, const Tensor& base, const Scalar& exp) {
 
   // Note: need the casts inside the ternary because conversion functions return e.g. c10::complex,
   // which causes a complex scalar to always be returned.
-  exp = (dtype == at::kComplexDouble) ? Scalar(exp.toComplexDouble()) : Scalar(exp.toDouble());
-  return at::pow_out(result, base.to(dtype), exp);
+  auto casted_exp = (dtype == at::kComplexDouble) ? Scalar(exp.toComplexDouble()) : Scalar(exp.toDouble());
+  return at::pow_out(result, base.to(dtype), casted_exp);
 }
 
 Tensor& float_power_out(Tensor& result, const Scalar& base, const Tensor& exp) {
@@ -115,20 +115,20 @@ Tensor& float_power_out(Tensor& result, const Scalar& base, const Tensor& exp) {
               "the output given to float_power has dtype ", result.scalar_type(),
               " but the operation's result requires dtype ", dtype);
 
-  base = (dtype == at::kComplexDouble) ? Scalar(base.toComplexDouble()) : Scalar(base.toDouble());
-  return at::pow_out(result, base, exp.to(dtype));
+  auto casted_base = (dtype == at::kComplexDouble) ? Scalar(base.toComplexDouble()) : Scalar(base.toDouble());
+  return at::pow_out(result, casted_base, exp.to(dtype));
 }
 
 Tensor float_power(const Tensor& base, const Scalar& exp) {
   auto dtype = (at::isComplexType(base.scalar_type()) || exp.isComplex()) ? at::kComplexDouble : at::kDouble;
-  exp = (dtype == at::kComplexDouble) ? Scalar(exp.toComplexDouble()) : Scalar(exp.toDouble());
-  return at::pow(base.to(dtype), exp);
+  auto casted_exp = (dtype == at::kComplexDouble) ? Scalar(exp.toComplexDouble()) : Scalar(exp.toDouble());
+  return at::pow(base.to(dtype), casted_exp);
 }
 
 Tensor float_power(const Scalar& base, const Tensor& exp) {
   auto dtype = (at::isComplexType(exp.scalar_type()) || base.isComplex()) ? at::kComplexDouble : at::kDouble;
-  base = (dtype == at::kComplexDouble) ? Scalar(base.toComplexDouble()) : Scalar(base.toDouble());
-  return at::pow(base, exp.to(dtype));
+  auto casted_base = (dtype == at::kComplexDouble) ? Scalar(base.toComplexDouble()) : Scalar(base.toDouble());
+  return at::pow(casted_base, exp.to(dtype));
 }
 
 Tensor float_power(const Tensor& base, const Tensor& exp) {
@@ -151,8 +151,8 @@ Tensor& float_power_(Tensor& base, const Scalar& exp) {
               "the base given to float_power_ has dtype ", base.scalar_type(),
               " but the operation's result requires dtype ", dtype);
 
-  exp = (dtype == at::kComplexDouble) ? Scalar(exp.toComplexDouble()) : Scalar(exp.toDouble());
-  return base.pow_(exp);
+  auto casted_exp = (dtype == at::kComplexDouble) ? Scalar(exp.toComplexDouble()) : Scalar(exp.toDouble());
+  return base.pow_(casted_exp);
 }
 
 } // namespace native
