@@ -287,10 +287,9 @@ TEST(ExternalCall, UnaryFloat) {
            toExprHandleVec({5, 7})},
           {{100, 200},
            {100},
-           [](at::Tensor x) { return at::mean(x, {1});},
+           [](at::Tensor x) { return at::mean(x, {1}); },
            "nnc_aten_mean",
-           toExprHandleVec({1})}
-           };
+           toExprHandleVec({1})}};
   for (auto curTest : tests) {
     std::vector<int64_t> aShape, resShape;
     TensorFunc torchFunc;

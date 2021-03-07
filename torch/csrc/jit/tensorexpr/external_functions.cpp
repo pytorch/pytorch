@@ -203,7 +203,9 @@ const static RegisterNNCExternalFunction nnc_mm("nnc_aten_mm", nnc_aten_mm);
 const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
     "nnc_aten_adaptive_avg_pool2d",
     nnc_aten_adaptive_avg_pool2d);
-const static RegisterNNCExternalFunction nnc_mean("nnc_aten_mean", nnc_aten_mean);
+const static RegisterNNCExternalFunction nnc_mean(
+    "nnc_aten_mean",
+    nnc_aten_mean);
 
 } // namespace tensorexpr
 } // namespace jit
