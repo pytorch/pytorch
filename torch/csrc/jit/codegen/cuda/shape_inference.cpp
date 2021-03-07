@@ -207,7 +207,7 @@ class NaiveTypePropagator {
       c10::optional<at::ScalarType> scalar_type = c10::nullopt) {
     TORCH_CHECK(
         op0 != nullptr || op1 != nullptr,
-        "const Scalar& operations on binary broadcast type, not supported yet.");
+        "Scalar operations on binary broadcast type, not supported yet.");
 
     if (op0 != nullptr && op1 != nullptr) {
       TORCH_CHECK(

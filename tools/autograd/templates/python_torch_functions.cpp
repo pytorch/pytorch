@@ -88,8 +88,8 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "arange(const Scalar& end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
-    "arange(const Scalar& start, const Scalar& end, const Scalar& step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "arange(Scalar end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<9> parsed_args;
@@ -159,7 +159,7 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "range(const Scalar& start, const Scalar& end, const Scalar& step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "range(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<8> parsed_args;
@@ -221,8 +221,8 @@ static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwa
   HANDLE_TH_ERRORS
 
   static PythonArgParser parser({
-    "full(IntArrayRef size, const Scalar& fill_value, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
-    "full(IntArrayRef size, const Scalar& fill_value, *, DimnameList names=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "full(IntArrayRef size, Scalar fill_value, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "full(IntArrayRef size, Scalar fill_value, *, DimnameList names=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   // Acquires (common) arguments

@@ -8,8 +8,8 @@
 // Example:
 //
 //   static PythonArgParser parser({
-//     "norm(const Scalar& p, int64_t dim, bool keepdim=False)",
-//     "norm(const Scalar& p=2)",
+//     "norm(Scalar p, int64_t dim, bool keepdim=False)",
+//     "norm(Scalar p=2)",
 //   });
 //   ParsedArgs<3> parsed_args;
 //   auto r = parser.parse(args, kwargs, parsed_args);
