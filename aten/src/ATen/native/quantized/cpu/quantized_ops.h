@@ -27,7 +27,7 @@ using qthreshold_fn = void (*)(
 using qtanh_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qelu_fn = void(*)(
     const at::Tensor& /*qx*/,
-    Scalar /*alpha*/,
+    const Scalar& /*alpha*/,
     const Scalar& /*scale*/,
     const Scalar& /*input_scale*/,
     at::Tensor& /*qy*/);

@@ -101,7 +101,7 @@ template <bool is_scatter_like = true>
 struct cpu_scatter_gather_base_kernel {
   template <typename func_t>
   void operator()(Tensor& self, int64_t dim,
-    const Tensor& index, Scalar& value,
+    const Tensor& index, const Scalar& value,
     const std::string& method_name, func_t& kernel_func) {
     // no-op if index is empty
     if (index.numel() == 0) {
@@ -338,7 +338,7 @@ void scatter_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& in
 }
 
 void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Tensor& index,
-                                      Scalar& value, const SCATTER_GATHER_OP& reduce) {
+                                      const Scalar& value, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,

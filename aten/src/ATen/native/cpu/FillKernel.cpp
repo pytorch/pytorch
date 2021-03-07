@@ -24,7 +24,7 @@ void fill_non_native_type(TensorIterator& iter, const Scalar& value_scalar) {
 }
 
 template <>
-void fill_non_native_type<c10::complex<at::Half>>(TensorIterator& iter, Scalar value_scalar) {
+void fill_non_native_type<c10::complex<at::Half>>(TensorIterator& iter, const Scalar& value_scalar) {
   static_assert(sizeof(c10::complex<at::Half>) == sizeof(int32_t), "Size of ComplexHalf should be 32-bits");
   auto value = c10::complex<at::Half>(value_scalar.to<c10::complex<float>>());
   auto val = *reinterpret_cast<int32_t*>(std::addressof(value));
