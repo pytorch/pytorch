@@ -65,7 +65,7 @@ Tensor arange(
     const Scalar& end,
     const Scalar& step,
     const TensorOptions& options) {
-  bool set_to_integral_dtype = !options.has_dtype() && 
+  bool set_to_integral_dtype = !options.has_dtype() &&
        // bool inputs are considered integral
        start.isIntegral(true) &&
        end.isIntegral(true) &&
