@@ -1,4 +1,3 @@
-#ifdef USE_CUDA
 #include <torch/csrc/CudaIPCTypes.h>
 #include <TH/THAllocator.h>
 #include <map>
@@ -6,7 +5,7 @@
 #include <random>
 
 #ifdef _MSC_VER
-#include <windows.h>
+#include <c10/util/win32-headers.h>
 #else
 #include <sys/types.h>
 #include <unistd.h>
@@ -243,5 +242,3 @@ namespace {
 REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback);
 }
 } // namespace c10
-
-#endif

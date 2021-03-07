@@ -43,29 +43,27 @@ def _get_allgather_out_list(all_gather_in_list, world_size):
 
 
 def quantization_pertensor_hook(
-    process_group: dist.ProcessGroup, bucket: dist._GradBucket
+    process_group: dist.ProcessGroup, bucket: dist.GradBucket
 ) -> torch.futures.Future:
     """
-        Applies the ``torch.quantize_per_tensor`` logic to DDP using ``allgather``
-        protocol. Workers first allgather the scale and zero point of their own
-        ``GradBucket`` prior to the quantization. After all workers have that information,
-        the first ``then`` callback called ``quantize_and_allgather`` quantizes worker's
-        own gradient tensors, and uses ``allgather`` to communicate these accross all workers.
-        The final ``then`` callback called ``dequantize_and_aggregate``, dequantizes and
-        aggregates each quantized gradient tensors locally and returns the mean.
+    Applies the ``torch.quantize_per_tensor`` logic to DDP using ``allgather``
+    protocol. Workers first allgather the scale and zero point of their own
+    ``GradBucket`` prior to the quantization. After all workers have that information,
+    the first ``then`` callback called ``quantize_and_allgather`` quantizes worker's
+    own gradient tensors, and uses ``allgather`` to communicate these accross all workers.
+    The final ``then`` callback called ``dequantize_and_aggregate``, dequantizes and
+    aggregates each quantized gradient tensors locally and returns the mean.
 
-        .. warning ::
-            This is experimental, and uses ``allgather`` protocol which is considerably slower than
-            ``allreduce`` protocol. It works only with flattened grads.
+    .. warning ::
+        This is experimental, and uses ``allgather`` protocol which is considerably slower than
+        ``allreduce`` protocol. It works only with flattened grads.
 
-        Example::
-            >>> ddp_model.register_comm_hook(process_group, quantization_pertensor_hook)
+    Example::
+        >>> ddp_model.register_comm_hook(process_group, quantization_pertensor_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     rank = process_group.rank() if process_group is not None else dist.get_rank()
-    world_size = (
-        process_group.size() if process_group is not None else dist.get_world_size()
-    )
+    world_size = group_to_use.size()
 
     tensor = bucket.get_tensors()[0]
 
@@ -118,35 +116,33 @@ def quantization_pertensor_hook(
 
 
 def quantization_perchannel_hook(
-    process_group: dist.ProcessGroup, bucket: dist._GradBucket, bucket_size=512
+    process_group: dist.ProcessGroup, bucket: dist.GradBucket, bucket_size=512
 ) -> torch.futures.Future:
     """
-        Applies the ``torch.quantize_per_channel`` logic to DDP using ``allgather``
-        protocol. Compared to pertensor, the main motivation of perchannel is
-        for considerably large tensors such as a tensor that contains 6 million
-        elements quantizing per a bucket size of 512 (or 128) elements may significantly
-        increase the resolution.
+    Applies the ``torch.quantize_per_channel`` logic to DDP using ``allgather``
+    protocol. Compared to pertensor, the main motivation of perchannel is
+    for considerably large tensors such as a tensor that contains 6 million
+    elements quantizing per a bucket size of 512 (or 128) elements may significantly
+    increase the resolution.
 
-        It first splits ``GradBucket`` tensors into multiple chunks (channels) of ``bucket_size``
-        elements. Then, workers allgather the scales and zero points of their own
-        ``GradBucket`` prior to the quantization. After all workers have that information,
-        the first ``then`` callback called ``quantize_and_allgather`` quantizes worker's
-        own gradient tensors, and uses ``allgather`` to communicate these accross all workers.
-        The final ``then`` callback called ``dequantize_and_aggregate``, dequantizes, flattens, and
-        aggregates each quantized gradient tensors locally and returns the mean.
+    It first splits ``GradBucket`` tensors into multiple chunks (channels) of ``bucket_size``
+    elements. Then, workers allgather the scales and zero points of their own
+    ``GradBucket`` prior to the quantization. After all workers have that information,
+    the first ``then`` callback called ``quantize_and_allgather`` quantizes worker's
+    own gradient tensors, and uses ``allgather`` to communicate these accross all workers.
+    The final ``then`` callback called ``dequantize_and_aggregate``, dequantizes, flattens, and
+    aggregates each quantized gradient tensors locally and returns the mean.
 
-        .. warning ::
-            This is experimental, and uses ``allgather`` protocol which is considerably slower than
-            ``allreduce`` protocol. It works only with flattened grads.
+    .. warning ::
+        This is experimental, and uses ``allgather`` protocol which is considerably slower than
+        ``allreduce`` protocol. It works only with flattened grads.
 
-        Example::
-            >>> ddp_model.register_comm_hook(process_group, quantization_perchannel_hook)
+    Example::
+        >>> ddp_model.register_comm_hook(process_group, quantization_perchannel_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     rank = process_group.rank() if process_group is not None else dist.get_rank()
-    world_size = (
-        process_group.size() if process_group is not None else dist.get_world_size()
-    )
+    world_size = group_to_use.size()
 
     tensor = bucket.get_tensors()[0]
 

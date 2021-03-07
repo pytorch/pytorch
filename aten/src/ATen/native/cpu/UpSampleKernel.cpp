@@ -4,35 +4,11 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec256/vec256.h>
+#include <ATen/native/cpu/utils.h>
 
 namespace at {
 namespace native {
 namespace {
-
-template <typename T>
-inline T data_index_init(T offset) {
-  return offset;
-}
-
-template <typename T, typename... Args>
-inline T data_index_init(T offset, T &x, const T &X, Args &&... args) {
-  offset = data_index_init(offset, std::forward<Args>(args)...);
-  x = offset % X;
-  return offset / X;
-}
-
-inline bool data_index_step() {
-  return true;
-}
-
-template <typename T, typename... Args>
-inline bool data_index_step(T &x, const T &X, Args &&... args) {
-  if (data_index_step(std::forward<Args>(args)...)) {
-    x = ((x + 1) == X) ? 0 : (x + 1);
-    return x == 0;
-  }
-  return false;
-}
 
 static inline int64_t nearest_idx(
     int64_t output_index,
@@ -53,7 +29,7 @@ static inline int64_t nearest_idx(
 
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_nearest(
-    Tensor& output_,
+    const Tensor& output_,
     const Tensor& input_,
     const scale_type& scales) {
   TORCH_CHECK(input_.dtype() == output_.dtype(), "expected dtype ", input_.dtype(),
@@ -139,7 +115,7 @@ void cpu_upsample_nearest(
 
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_nearest_channels_last(
-    Tensor& output_,
+    const Tensor& output_,
     const Tensor& input_,
     const scale_type& scales) {
   TORCH_CHECK(input_.dtype() == output_.dtype(), "expected dtype ", input_.dtype(),
@@ -234,7 +210,7 @@ void cpu_upsample_nearest_channels_last(
 
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_nearest_backward(
-    Tensor& grad_input_,
+    const Tensor& grad_input_,
     const Tensor& grad_output_,
     const scale_type& scales) {
   TORCH_CHECK(grad_input_.dtype() == grad_output_.dtype(), "expected dtype ", grad_output_.dtype(),
@@ -324,7 +300,7 @@ void cpu_upsample_nearest_backward(
 
 using scale_t = std::vector<c10::optional<double>>;
 void upsample_nearest1d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest1d", [&] {
@@ -333,7 +309,7 @@ void upsample_nearest1d_kernel_impl(
 }
 
 void upsample_nearest2d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
@@ -349,7 +325,7 @@ void upsample_nearest2d_kernel_impl(
 }
 
 void upsample_nearest3d_kernel_impl(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
@@ -366,7 +342,7 @@ void upsample_nearest3d_kernel_impl(
 }
 
 void upsample_nearest1d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES(grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
@@ -375,7 +351,7 @@ void upsample_nearest1d_backward_kernel_impl(
 }
 
 void upsample_nearest2d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
@@ -385,7 +361,7 @@ void upsample_nearest2d_backward_kernel_impl(
 }
 
 void upsample_nearest3d_backward_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output,
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,

@@ -247,7 +247,7 @@ class IntermediateLayerGetter(nn.ModuleDict):
     Additionally, it is only able to query submodules that are directly
     assigned to the model. So if `model` is passed, `model.feature1` can
     be returned, but not `model.feature1.layer2`.
-    Arguments:
+    Args:
         model (nn.Module): model on which we will extract the features
         return_layers (Dict[name, new_name]): a dict containing the names
             of the modules for which the activations will be returned as
@@ -324,7 +324,7 @@ class _SimpleSegmentationModel(nn.Module):
 class FCN(_SimpleSegmentationModel):
     """
     Implements a Fully-Convolutional Network for semantic segmentation.
-    Arguments:
+    Args:
         backbone (nn.Module): the network used to compute the features for the model.
             The backbone should return an OrderedDict[Tensor], with the key being
             "out" for the last feature map used, and "aux" if an auxiliary classifier
@@ -509,7 +509,7 @@ def box_area(boxes):
     """
     Computes the area of a set of bounding boxes, which are specified by its
     (x1, y1, x2, y2) coordinates.
-    Arguments:
+    Args:
         boxes (Tensor[N, 4]): boxes for which the area will be computed. They
             are expected to be in (x1, y1, x2, y2) format
     Returns:

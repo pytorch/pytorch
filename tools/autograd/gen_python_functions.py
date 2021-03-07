@@ -1,7 +1,7 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn. torch._C._fft, or torch._C._linalg objects.
+# torch._C._nn. torch._C._fft, torch._C._linalg or torch._C._special objects.
 #
 
 # Code tries to stick to the following rules:
@@ -40,8 +40,10 @@ from .gen_trace_type import should_trace
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.api.types import *
 from tools.codegen.api.python import *
-from tools.codegen.gen import cpp_string, parse_native_yaml, with_native_function, FileManager
+from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
+from tools.codegen.context import with_native_function
 from tools.codegen.model import *
+from tools.codegen.utils import *
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
@@ -77,10 +79,11 @@ SKIP_PYTHON_BINDINGS = [
     'copy_sparse_to_sparse_', 'copy_',
     'numpy_T',  # this needs to be an attribute in Python, not a function
     'nonzero(_(out|numpy))?',
-    'set_quantizer_',  # return types not supported yet
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad', 'set_'
+    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad', 'set_',
+    '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
+    'fake_quantize_per_channel_affine_cachemask',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -108,7 +111,7 @@ def should_generate_py_binding(f: NativeFunction) -> bool:
 
     return True
 
-def get_pycname(name: str) -> str:
+def get_pycname(name: BaseOperatorName) -> str:
     return f'THPVariable_{name}'
 
 def is_noarg(overloads: Sequence[PythonSignatureNativeFunctionPair]) -> bool:
@@ -128,6 +131,9 @@ def is_py_fft_function(f: NativeFunction) -> bool:
 
 def is_py_linalg_function(f: NativeFunction) -> bool:
     return f.python_module == 'linalg'
+
+def is_py_special_function(f: NativeFunction) -> bool:
+    return f.python_module == 'special'
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -155,6 +161,9 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
     create_python_bindings(
         fm, functions, is_py_linalg_function, 'torch.linalg', 'python_linalg_functions.cpp', method=False)
 
+    create_python_bindings(
+        fm, functions, is_py_special_function, 'torch.special', 'python_special_functions.cpp', method=False)
+
 def create_python_bindings(
     fm: FileManager,
     pairs: Sequence[PythonSignatureNativeFunctionPair],
@@ -169,12 +178,12 @@ def create_python_bindings(
     py_method_defs: List[str] = []
     py_forwards: List[str] = []
 
-    grouped: Dict[str, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
+    grouped: Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
     for pair in pairs:
         if pred(pair.function):
-            grouped[str(pair.function.func.name.name)].append(pair)
+            grouped[pair.function.func.name.name].append(pair)
 
-    for name in sorted(grouped.keys()):
+    for name in sorted(grouped.keys(), key=lambda x: str(x)):
         overloads = grouped[name]
         py_methods.append(method_impl(name, module, overloads, method=method))
         py_method_defs.append(method_def(name, module, overloads, method=method))
@@ -192,25 +201,28 @@ def load_signatures(
     deprecated_yaml_path: str,
     *,
     method: bool,
+    skip_deprecated: bool = False,
+    pyi: bool = False,
 ) -> Sequence[PythonSignatureNativeFunctionPair]:
     native_functions = list(filter(should_generate_py_binding, parse_native_yaml(native_yaml_path)))
 
     @with_native_function
     def gen_signature_pairs(f: NativeFunction) -> PythonSignatureNativeFunctionPair:
         return PythonSignatureNativeFunctionPair(
-            signature=signature(f, method=method),
+            signature=signature(f, method=method, pyi=pyi),
             function=f,
         )
 
     pairs = list(map(gen_signature_pairs, native_functions))
-    deprecated = load_deprecated_signatures(pairs, deprecated_yaml_path, method=method)
-    return pairs + deprecated
+    deprecated = load_deprecated_signatures(pairs, deprecated_yaml_path, method=method, pyi=pyi)
+    return pairs if skip_deprecated else pairs + deprecated
 
 def load_deprecated_signatures(
     pairs: Sequence[PythonSignatureNativeFunctionPair],
     deprecated_yaml_path: str,
     *,
     method: bool,
+    pyi: bool,
 ) -> List[PythonSignatureNativeFunctionPair]:
     # The deprecated.yaml doesn't have complete type information, we need
     # find and leverage the original ATen signature (to which it delegates
@@ -224,7 +236,9 @@ def load_deprecated_signatures(
         opname = str(f.func.name.name.base)
         if f.func.is_out_fn():
             opname += '_out'
-        args = CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
+        if f.func.name.name.inplace and pyi:
+            opname += '_'
+        args = CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
         # Simply ignore TensorOptionsArguments as it does not exist in deprecated.yaml.
         types = ', '.join(argument_type_str(a.argument.type)
                           for a in args if isinstance(a.argument, Argument))
@@ -243,14 +257,6 @@ def load_deprecated_signatures(
         # a literal Scalar
         rearranged_types = ', '.join(types.get(arg, 'Scalar') for arg in call_args)
         return f'{opname}({rearranged_types})'
-
-    # TODO: Use a real parser here; this will get bamboozled
-    def split_name_params(schema: str) -> Tuple[str, List[str]]:
-        m = re.match(r'(\w+)(\.\w+)?\((.*)\)', schema)
-        if m is None:
-            raise RuntimeError(f'Unsupported function schema: {schema}')
-        name, _, params = m.groups()
-        return name, params.split(', ')
 
     # group the original ATen signatures by type-only signature
     grouped: Dict[str, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
@@ -315,6 +321,7 @@ def load_deprecated_signatures(
                     method=python_sig.method,
                     deprecated_args_names=tuple(args),
                     deprecated_args_exprs=tuple(call_args),
+                    returns=python_sig.returns,
                 ),
                 function=pair.function,
             ))
@@ -327,31 +334,10 @@ def load_deprecated_signatures(
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-# TODO: remove the copy of this method in 'tools/pyi/gen_pyi.py'.
-@with_native_function
-def namedtuple_fieldnames(f: NativeFunction) -> List[str]:
-    returns = f.func.returns
-    if len(returns) <= 1 or all(map(lambda r: r.name is None, returns)):
-        return []
-    else:
-        if any(map(lambda r: r.name is None, returns)):
-            # When building on Windows, `PyStructSequence_UnnamedField` could not be
-            # resolved by the linker for some reason, which cause error in building:
-            #
-            # python_nn_functions.cpp.obj : error LNK2001: unresolved external symbol
-            # PyStructSequence_UnnamedField
-            #
-            # Thus, at this point in time, we do not support unnamed
-            # fields in namedtuple; you must either name all fields,
-            # or none of them.
-            raise ValueError("Unnamed field is not supported by codegen")
-
-        return list(map(lambda r: str(r.name), returns))
-
 @with_native_function
 def gen_namedtuple_typename_key(f: NativeFunction) -> str:
     name = cpp.name(f.func)
-    fieldnames = namedtuple_fieldnames(f)
+    fieldnames = namedtuple_fieldnames(f.func.returns)
     return '_'.join([name] + fieldnames)
 
 def emit_namedtuple_typedefs(
@@ -367,7 +353,7 @@ def emit_namedtuple_typedefs(
     typedefs: List[str] = []          # typedef declarations and init code
 
     for overload in overloads:
-        fieldnames = namedtuple_fieldnames(overload.function)
+        fieldnames = namedtuple_fieldnames(overload.function.func.returns)
         if not fieldnames:
             continue
 
@@ -469,7 +455,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 """)
 
 def method_impl(
-    name: str,
+    name: BaseOperatorName,
     module: Optional[str],
     overloads: Sequence[PythonSignatureNativeFunctionPair],
     *,
@@ -530,7 +516,7 @@ def method_impl(
     )
 
 def gen_has_torch_function_check(
-    name: str, module: Optional[str], *, noarg: bool, method: bool
+    name: BaseOperatorName, module: Optional[str], *, noarg: bool, method: bool
 ) -> str:
     if noarg:
         if method:
@@ -548,6 +534,7 @@ if(check_has_torch_function(self_)) {{
         "torch.nn": "THPNNVariableFunctionsModule",
         "torch.fft": "THPFFTVariableFunctionsModule",
         "torch.linalg": "THPLinalgVariableFunctionsModule",
+        "torch.special": "THPSpecialVariableFunctionsModule",
     }[module] if module else "THPVariableClass"
 
     return f"""\
@@ -596,7 +583,7 @@ def emit_dispatch_case(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 def forward_decls(
-    name: str,
+    name: BaseOperatorName,
     overloads: Sequence[PythonSignatureNativeFunctionPair],
     *,
     method: bool
@@ -620,30 +607,8 @@ static PyObject * {pycname}(PyObject* self_, PyObject* args, PyObject* kwargs);
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-# Python binary operator dunder methods
-BINARY_OP_NAMES = [
-    '__lt__', '__le__',
-    '__gt__', '__ge__',
-    '__eq__', '__ne__',
-
-    '__add__', '__radd__', '__iadd__',
-    '__sub__', '__rsub__', '__isub__',
-    '__mul__', '__rmul__', '__imul__',
-    '__matmul__', '__rmatmul__', '__imatmul__',
-    '__truediv__', '__rtruediv__', '__itruediv__',
-    '__floordiv__', '__rfloordiv__', '__ifloordiv__',
-    '__mod__', '__rmod__', '__imod__',
-    '__divmod__', '__rdivmod__', '__idivmod__',
-    '__pow__', '__rpow__', '__ipow__',
-    '__lshift__', '__rlshift__', '__ilshift__',
-    '__rshift__', '__rrshift__', '__irshift__',
-    '__and__', '__rand__', '__iand__',
-    '__xor__', '__rxor__', '__ixor__',
-    '__or__', '__ror__', '__ior__',
-]
-
 def method_def(
-    name: str,
+    name: BaseOperatorName,
     module: Optional[str],
     overloads: Sequence[PythonSignatureNativeFunctionPair],
     *,
@@ -664,7 +629,7 @@ def method_def(
     if module == "torch":
         flags += ' | METH_STATIC'
 
-    if name in BINARY_OP_NAMES:
+    if name.dunder_method:
         # PyMethodDef entry for binary op, throws not implemented error
         return f"""\
 {{"{name}", {pyfunc_cast}(TypeError_to_NotImplemented_<{pycname}>), {flags}, NULL}},"""
@@ -680,7 +645,7 @@ def method_def(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 def group_overloads(
-    overloads: Sequence[PythonSignatureNativeFunctionPair]
+    overloads: Sequence[PythonSignatureNativeFunctionPair],
 ) -> Sequence[PythonSignatureGroup]:
     bases: Dict[str, PythonSignatureNativeFunctionPair] = {}
     outplaces: Dict[str, PythonSignatureNativeFunctionPair] = {}
@@ -780,7 +745,8 @@ def sort_overloads(
 ) -> Sequence[PythonSignatureGroup]:
 
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
-        return str(t1) == 'Scalar' and str(t2) == 'Tensor'
+        return (str(t1) == 'Scalar' and str(t2) == 'Tensor' or
+                'Dimname' in str(t1) and 'Dimname' not in str(t2))
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:
         """Returns True if s1 < s2 in the partial order."""

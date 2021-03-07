@@ -1,10 +1,12 @@
 #ifdef USE_CUDA
 
+#include <cmath>
 #include <sstream>
 #include <stdexcept>
-#include "test/cpp/tensorexpr/test_base.h"
 
-#include <cmath>
+#include <gtest/gtest.h>
+
+#include "test/cpp/tensorexpr/test_base.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
 #include "test/cpp/tensorexpr/padded_buffer.h"
@@ -24,7 +26,7 @@ using namespace torch::jit::tensorexpr;
 using namespace torch::jit::tensorexpr;
 
 template <typename ctype>
-void testCudaTestVectorAdd01_impl() {
+static void testCudaTestVectorAdd01_impl() {
   KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
@@ -90,7 +92,7 @@ float sigmoid(float x) {
   return 1.0f / (1.0f + expf(-0.0f - x));
 }
 
-void testCudaSigmoid() {
+TEST(Cuda, Sigmoid_CUDA) {
   KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
@@ -145,7 +147,7 @@ void testCudaSigmoid() {
   cudaFree(c_dev);
 }
 
-void testCudaTestVectorAdd01() {
+TEST(Cuda, TestVectorAdd01_CUDA) {
   // floating types.
   testCudaTestVectorAdd01_impl<float>();
   testCudaTestVectorAdd01_impl<at::Half>();
@@ -215,12 +217,12 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
   cudaFree(c_dev);
 }
 
-void testCudaTestVectorAdd02() {
+TEST(Cuda, TestVectorAdd02_CUDA) {
   testCudaTestVectorAdd02_impl(1024, 128);
   testCudaTestVectorAdd02_impl(1030, 128);
 }
 
-void testCudaHalfCast() {
+TEST(Cuda, HalfCast_CUDA) {
   KernelScope ks;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
@@ -259,7 +261,7 @@ void testCudaHalfCast() {
   cudaFree(bDev);
 }
 
-void testCudaDynamicShape2D() {
+TEST(Cuda, DynamicShape2D_CUDA) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
@@ -322,7 +324,7 @@ void testCudaDynamicShape2D() {
   testWithSize(27, 13);
 }
 
-void testCudaTestRand01() {
+TEST(Cuda, TestRand01_CUDA) {
   KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
@@ -381,7 +383,7 @@ void testCudaTestRand01() {
   cudaFree(c_dev);
 }
 
-void testCudaDynamicShapeSplit() {
+TEST(Cuda, DynamicShapeSplit_CUDA) {
   KernelScope ks;
   constexpr int N = 4096;
   VarHandle n("n", kInt);
@@ -432,7 +434,7 @@ void testCudaDynamicShapeSplit() {
   cudaFree(bDev);
 }
 
-void testCudaOneBlockOneThreadGlobalReduce1() {
+TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
   const static int N = 1024;
   KernelScope kernel_scope;
   Placeholder data_buf("data", kFloat, {N});
@@ -450,8 +452,8 @@ void testCudaOneBlockOneThreadGlobalReduce1() {
 
   Store* init_store = output_buf.store({0}, 0.f);
   VarHandle i1("i1", kInt);
-  ExprHandle load_data = Load::make(BufHandle(data_buf.data()), {i1}, 1);
-  ExprHandle load_output = Load::make(BufHandle(output_buf.data()), {0}, 1);
+  ExprHandle load_data = Load::make(BufHandle(data_buf.data()), {i1});
+  ExprHandle load_output = Load::make(BufHandle(output_buf.data()), {0});
   ExprHandle add_value = load_output + load_data;
   Store* store_output = output_buf.store({0}, add_value);
   For* for_output = For::make(i1, 0, N, store_output);
@@ -499,7 +501,7 @@ void testCudaOneBlockOneThreadGlobalReduce1() {
   cudaFree(output_dev);
 }
 
-void testCudaOneBlockMultiThreadGlobalReduce1() {
+TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
   const static int N = 1024;
   KernelScope kernel_scope;
 
@@ -533,8 +535,8 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
 
   //  for t in 0..1024: // thread-idx
   //    b[0] = b[0] + a[t] // implied atomic
-  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {t}, 1);
-  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {0}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {t});
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {0});
   ExprHandle add_value = load_b + load_a;
   Store* store_b = b_buf.store({0}, add_value);
   For* for_b = For::make(t, 0, N, store_b, thread_idx_options);
@@ -577,7 +579,7 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   cudaFree(b_dev);
 }
 
-void testCudaNoThreadIdxWrite_1() {
+TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
   KernelScope kernel_scope;
 
   // This test does the following reduction:
@@ -608,7 +610,7 @@ void testCudaNoThreadIdxWrite_1() {
   //   for n in 0..2:
   //     a[0] = a[0] + n
   Store* store_a0_0 = a_buf.store({0}, 0.f);
-  ExprHandle load_a0 = Load::make(BufHandle(a_buf.data()), {0}, 1);
+  ExprHandle load_a0 = Load::make(BufHandle(a_buf.data()), {0});
   ExprHandle v1 = load_a0 + n;
   Store* store_a0_v1 = a_buf.store({0}, v1);
   For* loop_a_0 = For::make(n, 0, 2, store_a0_v1);
@@ -674,7 +676,7 @@ void testCudaNoThreadIdxWrite_1() {
   cudaFree(b_dev);
 }
 
-void testCudaSharedMemReduce_1() {
+TEST(Cuda, SharedMemReduce_1_CUDA) {
   // FIXME: this test is flaky in CI.
   KernelScope kernel_scope;
   // This test does the following:
@@ -705,20 +707,19 @@ void testCudaSharedMemReduce_1() {
   VarHandle n("n", kInt);
 
   std::vector<Stmt*> block;
-  VarHandle c_var("c", kHandle);
   std::vector<const Expr*> dims;
   dims.push_back(ExprHandle(N).node());
-  BufHandle c{new Buf(c_var.node(), dims, kFloat)};
+  BufHandle c{new Buf("c", dims, kFloat)};
   {
     // alloc(c, 64);
-    Allocate* alloc = Allocate::make(c_var, kFloat, {N});
+    Allocate* alloc = Allocate::make(c);
     block.push_back(alloc);
   }
 
   {
     //    for n in 0..64:  // thread-idx
     //      c(n) = 0
-    Store* store_cn_0 = Store::make(c, {n}, 0.f, 1);
+    Store* store_cn_0 = Store::make(c, {n}, 0.f);
     For* loop_n1 = For::make(n, 0, N, store_cn_0, thread_idx_opt);
     block.push_back(loop_n1);
   }
@@ -727,9 +728,9 @@ void testCudaSharedMemReduce_1() {
     //  for m in 0..128:
     //    for n in 0..64:  // thread_idx
     //      c(n) = c(n) + a(k, m, n)
-    ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
+    ExprHandle load_cn = Load::make(kFloat, c, {n});
     ExprHandle a_kmn =
-        Load::make(BufHandle(a.data()), {k * (M * N) + m * N + n}, 1);
+        Load::make(BufHandle(a.data()), {k * (M * N) + m * N + n});
     ExprHandle v_add = load_cn + a_kmn;
     Store* store_cn_v = Store::make(c, {n}, v_add);
     For* loop_n2 = For::make(n, 0, N, store_cn_v, thread_idx_opt);
@@ -744,7 +745,7 @@ void testCudaSharedMemReduce_1() {
     Store* store_bk_0 = b.store({k}, 0.f);
     block.push_back(store_bk_0);
     ExprHandle load_bk = b.load(k);
-    ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
+    ExprHandle load_cn = Load::make(kFloat, c, {n});
     ExprHandle v_add = load_bk + load_cn;
     Store* store_bk = b.store({k}, v_add);
     For* loop_n3 = For::make(n, 0, N, store_bk, thread_idx_opt);
@@ -753,7 +754,7 @@ void testCudaSharedMemReduce_1() {
 
   {
     //    free(c)
-    Free* free_stmt = Free::make(c_var);
+    Free* free_stmt = Free::make(c);
     block.push_back(free_stmt);
   }
 
@@ -814,7 +815,7 @@ void testCudaSharedMemReduce_1() {
   cudaFree(b_dev);
 }
 
-void testCudaLocalMemReduce_1() {
+TEST(Cuda, LocalMemReduce_1_CUDA) {
   KernelScope kernel_scope;
   // This test does the following:
   //  for k in 0..1:  // block-idx
@@ -841,10 +842,7 @@ void testCudaLocalMemReduce_1() {
   VarHandle m("m", kInt);
   VarHandle n("n", kInt);
 
-  VarHandle c_var("c", kHandle);
-  std::vector<const Expr*> dims;
-  dims.push_back(ExprHandle(N).node());
-  BufHandle c{new Buf(c_var.node(), dims, kFloat)};
+  BufHandle c{new Buf("c", {new IntImm(1)}, kFloat)};
   std::vector<Stmt*> block_k;
   {
     //    b(k) = 0
@@ -854,18 +852,18 @@ void testCudaLocalMemReduce_1() {
   std::vector<Stmt*> block_n;
   {
     // alloc(c, 1);
-    Allocate* alloc = Allocate::make(c_var, kFloat, {1});
+    Allocate* alloc = Allocate::make(c);
     block_n.push_back(alloc);
   }
   {
     // c(0) = 0
-    Store* store_c0_0 = Store::make(c, {0}, 0.f, 1);
+    Store* store_c0_0 = Store::make(c, {0}, 0.f);
     block_n.push_back(store_c0_0);
   }
   {
     //      for m in 0..128:
     //        c(0) = c(0) + a(k, m, n)
-    ExprHandle load_c0 = Load::make(kFloat, c, {0}, 1);
+    ExprHandle load_c0 = Load::make(kFloat, c, {0});
     ExprHandle a_kmn = a.load(k * (M * N) + m * N + n);
     ExprHandle v_add = load_c0 + a_kmn;
     Store* store_c0_v = Store::make(c, {0}, v_add);
@@ -875,14 +873,14 @@ void testCudaLocalMemReduce_1() {
   {
     //      b(k) = b(k) + c(0)
     ExprHandle load_bk = b.load(k);
-    ExprHandle load_c0 = Load::make(kFloat, c, {0}, 1);
+    ExprHandle load_c0 = Load::make(kFloat, c, {0});
     ExprHandle v_add = load_bk + load_c0;
     Store* store_bk = b.store({k}, v_add);
     block_n.push_back(store_bk);
   }
   {
     //      free(c)
-    Free* free_stmt = Free::make(c_var);
+    Free* free_stmt = Free::make(c);
     block_n.push_back(free_stmt);
   }
   {
@@ -927,7 +925,7 @@ void testCudaLocalMemReduce_1() {
   cudaFree(b_dev);
 }
 
-void testCudaHalfSupport() {
+TEST(Cuda, HalfSupport_CUDA) {
   KernelScope ks;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
@@ -985,7 +983,7 @@ void testCudaHalfSupport() {
   cudaFree(dDev);
 }
 
-void testCudaHalfPropagation() {
+TEST(Cuda, HalfPropagation_CUDA) {
   KernelScope kernel_scope;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
@@ -1034,7 +1032,7 @@ void testCudaHalfPropagation() {
   cudaFree(reluDev);
 }
 
-void testCudaUnusedHalfArgument() {
+TEST(Cuda, UnusedHalfArgument_CUDA) {
   KernelScope kernel_scope;
   Placeholder a("a", kFloat, {4});
   auto half = ToDtype<at::Half>();
@@ -1091,7 +1089,7 @@ void testCudaUnusedHalfArgument() {
   cudaFree(reluDev);
 }
 
-void testCudaPrioritizeDependents() {
+TEST(Cuda, PrioritizeDependents_CUDA) {
   KernelScope kernel_scope;
   Placeholder a("a", kFloat, {10});
   Placeholder b("b", kFloat, {12});
@@ -1108,8 +1106,8 @@ void testCudaPrioritizeDependents() {
    *   c[i] = (i < 10 ? a[i] + b[i] : b[i]);
    * }
    */
-  ExprHandle load_a = Load::make(BufHandle(a.data()), {i}, 1);
-  ExprHandle load_b = Load::make(BufHandle(b.data()), {i}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a.data()), {i});
+  ExprHandle load_b = Load::make(BufHandle(b.data()), {i});
   ExprHandle cmp = CompareSelect::make(i, 10, CompareSelectOperation::kLT);
   ExprHandle ite = IfThenElse::make(cmp, Add::make(load_a, load_b), load_b);
 
@@ -1165,7 +1163,7 @@ void testCudaPrioritizeDependents() {
 
 /// Tests the case where there are two loops which have different extents bound
 /// to the same block dimension. We must mask the smaller extent loop body.
-void testCudaMaskBlockDim() {
+TEST(Cuda, MaskBlockDim_CUDA) {
   KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
@@ -1258,7 +1256,7 @@ void testCudaMaskBlockDim() {
 /// Tests the case with two loops, which have different extents that are bound
 /// to the same thread dimension. This is the same as the above - the smaller
 /// rank write should be masked. But this time we also need to syncthreads.
-void testCudaMaskThreadDim() {
+TEST(Cuda, MaskThreadDim_CUDA) {
   KernelScope kernel_scope;
   int A_SIZE = 50;
   int B_SIZE = 100;
@@ -1353,7 +1351,7 @@ void testCudaMaskThreadDim() {
 /// in distinct dimensions.
 // Note: this is an extremely dumb pattern which we should never see, but is a
 // useful edge case to make sure we've got things covered.
-void testCudaMaskMultiBlockDim() {
+TEST(Cuda, MaskMultiBlockDim_CUDA) {
   KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
@@ -1447,7 +1445,7 @@ void testCudaMaskMultiBlockDim() {
 /// distinct.
 // Note: this is an extremely dumb pattern which we should never see, but is a
 // useful edge case to make sure we've got things covered.
-void testCudaMaskBlockAndThreadDim() {
+TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
   KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
@@ -1539,7 +1537,7 @@ void testCudaMaskBlockAndThreadDim() {
 /// Tests the case where the loopnest has two loops of depth two: each with the
 /// outer loop bound to blockDim.x and the inner loop bound to threadDim.x. In
 /// this case all writes with a rank smaller than the max should be masked.
-void testCudaMaskMultiDim() {
+TEST(Cuda, MaskMultiDim_CUDA) {
   KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
@@ -1669,7 +1667,7 @@ void testCudaMaskMultiDim() {
 // Tests the case where loop extents are symbolic and not known at compile time.
 // In this case both stores must be masked against the extent of the other loop,
 // incase it is larger.
-void testCudaMaskMultiDimSymbolic() {
+TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   KernelScope kernel_scope;
   VarHandle OUTER_SIZE("OUTER_SIZE", kInt);
   VarHandle A_SIZE("A_SIZE", kInt);
@@ -1805,7 +1803,7 @@ void testCudaMaskMultiDimSymbolic() {
 // bound to the block dimension. Internally the inner loops have different
 // extents but are bound to the same thread dimension. The smaller loop should
 // be masked.
-void testCudaMaskCompoundInnerLoop() {
+TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
   KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
@@ -1942,9 +1940,9 @@ void testCudaMaskCompoundInnerLoop() {
 
 // Tests the case with two loops fused into a common parent, which is not bound
 // to any block or thread dimension - however it's two inner loops are bound to
-// the first thread dimenions. This should work just like the MaskThreadDim test
-// where the bigger loop is unmasked but the smaller is masked.
-void testCudaMaskInnerLoopOneBlock() {
+// the first thread dimensions. This should work just like the MaskThreadDim
+// test where the bigger loop is unmasked but the smaller is masked.
+TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
   KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
@@ -2083,7 +2081,7 @@ void testCudaMaskInnerLoopOneBlock() {
 // size, but with internal loops bound to different thread rank (ie x and y). In
 // this case both bodies must be masked against the other dimension being > 0.
 // Note: this is a bit degenerate no one would actually write this for perf.
-void testCudaMaskMultiDimMultiAxis() {
+TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
   KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 30;
@@ -2213,7 +2211,7 @@ void testCudaMaskMultiDimMultiAxis() {
 // Tests the case with two loop nests, each bound to both Block and Thread but
 // the second loop is smaller in both cases - the second store must be masked
 // for both the block and thread dimension.
-void testCudaMaskMultiDimMultiLevel() {
+TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   KernelScope kernel_scope;
   int OUTER_A_SIZE = 10;
   int OUTER_B_SIZE = 5;

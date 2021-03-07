@@ -18,6 +18,8 @@ namespace c10 {
 // DispatchKeySet.  Higher bit indexes get handled by dispatching first (because
 // we "count leading zeros" when we extract the highest priority dispatch
 // key.)
+//
+// NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint8_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -54,13 +56,16 @@ enum class DispatchKey : uint8_t {
   CPU, // registered at build/aten/src/ATen/RegisterCPU.cpp
   CUDA, // registered at build/aten/src/ATen/RegisterCUDA.cpp
   HIP, // NB: I think this is not actually used, due to Note [Masquerading as
-       // CUDA]
-  FPGA, // Xilinx support lives out of tree at https://gitlab.com/pytorch-complex/vitis_kernels
+  // CUDA]
+  FPGA, // Xilinx support lives out of tree at
+        // https://gitlab.com/pytorch-complex/vitis_kernels
   MSNPU, // unused externally, but tested at
-         // test/cpp_extensions/msnpu_extension.cpp
+  // test/cpp_extensions/msnpu_extension.cpp
   XLA, // lives out of tree at https://github.com/pytorch/xla
+  MLC, // lives out of tree at https://github.com/pytorch/MLCompute
   Vulkan,
   Metal,
+  XPU, // For out of tree Intel's heterogeneous computing plug-in
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
@@ -71,14 +76,22 @@ enum class DispatchKey : uint8_t {
   OpenCL,
   IDEEP,
 
+  // A meta tensor is a tensor without any data associated with it.  (They
+  // have also colloquially been referred to as tensors on the "null" device).
+  // A meta tensor can be used to dry run operators without actually doing any
+  // computation, e.g., add on two meta tensors would give you another meta
+  // tensor with the output shape and dtype, but wouldn't actually add anything.
+  Meta,
+
   // Here are backends which specify more specialized operators
   // based on the dtype of the tensor.
   QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
+  QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
   ComplexCPU, // lives out of tree at
-              // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
+  // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
   ComplexCUDA, // and
-               // https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
+  // https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
   // tested at test/cpp_extensions/complex_registration_extension.cpp
   // TODO: Remove Complex dispatch keys when Complex is moved in tree
 
@@ -102,7 +115,8 @@ enum class DispatchKey : uint8_t {
   SparseCPU, // registered at build/aten/src/ATen/RegisterSparseCPU.cpp
   SparseCUDA, // registered at build/aten/src/ATen/RegisterSparseCUDA.cpp
   SparseHIP, // TODO: I think this is not actually used, due to Note
-             // [Masquerading as CUDA]
+  // [Masquerading as CUDA]
+  SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
 
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are reserved backends for user-defined backends, see Note [Private use
@@ -115,58 +129,6 @@ enum class DispatchKey : uint8_t {
   // Define an alias key to represent end of backend dispatch keys.
   // If you add new backend keys after PrivateUse3, please also update it here.
   EndOfBackendKeys = PrivateUse3,
-
-  // The meta function characterizes how an operation affects the metadata of a
-  // tensor (shape, dtype) without doing any of the actual computation.  A
-  // meta tensor can be used to dry run operators without actually doing
-  // any computation, e.g., add on two meta tensors would give you another
-  // meta tensor with the output shape and dtype, but wouldn't actually
-  // add anything.  A meta implementation typically would look something like:
-  //
-  //  Tensor meta::add(const Tensor& self, const Tensor& other) {
-  //    TORCH_CHECK(self.size().equals(other.size()));
-  //    return at::empty_like(self, self.size());
-  //  }
-  //
-  // The meta function would get invoked if you ran an operator passing
-  // in meta tensors.  The call stack in such a case would look something like
-  // this:
-  //
-  //  at::add(x: Meta, y: Meta) {
-  //    return [dispatch] meta::add(x: Meta, y: Meta) {
-  //      output_shape = ...
-  //      [dispatch] meta::empty(output_shape) {
-  //        return ... meta tensor with output_shape but no data allocated ...
-  //      }
-  //    }
-  //  }
-  //
-  // Meta functions have an important secondary function, which is they can
-  // be used as tensor "allocators".  A typical backend implementation should
-  // be implemented in this way:
-  //
-  //  Tensor cpu::add(const Tensor& self, const Tensor& other) {
-  //    Tensor result = meta::add(self, other);
-  //    // ... do the actual computation into result ...
-  //    return result;
-  //  }
-  //
-  // In this case, the internal at::empty_like invocation would dispatch to the
-  // CPU factory function, not the meta factory function.  The call stack in
-  // this case looks like:
-  //
-  //  at::add(x: CPU, y: CPU) {
-  //    return [dispatch] cpu::add(x: CPU, y: CPU) {
-  //      output = [direct] meta::add(x: CPU, y: CPU) {
-  //        output_shape = ...
-  //        [dispatch] cpu::empty(output_shape)
-  //      }
-  //      ... compute on output ...
-  //      return output;
-  //    }
-  //  }
-  //
-  Meta,
 
   // In some situations, it is not immediately obvious what the correct
   // backend for function is, because the function in question doesn't
@@ -218,6 +180,8 @@ enum class DispatchKey : uint8_t {
   AutogradCPU,
   AutogradCUDA,
   AutogradXLA,
+  AutogradXPU,
+  AutogradMLC,
   AutogradNestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
@@ -276,8 +240,9 @@ enum class DispatchKey : uint8_t {
 
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
-  Math,  // registered at build/aten/src/ATen/RegisterMath.cpp
-  DefaultBackend,  // registered at build/aten/src/ATen/RegisterDefaultBackend.cpp
+  Math, // registered at build/aten/src/ATen/RegisterMath.cpp
+  DefaultBackend, // registered at
+                  // build/aten/src/ATen/RegisterDefaultBackend.cpp
 
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.

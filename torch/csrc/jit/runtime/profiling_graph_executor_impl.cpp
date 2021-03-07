@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
+
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
@@ -29,40 +30,78 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
-C10_DECLARE_bool();
-
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
     true,
     "If this flag is set to false TorchScript will be using the legacy/original executor");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_bool(
+    torch_jit_disable_warning_prints,
+    false,
+    "Disables warning.warn prints in TorchScript graph");
+
+constexpr size_t kDefaultNumProfiledRuns = 1;
+constexpr size_t kDefaultBailoutDepth = 20;
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_int64(
+    torch_jit_num_profiled_runs,
+    kDefaultNumProfiledRuns,
+    "Number of profiling runs");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_int64(
+    torch_jit_bailout_depth,
+    kDefaultBailoutDepth,
+    "Number of re-specializations");
+
 namespace torch {
 namespace jit {
 
 #if defined(C10_MOBILE)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> executor_mode{true};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> profiling_mode{false};
 #else
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> executor_mode{true};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> profiling_mode{true};
 #endif
 
-static std::atomic<size_t> num_profiled_runs{1};
-static std::atomic<size_t> bailout_depth{20}; // NOLINT
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
 }
+
 std::atomic<bool>& getExecutorMode() {
   return executor_mode;
 }
 
 std::atomic<size_t>& getNumProfiledRuns() {
+  // Initialize num_profiled_runs from command-line flag.
+  static const size_t init = []() {
+    return num_profiled_runs = FLAGS_torch_jit_num_profiled_runs;
+  }();
+  (void)init; // Silence clang-tidy.
   return num_profiled_runs;
 }
 
 std::atomic<size_t>& getBailoutDepth() {
+  // Initialize bailout_depth from command-line flag.
+  static const size_t init = []() {
+    return bailout_depth = FLAGS_torch_jit_bailout_depth;
+  }();
+  (void)init; // Silence clang-tidy.
   return bailout_depth;
 }
 
@@ -88,6 +127,62 @@ static bool needsGradientInProfilingMode(Block* b) {
     }
   }
   return false;
+}
+
+bool guardDifferentiableGraph(Node* dnode) {
+  auto gi = dnode->g(attr::Subgraph)->inputs();
+  bool all_inputs_seen = true;
+  for (size_t i = 0; i < gi.size(); i++) {
+    auto ty = gi[i]->type()->cast<TensorType>();
+    if (ty) {
+      auto n = gi[i]->uses().at(0).user;
+      auto dni = dnode->inputs().at(i);
+      GRAPH_DEBUG("found first user of ", i, " as ", *n);
+      if (n->kind() == prim::profile) {
+        GRAPH_DEBUG(
+            "setting input ", i, " to type ", *n->ty(attr::profiled_type));
+        dni->setType(n->ty(attr::profiled_type));
+      } else if (dni->node()->kind() == prim::DifferentiableGraph) {
+        // The profiling node might have been absorbed in a preceding
+        // differentiable graph and thus not (not ideal for fusing either),
+        // see TestAutodiffSubgraphSlicing.test_does_not_create_cycles.
+        // Alternatives to this special casing could be specializing the types
+        // before autodiff or duplicating profile nodes for autodiff outputs
+        // but that should be done while creating subgraphs and would be
+        // a mess.
+        // XXX TODO: revisit the alternatives
+        Value* o = dni->node()->g(attr::Subgraph)->outputs().at(dni->offset());
+        if (o->node()->kind() == prim::profile) {
+          dni->setType(o->node()->ty(attr::profiled_type));
+        }
+      }
+
+      // we check if the optional is defined
+      all_inputs_seen &= (dni->type()->cast<TensorType>() != TensorType::get());
+    }
+  }
+  if (all_inputs_seen) {
+    // we may have seen both true and false for requires_grad. In this case
+    // we guard with true here and the other case is in the fallback. This
+    // will give us trouble when we get "alternating patterns" of gradients
+    // of two inputs, but so it is. An alternative could be to look into
+    // the individual requires_grad seen in the profiling record.
+    insertTypeGuard(
+        dnode,
+        [](const TensorTypePtr& t) {
+          return TensorType::get()->withRequiresGrad(
+              t->requiresGrad().value_or(true));
+        },
+        prim::RequiresGradCheck);
+    return true;
+  } else {
+    // we inline the differentiable graph as a fallback
+    // ideally we would set this up for re-profiling
+    UpdateDifferentiableGraphRequiresGrad(
+        dnode->g(attr::Subgraph), c10::nullopt);
+    SubgraphUtils::unmergeSubgraph(dnode);
+    return false;
+  }
 }
 
 void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
@@ -356,12 +451,25 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     GRAPH_DEBUG("After CreateAutodiffSubgraphs\n", *copy);
     size_t idx = 0;
     for (Node* dnode : diff_nodes) {
-      GRAPH_DEBUG("Optimizing diff node ", idx);
+      GRAPH_DEBUG("Optimizing diff node ", idx, " in ", *copy);
+      if (!guardDifferentiableGraph(dnode)) {
+        // if we cannot guard (because of inputs without profiling information),
+        // we re-inline the subgraph and remove the differentiable node
+        GRAPH_DEBUG("Could not guardDifferentiableGraph ", idx, " in ", *copy);
+        idx++;
+        continue;
+      }
+      GRAPH_DEBUG("After guardDifferentiableGraph:\n", *copy);
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
+      RemoveTensorTypeSpecializations(gradient.f);
+      RemoveProfilingNodes(gradient.f);
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
       GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
-      runDiffGraphPasses(gradient.f);
+      // just like inside autograd.Functions, the forward of a differentiable
+      // graph is essentially in a torch.no_grad context.
+      UpdateDifferentiableGraphRequiresGrad(gradient.f, false);
+      GRAPH_DEBUG("After UpdateDifferentiableGraphRequiresGrad ", *gradient.f);
       // replaces fallback graphs inserted by TE Fuser
       replaceFallbackGraphWithFallbackFunction(gradient.f->block());
       packGradient(gradient, dnode);
@@ -370,6 +478,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     InlineAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
+    replaceFallbackGraphWithFallbackFunction(copy->block());
     RemoveProfilingNodes(copy);
     GRAPH_DEBUG(
         "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
@@ -489,6 +598,12 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     pr_ = ProfilingRecord::instrumentGraph(copy);
+    // `InsertProfileNodesForSpecializeAutogradZero` profiles a definition vs a
+    // use and it doesn't expect any profile nodes between a graph input and its
+    // consumer, `aten::_grad_sum_to_size`. This means we need to run it first,
+    // before any other pass that could insert `prim::iprofile_value` node on
+    // `aten::_grad_sum_to_size` input.
+    InsertProfileNodesForSpecializeAutogradZero(pr_.get());
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through

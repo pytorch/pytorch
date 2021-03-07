@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/autograd/profiler.h>
 #include <gtest/gtest.h>
@@ -116,8 +117,8 @@ class NCCLTest : public NCCLTestBase {
   std::vector<std::vector<at::Tensor>> getTensorLists(
       std::vector<std::vector<at::Tensor>>& tensor_lists) {
     std::vector<std::vector<at::Tensor>> outputs(numDevices_);
-    for (size_t i = 0; i < outputs.size(); ++i) {
-      outputs[i] = std::vector<at::Tensor>(worldSize_ * numDevices_);
+    for (auto & output : outputs) {
+      output = std::vector<at::Tensor>(worldSize_ * numDevices_);
     }
 
     // For the duration of this function, make THC use our streams
@@ -177,9 +178,9 @@ class AllreduceNCCLTest : public NCCLTest {
     // Make sure enabling profile does not make any issue. Note, in single
     // process multi-device mode we do not expect any events be populated for
     // collective operations, since profiling for that mode is not supported.
-    enableProfiler({ProfilerState::CPU});
+    enableProfilerLegacy({ProfilerState::CPU});
     auto results = pg_->allreduce(tensors_);
-    disableProfiler();
+    disableProfilerLegacy();
     return results;
   }
 };
@@ -272,11 +273,10 @@ void testAllreduce(const std::string& path, int rank, int size) {
   // Validation
   const int totalNumGPUs = test.numDevices() * size;
   const auto expected = (totalNumGPUs * (totalNumGPUs - 1)) / 2;
-  auto tensors = test.getTensors();
-  for (size_t j = 0; j < tensors.size(); j++) {
-    auto& tensor = tensors[j];
-    auto data = tensor.data_ptr<float>();
-    for (auto k = 0; k < tensor.numel(); k++) {
+  const auto tensors = test.getTensors();
+  for (const auto & tensor : tensors) {
+    const auto *const data = tensor.data_ptr<float>();
+    for (const auto k : c10::irange(tensor.numel())) {
       EXPECT_EQ(data[k], expected)
           << "Allreduce ouputs do not match expected outputs";
     }
@@ -298,11 +298,10 @@ void testBroadcast(const std::string& path, int rank, int size) {
 
       // Check results
       const auto expected = (rootRank * numDevices + rootTensor);
-      auto tensors = test.getTensors();
-      for (size_t j = 0; j < tensors.size(); j++) {
-        auto& tensor = tensors[j];
-        auto data = tensor.data_ptr<float>();
-        for (auto k = 0; k < tensor.numel(); k++) {
+      const auto tensors = test.getTensors();
+      for (const auto & tensor : tensors) {
+        const auto *const data = tensor.data_ptr<float>();
+        for (const auto k : c10::irange(tensor.numel())) {
           EXPECT_EQ(data[k], expected)
               << "Broadcast outputs do not match expected outputs";
         }
@@ -350,11 +349,11 @@ void testAllgather(const std::string& path, int rank, int size) {
   // Validation
   auto tensors = test.getOutputTensors();
   // device index
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (auto & device : tensors) {
     // rank index
-    for (size_t j = 0; j < tensors[i].size(); ++j) {
+    for (const auto j : c10::irange(device.size())) {
       const auto expected = j;
-      auto& tensor = tensors[i][j];
+      auto& tensor = device[j];
       auto data = tensor.data_ptr<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
         EXPECT_EQ(data[k], expected)
@@ -468,5 +467,18 @@ TEST_F(ProcessGroupNCCLTest, testReduceScatter) {
   {
     TemporaryFile file;
     testReduceScatter(file.path, rank_, size_);
+  }
+}
+
+TEST_F(ProcessGroupNCCLTest, testBackendName) {
+  if (skipTest()) {
+    return;
+  }
+  {
+    TemporaryFile file;
+    auto test = NCCLTestBase(file.path);
+    test.initialize(rank_, size_);
+    EXPECT_EQ(
+      test.getProcessGroup().getBackendName(), std::string(c10d::NCCL_BACKEND_NAME));
   }
 }

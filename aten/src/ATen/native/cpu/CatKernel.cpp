@@ -15,18 +15,20 @@ struct InputMeta {
 
   InputMeta(const Tensor& t, int64_t dim, int64_t inner)
     : data_ptr(t.data_ptr())
-    , inner_size(t.size(dim) * inner) {}
+    , inner_size(t.sizes()[dim] * inner) {}
 };
 
 template <typename scalar_t>
 void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
-  int64_t outer = result.numel() / (result.size(dim) * result.stride(dim));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      dim >= 0 && dim < result.dim(), "dim out of range in cat_serial_kernel_impl");
+  int64_t outer = result.numel() / (result.sizes()[dim] * result.strides()[dim]);
   scalar_t* result_data = result.data_ptr<scalar_t>();
   int64_t ninputs = tensors.size();
   std::vector<InputMeta> inputs;
   inputs.reserve(ninputs);
   for (auto const &tensor : tensors) {
-    inputs.emplace_back(tensor, dim, result.stride(dim));
+    inputs.emplace_back(tensor, dim, result.strides()[dim]);
   }
 
   using Vec = vec256::Vec256<scalar_t>;

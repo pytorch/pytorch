@@ -144,7 +144,7 @@ class TestDataRandomFiller : public DataRandomFiller {
 };
 
 // Convenient helpers to fill data to workspace.
-CAFFE2_API void fillRandomNetworkInputs(
+TORCH_API void fillRandomNetworkInputs(
     const NetDef& net,
     const std::vector<std::vector<std::vector<int64_t>>>& inputDims,
     const std::vector<std::vector<std::string>>& inputTypes,

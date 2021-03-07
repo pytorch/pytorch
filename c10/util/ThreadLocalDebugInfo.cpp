@@ -7,12 +7,11 @@ thread_local std::shared_ptr<ThreadLocalDebugInfo> debug_info = nullptr;
 }
 
 /* static */
-std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::get(
-    DebugInfoKind kind) {
+DebugInfoBase* ThreadLocalDebugInfo::get(DebugInfoKind kind) {
   ThreadLocalDebugInfo* cur = debug_info.get();
   while (cur) {
     if (cur->kind_ == kind) {
-      return cur->info_;
+      return cur->info_.get();
     }
     cur = cur->parent_info_.get();
   }

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/utils/future.h>
 #include <torch/types.h>
 #include <vector>
 
@@ -16,52 +15,77 @@ enum RPCErrorType {
                              FaultyProcessGroupAgent for testing */
 };
 
+// The enum values are bitwise ORed with MessageType
+// They are bit flags starting from 0x100 and should have
+// value such as 0x100, 0x200, 0x400, 0x800, 0xF00, etc.
+enum MessageTypeFlags {
+  REQUEST_TYPE = 0x100,
+  RESPONSE_TYPE = 0x200,
+};
+
+// Message types must have values between 0 to 255
 enum MessageType {
   // messages for dist.rpc on builtin operators
-  SCRIPT_CALL = 0,
-  SCRIPT_RET = 1,
+  SCRIPT_CALL = 0 | MessageTypeFlags::REQUEST_TYPE,
+  SCRIPT_RET = 1 | MessageTypeFlags::RESPONSE_TYPE,
 
   // messages for dist.rpc on Python UDF
-  PYTHON_CALL = 2,
-  PYTHON_RET = 3,
+  PYTHON_CALL = 2 | MessageTypeFlags::REQUEST_TYPE,
+  PYTHON_RET = 3 | MessageTypeFlags::RESPONSE_TYPE,
 
   // messages for dist.remote on builtin operators and Python UDF
-  SCRIPT_REMOTE_CALL = 4, // A remote call on a builtin operator
-  PYTHON_REMOTE_CALL = 5, // A remote call on a Python UDF
-  REMOTE_RET = 6, // Response for remote calls for UDF, builtin, or script
+  SCRIPT_REMOTE_CALL =
+      4 | MessageTypeFlags::REQUEST_TYPE, // A remote call on a builtin operator
+  PYTHON_REMOTE_CALL =
+      5 | MessageTypeFlags::REQUEST_TYPE, // A remote call on a Python UDF
+  REMOTE_RET =
+      6 | MessageTypeFlags::RESPONSE_TYPE, // Response for remote calls for UDF,
+                                           // builtin, or script
 
   // RRef related internal messages
-  SCRIPT_RREF_FETCH_CALL = 7, // A UserRRef<IValue> fetches value from owner
-  PYTHON_RREF_FETCH_CALL = 8, // A UserRRef<py::object> fetches value from owner
-  SCRIPT_RREF_FETCH_RET = 9, // An OwnerRRef sends ivalue to user
-  PYTHON_RREF_FETCH_RET = 10, // An OwnerRRef sends py::object to user
-  RREF_USER_DELETE = 11, // A UserRRef tells the owner to deref
-  RREF_FORK_REQUEST = 12, // A child UserRRef tells the owner about itself
-  RREF_CHILD_ACCEPT = 13, // A child UserRRef tells parent that owner knows it
-  RREF_ACK = 14, // ACK to internal RRef messages
+  SCRIPT_RREF_FETCH_CALL =
+      7 | MessageTypeFlags::REQUEST_TYPE, // A UserRRef<IValue> fetches value
+                                          // from owner
+  PYTHON_RREF_FETCH_CALL =
+      8 | MessageTypeFlags::REQUEST_TYPE, // A UserRRef<py::object> fetches
+                                          // value from owner
+  SCRIPT_RREF_FETCH_RET =
+      9 | MessageTypeFlags::RESPONSE_TYPE, // An OwnerRRef sends ivalue to user
+  PYTHON_RREF_FETCH_RET = 10 |
+      MessageTypeFlags::RESPONSE_TYPE, // An OwnerRRef sends py::object to user
+  RREF_USER_DELETE = 11 |
+      MessageTypeFlags::REQUEST_TYPE, // A UserRRef tells the owner to deref
+  RREF_FORK_REQUEST =
+      12 | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells the owner
+                                           // about itself
+  RREF_CHILD_ACCEPT =
+      13 | MessageTypeFlags::REQUEST_TYPE, // A child UserRRef tells parent that
+                                           // owner knows it
+  RREF_ACK =
+      14 | MessageTypeFlags::RESPONSE_TYPE, // ACK to internal RRef messages
 
   // Messages with autograd info
-  FORWARD_AUTOGRAD_REQ = 15,
-  FORWARD_AUTOGRAD_RESP = 16,
+  FORWARD_AUTOGRAD_REQ = 15 | MessageTypeFlags::REQUEST_TYPE,
+  FORWARD_AUTOGRAD_RESP = 16 | MessageTypeFlags::RESPONSE_TYPE,
 
   // Messages to propagate gradients on the backward pass.
-  BACKWARD_AUTOGRAD_REQ = 17,
-  BACKWARD_AUTOGRAD_RESP = 18,
+  BACKWARD_AUTOGRAD_REQ = 17 | MessageTypeFlags::REQUEST_TYPE,
+  BACKWARD_AUTOGRAD_RESP = 18 | MessageTypeFlags::RESPONSE_TYPE,
 
   // Messages to tell workers to clean up their autograd context.
-  CLEANUP_AUTOGRAD_CONTEXT_REQ = 19,
-  CLEANUP_AUTOGRAD_CONTEXT_RESP = 20,
+  CLEANUP_AUTOGRAD_CONTEXT_REQ = 19 | MessageTypeFlags::REQUEST_TYPE,
+  CLEANUP_AUTOGRAD_CONTEXT_RESP = 20 | MessageTypeFlags::RESPONSE_TYPE,
 
   // Messages that tell workers to run requests with profiling enabled.
-  RUN_WITH_PROFILING_REQ = 21,
-  RUN_WITH_PROFILING_RESP = 22,
+  RUN_WITH_PROFILING_REQ = 21 | MessageTypeFlags::REQUEST_TYPE,
+  RUN_WITH_PROFILING_RESP = 22 | MessageTypeFlags::RESPONSE_TYPE,
 
   // Messages to support RRef.backward().
-  RREF_BACKWARD_REQ = 23,
-  RREF_BACKWARD_RESP = 24,
+  RREF_BACKWARD_REQ = 23 | MessageTypeFlags::REQUEST_TYPE,
+  RREF_BACKWARD_RESP = 24 | MessageTypeFlags::RESPONSE_TYPE,
 
   // Other internal message types
-  EXCEPTION = 55,
+  EXCEPTION = 55 | MessageTypeFlags::RESPONSE_TYPE,
   UNKNOWN = 60
 };
 
@@ -84,7 +108,7 @@ enum MessageType {
 // Layers above ``RpcAgent`` only converts ScriptCall, ScriptResp, PythonCall,
 // and PythonResp into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
-class TORCH_API Message final {
+class TORCH_API Message final : public torch::CustomClassHolder {
  public:
   Message();
 
@@ -145,9 +169,6 @@ TORCH_API Message createExceptionResponse(const std::exception& e, int64_t id);
 TORCH_API Message
 createExceptionResponse(const std::string& exceptionStr, int64_t id);
 
-// FutureMessage is an internal type used in the communication layer. All
-// user-facing surface APIs should use JitFuture instead.
-using FutureMessage = torch::utils::Future<Message>;
 using JitFuture = c10::ivalue::Future;
 
 } // namespace rpc

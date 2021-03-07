@@ -22,18 +22,17 @@ inline void fill_inplace(Tensor& self, Scalar value_scalar) {
 
 namespace detail {
 Tensor& scalar_fill(Tensor& self, Scalar value) {
-  AT_DISPATCH_ALL_TYPES_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kHalf, kBool, kBFloat16, self.scalar_type(), "fill_out", [&]() {
         fill_inplace<scalar_t>(self, value);
       });
   return self;
 }
 
-Tensor scalar_tensor_static(Scalar s, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
-                            c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+Tensor scalar_tensor_static(Scalar s, c10::optional<ScalarType> dtype_opt, c10::optional<Device> device_opt) {
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   at::AutoNonVariableTypeMode non_var_type_mode(true);
-  auto result = at::detail::empty_cpu({}, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
+  auto result = at::detail::empty_cpu({}, dtype_opt, c10::nullopt, device_opt, c10::nullopt, c10::nullopt);
   scalar_fill(result, s);
   return result;
 }

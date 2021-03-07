@@ -28,7 +28,7 @@ PLATFORM_TO_HASH = {
 CLANG_FORMAT_DIR = os.path.join(PYTORCH_ROOT, ".clang-format-bin")
 CLANG_FORMAT_PATH = os.path.join(CLANG_FORMAT_DIR, "clang-format")
 
-def compute_file_sha1(path):
+def compute_file_sha1(path: str) -> str:
     """Compute the SHA1 hash of a file and return it as a hex string."""
     # If the file doesn't exist, return an empty string.
     if not os.path.exists(path):
@@ -90,7 +90,7 @@ def get_and_check_clang_format(verbose=False):
         # If the directory doesn't exist, try to create it.
         try:
             os.mkdir(CLANG_FORMAT_DIR)
-        except os.OSError as e:
+        except OSError as e:
             print("Unable to create directory for clang-format binary: {}".format(CLANG_FORMAT_DIR))
             return False
         finally:
@@ -142,7 +142,7 @@ def get_and_check_clang_format(verbose=False):
             # Err on the side of caution and try to delete the downloaded binary.
             try:
                 os.unlink(CLANG_FORMAT_PATH)
-            except os.OSError as e:
+            except OSError as e:
                 print("Failed to delete binary: {}".format(str(e)))
                 print("Delete this binary as soon as possible and do not execute it!")
 

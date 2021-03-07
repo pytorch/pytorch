@@ -16,6 +16,8 @@ from torch._C._distributed_rpc import _get_current_rpc_agent
 # Thread local tensor tables to store tensors while pickling torch.Tensor
 # objects
 _thread_local_tensor_tables = threading.local()
+_pickler = pickle.Pickler
+_unpickler = pickle.Unpickler
 
 
 class RPCExecMode(Enum):
@@ -63,13 +65,31 @@ class _InternalRPCPickler:
     def _rref_reducer(self, rref):
         return self._py_rref_reducer(rref)
 
+    @classmethod
+    def _script_module_receiver(cls, script_module_serialized):
+        """
+        Given a serialized representation of a ScriptModule created with torch.jit.save,
+        loads and returns the ScriptModule.
+        """
+        f = io.BytesIO(script_module_serialized)
+        m = torch.jit.load(f)
+        return m
+
+    def _script_module_reducer(self, script_module):
+        """
+        Serializes a ScriptModule.
+        """
+        f = io.BytesIO()
+        torch.jit.save(script_module, f)
+        return (_InternalRPCPickler._script_module_receiver, (f.getvalue(),))
+
     def serialize(self, obj):
         r"""
         Serialize non tensor data into binary string, tensor data into
         tensor table
         """
         f = io.BytesIO()
-        p = pickle.Pickler(f)
+        p = _pickler(f)
         p.dispatch_table = self._dispatch_table
 
         # rpc api could accept user picklers inheriting from _InternalRPCPickler to serialize rref,
@@ -86,6 +106,10 @@ class _InternalRPCPickler:
         # An RRef created locally by RRef Python constructor is type of `rpc.RRef`.
         # Ignore type error because dispatch_table is defined in third-party package
         p.dispatch_table[dist.rpc.RRef] = self._rref_reducer  # type: ignore[index]
+        # Add dispatch pickling for ScriptModule if needed.
+        if isinstance(obj, torch.jit.ScriptModule):
+            # Ignore type error because dispatch_table is defined in third-party package
+            p.dispatch_table[obj.__class__] = self._script_module_reducer  # type: ignore[index]
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables
@@ -120,7 +144,8 @@ class _InternalRPCPickler:
         _thread_local_tensor_tables.recv_tables = tensor_table
 
         try:
-            ret = pickle.loads(binary_data)
+            unpickler = _unpickler(io.BytesIO(binary_data))
+            ret = unpickler.load()
         except AttributeError as e:
             # Occurs when function is not found on module/class during
             # unpickling.
@@ -179,7 +204,7 @@ def _run_function(python_udf):
 
 def _handle_exception(result):
     if isinstance(result, RemoteException):
-        raise result.exception_type(result.msg)
+        raise result.exception_type(result.msg.encode("utf-8").decode("unicode_escape"))
 
 
 def _build_rpc_profiling_key(
@@ -189,7 +214,7 @@ def _build_rpc_profiling_key(
     Builds the key that RPC calls are profiled with using the autograd profiler.
     This will be the name of the corresponding Event recorded in the profiler.
 
-    Arguments:
+    Args:
         exec_type (RPCExecMode): Type of RPC/RRef call
         func_name (str): Name of function being profiled.
         current_worker_name (str): Name of current worker.
@@ -214,7 +239,7 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
     callbacks that start the profiling, though the user is responsible for
     running the appropriate callbacks when the function to be profiled finishes.
 
-    Arguments:
+    Args:
         exec_type (RPCExecMode): Type of RPC/RRef call
         func_name (str): Name of function being profiled.
         current_worker_name (str): Name of current worker.

@@ -133,7 +133,7 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
   ska::flat_hash_map<uint64_t, std::map<uint64_t, uint64_t>::iterator> free_end_offset_to_size_iter;
   // Upon free end_ptr = offset + size
   // If end_ptr exists merge freed allocation
-  // Also find coresponding offset in size_to_offet
+  // Also find corresponding offset in size_to_offset
   // Remove that entry and update with new size and offset
   // If end_ptr does not exist then just insert offset,size
   // in map and correspondingly size, offset in the other map.
@@ -176,7 +176,7 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
       }
       allocation_offsets[mem_event.allocation_id] = alloc_offset;
     } else {
-      // 1. Check if freed block is adjancent to an existing free block
+      // 1. Check if freed block is adjacent to an existing free block
       //    at its end boundary. This is done by checking
       //    free_end_offset_to_size_iter.
       //    If we find such a block, remove it and adjust size of
@@ -186,7 +186,7 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
       //    free_start_offset_to_size_iter.
       //    If we find such a block, remove it and adjust size of
       //    the block being freed.
-      // 3. Inser the freed block in map.
+      // 3. Insert the freed block in map.
       auto freed_offset = allocation_offsets[mem_event.allocation_id];
       auto freed_size = mem_event.size;
       auto end_offset = freed_offset + freed_size;
@@ -223,7 +223,7 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
     }
   }
   TORCH_CHECK(validate_allocation_plan(mem_events, allocation_offsets),
-      "ProfilingAllocator: Allocation plan invaild.");
+      "ProfilingAllocator: Allocation plan invalid.");
   return allocation_offsets;
 }
 
@@ -394,7 +394,7 @@ CPUProfilingAllocator::~CPUProfilingAllocator() {
 
 WithProfileAllocationsGuard::WithProfileAllocationsGuard(
     AllocationPlan* plan) {
-  // Nesting of allocation profiling does not seem meanigful.
+  // Nesting of allocation profiling does not seem meaningful.
   TORCH_CHECK(allocation_planner == nullptr,
       "Nesting profiling allocations is not supported.");
   planner_ = std::make_unique<AllocationPlanner>(plan);
@@ -409,7 +409,7 @@ WithProfileAllocationsGuard::~WithProfileAllocationsGuard() {
 
 WithValidateAllocationPlanGuard::WithValidateAllocationPlanGuard(
     AllocationPlan* plan, bool* success) {
-  // Nesting of allocation profiling does not seem meanigful.
+  // Nesting of allocation profiling does not seem meaningful.
   TORCH_CHECK(allocation_planner == nullptr,
       "Nesting profiling allocations is not supported.");
   planner_ = std::make_unique<AllocationPlanner>(plan, true);

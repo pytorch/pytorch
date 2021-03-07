@@ -1,11 +1,3 @@
-// define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
-#ifndef _USE_MATH_DEFINES
-#define _USE_MATH_DEFINES
-#endif
-#include <math.h>
-#endif
-
 #include <ATen/ATen.h>
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/Utils.h>
@@ -14,6 +6,7 @@
 #include <ATen/TracerMode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
+#include <ATen/native/Math.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
 #include <c10/core/TensorOptions.h>
@@ -180,7 +173,7 @@ Tensor empty(
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK(options.device().type() == DeviceType::CPU || options.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(options.device().is_cpu() || options.device().is_cuda(),
       "NYI: named tensors only support CPU and CUDA tensors");
   auto result = at::empty(size, options, optional_memory_format);
   internal_set_names_inplace(result, names);
@@ -458,6 +451,31 @@ Tensor new_full(
   return at::full(size, fill_value, self.options().merge_in(options));
 }
 
+namespace {
+TensorOptions linspace_logspace_infer_options(
+    Scalar start,
+    Scalar end,
+    const TensorOptions& options) {
+  auto result_options = options;
+  if (start.isComplex() || end.isComplex()) {
+    // Since result_options.has_dtype() returns true (dtype is default type),
+    // even if the user hasn't specified the dtype.
+    // We just check to see if either `start` or `end` is complex,
+    // and if the `result_dtype` is not complex (be it default float type or
+    // user provided), we cast it to default complex dtype with a Warning!.
+    auto result_dtype = c10::typeMetaToScalarType(options.dtype());
+    if (!at::isComplexType(result_dtype)) {
+      TORCH_WARN(
+          "As either `start` or `stop` is complex, return type will be the complex dtype corresponding to default dtype.",
+          "In future, this may throw an error when a non-complex dtype arg is passed as input along ",
+          "with complex valued start or end value.");
+      result_options = result_options.dtype(c10::get_default_complex_dtype());
+    }
+  }
+
+  return result_options;
+}
+} // anonymous namespace
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -468,7 +486,8 @@ Tensor linspace(
     const TensorOptions& options) {
   const auto steps_ = steps.value_or(100);
   TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
-  Tensor result = at::empty({steps_}, options);
+  auto result_options = linspace_logspace_infer_options(start, end, options);
+  Tensor result = at::empty({steps_}, result_options);
   return at::linspace_out(result, start, end, steps);
 }
 
@@ -482,7 +501,8 @@ Tensor logspace(
     const TensorOptions& options) {
   const auto steps_ = steps.value_or(100);
   TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
-  Tensor result = at::empty({steps_}, options);
+  auto result_options = linspace_logspace_infer_options(start, end, options);
+  Tensor result = at::empty({steps_}, result_options);
   return at::logspace_out(result, start, end, steps, base);
 }
 
@@ -915,7 +935,7 @@ Tensor blackman_window(
     window_length += 1;
   }
   // from https://en.wikipedia.org/wiki/Window_function#Blackman_window
-  auto window = native::arange(window_length, options).mul_(M_PI / static_cast<double>(window_length - 1));
+  auto window = native::arange(window_length, options).mul_(c10::pi<double> / static_cast<double>(window_length - 1));
   window = window.mul(4).cos_().mul_(0.08) - window.mul(2).cos_().mul_(0.5) + 0.42;
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
@@ -960,7 +980,7 @@ Tensor hamming_window(
     window_length += 1;
   }
   auto window = native::arange(window_length, options);
-  window.mul_(M_PI * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
+  window.mul_(c10::pi<double> * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
 

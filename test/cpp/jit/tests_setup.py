@@ -63,11 +63,37 @@ class TorchSaveError(FileSetup):
 
         torch.save(value, self.path, _use_new_zipfile_serialization=False)
 
+class TorchSaveJitStream_CUDA(FileSetup):
+    path = 'saved_stream_model.pt'
+
+    def setup(self):
+        if not torch.cuda.is_available():
+            return
+
+        class Model(torch.nn.Module):
+            def forward(self):
+                s = torch.jit.cuda.Stream()
+                a = torch.rand(3, 4, device="cuda")
+                b = torch.rand(3, 4, device="cuda")
+
+                with torch.jit.cuda.stream(s):
+                    is_stream_s = torch.cuda.current_stream(s.device_index()).id() == s.id()
+                    c = torch.cat((a, b), 0).to("cuda")
+                s.synchronize()
+                return is_stream_s, a, b, c
+
+        model = Model()
+
+        # Script the model and save
+        script_model = torch.jit.script(model)
+        torch.jit.save(script_model, self.path)
+
 
 tests = [
     EvalModeForLoadedModule(),
     SerializationInterop(),
     TorchSaveError(),
+    TorchSaveJitStream_CUDA()
 ]
 
 def setup():

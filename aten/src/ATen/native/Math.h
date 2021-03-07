@@ -6,11 +6,11 @@
 #include <cfloat>
 #include <limits>
 #include <type_traits>
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
+#include <c10/util/MathConstants.h>
 #include <c10/util/math_compat.h>
 
-#ifndef M_PIf
-#define M_PIf 3.1415926535f
-#endif  // M_PIf
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
@@ -105,8 +105,8 @@ Date:  February 1996
 #endif
   }
   /* Two steps of Newton-Raphson correction */
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(M_PI)))*std::exp(-x*x));
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(M_PI)))*std::exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(c10::pi<double>)))*std::exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(c10::pi<double>)))*std::exp(-x*x));
 
   return(x);
 }
@@ -241,8 +241,8 @@ static inline double trigamma(double x) {
   double result = 0;
   if (x < 0.5) {
     sign = -1;
-    const double sin_pi_x = sin(M_PI * x);
-    result -= (M_PI * M_PI) / (sin_pi_x * sin_pi_x);
+    const double sin_pi_x = sin(c10::pi<double> * x);
+    result -= (c10::pi<double> * c10::pi<double>) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
   for (int i = 0; i < 6; ++i) {
@@ -259,8 +259,8 @@ static inline float trigamma(float x) {
   float result = 0;
   if (x < 0.5f) {
     sign = -1;
-    const float sin_pi_x = sinf(M_PIf * x);
-    result -= (M_PIf * M_PIf) / (sin_pi_x * sin_pi_x);
+    const float sin_pi_x = sinf(c10::pi<float> * x);
+    result -= (c10::pi<float> * c10::pi<float>) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
   for (int i = 0; i < 6; ++i) {
@@ -277,17 +277,22 @@ static inline float trigamma(float x) {
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 static inline double calc_digamma(double x) {
+  // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
   static double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
-    return INFINITY;
+    // As per C++ standard for gamma related functions and SciPy,
+    // If the argument is ±0, ±∞ is returned
+    return std::copysign(INFINITY, -x);
   }
 
-  int x_is_integer = x == floor(x);
+  bool x_is_integer = x == trunc(x);
   if (x < 0) {
     if (x_is_integer) {
-      return INFINITY;
+      // As per C++ standard for gamma related functions and SciPy,
+      // If the argument is a negative integer, NaN is returned
+      return std::numeric_limits<double>::quiet_NaN();
     }
-    return calc_digamma(1 - x) - M_PI / tan(M_PI * x);
+    return calc_digamma(1 - x) - c10::pi<double> / tan(c10::pi<double> * x);
   }
 
   // Push x to be >= 10
@@ -324,19 +329,24 @@ static inline double calc_digamma(double x) {
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 static inline float calc_digamma(float x) {
+  // See [C++ Standard Reference: Gamma Function]
   static float PSI_10 = 2.25175258906672110764f;
   if (x == 0) {
-    return INFINITY;
+    // As per C++ standard for gamma related functions and SciPy,
+    // If the argument is ±0, ±∞ is returned
+    return std::copysign(INFINITY, -x);
   }
 
-  int x_is_integer = x == floorf(x);
+  bool x_is_integer = x == truncf(x);
   if (x < 0) {
     if (x_is_integer) {
-      return INFINITY;
+    // As per C++ standard for gamma related functions and SciPy,
+    // If the argument is a negative integer, NaN is returned
+      return std::numeric_limits<float>::quiet_NaN();
     }
     // Avoid rounding errors for `tan`'s input.
     // Those make a big difference at extreme values.
-    float pi_over_tan_pi_x = (float)(M_PI / tan(M_PI * (double)x));
+    float pi_over_tan_pi_x = (float)(c10::pi<double> / tan(c10::pi<double> * (double)x));
     return calc_digamma(1 - x) - pi_over_tan_pi_x;
   }
 
@@ -873,7 +883,7 @@ static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam
     absoldterm = absterm;
     afac /= a;
   }
-  res += sgn * std::exp(-0.5 * a * eta * eta) * sum / std::sqrt(2 * M_PIf * a);
+  res += sgn * std::exp(-0.5 * a * eta * eta) * sum / std::sqrt(2 * c10::pi<float> * a);
 
   return res;
 }
@@ -1082,13 +1092,23 @@ static inline scalar_t calc_igamma(scalar_t a, scalar_t x) {
 }
 
 template <>
-c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+C10_UNUSED c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-c10::Half calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
+C10_UNUSED c10::Half calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
   return calc_igamma<float>(float(a), float(x));
+}
+
+template <>
+C10_UNUSED c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+  return calc_igammac<float>(float(a), float(x));
+}
+
+template <>
+C10_UNUSED c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
+  return calc_igammac<float>(float(a), float(x));
 }
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
@@ -1099,7 +1119,7 @@ static T abs_impl(T v) {
 }
 
 template <>
-uint8_t abs_impl(uint8_t v) {
+C10_UNUSED uint8_t abs_impl(uint8_t v) {
   return v;
 }
 

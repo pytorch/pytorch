@@ -30,19 +30,25 @@
 namespace c10 {
 namespace {
 DeviceType parse_type(const std::string& device_string) {
-  static const std::array<std::pair<std::string, DeviceType>, 11> types = {{
-      {"cpu", DeviceType::CPU},
-      {"cuda", DeviceType::CUDA},
-      {"mkldnn", DeviceType::MKLDNN},
-      {"opengl", DeviceType::OPENGL},
-      {"opencl", DeviceType::OPENCL},
-      {"ideep", DeviceType::IDEEP},
-      {"hip", DeviceType::HIP},
-      {"fpga", DeviceType::FPGA},
-      {"msnpu", DeviceType::MSNPU},
-      {"xla", DeviceType::XLA},
-      {"vulkan", DeviceType::Vulkan},
-  }};
+  static const std::array<
+      std::pair<std::string, DeviceType>,
+      static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+      types = {{
+          {"cpu", DeviceType::CPU},
+          {"cuda", DeviceType::CUDA},
+          {"xpu", DeviceType::XPU},
+          {"mkldnn", DeviceType::MKLDNN},
+          {"opengl", DeviceType::OPENGL},
+          {"opencl", DeviceType::OPENCL},
+          {"ideep", DeviceType::IDEEP},
+          {"hip", DeviceType::HIP},
+          {"fpga", DeviceType::FPGA},
+          {"msnpu", DeviceType::MSNPU},
+          {"xla", DeviceType::XLA},
+          {"vulkan", DeviceType::Vulkan},
+          {"mlc", DeviceType::MLC},
+          {"meta", DeviceType::Meta},
+      }};
   auto device = std::find_if(
       types.begin(),
       types.end(),
@@ -52,8 +58,9 @@ DeviceType parse_type(const std::string& device_string) {
   if (device != types.end()) {
     return device->second;
   }
-  AT_ERROR(
-      "Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu, xla, vulkan device type at start of device string: ", device_string);
+  TORCH_CHECK(false,
+      "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, msnpu, mlc, xla, vulkan, meta device type at start of device string: ",
+      device_string);
 }
 } // namespace
 
@@ -71,7 +78,7 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
     try {
       index_ = c10::stoi(match[2].str());
     } catch (const std::exception &) {
-      AT_ERROR(
+      TORCH_CHECK(false,
         "Could not parse device index '", match[2].str(),
         "' in device string '", device_string, "'");
     }

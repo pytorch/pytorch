@@ -28,6 +28,8 @@ struct TestCPUGenerator : public c10::GeneratorImpl {
   void set_current_seed(uint64_t seed) override { throw std::runtime_error("not implemented"); }
   uint64_t current_seed() const override { throw std::runtime_error("not implemented"); }
   uint64_t seed() override { throw std::runtime_error("not implemented"); }
+  void set_state(const c10::TensorImpl& new_state) override { throw std::runtime_error("not implemented"); }
+  c10::intrusive_ptr<c10::TensorImpl> get_state() const override { throw std::runtime_error("not implemented"); }
   TestCPUGenerator* clone_impl() const override { throw std::runtime_error("not implemented"); }
 
   static DeviceType device_type() { return DeviceType::CPU; }
@@ -57,15 +59,15 @@ Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> 
   return at::native::templates::normal_impl_<native::templates::cpu::NormalKernel, TestCPUGenerator>(self, mean, std, gen);
 }
 
-Tensor& normal_Tensor_float_out(Tensor& output, const Tensor& mean, double std, c10::optional<Generator> gen) {
+Tensor& normal_Tensor_float_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor& normal_float_Tensor_out(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor& normal_float_Tensor_out(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor& normal_Tensor_Tensor_out(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor& normal_Tensor_Tensor_out(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
@@ -121,36 +123,36 @@ Tensor& bernoulli_float(Tensor& self, double p, c10::optional<Generator> gen) {
   return at::native::templates::bernoulli_impl_<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(self, p, gen);
 }
 
-Tensor& bernoulli_out(Tensor& result, const Tensor& self, c10::optional<Generator> gen) {
+Tensor& bernoulli_out(const Tensor& self, c10::optional<Generator> gen, Tensor& result) {
   return at::native::templates::bernoulli_out_impl<native::templates::cpu::BernoulliKernel, TestCPUGenerator>(result, self, gen);
 }
 
 TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   // Random
-  m.impl_UNBOXED("random_.from",             random_from_to);
-  m.impl_UNBOXED("random_.to",               random_to);
-  m.impl_UNBOXED("random_",                  random_);
+  m.impl("random_.from",             random_from_to);
+  m.impl("random_.to",               random_to);
+  m.impl("random_",                  random_);
   // Normal
-  m.impl_UNBOXED("normal_",                  normal_);
-  m.impl_UNBOXED("normal.Tensor_float_out",  normal_Tensor_float_out);
-  m.impl_UNBOXED("normal.float_Tensor_out",  normal_float_Tensor_out);
-  m.impl_UNBOXED("normal.Tensor_Tensor_out", normal_Tensor_Tensor_out);
-  m.impl_UNBOXED("normal.Tensor_float",      normal_Tensor_float);
-  m.impl_UNBOXED("normal.float_Tensor",      normal_float_Tensor);
-  m.impl_UNBOXED("normal.Tensor_Tensor",     normal_Tensor_Tensor);
-  m.impl_UNBOXED("uniform_",                 uniform_);
+  m.impl("normal_",                  normal_);
+  m.impl("normal.Tensor_float_out",  normal_Tensor_float_out);
+  m.impl("normal.float_Tensor_out",  normal_float_Tensor_out);
+  m.impl("normal.Tensor_Tensor_out", normal_Tensor_Tensor_out);
+  m.impl("normal.Tensor_float",      normal_Tensor_float);
+  m.impl("normal.float_Tensor",      normal_float_Tensor);
+  m.impl("normal.Tensor_Tensor",     normal_Tensor_Tensor);
+  m.impl("uniform_",                 uniform_);
   // Cauchy
-  m.impl_UNBOXED("cauchy_",                  cauchy_);
+  m.impl("cauchy_",                  cauchy_);
   // LogNormal
-  m.impl_UNBOXED("log_normal_",              log_normal_);
+  m.impl("log_normal_",              log_normal_);
   // Geometric
-  m.impl_UNBOXED("geometric_",               geometric_);
+  m.impl("geometric_",               geometric_);
   // Exponential
-  m.impl_UNBOXED("exponential_",             exponential_);
+  m.impl("exponential_",             exponential_);
   // Bernoulli
-  m.impl_UNBOXED("bernoulli.out",            bernoulli_out);
-  m.impl_UNBOXED("bernoulli_.Tensor",        bernoulli_Tensor);
-  m.impl_UNBOXED("bernoulli_.float",         bernoulli_float);
+  m.impl("bernoulli.out",            bernoulli_out);
+  m.impl("bernoulli_.Tensor",        bernoulli_Tensor);
+  m.impl("bernoulli_.float",         bernoulli_float);
 }
 
 class RNGTest : public ::testing::Test {

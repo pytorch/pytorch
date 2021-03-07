@@ -2,7 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/ResizeCommon.h>
+#include <ATen/TensorUtils.h>
 #include <TH/THTensor.hpp>
+
 
 namespace at { namespace native {
 
@@ -14,36 +16,38 @@ namespace at { namespace native {
 // Issues a warning if the output tensor has one or more elements and
 //   needs resizing
 // NOTE: In the future the warning will become an error
-void resize_output(Tensor& output, IntArrayRef shape);
+TORCH_API void resize_output(Tensor& output, IntArrayRef shape);
 
 // These functions are called by native::resize_ as well as (legacy) TH resize.
 // They are not in TH/THTensor.cpp because the at namespace is easier
 // to benchmark than TH; I can't get gbenchmark to call fns from THTensor.cpp
 
-static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) {
+static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size) {
   // It does not make sense to try to resize a storage
   // to hold 0 elements, and this can break
   // if storage_offset is positive but
   // new_size is 0, so just bail in that case
   // (same comment is in Resize.cuh)
-  if (new_size > 0) {
-    if (!THTensor_getStoragePtr(self)) {
-      caffe2::TypeMeta dtype = self->dtype();
-      THTensor_stealAndSetStoragePtr(self, THStorage_new());
-      TORCH_INTERNAL_ASSERT(dtype == self->dtype());
-    }
-    int64_t new_size_bytes =
-        (new_size + self->storage_offset()) * self->dtype().itemsize();
-    if (new_size_bytes > self->storage().nbytes()) {
-      THStorage_resizeBytes(THTensor_getStoragePtr(self), new_size_bytes);
-    }
+  if (new_size == 0) {
+    return;
+  }
+  if (!THTensor_getStoragePtr(self)) {
+    caffe2::TypeMeta dtype = self->dtype();
+    THTensor_stealAndSetStoragePtr(self, THStorage_new());
+    TORCH_INTERNAL_ASSERT(dtype == self->dtype());
+  }
+  uint64_t new_size_bytes =
+      (new_size + self->storage_offset()) * self->dtype().itemsize();
+  if (new_size_bytes > self->storage().nbytes()) {
+    THStorage_resizeBytes(THTensor_getStoragePtr(self), new_size_bytes);
   }
 }
 
 inline TensorImpl* resize_impl_cpu_(
     TensorImpl* self,
     IntArrayRef size,
-    c10::optional<IntArrayRef> stride) {
+    c10::optional<IntArrayRef> stride,
+    bool resize_storage = true) {
   if (self->sizes() == size && (!stride || self->strides() == stride)) {
     return self;
   }
@@ -57,7 +61,9 @@ inline TensorImpl* resize_impl_cpu_(
     self->set_sizes_contiguous(size);
     storage_size = self->numel();
   }
-  maybe_resize_storage_cpu(self, storage_size);
+  if (resize_storage) {
+    maybe_resize_storage_cpu(self, storage_size);
+  }
 
   return self;
 }
@@ -123,9 +129,7 @@ static inline void checkSetStorage(Tensor& result, Storage storage, int64_t stor
   }
 
   // storageOffset
-  if (storage_offset < 0) {
-    TORCH_CHECK("Tensor: invalid storage offset ", storage_offset);
-  }
+  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
 }
 
 /**

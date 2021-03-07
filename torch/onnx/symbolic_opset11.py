@@ -76,7 +76,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
             index = add(g, index, ind)
         broadcast_index_shape = g.op("Shape", index)
         indices_list = [
-            g.op("Unsqueeze", expand(g, ind, broadcast_index_shape, None), axes_i=[-1]) for ind in indices_list
+            sym_help._unsqueeze_helper(g, expand(g, ind, broadcast_index_shape, None), [-1]) for ind in indices_list
         ]
         index = g.op("Concat", *indices_list, axis_i=-1)
     else:
@@ -97,21 +97,21 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   %28 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
         #   %29 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
         #   %15 : None = prim::Constant()
-        #   %16 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = 
+        #   %16 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) =
         #               aten::to(%8, %26, %27, %11, %12, %28, %29, %15)
         #   %18 : Float(requires_grad=0, device=cpu) = prim::Constant[value={1}]()
         #   %30 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
         #   %22 : int[] = prim::Constant[value=[-1]]()
         #   %23 : Tensor = aten::view(%16, %22)
         #   %24 : Tensor?[] = prim::ListConstruct(%23)
-        #   %25 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = 
+        #   %25 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) =
         #                aten::index_put(%mask, %24, %18, %30)
         #   return (%25)
         #
         # after graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu),
         #       %some_const : Float(requires_grad=0, device=cpu)):
         #   %3 : Tensor = onnx::Equal(%0, %some_const)
-        #   %4 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%3) 
+        #   %4 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%3)
         #   %12 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Cast[to=9](%4)
         #   %19 : Tensor = onnx::Cast[to=9](%12)
         #   %20 : Tensor = onnx::Constant[value={1}]()
@@ -137,7 +137,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   %37 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
         #   %22 : None = prim::Constant()
         #   %23 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
-        #                = aten::to(%15, %34, %35, %18, %19, %36, %37, %22) 
+        #                = aten::to(%15, %34, %35, %18, %19, %36, %37, %22)
         #   %38 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
         #   %30 : int[] = prim::Constant[value=[-1]]()
         #   %31 : Tensor = aten::view(%23, %30)
@@ -148,7 +148,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #
         # after graph(%0 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu),
         #       %some_const : Float(requires_grad=0, device=cpu)):
-        #   %3 : Float(8, strides=[1], requires_grad=0, device=cpu) 
+        #   %3 : Float(8, strides=[1], requires_grad=0, device=cpu)
         #               = onnx::Constant[value= 1  1  1  1  1  1  1  1 [ CPUFloatType{8} ]]()
         #   %4 : Tensor = onnx::Equal(%0, %some_const)
         #   %5 : Bool(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) = onnx::Not(%4)
@@ -168,19 +168,19 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         #   %32 : Tensor = onnx::Constant[value={0}]()
         #   %33 : Tensor = onnx::Unsqueeze[axes=[0]](%32)
         #   %34 : Tensor = onnx::Slice(%24, %30, %31, %33)
-        #   %35 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu) 
+        #   %35 : Float(2, 2, 2, strides=[4, 2, 1], requires_grad=0, device=cpu)
         #               = onnx::ScatterND(%0, %22, %34)
         #   return (%35)
 
         bool_inp = list(index.node().inputs())[0]
         if bool_inp.type() is not None and bool_inp.type().scalarType() == 'Bool':
-            if values.type() is not None:
-                if values.type().dim() == 0:
-                    from torch.onnx.symbolic_opset9 import masked_fill
-                    return masked_fill(g, self, bool_inp, values)
-                return masked_scatter(g, self, bool_inp, values)
+            rank = sym_help._get_tensor_rank(values)
+            if rank is not None and rank == 0:
+                from torch.onnx.symbolic_opset9 import masked_fill
+                return masked_fill(g, self, bool_inp, values)
+            return masked_scatter(g, self, bool_inp, values)
         broadcast_index_shape = g.op("Shape", index)
-        index = g.op("Unsqueeze", index, axes_i=[-1])
+        index = sym_help._unsqueeze_helper(g, index, [-1])
     sub_data_shape = sym_help._slice_helper(
         g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[maxsize])
     values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
@@ -201,45 +201,14 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 
 @parse_args('v', 'i')
 def pixel_shuffle(g, self, upscale_factor):
-    dims = self.type().sizes()
-    if len(dims) != 4:
+    rank = sym_help._get_tensor_rank(self)
+    if rank is not None and rank != 4:
         return _unimplemented("pixel_shuffle", "only support 4d input")
     return g.op("DepthToSpace", self, blocksize_i=upscale_factor, mode_s="CRD")
 
 
 def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, *args):
-        scales, align_corners = sym_help._get_interpolate_attributes(g, interpolate_mode, args)
-        align_corners = sym_help._maybe_get_scalar(align_corners)
-        coordinate_transformation_mode = "asymmetric" if interpolate_mode == "nearest" \
-            else "align_corners" if align_corners else "pytorch_half_pixel"
-        empty_tensor = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
-
-        if scales is None:
-            input_size = g.op("Shape", input)
-            input_size_beg = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
-            output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
-            output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
-            scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
-            return g.op("Resize",
-                        input,
-                        empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
-                        scales,  # scales is not needed since we are sending out_size
-                        output_size,
-                        coordinate_transformation_mode_s=coordinate_transformation_mode,
-                        cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-                        mode_s=interpolate_mode,  # nearest, linear, or cubic
-                        nearest_mode_s="floor")  # only valid when mode="nearest"
-        else:
-            return g.op("Resize",
-                        input,
-                        empty_tensor,  # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
-                        scales,  # scales is not needed since we are sending out_size
-                        coordinate_transformation_mode_s=coordinate_transformation_mode,
-                        cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-                        mode_s=interpolate_mode,  # nearest, linear, or cubic
-                        nearest_mode_s="floor")  # only valid when mode="nearest"
-    return symbolic_fn
+    return sym_help._interpolate_helper(name, dim, interpolate_mode)
 
 
 upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
@@ -252,64 +221,7 @@ upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
 
 
 def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
-    mode = sym_help._maybe_get_const(mode, 's')
-    if 'linear' in mode:
-        mode = 'linear'
-    if 'cubic' in mode:
-        mode = 'cubic'
-    align_corners = sym_help._maybe_get_const(align_corners, 'b')
-    align_corners = False if not isinstance(align_corners, bool) else align_corners
-    coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
-        else "align_corners" if align_corners else "pytorch_half_pixel"
-    # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
-    roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
-
-    if not sym_help._is_none(size) :
-        input_size = g.op("Shape", input)
-        input_size = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
-        # in some cases size is not a packed list but size is a scalar
-        # We need to also verify that (sym_help._maybe_get_const(size, 't').dim() == 0)
-        # but this information is not always available. Try to get the dim,
-        # and if not assume that it is not a scalar.
-        try:
-            is_scalar = not sym_help._is_packed_list(size) and ((sym_help._maybe_get_const(size, 't').dim() == 0))
-        except AttributeError:
-            is_scalar = not sym_help._is_packed_list(size)
-            if not is_scalar:
-                warnings.warn("Cannot verify if the output_size is a scalar "
-                              "while exporting interpolate. Assuming that it is not a scalar.")
-
-        if is_scalar:
-            if not input.type().dim():
-                return sym_help._unimplemented("interpolate (with a scalar output_size)",
-                                               "missing input shape (try giving an array of output_size values)")
-            size = unsqueeze(g, size, 0)
-            size = [size for i in range(input.type().dim() - 2)]
-            size = g.op("Concat", *size, axis_i=0)
-        size = g.op("Cast", size, to_i=sym_help.cast_pytorch_to_onnx['Long'])
-        size = g.op("Concat", input_size, size, axis_i=0)
-        scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
-        return g.op("Resize",
-                    input,
-                    roi,
-                    scales,
-                    size,
-                    coordinate_transformation_mode_s=coordinate_transformation_mode,
-                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-                    mode_s=mode,  # nearest, linear, or cubic
-                    nearest_mode_s="floor")
-    else:  # if not sym_help._is_none(scales)
-        if not input.type().dim():
-            return sym_help._unimplemented("interpolate (with scales)", "missing input shape")
-        scales = sym_help._interpolate_get_scales(g, scale_factor, input.type().dim())
-        return g.op("Resize",
-                    input,
-                    roi,
-                    scales,
-                    coordinate_transformation_mode_s=coordinate_transformation_mode,
-                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-                    mode_s=mode,  # nearest, linear, or cubic
-                    nearest_mode_s="floor")  # only valid when mode="nearest"
+    return sym_help.__interpolate_helper(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor)
 
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
@@ -374,7 +286,7 @@ def _len(g, self):
     if _is_tensor_list(self) or self.node().kind() == "onnx::SplitToSequence":
         return g.op("SequenceLength", self)
     sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
-    return g.op('Squeeze', sz_0, axes_i=[0])
+    return sym_help._squeeze_helper(g, sz_0, [0])
 
 
 def __getitem_(g, self, i):
@@ -410,6 +322,8 @@ def insert(g, self, pos, tensor):
 def pop(g, tensor_list, dim):
     return g.op("SequenceErase", tensor_list, dim)
 
+def Delete(g, tensor_list, dim):
+    return g.op("SequenceErase", tensor_list, dim)
 
 def cat(g, tensor_list, dim):
     if sym_help._is_packed_list(tensor_list):
@@ -487,7 +401,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
             return split_out
         # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
         if sym_help._is_packed_list(split_size_or_sizes) and len(sym_help._unpack_list(split_size_or_sizes)) == _outputs:
-            split_sizes = [g.op("Unsqueeze", v, axes_i=[0]) for v in sym_help._unpack_list(split_size_or_sizes)]
+            split_sizes = [sym_help._unsqueeze_helper(g, v, [0]) for v in sym_help._unpack_list(split_size_or_sizes)]
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
             res = []
@@ -516,7 +430,7 @@ def unbind(g, self, dim=0, _outputs=None):
 
 
 # Generate paddings in ONNX order based on pad in pytorch.
-# Arguments:
+# Args:
 #     dim: the dimension of the tensor.
 #     pad: the paddings in pytorch.
 #          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ..., dim_m_begin, dim_m_end,
@@ -549,19 +463,19 @@ def constant_pad_nd(g, input, padding, value=None):
     mode = "constant"
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, input)
-    pad = _prepare_onnx_paddings(g, input.type().dim(), padding)
+    pad = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
     return g.op("Pad", input, pad, value, mode_s=mode)
 
 
 def reflection_pad(g, input, padding):
     mode = "reflect"
-    paddings = _prepare_onnx_paddings(g, input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
     return g.op("Pad", input, paddings, mode_s=mode)
 
 
 def replication_pad(g, input, padding):
     mode = "edge"
-    paddings = _prepare_onnx_paddings(g, input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(g, sym_help._get_tensor_rank(input), padding)
     return g.op("Pad", input, paddings, mode_s=mode)
 
 
@@ -639,9 +553,12 @@ def squeeze(g, self, dim=None):
 
     dim = sym_help._get_const(dim, 'i', 'dim')
 
-    input_shape = self.type().sizes()
-    from torch.onnx.symbolic_helper import _onnx_shape_inference
-    if input_shape is None or not _onnx_shape_inference:
+    input_rank = sym_help._get_tensor_rank(self)
+    adjusted_dim = dim
+    if input_rank is not None and dim < 0:
+        adjusted_dim += input_rank
+    dim_size = sym_help._get_tensor_dim_size(self, adjusted_dim)
+    if (dim < 0 and input_rank is None) or dim_size is None:
         # If onnx shape inference is not on, export always as dynamic.
         # Because we cannot tell if observed static shape is also static at runtime.
         # create 'cond' node (condition is shape[i]==1)
@@ -653,7 +570,7 @@ def squeeze(g, self, dim=None):
         if_node_outputs = g.op("If", cond)
         if_node = if_node_outputs.node()
         if_block = torch.onnx.utils._add_block(if_node)
-        squeeze_ = if_block.op("Squeeze", self, axes_i=[dim])
+        squeeze_ = sym_help._squeeze_helper(if_block, self, [dim])
         torch.onnx.utils._add_output_to_block(if_block, squeeze_)
         else_block = torch.onnx.utils._add_block(if_node)
         identity_ = else_block.op("Identity", self)
@@ -661,21 +578,19 @@ def squeeze(g, self, dim=None):
         return if_node_outputs
 
     # For static input shape
-    if dim < 0:
-        dim += self.type().dim()
-    if input_shape[dim] > 1:
+    dim = adjusted_dim
+    if dim_size > 1:
         warnings.warn("This model contains a squeeze operation on dimension " + str(dim) + ". The size of " +
-                      "this dimension in the given input is " + str(input_shape[dim]) + ". The model will " +
+                      "this dimension in the given input is " + str(dim_size) + ". The model will " +
                       "be exported without the squeeze node. If the model is intended to be used with dynamic " +
                       "input shapes, please export with dynamic_axes argument.")
         return self
-    return g.op("Squeeze", self, axes_i=[dim])
+    return sym_help._squeeze_helper(g, self, [dim])
 
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):
-    return g.op("Unsqueeze", self, axes_i=[dim])
-
+    return sym_help._unsqueeze_helper(g, self, [dim])
 
 def mm(g, self, other):
     return g.op("Gemm", self, other, beta_f=0.0, alpha_f=1.0)
@@ -778,7 +693,7 @@ def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding
 
     # Broadcast and add kernel staring positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d
-    blocks_d_indices = g.op('Unsqueeze', blocks_d_indices, axes_i=[0])  # Reshape to [1, -1]
+    blocks_d_indices = sym_help._unsqueeze_helper(g, blocks_d_indices, [0])  # Reshape to [1, -1]
     kernel_mask = g.op('Reshape', kernel_grid, g.op('Constant', value_t=torch.tensor([-1, 1])))
     block_mask = g.op("Add", blocks_d_indices, kernel_mask)
 
@@ -800,8 +715,8 @@ def _get_im2col_output_shape(g, input, kernel_h, kernel_w):
                             g.op("Constant", value_t=torch.tensor(kernel_h * kernel_w)))
 
     return g.op("Concat",
-                g.op("Unsqueeze", batch_dim, axes_i=[0]),
-                g.op("Unsqueeze", channel_unfolded, axes_i=[0]),
+                sym_help._unsqueeze_helper(g, batch_dim, [0]),
+                sym_help._unsqueeze_helper(g, channel_unfolded, [0]),
                 g.op("Constant", value_t=torch.tensor([-1])), axis_i=0)
 
 
@@ -861,7 +776,7 @@ def narrow(g, input, dim, start, length):
 
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
-    dim = input.type().dim()
+    dim = sym_help._get_tensor_rank(input)
     # use ONNX's Flatten operator for cases where the output shape is 2D
     if start_dim == 1:
         if (end_dim == -1 or (dim is not None and end_dim == dim - 1)):
@@ -894,11 +809,12 @@ def embedding_bag(g,
         return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
 
     loop_condition = g.op("Constant", value_t=torch.tensor(1))
+    loop_condition = g.op("Cast", loop_condition, to_i=9)
     zero = g.op("Constant", value_t=torch.tensor([0]))
 
-    indices_len = g.op("Unsqueeze",
-                       sym_help._size_helper(g, indices, g.op("Constant", value_t=torch.tensor(0))),
-                       axes_i=[0])
+    indices_len = sym_help._unsqueeze_helper(g,
+                                             sym_help._size_helper(g, indices, g.op("Constant", value_t=torch.tensor(0))),
+                                             [0])
     if not include_last_offset:
         offsets = [offsets, indices_len]
         offsets = g.op("Concat", *offsets, axis_i=0)
@@ -914,11 +830,12 @@ def embedding_bag(g,
 
     loop_block = _add_block(loop.node())
     block_input_iter = _add_input_to_block(loop_block)
+    cond = _add_input_to_block(loop_block)
 
     indices_start = loop_block.op("Gather", offsets_starts, block_input_iter, axis_i=0)
     indices_end = loop_block.op("Gather", offsets_ends, block_input_iter, axis_i=0)
-    indices_start = loop_block.op("Unsqueeze", indices_start, axes_i=[0])
-    indices_end = loop_block.op("Unsqueeze", indices_end, axes_i=[0])
+    indices_start = sym_help._unsqueeze_helper(loop_block, indices_start, [0])
+    indices_end = sym_help._unsqueeze_helper(loop_block, indices_end, [0])
 
     indices_row = loop_block.op("Slice", indices, indices_start, indices_end, zero)
     embeddings = loop_block.op("Gather", embedding_matrix, indices_row, axis_i=0)
@@ -927,20 +844,37 @@ def embedding_bag(g,
                                                indices_start,
                                                indices_end,
                                                zero)
-        per_sample_weights_row = loop_block.op("Unsqueeze", per_sample_weights_row, axes_i=[1])
+        per_sample_weights_row = sym_help._unsqueeze_helper(loop_block, per_sample_weights_row, [1])
         embeddings = loop_block.op("Mul", embeddings, per_sample_weights_row)
     if mode == 0:
-        embeddings = loop_block.op("ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
+        embeddings = sym_help._reducesum_helper(loop_block, embeddings, axes_i=[0], keepdims_i=0)
     elif mode == 1:
         embeddings = loop_block.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
     else:
         embeddings = loop_block.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
 
-    _add_output_to_block(loop_block, loop_condition)
+    cond_out = loop_block.op("Cast", loop_condition, to_i=9)
+    _add_output_to_block(loop_block, cond_out)
     _add_output_to_block(loop_block, embeddings)
-    # This pass does all required type casting for loop inputs (condition and iter)
-    torch._C._jit_pass_fixup_onnx_loop_node_inputs(loop.node())
 
     # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
     # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
     return loop.node().output(), None, None, None
+
+
+def prim_ConstantChunk(g, self, chunks, dim):
+    input_shape = g.op("Shape", self)
+    axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+    input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
+    start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+    chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
+    chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))
+    input_shape_dim_shift = g.op("Add", input_shape_dim, chunk_size_minus_1)
+    chunk_dim = g.op("Div", input_shape_dim_shift, chunk_size)
+    res = []
+    for i in range(chunks):
+        index = g.op("Constant", value_t=torch.tensor([i + 1], dtype=torch.long))
+        end = g.op("Mul", chunk_dim, index)
+        res.append(g.op("Slice", self, start, end, axis))
+        start = end
+    return res

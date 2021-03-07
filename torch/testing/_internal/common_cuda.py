@@ -6,6 +6,7 @@ import torch.cuda
 from torch.testing._internal.common_utils import TEST_NUMBA
 import inspect
 import contextlib
+from distutils.version import LooseVersion
 
 
 TEST_CUDA = torch.cuda.is_available()
@@ -14,6 +15,10 @@ CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
 TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE))
 TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
+
+CUDA11OrLater = torch.version.cuda and LooseVersion(torch.version.cuda) >= "11.0.0"
+CUDA9 = torch.version.cuda and torch.version.cuda.startswith('9.')
+SM53OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3)
 
 TEST_MAGMA = TEST_CUDA
 if TEST_CUDA:
@@ -61,7 +66,7 @@ def tf32_off():
     try:
         torch.backends.cuda.matmul.allow_tf32 = False
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
-            yield 
+            yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
@@ -74,7 +79,7 @@ def tf32_on(self, tf32_precision=1e-5):
         torch.backends.cuda.matmul.allow_tf32 = True
         self.precision = tf32_precision
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
-            yield 
+            yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
         self.precision = old_precison
@@ -144,6 +149,6 @@ def with_tf32_off(f):
 
 def _get_torch_cuda_version():
     if torch.version.cuda is None:
-        return [0, 0]
+        return (0, 0)
     cuda_version = str(torch.version.cuda)
-    return [int(x) for x in cuda_version.split(".")]
+    return tuple(int(x) for x in cuda_version.split("."))

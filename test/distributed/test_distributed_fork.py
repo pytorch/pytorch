@@ -5,6 +5,11 @@ from functools import wraps
 import torch
 import torch.cuda
 import torch.distributed as dist
+
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 from torch.testing._internal.common_utils import TestCase, find_free_port, run_tests
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.distributed.distributed_test import (
@@ -16,10 +21,6 @@ Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
 but it could not be found. Install ninja with `pip install ninja`
 or `conda install ninja`.
 """
-
-if not dist.is_available():
-    print("Distributed not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
 
 BACKEND = os.environ["BACKEND"]
 INIT_METHOD = os.getenv("INIT_METHOD", "env://")
@@ -54,7 +55,7 @@ elif BACKEND == "mpi":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
     dist.init_process_group(init_method=INIT_METHOD, backend="mpi")
 
-    class TestMPI(DistributedTest._DistTestBase):
+    class TestMPIWithFork(TestCase, DistributedTest._DistTestBase):
         pass
 
 elif BACKEND == "test":

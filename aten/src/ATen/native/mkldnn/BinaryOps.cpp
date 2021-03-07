@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 
 #if !AT_MKLDNN_ENABLED()
@@ -8,10 +9,11 @@ namespace at {
 namespace native {
 
 Tensor& mkldnn_add_out(
-    Tensor& result,
     const Tensor& self,
     const Tensor& other,
-    Scalar alpha) {
+    Scalar alpha,
+    Tensor& result
+    ) {
   TORCH_CHECK(false, "mkldnn_add_out: ATen not compiled with MKLDNN support");
 }
 
@@ -45,11 +47,34 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 namespace at {
 namespace native {
 
+Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
+  if (!self.requires_grad() && !other.requires_grad()) {
+    auto out_size = infer_size(self.sizes(), other.sizes());
+    auto out_dtype = promoteTypes(
+        c10::typeMetaToScalarType(self.dtype()),
+        c10::typeMetaToScalarType(other.dtype()));
+    TORCH_CHECK(
+        self.device() == other.device(),
+        "Expected same device for binary mkldnn op");
+    return empty_mkldnn(
+        out_size,
+        out_dtype,
+        self.options().layout_opt(),
+        self.options().device_opt(),
+        self.options().pinned_memory_opt());
+  } else {
+    TORCH_CHECK(
+        false,
+        "MKLDNN does not support Binary Ops with a 0-dimension Tensor in training");
+  }
+}
+
 Tensor& mkldnn_add_out(
-    Tensor& result,
     const Tensor& self,
     const Tensor& other,
-    Scalar alpha) {
+    Scalar alpha,
+    Tensor& result
+    ) {
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor& y = itensor_from_mkldnn(other);
 
@@ -61,6 +86,10 @@ Tensor& mkldnn_add_out(
 }
 
 Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
+  if (self.numel() == 0 || other.numel() == 0) {
+    return emptyBinaryOp(self, other);
+  }
+
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor& y = itensor_from_mkldnn(other);
 
@@ -73,7 +102,7 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& mkldnn_add_(Tensor& self, const Tensor& other, Scalar alpha) {
-  return native::mkldnn_add_out(self, self, other, alpha);
+  return native::mkldnn_add_out(self, other, alpha, self);
 }
 
 Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -100,6 +129,9 @@ Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) 
 }
 
 Tensor mkldnn_mul(const Tensor& self, const Tensor& other) {
+  if (self.numel() == 0 || other.numel() == 0) {
+    return emptyBinaryOp(self, other);
+  }
   Tensor result = empty_mkldnn(self.sizes(), optTypeMetaToScalarType(self.options().dtype_opt()),
                                self.options().layout_opt(), self.options().device_opt(),
                                self.options().pinned_memory_opt());

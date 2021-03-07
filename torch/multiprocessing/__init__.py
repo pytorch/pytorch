@@ -35,7 +35,7 @@ torch._C._multiprocessing_init()
 
 """Add helper function to spawn N processes and wait for completion of any of
 them. This depends `mp.get_context` which was added in Python 3.4."""
-from .spawn import spawn, SpawnContext, _supports_context, start_processes, ProcessContext, \
+from .spawn import spawn, SpawnContext, start_processes, ProcessContext, \
     ProcessRaisedException, ProcessExitedException
 
 
@@ -50,7 +50,7 @@ else:
 def set_sharing_strategy(new_strategy):
     """Sets the strategy for sharing CPU tensors.
 
-    Arguments:
+    Args:
         new_strategy (str): Name of the selected strategy. Should be one of
             the values returned by :func:`get_all_sharing_strategies()`.
     """

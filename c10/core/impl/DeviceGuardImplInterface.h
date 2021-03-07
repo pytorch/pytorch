@@ -126,7 +126,7 @@ struct C10_API DeviceGuardImplInterface {
 /**
  * Increments the event's version and enqueues a job with this version
  * in the stream's work queue. When the stream process that job
- * it nofifies all streams waiting on / blocked by that version of the
+ * it notifies all streams waiting on / blocked by that version of the
  * event to continue and marks that version as recorded.
  * */
   virtual void record(
@@ -175,6 +175,60 @@ struct C10_API DeviceGuardImplInterface {
   virtual ~DeviceGuardImplInterface() = default;
 };
 
+// A no-op device guard impl that doesn't do anything interesting.  Useful
+// for devices that don't actually have a concept of device index.  Prominent
+// examples are CPU and Meta.
+template <DeviceType D>
+struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
+  NoOpDeviceGuardImpl() {}
+  DeviceType type() const override {
+    return D;
+  }
+  Device exchangeDevice(Device) const override {
+    return Device(D, -1); // no-op
+  }
+  Device getDevice() const override {
+    return Device(D, -1);
+  }
+  void setDevice(Device) const override {
+    // no-op
+  }
+  void uncheckedSetDevice(Device d) const noexcept override {
+    // no-op
+  }
+  Stream getStream(Device d) const noexcept override {
+    // no-op
+    return Stream(Stream::DEFAULT, Device(D, -1));
+  }
+  // NB: These do NOT set the current device
+  Stream exchangeStream(Stream s) const noexcept override {
+    // no-op
+    return Stream(Stream::DEFAULT, Device(D, -1));
+  }
+  DeviceIndex deviceCount() const noexcept override {
+    return 1;
+  }
+
+  // Event-related functions
+  void record(void** event,
+    const Stream& stream,
+    const DeviceIndex device_index,
+    const EventFlag flag) const override {
+    TORCH_CHECK(false, D, " backend doesn't support events.");
+  }
+  void block(
+    void* event,
+    const Stream& stream) const override {
+    TORCH_CHECK(false, D, " backend doesn't support events.")
+  }
+  bool queryEvent(void* event) const override {
+    TORCH_CHECK(false, D, " backend doesn't support events.")
+  }
+  void destroyEvent(
+    void* event,
+    const DeviceIndex device_index) const noexcept override { }
+};
+
 // The registry is NON-owning.  Each stored pointer is std::atomic so
 // that under all interleavings of registry calls the structure is
 // race-free.  This doesn't cost us anything on reads in X86.  (An
@@ -215,8 +269,8 @@ inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   // FB employees can see
   //   https://fb.workplace.com/groups/llvm.gcc/permalink/4053565044692080/
   // for more details
-  static_assert(sizeof(DeviceType) == 2, "DeviceType is not 16-bit");
-  auto p = device_guard_impl_registry[static_cast<size_t>(type) & 0xFFFF].load();
+  static_assert(sizeof(DeviceType) == 1, "DeviceType is not 8-bit");
+  auto p = device_guard_impl_registry[static_cast<size_t>(type) & 0xFF].load();
 
   // This seems to be the first place where you make use of a device
   // when you pass devices to factory functions.  Give a nicer error

@@ -108,7 +108,16 @@ public:
     return _mm256_andnot_pd(mask, values);
   }
   Vec256<double> angle() const {
-    return _mm256_set1_pd(0);
+    const auto zero_vec = _mm256_set1_pd(0.f);
+    const auto nan_vec = _mm256_set1_pd(NAN);
+    const auto not_nan_mask = _mm256_cmp_pd(values, values, _CMP_EQ_OQ);
+    const auto nan_mask = _mm256_cmp_pd(not_nan_mask, zero_vec, _CMP_EQ_OQ);
+    const auto pi = _mm256_set1_pd(c10::pi<double>);
+
+    const auto neg_mask = _mm256_cmp_pd(values, zero_vec, _CMP_LT_OQ);
+    auto angle = _mm256_blendv_pd(zero_vec, pi, neg_mask);
+    angle = _mm256_blendv_pd(angle, nan_vec, nan_mask);
+    return angle;
   }
   Vec256<double> real() const {
     return *this;
@@ -162,6 +171,16 @@ public:
     x.store(tmp_x);
     for (int64_t i = 0; i < size(); i++) {
       tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
+    }
+    return loadu(tmp);
+  }
+  Vec256<double> igammac(const Vec256<double> &x) const {
+    __at_align32__ double tmp[size()];
+    __at_align32__ double tmp_x[size()];
+    store(tmp);
+    x.store(tmp_x);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);
   }

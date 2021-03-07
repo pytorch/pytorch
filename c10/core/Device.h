@@ -15,7 +15,7 @@ namespace c10 {
 /// A DeviceIndex is not independently meaningful without knowing
 /// the DeviceType it is associated; try to use Device rather than
 /// DeviceIndex directly.
-using DeviceIndex = int16_t;
+using DeviceIndex = int8_t;
 
 /// Represents a a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
@@ -81,6 +81,16 @@ struct C10_API Device final {
     return type_ == DeviceType::CUDA;
   }
 
+  /// Return true if the device is of HIP type.
+  bool is_hip() const noexcept {
+    return type_ == DeviceType::HIP;
+  }
+
+  /// Return true if the device is of XPU type.
+  bool is_xpu() const noexcept {
+    return type_ == DeviceType::XPU;
+  }
+
   /// Return true if the device is of CPU type.
   bool is_cpu() const noexcept {
     return type_ == DeviceType::CPU;
@@ -93,10 +103,14 @@ struct C10_API Device final {
   DeviceType type_;
   DeviceIndex index_ = -1;
   void validate() {
-    TORCH_CHECK(index_ == -1 || index_ >= 0,
-        "Device index must be -1 or non-negative, got ", index_);
-    TORCH_CHECK(!is_cpu() || index_ <= 0,
-        "CPU device index must be -1 or zero, got ", index_);
+    // Removing these checks in release builds noticeably improves
+    // performance in micro-benchmarks.
+    // This is safe to do, because backends that use the DeviceIndex
+    // have a later check when we actually try to switch to that device.
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(index_ == -1 || index_ >= 0,
+        "Device index must be -1 or non-negative, got ", (int)index_);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!is_cpu() || index_ <= 0,
+        "CPU device index must be -1 or zero, got ", (int)index_);
   }
 };
 
@@ -112,8 +126,8 @@ struct hash<c10::Device> {
   size_t operator()(c10::Device d) const noexcept {
     // Are you here because this static assert failed?  Make sure you ensure
     // that the bitmasking code below is updated accordingly!
-    static_assert(sizeof(c10::DeviceType) == 2, "DeviceType is not 16-bit");
-    static_assert(sizeof(c10::DeviceIndex) == 2, "DeviceIndex is not 16-bit");
+    static_assert(sizeof(c10::DeviceType) == 1, "DeviceType is not 8-bit");
+    static_assert(sizeof(c10::DeviceIndex) == 1, "DeviceIndex is not 8-bit");
     // Note [Hazard when concatenating signed integers]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // We must first convert to a same-sized unsigned type, before promoting to
@@ -124,8 +138,8 @@ struct hash<c10::Device> {
     // Technically, by C/C++ integer promotion rules, we only need one of the
     // uint32_t casts to the result type, but we put in both for explicitness's sake.
     uint32_t bits =
-        static_cast<uint32_t>(static_cast<uint16_t>(d.type())) << 16
-      | static_cast<uint32_t>(static_cast<uint16_t>(d.index()));
+        static_cast<uint32_t>(static_cast<uint8_t>(d.type())) << 16
+      | static_cast<uint32_t>(static_cast<uint8_t>(d.index()));
     return std::hash<uint32_t>{}(bits);
   }
 };

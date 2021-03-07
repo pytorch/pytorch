@@ -2032,6 +2032,19 @@ TEST_F(ModulesTest, SmoothL1LossDefaultOptions) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, HuberLossDefaultOptions) {
+  HuberLoss loss;
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor(0.0233335, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
   MultiLabelMarginLoss loss;
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2058,12 +2071,53 @@ TEST_F(ModulesTest, SmoothL1LossNoReduction) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, HuberLossNoReduction) {
+  HuberLoss loss(/*reduction=*/torch::kNone);
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
   MultiLabelMarginLoss loss(torch::kNone);
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, SmoothL1LossBeta) {
+  auto options = SmoothL1LossOptions().beta(0.2);
+  SmoothL1Loss loss(options);
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor(0.108333, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, HuberLossDelta) {
+  auto options = HuberLossOptions().delta(0.2);
+  HuberLoss loss(options);
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor(0.0216666, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
@@ -2758,6 +2812,24 @@ TEST_F(ModulesTest, PixelShuffle) {
 
   ASSERT_EQ(y.ndimension(), 4);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 4, 4}));
+  ASSERT_TRUE(y.allclose(y_exp));
+}
+
+TEST_F(ModulesTest, PixelUnshuffle) {
+  PixelUnshuffle module(/*downscale_factor=*/2);
+  auto x = torch::tensor(
+      {{{{-17, 7, 19, 14}, {0, -15, -2, 0}, {-1, -3, 2, 1}, {-12, -3, 14, 9}}}},
+      torch::kFloat);
+  auto y_exp = torch::tensor(
+      {{{{-17, 19}, {-1, 2}},
+        {{7, 14}, {-3, 1}},
+        {{0, -2}, {-12, 14}},
+        {{-15, 0}, {-3, 9}}}},
+      torch::kFloat);
+  auto y = module(x);
+
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 4, 2, 2}));
   ASSERT_TRUE(y.allclose(y_exp));
 }
 
@@ -4762,6 +4834,12 @@ TEST_F(ModulesTest, PrettyPrintSigmoid) {
 TEST_F(ModulesTest, PrettyPrintPixelShuffle) {
   ASSERT_EQ(c10::str(PixelShuffle(PixelShuffleOptions(5))),
             "torch::nn::PixelShuffle(upscale_factor=5)");
+}
+
+TEST_F(ModulesTest, PrettyPrintPixelUnshuffle) {
+  ASSERT_EQ(
+      c10::str(PixelUnshuffle(PixelUnshuffleOptions(5))),
+      "torch::nn::PixelUnshuffle(downscale_factor=5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintSoftplus) {

@@ -11,7 +11,7 @@
 
 namespace caffe2 {
 
-class CAFFE2_API StatValue {
+class TORCH_API StatValue {
   std::atomic<int64_t> v_{0};
 
  public:
@@ -28,7 +28,7 @@ class CAFFE2_API StatValue {
   }
 };
 
-struct CAFFE2_API ExportedStatValue {
+struct TORCH_API ExportedStatValue {
   std::string key;
   int64_t value;
   std::chrono::time_point<std::chrono::high_resolution_clock> ts;
@@ -40,7 +40,7 @@ struct CAFFE2_API ExportedStatValue {
 using ExportedStatList = std::vector<ExportedStatValue>;
 using ExportedStatMap = std::unordered_map<std::string, int64_t>;
 
-CAFFE2_API ExportedStatMap toMap(const ExportedStatList& stats);
+TORCH_API ExportedStatMap toMap(const ExportedStatList& stats);
 
 /**
  * @brief Holds a map of atomic counters keyed by name.
@@ -114,7 +114,7 @@ CAFFE2_API ExportedStatMap toMap(const ExportedStatList& stats);
  * structure by calling StatRegistry::update().
  *
  */
-class CAFFE2_API StatRegistry {
+class TORCH_API StatRegistry {
   std::mutex mutex_;
   std::unordered_map<std::string, std::unique_ptr<StatValue>> stats_;
 
@@ -153,7 +153,7 @@ class CAFFE2_API StatRegistry {
   ~StatRegistry();
 };
 
-struct CAFFE2_API Stat {
+struct TORCH_API Stat {
   std::string groupName;
   std::string name;
   Stat(const std::string& gn, const std::string& n) : groupName(gn), name(n) {}
@@ -164,7 +164,7 @@ struct CAFFE2_API Stat {
   }
 };
 
-class CAFFE2_API ExportedStat : public Stat {
+class TORCH_API ExportedStat : public Stat {
   StatValue* value_;
 
  public:
@@ -181,7 +181,7 @@ class CAFFE2_API ExportedStat : public Stat {
   }
 };
 
-class CAFFE2_API AvgExportedStat : public ExportedStat {
+class TORCH_API AvgExportedStat : public ExportedStat {
  private:
   ExportedStat count_;
 
@@ -200,7 +200,7 @@ class CAFFE2_API AvgExportedStat : public ExportedStat {
   }
 };
 
-class CAFFE2_API StdDevExportedStat : public ExportedStat {
+class TORCH_API StdDevExportedStat : public ExportedStat {
   // Uses an offset (first_) to remove issue of cancellation
   // Variance is then (sumsqoffset_ - (sumoffset_^2) / count_) / (count_ - 1)
  private:
@@ -234,7 +234,7 @@ class CAFFE2_API StdDevExportedStat : public ExportedStat {
   }
 };
 
-class CAFFE2_API DetailedExportedStat : public ExportedStat {
+class TORCH_API DetailedExportedStat : public ExportedStat {
  private:
   std::vector<ExportedStat> details_;
 
@@ -258,7 +258,7 @@ class CAFFE2_API DetailedExportedStat : public ExportedStat {
   }
 };
 
-class CAFFE2_API StaticStat : public Stat {
+class TORCH_API StaticStat : public Stat {
  private:
   StatValue* value_;
 

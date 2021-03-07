@@ -19,8 +19,7 @@ def _merge_node_kwargs(a, b):
     return c
 
 
-@context.define_context(allow_default=True)
-class Cluster(object):
+class Cluster(context.DefaultManaged):
     """
     Context that keeps track of all the node names used.
     Users shouldn't have to use them directly, since a Cluster is automatically
@@ -53,8 +52,7 @@ class Cluster(object):
             self.nodes(), self.node_kwargs())
 
 
-@context.define_context(allow_default=True)
-class Node(object):
+class Node(context.DefaultManaged):
     """
     A Node context is used to indicate that all Tasks instantiated within will
     run on the given node name. (Only the name of the node actually counts.)
@@ -158,8 +156,7 @@ def add_setup_steps(step, init_nets, exit_nets, name):
     return core.execution_step(name, steps)
 
 
-@context.define_context(allow_default=False)
-class TaskGroup(object):
+class TaskGroup(context.Managed):
     """
     Context that gathers tasks which will run concurrently, potentially on
     multiple nodes. All tasks in the same node will share the same workspace
@@ -440,8 +437,7 @@ class TaskOutputList(object):
         return "TaskOutputList(outputs={})".format(self.outputs)
 
 
-@context.define_context()
-class Task(object):
+class Task(context.Managed):
     """
     A Task is composed of an execution step and zero or more outputs.
     Tasks are executed in the context of a TaskGroup, which, in turn, can
@@ -540,6 +536,8 @@ class Task(object):
         self._num_instances = num_instances
 
     def __enter__(self):
+        super(Task, self).__enter__()
+
         # temporarily remove from _tasks_to_add to ensure correct order
         if self.group is not None:
             self.group._tasks_to_add.remove(self)
@@ -551,6 +549,8 @@ class Task(object):
         return self
 
     def __exit__(self, type, value, traceback):
+        super(Task, self).__exit__(type, value, traceback)
+
         self._net_builder.__exit__(type, value, traceback)
         if type is None:
             self.set_step(self._net_builder)

@@ -7,11 +7,9 @@
 
 import functools
 import inspect
-import itertools
 import logging
 import numpy as np
 import random
-import six
 from future.utils import viewkeys
 
 from caffe2.proto import caffe2_pb2
@@ -32,7 +30,7 @@ from caffe2.python.model_helper import ModelHelper
 def _RectifyName(blob_reference_or_name):
     if blob_reference_or_name is None:
         return None
-    if isinstance(blob_reference_or_name, six.string_types):
+    if isinstance(blob_reference_or_name, str):
         return core.ScopedBlobReference(blob_reference_or_name)
     if not isinstance(blob_reference_or_name, core.BlobReference):
         raise Exception("Unknown blob reference type")
