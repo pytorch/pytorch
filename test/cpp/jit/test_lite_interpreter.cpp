@@ -925,6 +925,10 @@ TEST(LiteInterpreterTest, OpVersionTable) {
       torch::jit::mobile::operator_resolver(
           op1_name, /*op_version*/ 2, /*model_version*/ 4),
       "is larger than the maximum version number");
+
+  auto table = torch::jit::mobile::get_op_version_table();
+  EXPECT_EQ(table["aten::_convolution"].first, 0);
+  EXPECT_EQ(table["aten::_convolution"].second, 1);
 }
 
 namespace {

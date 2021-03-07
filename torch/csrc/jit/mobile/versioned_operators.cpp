@@ -171,6 +171,15 @@ OperatorFunctor operator_resolver(
   return nullptr;
 }
 
+TORCH_API std::unordered_map<std::string, std::pair<int64_t, int64_t>>
+get_op_version_table() {
+  std::unordered_map<std::string, std::pair<int64_t, int64_t>> table;
+  for (const auto& item : op_version_table) {
+    table[item.first] = std::pair<int64_t, int64_t>(
+        item.second.min_version(), item.second.max_version());
+  }
+  return table;
+}
 } // namespace mobile
 } // namespace jit
 } // namespace torch
