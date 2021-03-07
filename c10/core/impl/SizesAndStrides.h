@@ -151,12 +151,6 @@ class C10_API SizesAndStrides {
     std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
   }
 
-  using SizesVector = SmallVector<int64_t, 5>;
-  void set_sizes_dv(const SizesVector& newSizes) {
-    resize(newSizes.size());
-    std::copy(newSizes.begin(), newSizes.end(), sizes_begin());
-  }
-
   const int64_t* strides_data() const noexcept {
     if (C10_LIKELY(isInline())) {
       return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];
