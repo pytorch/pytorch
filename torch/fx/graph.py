@@ -519,7 +519,7 @@ class Graph:
 
             return True
 
-        if (self.owning_module and 
+        if (self.owning_module and
                 not _get_attr_reference_exists(self.owning_module, qualified_name)):
             warnings.warn("Attempted to insert a get_attr Node with no "
                           "underlying reference in the owning "
@@ -567,7 +567,7 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
         """
-        if (self.owning_module and 
+        if (self.owning_module and
                 self.owning_module.get_submodule(module_name) is not None):
             warnings.warn("Attempted to insert a get_attr Node with no "
                           "underlying reference in the owning "
@@ -960,7 +960,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
         particular:
         - Checks Nodes have correct ownership (owned by this graph)
         - Checks Nodes appear in topological order
-        - If this Graph has an owning GraphModule, checks that targets 
+        - If this Graph has an owning GraphModule, checks that targets
         exist in that GraphModule
         """
 

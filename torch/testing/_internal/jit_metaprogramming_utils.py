@@ -296,7 +296,7 @@ def gen_script_fn_and_args(method_name, func_type, *args, **kwargs):
 # returns a function takes in (args, kwargs) and runs the compiled function
 def create_script_fn(self, method_name, func_type):
     # function returns tuple containing original output and
-    # filtered output to be used in checking gradients 
+    # filtered output to be used in checking gradients
     def script_fn(*args, **kwargs):
         fn, tensors = gen_script_fn_and_args(method_name, func_type, *args, **kwargs)
         self.assertExportImport(fn.graph, tensors)
