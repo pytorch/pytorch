@@ -980,35 +980,12 @@ Tensor tile(const Tensor& self, IntArrayRef reps){
   return self.repeat(reps);
 }
 
+// Vec = ArrayRef<int64_t>, SmallVector<int64_t>
+template<typename Vec>
 Tensor alias_with_sizes_and_strides(
     const Tensor& self,
-    const c10::IntArrayRef sizes,
-    const c10::IntArrayRef strides) {
-  Tensor self_;
-  if (self.is_quantized()) {
-    auto impl = c10::make_intrusive<QTensorImpl>(
-        Storage(self.storage()),
-        self.key_set(),
-        self.dtype(),
-        get_qtensorimpl(self)->quantizer());
-    impl->set_storage_offset(self.storage_offset());
-    impl->set_sizes_and_strides(sizes, strides);
-    self_ = Tensor(std::move(impl));
-  } else {
-    auto impl = c10::make_intrusive<TensorImpl>(
-        Storage(self.storage()), self.key_set(), self.dtype());
-    impl->set_storage_offset(self.storage_offset());
-    impl->set_sizes_and_strides(sizes, strides);
-    self_ = Tensor(std::move(impl));
-  }
-  namedinference::propagate_names(self_, self);
-  return self_;
-}
-
-Tensor alias_with_sizes_and_strides_dv(
-    const Tensor& self,
-    const DimVector& sizes,
-    const DimVector& strides) {
+    const Vec& sizes,
+    const Vec& strides) {
   Tensor self_;
   if (self.is_quantized()) {
     auto impl = c10::make_intrusive<QTensorImpl>(
@@ -1998,7 +1975,7 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
     TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
   }
 
-  std::vector<int64_t> inferred_size;
+  DimVector inferred_size;
   try {
     inferred_size = at::infer_size(sizes, self.size(dim));
   } catch (const std::runtime_error& e) {
@@ -2095,15 +2072,15 @@ Tensor numpy_T(const Tensor &self) {
 }
 
 Tensor view(const Tensor& self, IntArrayRef size) {
-  auto inferred_size = at::infer_size_dv(size, self.numel());
-  auto stride = at::detail::computeStrideDV(self.sizes(),
+  at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
+  auto stride = at::detail::computeStride(self.sizes(),
                                           self.strides(),
                                           inferred_size);
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
-  return alias_with_sizes_and_strides_dv(self, inferred_size, stride_value);
+  return alias_with_sizes_and_strides(self, inferred_size, stride_value);
 }
 
 Tensor alias(const Tensor& self) {
