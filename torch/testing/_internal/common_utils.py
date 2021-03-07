@@ -1581,8 +1581,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
 
     return result
 
-def prod_single_zero(dim_size):
-    result = torch.randn(dim_size, dim_size)
+def prod_single_zero(dim_size, device=torch.device('cpu'), dtype=torch.float):
+    result = torch.randn(dim_size, dim_size, device=device, dtype=dtype)
     result[0, 1] = 0
     return result
 

@@ -2791,9 +2791,9 @@ def normal_scalar_clamp(amin, amax, requires_grad=False):
     return v
 
 
-def prod_zeros(dim_size, dim_select, dtype=torch.float):
+def prod_zeros(dim_size, dim_select, device=torch.device('cpu'), dtype=torch.float):
     assert len(dim_select) == 2
-    result = torch.randn(dim_size, dim_size, dim_size, dtype=dtype)
+    result = torch.randn(dim_size, dim_size, dim_size, dtype=dtype, device=device)
     result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
     result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
     result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
@@ -3116,19 +3116,19 @@ def method_tests():
         ('prod', (), NO_ARGS, 'scalar'),
         ('prod', (), (0,), 'scalar_dim', (), [0]),
         ('prod', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('prod', prod_zeros(S, [0, 1]), NO_ARGS, 'zerodims2'),
-        ('prod', prod_zeros(S, [0, 2]), NO_ARGS, 'zerodims1'),
-        ('prod', prod_zeros(S, [1, 2]), NO_ARGS, 'zerodims0'),
-        ('prod', prod_zeros(S, [0, 1]), (1,), 'zeros_dims2', (), [0]),
-        ('prod', prod_zeros(S, [0, 2]), (1,), 'zeros_dims1', (), [0]),
-        ('prod', prod_zeros(S, [1, 2]), (1,), 'zeros_dims0', (), [0]),
-        ('prod', prod_zeros(S, [0, 1]), (1, True), 'keepdim_zeros_dims2', (), [0]),
-        ('prod', prod_zeros(S, [0, 2]), (1, True), 'keepdim_zeros_dims1', (), [0]),
-        ('prod', prod_zeros(S, [1, 2]), (1, True), 'keepdim_zeros_dims0', (), [0]),
-        ('prod', prod_single_zero(S), NO_ARGS, 'single_zero'),
-        ('prod', (torch.tensor(0., requires_grad=True)), NO_ARGS, 'scalar_zero'),
-        ('prod', (torch.tensor(0., requires_grad=True)), (0,), 'scalar_dim_zero', (), [0]),
-        ('prod', (torch.tensor(0., requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', (), [0]),
+        ('prod', lambda dtype, device: prod_zeros(S, [0, 1], device=device, dtype=dtype), NO_ARGS, 'zerodims2'),
+        ('prod', lambda dtype, device: prod_zeros(S, [0, 2], device=device, dtype=dtype), NO_ARGS, 'zerodims1'),
+        ('prod', lambda dtype, device: prod_zeros(S, [1, 2], device=device, dtype=dtype), NO_ARGS, 'zerodims0'),
+        ('prod', lambda dtype, device: prod_zeros(S, [0, 1], device=device, dtype=dtype), (1,), 'zeros_dims2', (), [0]),
+        ('prod', lambda dtype, device: prod_zeros(S, [0, 2], device=device, dtype=dtype), (1,), 'zeros_dims1', (), [0]),
+        ('prod', lambda dtype, device: prod_zeros(S, [1, 2], device=device, dtype=dtype), (1,), 'zeros_dims0', (), [0]),
+        ('prod', lambda dtype, device: prod_zeros(S, [0, 1], device=device, dtype=dtype), (1, True), 'keepdim_zeros_dims2', (), [0]),
+        ('prod', lambda dtype, device: prod_zeros(S, [0, 2], device=device, dtype=dtype), (1, True), 'keepdim_zeros_dims1', (), [0]),
+        ('prod', lambda dtype, device: prod_zeros(S, [1, 2], device=device, dtype=dtype), (1, True), 'keepdim_zeros_dims0', (), [0]),
+        ('prod', lambda dtype, device: prod_single_zero(S, device=device, dtype=dtype), NO_ARGS, 'single_zero'),
+        ('prod', lambda dtype, device: (torch.tensor(0., requires_grad=True, device=device, dtype=dtype)), NO_ARGS, 'scalar_zero'),
+        ('prod', lambda dtype, device: (torch.tensor(0., requires_grad=True, device=device, dtype=dtype)), (0,), 'scalar_dim_zero', (), [0]),
+        ('prod', lambda dtype, device: (torch.tensor(0., requires_grad=True, device=device, dtype=dtype)), (0, True,), 'scalar_keepdim_dim_zero', (), [0]),
         ('var_mean', (S, S, S), NO_ARGS, ''),
         ('var_mean', (S, S, S), (1,), 'dim', [0]),
         ('var_mean', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
