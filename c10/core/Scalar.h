@@ -14,7 +14,7 @@
 
 namespace c10 {
 
-struct Scalar;
+class Scalar;
 using ScalarList = ArrayRef<Scalar>;
 
 /**
