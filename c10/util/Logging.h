@@ -432,12 +432,17 @@ struct DDPLoggingData {
 
     std::string devicesStr = toString(deviceIdsStream, ddp_logging_data.device_ids);
     std::string bucketSizesStr = toString(bucketSizesStream, ddp_logging_data.bucket_sizes);
+    std::string dtypesStr;
+    for (const auto & dtype : ddp_logging_data.dtypes) {
+      dtypesStr += dtype;
+      dtypesStr += " ";
+    }
 
     std::string ddpLoggingDataInfo = c10::str(
       "world_size: ", ddp_logging_data.world_size, ", module_name: ",
       ddp_logging_data.module_name, ", device_ids: ", devicesStr, ", output_device: ",
       ddp_logging_data.output_device, ", backend_name: ", ddp_logging_data.backend_name,
-      ", parameter_dtype: ", ddp_logging_data.dtype, ", total_parameter_size_in_bytes: ",
+      ", parameter_dtype: ", dtypesStr, ", total_parameter_size_in_bytes: ",
       ddp_logging_data.total_parameter_size_bytes, ", num_parameter_tensors: ",
       ddp_logging_data.num_parameter_tensors, " bucket_sizes: ", bucketSizesStr,
       ", CUDA_VISIBLE_DEVICES: ", ddp_logging_data.cuda_visible_devices, ", broadcast_buffers: ",
