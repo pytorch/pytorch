@@ -1233,6 +1233,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
+  template <typename T>
+  void Resize(const std::vector<T>& dim_source) {
+    Resize(ArrayRef<T>(dim_source));
+  }
+
   /**
    * Resizes the tensor without touching underlying storage.
    * This requires the total size of the tensor to remains constant.
