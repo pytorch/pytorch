@@ -170,7 +170,7 @@ enum class DispatchKey : uint8_t {
   // torch::Tensor my_functional_op(...) {
   //   {
   //     // Note for every op in VariableType, you need to go through
-  //     // `AutoNonInplaceOrViewMode` guard exactly once to add the
+  //     // `AutoDispatchBelowInplaceOrView` guard exactly once to add the
   //     // key to TLS excluded set. If you don't go through it at all,
   //     // inplace/view ops called through `at::` inside your backend
   //     // kernel will dispatch to InplaceOrView kernels and do a lot
@@ -182,7 +182,7 @@ enum class DispatchKey : uint8_t {
   // But this work is currently blocked since it adds an extra dispatch
   // for all ops and it's non-trivial overhead at model level(a few percents).
   // Thus our current approach takes advantage of the fact every kernel go
-  // through VariableType kernel first and pulls the `at::AutoNonInplaceOrViewMode` guard of functional ops
+  // through VariableType kernel first and pulls the `at::AutoDispatchBelowInplaceOrView` guard of functional ops
   // up to the `VariableType` kernel. Thus we only add the extra dispatch
   // to view/inplace ops to minimize its perf impact to real models.
   InplaceOrView,

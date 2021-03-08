@@ -593,6 +593,7 @@ class TORCH_API Tensor {
   /// Enables .grad() for non-leaf Tensors.
 
   Tensor& set_requires_grad(bool requires_grad) {
+    // requires_grad cannot be set to true in InferenceMode.
     impl_->set_requires_grad(!c10::InferenceMode::is_enabled() && requires_grad);
     return *this;
   }
