@@ -229,7 +229,7 @@ def make_columns(
     if total_omitted > 0:
         columns.append(f'({total_omitted} S3 reports omitted)')
     if total_suites > 0:
-        columns.append(f'({total_suites}) matching suites omitted)')
+        columns.append(f'({total_suites} matching suites omitted)')
     return ' '.join(columns)
 
 
