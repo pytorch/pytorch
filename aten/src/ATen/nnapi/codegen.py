@@ -105,7 +105,7 @@ def main(argv):
     out_dir = pathlib.Path(__file__).parent
 
     (out_dir / "nnapi_wrapper.h").write_text(
-        PREFIX + 
+        PREFIX +
         textwrap.dedent("""\
             #ifndef NNAPI_WRAPPER_H_
             #define NNAPI_WRAPPER_H_
@@ -124,7 +124,7 @@ def main(argv):
     )
 
     (out_dir / "nnapi_wrapper.cpp").write_text(
-        PREFIX + 
+        PREFIX +
         textwrap.dedent("""\
             #ifndef _WIN32
             #include <dlfcn.h>

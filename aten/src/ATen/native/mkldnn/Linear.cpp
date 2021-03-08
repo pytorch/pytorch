@@ -44,8 +44,11 @@ Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight_t,
     const Tensor& bias) {
-  TORCH_CHECK(self.dim() >= 2,
-      "mkldnn_linear: input needs to has dim at least 2, input dim ", self.dim());
+  const int64_t dim = self.dim();
+  TORCH_CHECK(
+      self.dim() != 0,
+      "mkldnn_linear: input needs to has dim at least 1, input dim ",
+      self.dim());
   TORCH_CHECK(self.is_mkldnn(),
       "mkldnn_linear: input needs to be mkldnn layout");
   if (self.scalar_type() == ScalarType::BFloat16) {
@@ -53,8 +56,10 @@ Tensor mkldnn_linear(
         "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
-  // reshape first if input dim is greater than 2 and the reshape will cost a memory copy.
-  auto self_reshaped = self.dim() > 2 ? self.reshape({-1, self.size(self.dim() - 1)}) : self;
+  // reshape first if input dim != 2 and the reshape will cost a memory copy.
+  auto self_reshaped =
+      dim == 2 ? self : self.reshape({-1, self.size(self.dim() - 1)});
+
   const ideep::tensor x = itensor_from_mkldnn(self_reshaped);
   // weight_t can be a mkldnn tensor or dense tensor.
   const Tensor weight = (weight_t.is_mkldnn() || weight_t.is_contiguous()) ? weight_t : weight_t.contiguous();
@@ -72,7 +77,7 @@ Tensor mkldnn_linear(
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(weight.size(0));
 
-  if (self.dim() > 2) {
+  if (self.dim() != 2) {
     return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
                                    self.options().device_opt()).reshape(output_size);
   }

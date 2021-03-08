@@ -223,6 +223,13 @@ TORCH_API Tensor* Reduce(
     const Placeholder& buffer,
     const std::vector<DimArg>& reduce_args);
 
+TORCH_API Tensor* Reduce(
+    const std::string& name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    const BufHandle& buffer,
+    const std::vector<DimArg>& reduce_args);
+
 // Overload for the common case of all dimensions of a prevously Computed
 // Tensor.
 TORCH_API Tensor* Reduce(
@@ -298,6 +305,18 @@ inline ExprHandle Placeholder::load(const std::vector<T>& args) const {
   std::vector<ExprHandle> params(args.begin(), args.end());
   return ExprHandle(
       new Load(data(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+}
+
+template <typename... Ts>
+inline ExprHandle BufHandle::load(const Ts&... ts) const {
+  std::vector<ExprHandle> params({ExprHandle(ts)...});
+  return Load::make(*this, params);
+}
+
+template <typename T>
+inline ExprHandle BufHandle::load(const std::vector<T>& args) const {
+  std::vector<ExprHandle> params(args.begin(), args.end());
+  return Load::make(*this, params);
 }
 
 } // namespace tensorexpr

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Utils.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 
@@ -26,23 +27,14 @@ C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
 // TODO: reuse_inp reuse_out can be deprecated with further analysis
 // try to avoid this API.
-#define REGISTER_OPERATOR_FUNCTOR_OPT(name, id, reuse_inp, reuse_out, ...) \
-  struct SROperatorFunctor_##id : public SROperatorFunctor {               \
-    const SROpFunctor fn = __VA_ARGS__;                                    \
-    bool CanReuseInput() override {                                        \
-      return reuse_inp;                                                    \
-    }                                                                      \
-    bool CanReuseOutput() override {                                       \
-      return reuse_out;                                                    \
-    }                                                                      \
-    SROperator Generate(Node* n) override {                                \
-      return fn(n);                                                        \
-    }                                                                      \
-  };                                                                       \
+#define REGISTER_OPERATOR_FUNCTOR(name, id, ...)             \
+  struct SROperatorFunctor_##id : public SROperatorFunctor { \
+    const SROpFunctor fn = __VA_ARGS__;                      \
+    SROperator Generate(Node* n) override {                  \
+      return fn(n);                                          \
+    }                                                        \
+  };                                                         \
   C10_REGISTER_CLASS(SROperatorRegistry, name, SROperatorFunctor_##id);
-
-#define REGISTER_OPERATOR_FUNCTOR(name, id, ...) \
-  REGISTER_OPERATOR_FUNCTOR_OPT(name, id, true, true, __VA_ARGS__)
 
 #define REGISTER_VIEW_OPERATOR_FUNCTOR(name, id, ...)        \
   struct SROperatorFunctor_##id : public SROperatorFunctor { \
@@ -56,7 +48,45 @@ C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 C10_DECLARE_REGISTRY(SRViewOperatorRegistry, SROperatorFunctor);
 
 inline at::Tensor create_empty_from(const at::Tensor& t) {
-  return at::empty({0}, t.options());
+  return at::detail::empty_cpu(
+      {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      t.layout(),
+      t.device(),
+      c10::nullopt,
+      c10::nullopt);
+}
+
+inline at::Tensor create_empty(c10::ScalarType dtype) {
+  return at::detail::empty_cpu(
+      {0}, dtype, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
+}
+
+inline at::Tensor create_empty_from(
+    const at::Tensor& t,
+    c10::ScalarType dtype) {
+  return at::detail::empty_cpu(
+      {0}, dtype, t.layout(), t.device(), c10::nullopt, c10::nullopt);
+}
+
+inline at::Tensor create_empty_from(const at::Tensor& t, c10::Layout layout) {
+  return at::detail::empty_cpu(
+      {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      layout,
+      t.device(),
+      c10::nullopt,
+      c10::nullopt);
+}
+
+inline at::Tensor create_empty_from(const at::Tensor& t, c10::Device device) {
+  return at::detail::empty_cpu(
+      {0},
+      c10::typeMetaToScalarType(t.dtype()),
+      t.layout(),
+      device,
+      c10::nullopt,
+      c10::nullopt);
 }
 
 inline bool checkResizedDataPtr(at::Tensor& t) {
@@ -74,6 +104,7 @@ bool canRunOutOfPlace(Node* n);
 bool canReuseInputsOutputs(Node* n);
 bool canReuseInputs(Node* n);
 bool canReuseOutputs(Node* n);
+bool canOptimizeConstruct(Node* n);
 bool isViewOp(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
