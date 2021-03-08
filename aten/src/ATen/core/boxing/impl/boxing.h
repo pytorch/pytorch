@@ -293,18 +293,7 @@ struct BoxedKernelWrapper<
     using ArgTuple = std::tuple<Args...>;
     constexpr int RetCount = std::tuple_size<Result>();
 
-    // size_t refcount1 = std::get<sizeof...(Args)-1>(ArgTuple{args...}).use_count();
-    // size_t refcount2 = std::get<sizeof...(Args)-2>(ArgTuple{args...}).use_count();
-
     torch::jit::Stack stack = boxArgs(args...);
-    // TORCH_INTERNAL_ASSERT(refcount1+1 == std::get<sizeof...(Args)-1>(ArgTuple{args...}).use_count());
-    // TORCH_INTERNAL_ASSERT(refcount2+1 == std::get<sizeof...(Args)-2>(ArgTuple{args...}).use_count());
-
-    // for (const IValue& v : *stack) {
-    //   if (v.isPtrType()) {
-    //     TORCH_INTERNAL_ASSERT(static_cast<const intrusive_ptr_target*>(v.internalToPointer())->refcount_.load() > 1);
-    //   }
-    // }
 
     (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -319,20 +308,6 @@ struct BoxedKernelWrapper<
         "The parameter list of an op returning a tuple of Tensor references "
             "must end with an equal number of Tensor reference parameters."
     );
-    for (IValue& v : stack) {
-      if (v.isPtrType()) {
-        TORCH_INTERNAL_ASSERT(static_cast<const intrusive_ptr_target*>(v.internalToPointer())->refcount_.load() > 1);
-      }
-      v = IValue();
-    }
-    stack.clear();
-    // TORCH_INTERNAL_ASSERT(refcount1 == std::get<sizeof...(Args)-1>(ArgTuple{args...}).use_count());
-    // TORCH_INTERNAL_ASSERT(refcount2 == std::get<sizeof...(Args)-2>(ArgTuple{args...}).use_count());
-    // TORCH_INTERNAL_ASSERT(refcount1 > 0);
-    // TORCH_INTERNAL_ASSERT(refcount2 > 0);
-    // static_assert(std::is_same<at::Tensor&, std::tuple_element_t<sizeof...(Args)-1, ArgTuple>>::value, "");
-    // static_assert(std::is_same<at::Tensor&, std::tuple_element_t<sizeof...(Args)-2, ArgTuple>>::value, "");
-    // TORCH_INTERNAL_ASSERT((*stack).size() == 0);
     return result;
   }
 };
