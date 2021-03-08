@@ -1532,6 +1532,23 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'input_1': [0, 1, 2],
                                     'output_1': [0, 1, 2]})
 
+    @disableScriptTest()
+    def test_tuple(self):
+        class Tuple(torch.nn.Module):
+            def forward(self, x):
+                if x.size() == 2:
+                    l = []
+                else:
+                    l = None
+
+                if l is not None:
+                    l.append(x)
+
+                return (x, l)
+
+        x = torch.randn(3, 4)
+        self.run_test(Tuple(), (x,))
+
     def test_square(self):
         class Square(torch.nn.Module):
             def forward(self, x):
