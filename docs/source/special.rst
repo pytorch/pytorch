@@ -18,4 +18,5 @@ function for details.
 Functions
 -----------------------
 
+.. autofunction:: entr
 .. autofunction:: gammaln
