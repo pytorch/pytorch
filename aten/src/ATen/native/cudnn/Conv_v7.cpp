@@ -553,7 +553,7 @@ static inline void split_batch_dim_to_32bit_out(
     const at::Tensor& input,
     const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32, 
+    bool benchmark, bool deterministic, bool allow_tf32,
     int64_t max_worksize, func_t func_32bit) {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   const int64_t ni = input.numel();
