@@ -192,20 +192,25 @@ def wait_for_process(p):
     try:
         return p.wait()
     except KeyboardInterrupt:
+        print("Caught KeyboardInterrupt")
         # Give `p` a chance to handle KeyboardInterrupt. Without this,
         # `pytest` can't print errors it collected so far upon KeyboardInterrupt.
         exit_status = p.wait(timeout=5)
         if exit_status is not None:
+            print("After KeyboardInterrupt and wait with timeout 5, exit_status %d" % exit_status)
             return exit_status
         else:
+            print("Killing subprocess")
             p.kill()
             raise
-    except:  # noqa: B001,E722, copied from python core library
+    except Exception as e:  # noqa: B001,E722, copied from python core library
+        print("Caught exception; killing again?")
+        print(repr(e))
         p.kill()
         raise
     finally:
         # Always call p.wait() to ensure exit
-        p.wait()
+        return p.wait()
 
 def shell(command, cwd=None, env=None):
     sys.stdout.flush()
@@ -284,8 +289,10 @@ def run_tests(argv=UNITTEST_ARGS):
             command = [sys.executable] + argv + ['--log-suffix=-shard-{}'.format(i + 1)] + test_batches[i]
             processes.append(subprocess.Popen(command, universal_newlines=True))
         failed = False
-        for p in processes:
-            failed |= wait_for_process(p) != 0
+        for i, p in enumerate(processes):
+            code = wait_for_process(p)
+            print("Shard %d exit code %d" % (i, code))
+            failed |= (code != 0)
         assert not failed, "Some test shards have failed"
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
