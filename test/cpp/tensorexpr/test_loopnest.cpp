@@ -3925,8 +3925,10 @@ TEST(LoopNest, DISABLED_VectorizeUse) {
   KernelScope kernel_scope;
   constexpr int N = 8;
   Placeholder a("a", kFloat, {N});
-  Tensor* b = Compute("b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
-  Tensor* c = Compute("c", {{N, "n"}}, [&](const VarHandle& n) { return b->call(n) + 2.0f; });
+  Tensor* b = Compute(
+      "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
+  Tensor* c = Compute(
+      "c", {{N, "n"}}, [&](const VarHandle& n) { return b->call(n) + 2.0f; });
   LoopNest nest({c});
   auto loops = nest.getLoopStmtsFor(b);
   nest.vectorize(loops[0]);
