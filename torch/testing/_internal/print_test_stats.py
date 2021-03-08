@@ -708,7 +708,7 @@ class TestFile:
         if suite_name not in self.test_suites:
             self.test_suites[suite_name] = TestSuite(suite_name)
         if test_case.name in self.test_suites[suite_name].test_cases:
-            # We expect duplicate tests for test_cpp_extensions_aot, distributed/test_distributed_fork, 
+            # We expect duplicate tests for test_cpp_extensions_aot, distributed/test_distributed_fork,
             # and distributed/test_distributed_spawn. In these cases, we store the test case that took the longest,
             # as in these jobs, the duplicate tests are run in parallel.
             # For other unexpected cases, we should raise a warning.
@@ -718,7 +718,7 @@ class TestFile:
                self.name == 'cpp':  # The caffe2 cpp tests spawn duplicate test cases as well.
                 time_difference = self.test_suites[suite_name].replace(test_case)
                 self.total_time += time_difference
-            else: 
+            else:
                 raise RuntimeWarning(f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
         else:
             self.test_suites[suite_name].append(test_case)
@@ -818,8 +818,8 @@ def assemble_s3_object(
                         'cases': {
                             name: {
                                 'seconds': case.time,
-                                'status': 'skipped' if case.skipped else 
-                                          'errored' if case.errored else 
+                                'status': 'skipped' if case.skipped else
+                                          'errored' if case.errored else
                                           'failed' if case.failed else None
                             }
                             for name, case in suite.test_cases.items()

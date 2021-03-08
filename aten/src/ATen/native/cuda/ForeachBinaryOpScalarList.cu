@@ -20,9 +20,9 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<Scalar> s
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         multi_tensor_apply<2, opmath_t>(tensor_lists,
                                         scalars,
-                                        BinaryOpScalarListFunctor<scalar_t, 
+                                        BinaryOpScalarListFunctor<scalar_t,
                                                                   /* depth */ 2,
-                                                                  /* r_args_depth */ 1, 
+                                                                  /* r_args_depth */ 1,
                                                                   /* res_arg_index */ 1>(),
 
                                         Op<opmath_t>());
@@ -39,9 +39,9 @@ void foreach_binary_op_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
         using opmath_t = get_opmath_t<scalar_t>::opmath_t;
         multi_tensor_apply<1, opmath_t>(tensor_lists,
                                         scalars,
-                                        BinaryOpScalarListFunctor<scalar_t, 
+                                        BinaryOpScalarListFunctor<scalar_t,
                                                                   /* depth */ 1,
-                                                                  /* r_args_depth */ 1, 
+                                                                  /* r_args_depth */ 1,
                                                                   /* res_arg_index */ 0>(),
                                         Op<opmath_t>());
     });
