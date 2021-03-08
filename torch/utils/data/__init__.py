@@ -7,7 +7,7 @@ from torch.utils.data.dataset import \
 from torch.utils.data.dataset import IterableDataset as IterDataPipe
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader, _DatasetKind, get_worker_info
-from torch.utils.data.decorator import functional_datapipe, set_determinism, non_deterministic
+from torch.utils.data.decorator import functional_datapipe, guaranteed_datapipes_determinism, non_deterministic
 
 
 __all__ = ['Sampler', 'SequentialSampler', 'RandomSampler',
@@ -15,7 +15,8 @@ __all__ = ['Sampler', 'SequentialSampler', 'RandomSampler',
            'DistributedSampler', 'Dataset', 'IterableDataset', 'TensorDataset',
            'ConcatDataset', 'ChainDataset', 'Subset', 'random_split',
            'DataLoader', '_DatasetKind', 'get_worker_info',
-           'IterDataPipe', 'functional_datapipe', 'set_determinism', 'non_deterministic']
+           'IterDataPipe', 'functional_datapipe', 'guaranteed_datapipes_determinism',
+           'non_deterministic']
 
 
 ################################################################################
