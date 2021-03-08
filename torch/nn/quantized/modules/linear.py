@@ -228,15 +228,19 @@ class Linear(torch.nn.Module):
 
     # Function rather than property to make sure that JIT serialization doesn't
     # register this as an attribute
+
     def _weight_bias(self):
         return self._packed_params._weight_bias()
 
+    @torch.jit.export
     def weight(self):
         return self._weight_bias()[0]
 
+    @torch.jit.export
     def bias(self):
         return self._weight_bias()[1]
 
+    @torch.jit.export
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params.set_weight_bias(w, b)
 
