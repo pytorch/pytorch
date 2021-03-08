@@ -1466,10 +1466,10 @@ class TestSparse(TestCase):
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
 
-        with self.maybeWarnsRegex(UserWarning, 'floor_divide'):
+        with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
             y1 = x1 // 37.5
         y2 = x1.clone()
-        with self.maybeWarnsRegex(UserWarning, 'floor_divide'):
+        with self.assertWarnsOnceRegex(UserWarning, 'floor_divide'):
             y2.floor_divide_(37.5)
         expected = self.safeToDense(x1) // 37.5
         self.assertEqual(self.safeToDense(y1), expected)
@@ -3022,7 +3022,7 @@ class TestSparse(TestCase):
 
     def test_sparse_matmul(self):
         """
-        This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors. 
+        This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
         """
 
         def _indices2csr(indices, dim):
@@ -3134,10 +3134,10 @@ class TestSparse(TestCase):
             def fn(D1, D2):
                 return torch.sparse.mm(D1, D2).to_dense()
 
-            # For cuda, `nondet_tol` is set with `1e-5` 
+            # For cuda, `nondet_tol` is set with `1e-5`
             # This is because cuSparse sometimes returns approximate zero values like `~e-323`
-            # TODO: Check this cuSparse issue. 
-            # This happens when you do chain multiplication `torch.sparse.mm` operations 
+            # TODO: Check this cuSparse issue.
+            # This happens when you do chain multiplication `torch.sparse.mm` operations
             gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
             grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
@@ -3150,8 +3150,8 @@ class TestSparse(TestCase):
             # This is not a matrix
             self.assertRaises(RuntimeError, lambda: fn(3, 4, [2, 2, 2], [2, 2, 2]))
 
-            # Shapes does not 
-            self.assertRaisesRegex(RuntimeError, 
+            # Shapes does not
+            self.assertRaisesRegex(RuntimeError,
                                    r"mat1 and mat2 shapes cannot be multiplied \(2x3 and 4x2\)",
                                    lambda: fn(2, 10, [2, 3], [4, 2]))
 

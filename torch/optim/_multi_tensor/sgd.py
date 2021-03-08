@@ -37,7 +37,7 @@ class SGD(Optimizer):
                 p_{t+1} & = p_{t} - \text{lr} * v_{t+1},
             \end{aligned}
 
-        where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the 
+        where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the
         parameters, gradient, velocity, and momentum respectively.
 
         This is in contrast to Sutskever et. al. and
@@ -105,7 +105,7 @@ class SGD(Optimizer):
                     if p.grad.is_sparse:
                         has_sparse_grad = True
 
-                        if momentum != 0: 
+                        if momentum != 0:
                             raise RuntimeError('SGD does not support momentum for sparse gradients')
 
             if grads == []:
@@ -148,7 +148,7 @@ class SGD(Optimizer):
                 torch._foreach_add_(params_with_grad, grads, alpha=-group['lr'])
             else:
                 # foreach APIs dont support sparse
-                for i in range(len(params_with_grad)): 
+                for i in range(len(params_with_grad)):
                     params_with_grad[i].add_(grads[i], alpha=-group['lr'])
 
         return loss
