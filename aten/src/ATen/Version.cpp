@@ -114,7 +114,7 @@ std::string used_cpu_capability() {
     case native::CPUCapability::AVX2:
       ss << "AVX2";
       break;
-#endif      
+#endif
     default:
       break;
   }

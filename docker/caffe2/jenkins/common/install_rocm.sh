@@ -63,7 +63,7 @@ install_centos() {
                    rocprofiler-dev \
                    roctracer-dev
 }
- 
+
 # Install Python packages depending on the base OS
 if [ -f /etc/lsb-release ]; then
   install_ubuntu

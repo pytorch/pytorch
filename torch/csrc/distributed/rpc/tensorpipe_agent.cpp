@@ -9,6 +9,7 @@
 #include <fmt/format.h>
 #include <tensorpipe/tensorpipe.h>
 
+#include <torch/csrc/distributed/rpc/agent_utils.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -412,32 +413,13 @@ void TensorPipeAgent::removeFromTimeoutMap(uint64_t messageId) {
   }
 }
 
-void TensorPipeAgent::collectNames() {
-  const worker_id_t selfId = workerInfo_.id_;
-  const std::string& selfName = workerInfo_.name_;
+void TensorPipeAgent::prepareNames() {
+  auto nameToId = collectNames(
+      rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
 
-  std::vector<uint8_t> selfNameVector(
-      (uint8_t*)selfName.c_str(),
-      (uint8_t*)selfName.c_str() + selfName.length());
-  rankToNameStore_.set(c10::to_string(selfId), selfNameVector);
-
-  workerIdToInfo_.emplace(selfId, WorkerInfo(selfName, selfId));
-  workerNameToInfo_.emplace(selfName, WorkerInfo(selfName, selfId));
-  for (worker_id_t workerId = 0; workerId < worldSize_; ++workerId) {
-    if (workerId == selfId) {
-      continue;
-    }
-    std::vector<uint8_t> workerNameVector =
-        rankToNameStore_.get(c10::to_string(workerId));
-    std::string workerName(
-        (char*)workerNameVector.data(), workerNameVector.size());
-
-    TORCH_CHECK(
-        workerNameToInfo_.find(workerName) == workerNameToInfo_.end(),
-        "RPC worker name ",
-        workerName,
-        " is not unique.");
-
+  for (const auto& entry: nameToId) {
+    const auto& workerName = entry.first;
+    const auto& workerId = entry.second;
     workerIdToInfo_.emplace(workerId, WorkerInfo(workerName, workerId));
     workerNameToInfo_.emplace(workerName, WorkerInfo(workerName, workerId));
   }
@@ -464,7 +446,7 @@ TensorPipeAgent::TensorPipeAgent(
       nameToAddressStore_("addrs", store),
       worldSize_(worldSize),
       processGroup_(std::move(processGroup)) {
-  collectNames();
+  prepareNames();
 
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());

@@ -134,11 +134,11 @@ struct Vec256<c10::qint32> {
     Vec256<float> vf0 = rhs[0];
 
     vfloat32 vecf0 = vf0.vec0();
-    vfloat32 vecf1 = vf0.vec1(); 
+    vfloat32 vecf1 = vf0.vec1();
     vecf0 = vec_mul(vecf0, inverse_scale_v);
     vecf1 = vec_mul(vecf1, inverse_scale_v);
     vecf0 = vec_add(vec_rint(vecf0), vec_zero_point);
-    vecf1 = vec_add(vec_rint(vecf1), vec_zero_point);     
+    vecf1 = vec_add(vec_rint(vecf1), vec_zero_point);
     vint32 veci0  = vec_signed(vecf0);
     vint32 veci1  = vec_signed(vecf1);
 
@@ -171,7 +171,7 @@ struct Vec256<c10::qint32> {
       float multiplier,
       int32_t zero_point) {
     const vint32 vmin = vec_splats(std::numeric_limits<value_type>::min());
-    const vint32 vmax = vec_splats(std::numeric_limits<value_type>::max());        
+    const vint32 vmax = vec_splats(std::numeric_limits<value_type>::max());
     vfloat32 vec_mult = vec_splats(multiplier);
     vint32 vec_zero_point = vec_splats(zero_point);
     Vec256<c10::qint32> vi = inp[0];
