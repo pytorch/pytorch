@@ -3,7 +3,14 @@ from unittest import skipIf
 import inspect
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
-from torch.package import PackageExporter, PackageImporter, OrderedImporter, sys_importer
+from torch.package import (
+    PackageExporter,
+    PackageImporter,
+    OrderedImporter,
+    sys_importer,
+    EmptyMatchError,
+    DeniedModuleError,
+)
 from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -230,6 +237,41 @@ import module_a
         self.assertIsNot(package_a, package_a_im)
         self.assertIs(package_a.subpackage, package_a_im.subpackage)
 
+    def test_extern_glob_allow_empty(self):
+        """
+        Test that an error is thrown when a extern glob is specified with allow_empty=True
+        and no matching module is required during packaging.
+        """
+        filename = self.temp()
+        with self.assertRaisesRegex(EmptyMatchError, r'did not match any modules'):
+            with PackageExporter(filename, verbose=False) as exporter:
+                exporter.extern(include=['package_a.*'], allow_empty=False)
+                exporter.save_module('package_b.subpackage')
+
+    def test_deny(self):
+        """
+        Test marking packages as "deny" during export.
+        """
+        filename = self.temp()
+
+        with self.assertRaisesRegex(DeniedModuleError, 'required during packaging but has been explicitly blocklisted'):
+            with PackageExporter(filename, verbose=False) as exporter:
+                exporter.deny(['package_a.subpackage', 'module_a'])
+                exporter.require_module('package_a.subpackage')
+
+    def test_deny_glob(self):
+        """
+        Test marking packages as "deny" using globs instead of package names.
+        """
+        filename = self.temp()
+        with self.assertRaisesRegex(DeniedModuleError, 'required during packaging but has been explicitly blocklisted'):
+            with PackageExporter(filename, verbose=False) as exporter:
+                exporter.deny(['package_a.*', 'module_*'])
+                exporter.save_source_string('test_module', """\
+import package_a.subpackage
+import module_a
+""")
+
     def test_save_imported_module_fails(self):
         """
         Directly saving/requiring an PackageImported module should raise a specific error message.
@@ -350,6 +392,17 @@ import module_a
         r = m.result
         with self.assertRaisesRegex(NotImplementedError, 'was mocked out'):
             r()
+
+    def test_mock_glob_allow_empty(self):
+        """
+        Test that an error is thrown when a mock glob is specified with allow_empty=True
+        and no matching module is required during packaging.
+        """
+        filename = self.temp()
+        with self.assertRaisesRegex(EmptyMatchError, r'did not match any modules'):
+            with PackageExporter(filename, verbose=False) as exporter:
+                exporter.mock(include=['package_a.*'], allow_empty=False)
+                exporter.save_module('package_b.subpackage')
 
     @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
     def test_custom_requires(self):

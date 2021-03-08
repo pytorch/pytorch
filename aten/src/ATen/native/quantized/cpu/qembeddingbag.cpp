@@ -172,7 +172,7 @@ at::Tensor& embedding_bag_4bit_impl(
   }
 
   const std::vector<int64_t> shape = {output_size, D};
-  output.resize_(shape);
+  at::native::resize_(output, shape, c10::nullopt);
   auto* output_data = output.data_ptr<float>();
 
   const int64_t block_size = D;
@@ -314,7 +314,7 @@ at::Tensor& embedding_bag_byte_impl(
   } else {
     shape = {output_size, D};
   }
-  output.resize_(shape);
+  at::native::resize_(output, shape, c10::nullopt);
   auto* output_data = output.data_ptr<float>();
 
   const int index_size = indices.numel();

@@ -90,7 +90,7 @@ def all_gather(tensor, group=dist.group.WORLD):
     Returns:
         tuple[Tensor]): Output of the collective.
 
-    """    
+    """
     return _AllGather.apply(group, tensor)
 
 

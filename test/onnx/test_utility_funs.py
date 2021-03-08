@@ -240,7 +240,7 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
-        x = torch.randn(2, 3, 4, 5, 8, 7) 
+        x = torch.randn(2, 3, 4, 5, 8, 7)
         graph, _, __ = self._model_to_graph(PReluModel(), x)
 
         for node in graph.nodes():
