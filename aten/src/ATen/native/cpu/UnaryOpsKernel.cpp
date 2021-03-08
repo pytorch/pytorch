@@ -599,18 +599,19 @@ static void rsqrt_kernel(TensorIterator& iter) {
 }
 
 static void entr_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.common_dtype(), "entr_cpu", [&] {
-    cpu_kernel(iter, [](scalar_t x) -> scalar_t {
-      if (::isnan(x)){
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, iter.common_dtype(), "entr_cpu", [&] {
+        cpu_kernel(iter, [](scalar_t x) -> scalar_t {
+          if (at::_isnan(x)) {
             return x;
-      } else if (x > 0) {
-        return -x * std::log(x);
-      } else if (x == 0) {
-        return static_cast<scalar_t>(0);
-      }
-      return static_cast<scalar_t>(-INFINITY);
-    });
-  });
+          } else if (x > 0) {
+            return -x * std::log(x);
+          } else if (x == 0) {
+            return static_cast<scalar_t>(0);
+          }
+          return static_cast<scalar_t>(-INFINITY);
+        });
+      });
 }
 
 // TODO: Disable cont. branch to test more risky code

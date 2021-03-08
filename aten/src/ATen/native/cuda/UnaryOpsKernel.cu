@@ -260,10 +260,9 @@ void entr_kernel_cuda(TensorIterator& iter) {
       "entr_cuda",
       [&]() {
         gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t x) -> scalar_t {
-          if (::isnan(x)){
+          if (at::_isnan(x)) {
             return x;
-          }
-          else if (x > 0) {
+          } else if (x > 0) {
             return -x * std::log(x);
           } else if (x == 0) {
             return 0;
