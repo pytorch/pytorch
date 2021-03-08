@@ -539,8 +539,8 @@ void exponential_kernel(TensorIterator& iter, double lambda_, RNG gen) {
       // fix it up to be equal to numeric_limits::epsilon, which is equivalent to rand==1.0 being squashed to 1-epsilon
       auto val = transformation::exponential<accscalar_t>(rand, lambda);
       //transformation result is always non-negative
-      if (val < std::numeric_limits<accscalar_t>::epsilon()) {
-        val = std::numeric_limits<accscalar_t>::epsilon();
+      if (val < std::numeric_limits<accscalar_t>::epsilon())/2 {
+        val = std::numeric_limits<accscalar_t>::epsilon()/2;
       }
       return static_cast<scalar_t>(val);
     };
