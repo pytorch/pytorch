@@ -22,8 +22,6 @@
 #include <limits>
 #include <numeric>
 #include <vector>
-#include "Functions.h"
-#include "c10/core/MemoryFormat.h"
 
 
 namespace at {
