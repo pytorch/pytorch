@@ -22,6 +22,8 @@
 #include <limits>
 #include <numeric>
 #include <vector>
+#include "Functions.h"
+#include "c10/core/MemoryFormat.h"
 
 
 namespace at {
@@ -196,33 +198,85 @@ Tensor pinverse(const Tensor& self, double rcond) {
 }
 
 Tensor& linalg_matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
+  squareCheckInputs(self);
   checkSameDevice("matrix_power", result, self);
   checkLinalgCompatibleDtype("matrix_power", result, self);
   at::native::resize_output(result, self.sizes());
-  result.copy_(at::native::linalg_matrix_power(self, n));
+
+  // Fast paths for exponents <= 3
+  if (n == 0) {
+    return result.copy_(at::eye(self.size(-2), self.options()));
+  } else if (n == 1) {
+    return result.copy_(self);
+  } else if (n == -1) {
+    return at::linalg_inv_out(result, self);
+  }
+
+  auto a = n < 0 ? at::linalg_inv(self) : self;
+  n = std::abs(n);
+
+  if (n == 2) {
+    return at::matmul_out(result, a, a);
+  } else if (n == 3) {
+    return at::matmul_out(result, at::matmul(a, a), a);
+  }
+
+  // This is a binary decomposition of n.
+  // Moving from the least significant bit to the most significant bit
+  // This is done to reduce the number of matrix multiplications
+  // by raising the input matrix in powers of 2
+  // The total number of matrix multiplications are
+  // number of bits + number of bits that equal 1 ~ O(log n)
+  // instead of O(n)
+  Tensor z, res;
+  while (true) {
+    auto bit = n % 2;
+    n = n / 2;
+    z = z.defined() ? at::matmul(z, z) : a;
+    if (bit == 1) {
+      if (n <= 0) {
+        if (res.defined()) {
+          at::matmul_out(result, res, z);
+        } else {
+          result.copy_(z);
+        }
+        break;
+      } else {
+        res = res.defined() ? at::matmul(res, z) : z;
+      }
+    }
+  }
+
   return result;
 }
 
 Tensor linalg_matrix_power(const Tensor& self, int64_t n) {
   squareCheckInputs(self);
 
-  TORCH_CHECK(
-      at::isFloatingType(self.scalar_type()) ||
-          at::isComplexType(self.scalar_type()),
-      "matrix_power: expected input tensor of floating or complex type but got ",
-      self.scalar_type());
+  // For n=0 we return the identity matrix of the same shape
+  // as input. We are cloning here to include the result in
+  // the autograd graph.
+  if (n == 0) {
+    return self.clone(at::MemoryFormat::Contiguous)
+        .copy_(at::eye(self.size(-2), self.options()));
+  }
 
-  auto a = n < 0 ? self.inverse() : self.clone(at::MemoryFormat::Contiguous);
+  // Handle n=1 separately as it's the only other case
+  // for which input needs to be cloned
+  if (n == 1) {
+    return self.clone(at::MemoryFormat::Contiguous);
+  }
+
+  auto a = n < 0 ? at::linalg_inv(self) : self;
   n = std::abs(n);
 
-  if (n == 0) {
-    return a.copy_(at::native::eye(self.size(-2), self.options()));
-  } else if (n == 1) {
+  // Fast paths for exponents <= 3
+  if (n == 1) {
     return a;
   } else if (n == 2) {
-    return at::native::matmul(a, a);
+    return at::matmul(a, a);
   } else if (n == 3) {
-    return at::native::matmul(at::native::matmul(a, a), a);
+    return at::matmul(at::matmul(a, a), a);
   }
 
   // This is a binary decomposition of n.
@@ -234,13 +288,13 @@ Tensor linalg_matrix_power(const Tensor& self, int64_t n) {
   // instead of O(n)
   Tensor z, result;
   while (n > 0) {
-    z = z.defined() ? at::native::matmul(z, z) : a;
+    z = z.defined() ? at::matmul(z, z) : a;
     if (n % 2 == 1) {
-      result = result.defined() ? at::native::matmul(result, z) : z;
+      result = result.defined() ? at::matmul(result, z) : z;
     }
     n = n / 2;
   }
-  
+
   return result;
 }
 
@@ -1718,7 +1772,7 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, optio
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   Tensor result_;
   auto ord = opt_ord.value_or(2.0).toDouble();
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "matrix norm only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "matrix norm only supports strided layout, got: ", self.layout());

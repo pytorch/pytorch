@@ -1,4 +1,6 @@
 #include <c10d/logger.hpp>
+#include <c10d/Utils.hpp>
+#include <fmt/format.h>
 
 namespace c10d {
 
@@ -10,16 +12,35 @@ namespace {
 
 const int kMilliSecondToNanosSecond = 1000000;
 
-std::string parse_env(const char* env_var_name) {
-  char* stringValue = std::getenv(env_var_name);
-  std::string res = "N/A";
-  if (stringValue != nullptr) {
-    res = stringValue;
-  }
-  return res;
-}
-
 } // anonymous namespace
+
+std::ostream& operator<<(
+  std::ostream& output,
+  const Logger& logger
+) {
+  auto& ddp_logging_data = logger.ddp_logging_data_;
+
+  std::string loggerInfo = fmt::format(
+    "[Rank {} / {}] Training {} unused_parameter_size={} \n "
+    "Avg forward compute time: {} \n Avg backward compute time: {} \n"
+    "Avg backward comm. time: {} \n Avg backward comm/comp overlap time: {}",
+    ddp_logging_data->rank,
+    ddp_logging_data->world_size,
+    ddp_logging_data->module_name,
+    ddp_logging_data->unused_parameter_size,
+    ddp_logging_data->avg_forward_compute_time,
+    ddp_logging_data->avg_backward_compute_time,
+    ddp_logging_data->avg_backward_comm_time,
+    ddp_logging_data->avg_backward_compute_comm_overlap_time
+  );
+
+  if (ddp_logging_data->comm_hook != "") {
+    loggerInfo +=
+        fmt::format("\n Gradient comm. hook: {}", ddp_logging_data->comm_hook);
+  }
+
+  return output << loggerInfo;
+}
 
 Logger::Logger(std::shared_ptr<c10d::Reducer> reducer) {
   reducer_ = reducer;
@@ -35,6 +56,7 @@ void Logger::set_env_variables() {
   ddp_logging_data_->gloo_device_transport = parse_env("GLOO_DEVICE_TRANSPORT");
   ddp_logging_data_->nccl_socket_ifname = parse_env("NCCL_SOCKET_IFNAME");
   ddp_logging_data_->nccl_blocking_wait = parse_env("NCCL_BLOCKING_WAIT");
+  ddp_logging_data_->nccl_async_error_handling = parse_env("NCCL_ASYNC_ERROR_HANDLING");
   ddp_logging_data_->nccl_debug = parse_env("NCCL_DEBUG");
   ddp_logging_data_->nccl_nthreads = parse_env("NCCL_NTHREADS");
   ddp_logging_data_->nccl_ib_timeout = parse_env("NCCL_IB_TIMEOUT");
@@ -60,6 +82,10 @@ std::vector<int> Logger::get_bucket_sizes() {
     bucket_sizes.push_back(bucket_size);
   }
   return bucket_sizes;
+}
+
+void Logger::set_comm_hook(const std::string& hook) {
+  ddp_logging_data_->comm_hook = hook;
 }
 
 void Logger::set_construction_data_and_log(
@@ -91,6 +117,14 @@ void Logger::set_construction_data_and_log(
   ddp_logging_data_->gradient_as_bucket_view =
       reducer_->gradient_as_bucket_view_;
   ddp_logging_data_->backend_name = reducer_->process_group_->getBackendName();
+
+  if (parseDistDebugLevel() != DistributedDebugLevel::OFF) {
+    std::string initInfo = fmt::format(
+      "[Rank {}]: DDP Initialized with: \n",
+      ddp_logging_data_->rank
+    );
+    LOG(INFO) << initInfo << *ddp_logging_data_;
+  }
 
   LogPyTorchDDPUsage(*ddp_logging_data_);
 }
@@ -233,6 +267,11 @@ void Logger::set_runtime_stats_and_log() {
         reducer_->cpu_timer_.backward_comm_start_time,
         reducer_->cpu_timer_.backward_compute_end_time);
   }
+  // Log runtime stats to stderr if TORCH_DISTRIBUTED_DEBUG=DETAIL is enabled.
+  if (parseDistDebugLevel() == DistributedDebugLevel::DETAIL) {
+    LOG(INFO) << *this;
+  }
+
   // Log runtime (e.g. avg performance) stats at the beginning and also
   // after a larger number of iterations. Choosing 10/1000/10000 is
   // not scientific here, it assumes most of applications will run
