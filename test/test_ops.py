@@ -547,18 +547,21 @@ class TestCommon(JitCommonTestCase):
         # Case 3: out= with the correct dtype and device, but an empty
         #   tensor.
         #   Expected behavior: resize without warning.
-        # TODO: this currently asserts the op throws NO warnings,
-        #   which may be too strict (if the op is deprecated, for example)
         def _case_three_transform(t):
             return make_tensor((0,),
                                dtype=t.dtype,
                                device=t.device)
 
         out = _apply_out_transform(_case_three_transform, expected)
-        with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             op_out(out=out)
-        self.assertEqual(len(w), 0)
+
+        # Verifies no warning is a resize warning
+        for w in caught:
+            if "An output with one or more elements" in str(w.message):
+                self.fail("Resizing an out= argument with no elements threw a resize warning!")
+
         self.assertEqual(expected, out)
 
         # Case 4: out= with correct shape and dtype, but wrong device.

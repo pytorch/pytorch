@@ -1501,6 +1501,8 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_amax_amin,
            skips=(
+               # amax does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
                # Reference: https://github.com/pytorch/pytorch/issues/48978
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.bfloat16]),)),
@@ -1512,6 +1514,8 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_amax_amin,
            skips=(
+               # amin does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
                # Reference: https://github.com/pytorch/pytorch/issues/48978
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.bfloat16]),)),
