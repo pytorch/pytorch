@@ -832,6 +832,75 @@ class TestTensorCreation(TestCase):
                     tp = t.permute(p)
                     compare_helper_(like_fn, tp)
 
+    def _test_special_splits(self, torch_fn, np_fn, dim_range, dim, device, dtype):
+        def get_valid_index_list(sizes, target):
+            ind_list = []
+            curr = 0
+            for i in range(sizes):
+                ind_list += [random.randint(curr, target)]
+                curr = ind_list[-1]
+            return ind_list
+
+        input_sizes = [
+            (0,),
+            (10,),
+            (10, 0),
+            (0, 10),
+            (4, 10),
+            (12, 3),
+            (1, 2, 4),
+            (3, 7, 8),
+            (0, 7, 0),
+            (8, 0, 1),
+            (1, 3, 5, 13),
+            (2, 4, 6, 8),
+            (3, 0, 1, 2),
+            (6, 0, 0, 6),
+            (0, 5, 1, 0)
+        ]
+        for input_size in input_sizes:
+            a_base = self._generate_input(input_size, dtype, device, with_extremal=False)
+            if dim_range[0] <= len(input_size) <= dim_range[1]:
+                for a in [a_base, a_base.t()] if a_base.dim() < 2 else [a_base]:
+                    a_n = a.cpu().numpy()
+                    for sections in range(1, a.size(dim) + 1):
+                        if a.size(dim) % sections == 0:
+                            result = torch_fn(a, sections)
+                            result_n = np_fn(a_n, sections)
+                            self.assertEqual(result, result_n)
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, "tensor split does not result in an equal division"):
+                                torch_fn(a, sections)
+                            with self.assertRaises(ValueError):
+                                np_fn(a_n, sections)
+
+                    for size in range(1, 5):
+                        index_list = get_valid_index_list(size, a.size(dim))
+                        result = torch_fn(a, index_list)
+                        result_n = np_fn(a_n, index_list)
+                        self.assertEqual(result, result_n)
+            elif torch_fn is not torch.hsplit:
+                with self.assertRaises(RuntimeError):
+                    torch_fn(a_base, random.randint(1, 10))
+                with self.assertRaises(ValueError):
+                    np_fn(a_base.cpu().numpy(), random.randint(1, 10))
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
+    def test_hsplit(self, device, dtype):
+        self._test_special_splits(torch.hsplit, np.hsplit, (1, 1), 0, device, dtype)
+        self._test_special_splits(torch.hsplit, np.hsplit, (2, 4), 1, device, dtype)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
+    def test_vsplit(self, device, dtype):
+        self._test_special_splits(torch.vsplit, np.vsplit, (2, 4), 0, device, dtype)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
+    def test_dsplit(self, device, dtype):
+        self._test_special_splits(torch.dsplit, np.dsplit, (3, 4), 2, device, dtype)
+
     def _test_special_stacks(self, dim, at_least_dim, torch_fn, np_fn, device, dtype):
         # Test error for non-tuple argument
         t = torch.randn(10)

@@ -4388,6 +4388,24 @@ unsafe_chunk(chunks, dim=0) -> List of Tensors
 See :func:`torch.unsafe_chunk`
 """)
 
+add_docstr_all('hsplit',
+               r"""
+hsplit(split_size_or_sections) -> List of Tensors
+See :func:`torch.hsplit`
+""")
+
+add_docstr_all('vsplit',
+               r"""
+vsplit(split_size_or_sections) -> List of Tensors
+See :func:`torch.vsplit`
+""")
+
+add_docstr_all('dsplit',
+               r"""
+dsplit(split_size_or_sections) -> List of Tensors
+See :func:`torch.dsplit`
+""")
+
 add_docstr_all('unsafe_split',
                r"""
 unsafe_split(split_size, dim=0) -> List of Tensors

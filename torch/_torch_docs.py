@@ -1481,6 +1481,134 @@ on inplace modification of the outputs.
     silently incorrect.
 """)
 
+add_docstr(torch.hsplit,
+           r"""
+hsplit(input, indices_or_sections) -> List of Tensors
+
+Splits :attr:`input`, a tensor with one or more dimensions, into multiple tensors
+horizontally (column wise) according to :attr:`indices_or_sections`. Each split
+is a view of :attr:`input`.
+
+If :attr:`input` is one dimensional this is equivalent to calling
+torch.tensor_split(input, indices_or_sections, dim=0) (the split dimension is
+zero), and if :attr:`input` has two or more dimensions it's equivalent to calling
+torch.tensor_split(input, indices_or_sections, dim=1) (the split dimension is 1),
+except that if :attr:`indices_or_sections` is an integer it must evenly divide
+the split dimension or a runtime error will be thrown.
+
+This function is based on NumPy's :func:`numpy.hsplit`.
+
+Args:
+    input (Tensor): tensor to split.
+    indices_or_sections (int or list(ints)): See argument in :func:`torch.tensor_split`.
+
+Example::
+    >>> x = torch.arange(16.0).reshape(4,4)
+    >>> x
+    tensor([[ 0.,  1.,  2.,  3.],
+            [ 4.,  5.,  6.,  7.],
+            [ 8.,  9., 10., 11.],
+            [12., 13., 14., 15.]])
+    >>> torch.hsplit(x, 2)
+    (tensor([[ 0.,  1.],
+            [ 4.,  5.],
+            [ 8.,  9.],
+            [12., 13.]]), tensor([[ 2.,  3.],
+            [ 6.,  7.],
+            [10., 11.],
+            [14., 15.]]))
+    >>> torch.hsplit(x, [3, 6])
+    (tensor([[ 0.,  1.,  2.],
+            [ 4.,  5.,  6.],
+            [ 8.,  9., 10.],
+            [12., 13., 14.]]), tensor([[ 3.],
+            [ 7.],
+            [11.],
+            [15.]]), tensor([], size=(4, 0)))
+
+""")
+
+add_docstr(torch.vsplit,
+           r"""
+vsplit(input, indices_or_sections) -> List of Tensors
+
+Splits :attr:`input`, a tensor with two or more dimensions, into multiple tensors
+vertically (row wise) according to :attr:`indices_or_sections`. Each split
+is a view of :attr:`input`.
+
+This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=1)
+(the split dimension is 1), except that if :attr:`indices_or_sections` is an integer
+it must evenly divide the split dimension or a runtime error will be thrown.
+
+This function is based on NumPy's :func:`numpy.vsplit`.
+
+Args:
+    input (Tensor): tensor to split.
+    indices_or_sections (int or list(ints)): See argument in :func:`torch.tensor_split`.
+
+Example::
+    >>> x = torch.arange(16.0).reshape(4,4)
+    >>> x
+    tensor([[ 0.,  1.,  2.,  3.],
+            [ 4.,  5.,  6.,  7.],
+            [ 8.,  9., 10., 11.],
+            [12., 13., 14., 15.]])
+    >>> torch.vsplit(x, 2)
+    (tensor([[0., 1., 2., 3.],
+            [4., 5., 6., 7.]]), tensor([[ 8.,  9., 10., 11.],
+            [12., 13., 14., 15.]]))
+    >>> torch.vsplit(x, [3, 6])
+    (tensor([[ 0.,  1.,  2.,  3.],
+            [ 4.,  5.,  6.,  7.],
+            [ 8.,  9., 10., 11.]]), tensor([[12., 13., 14., 15.]]), tensor([], size=(0, 4)))
+
+""")
+
+add_docstr(torch.dsplit,
+           r"""
+dsplit(input, indices_or_sections) -> List of Tensors
+
+Splits :attr:`input`, a tensor with three or more dimensions, into multiple tensors
+along the third axis (depth wise) according to :attr:`indices_or_sections`. Each split
+is a view of :attr:`input`.
+
+This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=2)
+(the split dimension is 1), except that if :attr:`indices_or_sections` is an integer
+it must evenly divide the split dimension or a runtime error will be thrown.
+
+This function is based on NumPy's :func:`numpy.dsplit`.
+
+Args:
+    input (Tensor): tensor to split.
+    indices_or_sections (int or list(ints)): See argument in :func:`torch.tensor_split`.
+
+Example::
+    >>> x = torch.arange(16.0).reshape(2, 2, 4)
+    >>> x
+    tensor([[[ 0.,  1.,  2.,  3.],
+             [ 4.,  5.,  6.,  7.]],
+            [[ 8.,  9., 10., 11.],
+             [12., 13., 14., 15.]]])
+    >>> torch.dsplit(x, 2)
+    (tensor([[[ 0.,  1.],
+            [ 4.,  5.]],
+           [[ 8.,  9.],
+            [12., 13.]]]), tensor([[[ 2.,  3.],
+            [ 6.,  7.]],
+           [[10., 11.],
+            [14., 15.]]]))
+
+    >>> torch.dsplit(x, [3, 6])
+    (tensor([[[ 0.,  1.,  2.],
+            [ 4.,  5.,  6.]],
+           [[ 8.,  9., 10.],
+            [12., 13., 14.]]]), tensor([[[ 3.],
+            [ 7.]],
+           [[11.],
+            [15.]]]), tensor([], size=(2, 2, 0)))
+
+""")
+
 add_docstr(torch.can_cast,
            r"""
 can_cast(from, to) -> bool
