@@ -6089,6 +6089,11 @@ class TestONNXRuntime(unittest.TestCase):
         embedding_matrix = torch.rand(10, 3)
         self.run_test(model, (x, embedding_matrix))
 
+        x = torch.randint(4, (4, 3, 2))
+        x[2] = 1
+        x[0][1] = 1
+        self.run_test(model, (x, embedding_matrix))
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)

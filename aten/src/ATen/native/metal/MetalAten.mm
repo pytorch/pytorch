@@ -1,6 +1,5 @@
 #import <ATen/native/metal/MetalTensor.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
-#import <ATen/native/metal/MetalUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNOps.h>
 

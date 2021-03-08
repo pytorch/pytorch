@@ -480,10 +480,16 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     # if (padding_idx >= 0) {
     #   embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
     # }
+    # auto out = weight.index_select(0, indices.reshape(-1));
+    # zerofill_padding(out);
+    # return out.view(size);
     weight = g.op("Gather", weight, indices)
     if (padding_idx >= 0):
         mask = eq(g, indices, g.op("Constant", value_t=torch.tensor(padding_idx)))
-        mask = reshape(g, mask, g.op("Constant", value_t=torch.tensor([-1, 1], dtype=torch.int64)))
+        if sym_help._export_onnx_opset_version < 11:
+            mask = unsqueeze(g, mask, -1)
+        else:
+            mask = sym_help._unsqueeze_helper(g, mask, [-1])
         weight = masked_fill(g, weight, mask, torch.tensor(0.))
     return weight
 
