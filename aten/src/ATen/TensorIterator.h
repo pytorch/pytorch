@@ -159,7 +159,6 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   //
   // The `size` often matches shape[0], but may be smaller due to
   // parallelization of the inner loop.
-  using loop_t = c10::function_ref<void(char** data, const int64_t* strides, int64_t size)>;
   using loop2d_t = c10::function_ref<void(char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
 
   using loop_subiter_t = c10::function_ref<void(TensorIteratorBase& subiter)>;
@@ -243,12 +242,56 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     return c10::fetch_and_cast<T>(op.tensor.scalar_type(), op.data);
   }
 
-  void for_each(loop_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
+  template <typename loop1d_t,
+            std::enable_if_t<std::is_convertible<
+              loop1d_t, c10::function_ref<void(char**, const int64_t* strides, int64_t size)>
+            >::value, int> = 0>
+  void for_each(loop1d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE) {
+    const auto ntensor = ntensors();
+    PtrVector data(ntensor);
+    auto loop2d = [&](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
+      data.assign(base, base + ntensor);
+      const int64_t* outer_strides = &strides[ntensor];
+      for (int64_t i = 0; i < size1; i++) {
+        if (i > 0) {
+          for (int arg = 0; arg < ntensor; arg++) {
+            data[arg] += outer_strides[arg];
+          }
+        }
+        loop(data.data(), strides, size0);
+      }
+    };
+
+    for_each(loop2d, grain_size);
+  }
+
   void for_each(loop2d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
 
   void parallel_reduce(loop2d_t loop);
 
-  void serial_for_each(loop_t loop, Range range) const;
+  template <typename loop1d_t,
+            std::enable_if_t<std::is_convertible<
+              loop1d_t, c10::function_ref<void(char**, const int64_t* strides, int64_t size)>
+            >::value, int> = 0>
+  void serial_for_each(loop1d_t loop, Range range) {
+    const auto ntensor = ntensors();
+    PtrVector data(ntensor);
+    auto loop2d = [&](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
+      data.assign(base, base + ntensor);
+      const int64_t* outer_strides = &strides[ntensor];
+      for (int64_t i = 0; i < size1; i++) {
+        if (i > 0) {
+          for (int arg = 0; arg < ntensor; arg++) {
+            data[arg] += outer_strides[arg];
+          }
+        }
+        loop(data.data(), strides, size0);
+      }
+    };
+
+    serial_for_each(loop2d, range);
+  }
+
   void serial_for_each(loop2d_t loop, Range range) const;
 
   /// Create a strides array for a Tensor with shape of this iterator. The

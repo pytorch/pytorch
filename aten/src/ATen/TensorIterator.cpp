@@ -12,7 +12,6 @@ namespace at {
 
 using DimMask = TensorIteratorBase::DimMask;
 using PtrVector = TensorIteratorBase::PtrVector;
-using loop_t = TensorIteratorBase::loop_t;
 using loop2d_t = TensorIteratorBase::loop2d_t;
 using StrideVector = TensorIteratorBase::StrideVector;
 
@@ -608,25 +607,6 @@ int TensorIteratorBase::num_reduce_dims() const {
   return count;
 }
 
-#define LOOP_WRAPPER(ntensor, loop) \
-  [=](char** base, const int64_t* strides, int64_t size0, int64_t size1) { \
-    auto data = PtrVector(base, base + ntensor);                          \
-    const int64_t* outer_strides = &strides[ntensor];                     \
-                                                                          \
-    for (int64_t i = 0; i < size1; i++) {                                 \
-      if (i > 0) {                                                        \
-        for (int arg = 0; arg < ntensor; arg++) {                         \
-          data[arg] += outer_strides[arg];                                \
-        }                                                                 \
-      }                                                                   \
-      loop(data.data(), strides, size0);                               \
-    }                                                                     \
-  }
-
-void TensorIteratorBase::for_each(loop_t loop, int64_t grain_size) {
-  for_each(LOOP_WRAPPER(ntensors(), loop), grain_size);
-}
-
 void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
   int64_t numel = this->numel();
   if (numel == 0) {
@@ -648,10 +628,6 @@ StrideVector TensorIteratorBase::get_strides() const {
     }
   }
   return strides;
-}
-
-void TensorIteratorBase::serial_for_each(loop_t loop, Range range) const {
-  serial_for_each(LOOP_WRAPPER(ntensors(), loop), range);
 }
 
 void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
