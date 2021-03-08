@@ -5036,8 +5036,7 @@ Example::
     tensor(9)
 """.format(**common_args))
 
-add_docstr(torch.matrix_power,
-           r"""
+add_docstr(torch.matrix_power, r"""
 matrix_power(input, n) -> Tensor
 
 Returns the matrix raised to the power :attr:`n` for square matrices.
@@ -5047,6 +5046,8 @@ If :attr:`n` is negative, then the inverse of the matrix (if invertible) is
 raised to the power :attr:`n`.  For a batch of matrices, the batched inverse
 (if invertible) is raised to the power :attr:`n`. If :attr:`n` is 0, then an identity matrix
 is returned.
+
+.. note:: :func:`torch.matrix_power` is deprecated, use :func:`torch.linalg.matrix_power` instead.
 
 Args:
     {input}
