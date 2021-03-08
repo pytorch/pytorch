@@ -1,7 +1,7 @@
 from tools.codegen.model import *
 
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 
 from typing import Union, List
 

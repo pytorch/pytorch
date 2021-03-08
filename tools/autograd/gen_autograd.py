@@ -23,7 +23,10 @@ torch/csrc/autograd/generated/
 
 import argparse
 import os
-import tools.codegen.api.cpp as cpp
+# Favoring from...to instead of import...as
+# due to a discrepancy between them up to Python version 3.6
+# https://stackoverflow.com/questions/24807434/imports-in-init-py-and-import-as-statement
+from tools.codegen.api import cpp
 from tools.codegen.api.autograd import *
 from tools.codegen.api.types import *
 from tools.codegen.gen import parse_native_yaml

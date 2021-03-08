@@ -32,7 +32,7 @@ from .gen_trace_type import (
 
 from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.gen import FileManager
 from tools.codegen.context import with_native_function
