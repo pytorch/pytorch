@@ -2005,8 +2005,8 @@ def repeat_interleave(g, self, repeats, dim=None):
     input_sizes[dim], input_sizes_temp[dim] = -1, 1
     for idx, r_split in enumerate(r_splits):
         i_split = unsqueeze(g, i_splits[idx], dim + 1)
-        r_concat = [g.op("Constant", value_t=torch.LongTensor(input_sizes_temp[:dim + 1])), 
-                    r_split, 
+        r_concat = [g.op("Constant", value_t=torch.LongTensor(input_sizes_temp[:dim + 1])),
+                    r_split,
                     g.op("Constant", value_t=torch.LongTensor(input_sizes_temp[dim + 1:]))]
         r_concat = g.op("Concat", *r_concat, axis_i=0)
         i_split = expand(g, i_split, r_concat, None)
