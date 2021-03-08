@@ -207,30 +207,24 @@ Tensor upsample_nearest2d_vec(
 Tensor add_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
-  TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
-  TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
   return mpscnn::add(input1, input2.is_metal() ? input2 : input2.metal());
 }
 
 Tensor& add__Tensor(Tensor& input1, const Tensor& input2, Scalar alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
-  TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
-  TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
   return mpscnn::add_(input1, input2.is_metal() ? input2 : input2.metal());
 }
 
 Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
-  TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
   return mpscnn::sub(input1, input2.is_metal() ? input2 : input2.metal());
 }
 
 Tensor mul_Tensor(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
-  TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
   return mpscnn::mul(input1, input2.is_metal() ? input2 : input2.metal());
 }
 
