@@ -501,6 +501,7 @@ class RendezvousEnvTest(TestCase):
             return d
 
         with Env(without(vars, "WORLD_SIZE")):
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             with self.assertRaisesRegex(ValueError, "WORLD_SIZE expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
@@ -510,6 +511,7 @@ class RendezvousEnvTest(TestCase):
             c10d.destroy_process_group()
 
         with Env(without(vars, "RANK")):
+            self.assertEqual(None, os.environ.get("RANK"))
             with self.assertRaisesRegex(ValueError, "RANK expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
@@ -519,6 +521,8 @@ class RendezvousEnvTest(TestCase):
             c10d.destroy_process_group()
 
         with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+            self.assertEqual(None, os.environ.get("RANK"))
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             c10d.init_process_group(backend="nccl", rank=0, world_size=1)
             self.assertEqual(c10d.get_rank(), 0)
             self.assertEqual(c10d.get_world_size(), 1)
@@ -531,26 +535,32 @@ class RendezvousEnvTest(TestCase):
             c10d.destroy_process_group()
 
         with Env(without(vars, "MASTER_ADDR")):
+            self.assertEqual(None, os.environ.get("MASTER_ADDR"))
             with self.assertRaisesRegex(ValueError, "MASTER_ADDR expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
 
         with Env(without(vars, "MASTER_PORT")):
+            self.assertEqual(None, os.environ.get("MASTER_PORT"))
             with self.assertRaisesRegex(ValueError, "MASTER_PORT expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
 
         with Env(without(vars, "WORLD_SIZE")):
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             gen = c10d.rendezvous("env://?world_size={}".format(1))
             _, _, size = next(gen)
             self.assertEqual(size, 1)
 
         with Env(without(vars, "RANK")):
+            self.assertEqual(None, os.environ.get("RANK"))
             gen = c10d.rendezvous("env://?rank={}".format(0))
             _, rank, _ = next(gen)
             self.assertEqual(rank, 0)
 
         with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+            self.assertEqual(None, os.environ.get("RANK"))
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             gen = c10d.rendezvous("env://?rank={}&world_size={}".format(0, 1))
             _, rank, size = next(gen)
             self.assertEqual(rank, 0)
