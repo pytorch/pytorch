@@ -598,6 +598,21 @@ static void rsqrt_kernel(TensorIterator& iter) {
   });
 }
 
+static void entr_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.common_dtype(), "entr_cpu", [&] {
+    cpu_kernel(iter, [](scalar_t x) -> scalar_t {
+      if (::isnan(x)){
+            return x;
+      } else if (x > 0) {
+        return -x * std::log(x);
+      } else if (x == 0) {
+        return static_cast<scalar_t>(0);
+      }
+      return static_cast<scalar_t>(-INFINITY);
+    });
+  });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -688,8 +703,8 @@ REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
-REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel)
-
+REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel);
+REGISTER_DISPATCH(entr_stub, &entr_kernel);
 
 IMPLEMENT_COMPLEX_KERNEL(acos)
 IMPLEMENT_COMPLEX_KERNEL(asin)
