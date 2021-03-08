@@ -241,7 +241,7 @@ OPERATOR_SCHEMA(TopK)
       return out;
     })
     .SetDoc(R"DOC(
-Retrieve the top-K elements of the last dimension. 
+Retrieve the top-K elements of the last dimension.
 Given an input tensor of shape $(a_1, a_2, ..., a_n, r)$. `k` can be passed as an integer argument or a 1D tensor containing a single integer.
 Returns up to three outputs:
 
