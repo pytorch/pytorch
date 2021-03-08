@@ -476,7 +476,7 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     if scale_grad_by_freq and sym_help._training_mode:
         raise RuntimeError('Unsupported: ONNX export of embedding with scale_grad_by_freq=True '
                            'for training mode. ONNX does not support scaling the gradients.')
-    # To match the torch operator behavior for padding_idx: 
+    # To match the torch operator behavior for padding_idx:
     # if (padding_idx >= 0) {
     #   embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
     # }
