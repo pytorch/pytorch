@@ -340,6 +340,9 @@ def _decide_input_format(model, args):
     except AttributeError:
         warnings.warn("Model has no forward function")
         return args
+    except ValueError:
+        warnings.warn("Model has no forward function")
+        return args
     # Cases of models with no input args
     except IndexError:
         warnings.warn("No input args")
