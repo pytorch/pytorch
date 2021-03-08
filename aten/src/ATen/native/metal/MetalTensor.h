@@ -1,4 +1,5 @@
-#include <torch/script.h>
+#include <ATen/Tensor.h>
+#include <c10/util/ArrayRef.h>
 
 namespace at {
 namespace native {
