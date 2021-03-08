@@ -10,6 +10,7 @@ import threading
 import time
 import traceback
 import unittest
+from unittest import mock
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce
@@ -475,20 +476,18 @@ class RendezvousEnvTest(TestCase):
             "WORLD_SIZE": "1",
             "RANK": "0",
             "MASTER_ADDR": "127.0.0.1",
-            "MASTER_PORT": common.find_free_port(),
+            "MASTER_PORT": str(common.find_free_port()),
         }
 
         class Env(object):
             def __init__(self, vars):
-                self.vars = vars
+                self.env_patcher = mock.patch.dict(os.environ, vars, clear=True)
 
             def __enter__(self):
-                for key, value in self.vars.items():
-                    os.environ[key] = str(value)
+                self.env_patcher.start()
 
             def __exit__(self, type, value, traceback):
-                for key in self.vars.keys():
-                    del os.environ[key]
+                self.env_patcher.stop()
 
         def without(d, key):
             d = d.copy()
@@ -4711,11 +4710,11 @@ class CommTest(MultiProcessTestCase):
     def test_distributed_debug_mode(self):
         # Default should be off
         default_debug_mode = dist._get_debug_mode()
-        self.assertEqual(default_debug_mode, dist._DistributedDebugLevel.OFF)
+        self.assertEqual(default_debug_mode, dist._DistributedDebugMode.OFF)
         mapping = {
-            "OFF": dist._DistributedDebugLevel.OFF,
-            "INFO": dist._DistributedDebugLevel.INFO,
-            "DETAIL": dist._DistributedDebugLevel.DETAIL,
+            "OFF": dist._DistributedDebugMode.OFF,
+            "INFO": dist._DistributedDebugMode.INFO,
+            "DETAIL": dist._DistributedDebugMode.DETAIL,
         }
         invalid_debug_modes = ["foo", 0, 1, -1]
 
