@@ -3,7 +3,7 @@
 
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#include <torch/script.h>
+#include <c10/util/ArrayRef.h>
 
 namespace at {
 namespace native {

@@ -21,8 +21,8 @@ int computeMPSAlignOffset(int kernel, int pad) {
   // For 3x3s1p0, offset should be (1, 1)
   // For 3x3s1p2, offset should be (-1, -1)
   const int mps_offset = kernel / 2;
-  const int c2_offset = pad;
-  return mps_offset - c2_offset;
+  const int pt_offset = pad;
+  return mps_offset - pt_offset;
 }
 
 NSString* kernelFor(
