@@ -1,6 +1,4 @@
 #import <ATen/native/metal/MetalConvolution.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNOps.h>
 
 namespace at {
 namespace native {
