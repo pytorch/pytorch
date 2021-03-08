@@ -5,8 +5,6 @@
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageWrapper.h>
 
-#include <numeric>
-
 namespace at {
 namespace native {
 namespace metal {
