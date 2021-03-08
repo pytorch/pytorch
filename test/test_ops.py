@@ -1,4 +1,4 @@
-from functools import partial, wraps
+from functools import partial, wraps, reduce
 import warnings
 
 import torch
@@ -442,9 +442,11 @@ class TestCommon(JitCommonTestCase):
     # Validates ops implement the correct out= behavior
     # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
     #   for a description of the correct behavior
-    @ops(op_db, dtypes=OpDTypes.supported, allowed_dtypes=(torch.float,))
+    # TODO: operations that support out= but don't support float
+    #   are not covered by this test.
+    @ops(op_db, allowed_dtypes=(torch.float,))
     def test_out(self, device, dtype, op):
-        # TODO: verify the op doesn't suppor the out= kwarg
+        # TODO: verify the op doesn't support the out= kwarg
         if not op.supports_out:
             self.skipTest("Skipped! Op doesn't support out= kwarg.")
 
@@ -456,38 +458,89 @@ class TestCommon(JitCommonTestCase):
         expected = op(*sample.input, *sample.args, **sample.kwargs)
         op_out = partial(op, *sample.input, *sample.args, **sample.kwargs)
 
-        # Short-circuits if output is not a single tensor
-        # TODO: extend this to handle multiple tensors
-        if not isinstance(expected, torch.Tensor):
-            self.skipTest("Skipped! Only supports single tensor outputs for now.")
+        # Short-circuits if output is not a single tensor or an
+        #   iterable of tensors
+
+        # Returns True if iterable is an iterable of tensors (includes empty iterables)
+        #   and False o.w.
+        def _is_iterable_of_tensors(iterable):
+            try:
+                for t in iter(iterable):
+                    if not isinstance(t, torch.Tensor):
+                        return False
+            except TypeError as te:
+                return False
+
+            return True
+
+        if not isinstance(expected, torch.Tensor) and not _is_iterable_of_tensors(expected):
+            self.skipTest("Skipped! Only supports single tensor or iterable of tensor outputs.")
+
+        # A wrapper around map that works with single tensors and always
+        #   instantiates the map. Used below to apply transforms to
+        #   single tensor and iterable tensor outputs.
+        def _apply_out_transform(fn, out):
+            if isinstance(out, torch.Tensor):
+                return fn(out)
+
+            # assumes (see above) that out is an iterable of tensors
+            return tuple(map(fn, out))
 
         # Case 0: out= with the correct shape, dtype, and device
-        #   but NaN values
+        #   but NaN values for floating point and complex tensors, and
+        #   maximum values for integer tensors.
         #   Expected behavior: out= values have no effect on the computation.
-        out = torch.full_like(expected, float('nan'))
+        def _case_zero_transform(t):
+            try:
+                info = torch.iinfo(t.dtype)
+                return torch.full_like(t, info.max)
+            except TypeError as te:
+                # for non-integer types fills with NaN
+                return torch.full_like(t, float('nan'))
+
+        out = _apply_out_transform(_case_zero_transform, expected)
         op_out(out=out)
         self.assertEqual(expected, out)
 
         # Case 1: out= with the correct shape, dtype, and device,
         #   but noncontiguous.
         #   Expected behavior: strides are respected.
-        # TODO: (implement) and switch to make_tensor_like()
-        out = make_tensor(expected.shape,
-                          dtype=expected.dtype,
-                          device=expected.device,
-                          discontiguous=True)
-        original_strides = out.stride()
+        def _case_one_transform(t):
+            return make_tensor(t.shape,
+                               dtype=t.dtype,
+                               device=t.device,
+                               discontiguous=True)
+
+        # Extracts strides from a tensor or iterable of tensors into a tuple
+        def _extract_strides(out):
+            if isinstance(out, torch.Tensor):
+                return (out.stride(),)
+
+            # assumes (see above) that out is an iterable of tensors
+            return tuple(map(lambda t: t.stride(), out))
+
+        out = _apply_out_transform(_case_one_transform, expected)
+        original_strides = _extract_strides(out)
+
         op_out(out=out)
+        final_strides = _extract_strides(out)
+
         self.assertEqual(expected, out)
-        self.assertEqual(original_strides, out.stride())
+        self.assertEqual(original_strides, final_strides)
 
         # Case 2: out= with the correct dtype and device, but the wrong shape
         #   Expected behavior: resize with a warning.
-        wrong_shape = list(expected.shape)
-        wrong_shape[-1] = wrong_shape[-1] + 1
-        out = make_tensor(wrong_shape,
-                          dtype=expected.dtype,
-                          device=expected.device)
+        def _case_two_transform(t):
+            wrong_shape = list(t.shape)
+
+            if len(wrong_shape) == 0:
+                # Handles scalar tensor case (empty list)
+                wrong_shape = [2]
+            else:
+                wrong_shape[-1] = wrong_shape[-1] + 1
+            return make_tensor(wrong_shape, dtype=t.dtype, device=t.device)
+
+        out = _apply_out_transform(_case_two_transform, expected)
         with self.assertWarnsRegex(UserWarning, "An output with one or more elements"):
             op_out(out=out)
         self.assertEqual(expected, out)
@@ -497,9 +550,12 @@ class TestCommon(JitCommonTestCase):
         #   Expected behavior: resize without warning.
         # TODO: this currently asserts the op throws NO warnings,
         #   which may be too strict (if the op is deprecated, for example)
-        out = make_tensor((0,),
-                          dtype=expected.dtype,
-                          device=expected.device)
+        def _case_three_transform(t):
+            return make_tensor((0,),
+                               dtype=t.dtype,
+                               device=t.device)
+
+        out = _apply_out_transform(_case_three_transform, expected)
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             op_out(out=out)
@@ -507,47 +563,39 @@ class TestCommon(JitCommonTestCase):
         self.assertEqual(expected, out)
 
         # Case 4: out= with correct shape and dtype, but wrong device.
-        #   NOTE: this case only tested if a CUDA device is available.
-        #   Expected behavior: error.
-        if torch.device(device).type == 'cuda':
-            # Case 4A: CUDA input with CPU out.
-            out = make_tensor(expected.shape,
-                              dtype=expected.dtype,
-                              device='cpu')
+        wrong_device = None
+        if torch.device(device).type != 'cpu':
+            wrong_device = 'cpu'
+        elif torch.cuda.is_available():
+            wrong_device = 'cuda'
+
+        if wrong_device is not None:
+            def _case_four_transform(t):
+                return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
+
+            out = _apply_out_transform(_case_four_transform, expected)
             with self.assertRaises(RuntimeError):
                 op_out(out=out)
 
-            # Case 4B: CPU input with CUDA out.
-            #   TODO: not implemented.
-
         # Case 5: out= with correct shape and device, but a dtype
-        #   that the output can be "safely" cast to (cdouble).
-        #   Expected behavior: same computation is performed.
-        # TODO: enable this. Too many ops require that the out
-        #     tensor have the same dtype as the input tensor.
-
-        # out = make_tensor(expected.shape,
-        #                   dtype=torch.cdouble,
-        #                   device=expected.device)
-        # op_out(out=out)
-        # self.assertEqual(expected, out, exact_dtype=False)
-
-        # Case 6: out= with correct shape and device, but a dtype
         #   that output cannot be "safely" cast to (long).
         #   Expected behavior: error.
         # NOTE: this case is filtered by dtype since some ops produce
         #   bool tensors, for example, which can be safely cast to any
-        #   dtype.
+        #   dtype. It is applied when single tensors are floating point or complex
+        #   dtypes, or if an op returns multiple tensors when at least one such
+        #   tensor is a floating point or complex dtype.
         _dtypes = floating_and_complex_types_and(torch.float16, torch.bfloat16)
-        if expected.dtype in _dtypes:
-            out = make_tensor(expected.shape,
-                              dtype=torch.long,
-                              device=expected.device)
+        if (isinstance(expected, torch.Tensor) and expected.dtype in _dtypes or
+                (not isinstance(expected, torch.Tensor) and
+                 reduce(lambda cur, t: cur or t.dtype in _dtypes, expected, False))):
+            def _case_five_transform(t):
+                return make_tensor(t.shape, dtype=torch.long, device=t.device)
+
+            out = out = _apply_out_transform(_case_five_transform, expected)
             with self.assertRaises(RuntimeError):
                 op_out(out=out)
 
-        # Case 7: out= where out= is given the input tensor.
-        #   TODO: not currently tested.
 
 instantiate_device_type_tests(TestOpInfo, globals())
 instantiate_device_type_tests(TestGradients, globals())

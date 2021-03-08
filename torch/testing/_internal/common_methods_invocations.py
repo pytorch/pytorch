@@ -1380,11 +1380,6 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.int8], active_if=TEST_WITH_ASAN),
                        SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
                                 dtypes=[torch.cfloat, torch.cdouble]),
-                       # TODO: Fix test_out_arg_all_dtypes as torch.empty_like(expected_output) where expected_output=op(input)
-                       # We can break the logic of the loop over all possible types but it is OK.
-                       # https://github.com/pytorch/pytorch/blob/master/test/test_unary_ufuncs.py#L440-L449
-                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
-                                dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
                                 dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
@@ -1887,7 +1882,7 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         device_type='cpu',
                         dtypes=[torch.float16, torch.bfloat16]),
-               # addmm does not correctly warn when resizing out= inputs
+               # linalg.norm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('linalg.slogdet',
@@ -2025,6 +2020,8 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            skips=(
+               # max does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
                # Reference: https://github.com/pytorch/pytorch/issues/51788#issuecomment-777625293
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         device_type='cpu', dtypes=[torch.bfloat16]),)),
@@ -2055,6 +2052,8 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            skips=(
+               # min does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
                # Reference: https://github.com/pytorch/pytorch/issues/51788#issuecomment-777625293
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         device_type='cpu', dtypes=[torch.bfloat16]),)),
@@ -2442,7 +2441,11 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16),
            dtypesIfROCM=all_types_and(torch.float16),
            test_inplace_grad=False,
-           sample_inputs_func=sample_inputs_sort),
+           sample_inputs_func=sample_inputs_sort,
+           skips=(
+               # sort does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('stack',
            # gradcheck expects the input arguments as a flat list
            op=lambda *args, idx, **kwargs: torch.stack([*args], idx, **kwargs),
