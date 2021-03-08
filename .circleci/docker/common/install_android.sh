@@ -88,6 +88,7 @@ gradle --version
 mkdir /var/lib/jenkins/gradledeps
 cp build.gradle /var/lib/jenkins/gradledeps
 cp AndroidManifest.xml /var/lib/jenkins/gradledeps
+#cp gradle.properties /var/lib/jenkins/gradledeps
 
 pushd /var/lib/jenkins
 
@@ -95,11 +96,13 @@ export GRADLE_LOCAL_PROPERTIES=gradledeps/local.properties
 rm -f $GRADLE_LOCAL_PROPERTIES
 echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
 echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
+echo "android.useAndroidX=true" >> $GRADLE_LOCAL_PROPERTIES
+echo "android.enableJetifier=true" >> $GRADLE_LOCAL_PROPERTIES
 
 chown -R jenkins /var/lib/jenkins/gradledeps
 chgrp -R jenkins /var/lib/jenkins/gradledeps
 
-sudo -H -u jenkins $GRADLE_HOME/bin/gradle -p /var/lib/jenkins/gradledeps -g /var/lib/jenkins/.gradle --refresh-dependencies --debug --stacktrace assemble
+sudo -H -u jenkins $GRADLE_HOME/bin/gradle -Pandroid.useAndroidX=true -p /var/lib/jenkins/gradledeps -g /var/lib/jenkins/.gradle --refresh-dependencies --debug --stacktrace assemble
 
 chown -R jenkins /var/lib/jenkins/.gradle
 chgrp -R jenkins /var/lib/jenkins/.gradle
