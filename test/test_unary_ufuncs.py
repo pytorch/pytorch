@@ -469,30 +469,6 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertEqual(actual, expected)
 
-    def _test_out_arg(self, op, input, output, expected):
-        if op.safe_casts_outputs:
-            expect_fail = not torch.can_cast(expected.dtype, output.dtype)
-        else:
-            expect_fail = output.dtype != expected.dtype
-
-        if expect_fail:
-            with self.assertRaises(RuntimeError):
-                op(input, out=output)
-        else:
-            res = op(input, out=output)
-            self.assertTrue(res is output)
-            self.assertEqual(output, expected.to(output.dtype))
-
-    @ops(unary_ufuncs, dtypes=OpDTypes.supported)
-    def test_out_arg_all_dtypes(self, device, dtype, op):
-        input = make_tensor((64, 64), dtype=dtype, device=device,
-                            low=op.domain[0], high=op.domain[1])
-        expected = op(input)
-
-        for out_dtype in all_types_and_complex_and(torch.bool, torch.half):
-            out = torch.empty_like(input, dtype=out_dtype)
-            self._test_out_arg(op, input, out, expected)
-
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nan_to_num(self, device, dtype):
