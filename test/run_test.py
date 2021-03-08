@@ -609,8 +609,9 @@ CUSTOM_HANDLERS = {
 }
 
 
-def parse_test_module(test):
-    return test.split('.')[0]
+def parse_test(test):
+    test_module, *unittest_args = test.split(".", 1)
+    return test_module, unittest_args
 
 
 class TestChoices(list):
@@ -618,7 +619,7 @@ class TestChoices(list):
         super(TestChoices, self).__init__(args[0])
 
     def __contains__(self, item):
-        return list.__contains__(self, parse_test_module(item))
+        return list.__contains__(self, parse_test(item)[0])
 
 
 def parse_args():
@@ -893,7 +894,7 @@ def get_dep_modules(test):
 
 
 def determine_target(test, touched_files, options):
-    test = parse_test_module(test)
+    test = parse_test(test)[0]
     # Some tests are faster to execute than to determine.
     if test not in SLOW_TESTS:
         if options.verbose:
@@ -941,12 +942,12 @@ def determine_target(test, touched_files, options):
 
 
 def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
-    test_module = parse_test_module(test)
+    test_module, unittest_args = parse_test(test)
 
     # Printing the date here can help diagnose which tests are slow
     print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
-    handler = CUSTOM_HANDLERS.get(test, run_test)
-    return_code = handler(test_module, test_directory, options)
+    handler = CUSTOM_HANDLERS.get(test_module, run_test)
+    return_code = handler(test_module, test_directory, options, extra_unittest_args=unittest_args)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool), 'Return code should be an integer'
     if return_code == 0:
