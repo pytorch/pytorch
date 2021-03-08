@@ -9,7 +9,7 @@ bool is_vulkan_available() {
   return native::vulkan::api::available();
 #else
   return false;
-#endif /* USE_VULKAN
+#endif /* USE_VULKAN */
 }
 
 } // namespace native

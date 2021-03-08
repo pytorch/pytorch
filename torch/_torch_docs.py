@@ -4404,7 +4404,10 @@ Args:
 
 Keyword arguments:
     {out}
-    {dtype}
+    dtype (torch.dtype, optional): the data type to perform the computation in.
+        Default: if None, uses the global default dtype (see torch.get_default_dtype())
+        when both :attr:`start` and :attr:`end` are real,
+        and corresponding complex dtype when either is complex.
     {layout}
     {device}
     {requires_grad}
@@ -4773,7 +4776,10 @@ Args:
 
 Keyword arguments:
     {out}
-    {dtype}
+    dtype (torch.dtype, optional): the data type to perform the computation in.
+        Default: if None, uses the global default dtype (see torch.get_default_dtype())
+        when both :attr:`start` and :attr:`end` are real,
+        and corresponding complex dtype when either is complex.
     {layout}
     {device}
     {requires_grad}
