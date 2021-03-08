@@ -18,4 +18,7 @@ function for details.
 Functions
 -----------------------
 
+.. autofunction:: erf
+.. autofunction:: erfc
+.. autofunction:: erfinv
 .. autofunction:: gammaln

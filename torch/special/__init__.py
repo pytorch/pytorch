@@ -33,7 +33,7 @@ erf = _add_docstr(_special.special_erf,
                   r"""
 erf(input, *, out=None) -> Tensor
 
-Computes the error function of each element. The error function is defined as follows:
+Computes the error function of :attr:`input`. The error function is defined as follows:
 
 .. math::
     \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
@@ -54,7 +54,7 @@ erfc = _add_docstr(_special.special_erfc,
                    r"""
 erfc(input, *, out=None) -> Tensor
 
-Computes the complementary error function of each element of :attr:`input`.
+Computes the complementary error function of :attr:`input`.
 The complementary error function is defined as follows:
 
 .. math::
@@ -76,7 +76,7 @@ erfinv = _add_docstr(_special.special_erfinv,
                      r"""
 erfinv(input, *, out=None) -> Tensor
 
-Computes the inverse error function of each element of :attr:`input`.
+Computes the inverse error function of :attr:`input`.
 The inverse error function is defined in the range :math:`(-1, 1)` as:
 
 .. math::
