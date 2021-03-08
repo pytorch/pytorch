@@ -12,7 +12,7 @@ else:
     import operator
     from typing import Tuple
 
-    def prod(shape: Tuple[int] ) -> int:
+    def prod(shape: Tuple[int]) -> int:
         return reduce(operator.mul, shape, 1)
 
 
