@@ -207,6 +207,14 @@ def pixel_shuffle(g, self, upscale_factor):
     return g.op("DepthToSpace", self, blocksize_i=upscale_factor, mode_s="CRD")
 
 
+@parse_args('v', 'i')
+def pixel_unshuffle(g, self, downscale_factor):
+    rank = sym_help._get_tensor_rank(self)
+    if rank is not None and rank != 4:
+        return _unimplemented("pixel_unshuffle", "only support 4d input")
+    return g.op("SpaceToDepth", self, blocksize_i=downscale_factor)
+
+
 def _interpolate(name, dim, interpolate_mode):
     return sym_help._interpolate_helper(name, dim, interpolate_mode)
 
