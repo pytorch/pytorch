@@ -59,10 +59,10 @@ class LazyModuleMixin:
     Modules that lazily initialize parameters, or "lazy modules",
     derive the shapes of their parameters from the first input(s)
     to their forward method. Until that first forward they contain
-    :class:`torch.nn.UninitializedParameter`s that should not be accessed
-    or used, and afterward they contain regular :class:`torch.nn.Parameter`s.
+    :class:`torch.nn.UninitializedParameter` s that should not be accessed
+    or used, and afterward they contain regular :class:`torch.nn.Parameter` s.
     Lazy modules are convenient since they don't require computing some
-    module arguments, like the `in_features` argument of a
+    module arguments, like the :attr:`in_features` argument of a
     typical :class:`torch.nn.Linear`.
 
     After construction, networks with lazy modules should first
