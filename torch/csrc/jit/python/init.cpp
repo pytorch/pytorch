@@ -648,6 +648,12 @@ void initJITBindings(PyObject* module) {
             getTEMustUseLLVMOnCPU() = use_llvm;
           })
       .def(
+          "_jit_cat_wo_conditionals",
+          [](bool optimize_cat) {
+            using namespace torch::jit::tensorexpr;
+            getCatWoConditionals() = optimize_cat;
+          })
+      .def(
           "_llvm_enabled",
           []() {
 #ifdef TORCH_ENABLE_LLVM
@@ -1335,7 +1341,7 @@ void initJITBindings(PyObject* module) {
   initTreeViewBindings(module);
   initJitScriptBindings(module);
   initJitBackendBindings(module);
-  initStaticRuntimeBindings(module);
+  initStaticModuleBindings(module);
   initTensorExprBindings(module);
 
   setPrintHandler([](const std::string& str) {
