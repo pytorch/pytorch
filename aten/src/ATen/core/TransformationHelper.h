@@ -116,7 +116,7 @@ C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val
   // TODO: must be investigated and unified!!!
   // https://github.com/pytorch/pytorch/issues/38662
 #if defined(__CUDACC__) || defined(__HIPCC__)
-  return static_cast<T>(-1.0) / lambda * at::log(val);
+  return static_cast<T>(-1.0) / lambda * ::log(val);
 #else
   return static_cast<T>(-1.0) / lambda * at::log(static_cast<T>(1.0) - val);
 #endif
