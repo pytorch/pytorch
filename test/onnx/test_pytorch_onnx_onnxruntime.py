@@ -6092,55 +6092,6 @@ class TestONNXRuntime(unittest.TestCase):
         embedding_matrix = torch.rand(10, 3)
         self.run_test(model, (x, embedding_matrix))
 
-        x = torch.randint(4, (4, 3, 2))
-        x[2] = 1
-        x[0][1] = 1
-        self.run_test(model, (x, embedding_matrix))
-        self.run_test(model, (x, embedding_matrix), training=torch.onnx.TrainingMode.TRAINING)
-
-        class EmbedModelWithoutPaddingIdx(torch.nn.Module):
-            def forward(self, input, emb):
-                return torch.nn.functional.embedding(input, emb)
-
-        model = EmbedModelWithoutPaddingIdx()
-        x = torch.randint(4, (4, 3, 2))
-        self.run_test(model, (x, embedding_matrix))
-
-    @skipIfUnsupportedMinOpsetVersion(9)
-    def test_embedding_module(self):
-        class EmbedModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.emb = torch.nn.Embedding(4, 3, padding_idx=1)
-                self.emb2 = torch.nn.Embedding(4, 3, padding_idx=1)
-                with torch.no_grad():
-                    self.emb2.weight[1] = torch.ones(3)
-
-            def forward(self, input):
-                return self.emb(input), self.emb2(input)
-
-        model = EmbedModel()
-        x = torch.randint(4, (4, ))
-        x[2] = x[0] = 1
-        self.run_test(model, (x, ))
-
-        x = torch.randint(4, (4, 3, 2))
-        x[2] = 1
-        x[0][1] = 1
-        self.run_test(model, (x, ))
-
-        class EmbedModelWithoutPaddingIdx(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.emb = torch.nn.Embedding(4, 3)
-
-            def forward(self, input):
-                return self.emb(input)
-
-        model = EmbedModelWithoutPaddingIdx()
-        x = torch.randint(4, (4, 3, 2))
-        self.run_test(model, (x, ))
-
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)
