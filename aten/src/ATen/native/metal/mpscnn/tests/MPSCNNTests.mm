@@ -3,16 +3,10 @@
 #import <ATen/native/metal/mpscnn/MPSCNNOps.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
+
 #import <Foundation/Foundation.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
-#include <ATen/ATen.h>
-#include <ATen/Utils.h>
-#include <c10/util/accumulate.h>
-#import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
-
-#include <stdlib.h>
-#include <torch/script.h>
 #include <sstream>
 
 #define ITER_COUNT 5
