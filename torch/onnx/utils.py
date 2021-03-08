@@ -337,15 +337,14 @@ def _decide_input_format(model, args):
             args = tuple(args)
         return args
     # Cases of models without forward functions and dict inputs
-    except AttributeError:
-        warnings.warn("Model has no forward function")
-        return args
-    except ValueError:
+    except (AttributeError, ValueError):
         warnings.warn("Model has no forward function")
         return args
     # Cases of models with no input args
     except IndexError:
         warnings.warn("No input args")
+        return args
+    except:
         return args
 
 def _trace(func, args, operator_export_type, return_outs=False):
