@@ -1,0 +1,19 @@
+# Model Optimization Kernels
+
+All kernels related to the model optimization
+
+Eventually, the contents of this folder will include the following
+
+./mo
+├── pruning
+│   ├── cpu
+│   ├── cuda
+│   └── ...
+├── quantization
+│   ├── cpu
+│   ├── cuda
+│   └── ...
+└── sparsity
+    ├── cpu
+    ├── cuda
+    └── ...
