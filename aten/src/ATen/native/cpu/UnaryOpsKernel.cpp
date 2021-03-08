@@ -119,7 +119,7 @@ void LogitMKLKernel(T eps, TensorIterator* it) {
 
 void logit_kernel(TensorIterator& iter, Scalar eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, iter.dtype(), "logit_cpu", [&]() {
+      kBFloat16, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
         if (at::hasMKL() && iter.is_contiguous()) {
           LogitMKLKernel<scalar_t>(eps, &iter);

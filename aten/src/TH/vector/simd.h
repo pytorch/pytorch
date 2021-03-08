@@ -93,7 +93,7 @@ static inline uint32_t detectHostSIMDExtensions()
 }
 
  #endif
- 
+
 #elif defined(__EMSCRIPTEN__)
 
 static inline uint32_t detectHostSIMDExtensions()

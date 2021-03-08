@@ -1017,6 +1017,41 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::sum.int(int[] self) -> int",
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          auto sum = 0;
+          for (const auto& elem : l) {
+            sum += elem;
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.float(float[] self) -> float",
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          auto sum = 0.0;
+          for (const auto& elem : l) {
+            sum += elem;
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.bool(bool[] self) -> int",
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          auto sum = 0;
+          for (const auto& elem : l) {
+            if (elem) {
+              sum += 1;
+            }
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::any.str(str[] self) -> bool",
         [](Stack* stack) {
           auto l = pop(stack).toList();
@@ -1181,6 +1216,29 @@ RegisterOperators reg2({
         "aten::hash.generic(t value) -> int",
         hashValue,
         aliasAnalysisFromSchema()),
+
+#define DEFINE_COMPLEX_OP(type_a, type_b, actual_type_a, actual_type_b) \
+  Operator(                                                             \
+      "aten::complex." #type_a "_" #type_b "(" #type_a " x," #type_b    \
+      " y) -> complex",                                                 \
+      [](Stack* stack) {                                                \
+        actual_type_a a;                                                \
+        actual_type_b b;                                                \
+        pop(stack, a, b);                                               \
+        auto comp = c10::complex<double>(a, b);                         \
+        push(stack, comp);                                              \
+      },                                                                \
+      aliasAnalysisFromSchema())
+
+    DEFINE_COMPLEX_OP(int, bool, int, bool),
+    DEFINE_COMPLEX_OP(bool, int, bool, int),
+    DEFINE_COMPLEX_OP(float, bool, double, bool),
+    DEFINE_COMPLEX_OP(bool, float, bool, double),
+    DEFINE_COMPLEX_OP(float, int, double, int),
+    DEFINE_COMPLEX_OP(int, float, int, double),
+    DEFINE_COMPLEX_OP(int, int, int, int),
+    DEFINE_COMPLEX_OP(bool, bool, bool, bool),
+    DEFINE_COMPLEX_OP(float, float, double, double),
 });
 
 bool isSortableTupleType(

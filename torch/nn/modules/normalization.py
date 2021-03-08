@@ -141,7 +141,7 @@ class LayerNorm(Module):
         >>> output = m(input)
     """
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
-    normalized_shape: Tuple[int, ...] 
+    normalized_shape: Tuple[int, ...]
     eps: float
     elementwise_affine: bool
 
