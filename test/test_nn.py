@@ -5138,7 +5138,7 @@ class TestNN(NNTestCase):
         hx = torch.randn(3, 21)
         cell_shared_param = (10, 20)
         for cell in (nn.RNNCell(*cell_shared_param, nonlinearity="relu"),
-                     nn.RNNCell(*cell_shared_param, nonlinearity="tanh"), 
+                     nn.RNNCell(*cell_shared_param, nonlinearity="tanh"),
                      nn.GRUCell(*cell_shared_param)):
             self.assertRaises(Exception, lambda: cell(input, hx))
 
