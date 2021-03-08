@@ -4421,6 +4421,15 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 16, 4, 3, requires_grad=True)
         self.run_test(PixelShuffle(), x)
+        
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_pixel_unshuffle(self):
+        class PixelUnshuffle(torch.nn.Module):
+            def forward(self, x):
+                return torch.pixel_unshuffle(x, downscale_factor=2)
+
+        x = torch.randn(2, 4, 8, 6, requires_grad=True)
+        self.run_test(PixelUnshuffle(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scalar_type(self):
