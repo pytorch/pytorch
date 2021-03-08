@@ -536,7 +536,7 @@ void exponential_kernel(TensorIterator& iter, double lambda_, RNG gen) {
       // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
       // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
       // if traansformation returns too small value (whether because of rand being 1.0 or bad __logf approximation)
-      // fix it up to be equal to numeric_limits::epsilon, which is equivalent to rand==1.0 being squashed to 1-epsilon
+      // fix it up to be equal to numeric_limits::epsilon/2, which is equivalent to rand==1.0 being squashed to std::nextafter(1,0)
       auto val = transformation::exponential<accscalar_t>(rand, lambda);
       //transformation result is always non-negative
       if (val < std::numeric_limits<accscalar_t>::epsilon())/2 {
