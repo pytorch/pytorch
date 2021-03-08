@@ -6,42 +6,46 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
 namespace torch {
 namespace jit {
 
-struct TORCH_API StaticRuntimeOptions {
+struct TORCH_API StaticModuleOptions {
   bool cleanup_activations{true};
   bool enable_out_variant{true};
   bool optimize_memory{true};
 };
 
-/// Static runime supports two execution modes.
+/// The static runime supports two execution modes.
 ///
 /// Mode 1: single-threaded with no parallelism except for intra-op parallelism
 /// For this mode, you can do either:
 /// @code
-///   // m is the TorchScript module
-///   auto runtime = StaticRuntime(m, opts);
-///   auto output = runtime.run(args, kwargs);
+///   // m is a TorchScript module
+///   auto module = StaticModule(m, opts);
+///   auto output = module(args, kwargs);
 /// @endcode
+///
 /// or
+///
 /// @code
-///   auto mod = PrepareForStaticRuntime(m);
-///   auto runtime = StaticRuntime(mod, opts);
-///   auto output = runtime.run(args, kwargs);
+///   // g is the TorchScript graph
+///   auto module = StaticModule(g, opts);
+///   auto output = module(args, kwargs);
 /// @endcode
+///
 /// Mode 2: similar to data parallelism, run the same model for different inputs
-/// on different threads at the same time. In this case, run
-/// PrepareForStaticRuntime to prepare the graph for Static Runtime. You
-/// should have one InferenceModule instance per model, and one Static Runtime
-/// instance per running thread. To avoiding creating StaticRuntime on the fly,
-/// use a synchronized stack (i.e. boost::lockfree::stack) to cache all the
-/// Static Runtime instances in your code.
+/// on different threads at the same time.
+/// You should have one StaticModule per model, and one StaticRuntime instance
+/// per running thread. To avoiding creating StaticRuntimes on the fly, use a
+/// synchronized stack (i.e. boost::lockfree::stack) to cache all the
+/// StaticRuntime instances in your code.
 /// @code
 ///   // initialization
-///   auto mod = PrepareForStaticRuntime(m);
+///   auto module = std::make_shared<StaticModule>(m, opts);
+///
 ///   // 128 is good for most cases. Pick a number that works for you
 ///   boost::lockfree::stack<std::shared_ptr<StaticRuntime>,
 ///     boost::lockfree::fixed_sized<true>> pool(128);
@@ -50,58 +54,113 @@ struct TORCH_API StaticRuntimeOptions {
 ///   std::shared_ptr<StaticRuntime> runtime = nullptr;
 ///   pool.pop(runtime);
 ///   if (!runtime) {
-///     runtime = std::make_shared<StaticRuntime>(mod, opts);
+///     // holds a reference to the underlying module
+///     // but does its own memory management
+///     runtime = std::make_shared<StaticRuntime>(*module);
 ///   }
-///   auto output = runtime->run(args, kwargs);
+///   auto output = runtime(args, kwargs);
 ///   pool.push(runtime);
 /// @endcode
 ///
 
-// Group readonly data structures into InferenceModule
-struct TORCH_API InferenceModule {
- public:
-  explicit InferenceModule(const torch::jit::Module& m);
-  explicit InferenceModule(std::shared_ptr<torch::jit::Graph> g);
-  torch::jit::Module module;
-  std::shared_ptr<torch::jit::Graph> graph;
-  std::unique_ptr<c10::FunctionSchema> schema;
-
- private:
-  void init();
-};
-
-TORCH_API void PrepareGraphForStaticRuntime(
-    std::shared_ptr<torch::jit::Graph> g);
-
-inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
-    const torch::jit::Module& m) {
-  return std::make_shared<InferenceModule>(m);
-}
-
-inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
-    const std::shared_ptr<torch::jit::Graph>& g) {
-  return std::make_shared<InferenceModule>(g);
-}
-
 class MemoryPlanner;
 class ProcessedNode;
+class StaticRuntime;
+class TORCH_API StaticModule {
+ public:
+  explicit StaticModule(
+      std::shared_ptr<torch::jit::Graph> g,
+      const StaticModuleOptions& opts = StaticModuleOptions());
+
+  explicit StaticModule(
+      const torch::jit::Module& m,
+      const StaticModuleOptions& opts = StaticModuleOptions());
+
+ private:
+  explicit StaticModule(
+      std::pair<
+          std::shared_ptr<torch::jit::Graph>,
+          c10::optional<c10::FunctionSchema>> graph_and_schema,
+      const StaticModuleOptions& opts);
+
+ public:
+  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
+
+  // This interface only works if StaticModule was initialized
+  // with a TorchScript module, otherwise use the above interface
+  c10::IValue operator()(
+      const std::vector<c10::IValue>& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  const Graph& graph() const {
+    return *graph_;
+  }
+
+  const StaticModuleOptions& opts() const;
+  size_t num_inputs() const;
+  size_t num_outputs() const;
+
+  inline const std::unordered_map<int, std::vector<std::pair<int, int>>>&
+  index_map() const {
+    return index_map_;
+  }
+
+  inline const std::vector<std::pair<int, int>>& output_indices() const {
+    return output_indices_;
+  }
+
+  inline const std::vector<IValue>& constants() const {
+    return constants_;
+  }
+
+  inline const std::vector<ProcessedNode>& nodes() const {
+    return nodes_;
+  }
+
+  inline const c10::optional<c10::FunctionSchema>& schema() const {
+    return schema_;
+  }
+
+  inline const std::unordered_map<const Value*, std::vector<const Value*>>&
+  shared_values() const {
+    return shared_values_;
+  }
+
+  inline const std::unordered_set<const Value*>& external_values() const {
+    return external_values_;
+  }
+
+  StaticRuntime& runtime();
+
+ private:
+  // Static runtime states
+  StaticModuleOptions opts_;
+  std::unique_ptr<StaticRuntime> cached_runtime_;
+  // IValue table (including inputs, outputs, intermediates, and weights)
+  std::vector<IValue> constants_;
+  std::vector<std::pair<int, int>> output_indices_;
+  std::unordered_map<int, std::vector<std::pair<int, int>>> index_map_;
+  // The nodes we need to run
+  std::vector<ProcessedNode> nodes_;
+  // Output of liveness analyis. A mapping from a value to the set of values
+  // with which it could potentially share memory.
+  std::unordered_map<const Value*, std::vector<const Value*>> shared_values_;
+  std::unordered_set<const Value*> external_values_;
+
+  // Original input
+  std::shared_ptr<torch::jit::Graph> graph_;
+  c10::optional<c10::FunctionSchema> schema_;
+};
+
 class TORCH_API StaticRuntime {
  public:
-  // InferenceModule m is created by PrepareForStaticRuntime
-  explicit StaticRuntime(
-      std::shared_ptr<InferenceModule> m,
-      const StaticRuntimeOptions& opts = StaticRuntimeOptions());
+  explicit StaticRuntime(const StaticModule& sm);
 
-  // m is unoptimized
-  explicit StaticRuntime(
-      const torch::jit::Module& m,
-      const StaticRuntimeOptions& opts = StaticRuntimeOptions());
+  std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
 
-  std::vector<at::Tensor> run(const std::vector<at::Tensor>& inps);
-
-  // This interface only works module_ that has a non-empty TorchScript module
-  // member; otherwise use the above interface
-  c10::IValue run(
+  // This interface only works if StaticModule was initialized
+  // with a TorchScript module, otherwise use the above interface
+  c10::IValue operator()(
       const std::vector<c10::IValue>& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
@@ -135,52 +194,6 @@ class TORCH_API StaticRuntime {
       const int warmup_runs,
       const int main_runs);
 
-  const InferenceModule* get_inference_module() {
-    return module_.get();
-  }
-
-  const std::vector<ProcessedNode>& get_nodes() const {
-    return nodes_;
-  }
-
-  std::vector<ProcessedNode>& get_nodes() {
-    return nodes_;
-  }
-
-  size_t num_inputs() const {
-    return inputs_.size();
-  }
-
-  size_t num_outputs() const {
-    return outputs_.size();
-  }
-
-  inline const std::vector<IValue*>& outputs() const {
-    return outputs_;
-  }
-
-  void check_for_memory_leak(bool output_returned = true);
-
- private:
-  // Static runtime states
-  std::shared_ptr<InferenceModule> module_;
-  StaticRuntimeOptions opts_;
-  // IValue table (including inputs, outputs, intermediates, and weights)
-  std::vector<IValue> constants_;
-  std::vector<IValue> inputs_;
-  std::vector<IValue*> outputs_;
-  // The nodes we need to run
-  std::vector<ProcessedNode> nodes_;
-  // Output of liveness analyis. A mapping from a value to the set of values
-  // with which it could potentially share memory.
-  std::unordered_map<const Value*, std::vector<const Value*>> shared_values_;
-  std::unordered_set<const Value*> external_values_;
-
-  // Memory planning is only enabled if opts_.cleanup_activations is true.
-  // Otherwise, the memory used by activations is cached inside the static
-  // runtime.
-  std::unique_ptr<MemoryPlanner> planner_;
-
   // Input is readwrite
   IValue& Input(size_t i) {
     DCHECK(i < inputs_.size());
@@ -192,6 +205,34 @@ class TORCH_API StaticRuntime {
     DCHECK(i < outputs_.size());
     return *outputs_[i];
   }
+
+  const std::vector<IValue*> outputs() const {
+    return outputs_;
+  }
+
+  inline const std::vector<ProcessedNode>& nodes() const {
+    return nodes_;
+  }
+
+  inline std::vector<ProcessedNode>& nodes() {
+    return nodes_;
+  }
+
+  const Graph& graph() const {
+    return static_module_.graph();
+  }
+
+  void check_for_memory_leak(bool output_returned = true);
+
+ private:
+  // Memory planning is only enabled if sm->opts().cleanup_activations is true.
+  // Otherwise, the memory used by activations is cached inside the static
+  // runtime.
+  std::unique_ptr<MemoryPlanner> planner_;
+  std::vector<IValue> inputs_;
+  std::vector<IValue*> outputs_;
+  const StaticModule& static_module_;
+  std::vector<ProcessedNode> nodes_;
 };
 
 /// There are three types of ops in a processed graph in Static Runtime:
@@ -223,8 +264,7 @@ class MemoryPlanner {
  public:
   explicit MemoryPlanner(
       StaticRuntime* runtime,
-      const std::unordered_map<const Value*, std::vector<const Value*>>&
-          should_share,
+      const std::unordered_map<const Value*, std::vector<const Value*>>&,
       const std::unordered_set<const Value*>& external_values,
       bool out_variants);
 
@@ -254,6 +294,7 @@ class MemoryPlanner {
 
 class ProcessedNode {
  public:
+  ProcessedNode() = default;
   ProcessedNode(
       Node* n,
       std::vector<const IValue*>&& inputs,
@@ -261,8 +302,12 @@ class ProcessedNode {
 
   void run();
 
-  Node* get_node() const {
+  Node* node() const {
     return node_;
+  }
+
+  inline void set_input(size_t index, const IValue* ival) {
+    inputs_[index] = ival;
   }
 
   // Input is readonly
@@ -295,7 +340,7 @@ class ProcessedNode {
   std::function<void(ProcessedNode*)> fn_;
   std::function<void(ProcessedNode*)> native_fn_;
   std::vector<const IValue*> inputs_; // unowned
-  std::vector<IValue> outputs_; // TODO make list for safety
+  std::vector<IValue> outputs_;
 };
 
 } // namespace jit
