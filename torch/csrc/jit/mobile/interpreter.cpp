@@ -26,6 +26,17 @@ void createObject(Stack& stack, const at::ClassTypePtr& type) {
       type->numAttributes());
   push(stack, std::move(userObj));
 }
+
+void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
+  at::TypePtr ty = pop(stack).type();
+  for (const at::TypePtr& candidate : types) {
+    if (ty->isSubtypeOf(candidate)) {
+      push(stack, true);
+      return;
+    }
+  }
+  push(stack, false);
+}
 } // namespace
 
 using namespace at;
@@ -189,9 +200,21 @@ bool InterpreterState::run(Stack& stack) {
         createObject(stack, type);
         ++pc;
       } break;
+      case ISINSTANCE: {
+        at::ArrayRef<TypePtr> types(
+            &(code_->types_[inst.X]), &(code_->types_[inst.X + inst.N]));
+        isinstance(stack, types);
+        ++pc;
+      } break;
       case WARN: {
         drop(stack, 1);
-        TORCH_WARN(pop(stack).toStringRef());
+        // Note: Please don't move the pop(stack) code below into the TORCH_WARN
+        // macro since TORCH_WARN fails to evaluate its arguments when
+        // STRIP_ERROR_MESSAGES is defined (which happens for production
+        // mobile builds). This will cause the stack to be in an inconsistent
+        // state. It has previously resulted in a SEV (S22350).
+        auto sref = pop(stack).toStringRef();
+        TORCH_WARN(sref);
         ++pc;
       } break;
       default:

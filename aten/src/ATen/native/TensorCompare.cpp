@@ -193,6 +193,10 @@ bool is_nonzero(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(false, "Expected non-Tensor backend scalar");
 }
 
+void _assert_async_cpu(const Tensor& self) {
+  TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
+}
+
 namespace {
 
 // DO NOT USE THIS -- it's just an implementation detail of wrapped_scalar tensor below.
@@ -293,7 +297,7 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
                                        const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "mode only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "mode only supports strided layout, got: ", self.layout());
@@ -328,7 +332,7 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
 
 static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indices,
                                                   const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "max only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "max only supports strided layout, got: ", self.layout());
@@ -375,7 +379,7 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
 
 static std::tuple<Tensor &, Tensor &> _aminmax_out_impl(Tensor& min, Tensor& max,
                                                   const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "min_max_val only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "min_max only supports strided layout, got: ", self.layout());
@@ -408,7 +412,7 @@ std::tuple<Tensor, Tensor> _aminmax(const Tensor& self, int64_t dim, bool keepdi
 
 static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indices,
                                                   const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "min only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "min only supports strided layout, got: ", self.layout());
