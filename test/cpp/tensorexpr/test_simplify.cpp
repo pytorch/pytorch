@@ -2726,18 +2726,6 @@ TEST(Simplify, SimplifyModRoundModPattern) {
   }
 
   {
-    // t/2 /7 % 9 * 7 + t/2 % 7 => t/2 % 63
-    VarHandle t("t", kInt);
-    ExprHandle body = (t / 2 / 7 % 9) * 7 + t / 2 % 7;
-    ExprHandle simplified = IRSimplifier::simplify(body);
-    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
-    IS_NODE_WITH_NAME(Div, mod->lhs(), div);
-    IS_VAR_WITH_NAME(div->lhs(), "t");
-    IS_IMM_WITH_VAL(Int, div->rhs(), 2);
-    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
-  }
-
-  {
     // t/x % y * x + t % x => t%(x*y)
     VarHandle t("t", kInt);
     VarHandle x("x", kInt);
@@ -2831,6 +2819,18 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
     IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
     IS_NODE_WITH_NAME(Mod, mul->rhs(), mod);
     IS_VAR_WITH_NAME(mod->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
+  }
+
+  {
+    // t/14 % 9 * 7 + t/2 % 7 => t/2 % 63
+    VarHandle t("t", kInt);
+    ExprHandle body = (t / 14 % 9) * 7 + t / 2 % 7;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mod, simplified.node(), mod);
+    IS_NODE_WITH_NAME(Div, mod->lhs(), div);
+    IS_VAR_WITH_NAME(div->lhs(), "t");
+    IS_IMM_WITH_VAL(Int, div->rhs(), 2);
     IS_IMM_WITH_VAL(Int, mod->rhs(), 63);
   }
 
@@ -2953,7 +2953,6 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
         (t / (ExprHandle(10) * 9 * 7) % 11) * 7 * 9 * 10 +
         (t / (ExprHandle(9) * 7) % 10) * 7 * 9 + (t / 7 % 9) * 7 + t % 7;
     ExprHandle simplified = IRSimplifier::simplify(body);
-    print(simplified.node());
     IS_VAR_WITH_NAME(simplified.node(), "io_flat");
   }
 
@@ -2982,7 +2981,6 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
         (t / (l * n * m) % k) * m * n * l + (t / (n * m) % l) * m * n +
         (t / m % n) * m + t % m;
     ExprHandle simplified = IRSimplifier::simplify(body);
-    print(simplified.node());
     IS_VAR_WITH_NAME(simplified.node(), "io_flat");
   }
 }

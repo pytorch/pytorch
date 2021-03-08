@@ -1718,10 +1718,9 @@ const Expr* polyGCD(const Polynomial* poly) {
 }
 
 // A ModRound is a div-mod-mul in which the divisor in div and multiplier in mul
-// are identical. Return (scalar, denominator, divisor, mod_divisor).
-// Examples:
-// ((t/7)%9)*7 -> (1, t, 7, 9)
-// ((t/7)%9)*14 -> (2, t, 7, 9)
+// are identical and not equal to 1.
+// In a ModRound x/y%z*y*c (c is constant), 'scalar' denotes c, 'denominator'
+// denotes x, 'divisor' denotes y and 'mod_divisor' denotes z.
 class ModRound {
  public:
   ModRound(
@@ -1733,10 +1732,10 @@ class ModRound {
         denom(denom),
         divisor(divisor),
         mod_divisor(mod_divisor) {}
+  const Expr* scalar;
   const Expr* denom;
   const Expr* divisor;
   const Expr* mod_divisor;
-  const Expr* scalar;
 };
 
 c10::optional<class ModRound*> isModRound(const Term* e) {
@@ -1780,20 +1779,32 @@ c10::optional<class ModRound*> isModRound(const Term* e) {
   divisor = IRSimplifier::simplify(div->rhs());
   other = div->lhs();
 
-  // Deny cases in which divisor=1.
-  if (divisor->isConstant() && immediateEquals(divisor, 1)) {
-    return c10::nullopt;
-  }
+  denom = IRSimplifier::simplify(other);
 
   // Deny cases in which divisor!=multiplier.
   HashProvider& hasher = e->hasher();
   if (hasher.hash(divisor) != hasher.hash(multiplier)) {
+    // TODO: currently we do not extract a common factor if divisor and
+    // multiplier are not constants. The extraction is not supported (e.g.,
+    // x*2/x -> 2) in IRSimplifier.simplify because x could be 0. As future
+    // work, we can extend division to 2 versions: 1) division for customers
+    // that has to be strictly simplified and 2) division we introduced in our
+    // transformations which can be simplified without considering 0s, e.g.,
+    // Div_nonzero. The second division will be only used to facilitate our
+    // transformations.
     if (divisor->isConstant() && multiplier->isConstant()) {
-      // If both are scalar we may be able to find a common factor which becomes
-      // 'scalar' of the term.
+      // If both are scalar we may be able to find a common factor.
       if (immediateEquals(evaluateOp(new Mod(multiplier, divisor)), 0)) {
+        // The common factor becomes 'scalar' of the term, e.g.,in t/3%7*6,
+        // divisor=multiplier=3, scalar=2.
         Expr* c = evaluateOp(new Div(multiplier, divisor));
-        scalar = evaluateOp(new Mul(c, scalar));
+        scalar = c;
+      } else if (immediateEquals(evaluateOp(new Mod(divisor, multiplier)), 0)) {
+        // The common factor becomes part of 'denom', e.g., in t/14%7*2,
+        // divisor=multiplier=2, denom=t/7.
+        Expr* c = evaluateOp(new Div(divisor, multiplier));
+        divisor = multiplier;
+        denom = IRSimplifier::simplify(new Div(other, c));
       } else {
         return c10::nullopt;
       }
@@ -1801,7 +1812,11 @@ c10::optional<class ModRound*> isModRound(const Term* e) {
       return c10::nullopt;
     }
   }
-  denom = IRSimplifier::simplify(other);
+
+  // Deny cases in which divisor=1. Such cases are considered as Mods.
+  if (divisor->isConstant() && immediateEquals(divisor, 1)) {
+    return c10::nullopt;
+  }
 
   return new ModRound(scalar, denom, divisor, mod_divisor);
 }
