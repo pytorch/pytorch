@@ -34,7 +34,7 @@ from .gen_inplace_or_view_type import (
 
 from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.gen import FileManager
