@@ -10,7 +10,11 @@ if hasattr(math, 'prod'):
 else:
     from functools import reduce
     import operator
-    prod = lambda x: reduce(operator.mul, x, 1)
+    from typing import Tuple
+
+    def prod(shape: Tuple[int] ) -> int:
+        return reduce(operator.mul, shape, 1)
+
 
 # These no_grad_* functions are necessary as wrappers around the parts of these
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
