@@ -181,7 +181,8 @@ class Bilinear(Module):
 
 
 class LazyLinear(LazyModuleMixin, Linear):
-    r"""A :class:`torch.nn.Linear` module with lazy initialization.
+    r"""A :class:`torch.nn.Linear` module that infers the `in_features` parameter by
+    running a simple input through the network.
 
     In this module, the `weight` and `bias` are of :class:`torch.nn.UninitializedParameter`
     class. They will be initialized after the first call to ``forward`` is done and the
