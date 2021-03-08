@@ -6884,6 +6884,7 @@ class TestONNXRuntime(unittest.TestCase):
                 super().__init__()
                 self.weights = InnerModule2.get_embedding(embedding_dim)
                 self.register_buffer("_float_tensor", torch.FloatTensor(1))
+                self.const = 2
 
             @staticmethod
             def get_embedding(embedding_dim: int):
@@ -6893,9 +6894,11 @@ class TestONNXRuntime(unittest.TestCase):
 
             def forward(self, input, incremental_state: Optional[torch.Tensor] = None):
                 bsz, seq_len = input.shape[0], input.shape[1]
+                self.const = 3
                 if self.weights is None:
                     self.weights = InnerModule.get_embedding(self.embedding_dim)
                 self.weights = self.weights.to(self._float_tensor)
+                self.weights = self.weights * self.const
                 if incremental_state is not None:
                     pos = seq_len
                     return self.weights[1 + pos, :].expand(bsz, 1, -1)
@@ -6935,6 +6938,7 @@ class TestONNXRuntime(unittest.TestCase):
             def __init__(self, embedding_dim):
                 super().__init__()
                 self.embedding_dim = embedding_dim
+                self.const = 2.5
                 self.weights = InnerModule.get_embedding(self.embedding_dim)
                 self.register_buffer("_float_tensor", torch.FloatTensor(1))
 
@@ -6946,10 +6950,11 @@ class TestONNXRuntime(unittest.TestCase):
 
             def forward(self, input, incremental_state: Optional[torch.Tensor] = None):
                 bsz, seq_len = input.shape[0], input.shape[1]
+                self.const = 1.5
                 self.weights = InnerModule.get_embedding(self.embedding_dim)
                 return (
                     self.weights.index_select(0, torch.ones((bsz * seq_len), dtype=torch.int64)).view(bsz, seq_len, -1)
-                )
+                ) * self.const
 
         class Module(torch.nn.Module):
             def __init__(self):
@@ -6967,12 +6972,18 @@ class TestONNXRuntime(unittest.TestCase):
             def __init__(self):
                 super(MyModule, self).__init__()
                 self.conv = torch.nn.Conv1d(3, 10, 2)
+                self.b = False
 
             def forward(self, box_regression, weight):
+                self.b = True
                 self.conv.weight = weight
                 w = torch.softmax(self.conv.weight, dim=0)
                 self.conv.weight = w + w
-                return box_regression + self.conv.weight
+                # self.b = True
+                if self.b:
+                    return box_regression + self.conv.weight
+                else:
+                    return box_regression - self.conv.weight
 
         model = torch.jit.script(MyModule())
         weight = torch.ones(3, 2)
