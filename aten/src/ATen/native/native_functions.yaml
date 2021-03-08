@@ -2573,7 +2573,6 @@
     DefaultBackend: median
 
 - func: median.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: median_out_cpu
     CUDA: median_out_cuda
@@ -2582,7 +2581,6 @@
   variants: function, method
 
 - func: median.names_dim_values(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: nanmedian(Tensor self) -> Tensor
   variants: function, method
