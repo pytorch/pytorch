@@ -17,10 +17,9 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyOnCPUAndCUDA,
-    onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
-    OpDTypes)
+    onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU)
 from torch.testing import (
-    floating_types_and, all_types_and_complex_and, floating_types, floating_and_complex_types_and)
+    floating_types_and, floating_types, floating_and_complex_types_and)
 
 if TEST_SCIPY:
     import scipy
