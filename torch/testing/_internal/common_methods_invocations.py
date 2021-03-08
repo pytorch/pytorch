@@ -18,7 +18,7 @@ from torch.testing import \
      all_types_and_complex_and, all_types_and, all_types_and_complex,
      integral_types_and)
 from torch.testing._internal.common_device_type import \
-    (dtypes, skipCUDAIfNoMagmaAndNoCusolver, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
+    (skipCUDAIfNoMagmaAndNoCusolver, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
@@ -1956,7 +1956,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
            supports_tensor_out=True,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
            sample_inputs_func=sample_inputs_linalg_matrix_power,
            ),
     OpInfo('linalg.norm',
