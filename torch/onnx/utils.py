@@ -344,7 +344,8 @@ def _decide_input_format(model, args):
     except IndexError:
         warnings.warn("No input args")
         return args
-    except:
+    except Exception as e:
+        warning.warn("Skipping _decide_input_format\n {}".format(e.args[0]))
         return args
 
 def _trace(func, args, operator_export_type, return_outs=False):
