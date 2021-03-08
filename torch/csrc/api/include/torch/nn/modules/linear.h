@@ -184,8 +184,8 @@ class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
   /// Pretty prints the `Bilinear` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
-  /// Applies a bilinear transform on the `input1` and `input2` tensor by multiplying 
-  /// with the `weight` and optionally adding the `bias`, if `with_bias` 
+  /// Applies a bilinear transform on the `input1` and `input2` tensor by multiplying
+  /// with the `weight` and optionally adding the `bias`, if `with_bias`
   /// is true in the options.
   Tensor forward(const Tensor& input1, const Tensor& input2);
 
