@@ -49,13 +49,15 @@ def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     params = tuple(p.detach().requires_grad_() for p in orig_params)
     return params, names
 
-def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...]) -> None:
+def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], as_params=False) -> None:
     """
     Reload a set of weights so that `mod` can be used again to perform a forward pass.
     Note that the `params` are regular Tensors (that can have history) and so are left
     as Tensors. This means that mod.parameters() will still be empty after this call.
     """
     for name, p in zip(names, params):
+        if as_params:
+            p = nn.Parameter(p)
         _set_nested_attr(mod, name.split("."), p)
 
 def make_functional(model: nn.Module):
@@ -66,4 +68,4 @@ def make_functional(model: nn.Module):
         load_weights(mutable_model, descriptors, weights)
         return mutable_model(*data)
 
-    return weights, fun
+    return weights, fun, descriptors

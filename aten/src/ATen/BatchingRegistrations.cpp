@@ -459,6 +459,14 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor flatten_batching_rule(const Tensor& self, int64_t start_dim, int64_t end_dim) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto start_dim_physical = self_physical.getPhysicalDim(start_dim);
+  auto end_dim_physical = self_physical.getPhysicalDim(end_dim);
+  auto result = self_physical.tensor().flatten(start_dim, end_dim);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
 Tensor view_as_complex_batching_rule(const Tensor& self) {
   // guard against the user passing in a batch of scalar tensors with batch
   // size equal to 2.
@@ -1044,6 +1052,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 //   m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
   m.impl("conj", native::conj);
+  m.impl("flatten.using_ints", flatten_batching_rule);
 // 
 //   // inplace operations
 //   m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);

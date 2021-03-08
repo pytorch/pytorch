@@ -46,14 +46,16 @@ def _any_differentiable(tensor_or_tuple_of_tensors):
     return False
 
 
-def grad_with_value(f, diff_argnums=(0,)):
+def grad_with_value(f, diff_argnums=(0,), has_aux=False):
     def wrapper(*args):
         torch._C._grad_increment_nesting()
-        output = None
+        output, aux = None, None
         try:
             args = [_create_differentiable(arg) if i in diff_argnums else arg
                     for i, arg in enumerate(args)]
             output = f(*args)
+            if has_aux:
+                output, aux = output
             assert output.dim() == 0
             diff_args = [args[i] for i in diff_argnums]
             single_diff_arg = isinstance(diff_args[0], torch.Tensor) and len(diff_args) == 1
@@ -69,13 +71,17 @@ def grad_with_value(f, diff_argnums=(0,)):
         finally:
             _undo_create_differentiable(args)
             torch._C._grad_decrement_nesting()
+        if has_aux:
+            return grad_input, output, aux
         return grad_input, output
     return wrapper
 
-def grad(f, diff_argnums=(0,)):
+def grad(f, diff_argnums=(0,), has_aux=False):
     def wrapper(*args):
-        result, _ = grad_with_value(f, diff_argnums)(*args)
-        return result
+        results = grad_with_value(f, diff_argnums, has_aux=has_aux)(*args)
+        if has_aux:
+            return results[0], results[2]
+        return results[0]
     return wrapper
 
 def f(x):
@@ -143,7 +149,7 @@ net = SampleNet(vocab_size)
 criterion = nn.CrossEntropyLoss()
 
 params = dict(net.named_parameters())
-weights, net_func = make_functional(net)
+weights, net_func, _ = make_functional(net)
 
 def compute_loss(weights, data, target):
     output = net_func(weights, (data,))
