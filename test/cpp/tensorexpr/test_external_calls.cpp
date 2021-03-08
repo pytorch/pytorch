@@ -194,17 +194,18 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
 TEST(ExternalCall, BinaryFloat) {
   KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor, at::Tensor)>;
-  std::vector<std::tuple<
+  using Test = std::tuple<
       std::vector<int64_t>,
       std::vector<int64_t>,
       std::vector<int64_t>,
       TensorFunc,
-      std::string>>
-      tests = {};
+      std::string>;
+  std::vector<Test> tests = {};
   tests.push_back(
-      {{100, 200}, {200, 300}, {100, 300}, at::matmul, "nnc_aten_matmul"});
-  tests.push_back({{100, 300}, {300}, {100}, at::mv, "nnc_aten_mv"});
-  tests.push_back({{100, 200}, {200, 300}, {100, 300}, at::mm, "nnc_aten_mm"});
+      Test{{100, 200}, {200, 300}, {100, 300}, at::matmul, "nnc_aten_matmul"});
+  tests.push_back(Test{{100, 300}, {300}, {100}, at::mv, "nnc_aten_mv"});
+  tests.push_back(
+      Test{{100, 200}, {200, 300}, {100, 300}, at::mm, "nnc_aten_mm"});
   for (auto curTest : tests) {
     std::vector<int64_t> aShape, bShape, resShape;
     TensorFunc torchFunc;
@@ -271,27 +272,27 @@ TEST(ExternalCall, UnaryFloat) {
     auto intV = std::vector<int>(v.begin(), v.end());
     return std::vector<ExprHandle>(intV.begin(), intV.end());
   };
-  std::vector<std::tuple<
+  using Test = std::tuple<
       std::vector<int64_t>,
       std::vector<int64_t>,
       TensorFunc,
       std::string,
-      std::vector<ExprHandle>>>
-      tests = {};
-  tests.push_back(
-      {{1, 64, 8, 9},
-       {1, 64, 5, 7},
-       [](at::Tensor x) {
-         return at::adaptive_avg_pool2d(x, {5, 7});
-       },
-       "nnc_aten_adaptive_avg_pool2d",
-       toExprHandleVec({5, 7})});
-  tests.push_back(
-      {{100, 200},
-       {100},
-       [](at::Tensor x) { return at::mean(x, {1}); },
-       "nnc_aten_mean",
-       toExprHandleVec({1})});
+      std::vector<ExprHandle>>;
+  std::vector<Test> tests = {};
+  tests.push_back(Test{
+      {1, 64, 8, 9},
+      {1, 64, 5, 7},
+      [](at::Tensor x) {
+        return at::adaptive_avg_pool2d(x, {5, 7});
+      },
+      "nnc_aten_adaptive_avg_pool2d",
+      toExprHandleVec({5, 7})});
+  tests.push_back(Test{
+      {100, 200},
+      {100},
+      [](at::Tensor x) { return at::mean(x, {1}); },
+      "nnc_aten_mean",
+      toExprHandleVec({1})});
   for (auto curTest : tests) {
     std::vector<int64_t> aShape, resShape;
     TensorFunc torchFunc;
