@@ -37,6 +37,9 @@ Tensor _embedding_helper(const Tensor & weight, const Tensor & indices,
 
 Tensor _embedding_module(const Tensor & weight, const Tensor & indices,
                  int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+  // Refer: Embedding Module Documentation
+  // No-Op to allow users change the padding vector.
+  // Here we won't zero out the vector at padding_idx.
   auto no_op = [](Tensor& embedding) {};
   return _embedding_helper(
       weight, indices, no_op, scale_grad_by_freq, sparse);
