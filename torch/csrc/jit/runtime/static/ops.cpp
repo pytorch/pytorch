@@ -575,10 +575,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     if (!te->supports(in0_t)) {
-      out_t.resize_({0});
+      fastResizeToZero(out_t);
       at::native::tanh_out(out_t, in0_t);
     } else {
-      out_t.resize_as_(in0_t);
+      at::native::resize_as_(out_t, in0_t, c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
@@ -596,10 +596,10 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out_t = p_node->Output(0).toTensor();
         if (!te->supports(in0_t)) {
-          out_t.resize_({0});
+          fastResizeToZero(out_t);
           at::native::sigmoid_out(out_t, in0_t);
         } else {
-          out_t.resize_as_(in0_t);
+          at::native::resize_as_(out_t, in0_t, c10::nullopt);
           (*te)(
               out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
         }
@@ -626,7 +626,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       at::native::logit_out(out_t, in0_t, in1_d);
     } else {
-      out_t.resize_as_(in0_t);
+      at::native::resize_as_(out_t, in0_t, c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
@@ -643,11 +643,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
     at::native::copy_(out_t, in0_t, false);
   };
 });
-REGISTER_OPERATOR_FUNCTOR_OPT(
+REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_rowwise_offsets,
     quantized_embedding_bag_byte_rowwise_offsets,
-    false, // don't reuse byte inputs
-    true,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         const auto& weight = p_node->Input(0).toTensor();
@@ -677,11 +675,9 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
             include_last_offset);
       };
     });
-REGISTER_OPERATOR_FUNCTOR_OPT(
+REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_4bit_rowwise_offsets,
     embedding_bag_4bit_rowwise_offsets,
-    false, // don't reuse byte inputs
-    true,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         const auto& weight = p_node->Input(0).toTensor();
@@ -918,7 +914,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
-      auto* node = p_node->get_node();
+      auto* node = p_node->node();
       const auto& type = node->output()->type()->expect<TupleType>();
       if (type->name().has_value()) {
         namedTupleConstruct(stack, type, node->inputs().size());
@@ -940,7 +936,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       // run op
       listConstruct(
           stack,
-          p_node->get_node()->output()->type()->expectRef<ListType>(),
+          p_node->node()->output()->type()->expectRef<ListType>(),
           p_node->inputs().size());
       // put output back
       p_node->Output(0) = std::move(stack[0]);

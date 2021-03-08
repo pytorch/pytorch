@@ -128,7 +128,7 @@ C10_DEVICE static inline scalar_t polevl(const scalar_t x,  const scalar_t A[], 
 }
 
 /* the functions stirling_approx_tail, binomial_inversion, and btrs are adapted
- * from TensorFlow's random_binomial_op.cc implementation. That code is under 
+ * from TensorFlow's random_binomial_op.cc implementation. That code is under
  * copyright: 2019 The TensorFlow Authors.
  *
  * It was released under the Apache License, Version 2.0 (the "License"), available at:

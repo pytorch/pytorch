@@ -30,18 +30,38 @@ TEST(LoggingTest, TestEnforceFalse) {
 TEST(LoggingTest, TestEnforceEquals) {
   int x = 4;
   int y = 5;
+  int z = 0;
   try {
-    CAFFE_ENFORCE_THAT(==, ++x, ++y);
+    CAFFE_ENFORCE_THAT(==, ++x, ++y, "Message: ", z++);
     // This should never be triggered.
     ADD_FAILURE();
   } catch (const ::c10::Error& err) {
-    EXPECT_NE(std::string(err.what()).find("5 vs 6"), string::npos);
+    auto errStr = std::string(err.what());
+    EXPECT_NE(errStr.find("5 vs 6"), string::npos);
+    EXPECT_NE(errStr.find("Message: 0"), string::npos);
   }
 
   // arguments are expanded only once
   CAFFE_ENFORCE_THAT(==, ++x, y);
   EXPECT_EQ(x, 6);
   EXPECT_EQ(y, 6);
+  EXPECT_EQ(z, 1);
+}
+
+namespace {
+struct EnforceEqWithCaller {
+  void test(const char *x) {
+    CAFFE_ENFORCE_EQ_WITH_CALLER(1, 1, "variable: ", x, " is a variable");
+  }
+};
+}
+
+TEST(LoggingTest, TestEnforceMessageVariables) {
+  const char *const x = "hello";
+  CAFFE_ENFORCE_EQ(1, 1, "variable: ", x, " is a variable");
+
+  EnforceEqWithCaller e;
+  e.test(x);
 }
 
 TEST(LoggingTest, EnforceEqualsObjectWithReferenceToTemporaryWithoutUseOutOfScope) {

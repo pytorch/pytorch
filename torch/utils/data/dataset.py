@@ -12,16 +12,6 @@ from ... import Tensor, Generator
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 
-class functional_datapipe(object):
-    def __init__(self, name):
-        self.name = name
-
-    def __call__(self, cls):
-        if not issubclass(cls, IterableDataset):
-            raise Exception('Can only decorate IterDataPipe')
-        IterableDataset.register_datapipe_as_function(self.name, cls)
-        return cls
-
 
 class Dataset(Generic[T_co]):
     r"""An abstract class representing a :class:`Dataset`.
