@@ -211,7 +211,7 @@ def wait_for_process(p):
     finally:
         # Always call p.wait() to ensure exit
         p.wait()
-    return p.wait() # should not be reached?
+    return p.wait()  # should not be reached?
 
 def shell(command, cwd=None, env=None):
     sys.stdout.flush()
