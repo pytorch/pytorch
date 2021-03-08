@@ -287,12 +287,6 @@ TEST(ExternalCall, UnaryFloat) {
       },
       "nnc_aten_adaptive_avg_pool2d",
       toExprHandleVec({5, 7})});
-  tests.push_back(Test{
-      {100, 200},
-      {100},
-      [](at::Tensor x) { return at::mean(x, {1}); },
-      "nnc_aten_mean",
-      toExprHandleVec({1})});
   for (auto curTest : tests) {
     std::vector<int64_t> aShape, resShape;
     TensorFunc torchFunc;
