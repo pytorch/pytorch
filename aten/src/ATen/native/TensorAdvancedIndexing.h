@@ -28,7 +28,7 @@ using scatter_add_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, c
 using scatter_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
                                   const Tensor& src, const SCATTER_GATHER_OP& reduce);
 using scatter_scalar_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
-                                         Scalar& value, const SCATTER_GATHER_OP& reduce);
+                                         const Scalar& value, const SCATTER_GATHER_OP& reduce);
 
 DECLARE_DISPATCH(index_fn, index_stub);
 DECLARE_DISPATCH(index_fill_fn, index_fill_stub);

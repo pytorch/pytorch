@@ -474,7 +474,7 @@ void scatter_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& i
 }
 
 void scatter_scalar_reduce_cuda_kernel(Tensor& self, const int64_t dim, const Tensor& index,
-                               Scalar& value, const SCATTER_GATHER_OP& reduce) {
+                               const Scalar& value, const SCATTER_GATHER_OP& reduce) {
   switch (reduce) {
   case SCATTER_GATHER_OP::REDUCE_ADD :
     cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
