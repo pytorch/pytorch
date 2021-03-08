@@ -69,9 +69,7 @@ class LazyModuleMixin:
     be converted to the desired dtype and placed on the expected device.
     This is because lazy modules only perform shape inference so the usual dtype
     and device placement behavior applies.
-    The lazy modules should then be initialized with one "dry run". However, if the
-    module has branches depending on the inputs, more "dry runs" may be necessary to ensure
-    that all the components in the module are properly initialized.
+    The lazy modules should then perform "dry runs" to initialize all the components in the module.
     These "dry runs" send inputs of the correct size, dtype, and device through
     the network and to each one of its lazy modules. After this the network can be used as usual.
 
@@ -93,8 +91,7 @@ class LazyModuleMixin:
     >>> # NOTE: these transforms can and should be applied after construction and before any 'dry runs'
     >>> lazy_mlp = mlp.cuda().double()
     >>> lazy_mlp
-    LazyMLP(
-      (fc1): LazyLinear(in_features=0, out_features=10, bias=True)
+    LazyMLP( (fc1): LazyLinear(in_features=0, out_features=10, bias=True)
       (relu1): ReLU()
       (fc2): LazyLinear(in_features=0, out_features=1, bias=True)
       (relu2): ReLU()
@@ -118,8 +115,9 @@ class LazyModuleMixin:
     first and then a regular :class:`torch.nn.Linear` second, the second module would be
     initialized on construction and the first module would be initialized during the first dry run.
     This can cause the parameters of a network using lazy modules to be initialized differently
-    than the parameters of a network without lazy modules due to random number generation. Check
-    `https://pytorch.org/docs/stable/notes/randomness.html` for more details.
+    than the parameters of a network without lazy modules as the order of parameter initializations,
+    which often depends on a stateful random number generator, is different.
+    Check :doc:`/notes/randomness` for more details.
 
     Lazy modules can be serialized with a state dict like other modules. For example:
 
@@ -134,7 +132,7 @@ class LazyModuleMixin:
                  ('fc2.bias', tensor([0.0019]))])
 
 
-    Lazy modules can load regular nn.Parameters (i.e. you can serialize/deserialize
+    Lazy modules can load regular :class:`torch.nn.Parameter`s (i.e. you can serialize/deserialize
     initialized LazyModules and they will remain initialized)
 
 
@@ -165,7 +163,7 @@ class LazyModuleMixin:
                  ('fc2.bias', tensor([0.0019]))])
 
     Note, however, that the loaded parameters will not be replaced when doing a "dry run" if they are initialized
-    and the input shapes are different. This prevents using initialized modules in different contexts.
+    when the state is loaded. This prevents using initialized modules in different contexts.
     """
 
     # modules inheriting from this will change their __class__ to the specified
