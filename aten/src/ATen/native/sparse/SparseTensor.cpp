@@ -9,7 +9,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
 
-#include <TH/THBlasUtils.h>
+#include <ATen/native/CPUBlas.h>
 
 namespace at { namespace native {
 
@@ -75,7 +75,7 @@ SparseTensor new_sparse(c10::optional<ScalarType> dtype, c10::optional<Layout> l
   DispatchKey dispatch_key;
   if (device_or_default(device).is_cuda()) {
     dispatch_key = DispatchKey::SparseCUDA;
-  } else if (device_or_default(device).type() == DeviceType::XPU) {
+  } else if (device_or_default(device).is_xpu()) {
     dispatch_key = DispatchKey::SparseXPU;
   } else {
     dispatch_key = DispatchKey::SparseCPU;
@@ -413,7 +413,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
           int64_t curr = indicesBufferAccessor[j];
           if (curr == prev) {
             if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
-              THBlas_axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+              at::native::cpublas::axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
             }
           } else {
             ++i;
@@ -421,7 +421,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
               newIndicesAccessor[d][i] = indicesAccessor[d][pos];
             }
             if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
-              THBlas_copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+              at::native::cpublas::copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
             }
           }
           prev = curr;
@@ -541,8 +541,8 @@ Tensor sparse_mask_helper_cpu(
       `t`             - coalesced sparse tensor input
       `mask_indices`  - mask indices tensor
 
-    Note: The nnz in the output tensor will be same as the `mask_indices`. So it will 
-    works independently if the mask is coalesced or not. 
+    Note: The nnz in the output tensor will be same as the `mask_indices`. So it will
+    works independently if the mask is coalesced or not.
   */
   TORCH_CHECK(t.is_sparse(), "t: input is not a sparse tensor");
   TORCH_CHECK(t.is_coalesced(), "t:  input is uncoalesced");
@@ -554,7 +554,7 @@ Tensor sparse_mask_helper_cpu(
   auto t_v = t._values();
   auto vsize = t_v.sizes().vec();
   vsize[0] = r_nnz;
- 
+
   Tensor r_values = at::zeros(vsize, t_v.options());
   auto t_i = t._indices();
   auto t_nnz = t._nnz();
@@ -583,7 +583,7 @@ Tensor sparse_mask_helper_cpu(
       }
     }
   });
-  return r_values; 
+  return r_values;
 }
 
 }} // namespace at::native
