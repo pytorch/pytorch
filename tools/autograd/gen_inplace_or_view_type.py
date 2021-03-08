@@ -1,3 +1,4 @@
+from tools.codegen.api import cpp
 from tools.codegen.api.autograd import *
 from tools.codegen.api.types import *
 from tools.codegen.code_template import CodeTemplate
