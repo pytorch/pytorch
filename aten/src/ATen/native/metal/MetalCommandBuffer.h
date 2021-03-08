@@ -3,7 +3,7 @@
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
 @interface MetalCommandBuffer : NSObject
-@property(nonatomic, strong, readonly) NSThread* thread;
+@property(nonatomic, weak, readonly) NSThread* thread;
 @property(nonatomic, strong, readonly) id<MTLCommandBuffer> buffer;
 
 + (MetalCommandBuffer*)newBuffer;
