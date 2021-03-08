@@ -784,36 +784,39 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
   };
 });
 // out variant takes precedence over native
-REGISTER_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
-  return [](ProcessedNode* p_node) {
-    // support 4- or 5-arg for adindexer/adfinder models
-    DCHECK(p_node->inputs().size() >= 4);
-    const auto& in0_t = p_node->Input(0).toTensor();
-    auto in2_i = p_node->Input(2).toBool(); // non_blocking
-    // ignore input 3 (copy)
-    if (p_node->Output(0).isNone()) {
-      auto in1_i = p_node->Input(1).toScalarType();
-      c10::optional<c10::MemoryFormat> in4_o = c10::nullopt;
-      if (p_node->inputs().size() > 4 && p_node->Input(4).isInt()) {
-        in4_o = p_node->Input(4).toOptional<c10::MemoryFormat>();
-      }
-      if (in4_o.value_or(c10::MemoryFormat::Preserve) ==
-          c10::MemoryFormat::Preserve) {
-        if (in0_t.is_non_overlapping_and_dense()) {
-          in4_o = c10::nullopt;
-        } else {
-          in4_o = in0_t.suggest_memory_format();
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::to_copy,
+    aten_to_copy,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        // support 4- or 5-arg for adindexer/adfinder models
+        DCHECK(p_node->inputs().size() >= 4);
+        const auto& in0_t = p_node->Input(0).toTensor();
+        auto in2_i = p_node->Input(2).toBool(); // non_blocking
+        // ignore input 3 (copy)
+        if (p_node->Output(0).isNone()) {
+          auto in1_i = p_node->Input(1).toScalarType();
+          c10::optional<c10::MemoryFormat> in4_o = c10::nullopt;
+          if (p_node->inputs().size() > 4 && p_node->Input(4).isInt()) {
+            in4_o = p_node->Input(4).toOptional<c10::MemoryFormat>();
+          }
+          if (in4_o.value_or(c10::MemoryFormat::Preserve) ==
+              c10::MemoryFormat::Preserve) {
+            if (in0_t.is_non_overlapping_and_dense()) {
+              in4_o = c10::nullopt;
+            } else {
+              in4_o = in0_t.suggest_memory_format();
+            }
+          }
+          // See Note [Explicit nullopt MemoryFormat argument]
+          p_node->Output(0) = at::detail::empty_cpu(
+              {0}, in1_i, in0_t.layout(), in0_t.device(), c10::nullopt, in4_o);
         }
-      }
-      // See Note [Explicit nullopt MemoryFormat argument]
-      p_node->Output(0) = at::detail::empty_cpu(
-          {0}, in1_i, in0_t.layout(), in0_t.device(), c10::nullopt, in4_o);
-    }
-    auto& out_t = p_node->Output(0).toTensor();
-    fastResizeToZero(out_t);
-    at::native::to_copy_out(out_t, in0_t, in2_i);
-  };
-});
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        at::native::to_copy_out(out_t, in0_t, in2_i);
+      };
+    });
 
 // Out variants for view ops are registered to a separate registry because
 // their outputs (views) can't participate in memory reuse.
