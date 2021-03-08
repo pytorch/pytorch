@@ -533,13 +533,17 @@ void exponential_kernel(TensorIterator& iter, double lambda_, RNG gen) {
     auto lambda = static_cast<accscalar_t>(lambda_);
     // define lambda for exponential transformation
     auto exponential_func = [lambda] __device__ (accscalar_t rand) {
-      // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
-      // Hence, squash the 1 to just below 1.
       // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
-      if(rand == static_cast<accscalar_t>(1.0)) {
-        rand = ::nextafter(static_cast<accscalar_t>(1.0), static_cast<accscalar_t>(0.0));
+      // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
+      // if traansformation returns too small value (regardless of rand being 1.0 or bad __logf approximation)
+      // fix it up to be equal to numeric_limits::epsilon, which is equivalent to rand being squashed to 1-epsilon
+      auto val = transformation::exponential<accscalar_t>(rand, lambda);
+      //transformation result is always non-negative
+      if (val <= std::numeric_limits<accscalar_t>::epsilon()) {
+        val = std::numeric_limits<accscalar_t>::epsilon();
       }
-      return static_cast<scalar_t>(transformation::exponential<accscalar_t>(rand, lambda));
+      return static_cast<scalar_t>(
+          transformation::exponential<accscalar_t>(rand, lambda));
     };
     uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, exponential_func);
    });
