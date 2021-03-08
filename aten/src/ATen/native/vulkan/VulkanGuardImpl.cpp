@@ -1,0 +1,10 @@
+#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/macros/Macros.h>
+
+namespace at {
+namespace detail {
+
+C10_REGISTER_GUARD_IMPL(Vulkan, c10::impl::NoOpDeviceGuardImpl<DeviceType::Vulkan>);
+
+} // namespace detail
+} // namespace at

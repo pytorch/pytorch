@@ -734,22 +734,8 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (is_pointwise(unpacked_.filter)) {
-      conv2d_pw(
-          context,
-          command_buffer,
-          v_output,
-          v_input,
-          packed_.v_weight,
-          packed_.v_bias,
-          packed_.filter,
-          packed_.stride,
-          packed_.padding,
-          packed_.output_min,
-          packed_.output_max);
-    }
-    else {
-      conv2d(
+    if (is_depthwise(unpacked_.filter, unpacked_.groups)) {
+      conv2d_dw(
           context,
           command_buffer,
           v_output,
@@ -763,6 +749,38 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
           packed_.dilation,
           packed_.output_min,
           packed_.output_max);
+    }
+    else {
+      if (is_pointwise(unpacked_.filter)) {
+        conv2d_pw(
+            context,
+            command_buffer,
+            v_output,
+            v_input,
+            packed_.v_weight,
+            packed_.v_bias,
+            packed_.filter,
+            packed_.stride,
+            packed_.padding,
+            packed_.output_min,
+            packed_.output_max);
+      }
+      else {
+        conv2d(
+            context,
+            command_buffer,
+            v_output,
+            v_input,
+            packed_.v_weight,
+            packed_.v_bias,
+            packed_.filter,
+            unpacked_.filter,
+            packed_.stride,
+            packed_.padding,
+            packed_.dilation,
+            packed_.output_min,
+            packed_.output_max);
+      }
     }
   }
   command_pool.submit(context->gpu().queue, command_buffer);
