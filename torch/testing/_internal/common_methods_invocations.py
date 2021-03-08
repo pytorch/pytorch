@@ -1378,6 +1378,21 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
 
     return samples
 
+def sample_inputs_entr(op_info, device, dtype, requires_grad):
+    low, high = op_info.domain
+    low = low if low is None else low + op_info._domain_eps
+    high = high if high is None else high - op_info._domain_eps
+
+    if requires_grad:
+        low = 0
+
+    return (SampleInput(make_tensor((L,), device, dtype,
+                                    low=low, high=high,
+                                    requires_grad=requires_grad)),
+            SampleInput(make_tensor((), device, dtype,
+                                    low=low, high=high,
+                                    requires_grad=requires_grad)))
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -2627,6 +2642,21 @@ if TEST_SCIPY:
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                     device_type='cuda', dtypes=[torch.float16]),),
                        safe_casts_outputs=True),
+        UnaryUfuncInfo('special.entr',
+                       ref=scipy.special.entr,
+                       aten_name='special_entr',
+                       decorators=(precisionOverride({torch.float16: 1e-1,
+                                                      torch.bfloat16: 1e-1}),),
+                       dtypes=all_types_and(torch.bool),
+                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                       skips=(
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                    dtypes=[torch.bfloat16, torch.float16]),
+                       ),
+                       test_inplace_grad=False,
+                       safe_casts_outputs=True,
+                       sample_inputs_func=sample_inputs_entr),
         UnaryUfuncInfo('erf',
                        ref=scipy.special.erf,
                        decorators=(precisionOverride({torch.float16: 1e-2,
