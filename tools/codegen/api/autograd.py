@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import re
 from typing import Optional, Sequence, List, Tuple
 
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 from tools.codegen.api.types import *
 from tools.codegen.model import *
 from tools.codegen.utils import IDENT_REGEX

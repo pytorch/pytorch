@@ -30,7 +30,7 @@ from .gen_inplace_or_view_type import emit_view_body, get_view_info, is_tensor_l
 
 from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.gen import FileManager
