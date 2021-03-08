@@ -191,50 +191,157 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-TEST(ExternalCall, Matmul) {
+TEST(ExternalCall, BinaryFloat) {
   KernelScope kernel_scope;
-  Placeholder A("A", kFloat, {10, 3, 100, 200});
-  Placeholder B("", kFloat, {10, 3, 200, 300});
-  BufHandle ResultBuf("Result", {10, 3, 100, 300}, kFloat);
+  using TensorFunc = std::function<at::Tensor(at::Tensor, at::Tensor)>;
+  using Test = std::tuple<
+      std::vector<int64_t>,
+      std::vector<int64_t>,
+      std::vector<int64_t>,
+      TensorFunc,
+      std::string>;
+  std::vector<Test> tests = {};
+  tests.push_back(
+      Test{{100, 200}, {200, 300}, {100, 300}, at::matmul, "nnc_aten_matmul"});
+  tests.push_back(Test{{100, 300}, {300}, {100}, at::mv, "nnc_aten_mv"});
+  tests.push_back(
+      Test{{100, 200}, {200, 300}, {100, 300}, at::mm, "nnc_aten_mm"});
+  for (auto curTest : tests) {
+    std::vector<int64_t> aShape, bShape, resShape;
+    TensorFunc torchFunc;
+    std::string externCallName;
+    std::tie(aShape, bShape, resShape, torchFunc, externCallName) = curTest;
+    auto toExprHandleVec = [](std::vector<int64_t> v) {
+      auto intV = std::vector<int>(v.begin(), v.end());
+      return std::vector<ExprHandle>(intV.begin(), intV.end());
+    };
+    Placeholder A("A", kFloat, toExprHandleVec(aShape));
+    Placeholder B("", kFloat, toExprHandleVec(bShape));
+    BufHandle ResultBuf("Result", toExprHandleVec(resShape), kFloat);
 
-  Tensor* Result = new Tensor(
-      ResultBuf.node(),
-      ExternalCall::make(
-          ResultBuf,
-          "nnc_aten_matmul",
-          {BufHandle(A.data()), BufHandle(B.data())},
-          {}));
-  LoopNest l({Result});
-  l.prepareForCodegen();
-  l.simplify();
+    Tensor* Result = new Tensor(
+        ResultBuf.node(),
+        ExternalCall::make(
+            ResultBuf,
+            externCallName,
+            {BufHandle(A.data()), BufHandle(B.data())},
+            {}));
+    LoopNest l({Result});
+    l.prepareForCodegen();
+    l.simplify();
 
-  auto options = at::TensorOptions()
-                     .dtype(at::kFloat)
-                     .layout(at::kStrided)
-                     .device(at::kCPU)
-                     .requires_grad(false);
-  at::Tensor a = at::ones({10, 3, 100, 200}, options) * 5.f;
-  at::Tensor b = at::ones({10, 3, 200, 300}, options) * 6.f;
-  at::Tensor ref = at::matmul(a, b);
+    auto options = at::TensorOptions()
+                       .dtype(at::kFloat)
+                       .layout(at::kStrided)
+                       .device(at::kCPU)
+                       .requires_grad(false);
+    at::Tensor a = at::ones(c10::IntArrayRef(aShape), options) * 5.f;
+    at::Tensor b = at::ones(c10::IntArrayRef(bShape), options) * 6.f;
+    at::Tensor ref = torchFunc(a, b);
 
-  at::Tensor nnc_result;
-  std::vector<float> a_buf(10 * 3 * 100 * 200, 5.f);
-  std::vector<float> b_buf(10 * 3 * 200 * 300, 6.f);
-  std::vector<float> result_buf(10 * 3 * 100 * 300, -1.f);
+    auto prod = [](std::vector<int64_t> v) {
+      return std::accumulate(v.begin(), v.end(), 1, std::multiplies<int64_t>());
+    };
+
+    at::Tensor nnc_result;
+    std::vector<float> a_buf(prod(aShape), 5.f);
+    std::vector<float> b_buf(prod(bShape), 6.f);
+    std::vector<float> result_buf(prod(resShape), -1.f);
 
 #ifdef TORCH_ENABLE_LLVM
-  LLVMCodeGen llvm_codegen(l.root_stmt(), {A, B, Result});
+    LLVMCodeGen llvm_codegen(l.root_stmt(), {A, B, Result});
 
-  llvm_codegen.call({a_buf, b_buf, result_buf});
-  nnc_result = at::from_blob(result_buf.data(), {10, 3, 100, 300}, options);
-  ASSERT_TRUE(at::allclose(nnc_result, ref));
+    llvm_codegen.call({a_buf, b_buf, result_buf});
+    nnc_result =
+        at::from_blob(result_buf.data(), c10::IntArrayRef(resShape), options);
+    ASSERT_TRUE(at::allclose(nnc_result, ref));
 #endif
 
-  SimpleIREvaluator ir_eval(l.root_stmt(), {A, B, Result});
+    SimpleIREvaluator ir_eval(l.root_stmt(), {A, B, Result});
+    ir_eval.call({a_buf, b_buf, result_buf});
+    nnc_result =
+        at::from_blob(result_buf.data(), c10::IntArrayRef(resShape), options);
+    ASSERT_TRUE(at::allclose(nnc_result, ref));
+  }
+}
 
-  ir_eval.call({a_buf, b_buf, result_buf});
-  nnc_result = at::from_blob(result_buf.data(), {10, 3, 100, 300}, options);
-  ASSERT_TRUE(at::allclose(nnc_result, ref));
+TEST(ExternalCall, UnaryFloat) {
+  KernelScope kernel_scope;
+  using TensorFunc = std::function<at::Tensor(at::Tensor)>;
+  auto toExprHandleVec = [](std::vector<int64_t> v) {
+    auto intV = std::vector<int>(v.begin(), v.end());
+    return std::vector<ExprHandle>(intV.begin(), intV.end());
+  };
+  using Test = std::tuple<
+      std::vector<int64_t>,
+      std::vector<int64_t>,
+      TensorFunc,
+      std::string,
+      std::vector<ExprHandle>>;
+  std::vector<Test> tests = {};
+  tests.push_back(Test{
+      {1, 64, 8, 9},
+      {1, 64, 5, 7},
+      [](at::Tensor x) {
+        return at::adaptive_avg_pool2d(x, {5, 7});
+      },
+      "nnc_aten_adaptive_avg_pool2d",
+      toExprHandleVec({5, 7})});
+  tests.push_back(Test{
+      {100, 200},
+      {100},
+      [](at::Tensor x) { return at::mean(x, {1}); },
+      "nnc_aten_mean",
+      toExprHandleVec({1})});
+  for (auto curTest : tests) {
+    std::vector<int64_t> aShape, resShape;
+    TensorFunc torchFunc;
+    std::string externCallName;
+    std::vector<ExprHandle> externCallArgs;
+    std::tie(aShape, resShape, torchFunc, externCallName, externCallArgs) =
+        curTest;
+    Placeholder A("A", kFloat, toExprHandleVec(aShape));
+    BufHandle ResultBuf("Result", toExprHandleVec(resShape), kFloat);
+
+    Tensor* Result = new Tensor(
+        ResultBuf.node(),
+        ExternalCall::make(
+            ResultBuf, externCallName, {BufHandle(A.data())}, externCallArgs));
+    LoopNest l({Result});
+    l.prepareForCodegen();
+    l.simplify();
+
+    auto options = at::TensorOptions()
+                       .dtype(at::kFloat)
+                       .layout(at::kStrided)
+                       .device(at::kCPU)
+                       .requires_grad(false);
+    at::Tensor a = at::ones(c10::IntArrayRef(aShape), options) * 5.f;
+    at::Tensor ref = torchFunc(a);
+
+    auto prod = [](std::vector<int64_t> v) {
+      return std::accumulate(v.begin(), v.end(), 1, std::multiplies<int64_t>());
+    };
+
+    at::Tensor nnc_result;
+    std::vector<float> a_buf(prod(aShape), 5.f);
+    std::vector<float> result_buf(prod(resShape), -1.f);
+
+#ifdef TORCH_ENABLE_LLVM
+    LLVMCodeGen llvm_codegen(l.root_stmt(), {A, Result});
+
+    llvm_codegen.call({a_buf, result_buf});
+    nnc_result =
+        at::from_blob(result_buf.data(), c10::IntArrayRef(resShape), options);
+    ASSERT_TRUE(at::allclose(nnc_result, ref));
+#endif
+
+    SimpleIREvaluator ir_eval(l.root_stmt(), {A, Result});
+    ir_eval.call({a_buf, result_buf});
+    nnc_result =
+        at::from_blob(result_buf.data(), c10::IntArrayRef(resShape), options);
+    ASSERT_TRUE(at::allclose(nnc_result, ref));
+  }
 }
 
 TEST(ExternalCall, ComputeInterop) {
