@@ -148,34 +148,11 @@ static void allocate_reduction_result(
       }
     }
   }
-  TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
-  result.resize_(shape);
-}
-
-inline Tensor create_reduction_result(
-  const Tensor& self, IntArrayRef dim, bool keepdim, const c10::optional<ScalarType>& opt_dtype
-) {
-  DimMask mask = make_dim_mask(dim, self.dim());
-
-  ScalarType dtype = value_or_else(opt_dtype, [&] {
-    ScalarType src_type = self.scalar_type();
-    if (at::isIntegralType(src_type, /*includeBool=*/true)) {
-      return kLong;
-    }
-    return src_type;
-  });
-
-  auto shape = DimVector(self.sizes());
-  for (int dim = shape.size() - 1; dim >= 0; dim--) {
-    if (mask[dim]) {
-      if (keepdim) {
-        shape[dim] = 1;
-      } else {
-        shape.erase(shape.begin() + dim);
-      }
-    }
+  if (result.defined()) {
+    result.resize_(shape);
+  } else {
+    result = at::empty(shape, self.options().dtype(dtype));
   }
-  return at::empty(shape, self.options().dtype(dtype));
 }
 
 static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask, bool keepdim) {
