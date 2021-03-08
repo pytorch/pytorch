@@ -3361,7 +3361,8 @@ class TestTorchDeviceType(TestCase):
         input_.sum().backward()
 
     # TODO: this test should be in test_nn.py
-    @largeTensorTest('12GB', device='cuda')
+    @onlyCUDA
+    @largeTensorTest('12GB')
     def test_conv_transposed_large(self, device):
         # ConvTranspose3d works for large input tensors (gh-32866)
         in_channels = 64
