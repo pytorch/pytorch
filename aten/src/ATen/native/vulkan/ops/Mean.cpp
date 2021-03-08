@@ -22,7 +22,7 @@ Tensor mean(
   std::unordered_set<int64_t> dims_set;
 
   for (const auto& d : dim) {
-    dims_set.insert(utils::normalize(d, 4));
+    dims_set.insert(normalize(d, 4));
   }
 
   TORCH_CHECK(
