@@ -5132,7 +5132,7 @@ class TestNN(NNTestCase):
         for module in (nn.RNNCell, nn.GRUCell):
             cell = module(10, 20)
             self.assertRaises(Exception, lambda: cell(input, hx))
-    
+
     def test_RNN_cell_forward_hidden_size(self):
         input = torch.randn(3, 10)
         hx = torch.randn(3, 21)
@@ -5558,19 +5558,19 @@ class TestNN(NNTestCase):
             (hx + cx).sum().backward()
 
     def test_LSTM_cell_forward_input_size(self):
-         input = torch.randn(3, 11)
-         hx = torch.randn(3, 20)
-         cx = torch.randn(3, 20)
-         lstm = nn.LSTMCell(10, 20)
-         self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+        input = torch.randn(3, 11)
+        hx = torch.randn(3, 20)
+        cx = torch.randn(3, 20)
+        lstm = nn.LSTMCell(10, 20)
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
 
     def test_LSTM_cell_forward_hidden_size(self):
-         input = torch.randn(3, 10)
-         hx = torch.randn(3, 21)
-         cx = torch.randn(3, 20)
-         lstm = nn.LSTMCell(10, 20)
-         self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
-         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
+        input = torch.randn(3, 10)
+        hx = torch.randn(3, 21)
+        cx = torch.randn(3, 20)
+        lstm = nn.LSTMCell(10, 20)
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+        self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
 
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
