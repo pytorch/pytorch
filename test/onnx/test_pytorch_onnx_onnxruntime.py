@@ -4421,7 +4421,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 16, 4, 3, requires_grad=True)
         self.run_test(PixelShuffle(), x)
-        
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_pixel_unshuffle(self):
         class PixelUnshuffle(torch.nn.Module):
