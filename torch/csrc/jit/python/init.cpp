@@ -1335,7 +1335,7 @@ void initJITBindings(PyObject* module) {
   initTreeViewBindings(module);
   initJitScriptBindings(module);
   initJitBackendBindings(module);
-  initStaticRuntimeBindings(module);
+  initStaticModuleBindings(module);
   initTensorExprBindings(module);
 
   setPrintHandler([](const std::string& str) {

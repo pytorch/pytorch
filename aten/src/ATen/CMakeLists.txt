@@ -118,11 +118,11 @@ add_subdirectory(quantized)
 add_subdirectory(nnapi)
 
 if(BUILD_LITE_INTERPRETER)
-  list(APPEND ATen_CPU_SRCS_LITE "")
   set(all_cpu_cpp ${generated_cpp} ${core_generated_cpp} ${cpu_kernel_cpp})
   append_filelist("jit_core_sources" all_cpu_cpp)
   append_filelist("aten_cpu_source_non_codegen_list" all_cpu_cpp)
   append_filelist("aten_native_source_non_codegen_list" all_cpu_cpp)
+  list(APPEND all_cpu_cpp ${Aten_TH_AVX_extra_src})
 else()
   set(
     all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp}

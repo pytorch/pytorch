@@ -2366,22 +2366,22 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         def test_assert_async(self):
             with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
-                torch.assert_async(torch.tensor([]))
+                torch._assert_async(torch.tensor([]))
             with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with more than one value is ambiguous"):
-                torch.assert_async(torch.tensor([0, 0]))
+                torch._assert_async(torch.tensor([0, 0]))
             with self.assertRaisesRegex(RuntimeError, "Expected Tensor with single nonzero value, but got zero"):
-                torch.assert_async(torch.tensor(0))
-            torch.assert_async(torch.tensor(1))
-            torch.assert_async(torch.tensor(0.1))
-            torch.assert_async(torch.tensor(-0.1))
+                torch._assert_async(torch.tensor(0))
+            torch._assert_async(torch.tensor(1))
+            torch._assert_async(torch.tensor(0.1))
+            torch._assert_async(torch.tensor(-0.1))
             with self.assertRaisesRegex(RuntimeError, "Expected Tensor with single nonzero value, but got zero"):
-                torch.assert_async(torch.tensor(0.0))
-            torch.assert_async(torch.tensor(True))
+                torch._assert_async(torch.tensor(0.0))
+            torch._assert_async(torch.tensor(True))
             with self.assertRaisesRegex(RuntimeError, "Expected Tensor with single nonzero value, but got zero"):
-                torch.assert_async(torch.tensor(False))
-            torch.assert_async(torch.tensor(0 + 0.1j))
+                torch._assert_async(torch.tensor(False))
+            torch._assert_async(torch.tensor(0 + 0.1j))
             with self.assertRaisesRegex(RuntimeError, "Expected Tensor with single nonzero value, but got zero"):
-                torch.assert_async(torch.tensor(0 + 0j))
+                torch._assert_async(torch.tensor(0 + 0j))
 
         # NB: we must not be built with CUDA; if we are built with CUDA but no CUDA
         # is available, we get a different error.

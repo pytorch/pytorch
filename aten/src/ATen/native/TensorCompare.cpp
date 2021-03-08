@@ -193,7 +193,7 @@ bool is_nonzero(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(false, "Expected non-Tensor backend scalar");
 }
 
-void assert_async_cpu(const Tensor& self) {
+void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
 }
 

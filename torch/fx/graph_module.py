@@ -314,7 +314,7 @@ class {module_name}(torch.nn.Module):
         """
         Adds the given submodule to ``self``.
 
-        This installs empty Modules where none exist yet if they are 
+        This installs empty Modules where none exist yet if they are
         subpaths of ``target``.
 
         Args:
@@ -401,7 +401,7 @@ class {module_name}(torch.nn.Module):
         true:
         1. It has children that are used
         2. Its forward is called directly via a ``call_module`` node
-        3. It has a non-Module attribute that is used from a 
+        3. It has a non-Module attribute that is used from a
         ``get_attr`` node
 
         This method can be called to clean up an ``nn.Module`` without
@@ -425,9 +425,9 @@ class {module_name}(torch.nn.Module):
                     return '.'.join([x, y] if y else [x])
 
                 # Progressively collect all the names of intermediate
-                # modules. For example, if we have the target 
-                # `foo.bar.baz`, we'll add `foo`, `foo.bar`, and 
-                # `foo.bar.baz` to the list. 
+                # modules. For example, if we have the target
+                # `foo.bar.baz`, we'll add `foo`, `foo.bar`, and
+                # `foo.bar.baz` to the list.
                 for path in itertools.accumulate(fullpath, join_fn):
                     used.append(path)
 
