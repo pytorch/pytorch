@@ -124,6 +124,34 @@ llvm::ElementCount ElementCount(int lanes) {
 }
 #endif
 
+#if LLVM_VERSION_MAJOR >= 9
+
+using FunctionCallee = llvm::FunctionCallee;
+
+#elif LLVM_VERSION_MAJOR == 8 && LLVM_VERSION_PATCH == 20181009
+
+struct FunctionCallee {
+  FunctionCallee() {}
+
+  FunctionCallee(llvm::Constant* fn)
+      : v_(fn), ft_(cast<llvm::Function>(v_)->getFunctionType()) {}
+
+  llvm::FunctionType* getFunctionType() {
+    return ft_;
+  }
+
+  llvm::Value* getCallee() {
+    return v_;
+  }
+
+ private:
+  llvm::Value* v_{nullptr};
+  llvm::FunctionType* ft_{nullptr};
+};
+
+#else
+#error Only LLVM versions 8 and above are supported.
+#endif
 } // namespace
 
 class LLVMCodeGenImpl : public IRVisitor {
@@ -1288,7 +1316,7 @@ void LLVMCodeGenImpl::processParallelFor(const For* v) {
   llvm::Value* func_value = irb_.CreatePointerCast(func, Int8PtrTy_);
   llvm::FunctionType* dispatcher_fntype = llvm::FunctionType::get(
       VoidTy_, {Int8PtrTy_, IntTy_, IntTy_, Int8PtrTy_}, false);
-  llvm::FunctionCallee dispatcher_callee =
+  FunctionCallee dispatcher_callee =
       module_->getOrInsertFunction("DispatchParallel", dispatcher_fntype);
   llvm::Function* dispatcher =
       llvm::cast<llvm::Function>(dispatcher_callee.getCallee());
@@ -1535,38 +1563,6 @@ static void applyMathFunctionAttributes(llvm::Function* f) {
   f->addFnAttr(llvm::Attribute::WillReturn);
 #endif
 }
-
-namespace {
-#if LLVM_VERSION_MAJOR >= 9
-
-using FunctionCallee = llvm::FunctionCallee;
-
-#elif LLVM_VERSION_MAJOR == 8 && LLVM_VERSION_PATCH == 20181009
-
-struct FunctionCallee {
-  FunctionCallee() {}
-
-  FunctionCallee(llvm::Constant* fn)
-      : v_(fn), ft_(cast<llvm::Function>(v_)->getFunctionType()) {}
-
-  llvm::FunctionType* getFunctionType() {
-    return ft_;
-  }
-
-  llvm::Value* getCallee() {
-    return v_;
-  }
-
- private:
-  llvm::Value* v_{nullptr};
-  llvm::FunctionType* ft_{nullptr};
-};
-
-#else
-#error Only LLVM versions 8 and above are supported.
-#endif
-
-} // namespace
 
 llvm::Value* LLVMCodeGenImpl::toVec(llvm::Value* v, int lanes) {
   if (lanes > 1) {
