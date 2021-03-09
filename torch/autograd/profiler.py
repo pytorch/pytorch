@@ -291,10 +291,10 @@ class EventList(list):
 
         Args:
             group_by_input_shapes: group entries by
-            (event name, input shapes) rather than just event name.
-            This is useful to see which input shapes contribute to the runtime
-            the most and may help with size-specific optimizations or
-            choosing the best candidates for quantization (aka fitting a roof line)
+                (event name, input shapes) rather than just event name.
+                This is useful to see which input shapes contribute to the runtime
+                the most and may help with size-specific optimizations or
+                choosing the best candidates for quantization (aka fitting a roof line)
 
             group_by_stack_n: group by top n stack trace entries
 
@@ -365,8 +365,8 @@ class profile(object):
 
         with_flops (bool, optional): If with_flops is set, the profiler will estimate
             the FLOPS (floating pointer operations per second) value using the operator's input shape
-            and total CPU time. This allows one to estimate the hardware performance. Currently,
-            this option only works for the matrix multiplication and convolution functions.
+            and total time. This allows one to estimate the hardware performance. Currently,
+            this option only works for the matrix multiplication and 2D convolution operators.
 
         profile_memory (bool, optional): track tensor memory allocation/deallocation.
 

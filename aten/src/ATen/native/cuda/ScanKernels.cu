@@ -1,9 +1,13 @@
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/NumericLimits.cuh>
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/NumericLimits.cuh>
-#include <THC/THCNumerics.cuh>
-#include <ATen/cuda/CUDAContext.h>
+#include <ATen/NumericUtils.h>
+#include <c10/util/accumulate.h>
 #include <THC/THCGeneral.h>
+#include <THC/THCNumerics.cuh>
+
 #include <cub/device/device_scan.cuh>
 
 
@@ -166,10 +170,10 @@ __host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Te
   auto sizes = self.sizes();
 
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  const int64_t num_orows = prod_intlist(sizes.begin(), sizes.begin() + dim);
+  const int64_t num_orows = c10::multiply_integers(sizes.begin(), sizes.begin() + dim);
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  const int64_t num_irows = prod_intlist(sizes.begin() + dim + 1, sizes.end());
+  const int64_t num_irows = c10::multiply_integers(sizes.begin() + dim + 1, sizes.end());
   //for performance reasons, cuda kernels use uint32_t for loops over irows, orows and row,
   //make sure that input is not bigger than supported by uint32_t
   check_fits_in_unsigned(num_irows, "num_irows");
@@ -420,10 +424,10 @@ __host__ void scan_outer_dim(const Tensor& self, Tensor& result,
   auto sizes = self.sizes();
 
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  const int64_t num_orows = prod_intlist(sizes.begin(), sizes.begin() + dim);
+  const int64_t num_orows = c10::multiply_integers(sizes.begin(), sizes.begin() + dim);
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  const int64_t num_irows = prod_intlist(sizes.begin() + dim + 1, sizes.end());
+  const int64_t num_irows = c10::multiply_integers(sizes.begin() + dim + 1, sizes.end());
 
   dim3 threads(std::min(512, int(num_irows)));
   int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
@@ -556,10 +560,18 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
 
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half,
     self.scalar_type(), "logcumsumexp_cuda", [&]() {
+    using accscalar_t = acc_type<scalar_t, true>;
     scalar_t init = -std::numeric_limits<scalar_t>::infinity();
     auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x, const scalar_t y) -> scalar_t {
-      return ::log1p(std::exp(std::min(x, y) - std::max(x, y))) +
-          std::max(x, y);
+      scalar_t min = at::_isnan(y) ? y : std::min<scalar_t>(x,y); //std::min returns first arg if one of the args is nan
+      scalar_t max = at::_isnan(y) ? y : std::max<scalar_t>(x,y); //std::max returns first arg if one of the args is nan
+      if (min != max || ::isfinite(static_cast<accscalar_t>(min))) {
+      // nan will be propagated here
+          return ::log1p(std::exp(min - max)) + max;
+      } else {
+      // special case to correctly handle infinite inputs
+         return x;
+      }
     };
     scan_dim<scalar_t>(self, result, wrap_dim, init, log_add_exp);
   });

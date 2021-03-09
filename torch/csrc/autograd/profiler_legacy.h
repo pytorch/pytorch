@@ -206,10 +206,10 @@ struct TORCH_API LegacyEvent {
   }
 
   void updateMemoryStats(int64_t alloc_size, c10::Device device) {
-    if (device.type() == c10::DeviceType::CUDA ||
+    if (device.is_cuda() ||
         device.type() == c10::DeviceType::HIP) {
       cuda_memory_usage_ = alloc_size;
-    } else if (device.type() == c10::DeviceType::CPU ||
+    } else if (device.is_cpu() ||
         device.type() == c10::DeviceType::MKLDNN ||
         device.type() == c10::DeviceType::IDEEP) {
       cpu_memory_usage_ = alloc_size;
@@ -331,7 +331,7 @@ struct TORCH_API LegacyEvent {
   uint64_t correlation_id_;
   // Extra arguments for computing op flops
   std::unordered_map<std::string, c10::IValue> extra_args_;
-  uint64_t flops_;
+  uint64_t flops_ = 0;
 };
 
 // a linked-list of fixed sized vectors, to avoid

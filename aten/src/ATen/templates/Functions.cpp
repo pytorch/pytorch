@@ -5,6 +5,8 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 
+${static_dispatch_extra_headers}
+
 namespace at {
 
 Tensor var(const Tensor& self, int dim) {

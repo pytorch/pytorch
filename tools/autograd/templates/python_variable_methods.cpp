@@ -467,7 +467,7 @@ static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* 
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "nonzero()|deprecated",
+    "nonzero()",
     "nonzero(*, bool as_tuple)",
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;

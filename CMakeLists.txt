@@ -89,6 +89,33 @@ if(APPLE)
 
   # RPATH stuff
   set(CMAKE_MACOSX_RPATH ON)
+  if(NOT IOS)
+    # Determine if we can link against ML Compute
+    set(MLCOMPUTE_FOUND OFF)
+    execute_process(
+      COMMAND bash -c "xcrun --sdk macosx --show-sdk-path"
+      OUTPUT_VARIABLE _macosx_sdk_path
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+    set(_SDK_SEARCH_PATH "${_macosx_sdk_path}/System/Library/Frameworks/")
+    set(_FRAMEWORK_SEARCH_PATH "/System/Library/Frameworks/")
+
+    find_library(_MLCompute_fwrk_path_ NAMES MLCompute PATHS ${_FRAMEWORK_SEARCH_PATH} NO_DEFAULT_PATH)
+    find_library(_MLCompute_sdk_path_ NAMES MLCompute PATHS ${_SDK_SEARCH_PATH} NO_DEFAULT_PATH)
+
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/mlc)
+      set(_MLC_FOLDER_EXISTS YES)
+    else()
+      set(_MLC_FOLDER_EXISTS NO)
+    endif()
+
+    if(_MLCompute_fwrk_path_ AND _MLCompute_sdk_path_ AND _MLC_FOLDER_EXISTS)
+      set(MLCOMPUTE_FOUND ON)
+      message(STATUS "ML Compute framework found")
+    else()
+      message(STATUS "ML Compute framework not found")
+    endif()
+  endif()
 endif()
 
 set(CPU_AARCH64 OFF)
@@ -133,6 +160,7 @@ option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2 "Master flag to build Caffe2" ON)
+option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
 cmake_dependent_option(
     BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
     "BUILD_CAFFE2" OFF)
@@ -191,6 +219,9 @@ option(USE_METAL "Use Metal for Caffe2 iOS build" ON)
 option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
+    USE_MLCOMPUTE "Use ML Compute for macOS build" ON
+    "MLCOMPUTE_FOUND" OFF)
+cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
     "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON
@@ -233,10 +264,9 @@ if(NOT DEFINED USE_VULKAN)
       "ANDROID" OFF)
 endif()
 
-option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" OFF)
+option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
-option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
-option(USE_VULKAN_WRAPPER "Vulkan - Dynamically load Vulkan functions" ON)
+option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -343,6 +373,8 @@ set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
 set(OP_DEPENDENCY "" CACHE STRING
     "Path to the yaml file that contains the op dependency graph for custom build.")
+set(STATIC_DISPATCH_BACKEND "" CACHE STRING
+    "Name of the backend for which static dispatch code is generated, e.g.: CPU.")
 
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
@@ -539,9 +571,15 @@ endif()
 if(NOT IOS AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
   set(CROSS_COMPILING_MACOSX TRUE)
   # We need to compile a universal protoc to not fail protobuf build
-  execute_process(COMMAND ./scripts/build_host_protoc.sh --other-flags "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
+  # We set CMAKE_TRY_COMPILE_TARGET_TYPE to STATIC_LIBRARY (vs executable) to succeed the cmake compiler check for cross-compiling
+  set(protoc_build_command "./scripts/build_host_protoc.sh --other-flags -DCMAKE_OSX_ARCHITECTURES=\"x86_64;arm64\" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER_WORKS=1")
+  # We write to a temp scriptfile because CMake COMMAND dislikes double quotes in commands
+  file(WRITE ${PROJECT_SOURCE_DIR}/tmp_protoc_script.sh "#!/bin/bash\n${protoc_build_command}")
+  file(COPY ${PROJECT_SOURCE_DIR}/tmp_protoc_script.sh DESTINATION ${PROJECT_SOURCE_DIR}/scripts/ FILE_PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ)
+  execute_process(COMMAND ./scripts/tmp_protoc_script.sh
                   WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
                   RESULT_VARIABLE BUILD_HOST_PROTOC_RESULT)
+  file(REMOVE ${PROJECT_SOURCE_DIR}/tmp_protoc_script.sh ${PROJECT_SOURCE_DIR}/scripts/tmp_protoc_script.sh)
   if(NOT BUILD_HOST_PROTOC_RESULT EQUAL "0")
     message(FATAL_ERROR "Could not compile universal protoc.")
   endif()
@@ -594,10 +632,6 @@ if(USE_VULKAN)
   if(USE_VULKAN_SHADERC_RUNTIME)
     string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
   endif()
-
-  if(USE_VULKAN_WRAPPER)
-    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_WRAPPER")
-  endif()
 endif()
 
 if(USE_PYTORCH_METAL)
@@ -614,8 +648,6 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0
 endif()
 
 # ---[ Build flags
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 14)
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-narrowing")
@@ -752,6 +784,9 @@ if(USE_CPP_CODE_COVERAGE)
 endif()
 
 if(APPLE)
+    if(USE_MLCOMPUTE)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_MLCOMPUTE -fobjc-arc -framework MLCompute -framework Metal")
+    endif()
     string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-c++14-extensions")

@@ -28,7 +28,7 @@ inline void sub_check(const Tensor& self, const Tensor& other) {
 using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, Scalar alpha);
 
 using binary_fn_alpha = void(*)(TensorIterator&, Scalar alpha);
-using binary_fn_beta = void(*)(TensorIterator&, double beta);
+using binary_fn_double = void(*)(TensorIterator&, double);
 using binary_fn = void(*)(TensorIterator&);
 using binary_clamp_fn_alpha =
     void(*)(TensorIterator&, Scalar alpha, Scalar min_val, Scalar max_val);
@@ -37,7 +37,9 @@ DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
 DECLARE_DISPATCH(binary_clamp_fn_alpha, add_clamp_stub);
 DECLARE_DISPATCH(binary_fn_alpha, sub_stub);
 DECLARE_DISPATCH(binary_fn, mul_stub);
-DECLARE_DISPATCH(binary_fn, div_stub);
+DECLARE_DISPATCH(binary_fn, div_true_stub);
+DECLARE_DISPATCH(binary_fn, div_floor_stub);
+DECLARE_DISPATCH(binary_fn, div_trunc_stub);
 DECLARE_DISPATCH(binary_fn, remainder_stub);
 DECLARE_DISPATCH(binary_fn, atan2_stub);
 DECLARE_DISPATCH(binary_fn, bitwise_and_stub);
@@ -60,7 +62,8 @@ DECLARE_DISPATCH(binary_fn, maximum_stub);
 DECLARE_DISPATCH(binary_fn, minimum_stub);
 DECLARE_DISPATCH(binary_fn, fmax_stub);
 DECLARE_DISPATCH(binary_fn, fmin_stub);
-DECLARE_DISPATCH(binary_fn_beta, smooth_l1_stub);
+DECLARE_DISPATCH(binary_fn_double, smooth_l1_stub);
+DECLARE_DISPATCH(binary_fn_double, huber_stub);
 DECLARE_DISPATCH(binary_fn, sigmoid_backward_stub);
 DECLARE_DISPATCH(binary_fn_alpha, logit_backward_stub);
 DECLARE_DISPATCH(binary_fn, tanh_backward_stub);

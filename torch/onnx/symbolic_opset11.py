@@ -322,6 +322,8 @@ def insert(g, self, pos, tensor):
 def pop(g, tensor_list, dim):
     return g.op("SequenceErase", tensor_list, dim)
 
+def Delete(g, tensor_list, dim):
+    return g.op("SequenceErase", tensor_list, dim)
 
 def cat(g, tensor_list, dim):
     if sym_help._is_packed_list(tensor_list):
@@ -863,8 +865,7 @@ def embedding_bag(g,
 def prim_ConstantChunk(g, self, chunks, dim):
     input_shape = g.op("Shape", self)
     axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
-    axis_next = g.op("Constant", value_t=torch.tensor([dim + 1], dtype=torch.long))
-    input_shape_dim = g.op("Slice", input_shape, axis, axis_next)
+    input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
     start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
     chunk_size = g.op("Constant", value_t=torch.tensor([chunks], dtype=torch.long))
     chunk_size_minus_1 = g.op("Constant", value_t=torch.tensor([chunks - 1], dtype=torch.long))

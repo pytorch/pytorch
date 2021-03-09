@@ -1,7 +1,7 @@
+#include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/TensorUtils.h>
-
-#include <ATen/ATen.h>
+#include <c10/util/accumulate.h>
 
 #include <ostream>
 #include <sstream>
@@ -354,7 +354,7 @@ c10::optional<std::vector<int64_t>> computeStride(
   // we use the stride as if it were computed via resize.
   // This could perhaps be combined with the below code, but the complexity
   // didn't seem worth it.
-  const int64_t numel = prod_intlist(oldshape);
+  const int64_t numel = c10::multiply_integers(oldshape);
   if (numel == 0 && oldshape.equals(newshape)) {
     return oldstride.vec();
   }

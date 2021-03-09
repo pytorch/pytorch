@@ -29,7 +29,9 @@ DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(add_clamp_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
-DEFINE_DISPATCH(div_stub);
+DEFINE_DISPATCH(div_true_stub);
+DEFINE_DISPATCH(div_floor_stub);
+DEFINE_DISPATCH(div_trunc_stub);
 DEFINE_DISPATCH(remainder_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(bitwise_and_stub);
@@ -150,21 +152,46 @@ Tensor& copysign_(Tensor& self, Scalar other) {
   return native::copysign_(self, wrapped_scalar_tensor(other));
 }
 
-Tensor& div_out(const Tensor& self, const Tensor& other, Tensor& result) {
+Tensor& div_true_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_float_op(result, self, other);
-  div_stub(iter.device_type(), iter);
+  div_true_stub(iter.device_type(), iter);
+  if (!result.defined()) {
+    result = iter.output();
+  }
   return result;
+}
+
+Tensor& div_trunc_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  div_trunc_stub(iter.device_type(), iter);
+  if (!result.defined()) {
+    result = iter.output();
+  }
+  return result;
+}
+
+Tensor& div_floor_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  div_floor_stub(iter.device_type(), iter);
+  if (!result.defined()) {
+    result = iter.output();
+  }
+  return result;
+}
+
+Tensor& div_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return div_true_out(self, other, result);
 }
 
 Tensor div(const Tensor& self, const Tensor& other) {
   Tensor result;
   auto iter = TensorIterator::binary_float_op(result, self, other);
-  div_stub(iter.device_type(), iter);
+  div_true_stub(iter.device_type(), iter);
   return iter.output();
 }
 
 Tensor& div_(Tensor& self, const Tensor& other) {
-  return native::div_out(self, other, self);
+  return div_true_out(self, other, self);
 }
 
 // WARNING: There doesn't appear to be any testing for this function
@@ -179,6 +206,38 @@ Tensor div(const Tensor& self, Scalar other) {
 // used for Python)
 Tensor& div_(Tensor& self, Scalar other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
+}
+
+Tensor& div_out(const Tensor& self, const Tensor& other, std::string rounding_mode, Tensor& result) {
+  if (rounding_mode == "true") {
+    return div_true_out(self, other, result);
+  } else if (rounding_mode == "trunc") {
+    return div_trunc_out(self, other, result);
+  } else if (rounding_mode == "floor") {
+    return div_floor_out(self, other, result);
+  }
+
+  TORCH_CHECK(false,
+      "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
+      "but found '", rounding_mode, "'");
+}
+
+Tensor div(const Tensor& self, const Tensor& other, std::string rounding_mode) {
+  Tensor result;
+  native::div_out(self, other, std::move(rounding_mode), result);
+  return result;
+}
+
+Tensor& div_(Tensor& self, const Tensor& other, std::string rounding_mode) {
+  return native::div_out(self, other, std::move(rounding_mode), self);
+}
+
+Tensor div(const Tensor& self, Scalar other, std::string rounding_mode) {
+  return self.div(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
+}
+
+Tensor& div_(Tensor& self, Scalar other, std::string rounding_mode) {
+  return self.div_(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
 // divide, alias for div
@@ -200,6 +259,26 @@ Tensor divide(const Tensor& self, Scalar other) {
 
 Tensor& divide_(Tensor& self, Scalar other) {
   return self.div_(other);
+}
+
+Tensor& divide_out(const Tensor& self, const Tensor& other, std::string rounding_mode, Tensor& result) {
+  return at::div_out(result, self, other, std::move(rounding_mode));
+}
+
+Tensor divide(const Tensor& self, const Tensor& other, std::string rounding_mode) {
+  return self.div(other, std::move(rounding_mode));
+}
+
+Tensor& divide_(Tensor& self, const Tensor& other, std::string rounding_mode) {
+  return self.div_(other, std::move(rounding_mode));
+}
+
+Tensor divide(const Tensor& self, Scalar other, std::string rounding_mode) {
+  return self.div(other, std::move(rounding_mode));
+}
+
+Tensor& divide_(Tensor& self, Scalar other, std::string rounding_mode) {
+  return self.div_(other, std::move(rounding_mode));
 }
 
 // true_divide, an alias for div
@@ -241,28 +320,30 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  div_stub(iter.device_type(), iter);
-
-  if (result.is_floating_point()) {
-    result.trunc_();
-  }
-
-  return result;
+  TORCH_WARN_ONCE(
+    "floor_divide is deprecated, and will be removed in a future version of pytorch. "
+    "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+    "This results in incorrect rounding for negative values.\n"
+    "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+    "or for actual floor division, use torch.div(a, b, rounding_mode='floor')."
+  );
+  // FIXME: Not actually doing floor division (#43874)
+  return div_trunc_out(self, other, result);
 }
 
 Tensor floor_divide(const Tensor& self, const Tensor& other) {
+  TORCH_WARN_ONCE(
+    "floor_divide is deprecated, and will be removed in a future version of pytorch. "
+    "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+    "This results in incorrect rounding for negative values.\n"
+    "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+    "or for actual floor division, use torch.div(a, b, rounding_mode='floor')."
+  );
+  // FIXME: Not actually doing floor division (#43874)
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
-
-  div_stub(iter.device_type(), iter);
-
-  auto out = iter.output();
-  if (out.is_floating_point()) {
-    out.trunc_();
-  }
-
-  return out;
+  div_trunc_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor& floor_divide_(Tensor& self, const Tensor& other) {
@@ -287,11 +368,11 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
 }
 
 Tensor mul(const Tensor& self, Scalar other) {
-  return native::mul(self, wrapped_scalar_tensor(other));
+  return at::mul(self, wrapped_scalar_tensor(other)); // redispatch!
 }
 
 Tensor& mul_(Tensor& self, Scalar other) {
-  return native::mul_(self, wrapped_scalar_tensor(other));
+  return at::mul_out(self, self, wrapped_scalar_tensor(other)); // redispatch!
 }
 
 // multiply, alias for mul

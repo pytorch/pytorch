@@ -300,7 +300,7 @@ Tensor trace_backward_batching_rule(const Tensor& grad, IntArrayRef input_sizes)
   auto grad_input = at::zeros(grad_physical.getPhysicalShape(input_sizes), grad.options());
   // Batched Diagonal View
   auto grad_input_diag = at::diagonal(grad_input, /*offset*/0, /*dim1*/-2, /*dim2*/-1);
-  // Append a dimension of size one to the grad output 
+  // Append a dimension of size one to the grad output
   auto grad_physical_tensor = grad_physical.tensor().unsqueeze(-1);
   grad_input_diag.copy_(grad_physical_tensor);
   return grad_physical.getPhysicalToLogicalMap().apply(grad_input);
@@ -1140,6 +1140,12 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   BINARY_POINTWISE_VA(rsub, Scalar);
   BINARY_POINTWISE(mul);
   BINARY_POINTWISE(div);
+  {
+    using Binop = Tensor (*)(const Tensor&, const Tensor&, std::string);
+    using Unop = Tensor (*)(const Tensor&, Scalar, std::string);
+    m.impl("div.Tensor_mode", binary_pointwise_batching_rule<Binop, at::div, std::string>);
+    m.impl("div.Scalar_mode", unwrap_and_call<Unop, at::div, Scalar, std::string>);
+  }
 
   // at::pow has three out-of-place overloads
   m.impl("pow.Tensor_Tensor", binary_pointwise_batching_rule<TensorTensorType, at::pow>);

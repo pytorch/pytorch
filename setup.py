@@ -57,6 +57,15 @@
 #   USE_DISTRIBUTED=0
 #     disables distributed (c10d, gloo, mpi, etc.) build
 #
+#   USE_TENSORPIPE=0
+#     disables distributed Tensorpipe backend build
+#
+#   USE_GLOO=0
+#     disables distributed gloo backend build
+#
+#   USE_MPI=0
+#     disables distributed MPI backend build
+#
 #   USE_SYSTEM_NCCL=0
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
@@ -194,6 +203,7 @@ from distutils.errors import DistutilsArgError
 import setuptools.command.build_ext
 import setuptools.command.install
 import distutils.command.clean
+import distutils.command.sdist
 import distutils.sysconfig
 import filecmp
 import shutil
@@ -238,7 +248,7 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == 'clean' or arg == 'egg_info':
+    if arg in ['clean', 'egg_info', 'sdist']:
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
 sys.argv = filtered_args
@@ -286,10 +296,8 @@ report("Building wheel {}-{}".format(package_name, version))
 
 cmake = CMake()
 
-# all the work we need to do _before_ setup runs
-def build_deps():
-    report('-- Building version ' + version)
 
+def check_submodules():
     def check_file(f):
         if bool(os.getenv("USE_SYSTEM_LIBS", False)):
             return
@@ -310,6 +318,12 @@ def build_deps():
     check_file(os.path.join(third_party_path, 'onnx', 'third_party',
                             'benchmark', 'CMakeLists.txt'))
 
+
+# all the work we need to do _before_ setup runs
+def build_deps():
+    report('-- Building version ' + version)
+
+    check_submodules()
     check_pydep('yaml', 'pyyaml')
 
     build_caffe2(version=version,
@@ -443,7 +457,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             if IS_WINDOWS:
                 report('-- Building without distributed package')
             else:
-                report('-- Building with distributed package ')
+                report('-- Building with distributed package: ')
+                report('  -- USE_TENSORPIPE={}'.format(cmake_cache_vars['USE_TENSORPIPE']))
+                report('  -- USE_GLOO={}'.format(cmake_cache_vars['USE_GLOO']))
+                report('  -- USE_MPI={}'.format(cmake_cache_vars['USE_OPENMPI']))
         else:
             report('-- Building without distributed package')
 
@@ -552,10 +569,54 @@ class build_ext(setuptools.command.build_ext.build_ext):
             with open('compile_commands.json', 'w') as f:
                 f.write(new_contents)
 
+class concat_license_files():
+    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
+
+    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
+    from all the licenses found in ./third_party/. We concatenate them so there
+    is a single license file in the sdist and wheels with all of the necessary
+    licensing info.
+    """
+    def __init__(self):
+        self.f1 = 'LICENSE'
+        self.f2 = 'third_party/LICENSES_BUNDLED.txt'
+
+    def __enter__(self):
+        """Concatenate files"""
+        with open(self.f1, 'r') as f1:
+            self.bsd_text = f1.read()
+
+        with open(self.f1, 'a') as f1:
+            with open(self.f2, 'r') as f2:
+                self.bundled_text = f2.read()
+                f1.write('\n\n')
+                f1.write(self.bundled_text)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        """Restore content of f1"""
+        with open(self.f1, 'w') as f:
+            f.write(self.bsd_text)
+
+
+try:
+    from wheel.bdist_wheel import bdist_wheel
+except ImportError:
+    # This is useful when wheel is not installed and bdist_wheel is not
+    # specified on the command line. If it _is_ specified, parsing the command
+    # line will fail before wheel_concatenate is needed
+    wheel_concatenate = None
+else:
+    # Need to create the proper LICENSE.txt for the wheel
+    class wheel_concatenate(bdist_wheel):
+        """ check submodules on sdist to prevent incomplete tarballs """
+        def run(self):
+            with concat_license_files():
+                super().run()
+
 
 class install(setuptools.command.install.install):
     def run(self):
-        setuptools.command.install.install.run(self)
+        super().run()
 
 
 class clean(distutils.command.clean.clean):
@@ -579,8 +640,14 @@ class clean(distutils.command.clean.clean):
                         except OSError:
                             shutil.rmtree(filename, ignore_errors=True)
 
-        # It's an old-style class in Python 2.7...
-        distutils.command.clean.clean.run(self)
+        super().run()
+
+
+class sdist(distutils.command.sdist.sdist):
+    def run(self):
+        with concat_license_files():
+            super().run()
+
 
 def configure_extension_build():
     r"""Configures extension build options according to system environment and user's choice.
@@ -650,9 +717,6 @@ def configure_extension_build():
         library_dirs.append(
             os.path.dirname(cmake_cache_vars['CUDA_CUDA_LIB']))
 
-    if cmake_cache_vars['USE_NUMPY']:
-        extra_install_requires += ['numpy']
-
     if build_type.is_debug():
         if IS_WINDOWS:
             extra_compile_args.append('/Z7')
@@ -721,9 +785,11 @@ def configure_extension_build():
         )
 
     cmdclass = {
+        'bdist_wheel': wheel_concatenate,
         'build_ext': build_ext,
         'clean': clean,
         'install': install,
+        'sdist': sdist,
     }
 
     entry_points = {
@@ -895,6 +961,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
+                'include/torch/csrc/tensor/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
                 'include/TH/*.h*',

@@ -86,24 +86,28 @@ Examples::
 inv = _add_docstr(_linalg.linalg_inv, r"""
 linalg.inv(input, *, out=None) -> Tensor
 
-This function computes the "multiplicative inverse" matrix of a square matrix, or batch of such matrices, :attr:`input`.
-The result satisfies the relation
+Computes the multiplicative inverse matrix of a square matrix :attr:`input`, or of each square matrix in a
+batched :attr:`input`. The result satisfies the relation:
 
-``matmul(inv(input), input) = matmul(input, inv(input)) = eye(input.shape[0]).expand_as(input)``.
+``matmul(inv(input),input)`` = ``matmul(input,inv(input))`` = ``eye(input.shape[0]).expand_as(input)``.
 
 Supports input of float, double, cfloat and cdouble data types.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The inverse matrix is computed using LAPACK's `getrf` and `getri` routines for CPU inputs. For CUDA
+          inputs, cuSOLVER's `getrf` and `getrs` routines as well as cuBLAS' `getrf` and `getri` routines are
+          used if CUDA version >= 10.1.243, otherwise MAGMA's `getrf` and `getri` routines are used instead.
 
 .. note:: If :attr:`input` is a non-invertible matrix or non-square matrix, or batch with at least one such matrix,
           then a RuntimeError will be thrown.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
-
 Args:
-    input (Tensor): the square :math:`n \times n` matrix or the batch
-                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+    input (Tensor): the square `(n, n)` matrix or the batch of such matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
 
 Keyword args:
-    out (Tensor, optional): The output tensor. Ignored if None. Default: None
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default is ``None``.
 
 Examples::
 
@@ -145,7 +149,46 @@ Examples::
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor
 
-Alias of :func:`torch.det`.
+Computes the determinant of a square matrix :attr:`input`, or of each square matrix
+in a batched :attr:`input`.
+
+This function supports float, double, cfloat and cdouble dtypes.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The determinant is computed using LU factorization. LAPACK's `getrf` is used for CPU inputs,
+          and MAGMA's `getrf` is used for CUDA inputs.
+
+.. note:: Backward through `det` internally uses :func:`torch.linalg.svd` when :attr:`input` is not
+          invertible. In this case, double backward through `det` will be unstable when :attr:`input`
+          doesn't have distinct singular values. See :func:`torch.linalg.svd` for more details.
+
+Args:
+    input (Tensor): the input matrix of size `(n, n)` or the batch of matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+
+Example::
+
+    >>> a = torch.randn(3, 3)
+    >>> a
+    tensor([[ 0.9478,  0.9158, -1.1295],
+            [ 0.9701,  0.7346, -1.8044],
+            [-0.2337,  0.0557,  0.6929]])
+    >>> torch.linalg.det(a)
+    tensor(0.0934)
+
+    >>> a = torch.randn(3, 2, 2)
+    >>> a
+    tensor([[[ 0.9254, -0.6213],
+             [-0.5787,  1.6843]],
+
+            [[ 0.3242, -0.9665],
+             [ 0.4539, -0.0887]],
+
+            [[ 1.1336, -0.4025],
+             [-0.7089,  0.9032]]])
+    >>> torch.linalg.det(a)
+    tensor([1.1990, 0.4099, 0.7386])
 """)
 
 slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
@@ -193,22 +236,25 @@ Example::
 """)
 
 eigh = _add_docstr(_linalg.linalg_eigh, r"""
-linalg.eigh(input, UPLO='L') -> tuple(Tensor, Tensor)
+linalg.eigh(input, UPLO='L', *, out=None) -> (Tensor, Tensor)
 
-This function computes the eigenvalues and eigenvectors
-of a complex Hermitian (or real symmetric) matrix, or batch of such matrices, :attr:`input`.
-For a single matrix :attr:`input`, the tensor of eigenvalues :math:`w` and the tensor of eigenvectors :math:`V`
-decompose the :attr:`input` such that :math:`\text{input} = V \text{diag}(w) V^H`,
-where :math:`^H` is the conjugate transpose operation.
+Computes the eigenvalues and eigenvectors of a complex Hermitian (or real symmetric)
+matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
+
+For a single matrix :attr:`input`, the tensor of eigenvalues `w` and the tensor of eigenvectors
+`V` decompose the :attr:`input` such that `input = V diag(w) Vᴴ`, where `Vᴴ` is the transpose of `V`
+for real-valued :attr:`input`, or the conjugate transpose of `V` for complex-valued :attr:`input`.
 
 Since the matrix or matrices in :attr:`input` are assumed to be Hermitian, the imaginary part of their diagonals
-is always treated as zero. When :attr:`UPLO` is "L", its default value, only the lower triangular part of
-each matrix is used in the computation. When :attr:`UPLO` is "U" only the upper triangular part of each matrix is used.
+is always treated as zero. When :attr:`UPLO` is "L", its default value, only the lower triangular part of each
+matrix is used in the computation. When :attr:`UPLO` is "U" only the upper triangular part of each matrix is used.
 
-Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
+Supports input of float, double, cfloat and cdouble dtypes.
 
-See :func:`torch.linalg.eigvalsh` for a related function that computes only eigenvalues,
-however that function is not differentiable.
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs,
+          and MAGMA's `syevd` and `heevd` routines for CUDA inputs.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
@@ -216,24 +262,25 @@ however that function is not differentiable.
           a valid eigenvector. This function may compute different eigenvector representations on
           different device types. Usually the difference is only in the sign of the eigenvector.
 
-.. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd`` and ``_heevd``.
-          This function always checks whether the call to LAPACK/MAGMA is successful
-          using ``info`` argument of ``_syevd``, ``_heevd`` and throws a RuntimeError if it isn't.
-          On CUDA this causes a cross-device memory synchronization.
+.. note:: See :func:`torch.linalg.eigvalsh` for a related function that computes only eigenvalues.
+          However, that function is not differentiable.
 
 Args:
-    input (Tensor): the Hermitian :math:`n \times n` matrix or the batch
-                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+    input (Tensor): the Hermitian `n \times n` matrix or the batch of such matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
     UPLO ('L', 'U', optional): controls whether to use the upper-triangular or the lower-triangular part
-                               of :attr:`input` in the computations. Default: ``'L'``
+                               of :attr:`input` in the computations. Default is ``'L'``.
+
+Keyword args:
+    out (tuple, optional): tuple of two tensors to write the output to. Default is ``None``.
 
 Returns:
     (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
 
-        - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`.
+        - **eigenvalues** (*Tensor*): Shape `(*, m)`.
             The eigenvalues in ascending order.
-        - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
-            The orthonormal eigenvectors of the ``input``.
+        - **eigenvectors** (*Tensor*): Shape `(*, m, m)`.
+            The orthonormal eigenvectors of the :attr:`input`.
 
 Examples::
 
@@ -259,34 +306,37 @@ Examples::
 """)
 
 eigvalsh = _add_docstr(_linalg.linalg_eigvalsh, r"""
-linalg.eigvalsh(input, UPLO='L') -> Tensor
+linalg.eigvalsh(input, UPLO='L', *, out=None) -> Tensor
 
-This function computes the eigenvalues of a complex Hermitian (or real symmetric) matrix,
-or batch of such matrices, :attr:`input`. The eigenvalues are returned in ascending order.
+Computes the eigenvalues of a complex Hermitian (or real symmetric) matrix :attr:`input`,
+or of each such matrix in a batched :attr:`input`. The eigenvalues are returned in ascending order.
 
 Since the matrix or matrices in :attr:`input` are assumed to be Hermitian, the imaginary part of their diagonals
 is always treated as zero. When :attr:`UPLO` is "L", its default value, only the lower triangular part of
 each matrix is used in the computation. When :attr:`UPLO` is "U" only the upper triangular part of each matrix is used.
 
-Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
+Supports input of float, double, cfloat and cdouble dtypes.
 
-See :func:`torch.linalg.eigh` for a related function that computes both eigenvalues and eigenvectors.
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The eigenvalues are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs,
+          and MAGMA's `syevd` and `heevd` routines for CUDA inputs.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
-.. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd`` and ``_heevd``.
-          This function always checks whether the call to LAPACK/MAGMA is successful
-          using ``info`` argument of ``_syevd``, ``_heevd`` and throws a RuntimeError if it isn't.
-          On CUDA this causes a cross-device memory synchronization.
-
 .. note:: This function doesn't support backpropagation, please use :func:`torch.linalg.eigh` instead,
-          that also computes the eigenvectors.
+          which also computes the eigenvectors.
+
+.. note:: See :func:`torch.linalg.eigh` for a related function that computes both eigenvalues and eigenvectors.
 
 Args:
-    input (Tensor): the Hermitian :math:`n \times n` matrix or the batch
-                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+    input (Tensor): the Hermitian `n \times n` matrix or the batch
+                    of such matrices of size `(*, n, n)` where `*` is one or more batch dimensions.
     UPLO ('L', 'U', optional): controls whether to use the upper-triangular or the lower-triangular part
-                               of :attr:`input` in the computations. Default: ``'L'``
+                               of :attr:`input` in the computations. Default is ``'L'``.
+
+Keyword args:
+    out (Tensor, optional): tensor to write the output to. Default is ``None``.
 
 Examples::
 
@@ -318,31 +368,34 @@ Examples::
 """)
 
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
-matrix_rank(input, tol=None, hermitian=False) -> Tensor
+matrix_rank(input, tol=None, hermitian=False, *, out=None) -> Tensor
 
 Computes the numerical rank of a matrix :attr:`input`, or of each matrix in a batched :attr:`input`.
-The matrix rank is computed as the number of singular values (or the absolute eigenvalues when :attr:`hermitian` is ``True``)
-above the specified :attr:`tol` threshold.
 
-If :attr:`tol` is not specified, :attr:`tol` is set to
-``S.max(dim=-1) * max(input.shape[-2:]) * eps`` where ``S`` is the singular values
-(or the absolute eigenvalues when :attr:`hermitian` is ``True``),
-and ``eps`` is the epsilon value for the datatype of :attr:`input`.
-The epsilon value can be obtained using ``eps`` attribute of :class:`torch.finfo`.
+The matrix rank is computed as the number of singular values (or absolute eigenvalues when :attr:`hermitian` is ``True``)
+that are greater than the specified :attr:`tol` threshold.
 
-The method to compute the matrix rank is done using singular value decomposition (see :func:`torch.linalg.svd`) by default.
-If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
-and the computation of the rank is done by obtaining the eigenvalues (see :func:`torch.linalg.eigvalsh`).
+If :attr:`tol` is not specified, :attr:`tol` is set to ``S.max(dim=-1)*max(input.shape[-2:])*eps``,
+where ``S`` is the singular values (or absolute eigenvalues when :attr:`hermitian` is ``True``), and
+``eps`` is the epsilon value for the datatype of :attr:`input`. The epsilon value can be obtained using
+the ``eps`` attribute of :class:`torch.finfo`.
 
-Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
+Supports input of float, double, cfloat and cdouble dtypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
+.. note:: The matrix rank is computed using singular value decomposition (see :func:`torch.linalg.svd`) by default.
+          If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
+          and the computation is done by obtaining the eigenvalues (see :func:`torch.linalg.eigvalsh`).
+
 Args:
-    input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
+    input (Tensor): the input matrix of size `(m, n)` or the batch of matrices of size `(*, m, n)`
                     where `*` is one or more batch dimensions.
-    tol (float, optional): the tolerance value. Default: ``None``
-    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default: ``False``
+    tol (float, optional): the tolerance value. Default is ``None``
+    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default is ``False``.
+
+Keyword args:
+    out (Tensor, optional): tensor to write the output to. Default is ``None``.
 
 Examples::
 
@@ -603,34 +656,34 @@ Example::
 cond = _add_docstr(_linalg.linalg_cond, r"""
 linalg.cond(input, p=None, *, out=None) -> Tensor
 
-Computes the condition number of a matrix :attr:`input`,
-or of each matrix in a batched :attr:`input`, using the matrix norm defined by :attr:`p`.
-For norms ``p = {'fro', 'nuc', inf, -inf, 1, -1}`` this is defined as the matrix norm of :attr:`input`
-times the matrix norm of the inverse of :attr:`input`. And for norms ``p = {None, 2, -2}`` this is defined as
-the ratio between the largest and smallest singular values.
+Computes the condition number of a matrix :attr:`input`, or of each matrix in
+a batched :attr:`input`, using the matrix norm defined by :attr:`p`.
 
-This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
-If the input is complex and neither :attr:`dtype` nor :attr:`out` is specified, the result's data type will
-be the corresponding floating point type (e.g. float if :attr:`input` is complexfloat).
+For norms `{'fro', 'nuc', inf, -inf, 1, -1}` this is defined as the matrix norm of :attr:`input`
+times the matrix norm of the inverse of :attr:`input` computed using :func:`torch.linalg.norm`. While
+for norms `{None, 2, -2}` this is defined as the ratio between the largest and smallest singular
+values computed using :func:`torch.linalg.svd`.
 
-.. note:: For ``p = {None, 2, -2}`` the condition number is computed as the ratio between the largest
-          and smallest singular values computed using :func:`torch.linalg.svd`.
-          For these norms :attr:`input` may be a non-square matrix or batch of non-square matrices.
+This function supports float, double, cfloat and cdouble dtypes.
+
+.. note:: When given inputs on a CUDA device, this function may synchronize that device with the CPU depending
+          on which norm :attr:`p` is used.
+
+.. note:: For norms `{None, 2, -2}`, :attr:`input` may be a non-square matrix or batch of non-square matrices.
           For other norms, however, :attr:`input` must be a square matrix or a batch of square matrices,
           and if this requirement is not satisfied a RuntimeError will be thrown.
 
-.. note:: For ``p = {'fro', 'nuc', inf, -inf, 1, -1}`` if :attr:`input` is a non-invertible matrix then
+.. note:: For norms `{'fro', 'nuc', inf, -inf, 1, -1}` if :attr:`input` is a non-invertible matrix then
           a tensor containing infinity will be returned. If :attr:`input` is a batch of matrices and one
           or more of them is not invertible then a RuntimeError will be thrown.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
-
 Args:
-    input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
-                    where `*` is one or more batch dimensions.
+    input (Tensor): the input matrix of size `(m, n)` or the batch of matrices of size `(*, m, n)`
+        where `*` is one or more batch dimensions.
 
     p (int, float, inf, -inf, 'fro', 'nuc', optional): the type of the matrix norm to use in the computations.
-        The following norms are supported:
+        inf refers to :attr:`float('inf')`, numpy's :attr:`inf` object, or any equivalent object.
+        The following norms can be used:
 
         =====  ============================
         p      norm for matrices
@@ -649,68 +702,96 @@ Args:
         Default: ``None``
 
 Keyword args:
-    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+    out (Tensor, optional): tensor to write the output to. Default is ``None``.
+
+Returns:
+    The condition number of :attr:`input`. The output dtype is always real valued
+    even for complex inputs (e.g. float if :attr:`input` is cfloat).
 
 Examples::
 
-    >>> from torch import linalg as LA
-    >>> a = torch.tensor([[1., 0, -1], [0, 1, 0], [1, 0, 1]])
-    >>> LA.cond(a)
-    tensor(1.4142)
-    >>> LA.cond(a, 'fro')
-    tensor(3.1623)
-    >>> LA.cond(a, 'nuc')
-    tensor(9.2426)
-    >>> LA.cond(a, np.inf)
-    tensor(2.)
-    >>> LA.cond(a, -np.inf)
-    tensor(1.)
-    >>> LA.cond(a, 1)
-    tensor(2.)
-    >>> LA.cond(a, -1)
-    tensor(1.)
-    >>> LA.cond(a, 2)
-    tensor(1.4142)
-    >>> LA.cond(a, -2)
-    tensor(0.7071)
-
-    >>> a = torch.randn(3, 4, 4)
-    >>> LA.cond(a)
-    tensor([ 4.4739, 76.5234, 10.8409])
-
     >>> a = torch.randn(3, 4, 4, dtype=torch.complex64)
-    >>> LA.cond(a)
-    tensor([ 5.9175, 48.4590,  5.6443])
-    >>> LA.cond(a, 1)
-    >>> tensor([ 11.6734+0.j, 105.1037+0.j,  10.1978+0.j])
+    >>> torch.linalg.cond(a)
+    >>> a = torch.tensor([[1., 0, -1], [0, 1, 0], [1, 0, 1]])
+    >>> torch.linalg.cond(a)
+    tensor([1.4142])
+    >>> torch.linalg.cond(a, 'fro')
+    tensor(3.1623)
+    >>> torch.linalg.cond(a, 'nuc')
+    tensor(9.2426)
+    >>> torch.linalg.cond(a, float('inf'))
+    tensor(2.)
+    >>> torch.linalg.cond(a, float('-inf'))
+    tensor(1.)
+    >>> torch.linalg.cond(a, 1)
+    tensor(2.)
+    >>> torch.linalg.cond(a, -1)
+    tensor(1.)
+    >>> torch.linalg.cond(a, 2)
+    tensor([1.4142])
+    >>> torch.linalg.cond(a, -2)
+    tensor([0.7071])
+
+    >>> a = torch.randn(2, 3, 3)
+    >>> a
+    tensor([[[-0.9204,  1.1140,  1.2055],
+            [ 0.3988, -0.2395, -0.7441],
+            [-0.5160,  0.3115,  0.2619]],
+
+            [[-2.2128,  0.9241,  2.1492],
+            [-1.1277,  2.7604, -0.8760],
+            [ 1.2159,  0.5960,  0.0498]]])
+    >>> torch.linalg.cond(a)
+    tensor([[9.5917],
+            [3.2538]])
+
+    >>> a = torch.randn(2, 3, 3, dtype=torch.complex64)
+    >>> a
+    tensor([[[-0.4671-0.2137j, -0.1334-0.9508j,  0.6252+0.1759j],
+            [-0.3486-0.2991j, -0.1317+0.1252j,  0.3025-0.1604j],
+            [-0.5634+0.8582j,  0.1118-0.4677j, -0.1121+0.7574j]],
+
+            [[ 0.3964+0.2533j,  0.9385-0.6417j, -0.0283-0.8673j],
+            [ 0.2635+0.2323j, -0.8929-1.1269j,  0.3332+0.0733j],
+            [ 0.1151+0.1644j, -1.1163+0.3471j, -0.5870+0.1629j]]])
+    >>> torch.linalg.cond(a)
+    tensor([[4.6245],
+            [4.5671]])
+    >>> torch.linalg.cond(a, 1)
+    tensor([9.2589, 9.3486])
 """)
 
 pinv = _add_docstr(_linalg.linalg_pinv, r"""
-linalg.pinv(input, rcond=1e-15, hermitian=False) -> Tensor
+linalg.pinv(input, rcond=1e-15, hermitian=False, *, out=None) -> Tensor
 
 Computes the pseudo-inverse (also known as the Moore-Penrose inverse) of a matrix :attr:`input`,
 or of each matrix in a batched :attr:`input`.
-The pseudo-inverse is computed using singular value decomposition (see :func:`torch.svd`) by default.
-If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
-and the computation of the pseudo-inverse is done by obtaining the eigenvalues and eigenvectors
-(see :func:`torch.linalg.eigh`).
-The singular values (or the absolute values of the eigenvalues when :attr:`hermitian` is ``True``) that are below
-the specified :attr:`rcond` threshold are treated as zero and discarded in the computation.
 
-Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
+The singular values (or the absolute values of the eigenvalues when :attr:`hermitian` is ``True``)
+that are below the specified :attr:`rcond` threshold are treated as zero and discarded in the computation.
+
+Supports input of float, double, cfloat and cdouble datatypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The pseudo-inverse is computed using singular value decomposition (see :func:`torch.linalg.svd`) by default.
+          If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
+          and the computation of the pseudo-inverse is done by obtaining the eigenvalues and eigenvectors
+          (see :func:`torch.linalg.eigh`).
 
 .. note:: If singular value decomposition or eigenvalue decomposition algorithms do not converge
           then a RuntimeError will be thrown.
 
 Args:
-    input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
+    input (Tensor): the input matrix of size `(m, n)` or the batch of matrices of size `(*, m, n)`
                     where `*` is one or more batch dimensions.
-    rcond (float, Tensor, optional): the tolerance value to determine the cutoff for small singular values. Default: 1e-15
-                                     :attr:`rcond` must be broadcastable to the singular values of :attr:`input`
-                                     as returned by :func:`torch.svd`.
-    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default: ``False``
+    rcond (float, Tensor, optional): the tolerance value to determine the cutoff for small singular values.
+                                     Must be broadcastable to the singular values of :attr:`input` as returned
+                                     by :func:`torch.svd`. Default is ``1e-15``.
+    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default is ``False``.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default is ``None``.
 
 Examples::
 

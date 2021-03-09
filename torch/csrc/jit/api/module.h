@@ -276,6 +276,13 @@ struct TORCH_API Module : public Object {
       bool non_blocking);
 };
 
+// C++ equivalent api of `torch.jit.freeze`. See documentation there for
+// details.
+TORCH_API Module freeze(
+    const Module& module,
+    c10::optional<std::vector<std::string>> preserved_attrs = c10::nullopt,
+    bool optimize_numerics = true);
+
 namespace detail {
 
 struct TORCH_API SlotCursor {
@@ -510,7 +517,7 @@ struct TORCH_API BufferPolicy {
   }
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return typ->getAttribute(i)->isSubtypeOf(TensorType::get()) &&
-        !typ->is_parameter(i);
+        typ->is_buffer(i);
   }
   static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
 };

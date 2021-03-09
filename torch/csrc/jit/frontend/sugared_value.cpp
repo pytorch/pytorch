@@ -110,6 +110,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_xpu", "prim"},
            {"is_sparse", "prim"},
            {"is_mkldnn", "prim"},
+           {"is_mlc", "prim"},
            {"is_quantized", "prim"},
            {"is_vulkan", "prim"},
            {"is_meta", "prim"},
@@ -187,6 +188,14 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   }
 
   // none of the more-specific cases worked, so see if this is a builtin method
+  // If field is a type, then call the aten::to op
+  if (field == "type") {
+    if (auto builtin = BuiltinFunction::tryCreate(
+            Symbol::aten("to"), NamedValue(loc, "self", value_))) {
+      return builtin;
+    }
+  }
+
   if (auto builtin = BuiltinFunction::tryCreate(
           Symbol::aten(field), NamedValue(loc, "self", value_))) {
     return builtin;
@@ -299,6 +308,10 @@ void SimpleValue::setAttr(
         MethodValue(value_, prop->setter->name())
             .call(loc, m, {newValue}, {}, /*n_binders=*/1);
         return;
+      }
+
+      if (prop && !prop->setter) {
+        throw ErrorReport(loc) << "Tried to set read-only attribute: " << field;
       }
 
       throw ErrorReport(loc)

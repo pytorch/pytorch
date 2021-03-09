@@ -267,4 +267,21 @@ void Context::setDisplayVmapFallbackWarnings(bool enabled) {
   display_vmap_fallback_warnings_ = enabled;
 }
 
+void Context::setDefaultMobileCPUAllocator() {
+  TORCH_CHECK(prev_allocator_ptr_ == nullptr,
+      "Already within the scope of another non-default cpu allocator."
+      "Cannot set another allocator.");
+  // Setting the priority high to make sure no other allocator gets used instead of this.
+  prev_allocator_ptr_ = c10::GetCPUAllocator();
+  c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
+}
+
+void Context::unsetDefaultMobileCPUAllocator() {
+  TORCH_CHECK(prev_allocator_ptr_ != nullptr,
+      "setDefaultMobileCPUAllocator must have been called "
+      "before unsetDefaultMobileCPUAllocator.");
+  // Setting the priority high to make sure no other allocator gets used instead of this.
+  c10::SetCPUAllocator(prev_allocator_ptr_ , /*priority*/ 100);
+  prev_allocator_ptr_ = nullptr;
+}
 } // namespace at

@@ -1,15 +1,18 @@
 #pragma once
 
 #include <atomic>
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAEvent.h>
+#endif
 #include <memory>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
 
-#include <c10d/comm.hpp>
 #include <c10/util/intrusive_ptr.h>
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/comm.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
@@ -19,6 +22,8 @@ namespace c10d {
 
 constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
 constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
+// Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
+constexpr int kDDPRuntimeLoggingSampleRate = 100;
 
 class Reducer {
  public:
@@ -50,6 +55,10 @@ class Reducer {
   void prepare_for_backward(
       const std::vector<torch::autograd::Variable>& outputs);
 
+  // Called at the begginning of forward() inside DistributedDataParallel,
+  // right now it caputures the starting time of forward in each iteration.
+  void prepare_for_forward();
+
   // Returns the relative time in nanoseconds when gradients were ready,
   // with respect to the time `prepare_for_backward` was called. The outer
   // vector is for model replicas and the inner vector is for parameters.
@@ -60,7 +69,7 @@ class Reducer {
   // Registers a hook to the reducer. The hook is `CommHookInterface`
   // type to allow both Python and CPP hooks. This function can only
   // be called once before calling backward.
- // Cannot combine with the call of `register_builtin_comm_hook`.
+  // Cannot combine with the call of `register_builtin_comm_hook`.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
 
   // Registers a built-in C++ comm hook to the reducer. This function can only
@@ -105,17 +114,8 @@ class Reducer {
   // index has been used.
   std::vector<at::Tensor> get_local_used_maps_on_device() const;
 
-  // Set logging data that can be got during DistributedDataParallel
-  // construction time.
-  void set_construction_logging_data(
-      const std::string& module_name,
-      const std::vector<int>& device_ids,
-      int output_device,
-      bool broadcast_buffers);
-
-  // An Interface for users to get DDPLoggingData and log them
-  // in the applications.
-  c10::DDPLoggingData get_ddp_logging_data();
+  // Saves thread local state to be used by autograd engine callbacks.
+  void save_thread_local_state();
 
  protected:
   // Forward declaration.
@@ -172,10 +172,6 @@ class Reducer {
 
   // Work handle for allreduce on local_used_maps_
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
-
-  void verify_replicas_within_process();
-
-  void verify_replica0_across_processes();
 
   void mark_variable_ready_dense(VariableIndex index);
 
@@ -238,7 +234,8 @@ class Reducer {
     // participating variables after reduction has completed.
     std::vector<torch::autograd::Variable> variables;
 
-    // Per-variable offset/length into the flat bucket contents tensor and grad bucket.
+    // Per-variable offset/length into the flat bucket contents tensor and grad
+    // bucket.
     std::vector<size_t> offsets;
     std::vector<size_t> lengths;
 
@@ -328,11 +325,57 @@ class Reducer {
   // Map the index of a variable to its location in the bucket structure.
   std::vector<VariableLocator> variable_locators_;
 
+  // track the number of iterations to synchronize grads in training so far.
+  long num_iterations_;
+  // track the number of buckets that have been ready for
+  // communication calls like allReduce or communication hooks.
+  int num_buckets_ready_;
+
+  // CPU timestamp to record event start and end time.
+  struct CPUTimer {
+    // The timestamp of forward call start time in each iteration.
+    int64_t forward_start_time;
+    // The timestamp of backward computation start and end time in each
+    // iteration.
+    int64_t backward_compute_start_time;
+    int64_t backward_compute_end_time;
+    // The timestamp of first communication call start time in each iteration.
+    int64_t backward_comm_start_time;
+    // The timestamp of last communication call end time in each iteration.
+    int64_t backward_comm_end_time;
+  };
+
+  CPUTimer cpu_timer_{};
+
+#ifdef USE_CUDA
+  // GPU events to record event start and end time.
+  struct GPUTimer {
+    at::cuda::CUDAEvent forward_start = at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_compute_start =
+        at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_compute_end =
+        at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_comm_start =
+        at::cuda::CUDAEvent(cudaEventDefault);
+    at::cuda::CUDAEvent backward_comm_end =
+        at::cuda::CUDAEvent(cudaEventDefault);
+  };
+  GPUTimer gpu_timer_;
+#endif
+
   // We collect the relative timestamp of every gradient being ready
   // when executing autograd. This can be used to derive a timeline of
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
-  int64_t backward_stats_base_;
   std::vector<std::vector<int64_t>> backward_stats_;
+
+  bool should_collect_runtime_stats();
+  void record_forward_compute_start_time();
+  void record_backward_compute_start_time();
+  void record_backward_compute_end_time();
+  void record_backward_comm_start_time();
+  void record_backward_comm_end_time();
+
+  bool is_multi_device_module_ = false;
 
   // Following variables are to help build dynamic bucket order
   bool has_rebuilt_bucket_;
@@ -370,10 +413,9 @@ class Reducer {
  private:
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
-
-  // ddp_logging_data_ is used to hold all the ddp related logging
-  // data fields.
-  std::unique_ptr<c10::DDPLoggingData> ddp_logging_data_;
+  // Current thread local state
+  at::ThreadLocalState thread_local_state_;
+  friend class Logger;
 };
 
 // This is equivalent to take_tensors but returns indices into the
@@ -388,4 +430,15 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<bool>& expect_sparse_gradient = {},
     const std::vector<int64_t>& tensor_indices = {});
 
+// Verify model replicas in this process are the same with respect to no. of
+// params, requires grad, and matching dtype/size/layout.
+void verify_replicas_within_process(
+    std::vector<std::vector<torch::autograd::Variable>> model_replicas,
+    std::vector<std::vector<bool>> expect_sparse_gradients);
+
+// Verify models across all processes are the same as model on rank 0 with
+// respect to no. of params and matching dtype/size/layout.
+void verify_replica0_across_processes(
+    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
+    std::vector<std::vector<torch::autograd::Variable>> model_replicas);
 } // namespace c10d

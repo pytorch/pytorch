@@ -115,6 +115,8 @@ class TestGradients(TestCase):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
     def _skip_helper(self, op, dtype):
+        if not op.supports_autograd:
+            self.skipTest("Skipped! autograd not supported")
         if not op.test_complex_grad and dtype.is_complex:
             self.skipTest("Skipped! complex grad tests marked to skip.")
 
@@ -191,7 +193,7 @@ class TestCommon(JitCommonTestCase):
     #   against eager's gold standard op function variant
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
-        test_backward = op.test_complex_grad or not dtype.is_complex
+        test_backward = op.supports_autograd and (op.test_complex_grad or not dtype.is_complex)
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
@@ -258,9 +260,10 @@ class TestCommon(JitCommonTestCase):
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
-        test_backward = (
+        test_backward = op.supports_autograd and (
             (dtype.is_complex and op.test_complex_grad) or
             (dtype.is_floating_point and (not op.skip_bfloat16_grad or dtype != torch.bfloat16)))
+
         samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
@@ -370,10 +373,21 @@ class TestCommon(JitCommonTestCase):
         sample = samples[0]
 
         # Prepare data for test scripting
-        args = [f"t{i}" for i in range(len(sample.input))] + \
-               [f"s{i}" for i in range(len(sample.args))]
-        args_annot_kw = args + [f"{k}: {type(v).__name__} = {v}" for k, v in sample.kwargs.items()]
-        args_kw = args + [f"{k}={v}" for k, v in sample.kwargs.items()]
+        # Below we prepare strings of args/kwargs with and without type annotations.
+        # These strings are inserted into function template strings which is then torch scripted.
+        # - args string is ["t0", "t1", ...] corresponds to the input tensors required by the op
+        # - args_annot_kw is the string for the template function signature, for example,
+        # ["t0", "t1", "s0: float", "s1: bool", "max: float = 1.0", "min: float = 0.0"] ->
+        #    def fn(t0, t1, s0: float, s1: bool, max: float = 1.0, min: float = 0.0)
+        # - args_kw is the string of args/kwargs used to call the op, same as args_annot_kw but
+        # without type annotations
+        args = [f"t{i}" for i in range(len(sample.input))]
+        args_annot_kw = args + \
+            [f"s{i}: {type(v).__name__}" for i, v in enumerate(sample.args)] + \
+            [f"{k}: {type(v).__name__} = {v}" for k, v in sample.kwargs.items()]
+        args_kw = args + \
+            [f"s{i}" for i in range(len(sample.args))] + \
+            [f"{k}={v}" for k, v in sample.kwargs.items()]
 
         # Prepare data for test tracing
         sample_args_kwargs = ()
@@ -386,9 +400,9 @@ class TestCommon(JitCommonTestCase):
         original_name_inplace = original_name + "_"
         expected_dtype = op(*sample.input, *sample.args, **sample.kwargs).dtype
 
-        for a_op in op.aliases:  
+        for a_op in op.aliases:
             inplace = a_op.inplace_variant
-            method_or_inplace = [a_op.inplace_variant, a_op.method_variant]            
+            method_or_inplace = [a_op.inplace_variant, a_op.method_variant]
             variants = (v for v in (a_op.op, a_op.method_variant, a_op.inplace_variant) if v is not None)
 
             # Test scripting:

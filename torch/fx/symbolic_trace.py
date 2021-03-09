@@ -58,7 +58,7 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self, autowrap_modules : Tuple[ModuleType] = (math, )):
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, )) -> None:
         """
         Construct a Tracer object.
 
@@ -81,6 +81,7 @@ class Tracer(TracerBase):
         # modules we see while tracing
         self._autowrap_search: List[ModuleType] = list(autowrap_modules)
 
+        self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
 
     def create_arg(self, a: Any) -> 'Argument':
         """
@@ -185,10 +186,21 @@ class Tracer(TracerBase):
 
             mod (str): The ``Module`` to retrieve the qualified name for.
         """
-        for n, p in self.root.named_modules():
-            if mod is p:
-                return n
-        raise NameError('module is not installed as a submodule')
+        # Prefer the O(1) algorithm
+        if self.submodule_paths:
+            path = self.submodule_paths.get(mod)
+            if path is None:
+                raise NameError('module is not installed as a submodule')
+            assert isinstance(path, str)
+            return path
+        # O(N^2) fallback in the case that we didn't store the submodule
+        # paths. (This happens e.g. in using NormalizeArgs. See
+        #  `test/test_fx_experimental:test_normalize_args`)
+        else:
+            for n, p in self.root.named_modules():
+                if mod is p:
+                    return n
+            raise NameError('module is not installed as a submodule')
 
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
         """
@@ -202,7 +214,6 @@ class Tracer(TracerBase):
 
         This method can be overridden to--for example--create nested traced
         GraphModules, or any other behavior you would want while tracing across
-        ``Module`` boundaries.
         ``Module`` boundaries.
 
         Args:
@@ -223,7 +234,7 @@ class Tracer(TracerBase):
             return forward(*args, **kwargs)
         return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
-    def create_args_for_root(self, root_fn, is_module):
+    def create_args_for_root(self, root_fn, is_module, concrete_args=None):
         """
         Create ``placeholder`` nodes corresponding to the signature of the ``root``
         Module. This method introspects root's signature and emits those
@@ -249,6 +260,8 @@ class Tracer(TracerBase):
         sig = inspect.signature(fn_for_analysis)
 
         def proxy_placeholder(name: str):
+            if concrete_args is not None and name in concrete_args:
+                return concrete_args[name]
             if name[0] == '*':
                 default = ()    # type: ignore
             else:
@@ -269,7 +282,7 @@ class Tracer(TracerBase):
 
         return root_fn, args
 
-    def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
+    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
         can either be an ``nn.Module`` instance or a Python callable.
@@ -284,6 +297,7 @@ class Tracer(TracerBase):
 
             root (Union[Module, Callable]): Either a ``Module`` or a function to be
                 traced through.
+            concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
 
         Returns:
 
@@ -292,6 +306,7 @@ class Tracer(TracerBase):
         if isinstance(root, torch.nn.Module):
             self.root = root
             fn = type(root).forward
+            self.submodule_paths = {mod: name for name, mod in root.named_modules()}
         else:
             self.root = torch.nn.Module()
             fn = root
@@ -315,7 +330,7 @@ class Tracer(TracerBase):
         assert isinstance(fn, FunctionType)
 
         fn_globals = fn.__globals__  # run before it gets patched
-        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
+        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module), concrete_args)
 
         parameter_proxy_cache : Dict[str, Proxy] = {}  # Reduce number of get_attr calls
 
@@ -352,6 +367,8 @@ class Tracer(TracerBase):
 
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
+
+        self.submodule_paths = None
 
         return self.graph
 
@@ -585,7 +602,7 @@ def wrap(fn_or_name : Union[str, Callable]):
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
 
-def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
+def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> GraphModule:
     """Symbolic tracing API
 
     Given an ``nn.Module`` or function instance ``root``, this function will return a ``GraphModule``
@@ -594,12 +611,13 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
     Args:
         root (Union[torch.nn.Module, Callable]): Module or function to be traced and converted
             into a Graph representation.
+        concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
 
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
 
     """
     tracer = Tracer()
-    graph = tracer.trace(root)
+    graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     return GraphModule(tracer.root, graph, name)

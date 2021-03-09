@@ -69,6 +69,9 @@ Backend backendToBackendOfDeviceType(Backend b, DeviceType d) {
       return Backend::XLA;
     case DeviceType::XPU:
       return backendToXPU(b);
+    case DeviceType::MLC:
+      TORCH_CHECK(!isSparse(b), "Sparse not implemented for MLC");
+      return Backend::MLC;
     default:
       AT_ERROR("Unknown device type");
   }
@@ -166,12 +169,14 @@ std::vector<int64_t> compute_sizes(PyObject* seq) {
 
 ScalarType infer_scalar_type(PyObject *obj) {
 #ifdef USE_NUMPY
-  if (PyArray_Check(obj)) {
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
-  }
-  if (PyArray_CheckScalar(obj)) {
-    THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
+  if (is_numpy_available()) {
+    if (PyArray_Check(obj)) {
+      return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
+    }
+    if (PyArray_CheckScalar(obj)) {
+      THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
+      return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
+    }
   }
 #endif
   if (PyFloat_Check(obj)) {
@@ -293,7 +298,7 @@ Tensor internal_new_from_data(
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
 
-  if (PyArray_Check(data)) {
+  if (is_numpy_available() && PyArray_Check(data)) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = tensor_from_numpy(data, /*warn_if_not_writeable=*/!copy_numpy);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;

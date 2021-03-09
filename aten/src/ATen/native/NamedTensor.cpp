@@ -359,7 +359,13 @@ Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const T
 Tensor& scatter_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter_add");
 }
+std::tuple<Tensor&, Tensor&> sort_out(Tensor& values, Tensor& indices, const Tensor& self, c10::optional<bool> stable, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("sort");
+}
 std::tuple<Tensor&, Tensor&> sort_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("sort");
+}
+std::tuple<Tensor, Tensor> sort(const Tensor& self, c10::optional<bool> stable, Dimname dim, bool keepdim) {
   reportNYIDimnameOverload("sort");
 }
 std::tuple<Tensor, Tensor> sort(const Tensor& self, Dimname dim, bool keepdim) {

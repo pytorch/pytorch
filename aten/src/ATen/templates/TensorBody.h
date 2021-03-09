@@ -125,6 +125,10 @@ class TORCH_API Tensor {
     }
   }
 
+  bool is_complex() const {
+    return at::isComplexType(this->scalar_type());
+  }
+
   int64_t size(int64_t dim) const {
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
     dim = c10::maybe_wrap_dim(dim, this->dim(), false);
@@ -335,7 +339,9 @@ class TORCH_API Tensor {
   caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
-  Device device() const;
+  inline Device device() const {
+    return impl_->device();
+  }
 
   /// Returns a `Tensor`'s device index.
   int64_t get_device() const;
@@ -346,6 +352,9 @@ class TORCH_API Tensor {
   /// Returns if a `Tensor` has XPU backend.
   bool is_xpu() const;
 
+  /// Returns if a `Tensor` has XLA backend.
+  bool is_xla() const;
+
   /// Returns if a `Tensor` has HIP backend.
   bool is_hip() const;
 
@@ -354,6 +363,9 @@ class TORCH_API Tensor {
 
   /// Returns if a `Tensor` is mkldnn tensor.
   bool is_mkldnn() const;
+
+  /// Returns if a `Tensor` is mlc tensor.
+  bool is_mlc() const;
 
   /// Returns if a `Tensor` is vulkan tensor.
   bool is_vulkan() const;

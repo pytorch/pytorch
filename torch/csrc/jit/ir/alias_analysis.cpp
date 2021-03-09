@@ -555,8 +555,15 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
+    case prim::BroadcastMKLDNNTensors: {
+      makePointerTo(node->outputs().at(0), node->inputs().at(0));
+      makePointerTo(node->outputs().at(1), node->inputs().at(1));
+      return;
+    }
     // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:
+    case prim::MKLDNNGroup:
+    case prim::ConstantMKLDNNTensor:
     case prim::StaticSubgraph:
     case prim::Constant:
     case prim::AutogradZero:
@@ -981,6 +988,10 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
     case aten::hstack:
     case aten::dstack:
       return true;
+  }
+  auto op = use.user->maybeOperator();
+  if (op && op->aliasAnalysisKind() == AliasAnalysisKind::PURE_FUNCTION) {
+    return true;
   }
 
   return false;

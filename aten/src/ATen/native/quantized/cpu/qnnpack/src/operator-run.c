@@ -71,6 +71,10 @@ static void compute_q8gemm(
       &context->quantization_params);
 }
 
+// At the moment we opt to remove sparse kernels that
+// dont require prepacking as their perf was always
+// worse.
+#ifdef NO_PREPACK_SPARSE_KERNEL
 struct q8gemm_sparse_dq_context {
   const uint8_t* a;
   size_t a_stride;
@@ -114,6 +118,7 @@ static void compute_q8gemm_sparse_dq(
       output_channel_index,
       &context->quantization_params);
 }
+#endif
 
 struct q8gemm_prepackA_sparse_dq_context {
   size_t k;
@@ -122,6 +127,7 @@ struct q8gemm_prepackA_sparse_dq_context {
   uint8_t* a_packed;
   size_t a_packed_stride;
   size_t log2_mr;
+  size_t log2_row_block_size;
   const uint32_t* kernel_col_indices;
   const uint32_t* kernel_row_values;
   const uint8_t* kernel_values;
@@ -178,7 +184,8 @@ static void compute_q8gemm_prepacked_sparse_dq(
       nr_block_size,
       a_packed + mr_packed_block_start,
       context->kernel_values,
-      context->kernel_row_values + nr_block_start,
+      context->kernel_row_values +
+        (nr_block_start >> context->log2_row_block_size),
       context->kernel_col_indices,
       context->bias + nr_block_start,
       c + mr_block_start * c_stride + nr_block_start,
@@ -964,12 +971,13 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           nr);
       break;
     }
+#ifdef NO_PREPACK_SPARSE_KERNEL
     case pytorch_qnnp_ukernel_type_gemm_sparse_dq: {
       const size_t batch_size = op->batch_size;
       const size_t groups = op->groups;
       const size_t group_output_channels = op->group_output_channels;
-      const uint32_t mr = pytorch_qnnp_params.q8gemm_sparse.mr;
-      const uint32_t nr = pytorch_qnnp_params.q8gemm_sparse.nr;
+      const uint32_t mr = pytorch_qnnp_params.q8gemm_sparse_c1x4.mr;
+      const uint32_t nr = pytorch_qnnp_params.q8gemm_sparse_c1x4.nr;
 
       const size_t output_size = op->output_height * op->output_width;
       struct q8gemm_sparse_dq_context q8gemm_sparse_dq_context = {
@@ -982,7 +990,7 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           .c = (float*)op->output,
           .c_stride = op->output_pixel_stride,
           .quantization_params = op->dynamic_conv_quantization_params,
-          .ukernel = pytorch_qnnp_params.q8gemm_sparse.gemm_dq,
+          .ukernel = pytorch_qnnp_params.q8gemm_sparse_c1x4.gemm_dq,
       };
 
       pthreadpool_compute_4d_tiled(
@@ -999,20 +1007,50 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           nr);
       break;
     }
+#endif
     case pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq: {
       const size_t batch_size = op->batch_size;
       const size_t groups = op->groups;
       const size_t group_input_channels = op->group_input_channels;
       const size_t group_output_channels = op->group_output_channels;
-      const uint32_t mr = pytorch_qnnp_params.q8gemm_sparse.mr;
-      const uint32_t log2_mr = pytorch_qnnp_params.q8gemm_sparse.log2_mr;
-      const uint32_t nr = pytorch_qnnp_params.q8gemm_sparse.nr;
-      const uint32_t kr = pytorch_qnnp_params.q8gemm_sparse.kr;
+      uint32_t mr, log2_mr, nr, kr, log2_row_block_size;
+      pytorch_q8gemm_sparse_packA_ukernel_function prepack_kernel;
+      pytorch_q8gemm_dq_sparse_packedA_ukernel_function compute_kernel;
+      if (op->sparse_matrix.row_block_size == 1 &&
+          op->sparse_matrix.col_block_size == 4) {
+        mr = pytorch_qnnp_params.q8gemm_sparse_c1x4.mr;
+        log2_mr = pytorch_qnnp_params.q8gemm_sparse_c1x4.log2_mr;
+        log2_row_block_size = 0;
+        nr = pytorch_qnnp_params.q8gemm_sparse_c1x4.nr;
+        kr = pytorch_qnnp_params.q8gemm_sparse_c1x4.kr;
+        compute_kernel =
+          pytorch_qnnp_params.q8gemm_sparse_c1x4.packedA_gemm_dq;
+        prepack_kernel = pytorch_qnnp_params.q8gemm_sparse_c1x4.packA;
+      } else if (op->sparse_matrix.row_block_size == 8 &&
+          op->sparse_matrix.col_block_size == 1) {
+        mr = pytorch_qnnp_params.q8gemm_sparse_c8x1.mr;
+        log2_mr = pytorch_qnnp_params.q8gemm_sparse_c8x1.log2_mr;
+        log2_row_block_size = 3;
+        nr = pytorch_qnnp_params.q8gemm_sparse_c8x1.nr;
+        kr = pytorch_qnnp_params.q8gemm_sparse_c8x1.kr;
+        compute_kernel =
+          pytorch_qnnp_params.q8gemm_sparse_c8x1.packedA_gemm_dq;
+        prepack_kernel = pytorch_qnnp_params.q8gemm_sparse_c8x1.packA;
+      } else {
+        return pytorch_qnnp_status_invalid_parameter;
+      }
+
       const size_t output_size = op->output_height * op->output_width;
       const size_t k_stride = (group_input_channels + (kr - 1)) & -kr;
       const size_t m_stride = (output_size + (mr - 1)) & -mr;
       op->prepacked_a =
         (uint8_t*)realloc((void*)op->prepacked_a, k_stride * m_stride);
+      if (op->prepacked_a == NULL) {
+        pytorch_qnnp_log_error(
+            "failed to allocate %zu bytes for packed activation buffer",
+            (k_stride * m_stride));
+        return pytorch_qnnp_status_out_of_memory;
+      }
 
       struct q8gemm_prepackA_sparse_dq_context
         q8gemm_prepack_sparse_dq_context = {
@@ -1022,6 +1060,7 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           .a_packed = op->prepacked_a,
           .a_packed_stride = k_stride * mr,
           .log2_mr = log2_mr,
+          .log2_row_block_size = log2_row_block_size,
           .kernel_col_indices = op->sparse_matrix.col_indices,
           .kernel_row_values = op->sparse_matrix.row_values,
           .kernel_values = op->sparse_matrix.values,
@@ -1029,13 +1068,16 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           .c = (float*)op->output,
           .c_stride = op->output_pixel_stride,
           .quantization_params = op->dynamic_conv_quantization_params,
-          .ukernel = pytorch_qnnp_params.q8gemm_sparse.packedA_gemm_dq,
-          .prepack_ukernel = pytorch_qnnp_params.q8gemm_sparse.packA,
+          .ukernel = compute_kernel,
+          .prepack_ukernel = prepack_kernel,
       };
 
+      // This batch size is not the actual batch size of the op
+      // The batch size is modified in fully-connected-sparse.c
       if (groups != 1 || batch_size != 1) {
         pytorch_qnnp_log_error("pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq "
             "works with group size = 1, batch_size = 1.\n");
+        return pytorch_qnnp_status_invalid_parameter;
       }
 
       pthreadpool_compute_4d_tiled(

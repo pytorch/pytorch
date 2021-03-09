@@ -1,6 +1,7 @@
 #include <ATen/Utils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/accumulate.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -12,6 +13,8 @@
 
 namespace torch {
 namespace jit {
+
+namespace {
 
 using Tensor = at::Tensor;
 
@@ -208,7 +211,7 @@ Tensor resizeConstantScalarOrTensorToShape(
     ret_tensor = ret_tensor.reshape({1});
     ret_tensor = ret_tensor.expand(shape);
   } else {
-    TORCH_INTERNAL_ASSERT(ret_tensor.numel() == at::prod_intlist(shape));
+    TORCH_INTERNAL_ASSERT(ret_tensor.numel() == c10::multiply_integers(shape));
     ret_tensor = ret_tensor.view(shape);
   }
   return ret_tensor;
@@ -355,6 +358,8 @@ void FoldFrozenConvMulOrDiv(Block* b) {
     }
   }
 }
+
+} // namespace
 
 void FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
   FoldFrozenConvBatchnorm(graph->block());

@@ -162,19 +162,27 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
 }
 
 Tensor relu(const Tensor & self) {
-  return at::threshold(self, 0, 0);
+  return at::clamp_min(self, 0);
 }
 
 Tensor & relu_(Tensor & self) {
-  return at::threshold_(self, 0, 0);
+  return at::clamp_min_(self, 0);
 }
 
 Tensor selu(const Tensor & self) {
   return at::elu(self, SELU_ALPHA, SELU_SCALE);
 }
 
+Tensor relu6(const Tensor & self) {
+  return at::hardtanh(self, /*min_val=*/0, /*max_val=*/6);
+}
+
 Tensor & selu_(Tensor & self) {
   return at::elu_(self, SELU_ALPHA, SELU_SCALE);
+}
+
+Tensor & relu6_(Tensor & self) {
+  return at::hardtanh_(self, /*min_val=*/0, /*max_val=*/6);
 }
 
 Tensor celu(const Tensor & self, Scalar alpha) {

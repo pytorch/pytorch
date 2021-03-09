@@ -335,11 +335,14 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
   thrust::device_ptr<int64_t> maskPrefixSumData(
       maskPrefixSum.data_ptr<int64_t>());
 
+  // Reference for using static_cast on `init_value`:
+  // https://github.com/NVIDIA/thrust/issues/1379
   thrust::exclusive_scan(
       thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
       maskData,
       maskData + mask_cont.numel(),
-      maskPrefixSumData);
+      maskPrefixSumData,
+      static_cast<int64_t>(0));
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too
