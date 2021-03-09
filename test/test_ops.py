@@ -68,7 +68,7 @@ class TestGradients(TestCase):
     def _get_safe_inplace(self, inplace_variant):
         @wraps(inplace_variant)
         def _fn(t, *args, **kwargs):
-            inputs = t.clone() if isinstance(t, torch.Tensor) else [arg.clone() for arg in t]
+            inputs = t.clone() if isinstance(t, torch.Tensor) else tuple(arg.clone() for arg in t)
             return inplace_variant(inputs, *args, **kwargs)
 
         return _fn
