@@ -5,6 +5,12 @@ namespace at {
 namespace native {
 namespace {
 
+// Check foreach API restrictions
+// - Tensor lists must be non-empty.
+// - All tensors in all lists must have the same dtype.
+// - All TensorLists and ScalarLists must have the same number of elements.
+// - Corresponding tensors must have the same size.
+
 // Get result dtype
 ScalarType get_result_type(const Tensor& tensor, Scalar scalar, bool promote_integer_float = false) {
   ScalarType result_type = at::native::result_type(tensor, scalar);
@@ -107,13 +113,12 @@ bool check_fast_path_restrictions(
   ArrayRef<Scalar> scalarList = {}, 
   bool does_op_promote_integer_inputs_to_float = false) {
     auto expected_device = tensorLists[0][0].device();
-    auto expected_strides = tensorLists[0][0].strides();
+    auto expected_dtype = tensorLists[0][0].dtype();
     auto expected_size = tensorLists[0][0].sizes();
 
     auto is_tensor_okay = [&](const Tensor& tensor) {
       return tensor.device() == expected_device &&
              tensor.layout() == at::kStrided &&
-             tensor.strides() == expected_strides &&
              tensor.sizes() == expected_size &&
              tensor.is_non_overlapping_and_dense();
     };
@@ -121,6 +126,15 @@ bool check_fast_path_restrictions(
     for (const auto& tensorList : tensorLists) {
       for (const auto& tensor : tensorList) {
         if (!is_tensor_okay(tensor)) {
+          return false;
+        }
+      }
+    }
+
+    // Check if corresponding tensors in tensor lists have the same strides.
+    for (int i=0; i < tensorLists.size(); i++) {
+      for (int j=0; j < tensorLists[0].size(); j++) {
+        if (tensorLists[0][j].strides() != tensorLists[i][j].strides()) {
           return false;
         }
       }
