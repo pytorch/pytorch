@@ -231,8 +231,12 @@ class LLVMCodeGenImpl : public IRVisitor {
       llvm::Value* val);
 
   void optimize(llvm::Module& M);
-  std::string getLLVMCodeText(){return llvmCode;}
-  std::string getASMCodeText(){return asmCode;}
+  std::string getLLVMCodeText() {
+    return llvmCode;
+  }
+  std::string getASMCodeText() {
+    return asmCode;
+  }
 };
 } // namespace tensorexpr
 } // namespace jit
@@ -306,7 +310,7 @@ void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
 }
 
 std::string LLVMCodeGen::getCodeText(std::string attr /*=""*/) {
-  if (attr=="asm") {
+  if (attr == "asm") {
     return impl_->getASMCodeText();
   } else {
     return impl_->getLLVMCodeText();
@@ -514,8 +518,8 @@ void LLVMCodeGenImpl::emitKernel(
 #else
       llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
 #endif
-      PM.run(*module_);
-      asmCode = asmStream.str().str();
+  PM.run(*module_);
+  asmCode = asmStream.str().str();
 
   GRAPH_DEBUG(
       "\nLLVM module after optimizations\n\n", llvmCode, "\n", asmCode, "\n");
