@@ -74,11 +74,11 @@ using can_unbox =
 // boxArgs - utility for pushing unboxed args onto IValue stack
 //
 template <class... Args>
-static torch::jit::Stack boxArgs(Args... args) {
+static torch::jit::Stack boxArgs(Args... the_args) {
   // TODO Reuse stack vector instead of allocating?
   torch::jit::Stack stack;
   stack.reserve(sizeof...(Args));
-  torch::jit::push(stack, std::forward<Args>(args)...);
+  torch::jit::push(stack, std::forward<Args>(the_args)...);
   return stack;
 }
 
