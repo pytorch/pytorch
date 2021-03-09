@@ -99,7 +99,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
         elif str(t.elem) == 'Tensor':
             return BaseCType("TensorList", binds)
         elif str(t.elem) == 'Scalar':
-            return BaseCType("ScalarList", binds)
+            return BaseCType("ArrayRef<Scalar>", binds)
         elif str(t.elem) == 'Dimname':
             return BaseCType("DimnameList", binds)
         elif str(t.elem) == 'Tensor?':
