@@ -242,32 +242,32 @@ void enforceThatImpl(Pred p, const T1& lhs, const T2& rhs, const char* file,
 #define CAFFE_ENFORCE_BINARY_OP(cmp, op, x, y, ...)                      \
   CAFFE_ENFORCE_THAT_IMPL(cmp, x, y, #x " " #op " " #y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_EQ(x, y, ...)                     \
-  CAFFE_ENFORCE_BINARY_OP(std::equal_to(), ==, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::equal_to<void>(), ==, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_NE(x, y, ...)                     \
-  CAFFE_ENFORCE_BINARY_OP(std::not_equal_to(), !=, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::not_equal_to<void>(), !=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_LE(x, y, ...)                     \
-  CAFFE_ENFORCE_BINARY_OP(std::less_equal(), <=, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::less_equal<void>(), <=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_LT(x, y, ...)                     \
-  CAFFE_ENFORCE_BINARY_OP(std::less(), <, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::less<void>(), <, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_GE(x, y, ...)                     \
-  CAFFE_ENFORCE_BINARY_OP(std::greater_equal(), >=, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::greater_equal<void>(), >=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_GT(x, y, ...)                     \
-  CAFFE_ENFORCE_BINARY_OP(std::greater(), >, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP(std::greater<void>(), >, x, y, ##__VA_ARGS__)
 
 #define CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(cmp, op, x, y, ...)          \
   CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(cmp, x, y, #x " " #op " " #y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_EQ_WITH_CALLER(x, y, ...)                 \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::equal_to(), ==, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::equal_to<void>(), ==, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_NE_WITH_CALLER(x, y, ...)                 \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::not_equal_to(), !=, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::not_equal_to<void>(), !=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_LE_WITH_CALLER(x, y, ...)                 \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::less_equal(), <=, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::less_equal<void>(), <=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_LT_WITH_CALLER(x, y, ...)                 \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::less(), <, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::less<void>(), <, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_GE_WITH_CALLER(x, y, ...)                 \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::greater_equal(), >=, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::greater_equal<void>(), >=, x, y, ##__VA_ARGS__)
 #define CAFFE_ENFORCE_GT_WITH_CALLER(x, y, ...)                 \
-  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::greater(), >, x, y, ##__VA_ARGS__)
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::greater<void>(), >, x, y, ##__VA_ARGS__)
 
 /**
  * Very lightweight logging for the first time API usage. It's beneficial for
