@@ -122,7 +122,7 @@ binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, 
 @register_quant_pattern((torch.nn.functional.relu, operator.mul))
 @register_quant_pattern((torch.nn.functional.relu, torch.add))
 @register_quant_pattern((torch.nn.functional.relu, torch.mul))
-class BinaryOp(QuantizeHandler):
+class BinaryOpQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
         self.relu_node = None
@@ -227,7 +227,7 @@ class BinaryOp(QuantizeHandler):
                 return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
 @register_quant_pattern(torch.cat)
-class Cat(QuantizeHandler):
+class CatQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -271,7 +271,7 @@ class Cat(QuantizeHandler):
 # just for error checks
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
-class ConvRelu(QuantizeHandler):
+class ConvReluQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
         self.relu_node = None
@@ -602,7 +602,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.BatchNorm3d)
 @register_quant_pattern(torch.nn.intrinsic.BNReLU2d)
 @register_quant_pattern(torch.nn.intrinsic.BNReLU3d)
-class BatchNorm(QuantizeHandler):
+class BatchNormQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
         assert node.op == 'call_module'
@@ -630,7 +630,7 @@ class BatchNorm(QuantizeHandler):
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
 @mark_input_output_not_observed()
-class Embedding(QuantizeHandler):
+class EmbeddingQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
 
@@ -675,7 +675,7 @@ class Embedding(QuantizeHandler):
 @register_quant_pattern(torch.nn.RNNCell)
 @register_quant_pattern(torch.nn.LSTM)
 @mark_input_output_not_observed()
-class RNNDynamic(QuantizeHandler):
+class RNNDynamicQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
 
@@ -733,7 +733,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.layer_norm)
 @register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.silu)
-class DefaultNode(QuantizeHandler):
+class DefaultNodeQuantizeHandler(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
     def __init__(self, quantizer: QuantizerCls, node: Node):
@@ -833,7 +833,7 @@ class DefaultNode(QuantizeHandler):
 
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
 @register_quant_pattern(torch.nn.functional.elu)
-class ELU(QuantizeHandler):
+class ELUQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -940,7 +940,7 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('unsqueeze')
 @register_quant_pattern('unsqueeze_')
 @register_quant_pattern('view')
-class CopyNode(QuantizeHandler):
+class CopyNodeQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
