@@ -132,7 +132,7 @@ class LazyModuleMixin:
                  ('fc2.bias', tensor([0.0019]))])
 
 
-    Lazy modules can load regular :class:`torch.nn.Parameter`s (i.e. you can serialize/deserialize
+    Lazy modules can load regular :class:`torch.nn.Parameter` s (i.e. you can serialize/deserialize
     initialized LazyModules and they will remain initialized)
 
 
