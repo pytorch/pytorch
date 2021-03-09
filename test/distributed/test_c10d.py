@@ -241,6 +241,20 @@ class StoreTestBase(object):
     def test_set_get(self):
         self._test_set_get(self._create_store())
 
+    def test_compare_set(self):
+        store = self._create_store()
+        missing_key_result = store.compare_set("key0", "wrong_old_value", "new_value0")
+        self.assertEqual(b"wrong_old_value", missing_key_result)
+
+        store.set("key0", "value0")
+        self.assertEqual(b"value0", store.get("key0"))
+        old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
+        self.assertEqual(b"value0", old_value_result)
+        self.assertEqual(b"value0", store.get("key0"))
+        new_value_result = store.compare_set("key0", "value0", "new_value0")
+        self.assertEqual(b"new_value0", new_value_result)
+        self.assertEqual(b"new_value0", store.get("key0"))
+
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -260,6 +274,14 @@ class FileStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+class HashStoreTest(TestCase, StoreTestBase):
+    def setUp(self):
+        super(HashStoreTest, self).setUp()
+
+    def _create_store(self):
+        store = c10d.HashStore()
+        store.set_timeout(timedelta(seconds=300))
+        return store
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -342,20 +364,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
-
-    def test_compare_set(self):
-        store = self._create_store()
-        missing_key_result = store.compare_set("key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"wrong_old_value", missing_key_result)
-
-        store.set("key0", "value0")
-        self.assertEqual(b"value0", store.get("key0"))
-        old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"value0", old_value_result)
-        self.assertEqual(b"value0", store.get("key0"))
-        new_value_result = store.compare_set("key0", "value0", "new_value0")
-        self.assertEqual(b"new_value0", new_value_result)
-        self.assertEqual(b"new_value0", store.get("key0"))
 
     def _create_client(self, index, addr, port, world_size, messages):
         try:
