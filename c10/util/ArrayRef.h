@@ -270,30 +270,6 @@ bool operator!=(c10::ArrayRef<T> a1, const std::vector<T>& a2) {
   return !a1.equals(c10::ArrayRef<T>(a2));
 }
 
-template <typename T, unsigned N>
-bool operator==(const SmallVector<T, N>& LHS, c10::ArrayRef<T> RHS) {
-  if (N != RHS.size())
-    return false;
-  return std::equal(LHS.begin(), LHS.end(), RHS.begin());
-}
-
-template <typename T, unsigned N>
-bool operator!=(const SmallVector<int64_t, N>& LHS, c10::ArrayRef<T> RHS) {
-  return !(LHS == RHS);
-}
-
-template <typename T, unsigned N>
-bool operator==(c10::ArrayRef<T> LHS, const SmallVector<T, N>& RHS) {
-  if (N != LHS.size())
-    return false;
-  return std::equal(RHS.begin(), RHS.end(), LHS.begin());
-}
-
-template <typename T, unsigned N>
-bool operator!=(c10::ArrayRef<T> LHS, const SmallVector<T, N>& RHS) {
-  return !(LHS == RHS);
-}
-
 using IntArrayRef = ArrayRef<int64_t>;
 
 // This alias is deprecated because it doesn't make ownership
