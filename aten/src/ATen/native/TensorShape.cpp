@@ -1013,7 +1013,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
-  auto shape = infer_size(proposed_shape, self.numel());
+  DimVector shape = infer_size_dv(proposed_shape, self.numel());
 
   if (self.is_mkldnn()) {
     return at::_mkldnn_reshape(self, shape);
@@ -1977,9 +1977,9 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
     TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
   }
 
-  std::vector<int64_t> inferred_size;
+  DimVector inferred_size;
   try {
-    inferred_size = at::infer_size(sizes, self.size(dim));
+    inferred_size = at::infer_size_dv(sizes, self.size(dim));
   } catch (const std::runtime_error& e) {
     // at::infer_size would throw std::runtime_error for invalid size,
     // catch the runtime_error and display the error message in a more user-friendly way
