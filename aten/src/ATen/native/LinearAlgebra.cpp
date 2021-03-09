@@ -2214,43 +2214,64 @@ Tensor chain_matmul(TensorList matrices) {
   }
 }
 
+namespace {
+struct KronImpl final {
+  public:
+    explicit KronImpl(const Tensor& self, const Tensor& other) {
+      maxdim = std::max(self.dim(), other.dim());
+      int64_t pad_self = maxdim - self.dim();
+      int64_t pad_other = maxdim - other.dim();
+      a_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
+      b_reshape = c10::SmallVector<int64_t, 10>(2 * maxdim);
+      result_reshape = c10::SmallVector<int64_t, 10>(maxdim);
+      for (int64_t i = 0; i < maxdim; i++) {
+        a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
+        a_reshape[2 * i + 1] = 1;
+        b_reshape[2 * i] = 1;
+        b_reshape[2 * i + 1] = (i >= pad_other ? other.sizes()[i - pad_other] : 1);
+        result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1];
+      }
+      self_view = at::_unsafe_view(self, a_reshape);
+      other_view = at::_unsafe_view(other, b_reshape);
+    }
+
+    Tensor& kron_out(Tensor& result) const {
+      TORCH_INTERNAL_ASSERT(result.defined(), "Cannot call kron_out with an undefined result tensor as the out argument. Please allocate a Tensor before calling kron_out with it.");
+
+      c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
+      for (int64_t i = 0; i < maxdim; i++) {
+        mul_shape[2 * i] = a_reshape[2 * i];
+        mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
+      }
+      resize_output(result, result_reshape);
+      auto result_mul = at::_unsafe_view(result, mul_shape);
+      at::mul_out(result_mul, self_view, other_view);
+
+      return result;
+    }
+
+    Tensor kron() const {
+      return at::_unsafe_view(at::mul(self_view, other_view), result_reshape);
+    }
+  private:
+    int64_t maxdim;
+    Tensor self_view;
+    Tensor other_view;
+    c10::SmallVector<int64_t, 10> result_reshape;
+    c10::SmallVector<int64_t, 10> a_reshape;
+    c10::SmallVector<int64_t, 10> b_reshape;
+};
+}
+
 /*
 Calculates the Kronecker product between two Tensors.
 */
 Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  int64_t maxdim = std::max(self.dim(), other.dim());
-  int64_t pad_self = maxdim - self.dim();
-  int64_t pad_other = maxdim - other.dim();
-  c10::SmallVector<int64_t, 10> a_reshape(2 * maxdim);
-  c10::SmallVector<int64_t, 10> b_reshape(2 * maxdim);
-  c10::SmallVector<int64_t, 10> result_reshape(maxdim);
-  for (int64_t i = 0; i < maxdim; i++) {
-    a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
-    a_reshape[2 * i + 1] = 1;
-    b_reshape[2 * i] = 1;
-    b_reshape[2 * i + 1] = (i >= pad_other ? other.sizes()[i - pad_other] : 1);
-    result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1];
-  }
-  auto self_view = at::_unsafe_view(self, a_reshape);
-  auto other_view = at::_unsafe_view(other, b_reshape);
-  if (!result.defined()) {
-    result = at::_unsafe_view(at::mul(self_view, other_view), result_reshape);
-  } else {
-    c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
-    for (int64_t i = 0; i < maxdim; i++) {
-      mul_shape[2 * i] = a_reshape[2 * i];
-      mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
-    }
-    resize_output(result, result_reshape);
-    auto result_mul = at::_unsafe_view(result, mul_shape);
-    at::mul_out(result_mul, self_view, other_view);
-  }
-  return result;
+  return KronImpl(self, other).kron_out(result);
 }
 
 Tensor kron(const Tensor& self, const Tensor& other) {
-  at::Tensor result;
-  return at::kron_out(result, self, other);
+  return KronImpl(self, other).kron();
 }
 
 } // namespace native
