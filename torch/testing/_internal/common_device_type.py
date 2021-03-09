@@ -5,7 +5,7 @@ import runpy
 import threading
 from enum import Enum
 from functools import wraps
-from typing import List, Any, ClassVar, Optional, Sequence
+from typing import List, Any, ClassVar, Optional, Sequence, Tuple
 import unittest
 import os
 import torch
@@ -877,6 +877,21 @@ def skipCUDAIfRocm(fn):
 def skipCUDAIfNotRocm(fn):
     return skipCUDAIf(not TEST_WITH_ROCM, "test doesn't currently work on the CUDA stack")(fn)
 
+# Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
+def skipCUDAVersionIn(versions : List[Tuple[int, int]] = None):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            version = _get_torch_cuda_version()
+            if version == (0, 0):  # cpu
+                return fn(self, *args, **kwargs)
+            if version in (versions or []):
+                reason = "test skipped for CUDA version {0}".format(version)
+                raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
+    return dec_fn
 
 # Skips a test on CUDA if cuDNN is unavailable or its version is lower than requested.
 def skipCUDAIfCudnnVersionLessThan(version=0):

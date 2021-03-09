@@ -1,6 +1,6 @@
+#include "caffe2/opt/onnxifi_op.h"
 #include "caffe2/operators/slice_op.h"
 #include "caffe2/opt/bound_shape_inferencer.h"
-#include "caffe2/opt/onnxifi_op.h"
 
 namespace caffe2 {
 
@@ -305,7 +305,7 @@ template <typename DimContainer>
 void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
     const DimContainer& real_shape,
     c10::ArrayRef<uint64_t> max_shape,
-    details::OutputReshapeInfo &output_reshape_info,
+    details::OutputReshapeInfo& output_reshape_info,
     int currentIndex) {
   CAFFE_ENFORCE_EQ(real_shape.size(), max_shape.size());
   const auto dim_size = real_shape.size();
@@ -330,14 +330,19 @@ void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
         real_shape[j],
         ")");
     begin_ptr[j] = 0;
-    if (max_shape[j] >= real_shape[j]) {
+    if (max_shape[j] > real_shape[j]) {
       end_ptr[j] = real_shape[j];
       mismatch += j;
     } else {
-      end_ptr[j] = -1;
+      end_ptr[j] = max_shape[j];
     }
   }
-  output_reshape_info.fast_path[currentIndex] = !mismatch;
+
+  if (dim_size > 0) {
+    output_reshape_info.fast_path[currentIndex] = !mismatch;
+  } else {
+    output_reshape_info.fast_path[currentIndex] = false;
+  }
 }
 
 template <>
@@ -377,15 +382,24 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     return current_batch_size;
   }
 
-  auto& output_reshape_info = output_reshape_info_.emplace(current_batch_size, initOutputReshapeInfo()).first->second;
+  auto& output_reshape_info =
+      output_reshape_info_.emplace(current_batch_size, initOutputReshapeInfo())
+          .first->second;
 
   if (use_passed_output_shapes_) {
     auto shape_info_it = output_shapes_per_bs_.find(current_batch_size);
-    CAFFE_ENFORCE(shape_info_it != output_shapes_per_bs_.end(), "Unable to find outputs shapes for bs=", current_batch_size);
+    CAFFE_ENFORCE(
+        shape_info_it != output_shapes_per_bs_.end(),
+        "Unable to find outputs shapes for bs=",
+        current_batch_size);
     CAFFE_ENFORCE_EQ(shape_info_it->second.size(), OutputSize());
 
     for (int i = 0; i < OutputSize(); ++i) {
-      fillOutputReshapeInfo(shape_info_it->second[i], output_shapes_max_bs_[i], output_reshape_info, i);
+      fillOutputReshapeInfo(
+          shape_info_it->second[i],
+          output_shapes_max_bs_[i],
+          output_reshape_info,
+          i);
     }
   } else {
     BoundShapeSpec spec(dims[0], max_seq_size_);
@@ -422,7 +436,11 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     for (int i = 0; i < OutputSize(); ++i) {
       const auto find_res = shape_info.find(output_names_[i]);
       CAFFE_ENFORCE(find_res != shape_info.end());
-      fillOutputReshapeInfo(find_res->second.shape.dims(), output_shapes_max_bs_[i], output_reshape_info, i);
+      fillOutputReshapeInfo(
+          find_res->second.shape.dims(),
+          output_shapes_max_bs_[i],
+          output_reshape_info,
+          i);
     }
   }
 

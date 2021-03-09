@@ -364,6 +364,9 @@ class TORCH_API Tensor {
   /// Returns if a `Tensor` is mkldnn tensor.
   bool is_mkldnn() const;
 
+  /// Returns if a `Tensor` is mlc tensor.
+  bool is_mlc() const;
+
   /// Returns if a `Tensor` is vulkan tensor.
   bool is_vulkan() const;
 

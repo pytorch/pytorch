@@ -485,14 +485,18 @@ struct Environment {
           {"max", std::make_shared<BuiltinFunction>(prim::max, at::nullopt)},
           {"abs", std::make_shared<BuiltinFunction>(prim::abs, at::nullopt)},
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
+          {"any", std::make_shared<BuiltinFunction>(aten::any, at::nullopt)},
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
+          {"sum", std::make_shared<BuiltinFunction>(aten::sum, at::nullopt)},
           {"list", SpecialFormValue::create(prim::list)},
           {"dict", SpecialFormValue::create(prim::dict)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
           {"pow", std::make_shared<BuiltinFunction>(aten::pow, at::nullopt)},
+          {"complex",
+           std::make_shared<BuiltinFunction>(aten::complex, at::nullopt)},
           {"range", SpecialFormValue::create(prim::range)},
           {"zip", SpecialFormValue::create(prim::zip)},
           {"enumerate", SpecialFormValue::create(prim::enumerate)},
@@ -1891,13 +1895,13 @@ struct to_ir {
       auto* rhs = emitExpr(e);
       auto* n = graph->insertNode(graph->create(prim::Enter, {rhs}));
       entered.push(rhs);
-      auto rhsClass = rhs->type()->expect<ClassType>();
 
-      if (!rhsClass) {
+      if (rhs->type()->kind() != TypeKind::ClassType) {
         throw ErrorReport(e.range())
-            << "With item expression does not return a class type";
+            << "With item expression must return an object";
       }
 
+      auto rhsClass = rhs->type()->expect<ClassType>();
       auto* enterMethod = rhsClass->findMethod("__enter__");
       auto* exitMethod = rhsClass->findMethod("__exit__");
 
@@ -1916,13 +1920,8 @@ struct to_ir {
       // Check the schema of __exit__.
       auto& exitSchema = exitMethod->getSchema();
       if (exitSchema.arguments().size() != 4) {
-        throw ErrorReport(e.range())
-            << "__exit__ must have four arguments and no return value";
+        throw ErrorReport(e.range()) << "__exit__ must have four arguments";
       } else {
-        if (exitSchema.returns().at(0).type() != NoneType::get()) {
-          throw ErrorReport(e.range()) << "__exit__ must have no return value";
-        }
-
         for (unsigned i = 1; i < 4; ++i) {
           if (exitSchema.arguments().at(i).type() != AnyType::get()) {
             throw ErrorReport(e.range())

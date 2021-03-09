@@ -1362,8 +1362,8 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 
     axes = [-i for i in range(len(normalized_shape), 0, -1)]
 
-    two_cst = g.op("Constant", value_t=torch.tensor(2.))
-    eps_cst = g.op("Constant", value_t=torch.tensor(eps))
+    two_cst = sym_help._generate_wrapped_number(g, 2.)
+    eps_cst = sym_help._generate_wrapped_number(g, eps)
 
     mean = g.op("ReduceMean", input, axes_i=axes)
     numerator = sub(g, input, mean)

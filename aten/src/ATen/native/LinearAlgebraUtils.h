@@ -359,7 +359,7 @@ static inline void checkSameDevice(const std::string& fn_name, Tensor result, Te
 // Most linear algebra functions have the same dtype for input and output
 // (either floating or complex type input), so we can check whether input's dtype can be casted to result's dtype.
 // According to https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
-// c10::canCast can be used for checking the "safe copy" dtype requirements.
+// c10::canCast is used for checking the "safe copy" dtype requirements.
 static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result") {
   bool can_cast = c10::canCast(input.scalar_type(), result.scalar_type());
   TORCH_CHECK(
