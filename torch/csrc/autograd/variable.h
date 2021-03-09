@@ -239,11 +239,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     requires_grad_ = requires_grad;
   }
 
-  std::unique_ptr<AutogradMetaInterface> shallow_copy() const override {
-    // NB: need retain_graph to always be True to avoid grad_fn cleaning itself up.
-    return std::make_unique<AutogradMeta>(
-        nullptr, false, /*gradient_edge=*/Edge(grad_fn_, output_nr_));
-  }
+  std::unique_ptr<AutogradMetaInterface> shallow_copy() const override;
 
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_;

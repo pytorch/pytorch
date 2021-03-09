@@ -26,6 +26,14 @@
 namespace torch {
 namespace autograd {
 
+// TODO: this is probably not correct
+std::unique_ptr<c10::AutogradMetaInterface> AutogradMeta::shallow_copy() const {
+  // NB: need retain_graph to always be True to avoid grad_fn cleaning itself up.
+  return std::make_unique<AutogradMeta>(
+      nullptr, false, /*gradient_edge=*/Edge(grad_fn_, output_nr_));
+}
+
+
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
   c10::optional<ViewInfo> backward_info,
   c10::optional<ViewInfo> forward_info,
