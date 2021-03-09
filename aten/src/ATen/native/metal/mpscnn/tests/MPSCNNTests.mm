@@ -103,8 +103,8 @@ bool test_nchw_to_nc4_cpu() {
       const auto len = c10::multiply_integers(std::begin(size), std::end(size));
       auto buf =
           std::vector<float>{t.data_ptr<float>(), t.data_ptr<float>() + len};
-      auto c4 = NCHW_to_NC4((float*)t.data_ptr<float>(), t.sizes().vec());
-      auto n4 = NC4_to_NCHW((float*)c4.data(), t.sizes().vec());
+      auto c4 = NCHWToNC4((float*)t.data_ptr<float>(), t.sizes().vec());
+      auto n4 = NC4ToNCHW((float*)c4.data(), t.sizes().vec());
       return n4 == buf;
     });
     if (!b) {
