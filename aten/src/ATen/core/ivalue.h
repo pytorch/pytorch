@@ -2,6 +2,7 @@
 
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
+#include <ATen/core/ivalue_to.h>
 #include <c10/util/C++17.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -581,7 +582,9 @@ struct TORCH_API IValue final {
       std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
-  IValue(c10::List<T> v);
+  IValue(c10::List<T>&& v);
+  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  IValue(const c10::List<T>& v);
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
@@ -781,7 +784,7 @@ struct TORCH_API IValue final {
   template <typename T>
   T to() &&;
   template <typename T>
-  T to() const&;
+  typename c10::detail::ivalue_to_const_ref_overload_return<T>::type to() const&;
 
   // ToOptional: convert a IValue to the Optional obj that accepts both T and
   // None

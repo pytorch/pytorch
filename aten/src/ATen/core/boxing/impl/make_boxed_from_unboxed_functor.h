@@ -249,11 +249,50 @@ namespace impl {
 
   // ivalue_to_arg
 
+  template<class T>
+  struct decay_if_not_tensor final {
+    using type = std::decay_t<T>;
+  };
+
+  template<>
+  struct decay_if_not_tensor<at::Tensor&> final {
+    using type = at::Tensor&;
+  };
+
+  template<>
+  struct decay_if_not_tensor<const at::Tensor&> final {
+    using type = const at::Tensor&;
+  };
+
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg final {
-    static T call(IValue&& v) {
+    static decltype(auto) call(IValue& v) {
       assert_is_valid_input_type<T, AllowDeprecatedTypes>();
       return std::move(v).to<T>();
+    }
+  };
+
+  // The following two specializations take advantage of specialized
+  // `toTensor()` overloads on IValue to avoid copying.
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<at::Tensor&, AllowDeprecatedTypes> final {
+    // We cannot use the default implementation if they asked for a
+    // `at::Tensor&` because it moves from the IValue, so it can't get
+    // an lvalue reference.
+    static at::Tensor& call(IValue& v) {
+      // Tensor& is valid, don't bother asserting
+      return v.toTensor();
+    }
+  };
+
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<const at::Tensor&, AllowDeprecatedTypes> final {
+    // We should not use the default implementation if they asked for
+    // a `const at::Tensor&` because it moves from the IValue and they
+    // didn't ask for that.
+    static const at::Tensor& call(IValue& v) {
+      // const Tensor& is valid, don't bother asserting
+      return v.toTensor();
     }
   };
 
@@ -261,8 +300,8 @@ namespace impl {
   struct ivalue_to_arg<ArrayRef<T>, AllowDeprecatedTypes> final {
     // If an argument is ArrayRef<T>, convert the IValue to a std::vector<T> and pass that
     // to the operator. std::vector<T> is implicitly convertible to ArrayRef<T>.
-    static std::vector<T> call(IValue&& v) {
-      return ivalue_to_arg<std::vector<T>, AllowDeprecatedTypes>::call(std::move(v));
+    static std::vector<T> call(IValue& v) {
+      return ivalue_to_arg<std::vector<T>, AllowDeprecatedTypes>::call(v);
     }
   };
   template<class T, bool AllowDeprecatedTypes>
@@ -270,8 +309,8 @@ namespace impl {
     // If an argument is optional<ArrayRef<T>>, convert the IValue to an optional<std::vector<T>> and pass that
     // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but impliticly convertible
     // to optional<ArrayRef<T>>.
-    static OptionalArray<T> call(IValue&& v) {
-      return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(std::move(v));
+    static OptionalArray<T> call(IValue& v) {
+      return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
     }
   };
 
@@ -295,19 +334,6 @@ namespace impl {
       return c10::ivalue::from(v);
     }
   };
-
-  // reference_cast allows casting references, e.g. T&& to T&:
-  //    T make_t() {}
-  //    T& v = reference_cast<T&>(make_t()); // make_t() returns a T&& which is cast to T&.
-  // If the target is a non-reference value, then it gets moved:
-  //    T make_t() {}
-  //    T v = reference_cast<T>(make_t()); // no copies involved
-  // The first example actually also shows why reference_cast is usually a very bad idea. v now is a lvalue
-  // reference to a dead temporary. Use with caution!
-  template<class T, class U>
-  T reference_cast(U&& t) {
-      return std::forward<T>(t);
-  }
 
   // wrap_kernel_functor_unboxed_
 
@@ -358,27 +384,19 @@ namespace impl {
 
   // call_functor_with_args_from_stack
 
-  template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
+  template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices,  typename... ArgTypes>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
-  call_functor_with_args_from_stack_(OperatorKernel* functor, DispatchKeySet dispatchKeySet, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
+  call_functor_with_args_from_stack_(OperatorKernel* functor, DispatchKeySet dispatchKeySet, Stack* stack, std::index_sequence<ivalue_arg_indices...>, guts::typelist::typelist<ArgTypes...>*) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
-    /*
-     * For ops that take "Tensor&" as an argument, ivalue_to_arg would still return a "Tensor" by value
-     * and C++ doesn't allow us to call (*functor) with a temporary "Tensor" when it expects "Tensor&".
-     * We use reference_cast to explicitly cast our temporary to a "Tensor&" and make it pass the compiler.
-     * Even though usually dangerous, this is ok here because temporaries live until the end of the statement.
-     * TODO We should remove reference_cast once kernels don't take "Tensor&" arguments anymore
-     */
     // We're explicitly filtering out DispatchKeySet from the argument list.
     // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
     // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
     // See Note [Plumbing Keys Through The Dispatcher] for the background.
-    using ArgTypes = typename c10::remove_DispatchKeySet_arg_from_func<Functor>::parameter_types;
-    return wrap_kernel_functor_unboxed<Functor>::call(functor, dispatchKeySet, reference_cast<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>(
-      ivalue_to_arg<std::decay_t<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>, AllowDeprecatedTypes>::call(
-        std::move(torch::jit::peek(*stack, ivalue_arg_indices, sizeof...(ivalue_arg_indices)))
-    ))...);
+    return wrap_kernel_functor_unboxed<Functor>::call(functor, dispatchKeySet,
+      ivalue_to_arg<typename decay_if_not_tensor<ArgTypes>::type, AllowDeprecatedTypes>::call(
+        torch::jit::peek(*stack, ivalue_arg_indices, sizeof...(ivalue_arg_indices))
+    )...);
   }
 
   template<class Functor, bool AllowDeprecatedTypes>
@@ -390,7 +408,7 @@ namespace impl {
     // See Note [Plumbing Keys Through The Dispatcher] for the background.
     using ArgTypes = typename c10::remove_DispatchKeySet_arg_from_func<Functor>::parameter_types;
     constexpr size_t num_ivalue_args = guts::typelist::size<ArgTypes>::value;
-    return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack, std::make_index_sequence<num_ivalue_args>());
+    return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack, std::make_index_sequence<num_ivalue_args>(), static_cast<ArgTypes*>(nullptr));
   }
 
   // push_outputs
@@ -435,17 +453,34 @@ namespace impl {
       using ArgTypes = typename c10::remove_DispatchKeySet_arg_from_func<KernelFunctor>::parameter_types;
       constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
       constexpr size_t num_inputs = guts::typelist::size<ArgTypes>::value;
+#ifdef __cpp_if_constexpr
+      if constexpr (has_outputs) {
+#else
       guts::if_constexpr<has_outputs>([&] (auto delay_check) {
+#endif
         // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value
         // and don't get a dangling reference. This is only required because some kernels still return `Tensor&`.
+#ifdef __cpp_if_constexpr
+        using ReturnType_ = std::decay_t<ReturnType>;
+        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
+#else
         using ReturnType_ = std::decay_t<typename decltype(delay_check)::template type_identity<ReturnType>>;
         ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, delay_check(stack));
+#endif
         torch::jit::drop(*stack, num_inputs);
         push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
+#ifdef __cpp_if_constexpr
+      } else {
+#else
       }, /* else */ [&] {
+#endif
         call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
         torch::jit::drop(*stack, num_inputs);
+#ifdef __cpp_if_constexpr
+      }
+#else
       });
+#endif
     }
   };
 } // namespace impl

@@ -765,13 +765,13 @@ inline const ivalue::Object& IValue::toObjectRef() const {
 // toX method to IValue. These named methods are much more discoverable
 // than the to templated function.
 
-#define DEFINE_TO(type, method_name)       \
+#define DEFINE_TO(T, method_name)          \
   template <>                              \
-  inline type IValue::to<type>()&& {       \
+  inline T IValue::to<T>()&& {             \
     return std::move(*this).method_name(); \
   }                                        \
   template <>                              \
-  inline type IValue::to<type>() const& {  \
+  inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
     return this->method_name();            \
   }
 
@@ -908,7 +908,7 @@ static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
 }
 
 template <typename T>
-static std::vector<T> createVectorFromList(const c10::List<T>& impl) {
+std::vector<T> createVectorFromList(const c10::List<T>& impl) {
   std::vector<T> result;
   result.reserve(impl.size());
   for (size_t i = 0, N = impl.size(); i < N; ++i) {
@@ -1014,7 +1014,7 @@ inline T IValue::to() && {
 }
 
 template <typename T>
-inline T IValue::to() const& {
+inline typename c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to() const& {
   return generic_to(*this, _fake_type<T>{});
 }
 
@@ -1152,7 +1152,9 @@ inline IValue::IValue(c10::impl::GenericList v)
 }
 
 template <class T, IValue::enable_if_ivalue_constructible<T>>
-inline IValue::IValue(c10::List<T> v) : IValue(impl::toList<T>(std::move(v))) {}
+inline IValue::IValue(c10::List<T>&& v) : IValue(impl::toList<T>(std::move(v))) {}
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(const c10::List<T>& v) : IValue(impl::toList<T>(v)) {}
 template <class T, IValue::enable_if_ivalue_constructible<T>>
 inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
@@ -1363,15 +1365,15 @@ namespace ivalue {
 namespace detail {
 
 template <typename T>
-IValue from_(T x, std::true_type) {
+IValue from_(T&& x, std::true_type) {
   return IValue(std::move(x));
 }
 template <typename T>
 IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
-  return IValue(x);
+  return IValue(std::move(x));
 }
 template <typename T>
-IValue from_(T x, std::false_type) {
+IValue from_(T&& x, std::false_type) {
   static_assert(
       guts::false_t<T>::value,
       "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
@@ -1380,9 +1382,9 @@ IValue from_(T x, std::false_type) {
 } // namespace detail
 
 template <typename T>
-IValue from(T x) {
+IValue from(T&& x) {
   return detail::from_(
-      std::move(x), typename std::is_constructible<IValue, T>::type{});
+      std::forward<T>(x), typename std::is_constructible<IValue, T>::type{});
 }
 
 } // namespace ivalue

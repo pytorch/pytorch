@@ -402,12 +402,12 @@ bool available(
          (4 == weight.ndimension()) &&
          (weight.size(Layout::Filter::height) > 0) &&
          (weight.size(Layout::Filter::width) > 0) &&
-         ((c10::DeviceType::CPU == weight.device().type()) ||
+         ((weight.device().is_cpu()) ||
           (c10::DeviceType::Vulkan == weight.device().type())) &&
          (kFloat == weight.scalar_type()) &&
          // Bias
          ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
-                                       ((c10::DeviceType::CPU == bias->device().type()) ||
+                                       ((bias->device().is_cpu()) ||
                                         (c10::DeviceType::Vulkan == bias->device().type())) &&
                                        (kFloat == bias->scalar_type()) &&
                                        (transposed ? false /* to be addded in the future */
@@ -511,6 +511,7 @@ void conv2d_dw(
         },
         VK_KERNEL(conv2d_dw),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -588,6 +589,7 @@ void conv2d_pw(
         },
         VK_KERNEL(conv2d_pw),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -685,6 +687,7 @@ void conv2d(
         },
         VK_KERNEL(conv2d),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -775,8 +778,8 @@ void conv2d_old(
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
         VK_KERNEL(conv2d_nogroup_clamp),
-        //VK_KERNEL(conv2d_nogroup_clamp_1x),
         v_output.extents(),
+        context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(

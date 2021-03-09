@@ -54,11 +54,11 @@ template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
   template <>
   void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
 #endif
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
   template <>
   void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
 #endif
@@ -109,7 +109,7 @@ template <>
 void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double));
 template <>
 void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float));
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(__HIP_PLATFORM_HCC__) || (defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 210)
 template <>
 void gemv<c10::complex<double>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<double>));
 template <>

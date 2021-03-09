@@ -599,7 +599,6 @@ class TestFFT(TestCase):
         _test_complex((40, 60, 3, 80), 3, lambda x: x.transpose(2, 0).select(0, 2)[5:55, :, 10:])
         _test_complex((30, 55, 50, 22), 3, lambda x: x[:, 3:53, 15:40, 1:21])
 
-    @skipCUDAIfRocm
     @skipCPUIfNoMkl
     @onlyOnCPUAndCUDA
     @dtypes(torch.double)
@@ -680,7 +679,6 @@ class TestFFT(TestCase):
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
-    @skipCUDAIfRocm
     @skipCPUIfNoMkl
     @dtypes(torch.double)
     def test_stft(self, device, dtype):
@@ -712,9 +710,8 @@ class TestFFT(TestCase):
             else:
                 window = None
             if expected_error is None:
-                with self.maybeWarnsRegex(UserWarning, "stft with return_complex=False"):
-                    result = x.stft(n_fft, hop_length, win_length, window,
-                                    center=center, return_complex=False)
+                result = x.stft(n_fft, hop_length, win_length, window,
+                                center=center, return_complex=False)
                 # NB: librosa defaults to np.complex64 output, no matter what
                 # the input dtype
                 ref_result = librosa_stft(x, n_fft, hop_length, win_length, window, center)
@@ -748,7 +745,6 @@ class TestFFT(TestCase):
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
 
-    @skipCUDAIfRocm
     @skipCPUIfNoMkl
     @dtypes(torch.double, torch.cdouble)
     def test_complex_stft_roundtrip(self, device, dtype):
@@ -790,7 +786,6 @@ class TestFFT(TestCase):
                                       length=x.size(-1), **common_kwargs)
             self.assertEqual(x_roundtrip, x)
 
-    @skipCUDAIfRocm
     @skipCPUIfNoMkl
     @dtypes(torch.double, torch.cdouble)
     def test_stft_roundtrip_complex_window(self, device, dtype):
@@ -851,7 +846,6 @@ class TestFFT(TestCase):
             actual = torch.stft(*args, window=window, center=False)
             self.assertEqual(actual, expected)
 
-    @skipCUDAIfRocm
     @skipCPUIfNoMkl
     @dtypes(torch.cdouble)
     def test_complex_stft_real_equiv(self, device, dtype):

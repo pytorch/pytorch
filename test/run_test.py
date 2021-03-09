@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 
 import argparse
+import bz2
 import copy
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
 import modulefinder
 import os
 import shutil
@@ -15,9 +17,17 @@ import torch
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
 import torch.distributed as dist
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, List, Any
+
+try:
+    import boto3  # type: ignore[import]
+    import botocore  # type: ignore[import]
+    HAVE_BOTO3 = True
+except ImportError:
+    HAVE_BOTO3 = False
 
 TESTS = [
+    'test_public_bindings',
     'test_type_hints',
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
@@ -60,6 +70,7 @@ TESTS = [
     'test_optim',
     'test_pytree',
     'test_mobile_optimizer',
+    'test_set_default_mobile_cpu_allocator',
     'test_xnnpack_integration',
     'test_vulkan',
     'test_sparse',
@@ -220,7 +231,6 @@ RUN_PARALLEL_BLOCKLIST = [
 ] + [test for test in TESTS if test.startswith('distributed/')]
 
 WINDOWS_COVERAGE_BLOCKLIST = [
-    'test_dataloader',
 ]
 
 
@@ -337,6 +347,96 @@ JIT_EXECUTOR_TESTS = [
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
+
+
+def get_test_time_reports_from_S3() -> List[Dict[str, Any]]:
+    try:
+        commit_date_ts = subprocess.check_output(
+            ['git', 'show', '-s', '--format=%ct', 'HEAD'],
+            encoding="ascii").strip()
+        commit_date = datetime.fromtimestamp(int(commit_date_ts))
+        day_before_commit = str(commit_date - timedelta(days=1)).split(' ')[0]
+        # something like git rev-list --before="2021-03-04" --max-count=1 --remotes="*origin/nightly"
+        nightly_commit = subprocess.check_output(
+            ["git", "rev-list", f"--before={day_before_commit}", "--max-count=1", "--remotes=*origin/nightly"],
+            encoding="ascii").strip()
+        print(f'Using nightly commit: {nightly_commit}')
+
+        job = os.environ.get("CIRCLE_JOB", "")
+        job_minus_shard_number = job.rstrip('0123456789')
+        s3 = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
+        bucket = s3.Bucket(name="ossci-metrics")
+        summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{job_minus_shard_number}")
+    except (RuntimeError, RuntimeWarning):
+        print('Failed to read from S3. Proceeding with no reports.')
+        return []
+
+    reports = []
+    for summary in summaries:
+        binary = summary.get()["Body"].read()
+        string = bz2.decompress(binary).decode("utf-8")
+        reports.append(json.loads(string))
+    return reports
+
+
+def calculate_job_times(reports: List[Dict[str, Any]]) -> Dict[str, Tuple[float, int]]:
+    # an entry will be like ("test_file_name" -> (current_avg, # values))
+    jobs_to_times: Dict[str, Tuple[float, int]] = dict()
+    for report in reports:
+        assert report.get('format_version') == 2, "S3 format currently handled is version 2 only"
+        files: Dict[str, Any] = report['files']
+        for name, test_file in files.items():
+            if name not in jobs_to_times:
+                jobs_to_times[name] = (test_file['total_seconds'], 1)
+            else:
+                curr_avg, curr_count = jobs_to_times[name]
+                new_count = curr_count + 1
+                new_avg = (curr_avg * curr_count + test_file['total_seconds']) / new_count
+                jobs_to_times[name] = (new_avg, new_count)
+    return jobs_to_times
+
+
+def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, Tuple[float, int]]) -> List[Tuple[float, List[str]]]:
+    # if there's 'test_cpp_extensions_aot' entry in job_times, add 'test_cpp_extensions_aot_ninja'
+    # and 'test_cpp_extensions_aot_no_ninja' duplicate entries to ease future computation since
+    # test_cpp_extensions_aot_no_ninja and test_cpp_extensions_aot_ninja are Python test jobs that
+    # both use the test_cpp_extensions_aot.py file.
+    if 'test_cpp_extensions_aot' in job_times:
+        job_times['test_cpp_extensions_aot_ninja'] = job_times['test_cpp_extensions_aot']
+        job_times['test_cpp_extensions_aot_no_ninja'] = job_times['test_cpp_extensions_aot']
+    filtered_job_times: Dict[str, float] = dict()
+    for test in tests:
+        if test in job_times:
+            avg_time, _ = job_times[test]
+            filtered_job_times[test] = avg_time
+        else:
+            filtered_job_times[test] = 0.0
+
+    # The following attempts to implement a partition approximation greedy algorithm
+    # See more at https://en.wikipedia.org/wiki/Greedy_number_partitioning
+    sorted_jobs = sorted(filtered_job_times, key=lambda j: filtered_job_times[j], reverse=True)
+    sharded_jobs: List[Tuple[float, List[str]]] = [(0.0, []) for _ in range(num_shards)]
+    for job in sorted_jobs:
+        min_shard_index = sorted(range(num_shards), key=lambda i: sharded_jobs[i][0])[0]
+        curr_shard_time, curr_shard_jobs = sharded_jobs[min_shard_index]
+        curr_shard_jobs.append(job)
+        sharded_jobs[min_shard_index] = (curr_shard_time + filtered_job_times[job], curr_shard_jobs)
+    return sharded_jobs
+
+
+def get_shard(which_shard: int, num_shards: int, tests: List[str]) -> List[str]:
+    if HAVE_BOTO3:
+        s3_reports = get_test_time_reports_from_S3()
+    else:
+        print('Please install boto3 to enable automatic test sharding.')
+        s3_reports = []
+    if len(s3_reports) == 0:
+        print('Gathered no reports from S3. Proceeding with default sharding plan.')
+        return tests[which_shard - 1 :: num_shards]
+    jobs_to_times = calculate_job_times(s3_reports)
+    shards = calculate_shards(num_shards, tests, jobs_to_times)
+    _, tests_from_shard = shards[which_shard - 1]
+    return tests_from_shard
 
 
 def get_executable_command(options, allow_pytest, disable_coverage=False):
@@ -685,7 +785,7 @@ def get_selected_tests(options):
         which_shard, num_shards = options.shard
         assert which_shard <= num_shards, "Selected shard must be less or equal that total number of shards"
         assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
-        selected_tests = selected_tests[which_shard - 1 :: num_shards]
+        selected_tests = get_shard(which_shard, num_shards, selected_tests)
 
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)

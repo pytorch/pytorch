@@ -140,14 +140,14 @@ __global__ void kernelHistogram1D(
   }
 }
 
-#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                   \
-  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, -1, MEMORY_TYPE>    \
-      <<<grid,                                                             \
-         block,                                                            \
-         SHARED_MEM,                                                       \
-         getCurrentCUDAStream()>>>(                    \
-          aInfo, pInfo, bInfo, nbins, minvalue, maxvalue, totalElements, WEIGHTS_OP);        \
-  TORCH_INTERNAL_ASSERT(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
+#define HANDLE_CASE(MEMORY_TYPE, WEIGHTS_OP, SHARED_MEM)                              \
+  kernelHistogram1D<output_t, input_t, IndexType, 1, 2, -1, MEMORY_TYPE>              \
+      <<<grid,                                                                        \
+         block,                                                                       \
+         SHARED_MEM,                                                                  \
+         getCurrentCUDAStream()>>>(                                                   \
+          aInfo, pInfo, bInfo, nbins, minvalue, maxvalue, totalElements, WEIGHTS_OP); \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define HANDLE_SWITCH_CASE(mType, getOp)                                   \
   switch (mType) {                                                         \
