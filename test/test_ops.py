@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, OpDTypes)
+    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.autograd.gradcheck import gradcheck, gradgradcheck
 
@@ -25,6 +25,7 @@ class TestOpInfo(TestCase):
     # Verifies that ops have their unsupported dtypes
     #   registered correctly by testing that each claimed unsupported dtype
     #   throws a runtime error
+    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.unsupported)
     def test_unsupported_dtypes(self, device, dtype, op):
@@ -399,9 +400,9 @@ class TestCommon(JitCommonTestCase):
         original_name_inplace = original_name + "_"
         expected_dtype = op(*sample.input, *sample.args, **sample.kwargs).dtype
 
-        for a_op in op.aliases:  
+        for a_op in op.aliases:
             inplace = a_op.inplace_variant
-            method_or_inplace = [a_op.inplace_variant, a_op.method_variant]            
+            method_or_inplace = [a_op.inplace_variant, a_op.method_variant]
             variants = (v for v in (a_op.op, a_op.method_variant, a_op.inplace_variant) if v is not None)
 
             # Test scripting:
