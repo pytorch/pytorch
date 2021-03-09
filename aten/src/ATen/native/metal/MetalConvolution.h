@@ -1,6 +1,6 @@
 #import <ATen/native/metal/MetalPrepackOpContext.h>
 
-#include <torch/script.h>
+#include <c10/util/ArrayRef.h>
 
 namespace at {
 namespace native {

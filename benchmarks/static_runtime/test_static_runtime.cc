@@ -70,9 +70,9 @@ void testStaticRuntime(
 
   auto expect = module.forward(args);
 
-  StaticRuntime runtime(module);
-  auto actual = runtime.run(args, {});
-  runtime.check_for_memory_leak();
+  torch::jit::StaticModule smodule(module);
+  auto actual = smodule(args, {});
+  smodule.runtime().check_for_memory_leak();
 
   if (expect.isTuple()) {
     compareTensorLists(
@@ -187,10 +187,9 @@ TEST(StaticRuntime, LongModel) {
 
   // run static runtime
   std::vector<at::Tensor> input_tensors({a, b, c});
-  auto g = torch::jit::PrepareForStaticRuntime(mod);
-  torch::jit::StaticRuntime runtime(g);
-  at::Tensor output_2 = runtime.run(input_tensors)[0];
-  runtime.check_for_memory_leak();
+  torch::jit::StaticModule smod(mod);
+  at::Tensor output_2 = smod(input_tensors)[0];
+  smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
 
@@ -206,10 +205,9 @@ TEST(StaticRuntime, TrivialModel) {
 
   // run static runtime
   std::vector<at::Tensor> input_tensors({a, b, c});
-  auto g = torch::jit::PrepareForStaticRuntime(mod);
-  torch::jit::StaticRuntime runtime(g);
-  at::Tensor output_2 = runtime.run(input_tensors)[0];
-  runtime.check_for_memory_leak();
+  torch::jit::StaticModule smod(mod);
+  at::Tensor output_2 = smod(input_tensors)[0];
+  smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
 
@@ -223,10 +221,9 @@ TEST(StaticRuntime, LeakyReLU) {
 
   // run static runtime
   std::vector<at::Tensor> input_tensors({inputs});
-  auto g = torch::jit::PrepareForStaticRuntime(mod);
-  torch::jit::StaticRuntime runtime(g);
-  at::Tensor output_2 = runtime.run(input_tensors)[0];
-  runtime.check_for_memory_leak();
+  torch::jit::StaticModule smod(mod);
+  at::Tensor output_2 = smod(input_tensors)[0];
+  smod.runtime().check_for_memory_leak();
   EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
 }
 
@@ -234,8 +231,7 @@ TEST(StaticRuntime, DeepWide) {
   const int embedding_size = 32;
   const int num_features = 50;
   torch::jit::Module mod = getDeepAndWideSciptModel();
-  auto g = torch::jit::PrepareForStaticRuntime(mod);
-  torch::jit::StaticRuntime runtime(g);
+  torch::jit::StaticModule smod(mod);
 
   for (int batch_size : {1, 8, 32}) {
     for (int i = 0; i < 2; ++i) {
@@ -249,8 +245,8 @@ TEST(StaticRuntime, DeepWide) {
 
       // run static runtime
       std::vector<at::Tensor> input_tensors({ad_emb_packed, user_emb, wide});
-      at::Tensor output_2 = runtime.run(input_tensors)[0];
-      runtime.check_for_memory_leak();
+      at::Tensor output_2 = smod(input_tensors)[0];
+      smod.runtime().check_for_memory_leak();
       EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
     }
   }
@@ -260,7 +256,7 @@ TEST(StaticRuntime, KWargsAPI_1) {
   const int embedding_size = 32;
   const int num_features = 50;
   auto module = getDeepAndWideSciptModel();
-  torch::jit::StaticRuntime runtime(module);
+  torch::jit::StaticModule smod(module);
 
   for (int batch_size : {1, 8, 32}) {
     for (int i = 0; i < 2; ++i) {
@@ -274,8 +270,8 @@ TEST(StaticRuntime, KWargsAPI_1) {
         at::Tensor output_1 = getTensor(module.forward(inputs));
 
         // run static runtime
-        c10::IValue output_ivalue = runtime.run(inputs, {});
-        runtime.check_for_memory_leak();
+        c10::IValue output_ivalue = smod(inputs, {});
+        smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
         EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
@@ -300,8 +296,7 @@ TEST(StaticRuntime, KWargsAPI_2) {
   const int embedding_size = 32;
   const int num_features = 50;
   auto module = getDeepAndWideSciptModel();
-  auto g = torch::jit::PrepareForStaticRuntime(module);
-  torch::jit::StaticRuntime runtime(module);
+  torch::jit::StaticModule smod(module);
 
   for (int batch_size : {1, 8, 32}) {
     for (int i = 0; i < 2; ++i) {
@@ -319,8 +314,8 @@ TEST(StaticRuntime, KWargsAPI_2) {
              {"wide", wide}});
 
         // run static runtime
-        c10::IValue output_ivalue = runtime.run({}, kwargs);
-        runtime.check_for_memory_leak();
+        c10::IValue output_ivalue = smod({}, kwargs);
+        smod.runtime().check_for_memory_leak();
 
         at::Tensor output_2 = getTensor(output_ivalue);
         EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
@@ -343,14 +338,14 @@ TEST(StaticRuntime, CleanUpMemory) {
   const int embedding_size = 32;
   const int num_features = 50;
   torch::jit::Module mod = getDeepAndWideSciptModel();
-  auto g = torch::jit::PrepareForStaticRuntime(mod);
+  torch::jit::StaticModule smod(mod);
 
   for (auto cleanup_memory : {true, false}) {
     for (auto enable_out_variant : {true, false}) {
       VLOG(1) << "cleanup_memory: " << cleanup_memory
               << ", enable_out_variant: " << enable_out_variant;
-      torch::jit::StaticRuntimeOptions opts{cleanup_memory, enable_out_variant};
-      torch::jit::StaticRuntime runtime(g, opts);
+      torch::jit::StaticModuleOptions opts{cleanup_memory, enable_out_variant};
+      torch::jit::StaticModule smod(mod, opts);
 
       for (int batch_size : {1, 8, 32}) {
         for (int i = 0; i < 2; ++i) {
@@ -365,8 +360,8 @@ TEST(StaticRuntime, CleanUpMemory) {
           // run static runtime
           std::vector<at::Tensor> input_tensors(
               {ad_emb_packed, user_emb, wide});
-          at::Tensor output_2 = runtime.run(input_tensors)[0];
-          runtime.check_for_memory_leak();
+          at::Tensor output_2 = smod(input_tensors)[0];
+          smod.runtime().check_for_memory_leak();
           EXPECT_TRUE(torch::allclose(output_1, output_2, 1e-6));
         }
       }
@@ -390,7 +385,7 @@ TEST(StaticRuntime, FusionPass) {
 
       Method method = module.get_method("forward");
       auto graph = method.graph();
-      fuseStaticSubgraphs(graph);
+      fuseStaticSubgraphs(graph, 2);
       bool hit = false;
       for (const auto& n : module.get_method("forward").graph()->nodes()) {
         if (n->kind() == torch::jit::prim::StaticSubgraph) {

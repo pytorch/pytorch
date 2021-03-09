@@ -1017,6 +1017,24 @@ class TestFreezing(JitTestCase):
         m_f = torch._C._freeze_module(m_s._c)
         self.assertTrue(m_f.hasattr('conv1'))
 
+    def test_freeze_module_no_forward(self):
+
+        class FreezeMe(nn.Module):
+            def __init__(self):
+                super(FreezeMe, self).__init__()
+                self.lin = nn.Linear(10, 1)
+
+            @torch.jit.export
+            def foo(self, x):
+                return self.lin(x)
+
+        m = FreezeMe()
+        m_s = torch.jit.script(m)
+        m_s.eval()
+        m_f = torch._C._freeze_module(m_s._c, preservedAttrs=['foo'])
+        input = torch.ones(10)
+        self.assertEqual(m_s.foo(input), m_f.foo(input))
+
 
     def test_freeze_module_in_training_mode(self):
         class Net(nn.Module):

@@ -57,6 +57,15 @@
 #   USE_DISTRIBUTED=0
 #     disables distributed (c10d, gloo, mpi, etc.) build
 #
+#   USE_TENSORPIPE=0
+#     disables distributed Tensorpipe backend build
+#
+#   USE_GLOO=0
+#     disables distributed gloo backend build
+#
+#   USE_MPI=0
+#     disables distributed MPI backend build
+#
 #   USE_SYSTEM_NCCL=0
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
@@ -448,7 +457,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             if IS_WINDOWS:
                 report('-- Building without distributed package')
             else:
-                report('-- Building with distributed package ')
+                report('-- Building with distributed package: ')
+                report('  -- USE_TENSORPIPE={}'.format(cmake_cache_vars['USE_TENSORPIPE']))
+                report('  -- USE_GLOO={}'.format(cmake_cache_vars['USE_GLOO']))
+                report('  -- USE_MPI={}'.format(cmake_cache_vars['USE_OPENMPI']))
         else:
             report('-- Building without distributed package')
 
@@ -949,6 +961,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
+                'include/torch/csrc/tensor/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
                 'include/TH/*.h*',
