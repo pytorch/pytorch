@@ -5241,21 +5241,21 @@ else:
         self.assertEqual(out_tensor, ref)
         res3 = out_tensor.clone()
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(out_tensor, func + "_")(1, b1, b2)
         self.assertEqual(out_tensor, ref * 2),
         getattr(res3, func + "_")(b1, b2, beta=1)
         self.assertEqual(out_tensor, res3)
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(out_tensor, func + "_")(1., .5, b1, b2)
         self.assertEqual(out_tensor, ref * 2.5)
         getattr(res3, func + "_")(b1, b2, beta=1., alpha=.5)
         self.assertEqual(out_tensor, res3)
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func} is deprecated"):
             self.assertEqual(out_tensor, getattr(torch, func)(1, out_tensor, 0, b1, b2))
 

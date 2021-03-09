@@ -12320,7 +12320,7 @@ dedent """
                 cu = torch.jit.CompilationUnit(funcs_str)
                 f_script = cu.fn
                 f = scope['fn']
-                with self.maybeWarnsRegex(UserWarning, "floor_divide"):
+                with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
                     self.assertEqual(f_script(), f())
 
     def test_call_python_fn_from_script_fn(self):
