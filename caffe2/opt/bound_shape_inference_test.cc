@@ -1008,3 +1008,29 @@ TEST(BoundShapeInference, Softmax) {
       {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
       {1, 16});
 }
+
+TEST(BoundShapeInference, LpNorm) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "LpNorm",
+      "",
+      {"input"},
+      {"output"},
+      {MakeArgument<int>("p", 1)}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "input",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {1, 16}));
+  BoundShapeSpec spec(32, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "output",
+      {TensorBoundShape_DimType_CONSTANT},
+      {1});
+}
