@@ -1,11 +1,10 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNN.h>
+#import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
+#import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImageWrapper.h>
-
-#include <numeric>
 
 namespace at {
 namespace native {
@@ -31,15 +30,13 @@ void MPSImageWrapper::copyDataFromHost(const float* inputData) {
   TORCH_CHECK(inputData);
   TORCH_CHECK(_textureSizes.size() == 4);
   _commandBuffer = [MetalCommandBuffer currentBuffer];
-  _image = [MPSImage temporaryImageFromHost:inputData
-                                      Sizes:_textureSizes
-                              CommandBuffer:_commandBuffer];
+  _image = createTemporaryImage(_commandBuffer, _textureSizes, inputData);
 }
 
 void MPSImageWrapper::copyDataToHost(float* hostData) {
   TORCH_CHECK(_image);
   synchronize();
-  [MPSImage copyToHost:hostData FromImage:_image];
+  copyToHost(hostData, _image);
 }
 
 MPSImage* MPSImageWrapper::image() const {
@@ -79,7 +76,7 @@ TextureType MPSImageWrapper::textureType() const {
 
 void MPSImageWrapper::allocateTextureStorage(IntArrayRef sizes) {
   _textureSizes = sizes.vec();
-  _image = [MPSImage imageFromSize:_textureSizes];
+  _image = createStaticImage(_textureSizes);
 }
 
 void MPSImageWrapper::allocateTemporaryTextureStorage(
@@ -88,24 +85,21 @@ void MPSImageWrapper::allocateTemporaryTextureStorage(
   TORCH_CHECK(commandBuffer)
   _textureSizes = sizes.vec();
   _commandBuffer = commandBuffer;
-  _image = [MPSImage temporaryImageFromSize:_textureSizes
-                              commandBuffer:commandBuffer];
+  _image = createTemporaryImage(commandBuffer, _textureSizes);
 }
 
 void MPSImageWrapper::copyFromTexture(MPSImage* image) {
   if ([image isTemporaryImage]) {
-    _image = [MPSImage temporaryImageFromImage:image
-                                 CommandBuffer:_commandBuffer];
+    _image = createTemporaryImage(_commandBuffer, image);
   } else {
-    _image = [MPSImage imageFromImage:image];
+    _image = createStaticImage(image);
   }
 }
 
 void MPSImageWrapper::synchronize() {
   if ([_image isTemporaryImage]) {
-    _image = [MPSImage imageFromTemporaryImage:(MPSTemporaryImage*)_image
-                                 CommandBuffer:_commandBuffer
-                            waitUntilCompleted:NO];
+    _image =
+        createStaticImage((MPSTemporaryImage*)_image, _commandBuffer, false);
   }
   [_commandBuffer synchronize];
   _commandBuffer = nil;
