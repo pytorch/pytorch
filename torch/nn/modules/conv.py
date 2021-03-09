@@ -688,7 +688,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose1d')
 
-        # One cannot replace List by Tuple or Sequence in "_output_padding" because 
+        # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore
@@ -832,7 +832,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
 
-        # One cannot replace List by Tuple or Sequence in "_output_padding" because 
+        # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore
@@ -973,7 +973,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose3d')
 
-        # One cannot replace List by Tuple or Sequence in "_output_padding" because 
+        # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
             input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore
@@ -1015,7 +1015,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
     groups: int
     transposed: bool
     in_channels: int
-    out_channels: int 
+    out_channels: int
     kernel_size: Tuple[int, ...]
     weight: UninitializedParameter
     bias: UninitializedParameter
@@ -1048,7 +1048,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
             self.reset_parameters()
 
 
-# LazyConv1d defines weight as a Tensor but derived class defines it as UnitializeParameter 
+# LazyConv1d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv1d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`Conv1d` that is inferred from
@@ -1107,7 +1107,7 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
             self.bias = UninitializedParameter()
 
 
-# LazyConv2d defines weight as a Tensor but derived class defines it as UnitializeParameter 
+# LazyConv2d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv2d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`Conv2d` that is inferred from
@@ -1166,7 +1166,7 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
             self.bias = UninitializedParameter()
 
 
-# LazyConv3d defines weight as a Tensor but derived class defines it as UnitializeParameter 
+# LazyConv3d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
     r"""A :class:`torch.nn.Conv3d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`Conv3d` that is inferred from
@@ -1225,7 +1225,7 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
             self.bias = UninitializedParameter()
 
 
-# LazyConvTranspose1d defines weight as a Tensor but derived class defines it as UnitializeParameter 
+# LazyConvTranspose1d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[misc]
     r"""A :class:`torch.nn.ConvTranspose1d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`ConvTranspose1d` that is inferred from
@@ -1283,7 +1283,7 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
             self.bias = UninitializedParameter()
 
 
-# LazyConvTranspose2d defines weight as a Tensor but derived class defines it as UnitializeParameter 
+# LazyConvTranspose2d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[misc]
     r"""A :class:`torch.nn.ConvTranspose2d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`ConvTranspose2d` that is inferred from
@@ -1341,7 +1341,7 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
             self.bias = UninitializedParameter()
 
 
-# LazyConvTranspose3d defines weight as a Tensor but derived class defines it as UnitializeParameter 
+# LazyConvTranspose3d defines weight as a Tensor but derived class defines it as UnitializeParameter
 class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[misc]
     r"""A :class:`torch.nn.ConvTranspose3d` module with lazy initialization of
     the ``in_channels`` argument of the :class:`ConvTranspose3d` that is inferred from

@@ -17,7 +17,7 @@ def _allreduce_fut(
 
 
 def allreduce_hook(
-    process_group: dist.ProcessGroup, bucket: dist._GradBucket
+    process_group: dist.ProcessGroup, bucket: dist.GradBucket
 ) -> torch.futures.Future:
     """
     This DDP communication hook just calls ``allreduce`` using ``GradBucket``
@@ -35,7 +35,7 @@ def allreduce_hook(
 
 
 def fp16_compress_hook(
-    process_group: dist.ProcessGroup, bucket: dist._GradBucket
+    process_group: dist.ProcessGroup, bucket: dist.GradBucket
 ) -> torch.futures.Future:
     """
     This DDP communication hook implements a simple gradient compression
