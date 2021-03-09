@@ -556,5 +556,6 @@ class TestFunctionalIterDataPipe(TestCase):
         # Reset
         self.assertEqual(list(zipped_dp), exp)
 
+
 if __name__ == '__main__':
     run_tests()
