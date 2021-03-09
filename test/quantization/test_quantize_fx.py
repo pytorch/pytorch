@@ -3334,6 +3334,32 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_conv_transpose_impl(
             torch.nn.ConvTranspose2d, nnq.ConvTranspose2d, torch.randn(4, 1, 4, 4))
 
+    def test_reshape_fp16(self):
+        class M(torch.nn.Module):
+            def __init__(self, w, b):
+                super().__init__()
+                self.w = w
+                self.b = b
+
+            def forward(self, x):
+                x = torch.nn.functional.linear(x, self.w)
+                x = x.reshape(-1, 4)
+                x = torch.nn.functional.linear(x, self.w)
+                return x
+
+        w = torch.randn(4, 4)
+        b = torch.randn(4)
+        m = M(w, b).eval()
+        qconfig_dict = {
+            "": float16_static_qconfig,
+            "object_type": [
+                (torch.nn.functional.linear, default_qconfig)
+            ]
+        }
+        m = prepare_fx(m, qconfig_dict)
+        # make sure it runs
+        m = convert_fx(m)
+
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(

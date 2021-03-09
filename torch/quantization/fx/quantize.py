@@ -29,7 +29,6 @@ from ..quantize import (
 from ..utils import (
     get_combined_dict,
     get_swapped_custom_module_class,
-    activation_is_quantized,
     weight_is_quantized,
     activation_is_statically_quantized,
     activation_dtype,
@@ -171,7 +170,7 @@ def insert_observer_for_output_of_the_node(
     # need to be statically quantized
     assert modules is not None
     # TODO: Add warnings in the quantize handlers that does not support fp16 quantization
-    if activation_is_quantized(qconfig):
+    if activation_is_statically_quantized(qconfig):
         if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) \
                 and model.training:
             # we only insert fake quantize module in qat
@@ -1111,7 +1110,7 @@ class Quantizer:
                 # this is the case for glow
                 should_add_handler = qconfig is not None and (
                     (is_activation and
-                     activation_is_quantized(qconfig)) or
+                     activation_is_statically_quantized(qconfig)) or
                     (is_weight and weight_is_quantized(qconfig)) or
                     (is_bias and activation_dtype(qconfig) == torch.float16)
                     and weight_dtype(qconfig) == torch.float16)

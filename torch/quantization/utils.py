@@ -46,17 +46,11 @@ def weight_dtype(qconfig):
     weight = qconfig.weight()
     return weight.dtype
 
-def activation_is_quantized(qconfig):
+def activation_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized or not, this includes quantizing to quint8, qint8 and float16
     """
     return activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
-
-def activation_is_statically_quantized(qconfig):
-    """ Given a qconfig, decide if the activation needs to be
-    statically quantized or not
-    """
-    return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
 
 def weight_is_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be
