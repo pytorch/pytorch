@@ -33,7 +33,7 @@ jobs:
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
           export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
-          git submodule sync && git submodule update -q --init --recursive
+          git submodule sync && git submodule update -q --init --recursive --depth 1
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
