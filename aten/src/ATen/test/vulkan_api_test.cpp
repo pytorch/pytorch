@@ -1072,6 +1072,25 @@ TEST(VulkanAPITest, mul_scalar_) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanAPITest, reflection_pad2d) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({2, 3, 47, 63}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  const auto out_cpu = at::reflection_pad2d(a_cpu, {9,8,5,12});
+  const auto out_vulkan = at::reflection_pad2d(a_vulkan, {9,8,5,12}).cpu();
+
+  const auto check = almostEqual(out_cpu, out_vulkan);
+  if (!check) {
+    showRtol(out_cpu, out_vulkan);
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanAPITest, reshape) {
   if (!at::is_vulkan_available()) {
     return;
