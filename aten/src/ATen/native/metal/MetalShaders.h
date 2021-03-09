@@ -1,7 +1,7 @@
 #ifndef MPSCNNShaders_h
 #define MPSCNNShaders_h
 
-static const char* METAL_SHADERS = R"METAL_SHADERS(
+static const char* PT_METAL_SHADERS = R"PT_METAL_SHADERS(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -98,8 +98,6 @@ kernel void copy_nchw_to_metal(constant float* in[[buffer(0)]],
     }
     const ushort n = gid.z / divRoundUp(C, 4);
     const ushort c = gid.z - n * divRoundUp(C, 4);
-    // TODO: are the `else` branches needed?
-    // TODO: trick the optimizer for case where C == 4?
 #define CHW_TO_CHWP4(idx, n, c_, h, w)                                     \
 if ((c_) < C) {                                                          \
 trns[idx] = in[n * H * W * C + int(c_) * H * W + int(h) * W + int(w)]; \
@@ -125,8 +123,6 @@ kernel void copy_nchw_to_metal_nonarray(constant float* in[[buffer(0)]],
         return;
     }
     half4 trns;
-    // TODO: are the `else` branches needed?
-    // TODO: trick the optimizer for case where C % 4 == 0?
 #define CHW_TO_CHWP4(idx, c, h, w)                        \
 if ((c) < C) {                                          \
 trns[idx] = in[int(c) * H * W + int(h) * W + int(w)]; \
@@ -516,6 +512,6 @@ kernel void resize_nearest_nonarray(texture2d<half, access::sample> in[[texture(
     out.write(in.sample(s, float2(in_x, in_y)), gid.xy);
 }
 
-)METAL_SHADERS";
+)PT_METAL_SHADERS";
 
 #endif /* MPSCNNShaders_h */

@@ -304,7 +304,7 @@ def _generate_wrapped_number(g, scalar):
     wrapped as 0-dim int64 tensors and floating-point types are
     wrapped as 0-dim double tensors.
 
-    The input to this function is constant value. If the data type 
+    The input to this function is constant value. If the data type
     is a floating point type, it is converted to a 0-dim double
     tensor, else it is converted to a 0-dim tensor of its original type
     """
