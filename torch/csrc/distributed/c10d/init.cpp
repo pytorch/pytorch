@@ -105,6 +105,21 @@ class PythonStore : public ::c10d::Store {
     return std::vector<uint8_t>(str.begin(), str.end());
   }
 
+  std::vector<uint8_t> compareSet(const std::string& key, const std::vector<uint8_t>& currentValue, const std::vector<uint8_t>& newValue) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function fn =
+        pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "compareSet");
+    TORCH_INTERNAL_ASSERT(fn);
+    // Cast return value from Python to py::bytes, then implicitly
+    // convert that to a std::string, so that we can construct a
+    // std::vector<uint8_t>. There is no API for directly accessing
+    // the contents of the py::bytes object.
+    std::string str = pybind11::cast<py::bytes>(fn(key,
+      py::bytes(reinterpret_cast<const char*>(currentValue.data()), currentValue.size()),
+      py::bytes(reinterpret_cast<const char*>(newValue.data()), newValue.size())));
+    return std::vector<uint8_t>(str.begin(), str.end());
+  }
+
   int64_t add(const std::string& key, int64_t value) override {
     PYBIND11_OVERLOAD_PURE(int64_t, ::c10d::Store, add, key, value);
   }

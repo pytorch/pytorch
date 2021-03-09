@@ -288,6 +288,26 @@ FileStore::~FileStore() {
   }
 }
 
+std::vector<uint8_t> FileStore::compareSet(const std::string& key, const std::vector<uint8_t>& currentValue, const std::vector<uint8_t>& newValue) {
+  std::string regKey = regularPrefix_ + key;
+
+  std::unique_lock<std::mutex> l(activeFileOpLock_);
+  File file(path_, O_RDWR, timeout_);
+  auto lock = file.lockExclusive();
+  std::cout << path_;
+
+  pos_ = refresh(file, pos_, cache_);
+  if (cache_.count(regKey) == 0) {
+  	return currentValue;
+  } else if (cache_[regKey] == currentValue) {
+  	file.seek(pos_, SEEK_END);
+  	file.write(regKey);
+  	file.write(newValue);
+  	return newValue;
+  }
+  return cache_[regKey];
+}
+
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
   std::string regKey = regularPrefix_ + key;
   std::unique_lock<std::mutex> l(activeFileOpLock_);
