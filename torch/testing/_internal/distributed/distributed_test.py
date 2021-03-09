@@ -3117,11 +3117,11 @@ class DistributedTest:
                     torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
                     device_ids=[self.rank]
                 )
-                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                ddp_logging_data = ddp_model.get_ddp_logging_data()
                 # Hook not registered yet, so should be empty
                 self.assertEqual(ddp_logging_data.comm_hook, "")
                 ddp_model.register_comm_hook(None, hook)
-                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                ddp_logging_data = ddp_model.get_ddp_logging_data()
                 self.assertEqual(ddp_logging_data.comm_hook, hook.__qualname__)
 
             for hook in cpp_builtin_hooks:
@@ -3129,11 +3129,11 @@ class DistributedTest:
                     torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
                     device_ids=[self.rank]
                 )
-                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                ddp_logging_data = ddp_model.get_ddp_logging_data()
                 # Hook not registered yet, so should be empty
                 self.assertEqual(ddp_logging_data.comm_hook, "")
                 ddp_model._register_builtin_comm_hook(hook)
-                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                ddp_logging_data = ddp_model.get_ddp_logging_data()
                 self.assertEqual(ddp_logging_data.comm_hook, str(hook))
 
             # No hook registered
@@ -3141,7 +3141,7 @@ class DistributedTest:
                 torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
                 device_ids=[self.rank]
             )
-            ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+            ddp_logging_data = ddp_model.get_ddp_logging_data()
             # Hook not registered yet, so should be empty
             self.assertEqual(ddp_logging_data.comm_hook, "")
             # After second forward pass, hook should still be empty string
@@ -3150,7 +3150,7 @@ class DistributedTest:
                 loss = ddp_model(inp).sum()
                 loss.backward()
 
-            ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+            ddp_logging_data = ddp_model.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.comm_hook, "")
 
         def _test_ddp_hook_parity(self, state, hook):
