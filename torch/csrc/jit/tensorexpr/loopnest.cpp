@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 #include <stdexcept>
+#include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -959,6 +960,115 @@ void LoopNest::prepareForCodegen() {
 
   // Add allocs and frees for intermediate buffers at the global level.
   root_stmt_ = insertAllocFree(root_stmt_);
+}
+
+namespace {
+
+class IfThenElseReplacer : public IRMutator {
+ public:
+  IfThenElseReplacer(const IfThenElse* to_replace, const Expr* new_expr)
+      : to_replace_(to_replace), new_expr_(new_expr) {}
+
+  const Expr* mutate(const IfThenElse* i) override {
+    if (i == to_replace_) {
+      return new_expr_;
+    }
+    return i;
+  }
+
+ private:
+  const IfThenElse* to_replace_;
+  const Expr* new_expr_;
+};
+
+} // namespace
+
+bool LoopNest::optimizeConditionals() {
+  auto stores = NodeFinder<Store>::find(root_stmt_);
+  for (auto store : stores) {
+    auto ifthenelse_exprs = NodeFinder<IfThenElse>::find(store);
+    Var* cond_var = nullptr;
+    std::vector<const Expr*> conds;
+    std::vector<const Expr*> comp_values;
+    std::vector<const Expr*> cond_exprs;
+    bool optimizable = true;
+    for (auto i : ifthenelse_exprs) {
+      conds.push_back(i->condition());
+      if (auto cs = dynamic_cast<const CompareSelect*>(i->condition())) {
+        if (cs->compare_select_op() == kLT) {
+          if (auto v = const_cast<Var*>(dynamic_cast<const Var*>(cs->lhs()))) {
+            if (cond_var == nullptr) {
+              cond_var = v;
+            } else if (cond_var != v) {
+              // Different condition variables in nested if-then-else
+              // expression. Can not optimize such cases.
+              return false;
+            }
+          } else {
+            return false;
+          }
+          comp_values.push_back(cs->rhs());
+        } else {
+          return false;
+        }
+      } else {
+        return false;
+      }
+      if (auto v = dynamic_cast<const IfThenElse*>(i->false_value())) {
+      } else {
+        cond_exprs.push_back(i->false_value());
+      }
+      if (auto v = dynamic_cast<const IfThenElse*>(i->true_value())) {
+      } else {
+        cond_exprs.push_back(i->true_value());
+      }
+    }
+    if (comp_values.empty()) {
+      return false;
+    }
+    std::reverse(comp_values.begin(), comp_values.end());
+    std::reverse(cond_exprs.begin(), cond_exprs.end());
+
+    auto fors = getLoopStmtsFor(store);
+    For* for_to_split = nullptr;
+    for (auto f : fors) {
+      if (f->var() == cond_var) {
+        comp_values.push_back(f->stop());
+        for_to_split = f;
+      }
+    }
+    TORCH_INTERNAL_ASSERT(for_to_split != nullptr);
+
+    std::vector<const Expr*> comp_values_abs;
+    const Expr* prev_comp_value = new IntImm(0);
+    for (auto c : comp_values) {
+      comp_values_abs.push_back(new Sub(c, prev_comp_value));
+      prev_comp_value = c;
+    }
+
+    std::vector<Stmt*> split_loops;
+    auto cond_to_replace = ifthenelse_exprs.front();
+    for (size_t i = 0; i < cond_exprs.size(); ++i) {
+      IfThenElseReplacer ifthenelseReplacer(cond_to_replace, cond_exprs[i]);
+      auto new_store = store->accept_mutator(&ifthenelseReplacer);
+      auto new_store_w_updated_indices = Substitute(
+          new_store,
+          {{cond_var,
+            new Add(cond_var, i == 0 ? new IntImm(0) : comp_values[i - 1])}});
+      auto new_for_body = for_to_split->body()->clone_and_replace(
+          store, new_store_w_updated_indices);
+      auto new_for = new For(
+          for_to_split->var(),
+          for_to_split->start(),
+          comp_values_abs[i],
+          new_for_body);
+      split_loops.push_back(new_for);
+    }
+    auto par = dynamic_cast<Block*>(for_to_split->get_parent());
+    par->replace_stmt(for_to_split, new Block(split_loops));
+  }
+  root_stmt_ = IRSimplifier::simplify(root_stmt_);
+  return true;
 }
 
 void LoopNest::vectorizeInnerLoops() {

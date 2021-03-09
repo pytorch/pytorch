@@ -93,6 +93,8 @@ class TORCH_API LoopNest {
   bool computeInline(const Buf* b);
   void inlineIntermediateBufs(bool allow_duplicated_work);
 
+  bool optimizeConditionals();
+
   static void splitWithTail(For* f, int factor);
   static void splitWithTail(
       For* f,
