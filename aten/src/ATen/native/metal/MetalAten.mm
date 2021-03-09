@@ -1,6 +1,5 @@
 #import <ATen/native/metal/MetalTensor.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
-#import <ATen/native/metal/MetalUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNOps.h>
 
@@ -16,7 +15,7 @@ at::Tensor& copy_from_metal_(at::Tensor& dst, const at::Tensor& src) {
       src.device().type() == DeviceType::Metal,
       "copy_from_metal input tensor's device is not metal");
   TORCH_INTERNAL_ASSERT(
-      dst.device().type() == DeviceType::CPU,
+      dst.device().is_cpu(),
       "copy_from_metal is implemented only for CPU device output");
   TORCH_INTERNAL_ASSERT(
       dst.layout() == Layout::Strided,
@@ -39,7 +38,7 @@ at::Tensor& copy_to_metal_(at::Tensor& dst, const at::Tensor& src) {
       dst.device().type() == DeviceType::Metal,
       "copy_to_metal_ output tensor's device is not metal");
   TORCH_INTERNAL_ASSERT(
-      src.device().type() == DeviceType::CPU,
+      src.device().is_cpu(),
       "copy_to_metal_ is implemented only for CPU device input");
   TORCH_INTERNAL_ASSERT(
       src.layout() == Layout::Strided,
@@ -208,30 +207,24 @@ Tensor upsample_nearest2d_vec(
 Tensor add_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
-  TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
-  TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
   return mpscnn::add(input1, input2.is_metal() ? input2 : input2.metal());
 }
 
 Tensor& add__Tensor(Tensor& input1, const Tensor& input2, Scalar alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
-  TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
-  TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
   return mpscnn::add_(input1, input2.is_metal() ? input2 : input2.metal());
 }
 
 Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
-  TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
   return mpscnn::sub(input1, input2.is_metal() ? input2 : input2.metal());
 }
 
 Tensor mul_Tensor(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
-  TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
   return mpscnn::mul(input1, input2.is_metal() ? input2 : input2.metal());
 }
 

@@ -44,7 +44,7 @@ static inline MetalCommandBuffer* commandBufferFromInputTensor(
   MetalTensorImpl* impl = (MetalTensorImpl*)tensor.unsafeGetTensorImpl();
   MetalTensor& metalTensor = impl->unsafe_opaque_handle();
   MetalCommandBuffer* cmdBuffer = metalTensor.texture()->commandBuffer();
-  TORCH_CHECK(cmdBuffer, @"Command Buffer can't be nil!");
+  TORCH_CHECK(cmdBuffer, @"The Metal command buffer can't be nil!");
   return cmdBuffer;
 }
 
@@ -340,28 +340,6 @@ Tensor& hardswish_(Tensor& input) {
   return input;
 }
 
-/*
- A fully connected layer takes an MPSImage object with dimensions source.width x
- source.height x Ni, convolves it with
- Weights[No][source.width][source.height][Ni],and produces a 1 x 1 x No output.
-
- Thus, the following conditions must be true:
- kernelWidth == source.width
- kernelHeight == source.height
- clipRect.size.width == 1
- clipRect.size.height == 1
-
- You can think of a fully connected layer as a matrix multiplication
- where the image is flattened into a vector of length
- source.width*source.height*Ni, and the weights are arranged in a matrix of
- dimension No x (source.width*source.height*Ni) to produce an output vector of
- length No
-
- The value of the strideInPixelsX, strideInPixelsY, and groups properties must
- be 1. The offset property is not applicable and it is ignored. Because the clip
- rectangle is clamped to the destination image bounds, if the destination is 1 x
- 1, you do not need to set the clipRect property.
- */
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor addmm(const Tensor& bias, const Tensor& input, const Tensor& weight) {
   MPSImage* X = imageFromTensor(input);
@@ -441,7 +419,7 @@ Tensor binaryElementwiseShaderKernel(
   MetalTensor mt{outputSize};
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
-  TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different command buffer");
+  TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
   MPSImage* Y = imageFromMetalTensor(mt);
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
@@ -475,7 +453,7 @@ Tensor& binaryElementwiseShaderKernel_(
   }
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
-  TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different command buffer");
+  TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   MPSImage* Y = [MPSImage temporaryImageFromSize:outputSize commandBuffer:cb1];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       pipelineState:kernelFor(X1, arrayKernel, nonarrayKernel)];
@@ -510,7 +488,7 @@ Tensor binaryElementwiseMPSCNNKernel(
   MetalTensor mt{outputSize};
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
-  TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different command buffer");
+  TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
   MPSImage* Y = imageFromMetalTensor(mt);
   T* kernel = [[T alloc]
@@ -541,7 +519,7 @@ Tensor& binaryElementwiseMPSCNNKernel_(
   MetalTensor mt{outputSize};
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
-  TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different command buffer");
+  TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
   MPSImage* Y = imageFromMetalTensor(mt);
   T* kernel = [[T alloc]
@@ -560,36 +538,50 @@ API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor add(const Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNAdd>(input1, input2);
+  } else {
+    // TODO: support broadcast in shader functions for iOS 10 users
+    TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
+    TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
+    return binaryElementwiseShaderKernel(
+        input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
   }
-  return binaryElementwiseShaderKernel(
-      input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor& add_(Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNAdd>(input1, input2);
+  } else {
+    // TODO: support broadcast in for iOS 10 users
+    TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
+    TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
+    return binaryElementwiseShaderKernel_(
+        input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
   }
-  return binaryElementwiseShaderKernel_(
-      input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor sub(const Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNSubtract>(input1, input2);
+  } else {
+    // TODO: support non-broadcast for iOS 10 users
+    TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
+    return binaryElementwiseShaderKernel(
+        input1, input2, @"elementwise_sub", @"elementwise_sub_nonarray");
   }
-  return binaryElementwiseShaderKernel(
-      input1, input2, @"elementwise_sub", @"elementwise_sub_nonarray");
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor mul(const Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNMultiply>(input1, input2);
+  } else {
+    // TODO: support non-broadcast for iOS 10 users
+    TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
+    return binaryElementwiseShaderKernel(
+        input1, input2, @"elementwise_mul", @"elementwise_mul_nonarray");
   }
-  return binaryElementwiseShaderKernel(
-      input1, input2, @"elementwise_mul", @"elementwise_mul_nonarray");
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
@@ -766,7 +758,7 @@ Tensor cat_batch(const TensorList tensors, MetalTensor& mt) {
     const auto& t = tensors[i];
     MPSImage* X = imageFromTensor(t);
     MetalCommandBuffer* Xcb = commandBufferFromInputTensor(t);
-    TORCH_CHECK([commandBuffer isEqual:Xcb], @"inputs have different command buffer");
+    TORCH_CHECK([commandBuffer isEqual:Xcb], @"inputs have different Metal command buffers");
     id<MTLComputeCommandEncoder> encoder = [commandBuffer.buffer computeCommandEncoder];
     id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
         pipelineState:metal::mpscnn::kernelFor(
@@ -807,7 +799,7 @@ Tensor cat_feature(const TensorList tensors, MetalTensor& mt) {
     const auto& t = tensors[i];
     MPSImage* X = imageFromTensor(t);
     MetalCommandBuffer* Xcb = commandBufferFromInputTensor(t);
-    TORCH_CHECK([commandBuffer isEqual:Xcb], @"inputs have different command buffer");
+    TORCH_CHECK([commandBuffer isEqual:Xcb], @"inputs have different Metal command buffers");
     id<MTLComputeCommandEncoder> encoder = [commandBuffer.buffer computeCommandEncoder];
     auto kernelString = metal::mpscnn::kernelFor(
                          X, @"append_features_off0", @"append_features_off0_nonarray");
