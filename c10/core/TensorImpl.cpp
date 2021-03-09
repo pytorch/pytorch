@@ -352,11 +352,11 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
   // "detach" = don't copy meta for the current dyn layer
   const auto dynlayer = at::maybeCurrentDynamicLayer();
   for (auto it = dynlayer_autograd_meta_.begin(); it != dynlayer_autograd_meta_.end(); it++) {
-    if (dynlayer && dynlayer->layerId() != it->first) {
+    if (dynlayer && (dynlayer->layerId() > it->first) && it->second) {
       impl.get()->dynlayer_autograd_meta_[it->first] = it->second->shallow_copy();
     }
   }
-  if (dynlayer) {
+  if (dynlayer && autograd_meta_) {
     impl.get()->autograd_meta_ = autograd_meta_->shallow_copy();
   }
 
@@ -380,11 +380,11 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
   // "detach" = don't copy meta for the current dyn layer
   const auto dynlayer = at::maybeCurrentDynamicLayer();
   for (auto it = dynlayer_autograd_meta_.begin(); it != dynlayer_autograd_meta_.end(); it++) {
-    if (dynlayer && dynlayer->layerId() != it->first) {
+    if (dynlayer && (dynlayer->layerId() > it->first) && it->second) {
       impl.get()->dynlayer_autograd_meta_[it->first] = it->second->shallow_copy();
     }
   }
-  if (dynlayer) {
+  if (dynlayer && autograd_meta_) {
     impl.get()->autograd_meta_ = autograd_meta_->shallow_copy();
   }
 
