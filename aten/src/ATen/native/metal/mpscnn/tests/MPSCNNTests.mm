@@ -2,6 +2,7 @@
 #import <ATen/native/metal/MetalUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNNOps.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
+#import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 #import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
 
 #import <Foundation/Foundation.h>
@@ -120,14 +121,10 @@ bool test_copy_nchw_to_metal() {
     auto t1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     MetalCommandBuffer* cb = [MetalCommandBuffer newBuffer];
     MPSTemporaryImage* img1 =
-        [MPSImage temporaryImageFromHost:t1.data_ptr<float>()
-                                   Sizes:t1.sizes().vec()
-                           CommandBuffer:cb];
-    MPSImage* img2 = [MPSImage imageFromTemporaryImage:img1
-                                         CommandBuffer:cb
-                                    waitUntilCompleted:YES];
+        createTemporaryImage(cb, t1.sizes().vec(), t1.data_ptr<float>());
+    MPSImage* img2 = createStaticImage(img1, cb, true);
     auto t2 = at::zeros(size);
-    [MPSImage copyToHost:t2.data_ptr<float>() FromImage:img2];
+    copyToHost(t2.data_ptr<float>(), img2);
     return almostEqual(t1, t2);
   });
 }
@@ -202,22 +199,20 @@ bool test_max_pool2d() {
     auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto Y1 = at::max_pool2d(X, {2, 2}, {2, 2}, {0, 0}, {1, 1}, false);
     auto X2 = X.metal();
-    auto Y2 =
-        at::max_pool2d(X2, {2, 2}, {2, 2}, {0, 0}, {1, 1}, false).cpu();
+    auto Y2 = at::max_pool2d(X2, {2, 2}, {2, 2}, {0, 0}, {1, 1}, false).cpu();
     return almostEqual(Y1, Y2);
   });
 }
 
 bool test_max_pool2d_padding() {
-    __block std::vector<int64_t> size{1, 3, 4, 4};
-    return TEST(size, __PRETTY_FUNCTION__, ^bool {
-      auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      auto Y1 = at::max_pool2d(X, {2, 2}, {2, 2}, {1, 1}, {1, 1}, false);
-      auto X2 = X.metal();
-      auto Y2 =
-          at::max_pool2d(X2, {2, 2}, {2, 2}, {1, 1}, {1, 1}, false).cpu();
-      return almostEqual(Y1, Y2);
-    });
+  __block std::vector<int64_t> size{1, 3, 4, 4};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::max_pool2d(X, {2, 2}, {2, 2}, {1, 1}, {1, 1}, false);
+    auto X2 = X.metal();
+    auto Y2 = at::max_pool2d(X2, {2, 2}, {2, 2}, {1, 1}, {1, 1}, false).cpu();
+    return almostEqual(Y1, Y2);
+  });
 }
 
 bool test_max_pool2d_ceil() {
@@ -226,8 +221,7 @@ bool test_max_pool2d_ceil() {
     auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto Y1 = at::max_pool2d(X, {3, 3}, {2, 2}, {0, 0}, {1, 1}, true);
     auto X2 = X.metal();
-    auto Y2 =
-        at::max_pool2d(X2, {3, 3}, {2, 2}, {0, 0}, {1, 1}, true).cpu();
+    auto Y2 = at::max_pool2d(X2, {3, 3}, {2, 2}, {0, 0}, {1, 1}, true).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -257,7 +251,8 @@ bool test_sigmoid() {
 bool test_hardsigmoid() {
   __block std::vector<int64_t> size{3, 3, 44, 44};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
-    auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat))*12 - 6;
+    auto X =
+        at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 12 - 6;
     auto X2 = X.metal();
     auto Y1 = at::hardsigmoid_(X);
     auto Y2 = at::hardsigmoid_(X2).cpu();
@@ -268,7 +263,8 @@ bool test_hardsigmoid() {
 bool test_hardswish() {
   __block std::vector<int64_t> size{3, 3, 44, 44};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
-    auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat))*12 - 6;
+    auto X =
+        at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 12 - 6;
     auto X2 = X.metal();
     auto Y1 = at::hardswish_(X);
     auto Y2 = at::hardswish_(X2).cpu();
@@ -449,9 +445,9 @@ bool test_cat_dim0() {
   __block std::vector<int64_t> x2{5, 9, 221, 193};
   __block std::vector<int64_t> x3{7, 9, 221, 193};
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
-    auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat))*100;
-    auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat))*100;
-    auto X3 = at::rand(x3, at::TensorOptions(at::kCPU).dtype(at::kFloat))*100;
+    auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 100;
+    auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 100;
+    auto X3 = at::rand(x3, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 100;
     auto Y = at::cat({X1, X2, X3}, 0);
 
     auto MX1 = X1.metal();
@@ -644,8 +640,8 @@ bool test_hardtanh_() {
     return almostEqual(Y1, Y2);
   });
 #else
-    // Skip this test on MacOS as the shader function doesn't work well
-    // Will get back and fix it - T82700462
-    return true;
+  // Skip this test on MacOS as the shader function doesn't work well
+  // Will get back and fix it - T82700462
+  return true;
 #endif
 }
