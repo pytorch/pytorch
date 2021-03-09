@@ -10,7 +10,19 @@ from torch.fx import Transformer
 class AnnotateTypesWithSchema(Transformer):
     """
     Use Python function signatures to annotate types for `Nodes` within an FX graph.
-    This pulls out Python function signatures for both standard `torch.nn` Module
+    This pulls out Python function signatures for:
+
+        1. Standard `torch.nn` Module calls
+        2. `torch.nn.functional` calls
+        3. Attribute fetches via `get_attr`
+
+    Example usage:
+
+        m = torchvision.models.resnet18()
+
+        traced = torch.fx.symbolic_trace(m)
+
+        traced = AnnotateTypesWithSchema(traced).transform()
 
     """
     def __init__(self, module : torch.nn.Module, annotate_functionals : bool = True,
@@ -63,7 +75,7 @@ class AnnotateTypesWithSchema(Transformer):
             atoms = target.split('.')
             for i, atom in enumerate(atoms):
                 if not hasattr(module_itr, atom):
-                    raise RuntimeError(f'Node referenced nonextent target {atoms[:i]}!')
+                    raise RuntimeError(f'Node referenced nonextent target {".".join(atoms[:i])}!')
                 module_itr = getattr(module_itr, atom)
 
             attr_proxy.node.type = type(module_itr)
