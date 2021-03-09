@@ -363,7 +363,10 @@ void initTensorExprBindings(PyObject* module) {
           value_ptrs.emplace_back(CodeGen::CallArg(value.data_ptr()));
         }
         self.call(value_ptrs);
-      });
+      })
+      .def("getCodeText", [](CodeGen& self, std::string attr="") {
+        return self.getCodeText(attr);
+      }, py::arg("attr")="");
   py::class_<SimpleIREvaluator, CodeGen>(te, "SimpleIREvaluator"); // NOLINT
 #ifdef TORCH_ENABLE_LLVM
   py::class_<LLVMCodeGen, CodeGen>(te, "LLVMCodeGen"); // NOLINT

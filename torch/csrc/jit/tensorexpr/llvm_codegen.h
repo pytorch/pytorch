@@ -56,6 +56,8 @@ class TORCH_API LLVMCodeGen : public CodeGen {
     return rv;
   }
 
+  std::string getCodeText(std::string attr="") override;
+
  private:
   void* getKernelAddress(LLVMCodeGenImpl* impl);
 

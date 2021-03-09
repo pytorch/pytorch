@@ -60,7 +60,7 @@ class TORCH_API CodeGen {
   // a string. Currently only implemented for Block.
   // TODO. Rename this, as we can return other than string
   // and implement for other backends.
-  virtual std::string getCodeText() {
+  virtual std::string getCodeText(std::string attr="") {
     return ("");
   }
 
