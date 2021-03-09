@@ -601,9 +601,10 @@ static void addbmm_impl_(
     return;
   }
 
+  auto adjusted_beta(beta);
   for (int64_t batch = 0; batch < num_batches; ++batch) {
-    result.addmm_(batch1[batch], batch2[batch], beta, alpha);
-    beta = 1; // accumulate output once
+    result.addmm_(batch1[batch], batch2[batch], adjusted_beta, alpha);
+    adjusted_beta = 1; // accumulate output once
   }
 }
 
