@@ -105,6 +105,7 @@ def get_and_check_clang_format(verbose=False):
     else:
         # If the directory exists but the binary doesn't, download it.
         if not os.path.exists(CLANG_FORMAT_PATH):
+            print(CLANG_FORMAT_DIR)
             ok = download_clang_format(CLANG_FORMAT_DIR)
 
             if not ok:

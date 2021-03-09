@@ -845,6 +845,7 @@ class MKLDNNSubgraphSlicer {
     switch (n->kind()) {
       case aten::relu:
       case aten::relu6:
+      case aten::gelu:
       case aten::sigmoid:
       case aten::hardsigmoid:
       case aten::hardswish:
@@ -1008,7 +1009,65 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
       };
       return mkldnn_ops.count(node_to_functionalize->kind()) != 0;
     });
+
+    static const std::string gelu_pattern = R"IR(
+        graph(%x.1 : Tensor, %3 : int):
+          %1 : int = prim::Constant[value=3]()
+          %2 : float = prim::Constant[value=0.044714999999999998]()
+          %4 : float = prim::Constant[value=0.5]()
+          %5 : float = prim::Constant[value=0.79788456080286541]()
+          %6 : Tensor = aten::mul(%x.1, %4)
+          %7 : Tensor = aten::pow(%x.1, %1)
+          %8 : Tensor = aten::mul(%7, %2)
+          %9 : Tensor = aten::add(%x.1, %8, %3)
+          %10 : Tensor = aten::mul(%9, %5)
+          %11 : Tensor = aten::tanh(%10)
+          %12 : Tensor = aten::add(%11, %3, %3)
+          %13 : Tensor = aten::mul(%6, %12)
+          return (%13)
+          )IR";
+
+    static const std::string gelu_replacement = R"IR(
+      graph(%a, %3 : int):
+        %d = aten::gelu(%a)
+        return (%d))IR";
+
+    auto input_checks =
+        [](const Match& match,
+           const std::unordered_map<std::string, Value*>& vmap) {
+          const auto& match_vmap = match.values_map;
+
+          auto v3 = toIValue(match_vmap.at(vmap.at("3")));
+          if (!v3->isInt() || v3->toInt() != 1) {
+            GRAPH_DEBUG("Failed v3");
+            return false;
+          }
+
+          auto v2 = toIValue(match_vmap.at(vmap.at("2")));
+          if (!v2->isDouble() || v2->toDouble() != 0.044714999999999998) {
+            GRAPH_DEBUG("Failed v2");
+            return false;
+          }
+
+          auto v4 = toIValue(match_vmap.at(vmap.at("4")));
+          if (!v4->isDouble() || v4->toDouble() != 0.5) {
+            GRAPH_DEBUG("Failed v4");
+            return false;
+          }
+
+          auto v5 = toIValue(match_vmap.at(vmap.at("5")));
+          if (!v5->isDouble() || v5->toDouble() != 0.79788456080286541) {
+            GRAPH_DEBUG("Failed v5");
+            return false;
+          }
+          return true;
+        };
+
+    SubgraphRewriter rewriter;
+    rewriter.RegisterRewritePattern(gelu_pattern, gelu_replacement);
+    rewriter.runOnGraph(graph, input_checks);
     AliasDb db(graph);
+
     MKLDNNSubgraphSlicer(graph->block(), graph, db).run();
     EliminateDeadCode(graph);
     GRAPH_DUMP("After convert frozen ops to mkldnn", graph);

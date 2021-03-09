@@ -65,6 +65,21 @@ Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, cons
                                  grad_output.options().device_opt());
 }
 
+Tensor mkldnn_gelu(const Tensor& input) {
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_gelu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+
+  const ideep::tensor& x = itensor_from_mkldnn(input);
+  ideep::tensor y;
+  ideep::eltwise_forward::compute(
+      x, y, ideep::algorithm::eltwise_gelu, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+                                 input.options().device_opt());
+}
+
+
 }}
 
 #endif // AT_MKLDNN_EBABLED

@@ -15,6 +15,7 @@ from torch.utils import mkldnn as mkldnn_utils
 from torch.jit._recursive import wrap_cpp_module
 from typing import Any
 from itertools import product
+import math
 
 import io
 
@@ -1615,6 +1616,36 @@ class TestFrozenOptimizations(JitTestCase):
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)
 
+    def test_gelu(self):
+
+        class GELU(nn.Module):
+            """
+            Paper Section 3.4, last paragraph notice that BERT used the GELU instead of RELU
+            """
+
+            def forward(self, x):
+                return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
+
+        with set_default_dtype(torch.float):
+            mod = nn.Sequential(nn.Conv2d(3, 32, kernel_size=3, stride=2), GELU()).eval()
+            scripted_mod = torch.jit.script(mod)
+            #inps = [4, 3, 4]
+            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            FileCheck().check_not("aten::gelu").run(scripted_mod.graph)
+
+
+            inp = torch.rand(4, 3, 4, 4)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("inline", scripted_mod.graph)
+            self.run_pass("peephole", scripted_mod.graph)
+            self.run_pass("constant_propagation", scripted_mod.graph)
+            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            print(scripted_mod.graph)
+            FileCheck().check("aten::gelu").run(scripted_mod.graph)
+            self.assertEqual(mod(inp), scripted_mod(inp))
+   
+
+
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_freeze_mkdlnn(self):
         conv = torch.nn.Conv2d(3, 32, kernel_size=3, stride=2).eval().float()
@@ -1628,7 +1659,6 @@ class TestFrozenOptimizations(JitTestCase):
         with set_default_dtype(torch.float):
             for module, trace in product([nn.Conv2d, nn.Conv3d], [False, True]):
                 mod = module(3, 32, kernel_size=3, stride=2).eval()
-                inps = [4, 3, 4]
                 if module == nn.Conv2d:
                     inps.append(inps[-1])
                 if module == nn.Conv3d:

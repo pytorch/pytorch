@@ -3312,6 +3312,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
+    MkldnnCPU: mkldnn_gelu
     CPU: gelu_cpu
     CUDA: gelu_cuda
 
