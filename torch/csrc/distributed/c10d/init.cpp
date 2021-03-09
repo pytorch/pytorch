@@ -184,7 +184,21 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           py::arg("reducer"),
           py::arg("comm_hook_type"));
 
-  shared_ptr_class_<::c10d::GradBucket>(module, "GradBucket")
+  shared_ptr_class_<::c10d::GradBucket>(
+      module,
+      "GradBucket",
+      R"(
+This class mainly passes a list of gradient tensors
+(returned by :meth:`~torch.distributed.GradBucket.get_tensors`)
+to DDP communication hook,
+where each tensor in the list refers to the replica on each device.
+Since DDP communication hook only supports single process single device mode at this time,
+only exactly one tensor is stored in this bucket.
+This tensor is actually a flattened 1D tensor,
+which can be further decomposed into a list of per-parameter tensors
+(returned by :meth:`~torch.distributed.GradBucket.get_per_parameter_tensors`)
+to apply layer-wise operation.
+)")
       .def(
           py::init<
               size_t,
