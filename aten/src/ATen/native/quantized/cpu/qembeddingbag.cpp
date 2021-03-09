@@ -90,13 +90,37 @@ at::Tensor& embedding_lookup_fallback_impl(
       if (BIT_RATE == 8) {
         const uint8_t* scale_bias =
             weight_data + (idx + 1) * weight_size - 2 * sizeof(float);
-        scale = weight_val * reinterpret_cast<const float*>(scale_bias)[0];
-        bias = weight_val * reinterpret_cast<const float*>(scale_bias)[1];
+        uint32_t scale_val_int32 = 0;
+        scale_val_int32 = scale_val_int32 |
+          (scale_bias[0]) |
+          (scale_bias[1] << 8) |
+          (scale_bias[2] << 16) |
+          (scale_bias[3] << 24);
+        float scale_val = (reinterpret_cast<float*>(&scale_val_int32))[0];
+        uint32_t bias_val_int32 = 0;
+        bias_val_int32 = bias_val_int32 |
+          (scale_bias[4]) |
+          (scale_bias[5] << 8) |
+          (scale_bias[6] << 16) |
+          (scale_bias[7] << 24);
+        float bias_val = (reinterpret_cast<float*>(&bias_val_int32))[0];
+        scale = weight_val * scale_val;
+        bias = weight_val * bias_val;
       } else {
-        const at::Half* scale_bias = reinterpret_cast<const at::Half*>(
-            weight_data + (idx + 1) * weight_size - 2 * sizeof(at::Half));
-        scale = weight_val * (scale_bias)[0];
-        bias = weight_val * (scale_bias)[1];
+        const uint8_t* scale_bias =
+            weight_data + (idx + 1) * weight_size - 2 * sizeof(at::Half);
+        uint16_t scale_val_int16 = 0;
+        scale_val_int16 = scale_val_int16 |
+          (scale_bias[0]) |
+          (scale_bias[1] << 8);
+        at::Half scale_val = (reinterpret_cast<at::Half*>(&scale_val_int16))[0];
+        uint16_t bias_val_int16 = 0;
+        bias_val_int16 = bias_val_int16 |
+          (scale_bias[2]) |
+          (scale_bias[3] << 8);
+        at::Half bias_val = (reinterpret_cast<at::Half*>(&bias_val_int16))[0];
+        scale = weight_val * scale_val;
+        bias = weight_val * bias_val;
       }
 
       for (int j = 0; j < block_size; ++j) {
