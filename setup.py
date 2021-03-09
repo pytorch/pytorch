@@ -212,6 +212,7 @@ import os
 import json
 import glob
 import importlib
+import time
 
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
@@ -325,7 +326,16 @@ def check_submodules():
     folders = get_submodule_folders()
     # If none of the submodule folders exists, try to initialize them
     if all(not_exists_or_empty(folder) for folder in folders):
-        subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=cwd)
+        try:
+            print(' --- Trying to initialize submodules')
+            start = time.time()
+            subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=cwd)
+            end = time.time()
+            print(' --- Submodule initialization took {:.2f} sec'.format(end - start))
+        except Exception:
+            print(' --- Submodule initalization failed')
+            print('Please run:\n\tgit submodule update --init --recursive')
+            sys.exit(1)
     for folder in folders:
         check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE"])
     check_for_files(os.path.join(third_party_path, 'fbgemm', 'third_party',
