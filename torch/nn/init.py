@@ -4,18 +4,6 @@ import warnings
 from torch import Tensor
 import torch
 
-# Provide prod for older versions of math (prod was added in 3.8)
-if hasattr(math, 'prod'):
-    prod = math.prod
-else:
-    from functools import reduce
-    import operator
-    from typing import Tuple
-
-    def prod(shape: Tuple[int]) -> int:
-        return reduce(operator.mul, shape, 1)
-
-
 # These no_grad_* functions are necessary as wrappers around the parts of these
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
 # managers, so these need to be implemented as builtins. Using these wrappers
@@ -285,7 +273,9 @@ def _calculate_fan_in_and_fan_out(tensor):
     num_output_fmaps = tensor.size(0)
     receptive_field_size = 1
     if tensor.dim() > 2:
-        receptive_field_size = prod(tensor.shape[2:])
+        # math.prod is not always available, accumulate the product manually
+        for s in tensor.shape[2:]:
+            receptive_field_size = receptive_field_size*s
     fan_in = num_input_fmaps * receptive_field_size
     fan_out = num_output_fmaps * receptive_field_size
 
