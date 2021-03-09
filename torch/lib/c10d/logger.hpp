@@ -18,12 +18,21 @@ class Logger {
   // "struct DDPLoggingData" of "torch/c10/util/Logging.h".
   c10::DDPLoggingData get_ddp_logging_data();
 
+  // Stream insertion operator for logging data to stream under
+  // TORCH_DISTRIBUTED_DEBUG.
+  friend std::ostream& operator<<(
+    std::ostream& output,
+    const Logger& logger
+  );
+
   // Set environment variables.
   void set_env_variables();
   // Set parameters stats.
   void set_parameter_stats();
   // Get size of each bucket (Bytes).
   std::vector<int> get_bucket_sizes();
+  // Set comm. hook, if used
+  void set_comm_hook(const std::string& hook);
 
   // Calculate avg stats using cpu timer and gpu timer
   // that has been recorded in reducer.

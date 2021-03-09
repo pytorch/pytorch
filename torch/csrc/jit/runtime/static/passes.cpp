@@ -222,6 +222,80 @@ void PrecomputeMultiplierShiftForSigridHash(
   fuse.runOnGraph(graph);
 }
 
+void ClipRangesGatherRangesX2SigridHash(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+  // Placeholder is a dummy op used to capture the first subgraph
+  std::string pattern = R"IR(
+    graph(%ranges, %values, %max_length, %salt, %max_value, %hash_into_int32):
+        %clipped : Tensor = fb::clip_ranges(%ranges, %max_length)
+        %output : Tensor, %unused : Tensor = fb::gather_ranges(%values, %clipped)
+        %sigrid_hash_out : Tensor = fb::sigrid_hash(%output, %salt, %max_value, %hash_into_int32)
+        return (%sigrid_hash_out, %clipped))IR";
+  std::string fused_pattern = R"IR(
+    graph(%ranges, %values, %max_length, %salt, %max_value, %hash_into_int32):
+        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %hash_into_int32)
+        return (%sigrid_hash_out, %clipped))IR";
+
+  // the second gather_ranges can be eliminated because the `lengths` is
+  // produces is identical to the lengths produced by
+  // clip_ranges_gather_sigrid_hash_v3 (caveat, the fused ops makes some
+  // simplifying assumptions about the ranges input)
+  std::string pattern2 = R"IR(
+    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %hash_into_int32):
+        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %hash_into_int32)
+        %unused : Tensor, %lengths : Tensor = fb::gather_ranges(%gather2_values, %clipped)
+        return (%lengths, %sigrid_hash_out))IR";
+
+  std::string fused_pattern2 = R"IR(
+    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %hash_into_int32):
+        %lengths : Tensor, %sigrid_hash_out : Tensor = fb::clip_ranges_gather_sigrid_hash_v3(%ranges, %values, %max_length, %salt, %max_value, %hash_into_int32)
+        return (%lengths, %sigrid_hash_out))IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  fuse.RegisterRewritePattern(pattern2, fused_pattern2);
+  fuse.runOnGraph(graph);
+}
+
+void ClipRangesGatherRangesX2SigridHashPrecompute(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+  // Placeholder is a dummy op used to capture the first subgraph
+  std::string pattern = R"IR(
+    graph(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
+        %clipped : Tensor = fb::clip_ranges(%ranges, %max_length)
+        %output : Tensor, %unused : Tensor = fb::gather_ranges(%values, %clipped)
+        %sigrid_hash_out : Tensor = fb::sigrid_hash_precompute(%output, %salt, %max_value, %mul_shift, %hash_into_int32)
+        return (%sigrid_hash_out, %clipped))IR";
+  std::string fused_pattern = R"IR(
+    graph(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
+        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32)
+        return (%sigrid_hash_out, %clipped))IR";
+
+  // the second gather_ranges can be eliminated because the `lengths` is
+  // produces is identical to the lengths produced by
+  // clip_ranges_gather_sigrid_hash_v3 (caveat, the fused ops makes some
+  // simplifying assumptions about the ranges input)
+  std::string pattern2 = R"IR(
+    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
+        %sigrid_hash_out : Tensor, %clipped : Tensor = fb::placeholder(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32)
+        %unused : Tensor, %lengths : Tensor = fb::gather_ranges(%gather2_values, %clipped)
+        return (%lengths, %sigrid_hash_out))IR";
+
+  std::string fused_pattern2 = R"IR(
+    graph(%gather2_values, %ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32):
+        %lengths : Tensor, %sigrid_hash_out : Tensor = fb::clip_ranges_gather_sigrid_hash_precompute_v3(%ranges, %values, %max_length, %salt, %max_value, %mul_shift, %hash_into_int32)
+        return (%lengths, %sigrid_hash_out))IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  fuse.RegisterRewritePattern(pattern2, fused_pattern2);
+  fuse.runOnGraph(graph);
+}
+
 void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
   ConcatAddMulReplaceNaNClip(graph);
@@ -231,6 +305,9 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
   ClipRangesGatherRangesLengthsToOffsets(graph);
   ClipRangesGatherSigridHash(graph);
   ClipRangesGatherRangesSigridHash(graph);
+  // TODO: re-enable after bug fix
+  // ClipRangesGatherRangesX2SigridHash(graph);
+  // ClipRangesGatherRangesX2SigridHashPrecompute(graph);
 
   // prioritize clip_ranges+gather_ranges+sigrid_hash fusion over
   // clip_ranges+gather_ranges
@@ -255,6 +332,14 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
         at::Tensor out = at::empty_like(self);
         at::native::copy_(out, self);
         return out.permute(dims);
+      });
+  m.def(
+      "static_runtime::to_copy(Tensor self, ScalarType dtype, bool non_blocking, bool copy) -> Tensor",
+      [](at::Tensor self, at::ScalarType dtype, bool non_blocking, bool copy)
+          -> at::Tensor {
+        at::Tensor out = at::empty_like(self);
+        at::native::copy_(out, self);
+        return out.to(dtype, non_blocking, copy);
       });
 }
 
@@ -281,7 +366,9 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
       {c10::Symbol::fromQualString("aten::permute"),
        c10::Symbol::fromQualString("static_runtime::permute_copy")},
       {c10::Symbol::fromQualString("aten::narrow"),
-       c10::Symbol::fromQualString("aten::narrow_copy")}};
+       c10::Symbol::fromQualString("aten::narrow_copy")},
+      {c10::Symbol::fromQualString("aten::to"),
+       c10::Symbol::fromQualString("static_runtime::to_copy")}};
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto* n : graph->nodes()) {
     if (!supported.count(n->kind())) {

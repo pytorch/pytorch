@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import \
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_maybe_warns)
+     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_warn_once)
 
 from distutils.version import LooseVersion
 
@@ -153,7 +153,7 @@ class OpInfo(object):
                                                # Ex: ['aten::add', 'aten::mm'], defaults to an empty list
                                                # Note: currently no ops use fusible nodes
                  output_func=lambda x: x,  # fn mapping output to part that should be gradcheck'ed
-                 supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
+                 supports_out=True,  # whether the op supports the out kwarg
                  skips=tuple(),  # information about which tests to skip
                  decorators=None,  # decorators to apply to generated tests
                  safe_casts_outputs=False,  # whether op allows safe casting when writing to out arguments
@@ -191,7 +191,7 @@ class OpInfo(object):
 
         self.test_inplace_grad = test_inplace_grad
         self.test_complex_grad = test_complex_grad
-        self.supports_tensor_out = supports_tensor_out
+        self.supports_out = supports_out
         self.safe_casts_outputs = safe_casts_outputs
 
         self.skips = skips
@@ -1755,7 +1755,9 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),),
+                        dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),
+               # addmm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out')),
            sample_inputs_func=sample_inputs_addmm),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -1776,6 +1778,8 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_amax_amin,
            skips=(
+               # amax does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
                # Reference: https://github.com/pytorch/pytorch/issues/48978
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.bfloat16]),)),
@@ -1787,6 +1791,8 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_amax_amin,
            skips=(
+               # amin does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
                # Reference: https://github.com/pytorch/pytorch/issues/48978
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.bfloat16]),)),
@@ -1892,7 +1898,7 @@ op_db: List[OpInfo] = [
                    )),
     OpInfo('broadcast_to',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           supports_tensor_out=False,
+           supports_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_broadcast_to),
     UnaryUfuncInfo('ceil',
@@ -1909,7 +1915,6 @@ op_db: List[OpInfo] = [
                      test_complex_grad=False,
                      test_inplace_grad=False,
                      check_batched_gradgrad=False,
-                     supports_tensor_out=True,
                      decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                      skips=(
                          # These tests do not take into account custom op.get_op()
@@ -1917,7 +1922,9 @@ op_db: List[OpInfo] = [
                          # See https://github.com/pytorch/pytorch/issues/50837
                          SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                          SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                                  dtypes=[torch.complex64, torch.complex128]),)),
+                                  dtypes=[torch.complex64, torch.complex128]),
+                         # cholesky_inverse does not correctly warn when resizing out= inputs
+                         SkipInfo('TestCommon', 'test_out'),)),
     UnaryUfuncInfo('clamp',
                    aliases=('clip', ),
                    ref=np.clip,
@@ -1950,7 +1957,6 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.int],
                                 active_if=IS_WINDOWS),
                    ),
-                   supports_tensor_out=True,
                    test_inplace_grad=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
@@ -2050,7 +2056,10 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
            sample_inputs_func=sample_inputs_diag,
-           test_inplace_grad=False),
+           test_inplace_grad=False,
+           skips=(
+               # diag does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),)),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -2066,7 +2075,6 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=True,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.fftn',
                      aten_name='fft_fftn',
@@ -2074,7 +2082,6 @@ op_db: List[OpInfo] = [
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=True,
                      test_inplace_grad=False,
                      decorators=[precisionOverride(
                          {torch.float: 1e-4, torch.cfloat: 1e-4})],),
@@ -2084,7 +2091,6 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=True,
                      check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfft',
@@ -2093,7 +2099,6 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=True,
                      check_batched_grad=False,
                      check_batched_gradgrad=False,
                      test_inplace_grad=False,),
@@ -2103,7 +2108,6 @@ op_db: List[OpInfo] = [
                      ndimensional=True,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=True,
                      test_inplace_grad=False,
                      check_batched_grad=False,
                      check_batched_gradgrad=False,
@@ -2114,7 +2118,6 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=True,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.ifftn',
                      aten_name='fft_ifftn',
@@ -2122,7 +2125,6 @@ op_db: List[OpInfo] = [
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=True,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.ihfft',
                      aten_name='fft_ihfft',
@@ -2130,7 +2132,6 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_types(),
-                     supports_tensor_out=True,
                      check_batched_grad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfft',
@@ -2139,7 +2140,6 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=True,
                      check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfftn',
@@ -2148,7 +2148,6 @@ op_db: List[OpInfo] = [
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=True,
                      check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     UnaryUfuncInfo('floor',
@@ -2162,19 +2161,19 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_flip,
            test_inplace_grad=False,
-           supports_tensor_out=False),
+           supports_out=False),
     OpInfo('fliplr',
            op=torch.fliplr,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_fliplr_flipud,
            test_inplace_grad=False,
-           supports_tensor_out=False),
+           supports_out=False),
     OpInfo('flipud',
            op=torch.flipud,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_fliplr_flipud,
            test_inplace_grad=False,
-           supports_tensor_out=False),
+           supports_out=False),
     UnaryUfuncInfo('i0',
                    ref=np.i0,
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
@@ -2186,14 +2185,13 @@ op_db: List[OpInfo] = [
     OpInfo('floor_divide',
            dtypes=all_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_floor_divide,
-           decorators=[_wrap_maybe_warns("floor_divide is deprecated, and will be removed")],
+           decorators=[_wrap_warn_once("floor_divide is deprecated, and will be removed")],
            supports_autograd=False,
            ),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            test_inplace_grad=False,
-           supports_tensor_out=True,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_norm,
            aten_name='linalg_norm',
@@ -2204,13 +2202,14 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         device_type='cpu',
                         dtypes=[torch.float16, torch.bfloat16]),
+               # linalg.norm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('linalg.slogdet',
            aten_name='linalg_slogdet',
            op=torch.linalg.slogdet,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_slogdet,
            output_func=itemgetter(1),
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
@@ -2311,14 +2310,18 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.cfloat, torch.cdouble]),
            ),
-           supports_tensor_out=False),
+           supports_out=False),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_select,
            test_inplace_grad=False,
-           supports_tensor_out=True),
+           supports_out=True,
+           skips=(
+               # masked_select does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('max',
            op=torch.max,
            variant_test_name='binary',
@@ -2336,8 +2339,9 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
-           supports_tensor_out=False,
            skips=(
+               # max does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
                # Reference: https://github.com/pytorch/pytorch/issues/51788#issuecomment-777625293
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         device_type='cpu', dtypes=[torch.bfloat16]),)),
@@ -2348,7 +2352,7 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            test_inplace_grad=False,
-           supports_tensor_out=False,
+           supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('min',
            op=torch.min,
@@ -2366,9 +2370,10 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            test_inplace_grad=False,
-           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            skips=(
+               # min does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
                # Reference: https://github.com/pytorch/pytorch/issues/51788#issuecomment-777625293
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         device_type='cpu', dtypes=[torch.bfloat16]),)),
@@ -2379,7 +2384,7 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            test_inplace_grad=False,
-           supports_tensor_out=False,
+           supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
@@ -2464,12 +2469,17 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bfloat16, torch.half),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16, torch.half),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
-                   supports_autograd=False),
+                   supports_autograd=False,
+                   skips=(
+                       # signbit does not correctly warn when resizing out= inputs
+                       SkipInfo('TestCommon', 'test_out'),
+                   )),
     OpInfo('std',
            dtypes=floating_types_and(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
-           supports_tensor_out=False,
+           # TODO: std does support out in some signatures
+           supports_out=False,
            test_complex_grad=False,
            test_inplace_grad=False,
            # std has only partial support for complex and half (#51127)
@@ -2529,14 +2539,14 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           supports_tensor_out=False,
+           supports_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_tensor_split,),
     OpInfo('triangular_solve',
            op=torch.triangular_solve,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           supports_tensor_out=False,
+           supports_out=False,
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
@@ -2632,10 +2642,13 @@ op_db: List[OpInfo] = [
            op=torch.linalg.inv,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_inv,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # linalg_inv does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     UnaryUfuncInfo('angle',
                    ref=np.angle,
                    dtypes=all_types_and_complex_and(torch.bool),
@@ -2652,7 +2665,6 @@ op_db: List[OpInfo] = [
            op=torch.linalg.solve,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_solve,
            check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
@@ -2661,7 +2673,6 @@ op_db: List[OpInfo] = [
            op=torch.linalg.pinv,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_pinv,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     HermitianOpInfo('linalg.pinv',
@@ -2670,7 +2681,6 @@ op_db: List[OpInfo] = [
                     op=torch.linalg.pinv,
                     dtypes=floating_and_complex_types(),
                     test_inplace_grad=False,
-                    supports_tensor_out=False,
                     sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
                     decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                     skips=(
@@ -2681,7 +2691,6 @@ op_db: List[OpInfo] = [
            op=torch.svd,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_svd,
            decorators=[
                skipCUDAIfNoMagma,
@@ -2698,7 +2707,6 @@ op_db: List[OpInfo] = [
            aten_name='linalg_svd',
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_svd,
            decorators=[
                skipCUDAIfNoMagma,
@@ -2718,18 +2726,22 @@ op_db: List[OpInfo] = [
            op=torch.pinverse,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           supports_tensor_out=False,
+           supports_out=False,
            sample_inputs_func=sample_inputs_linalg_pinv,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
-           sample_inputs_func=sample_inputs_gather),
+           sample_inputs_func=sample_inputs_gather,
+           skips=(
+               # gather does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('index_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
-           supports_tensor_out=False,
+           supports_out=False,
            sample_inputs_func=sample_inputs_index_fill),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -2739,6 +2751,8 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=[torch.float16, torch.bfloat16]),
                SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=[torch.float16, torch.bfloat16]),
+               # index_select does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out')
            ),
            sample_inputs_func=sample_inputs_index_select),
     OpInfo('sort',
@@ -2746,68 +2760,73 @@ op_db: List[OpInfo] = [
            # sort on CUDA is still in the TH, no torch.bool/torch.float16 support yet
            dtypesIfCUDA=all_types_and(torch.float16),
            dtypesIfROCM=all_types_and(torch.float16),
-           supports_tensor_out=False,
            test_inplace_grad=False,
-           sample_inputs_func=sample_inputs_sort),
+           sample_inputs_func=sample_inputs_sort,
+           skips=(
+               # sort does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('stack',
            # gradcheck expects the input arguments as a flat list
-           op=lambda *args, idx: torch.stack([*args], idx),
+           op=lambda *args, idx, **kwargs: torch.stack([*args], idx, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
-           supports_tensor_out=False,
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+               # stack does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
            ),
            sample_inputs_func=sample_inputs_stack),
     OpInfo('hstack',
            # gradcheck expects the input arguments as a flat list
-           op=lambda *args: torch.hstack([*args]),
+           op=lambda *args, **kwargs: torch.hstack([*args], **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
-           supports_tensor_out=False,
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
-           ),
+               # hstack does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out')),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('vstack',
            # gradcheck expects the input arguments as a flat list
-           op=lambda *args: torch.vstack([*args]),
+           op=lambda *args, **kwargs: torch.vstack([*args], **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
-           supports_tensor_out=False,
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+               # vstack does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
            ),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('dstack',
            # gradcheck expects the input arguments as a flat list
-           op=lambda *args: torch.dstack([*args]),
+           op=lambda *args, **kwargs: torch.dstack([*args], **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
-           supports_tensor_out=False,
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
-           ),
+               # dstack does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
     OpInfo('movedim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
-           supports_tensor_out=False,
+           supports_out=False,
            sample_inputs_func=sample_movedim_moveaxis),
     OpInfo('moveaxis',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
-           supports_tensor_out=False,
+           supports_out=False,
            sample_inputs_func=sample_movedim_moveaxis),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-                  supports_tensor_out=False,
+                  supports_out=False,
                   test_inplace_grad=False,
                   skips=(
                       # torch.repeat does not exist so we get a RuntimeError.
@@ -2818,14 +2837,15 @@ op_db: List[OpInfo] = [
     ShapeFuncInfo('tile',
                   ref=np.tile,
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-                  supports_tensor_out=False,
+                  supports_out=False,
                   test_inplace_grad=False,
                   sample_inputs_func=sample_repeat_tile),
     OpInfo('var',
            dtypes=floating_types_and(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
-           supports_tensor_out=False,
+           # TODO: revisit, some var signatures do support out (see std, too)
+           supports_out=False,
            test_complex_grad=False,
            test_inplace_grad=False,
            # var has only partial support for complex and half (#51127)
@@ -2995,14 +3015,13 @@ if TEST_SCIPY:
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
                dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                test_inplace_grad=True,
-               supports_tensor_out=True,
                safe_casts_outputs=True,
                sample_inputs_func=sample_inputs_xlogy),
         OpInfo('trace',
                dtypes=all_types_and_complex(),
                dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                test_inplace_grad=False,
-               supports_tensor_out=False,
+               supports_out=False,
                sample_inputs_func=sample_inputs_trace)
     ]
     op_db = op_db + op_db_scipy_reference
