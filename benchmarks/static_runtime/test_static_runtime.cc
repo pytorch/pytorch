@@ -385,7 +385,7 @@ TEST(StaticRuntime, FusionPass) {
 
       Method method = module.get_method("forward");
       auto graph = method.graph();
-      fuseStaticSubgraphs(graph);
+      fuseStaticSubgraphs(graph, 2);
       bool hit = false;
       for (const auto& n : module.get_method("forward").graph()->nodes()) {
         if (n->kind() == torch::jit::prim::StaticSubgraph) {
