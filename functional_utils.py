@@ -18,7 +18,9 @@ def _create_differentiable(tensor_or_tuple_of_tensors):
         # if tensor.requires_grad:
         #     return tensor
         assert not tensor.requires_grad
-        return tensor.requires_grad_()
+        # NB: view is needed because autograd is silly.
+        # autograd saved the variable before executing the op, which matters...
+        return tensor.view_as(tensor).requires_grad_()
     if isinstance(tensor_or_tuple_of_tensors, tuple):
         return tuple(map(_create_differentiable, tensor_or_tuple_of_tensors))
     if isinstance(tensor_or_tuple_of_tensors, list):
@@ -63,6 +65,9 @@ def grad_with_value(f, diff_argnums=(0,), has_aux=False):
             if len(diff_args) == 1 and isinstance(diff_args[0], tuple):
                 diff_args = diff_args[0]
             # NB: need create_graph so that backward pass isn't run in no_grad mode
+            # import torchviz; import graphviz
+            # graph = torchviz.make_dot(output)
+            # graph.save("inner.dot")
             grad_input = torch.autograd.grad(
                 output, diff_args,
                 create_graph=True, retain_graph=True)

@@ -29,8 +29,21 @@ namespace autograd {
 // TODO: this is probably not correct
 std::unique_ptr<c10::AutogradMetaInterface> AutogradMeta::shallow_copy() const {
   // NB: need retain_graph to always be True to avoid grad_fn cleaning itself up.
-  return std::make_unique<AutogradMeta>(
-      nullptr, false, /*gradient_edge=*/Edge(grad_fn_, output_nr_));
+  auto result = std::make_unique<AutogradMeta>();
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  result->grad_fn_ = grad_fn_;
+  result->requires_grad_ = requires_grad_;
+  result->output_nr_ = output_nr_;
+  if (requires_grad_) {
+    // Need to materialize the grad accumulator so that it gets copied
+    TORCH_INTERNAL_ASSERT(grad_accumulator_.lock());
+  }
+  // What are the following even used for?
+  // result->grad_ = grad_;
+  // result->retains_grad_ = retains_grad_;
+  // result->is_view_ = is_view_;
+  return result;
 }
 
 
