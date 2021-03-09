@@ -1,18 +1,11 @@
-#import <ATen/native/metal/MetalPrepackOpContext.h>
+#ifndef MetalConvParams_h
+#define MetalConvParams_h
 
 #include <c10/util/ArrayRef.h>
 
 namespace at {
 namespace native {
 namespace metal {
-
-enum class NeuronType {
-  None,
-  Clamp,
-  Relu,
-  Sigmoid,
-  Tanh,
-};
 
 struct Conv2DParams final {
   Conv2DParams() = delete;
@@ -24,8 +17,15 @@ struct Conv2DParams final {
       c10::IntArrayRef dilation,
       int64_t groups);
 
-  std::vector<int64_t> output_sizes() const;
-  bool isDepthwise() const;
+  std::vector<int64_t> output_sizes() const {
+    return {N, OC, OH, OW};
+  }
+
+  bool isDepthwise() const {
+    // Currently, only channel multipler of 1 is supported
+    // i.e. inputFeatureChannels == outputFeatureChannels
+    return G > 1 && IC == 1 && OC == G && OC == C;
+  }
 
   int64_t N; // batch size
   int64_t C; // channels
@@ -46,8 +46,8 @@ struct Conv2DParams final {
   int64_t OH; // output height
 };
 
-NeuronType neuronType(const Conv2dOpContext& context);
-
 } // namespace metal
 } // namespace native
 } // namespace at
+
+#endif /* MetalConvParams_h */
