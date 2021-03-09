@@ -410,6 +410,7 @@ def calculate_job_times(reports: List[Dict[str, Any]]) -> Dict[str, float]:
                 new_avg = (curr_avg * curr_count + test_file['total_seconds']) / new_count
                 jobs_to_times[name] = (new_avg, new_count)
 
+
     # if there's 'test_cpp_extensions_aot' entry in jobs_to_times, add 'test_cpp_extensions_aot_ninja'
     # and 'test_cpp_extensions_aot_no_ninja' duplicate entries to ease future computation since
     # test_cpp_extensions_aot_no_ninja and test_cpp_extensions_aot_ninja are Python test jobs that
