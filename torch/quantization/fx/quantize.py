@@ -56,6 +56,7 @@ from .quantization_patterns import *
 
 from .utils import (
     _parent_name,
+    all_node_args_have_no_tensors,
     quantize_node,
     get_custom_module_class_keys,
     get_new_attr_name_with_prefix,
@@ -217,7 +218,7 @@ def insert_observer_for_output_of_the_node(
                 if is_observed(node.args[0]):
                     observed_node_names_set.add(node.name)
         elif (isinstance(quantize_handler, BinaryOp) and
-              quantize_handler.num_node_args == 1):
+              quantize_handler.num_tensor_args == 1):
             assert matched_nodes is not None
             input_node = matched_nodes[-1]  # first node in the sequence
 
@@ -248,7 +249,7 @@ def insert_observer_for_output_of_the_node(
 
             if output_is_quantized:
                 observed_node_names_set.add(node.name)
-        elif (quantize_handler.all_node_args and
+        elif (quantize_handler.all_node_args_are_tensors and
               input_output_observed(quantize_handler)):
             # observer for outputs
             new_observer = qconfig.activation()
@@ -317,59 +318,6 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
                 if kwarg_name == 'bias' and arg is kwarg_value:
                     return True
     return False
-
-def all_node_args_have_no_tensors(node: Node) -> bool:
-    """
-    If we know for sure that all of this node's args have no
-    tensors (are primitives), return True.  If we either
-    find a tensor or are not sure, return False. Note: this
-    function is not exact.
-
-    Things assumed to be not tensors:
-    * primitives such as ints
-    * list or tuples with all elements are primitives (TODO: add the code)
-    * results of x.ndim (an int)
-    * results of x.size (an int)
-
-    Everything which is not covered by the above bucket
-    is currently assumed to have a possibility of being a tensor.
-
-    TODO(before land): remove prints
-    """
-    # print('all_node_args_have_no_tensors for node', node.format_node(), node.op)
-    if node.op == 'placeholder':
-        # print('placeholder')
-        return False
-    elif node.op == 'call_module':
-        # print('call_module')
-        return False
-    elif node.op == 'get_attr':
-        # print('getattr')
-        return False
-    found_one_tensor = False
-    for arg in node.args:
-        # print('visiting all_node_args arg', arg, type(arg))
-        if type(arg) == Node and arg.target is getattr and arg.args[1] == 'ndim':
-            # x1 = x0.ndim
-            pass
-        elif type(arg) == Node and arg.op == 'call_method' and arg.target == 'size':
-            # x1 = x0.size(0)
-            pass
-        elif type(arg) == int:
-            pass
-        elif type(arg) == torch.fx.immutable_collections.immutable_list:
-            # TODO: real handling
-            pass
-        else:
-            if type(arg) == Node:
-                # recurse on args
-                this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg)
-                found_one_tensor = found_one_tensor or \
-                    (not this_arg_args_have_no_tensors)
-            else:
-                found_one_tensor = True
-        # print('returning', not found_one_tensor)
-    return not found_one_tensor
 
 
 # weight prepacking ops
@@ -692,7 +640,8 @@ class Quantizer:
 
     def _convert(self, model: GraphModule, is_reference: bool = False,
                  convert_custom_config_dict: Dict[str, Any] = None,
-                 is_standalone_module: bool = False) -> QuantizedGraphModule:
+                 is_standalone_module: bool = False,
+                 _remove_qconfig_flag: bool = True) -> QuantizedGraphModule:
         """ standalone_module means it a submodule that is not inlined in
         parent module, and will be quantized separately as one unit.
 
@@ -981,7 +930,8 @@ class Quantizer:
                     node, load_arg_simple)
 
         # removes qconfig and activation_post_process modules
-        _remove_qconfig(model)
+        if _remove_qconfig_flag:
+            _remove_qconfig(model)
         model = QuantizedGraphModule(model, act_post_process_removed_graph)
         return model
 
@@ -1039,9 +989,10 @@ class Quantizer:
 
     def convert(self, model: GraphModule, is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None,
-                is_standalone_module: bool = False) -> QuantizedGraphModule:
+                is_standalone_module: bool = False,
+                _remove_qconfig: bool = True) -> QuantizedGraphModule:
         quantized = self._convert(
-            model, is_reference, convert_custom_config_dict, is_standalone_module)
+            model, is_reference, convert_custom_config_dict, is_standalone_module, _remove_qconfig_flag=_remove_qconfig)
         if not is_reference:
             quantized = self._fold_weight(quantized)
         return quantized
@@ -1104,7 +1055,7 @@ class Quantizer:
                         if value is BinaryOp:
                             use_copy_node = all_node_args_have_no_tensors(node)
                             if use_copy_node:
-                                value = CopyNode
+                                value = CopyNode  # type: ignore
                         matched: List[Any] = []
                         record_match(pattern, node, matched)
                         for n in matched:

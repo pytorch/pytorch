@@ -1832,6 +1832,46 @@ class TestQuantizeFx(QuantizationTestCase):
 
         checkModel(m, data, ref_weight, ref_bias, ref_res)
 
+    def test_preserve_qconfig(self):
+        """
+        Test to make sure the temporary config option to preserve qconfig attributes
+        in the model works
+        """
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = self.mods2(x)
+                return x
+
+        model = M().eval()
+        qconfig_dict = {
+            "object_type": [
+                (torch.nn.functional.linear, float16_dynamic_qconfig),
+            ],
+        }
+        m = prepare_fx(model, qconfig_dict)
+        m(torch.rand(5, 5))
+        m = convert_fx(m, _remove_qconfig=False)
+
+        self.assertTrue(hasattr(m.mods2, 'qconfig'))
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops

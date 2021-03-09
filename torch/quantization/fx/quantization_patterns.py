@@ -28,6 +28,7 @@ from .pattern_utils import (
 
 from .utils import (
     _parent_name,
+    all_node_args_have_no_tensors,
     quantize_node,
     get_per_tensor_qparams,
     get_linear_prepack_op_for_dtype,
@@ -61,8 +62,8 @@ class QuantizeHandler(ABC):
         # this is an indicator of whether all the inputs are Node or not
         # since some op might be quantized differently depending on whether
         # all inputs are tensors or not, e.g. add/mul
-        self.num_node_args = len(node.args)
-        self.all_node_args = True
+        self.num_tensor_args = len(node.args)
+        self.all_node_args_are_tensors = True
 
     @abstractmethod
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
@@ -101,7 +102,18 @@ class BinaryOp(QuantizeHandler):
             node = node.args[0]  # type: ignore
         self.binary_op_node = node
         self.binary_op = node.target
-        self.num_node_args = len([a for a in self.binary_op_node.args[:2] if isinstance(a, Node)])
+
+        # determine how many of the first two args are Tensors (versus scalars)
+        # this distinguishes things like "x + y" from "x + 2" or "2 + x"
+        self.num_tensor_args = 0
+        for arg_idx in range(len(self.binary_op_node.args)):
+            arg = self.binary_op_node.args[arg_idx]
+            if isinstance(arg, Node) and (not all_node_args_have_no_tensors(arg)):
+                self.num_tensor_args += 1
+        self.all_node_args_are_tensors = \
+            (self.num_tensor_args == len(self.binary_op_node.args))
+
+        # self.num_node_args = len([a for a in self.binary_op_node.args[:2] if isinstance(a, Node)])
         qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
             operator.add: torch.ops.quantized.add,
             torch.add: torch.ops.quantized.add,
@@ -170,9 +182,10 @@ class BinaryOp(QuantizeHandler):
 
         if dtypes in [(torch.quint8, torch.qint8, None)]:
             assert self.quantized_binary_op is not None
-            if self.num_node_args == 1:
+            if self.num_tensor_args == 1:
                 # add/mul scalar
-                if isinstance(self.binary_op_node.args[0], Node):
+                first_arg = self.binary_op_node.args[0]
+                if isinstance(first_arg, Node) and (not all_node_args_have_no_tensors(first_arg)):
                     quantized_index = 0
                 else:
                     quantized_index = 1
@@ -192,23 +205,9 @@ class BinaryOp(QuantizeHandler):
                 else:
                     op = torch.ops.quantized.add
                 kwargs = {**self.binary_op_node.kwargs}
-                # not for land, just a hack to unblock for now
-                # TODO(before land): real fix
-                # add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
-                # op = quantizer.quantized_graph.create_node(
-                    # 'call_function', self.quantized_binary_op, add_args, kwargs)
-                if True:
-                    try:
-                        add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
-                        op = quantizer.quantized_graph.create_node(
-                            'call_function', self.quantized_binary_op, add_args, kwargs)
-                    except Exception:
-                        # add_args = (*load_arg(quantized=[1, 0])(self.binary_op_node.args), scale_arg, zero_point_arg)
-                        add_arg0 = load_arg(quantized=True)(self.binary_op_node.args[0])
-                        add_arg1 = load_arg(quantized=False)(self.binary_op_node.args[1])
-                        add_args = (add_arg0, add_arg1, scale_arg, zero_point_arg)
-                        op = quantizer.quantized_graph.create_node(
-                            'call_function', self.quantized_binary_op, add_args, kwargs)
+                add_args = (*load_arg(quantized=True)(self.binary_op_node.args), scale_arg, zero_point_arg)
+                op = quantizer.quantized_graph.create_node(
+                    'call_function', self.quantized_binary_op, add_args, kwargs)
                 return op
         else:
             assert dtypes == (torch.float16, torch.float16, None)
@@ -228,7 +227,7 @@ class Cat(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        if not self.all_node_args:
+        if not self.all_node_args_are_tensors:
             return NotImplemented
         activation_post_process = quantizer.activation_post_process_map[node.name]
         scale, zero_point = activation_post_process.calculate_qparams()
@@ -743,7 +742,7 @@ class DefaultNode(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        if not self.all_node_args:
+        if not self.all_node_args_are_tensors:
             return NotImplemented
         assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
             'call_function are handled in DefaultNode'
@@ -949,7 +948,7 @@ class DefaultQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        assert self.all_node_args
+        assert self.all_node_args_are_tensors
         root_module = quantizer.modules['']
         return quantize_node(
             quantizer,
