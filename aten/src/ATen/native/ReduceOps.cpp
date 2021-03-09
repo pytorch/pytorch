@@ -747,7 +747,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool
 static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0).to<double>();
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "norm only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "norm only supports strided layout, got: ", self.layout());
@@ -777,7 +777,7 @@ static inline Tensor _norm(const Tensor &self, Scalar p) {
     // are accessed with a different API than strided tensors
     return at::native_norm(self, p);
   } else {
-    TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+    TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
                 "norm only supports CPU AND CUDA device type, got: ", self.device().type());
     TORCH_CHECK(self.layout() == Layout::Strided,
                 "norm only supports strided layout, got: ", self.layout());
@@ -843,7 +843,7 @@ inline Tensor & _all(Tensor & result, TensorIterator & iter) {
 }
 
 Tensor all(const Tensor& self) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "all only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
@@ -886,7 +886,7 @@ Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
 }
 
 Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "all only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
@@ -925,7 +925,7 @@ inline Tensor & _any(Tensor & result, TensorIterator & iter) {
 }
 
 Tensor any(const Tensor& self) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
               "any only supports strided AND sparse layout, got: ", self.layout());
@@ -968,7 +968,7 @@ Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
 }
 
 Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "any only supports strided layout, got: ", self.layout());
@@ -1089,7 +1089,7 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
 }
 
 static Tensor& std_var_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "std and var only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std and var only supports strided layout, got: ", self.layout());
@@ -1130,7 +1130,7 @@ static Tensor& std_var_out(Tensor& result, const Tensor& self, IntArrayRef dim, 
 
 static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               fname, " only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());
@@ -1221,7 +1221,7 @@ std::tuple<Tensor,Tensor> var_mean(const Tensor& self, bool unbiased) {
 }
 
 Tensor var(const Tensor& self, bool unbiased) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "var only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "var only supports strided layout, got: ", self.layout());
@@ -1253,7 +1253,7 @@ Tensor& var_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbias
 }
 
 Tensor std(const Tensor& self, bool unbiased) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "std only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std only supports strided layout, got: ", self.layout());

@@ -34,6 +34,7 @@
 #include <torch/csrc/autograd/python_nn_functions.h>
 #include <torch/csrc/autograd/python_fft_functions.h>
 #include <torch/csrc/autograd/python_linalg_functions.h>
+#include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/multiprocessing/init.h>
@@ -448,10 +449,12 @@ PyObject *THPModule_userEnabledMkldnn(PyObject *_unused, PyObject *noargs)
 
 PyObject *THPModule_setDeterministicCuDNN(PyObject *_unused, PyObject *arg)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assert(PyBool_Check(arg), "set_deterministic_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
   at::globalContext().setDeterministicCuDNN(arg == Py_True);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
@@ -462,10 +465,12 @@ PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
 
 PyObject *THPModule_setDeterministicAlgorithms(PyObject *_unused, PyObject *arg)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assert(PyBool_Check(arg), "use_deterministic_algorithms expects a "
           "bool, but got %s", THPUtils_typename(arg));
   at::globalContext().setDeterministicAlgorithms(arg == Py_True);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_deterministicAlgorithms(PyObject *_unused, PyObject *noargs)
@@ -488,7 +493,7 @@ PyObject *THPModule_warnAlways(PyObject *_unused, PyObject *noargs)
 {
   if (c10::Warning::get_warnAlways()) {
     Py_RETURN_TRUE;
-  } 
+  }
   Py_RETURN_FALSE;
 }
 
@@ -831,6 +836,7 @@ PyObject* initModule() {
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
   torch::autograd::initLinalgFunctions(module);
+  torch::autograd::initSpecialFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);
 #ifdef USE_CUDA
