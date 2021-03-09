@@ -7,7 +7,6 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 from .. import init
-from ..functional import _no_grad_embedding_renorm_  # type: ignore
 
 
 class Embedding(Module):
@@ -100,7 +99,7 @@ class Embedding(Module):
 
     num_embeddings: int
     embedding_dim: int
-    padding_idx: int
+    padding_idx: Optional[int]
     max_norm: Optional[float]
     norm_type: float
     scale_grad_by_freq: bool
@@ -119,8 +118,6 @@ class Embedding(Module):
             elif padding_idx < 0:
                 assert padding_idx >= -self.num_embeddings, 'Padding_idx must be within num_embeddings'
                 padding_idx = self.num_embeddings + padding_idx
-        else:
-            padding_idx = -1
         self.padding_idx = padding_idx
         self.max_norm = max_norm
         self.norm_type = norm_type
@@ -132,7 +129,7 @@ class Embedding(Module):
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
             self.weight = Parameter(_weight)
-            self._fill_padding_idx_with_zero()
+
         self.sparse = sparse
 
     def reset_parameters(self) -> None:
@@ -140,18 +137,14 @@ class Embedding(Module):
         self._fill_padding_idx_with_zero()
 
     def _fill_padding_idx_with_zero(self) -> None:
-        if self.padding_idx != -1:
+        if self.padding_idx is not None:
             with torch.no_grad():
                 self.weight[self.padding_idx].fill_(0)
 
     def forward(self, input: Tensor) -> Tensor:
-        if self.max_norm is not None:
-            # See Note [embedding_renorm contiguous]
-            input = input.contiguous()
-            # See Note [embedding_renorm set_grad_enabled]
-            _no_grad_embedding_renorm_(self.weight, input, self.max_norm, self.norm_type)
-        return torch._embedding_module(
-            self.weight, input, self.padding_idx, self.scale_grad_by_freq, self.sparse)
+        return F.embedding(
+            input, self.weight, self.padding_idx, self.max_norm,
+            self.norm_type, self.scale_grad_by_freq, self.sparse)
 
     def extra_repr(self) -> str:
         s = '{num_embeddings}, {embedding_dim}'

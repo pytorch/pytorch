@@ -1850,7 +1850,8 @@ def embedding(
         weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
             and number of columns equal to the embedding size
         padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
-                                         (initialized to zeros) whenever it encounters the index.
+                                    whenever it encounters the index.
+                                    Note: Vector at :attr:`padding_idx` will not be receive gradient update.
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
                                     Note: this will modify :attr:`weight` in-place.

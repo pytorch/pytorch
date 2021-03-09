@@ -11,18 +11,15 @@
 
 namespace at { namespace native {
 
-template <typename Func>
-Tensor _embedding_helper(const Tensor & weight, const Tensor & indices,
-                 Func padding_func, bool scale_grad_by_freq, bool sparse){
+Tensor embedding(const Tensor & weight, const Tensor & indices,
+                 int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
   TORCH_CHECK(weight.dim() >= 1, "'weight' must be at least 1-D");
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
 
   // TODO: use tensor.index() after improving perf
   if (indices.dim() == 1) {
-    auto out = weight.index_select(0, indices);
-    padding_func(out);
-    return out;
+    return weight.index_select(0, indices);
   }
 
   auto size = indices.sizes().vec();
@@ -30,31 +27,7 @@ Tensor _embedding_helper(const Tensor & weight, const Tensor & indices,
     size.push_back(d);
   }
 
-  auto out = weight.index_select(0, indices.reshape(-1));
-  padding_func(out);
-  return out.view(size);
-};
-
-Tensor _embedding_module(const Tensor & weight, const Tensor & indices,
-                 int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
-  // Refer: Embedding Module Documentation
-  // No-Op to allow users change the padding vector.
-  // Here we won't zero out the vector at padding_idx.
-  auto no_op = [](Tensor& embedding) {};
-  return _embedding_helper(
-      weight, indices, no_op, scale_grad_by_freq, sparse);
-}
-
-Tensor embedding(const Tensor & weight, const Tensor & indices,
-                 int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
-  auto zerofill_padding = [&](Tensor& embedding) {
-    if (padding_idx >= 0) {
-      embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
-    }
-  };
-
-  return _embedding_helper(
-      weight, indices, zerofill_padding, scale_grad_by_freq, sparse);
+  return weight.index_select(0, indices.reshape(-1)).view(size);
 }
 
 Tensor embedding_backward(

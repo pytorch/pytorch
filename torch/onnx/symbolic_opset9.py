@@ -474,9 +474,6 @@ def expand_as(g, self, other):
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
-def _embedding_module(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
-    return g.op("Gather", weight, indices)
-
 @parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
 def embedding_bag(g,
                   embedding_matrix,

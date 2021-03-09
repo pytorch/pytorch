@@ -3703,9 +3703,12 @@ class TestNN(NNTestCase):
 
     def test_embedding_from_pretrained_padding_idx(self):
         padding_idx = 2
+        padding_vec = torch.ones(3) * 7
         embeddings = torch.rand(4, 3, requires_grad=True)
+        with torch.no_grad():
+            embeddings[padding_idx] = padding_vec
         embedding_nn = nn.Embedding.from_pretrained(embeddings, padding_idx=padding_idx)
-        self.assertEqual(embedding_nn.weight[padding_idx].sum(), 0)
+        self.assertEqual(embedding_nn.weight[padding_idx], padding_vec)
 
     def test_embedding_from_pretrained_options(self):
         a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
@@ -12281,15 +12284,6 @@ class TestNNDeviceType(NNTestCase):
                 inp = torch.tensor([[0, 1, 1, 2], [3, 5, 7, 11]], dtype=torch.long).to(device)
                 return torch.nn.functional.embedding(inp, weight)
             return fn
-
-        fn = fn_wrapper(device)
-        _assertGradAndGradgradChecks(self, fn, (weight, ))
-
-        def fn_wrapper(device):
-            def padding_fn(weight):
-                inp = torch.tensor([[0, 1, 1, 2], [1, 1, 0, 2]], dtype=torch.long).to(device)
-                return torch.nn.functional.embedding(inp, weight, padding_idx=1)
-            return padding_fn
 
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))
