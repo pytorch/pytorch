@@ -37,8 +37,8 @@ template <>
 bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
-  
-  
+
+
   DCHECK_EQ(X.dim(), 2);
   // amount, number of instances
   int N = X.dim32(0);

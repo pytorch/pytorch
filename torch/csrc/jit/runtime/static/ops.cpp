@@ -575,10 +575,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     if (!te->supports(in0_t)) {
-      out_t.resize_({0});
+      fastResizeToZero(out_t);
       at::native::tanh_out(out_t, in0_t);
     } else {
-      out_t.resize_as_(in0_t);
+      at::native::resize_as_(out_t, in0_t, c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
@@ -596,10 +596,10 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out_t = p_node->Output(0).toTensor();
         if (!te->supports(in0_t)) {
-          out_t.resize_({0});
+          fastResizeToZero(out_t);
           at::native::sigmoid_out(out_t, in0_t);
         } else {
-          out_t.resize_as_(in0_t);
+          at::native::resize_as_(out_t, in0_t, c10::nullopt);
           (*te)(
               out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
         }
@@ -626,7 +626,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       at::native::logit_out(out_t, in0_t, in1_d);
     } else {
-      out_t.resize_as_(in0_t);
+      at::native::resize_as_(out_t, in0_t, c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };

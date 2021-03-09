@@ -1637,6 +1637,46 @@ class TestFX(JitTestCase):
         m = FooBar1234()
         self.checkGraphModule(m, ())
 
+    def test_torchbind_class_attribute_in_fx_tensor_arg(self):
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+            self.skipTest("torch.classes._TorchScriptTesting._ReLUClass is registered, skipping")
+
+        class FooBar2341(torch.nn.Module):
+            def __init__(self):
+                super(FooBar2341, self).__init__()
+                self.f = torch.classes._TorchScriptTesting._ReLUClass()
+
+            def forward(self, x):
+                return self.f.run(x)
+
+        m = FooBar2341()
+
+        traced = symbolic_trace(m)
+        input = torch.randn(3, 4)
+        self.assertEqual(traced(input), m(input))
+
+        self.assertTrue(any(n.op == 'call_method' for n in traced.graph.nodes))
+
+    def test_script_method_trace(self):
+        class Scripted(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        class Holder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.s = torch.jit.script(Scripted())
+
+            def forward(self, x):
+                return self.s(x)
+
+        h = Holder()
+        traced = symbolic_trace(h)
+        input = torch.randn(3, 4)
+        self.assertEqual(traced(input), h(input))
+
+        self.assertTrue(any(n.op == 'call_method' for n in traced.graph.nodes))
+
     def test_namedtuple_return_trace(self):
         class NamedTupReturn(torch.nn.Module):
             def forward(self, x):
