@@ -918,7 +918,6 @@ struct TORCH_API IValue final {
     if (isTensor() || is_intrusive_ptr) {
       c10::intrusive_ptr_target* p = isTensor() ? payload.as_tensor.unsafeGetTensorImpl() : payload.u.as_intrusive_ptr;
       c10::intrusive_ptr<intrusive_ptr_target, c10::UndefinedTensorImpl>::reclaim(p);
-
       // No need to make this destructor call!
       // payload.as_tensor.~Tensor();
     }

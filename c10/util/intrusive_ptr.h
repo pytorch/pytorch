@@ -72,7 +72,6 @@ class C10_API intrusive_ptr_target {
   //    atomically increment the use count, if it is greater than 0.
   //    If it is not, you must report that the storage is dead.
   //
-public:
   mutable std::atomic<size_t> refcount_;
   mutable std::atomic<size_t> weakcount_;
 
