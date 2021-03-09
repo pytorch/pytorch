@@ -533,7 +533,7 @@ void exponential_kernel(TensorIterator& iter, double lambda_, RNG gen) {
     auto lambda = static_cast<accscalar_t>(lambda_);
     // define lambda for exponential transformation
     auto exponential_func = [lambda] __device__ (accscalar_t rand) {
-      return transformation::exponential<accscalar_t>(rand, lambda);
+      return static_cast<scalar_t>(transformation::exponential<accscalar_t>(rand, lambda));
     };
     uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, exponential_func);
    });
