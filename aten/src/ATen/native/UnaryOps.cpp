@@ -683,12 +683,14 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
   // torch.frexp is implemented for floating-point dtypes for now,
   // should add support for integral dtypes in the future.
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-              "frexp only supports floating-point dtypes");
+              "torch.frexp() only supports floating-point dtypes");
 
   TORCH_CHECK(mantissa.dtype() == self.dtype(),
-              "Expected mantissa to have dtype ", self.dtype(), " but got ", mantissa.dtype());
+              "torch.frexp() expects mantissa to have dtype ", self.dtype(),
+              " but got ", mantissa.dtype());
   TORCH_CHECK(exponent.dtype() == at::kInt,
-              "Expected exponent to have int dtype but got ", exponent.dtype());
+              "torch.frexp() expects exponent to have int dtype "
+              "but got ", exponent.dtype());
 
   auto iter = TensorIteratorConfig()
     .add_output(mantissa)

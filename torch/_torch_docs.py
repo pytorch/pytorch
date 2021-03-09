@@ -3257,9 +3257,9 @@ frexp(input, *, out=None) -> (Tensor mantissa, Tensor exponent)
 Decomposes :attr:`input` into mantissa and exponent tensors
 such that :math:`\text{input} = \text{mantissa} \times 2^{\text{exponent}}`.
 
-The range of mantissa is the open interval(-1, 1).
+The range of mantissa is the open interval (-1, 1).
 
-.. note:: This function requires inputs to be floating-point dtypes.
+Supports float inputs.
 
 Args:
     input (Tensor): the input tensor
@@ -3276,6 +3276,8 @@ Example::
     >>> tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
     >>> exponent
     >>> tensor([0, 1, 2, 2, 3, 3, 3, 3, 4], dtype=torch.int32)
+    >>> torch.ldexp(mantissa, exponent)
+    tensor([0., 1., 2., 3., 4., 5., 6., 7., 8.])
 """)
 
 add_docstr(torch.from_numpy,

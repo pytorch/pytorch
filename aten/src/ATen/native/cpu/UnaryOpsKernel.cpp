@@ -604,10 +604,10 @@ static void frexp_kernel(TensorIterator& iter) {
     "frexp_cpu", [&]() {
       cpu_kernel_multiple_outputs(
         iter,
-        [](scalar_t a) -> std::tuple<scalar_t, int> {
-          int exponent;
+        [](scalar_t a) -> std::tuple<scalar_t, int32_t> {
+          int32_t exponent;
           scalar_t mantissa = std::frexp(a, &exponent);
-          return std::tuple<scalar_t, int>(mantissa, exponent);
+          return std::tuple<scalar_t, int32_t>(mantissa, exponent);
         }
       );
   });

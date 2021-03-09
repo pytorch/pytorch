@@ -15,7 +15,7 @@ from torch.autograd.gradcheck import gradcheck, gradgradcheck
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
-from collections.abc import Sequence
+
 
 # Tests that apply to all operators
 
@@ -355,10 +355,7 @@ class TestCommon(JitCommonTestCase):
         def _test(tested_op):
             # call it with out=... and check we get the expected result
             out_kwargs = sample.kwargs.copy()
-            if isinstance(expected, Sequence):
-                out_kwargs['out'] = out = list(map(torch.empty_like, expected))
-            else:
-                out_kwargs['out'] = out = torch.empty_like(expected)
+            out_kwargs['out'] = out = torch.empty_like(expected)
             tested_op(*sample.input, *sample.args, **out_kwargs)
             self.assertEqual(expected, out)
 

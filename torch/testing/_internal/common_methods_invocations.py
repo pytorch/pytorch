@@ -1923,17 +1923,25 @@ op_db: List[OpInfo] = [
                    # skip testing torch.frexp as it is not supported by ROCm platform yet
                    decorators=[skipCUDAIfRocm],
                    test_inplace_grad=False,
+                   supports_tensor_out=False,
                    skips=(
-                       # skip OpInfo `test_reference_numerics_*` and `test_out_arg_all_dtypes`.
-                       # torch.frexp returns two tensors, a floating mantissa and a int32 exponent.
-                       # It is hard to update the above OpInfo tests to support testing two output tensors
-                       # with different dtype.
-                       # Test out-variants as well as extremal values with torch.frexp
-                       # in the specific test methods `test_frexp_reference_numerics` and `test_frexp_out`.
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
+                       # skips below tests as torch.frexp returns tuple-like (mantissa, exponent) as outputs,
+                       # while theses tests currently requires output to a single tensor.
+                       SkipInfo('TestUnaryUfuncs', 'test_batch_vs_slicing'),
+                       SkipInfo('TestUnaryUfuncs', 'test_contig_vs_every_other'),
+                       SkipInfo('TestUnaryUfuncs', 'test_contig_vs_transposed'),
+                       SkipInfo('TestUnaryUfuncs', 'test_non_contig_expand'),
+                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency'),
+
+                       # skips test_reference_numerics due to error in Windows CI.
+                       # The np.frexp returns exponent as np.intc dtype on Windows platform,
+                       # and np.intc does not have the correspond torch dtype
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                active_if=IS_WINDOWS),
                    )),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
