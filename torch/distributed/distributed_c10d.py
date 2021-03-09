@@ -398,6 +398,7 @@ def init_process_group(backend,
                        world_size=-1,
                        rank=-1,
                        store=None,
+                       pg_options=None,
                        group_name=''):
     """
     Initializes the default distributed process group, and this will also
@@ -493,6 +494,7 @@ def init_process_group(backend,
             [],
             Backend.MPI,
             None,
+            pg_options=pg_options,
             group_name=group_name,
             timeout=timeout))
     else:
@@ -510,6 +512,7 @@ def init_process_group(backend,
             [],
             backend,
             store,
+            pg_options=pg_options,
             group_name=group_name,
             timeout=timeout))
 
