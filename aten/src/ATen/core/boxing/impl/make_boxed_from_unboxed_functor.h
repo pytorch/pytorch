@@ -470,7 +470,9 @@ namespace impl {
   template<class OutputType, bool AllowDeprecatedTypes>
   struct push_outputs final {
     // Contrary to [Note: Argument forwarding in the dispatcher], we use OutputType&& here
-    // to avoid one extra call to the move constructor in this case.
+    // to avoid one extra call to the move constructor in this case. This is still not a
+    // universal reference though because OutputType is an explicitly specified class
+    // template parameter.
     static void call(OutputType&& output, Stack* stack) {
       torch::jit::push(*stack, return_to_ivalue<OutputType, AllowDeprecatedTypes>::call(std::forward<OutputType>(output)));
     }
