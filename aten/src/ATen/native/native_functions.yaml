@@ -1773,12 +1773,12 @@
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: fill_
+    CPU, CUDA: fill_
 
 - func: fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: fill_
+    CPU, CUDA: fill_
 
 - func: floor(Tensor self) -> Tensor
   variants: function, method
