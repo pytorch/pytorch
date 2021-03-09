@@ -18,6 +18,11 @@ from sys import platform
 
 import torch
 import torch.distributed as c10d
+
+if not c10d.is_available():
+    print("c10d not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
@@ -55,10 +60,6 @@ from torch.testing._internal.common_utils import (
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
 
 
 if platform == "darwin":
@@ -464,6 +465,7 @@ class RendezvousTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
+    @unittest.skipIf(True, "https://github.com/pytorch/pytorch/issues/53526")
     @retry_on_connect_failures
     @requires_nccl()
     def test_common_errors(self):
@@ -4710,11 +4712,11 @@ class CommTest(MultiProcessTestCase):
     def test_distributed_debug_mode(self):
         # Default should be off
         default_debug_mode = dist._get_debug_mode()
-        self.assertEqual(default_debug_mode, dist._DistributedDebugMode.OFF)
+        self.assertEqual(default_debug_mode, dist._DistributedDebugLevel.OFF)
         mapping = {
-            "OFF": dist._DistributedDebugMode.OFF,
-            "INFO": dist._DistributedDebugMode.INFO,
-            "DETAIL": dist._DistributedDebugMode.DETAIL,
+            "OFF": dist._DistributedDebugLevel.OFF,
+            "INFO": dist._DistributedDebugLevel.INFO,
+            "DETAIL": dist._DistributedDebugLevel.DETAIL,
         }
         invalid_debug_modes = ["foo", 0, 1, -1]
 
@@ -4729,9 +4731,8 @@ class CommTest(MultiProcessTestCase):
 
         for mode in invalid_debug_modes:
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-            with self.assertRaisesRegex(ValueError, f"Invalid value {str(mode)}"):
+            with self.assertRaisesRegex(RuntimeError, "to be one of"):
                 dist._get_debug_mode()
-
 
 if __name__ == "__main__":
     assert (
