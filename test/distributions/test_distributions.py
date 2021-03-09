@@ -4526,15 +4526,21 @@ class TestValidation(TestCase):
                 d_nonval = Dist(validate_args=False, **param)
                 d_val = Dist(validate_args=True, **param)
                 for v in torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0]):
+                    # samples with incorrect shape must throw ValueError only
                     try:
                         log_prob = d_val.log_prob(v)
-                    except IndexError:
+                    except ValueError:
                         pass
+                    # get sample of correct shape
+                    val = torch.full(d_val.batch_shape + d_val.event_shape, v)
+                    # check samples with incorrect support
+                    try:
+                        log_prob = d_val.log_prob(val)
                     except ValueError as e:
                         if e.args and 'must be within the support' in e.args[0]:
                             try:
-                                log_prob = d_nonval.log_prob(v)
-                            except (IndexError, RuntimeError):
+                                log_prob = d_nonval.log_prob(val)
+                            except RuntimeError:
                                 pass
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
