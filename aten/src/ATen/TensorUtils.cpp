@@ -342,15 +342,15 @@ size_t computeStorageNbytes(
 //    ``numel'', i.e., number of subspaces, as the corresponding chunk of
 //    `oldshape`.
 //
-// Note: generates instances for DimVector and IntArrayRef use cases,
+// templatized for DimVector and IntArrayRef use cases,
 // see overloads of computeStride() below.
 //
-template <class ResultVec, class NewShapeVec>
+template <typename ResultVec, typename NewShapeVec>
 inline c10::optional<ResultVec> computeStride_impl(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     const NewShapeVec& newshape,
-    ResultVec oldStrideToResult(const IntArrayRef&)
+    ResultVec toResult(const IntArrayRef&)
 ) {
   if (oldshape.empty()) {
     return ResultVec(newshape.size(), 1);
@@ -363,7 +363,7 @@ inline c10::optional<ResultVec> computeStride_impl(
   // didn't seem worth it.
   const int64_t numel = c10::multiply_integers(oldshape);
   if (numel == 0 && oldshape.equals(newshape)) {
-    return oldStrideToResult(oldstride);
+    return toResult(oldstride);
   }
 
   ResultVec newstride(newshape.size());

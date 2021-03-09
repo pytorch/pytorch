@@ -222,6 +222,10 @@ jobs:
         when: always
     - store_test_results:
         path: test-reports
+    - store_artifacts:
+        path: test/.coverage
+    - store_artifacts:
+        path: test/coverage.xml
 
   pytorch_windows_build:
     <<: *pytorch_windows_params

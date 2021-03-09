@@ -8,8 +8,14 @@
 
 namespace at {
 
-template <class Vec>
-inline void infer_size_impl(Vec &res, IntArrayRef shape, int64_t numel) {
+// Infers the size of a dim with size -1, if it exists. Also checks that new
+// shape is compatible with the number of elements.
+//
+// templated to handle std::vector<int64_t> and DimVector use cases, see
+// below
+//
+template <typename ResultVec>
+inline void infer_size_impl(ResultVec &res, IntArrayRef shape, int64_t numel) {
   int64_t newsize = 1;
   auto infer_dim = c10::optional<int64_t>();
   for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
@@ -48,8 +54,6 @@ inline void infer_size_impl(Vec &res, IntArrayRef shape, int64_t numel) {
   throw std::runtime_error(ss.str());
 }
 
-// Infers the size of a dim with size -1, if it exists. Also checks that new
-// shape is compatible with the number of elements.
 inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
   auto res = shape.vec();
   infer_size_impl(res, shape, numel);

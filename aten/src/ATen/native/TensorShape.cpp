@@ -980,8 +980,10 @@ Tensor tile(const Tensor& self, IntArrayRef reps){
   return self.repeat(reps);
 }
 
-// Vec = ArrayRef<int64_t>, SmallVector<int64_t>
-template<typename Vec>
+//
+// templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
+//
+template <typename Vec>
 Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Vec& sizes,

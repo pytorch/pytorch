@@ -16,7 +16,7 @@ at::Tensor& copy_from_metal_(at::Tensor& dst, const at::Tensor& src) {
       src.device().type() == DeviceType::Metal,
       "copy_from_metal input tensor's device is not metal");
   TORCH_INTERNAL_ASSERT(
-      dst.device().type() == DeviceType::CPU,
+      dst.device().is_cpu(),
       "copy_from_metal is implemented only for CPU device output");
   TORCH_INTERNAL_ASSERT(
       dst.layout() == Layout::Strided,
@@ -39,7 +39,7 @@ at::Tensor& copy_to_metal_(at::Tensor& dst, const at::Tensor& src) {
       dst.device().type() == DeviceType::Metal,
       "copy_to_metal_ output tensor's device is not metal");
   TORCH_INTERNAL_ASSERT(
-      src.device().type() == DeviceType::CPU,
+      src.device().is_cpu(),
       "copy_to_metal_ is implemented only for CPU device input");
   TORCH_INTERNAL_ASSERT(
       src.layout() == Layout::Strided,

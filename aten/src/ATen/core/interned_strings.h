@@ -303,6 +303,8 @@ namespace c10 {
   _(aten, swapdims_)                 \
   _(aten, movedim)                   \
   _(aten, moveaxis)                  \
+  _(aten, lgamma)                    \
+  _(aten, special_gammaln)           \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \

@@ -74,9 +74,14 @@ class QuantizeHandler(ABC):
         return NotImplemented
 
 @register_quant_pattern(operator.add)
+@register_quant_pattern(operator.sub)
 @register_quant_pattern(operator.mul)
+@register_quant_pattern(operator.truediv)
 @register_quant_pattern(torch.add)
+@register_quant_pattern(torch.sub)
 @register_quant_pattern(torch.mul)
+@register_quant_pattern(torch.div)
+@register_quant_pattern(torch.sum)
 @register_quant_pattern(torch.bmm)
 @register_quant_pattern((torch.nn.ReLU, operator.add))
 @register_quant_pattern((torch.nn.ReLU, operator.mul))
@@ -138,6 +143,11 @@ class BinaryOp(QuantizeHandler):
             operator.mul: all_bop_dtypes,
             torch.mul: all_bop_dtypes,
             torch.bmm: float16_dtypes,
+            torch.sub: float16_dtypes,
+            operator.sub: float16_dtypes,
+            torch.div: float16_dtypes,
+            operator.truediv: float16_dtypes,
+            torch.sum: float16_dtypes
         }
 
         qconfig = quantizer.qconfig_map[node.name]
@@ -700,13 +710,22 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.InstanceNorm2d)
 @register_quant_pattern(torch.nn.InstanceNorm3d)
 @register_quant_pattern(torch.nn.LayerNorm)
+@register_quant_pattern(torch.nn.SiLU)
 @register_quant_pattern(torch.nn.functional.hardswish)
 @register_quant_pattern(torch.nn.functional.instance_norm)
 @register_quant_pattern(torch.nn.functional.layer_norm)
 @register_quant_pattern(torch.nn.functional.leaky_relu)
+@register_quant_pattern(torch.nn.functional.silu)
 class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
+    def __init__(self, quantizer: QuantizerCls, node: Node):
+        super().__init__(quantizer, node)
+        if node.op == "call_function" or node.op == "call_method":
+            self.op = node.target
+        elif node.op == "call_module":
+            self.op = type(quantizer.modules[node.target])
+
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -717,41 +736,83 @@ class DefaultNode(QuantizeHandler):
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
         additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
-        activation_post_process = quantizer.activation_post_process_map[node.name]
-        if node.op == 'call_module':
-            module = quantizer.modules[node.target]
-            module.activation_post_process = activation_post_process
-            quantized_module_cls = get_static_quant_module_class(
-                type(module), additional_static_quant_mapping)
-            quantized_module = quantized_module_cls.from_float(module)
-            parent_name, name = _parent_name(node.target)
-            setattr(quantizer.modules[parent_name], name, quantized_module)
-            return quantizer.quantized_graph.create_node(
-                'call_module',
-                node.target,
-                load_arg(quantized=[0])(node.args),
-                load_arg(quantized=False)(node.kwargs))
+
+        all_dtypes = [
+            (torch.quint8, torch.qint8, None),
+            (torch.float16, torch.float16, None)
+        ]
+        int8_dtypes = [
+            (torch.quint8, torch.qint8, None)
+        ]
+        fp16_dtypes = [
+            (torch.float16, torch.float16, None)
+        ]
+        supported_dtypes = {
+            torch.nn.ConvTranspose1d: int8_dtypes,
+            torch.nn.ConvTranspose2d: int8_dtypes,
+            torch.nn.ELU: int8_dtypes,
+            torch.nn.LeakyReLU: int8_dtypes,
+            torch.nn.Hardswish: int8_dtypes,
+            torch.nn.InstanceNorm1d: int8_dtypes,
+            torch.nn.InstanceNorm2d: int8_dtypes,
+            torch.nn.InstanceNorm3d: int8_dtypes,
+            torch.nn.LayerNorm: all_dtypes,
+            torch.nn.SiLU: fp16_dtypes,
+            torch.nn.functional.hardswish: int8_dtypes,
+            torch.nn.functional.instance_norm: int8_dtypes,
+            torch.nn.functional.layer_norm: all_dtypes,
+            torch.nn.functional.leaky_relu: int8_dtypes,
+            torch.nn.functional.silu: fp16_dtypes,
+        }
+        qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        if dtypes not in supported_dtypes[self.op]:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by {} "
+                "supported dtype combinations are: {}".format(dtypes, self.op, supported_dtypes[self.op]))
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+
+        # TODO: make helper functions for (torch.quint8, torch.qint8, None)
+        if dtypes in [(torch.quint8, torch.qint8, None)]:
+            activation_post_process = quantizer.activation_post_process_map[node.name]
+            if node.op == 'call_module':
+                module = quantizer.modules[node.target]
+                module.activation_post_process = activation_post_process
+                quantized_module_cls = get_static_quant_module_class(
+                    type(module), additional_static_quant_mapping)
+                quantized_module = quantized_module_cls.from_float(module)
+                parent_name, name = _parent_name(node.target)
+                setattr(quantizer.modules[parent_name], name, quantized_module)
+                return quantizer.quantized_graph.create_node(
+                    'call_module',
+                    node.target,
+                    load_arg(quantized=[0])(node.args),
+                    load_arg(quantized=False)(node.kwargs))
+            else:
+                assert node.op == "call_function"
+                # call_function
+                scale, zero_point = activation_post_process.calculate_qparams()
+                scale = float(scale)
+                zero_point = int(zero_point)
+
+                scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+
+                assert not isinstance(node.target, str), "Expecting node.target for "
+                "call_function to be a function instead of a string"
+                quantized_op = get_quantized_operator(node.target)
+                args = load_arg(quantized=[0])(node.args)
+                kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale_arg, "output_zero_point": zero_point_arg}
+                if quantized_op in ARGS_TO_SKIP:
+                    args_to_skip = ARGS_TO_SKIP[quantized_op]
+                    for arg in args_to_skip:
+                        if arg in kwargs:
+                            kwargs.pop(arg)
+                return quantizer.quantized_graph.create_node(
+                    "call_function", quantized_op, args, kwargs)
         else:
-            assert node.op == "call_function"
-            # call_function
-            scale, zero_point = activation_post_process.calculate_qparams()
-            scale = float(scale)
-            zero_point = int(zero_point)
-
-            scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
-
-            assert not isinstance(node.target, str), "Expecting node.target for "
-            "call_function to be a function instead of a string"
-            quantized_op = get_quantized_operator(node.target)
-            args = load_arg(quantized=[0])(node.args)
-            kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale_arg, "output_zero_point": zero_point_arg}
-            if quantized_op in ARGS_TO_SKIP:
-                args_to_skip = ARGS_TO_SKIP[quantized_op]
-                for arg in args_to_skip:
-                    if arg in kwargs:
-                        kwargs.pop(arg)
-            return quantizer.quantized_graph.create_node(
-                "call_function", quantized_op, args, kwargs)
+            assert dtypes == (torch.float16, torch.float16, None)
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
 @register_quant_pattern(torch.nn.functional.elu)
@@ -789,7 +850,13 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+        qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        if dtypes == (torch.float16, torch.float16, None):
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+        else:
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
 
 # these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.AdaptiveAvgPool1d)

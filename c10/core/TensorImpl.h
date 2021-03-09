@@ -884,7 +884,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_and_strides_.set_sizes(new_size);
 
     if (new_dim > 0) {
-      for (size_t dim = new_dim - 1; dim > 0; dim--) {
+      for (size_t dim = new_dim - 1; ; dim--) {
         if (new_stride[dim] >= 0) {
           sizes_and_strides_.stride_at_unchecked(dim) = new_stride[dim];
         } else {
@@ -900,6 +900,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
               sizes_and_strides_.stride_at_unchecked(dim + 1);
           }
         }
+        if (dim == 0) break;
       }
     }
 
@@ -976,7 +977,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return named_tensor_meta_.get();
   }
 
-  bool has_named_tensor_meta() {
+  bool has_named_tensor_meta() const {
     return named_tensor_meta_ != nullptr;
   }
 

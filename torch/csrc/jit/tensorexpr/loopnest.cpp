@@ -478,7 +478,7 @@ void LoopNest::vectorize(For* f) {
     new_f = old_f;
   }
 
-  b->replace_stmt(f, new_f);
+  b->replace_stmt(f, IRSimplifier::simplify(new_f));
 }
 
 class Flattener : public IRMutator {
@@ -1472,16 +1472,18 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
     throw malformed_input("unroll attempted on loop with no parent");
   }
 
-  if (!f->start()->isConstant()) {
+  auto start_expr = IRSimplifier::simplify(f->start());
+  auto stop_expr = IRSimplifier::simplify(f->stop());
+  if (!start_expr->isConstant()) {
     throw std::runtime_error("Can't unroll due to non-constant loop start!");
   }
-  if (!f->stop()->isConstant()) {
+  if (!stop_expr->isConstant()) {
     throw std::runtime_error("Can't unroll due to non-constant loop stop!");
   }
 
   std::vector<Stmt*> unrolled_stmts;
-  int start_val = immediateAs<int>(f->start());
-  int stop_val = immediateAs<int>(f->stop());
+  int start_val = immediateAs<int>(start_expr);
+  int stop_val = immediateAs<int>(stop_expr);
   for (int current = start_val; current < stop_val; ++current) {
     for (const auto stmt : f->body()->stmts()) {
       auto stmt_copy = Stmt::clone(stmt);
