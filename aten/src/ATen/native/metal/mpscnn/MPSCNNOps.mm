@@ -1,5 +1,4 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
-#import <ATen/native/metal/MetalTensor.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalUtils.h>
 #import <ATen/native/metal/mpscnn/MPSCNN.h>
@@ -21,11 +20,11 @@ namespace native {
 namespace metal {
 namespace mpscnn {
 
-using MetalTensor = at::native::metal::MetalTensor;
-using MetalTensorImpl = at::MetalTensorImpl<MetalTensor>;
+using MetalTensorImplStorage = at::native::metal::MetalTensorImplStorage;
+using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 
 API_AVAILABLE(ios(10.0), macos(10.13))
-static inline MPSImage* imageFromMetalTensor(const MetalTensor& tensor) {
+static inline MPSImage* imageFromMetalTensorImplStorage(const MetalTensorImplStorage& tensor) {
   return tensor.texture()->image();
 }
 
@@ -33,8 +32,8 @@ API_AVAILABLE(ios(10.0), macos(10.13))
 static inline MPSImage* imageFromTensor(const Tensor& tensor) {
   TORCH_CHECK(tensor.is_metal());
   MetalTensorImpl* impl = (MetalTensorImpl*)tensor.unsafeGetTensorImpl();
-  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
-  return imageFromMetalTensor(metalTensor);
+  MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
+  return imageFromMetalTensorImplStorage(implStorage);
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
@@ -42,8 +41,8 @@ static inline MetalCommandBuffer* commandBufferFromInputTensor(
     const Tensor& tensor) {
   TORCH_CHECK(tensor.is_metal());
   MetalTensorImpl* impl = (MetalTensorImpl*)tensor.unsafeGetTensorImpl();
-  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
-  MetalCommandBuffer* cmdBuffer = metalTensor.texture()->commandBuffer();
+  MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
+  MetalCommandBuffer* cmdBuffer = implStorage.texture()->commandBuffer();
   TORCH_CHECK(cmdBuffer, @"The Metal command buffer can't be nil!");
   return cmdBuffer;
 }
@@ -71,12 +70,12 @@ Tensor conv2d(
                                      bias:b
                              neuronFilter:t];
   auto outputSize = params.output_sizes();
-  MetalTensor mt{outputSize};
+  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   [op encode:commandBuffer.buffer sourceImage:X destinationImage:Y];
-  auto output = MetalTensor::toTensor(std::move(mt), input.options());
+  auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
 
@@ -105,10 +104,10 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
   }
 
   auto outputSize = params.output_sizes();
-  MetalTensor mt{outputSize};
+  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
-  MPSImage* Y1 = imageFromMetalTensor(mt);
+  MPSImage* Y1 = imageFromMetalTensorImplStorage(mt);
   [op encode:commandBuffer.buffer sourceImage:X destinationImage:Y1];
   // fuse hardtanh with convolution
   if (nt == NeuronType::Clamp) {
@@ -121,7 +120,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
     [clampOp encode:commandBuffer.buffer];
     mt.texture()->copyFromTexture(Y2);
   }
-  auto output = MetalTensor::toTensor(std::move(mt), input.options());
+  auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
 
@@ -162,14 +161,14 @@ Tensor max_pool2d(
   int64_t oW = pooling_output_shape(iW, kW, pW, sW, dW, ceil_mode);
 
   std::vector<int64_t> outputSize{oN, oC, oH, oW};
-  MetalTensor mt{outputSize};
+  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   [pool encodeToCommandBuffer:commandBuffer.buffer
                   sourceImage:X
              destinationImage:Y];
-  auto output = MetalTensor::toTensor(std::move(mt), input.options());
+  auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
 
@@ -188,14 +187,14 @@ Tensor global_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
                    .z = 0}];
   std::vector<int64_t> outputSize{
       input.sizes()[0], input.sizes()[1], output_size[0], output_size[1]};
-  MetalTensor mt{outputSize};
+  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   [pool encodeToCommandBuffer:commandBuffer.buffer
                   sourceImage:X
              destinationImage:Y];
-  auto output = MetalTensor::toTensor(std::move(mt), input.options());
+  auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
 
@@ -207,14 +206,14 @@ Tensor neuronKernel(const Tensor& input, MPSCNNNeuron* neuron) {
   if (input.dim() == 2) {
     textureSize = {outputSize[0], outputSize[1], 1, 1};
   }
-  MetalTensor mt{outputSize};
+  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(textureSize, commandBuffer);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   [neuron encodeToCommandBuffer:commandBuffer.buffer
                     sourceImage:X
                destinationImage:Y];
-  auto output = MetalTensor::toTensor(std::move(mt), input.options());
+  auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
 
@@ -233,8 +232,8 @@ Tensor& neuronKernel_(Tensor& input, MPSCNNNeuron* neuron) {
                     sourceImage:X
                destinationImage:Y];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
-  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
-  metalTensor.texture()->copyFromTexture(Y);
+  MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
+  implStorage.texture()->copyFromTexture(Y);
   return input;
 }
 
@@ -261,10 +260,10 @@ Tensor& hardsigmoid_(Tensor& input) {
   if (input.dim() == 2) {
     textureSize = {outputSize[0], outputSize[1], 1, 1};
   }
-  MetalTensor mt{outputSize};
+  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(textureSize, commandBuffer);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   static dispatch_once_t onceToken;
   static MPSCNNNeuronHardSigmoid* neuron = nil;
   dispatch_once(&onceToken, ^{
@@ -277,8 +276,8 @@ Tensor& hardsigmoid_(Tensor& input) {
                     sourceImage:X
                destinationImage:Y];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
-  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
-  metalTensor.texture()->copyFromTexture(Y);
+  MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
+  implStorage.texture()->copyFromTexture(Y);
   return input;
 }
 
@@ -299,8 +298,8 @@ Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
                                                      Args:@[ @(min), @(max) ]];
   [clampOp encode:commandBuffer.buffer];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
-  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
-  metalTensor.texture()->copyFromTexture(Y);
+  MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
+  implStorage.texture()->copyFromTexture(Y);
   return input;
 }
 
@@ -335,8 +334,8 @@ Tensor& hardswish_(Tensor& input) {
   [encoder endEncoding];
   [X markRead];
   MetalTensorImpl* impl = (MetalTensorImpl*)input.unsafeGetTensorImpl();
-  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
-  metalTensor.texture()->copyFromTexture(Y);
+  MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
+  implStorage.texture()->copyFromTexture(Y);
   return input;
 }
 
@@ -382,15 +381,15 @@ Tensor addmm(const Tensor& bias, const Tensor& input, const Tensor& weight) {
                  .y = static_cast<NSInteger>(X.height / 2),
                  .z = 0}];
   std::vector<int64_t> outputSize = {N, oC, 1, 1};
-  MetalTensor mt{{N, oC}};
+  MetalTensorImplStorage mt{{N, oC}};
 
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(outputSize, commandBuffer);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   [fc encodeToCommandBuffer:commandBuffer.buffer
                 sourceImage:X
            destinationImage:Y];
-  auto output = MetalTensor::toTensor(std::move(mt), input.options());
+  auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
 
@@ -416,12 +415,12 @@ Tensor binaryElementwiseShaderKernel(
   if (broadCastFirstInput(input1, input2)) {
     outputSize = input2.sizes().vec();
   }
-  MetalTensor mt{outputSize};
+  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
   TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
       pipelineState:kernelFor(X1, arrayKernel, nonarrayKernel)];
   id<MTLComputeCommandEncoder> encoder = [cb1.buffer computeCommandEncoder];
@@ -435,7 +434,7 @@ Tensor binaryElementwiseShaderKernel(
   [encoder endEncoding];
   [X1 markRead];
   [X2 markRead];
-  auto output = MetalTensor::toTensor(std::move(mt), input1.options());
+  auto output = makeTensor(std::move(mt), input1.options());
   return output;
 }
 
@@ -469,8 +468,8 @@ Tensor& binaryElementwiseShaderKernel_(
   [X1 markRead];
   [X2 markRead];
   MetalTensorImpl* impl = (MetalTensorImpl*)input1.unsafeGetTensorImpl();
-  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
-  metalTensor.texture()->copyFromTexture(Y);
+  MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
+  implStorage.texture()->copyFromTexture(Y);
   return input1;
 }
 
@@ -485,12 +484,12 @@ Tensor binaryElementwiseMPSCNNKernel(
   if (broadCastFirstInput(input1, input2)) {
     outputSize = input2.sizes().vec();
   }
-  MetalTensor mt{outputSize};
+  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
   TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   T* kernel = [[T alloc]
       initWithDevice:[MPSCNNContext sharedInstance].device];
   kernel.primaryStrideInPixelsY = (NSUInteger)(input1.sizes()[2] == 1 ? 0 : 1);
@@ -501,7 +500,7 @@ Tensor binaryElementwiseMPSCNNKernel(
       primaryImage:X1
       secondaryImage:X2
       destinationImage:Y];
-  auto output = MetalTensor::toTensor(std::move(mt), input1.options());
+  auto output = makeTensor(std::move(mt), input1.options());
   return output;
 }
 
@@ -516,12 +515,12 @@ Tensor& binaryElementwiseMPSCNNKernel_(
   if (broadCastFirstInput(input1, input2)) {
     outputSize = input2.sizes().vec();
   }
-  MetalTensor mt{outputSize};
+  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* cb1 = commandBufferFromInputTensor(input1);
   MetalCommandBuffer* cb2 = commandBufferFromInputTensor(input2);
   TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   T* kernel = [[T alloc]
       initWithDevice:[MPSCNNContext sharedInstance].device];
   [kernel encodeToCommandBuffer:cb1.buffer
@@ -529,8 +528,8 @@ Tensor& binaryElementwiseMPSCNNKernel_(
       secondaryImage:X2
       destinationImage:Y];
   MetalTensorImpl* impl = (MetalTensorImpl*)input1.unsafeGetTensorImpl();
-  MetalTensor& metalTensor = impl->unsafe_opaque_handle();
-  metalTensor.texture()->copyFromTexture(Y);
+  MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
+  implStorage.texture()->copyFromTexture(Y);
   return input1;
 }
 
@@ -591,17 +590,17 @@ Tensor t(const Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   TORCH_CHECK(X.numberOfImages == 1);
   TORCH_CHECK(X.featureChannels == 1);
-  MetalTensor mt({sizes[1], sizes[0]});
+  MetalTensorImplStorage mt({sizes[1], sizes[0]});
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(
       {1, 1, sizes[1], sizes[0]}, commandBuffer);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   MPSImageTranspose* transpose = [[MPSImageTranspose alloc]
       initWithDevice:[MPSCNNContext sharedInstance].device];
   [transpose encodeToCommandBuffer:commandBuffer.buffer
                        sourceImage:X
                   destinationImage:Y];
-  auto output = MetalTensor::toTensor(std::move(mt), input.options());
+  auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
 
@@ -619,10 +618,10 @@ Tensor view(const Tensor& input, IntArrayRef size) {
 
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
-  MetalTensor mt{inferred_size, stride_value};
+  MetalTensorImplStorage mt{inferred_size, stride_value};
   mt.texture()->setCommandBuffer(commandBuffer);
   mt.texture()->copyFromTexture(X);
-  auto output = MetalTensor::toTensor(std::move(mt), input.options());
+  auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
 
@@ -638,15 +637,15 @@ Tensor log_softmax_int(const Tensor& input) {
   MPSCNNLogSoftMax* logSoftmax = [[MPSCNNLogSoftMax alloc]
       initWithDevice:[MPSCNNContext sharedInstance].device];
 
-  MetalTensor mt{outputSize};
+  MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(
       {outputSize[0], outputSize[1], 1, 1}, commandBuffer);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   [logSoftmax encodeToCommandBuffer:commandBuffer.buffer
                         sourceImage:X
                    destinationImage:Y];
-  auto output = MetalTensor::toTensor(std::move(mt), input.options());
+  auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
 
@@ -677,10 +676,10 @@ Tensor upsample_nearest2d_vec(
   std::vector<int64_t> outputSizes{
       nbatch, channels, output_height, output_width};
   MPSImage* X = imageFromTensor(input);
-  MetalTensor mt{outputSizes};
+  MetalTensorImplStorage mt{outputSizes};
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(outputSizes, commandBuffer);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   if (@available(iOS 11.0, *)) {
     MPSCNNUpsamplingNearest* kernel = [[MPSCNNUpsamplingNearest alloc]
         initWithDevice:[MPSCNNContext sharedInstance].device
@@ -715,7 +714,7 @@ Tensor upsample_nearest2d_vec(
     [X markRead];
     [Y markRead];
   }
-  auto output = MetalTensor::toTensor(std::move(mt), input.options());
+  auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
 
@@ -748,10 +747,10 @@ Tensor flatten_using_ints(
   return input.reshape(shape);
 }
 
-Tensor cat_batch(const TensorList tensors, MetalTensor& mt) {
+Tensor cat_batch(const TensorList tensors, MetalTensorImplStorage& mt) {
   at::Tensor tensor = tensors[0];
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(tensor);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
 
   ushort cat_dim4_pointer = 0;
   for (int i = 0; i < tensors.size(); ++i) {
@@ -784,14 +783,14 @@ Tensor cat_batch(const TensorList tensors, MetalTensor& mt) {
     cat_dim4_pointer += t.size(0)*((t.size(1) + 3)/4);
   }
 
-  auto output = MetalTensor::toTensor(std::move(mt), tensor.options());
+  auto output = makeTensor(std::move(mt), tensor.options());
   return output;
 }
 
-Tensor cat_feature(const TensorList tensors, MetalTensor& mt) {
+Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
   at::Tensor tensor = tensors[0];
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(tensor);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
 
   ushort channel_offset = 0;
   ushort channel4_offset = 0;
@@ -854,12 +853,12 @@ Tensor cat_feature(const TensorList tensors, MetalTensor& mt) {
     channel_offset += X.featureChannels;
   }
 
-  auto output = MetalTensor::toTensor(std::move(mt), tensor.options());
+  auto output = makeTensor(std::move(mt), tensor.options());
   return output;
 }
 
 Tensor cat(const TensorList tensors, int64_t dim) {
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       dim == 0 || dim == 1,
       "Metal cat is implemented only for batch dimension");
   int64_t cat_dim_size = 0;
@@ -867,15 +866,15 @@ Tensor cat(const TensorList tensors, int64_t dim) {
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(tensor);
   for (int i = 0; i < tensors.size(); ++i) {
     const auto& t = tensors[i];
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
         t.dim() == 4, "Metal cat expects 4 dimensional inputs");
-    TORCH_INTERNAL_ASSERT(t.is_metal(), "Metal cat expects metal tensors");
+    TORCH_CHECK(t.is_metal(), "Metal cat expects metal tensors");
 
     for (int d = 0; d < 4; ++d) {
       if (d == dim) {
         continue;
       }
-      TORCH_INTERNAL_ASSERT(
+      TORCH_CHECK(
           t.size(d) == tensor.size(d),
           "Metal cat inputs must have matching sizes except concatenated dimension");
     }
@@ -883,8 +882,8 @@ Tensor cat(const TensorList tensors, int64_t dim) {
   }
   auto result_size = tensor.sizes().vec();
   result_size[dim] = cat_dim_size;
-  TORCH_INTERNAL_ASSERT(result_size[0] * ((result_size[1] + 3)/4) > 1, "Output tensor must be a texture array");
-  MetalTensor mt{result_size};
+  TORCH_CHECK(result_size[0] * ((result_size[1] + 3)/4) > 1, "Output tensor must be a texture array");
+  MetalTensorImplStorage mt{result_size};
   mt.texture()->setCommandBuffer(commandBuffer);
   mt.texture()->allocateTemporaryTextureStorage(result_size, commandBuffer);
 
@@ -898,10 +897,10 @@ Tensor copy_to_host(const Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   auto&& sizes = [X sizes];
-  MetalTensor mt{sizes};
+  MetalTensorImplStorage mt{sizes};
   mt.texture()->setCommandBuffer(commandBuffer);
   mt.texture()->allocateTextureStorage(sizes);
-  MPSImage* Y = imageFromMetalTensor(mt);
+  MPSImage* Y = imageFromMetalTensorImplStorage(mt);
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
@@ -923,7 +922,7 @@ Tensor copy_to_host(const Tensor& input) {
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
   [X markRead];
-  auto output = MetalTensor::toTensor(std::move(mt), input.options());
+  auto output = makeTensor(std::move(mt), input.options());
   return output;
 }
 

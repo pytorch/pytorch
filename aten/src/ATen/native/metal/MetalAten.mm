@@ -1,8 +1,8 @@
-#import <ATen/native/metal/MetalTensor.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
+#import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNOps.h>
-
+#import <ATen/native/metal/MetalUtils.h>
 #include <ATen/metal/Context.h>
 #include <torch/script.h>
 
@@ -28,8 +28,8 @@ at::Tensor& copy_from_metal_(at::Tensor& dst, const at::Tensor& src) {
       dst.is_contiguous(),
       "copy_from_metal is implemented only for contiguous output tensor");
 
-  MetalTensor& mtensor = MetalTensor::fromTensor(src);
-  mtensor.copy_data_to_host(dst.data_ptr<float>());
+  MetalTensorImplStorage& tensorImplStorage = getTensorImplStorage(src);
+  tensorImplStorage.copy_data_to_host(dst.data_ptr<float>());
   return dst;
 }
 
@@ -46,9 +46,10 @@ at::Tensor& copy_to_metal_(at::Tensor& dst, const at::Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       src.scalar_type() == ScalarType::Float,
       "copy_to_metal_ is implemented only for float dtype");
+
   auto cpu_tensor_contiguous = src.contiguous();
-  MetalTensor& mtensor = MetalTensor::fromTensor(dst);
-  mtensor.set_data_from_host(cpu_tensor_contiguous.data_ptr<float>());
+  MetalTensorImplStorage& tensorImplStorage = getTensorImplStorage(dst);
+  tensorImplStorage.set_data_from_host(cpu_tensor_contiguous.data_ptr<float>());
   return dst;
 }
 
@@ -80,8 +81,8 @@ Tensor empty(
   TORCH_CHECK(
       !memory_format.has_value(),
       "'memory_format' argument is incompatible with Metal tensor");
-  MetalTensor mt{size.vec()};
-  return MetalTensor::toTensor(
+  MetalTensorImplStorage mt{size.vec()};
+  return makeTensor(
       std::move(mt), at::device(at::kMetal).dtype(dtype));
 };
 
@@ -95,8 +96,8 @@ at::Tensor empty_strided(
   TORCH_CHECK(
       !pin_memory.has_value() || !pin_memory.value(),
       "'pin_memory' argument is incompatible with Metal tensor");
-  MetalTensor mt{size.vec(), stride.vec()};
-  return MetalTensor::toTensor(
+  MetalTensorImplStorage mt{size.vec(), stride.vec()};
+  return makeTensor(
       std::move(mt), at::device(at::kMetal).dtype(dtype));
 }
 
