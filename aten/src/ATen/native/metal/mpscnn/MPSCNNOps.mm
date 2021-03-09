@@ -538,36 +538,50 @@ API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor add(const Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNAdd>(input1, input2);
+  } else {
+    // TODO: support broadcast in shader functions for iOS 10 users
+    TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
+    TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
+    return binaryElementwiseShaderKernel(
+        input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
   }
-  return binaryElementwiseShaderKernel(
-      input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor& add_(Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNAdd>(input1, input2);
+  } else {
+    // TODO: support broadcast in for iOS 10 users
+    TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
+    TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
+    return binaryElementwiseShaderKernel_(
+        input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
   }
-  return binaryElementwiseShaderKernel_(
-      input1, input2, @"elementwise_add", @"elementwise_add_nonarray");
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor sub(const Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNSubtract>(input1, input2);
+  } else {
+    // TODO: support non-broadcast for iOS 10 users
+    TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
+    return binaryElementwiseShaderKernel(
+        input1, input2, @"elementwise_sub", @"elementwise_sub_nonarray");
   }
-  return binaryElementwiseShaderKernel(
-      input1, input2, @"elementwise_sub", @"elementwise_sub_nonarray");
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor mul(const Tensor& input1, const Tensor& input2) {
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNMultiply>(input1, input2);
+  } else {
+    // TODO: support non-broadcast for iOS 10 users
+    TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
+    return binaryElementwiseShaderKernel(
+        input1, input2, @"elementwise_mul", @"elementwise_mul_nonarray");
   }
-  return binaryElementwiseShaderKernel(
-      input1, input2, @"elementwise_mul", @"elementwise_mul_nonarray");
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))

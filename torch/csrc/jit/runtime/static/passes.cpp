@@ -332,6 +332,14 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
         at::native::copy_(out, self);
         return out.permute(dims);
       });
+  m.def(
+      "static_runtime::to_copy(Tensor self, ScalarType dtype, bool non_blocking, bool copy) -> Tensor",
+      [](at::Tensor self, at::ScalarType dtype, bool non_blocking, bool copy)
+          -> at::Tensor {
+        at::Tensor out = at::empty_like(self);
+        at::native::copy_(out, self);
+        return out.to(dtype, non_blocking, copy);
+      });
 }
 
 void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -357,7 +365,9 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
       {c10::Symbol::fromQualString("aten::permute"),
        c10::Symbol::fromQualString("static_runtime::permute_copy")},
       {c10::Symbol::fromQualString("aten::narrow"),
-       c10::Symbol::fromQualString("aten::narrow_copy")}};
+       c10::Symbol::fromQualString("aten::narrow_copy")},
+      {c10::Symbol::fromQualString("aten::to"),
+       c10::Symbol::fromQualString("static_runtime::to_copy")}};
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto* n : graph->nodes()) {
     if (!supported.count(n->kind())) {
