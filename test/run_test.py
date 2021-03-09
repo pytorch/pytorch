@@ -22,6 +22,7 @@ from typing import Dict, Optional, Tuple, List, Any
 try:
     import boto3  # type: ignore[import]
     import botocore  # type: ignore[import]
+    import botocore.exceptions  # type: ignore[import]
     HAVE_BOTO3 = True
 except ImportError:
     HAVE_BOTO3 = False
@@ -238,7 +239,7 @@ WINDOWS_COVERAGE_BLOCKLIST = [
 # touched any related files first. This list was manually generated, but for every
 # run with --determine-from, we use another generated list based on this one and the
 # previous test stats.
-SLOW_TESTS = [
+TARGET_DET_LIST = [
     'distributions/test_distributions',
     'test_nn',
     'test_autograd',
@@ -302,6 +303,10 @@ SLOW_TESTS = [
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
 ]
+
+# if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
+SLOW_TEST_THRESHOLD = 300
+
 _DEP_MODULES_CACHE: Dict[str, set] = {}
 
 DISTRIBUTED_TESTS_CONFIG = {}
@@ -367,21 +372,26 @@ def get_test_time_reports_from_S3() -> List[Dict[str, Any]]:
 
     job = os.environ.get("CIRCLE_JOB", "")
     job_minus_shard_number = job.rstrip('0123456789')
-    s3 = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
-    bucket = s3.Bucket(name="ossci-metrics")
 
-    reports = []
-    commit_index = 0
-    while len(reports) == 0 and commit_index < len(nightly_commits):
-        nightly_commit = nightly_commits[commit_index]
-        print(f'Grabbing reports from nightly commit: {nightly_commit}')
-        summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{job_minus_shard_number}")
-        for summary in summaries:
-            binary = summary.get()["Body"].read()
-            string = bz2.decompress(binary).decode("utf-8")
-            reports.append(json.loads(string))
-        commit_index += 1
-    return reports
+    try:
+        s3 = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
+        bucket = s3.Bucket(name="ossci-metrics")
+
+        reports = []
+        commit_index = 0
+        while len(reports) == 0 and commit_index < len(nightly_commits):
+            nightly_commit = nightly_commits[commit_index]
+            print(f'Grabbing reports from nightly commit: {nightly_commit}')
+            summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{job_minus_shard_number}")
+            for summary in summaries:
+                binary = summary.get()["Body"].read()
+                string = bz2.decompress(binary).decode("utf-8")
+                reports.append(json.loads(string))
+            commit_index += 1
+        return reports
+    except botocore.exceptions.ClientError as err:
+        print('Error Message: {}'.format(err.response['Error']['Message']))
+        return []
 
 
 def calculate_job_times(reports: List[Dict[str, Any]]) -> Dict[str, Tuple[float, int]]:
@@ -432,11 +442,7 @@ def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, Tup
 
 def pull_job_times_from_S3() -> Dict[str, Tuple[float, int]]:
     if HAVE_BOTO3:
-        try:
-            s3_reports = get_test_time_reports_from_S3()
-        except (RuntimeError, RuntimeWarning):
-            print('Ran into issues downloading reports from S3.')
-            s3_reports = []
+        s3_reports = get_test_time_reports_from_S3()
     else:
         print('Please install boto3 to enable using S3 test times for automatic sharding and test categorization.')
         s3_reports = []
@@ -466,19 +472,16 @@ def get_slow_tests_based_on_S3() -> List[str]:
 
     # Got no stats from S3, returning early to save runtime
     if len(jobs_to_times) == 0:
-        print('Gathered no stats from S3. Proceeding with default SLOW_TESTS.')
-        return SLOW_TESTS
+        print('Gathered no stats from S3. No new slow tests calculated.')
+        return []
 
-    new_slow_tests: List[str] = []
+    slow_tests: List[str] = []
     for test in TESTS:
-        if test in jobs_to_times:
+        if test in jobs_to_times and test not in TARGET_DET_LIST:
             test_time, _ = jobs_to_times[test]
-            if test_time > 300:
-                new_slow_tests.append(test)
-        else:
-            if test in SLOW_TESTS:
-                new_slow_tests.append(test)
-    return new_slow_tests
+            if test_time > SLOW_TEST_THRESHOLD:
+                slow_tests.append(test)
+    return slow_tests
 
 
 def get_executable_command(options, allow_pytest, disable_coverage=False):
@@ -934,10 +937,10 @@ def get_dep_modules(test):
     return dep_modules
 
 
-def determine_target(slow_tests, test, touched_files, options):
+def determine_target(target_det_list, test, touched_files, options):
     test = parse_test_module(test)
     # Some tests are faster to execute than to determine.
-    if test not in slow_tests:
+    if test not in target_det_list:
         if options.verbose:
             print_to_stderr(f'Running {test} without determination')
         return True
@@ -1018,6 +1021,8 @@ def main():
 
     if options.determine_from is not None and os.path.exists(options.determine_from):
         slow_tests = get_slow_tests_based_on_S3()
+        print('Added the following tests to target_det tests as calculated based on S3:')
+        print(slow_tests)
         with open(options.determine_from, 'r') as fh:
             touched_files = [
                 os.path.normpath(name.strip()) for name in fh.read().split('\n')
@@ -1027,7 +1032,7 @@ def main():
         sys.path.append('test')
         selected_tests = [
             test for test in selected_tests
-            if determine_target(slow_tests, test, touched_files, options)
+            if determine_target(TARGET_DET_LIST + slow_tests, test, touched_files, options)
         ]
         sys.path.remove('test')
 
