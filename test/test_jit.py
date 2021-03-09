@@ -112,6 +112,8 @@ import unittest
 import warnings
 import zipfile
 
+torch.set_default_dtype(torch.double)
+
 
 def canonical(graph):
     return torch._C._jit_pass_canonicalize(graph).str(False)

@@ -16,6 +16,8 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 
+torch.set_default_dtype(torch.double)
+
 
 # Tests that apply to all operators
 
