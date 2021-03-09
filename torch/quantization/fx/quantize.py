@@ -705,7 +705,6 @@ class Quantizer:
             else:
                 return env[n.name]
 
-        # TODO(before land): add a "load from quantized if exists, otherwise non-quantized" concept?
         def load_arg(quantized: Optional[Union[List[int], bool, Tuple[int, ...]]]
                      ) -> Callable[[Node], Argument]:
             """
