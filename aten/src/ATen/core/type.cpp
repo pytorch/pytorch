@@ -1141,8 +1141,8 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
   std::string single_output = "";
   if (forward_args.size() == 2 &&
       forward_args[1].type()->cast<TupleType>() == nullptr) {
-    // if the output type is a single tuple, it needs to be wrapped in an outer
-    // tuple to match eager's behavior
+    // if the output type is a single tuple, it needs to be wrapped in an outer tuple
+    // to match eager's behavior
     single_output = ", '" + forward_args[1].type()->annotation_str() + "',";
   }
   std::string pre_hook_schema =
@@ -1152,10 +1152,9 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
       pre_hook_name + "' on module '" + name()->name() +
       "'. If you did not want to script this pre-hook remove it from the "
       "original NN module before scripting. Pre-hooks for module '" +
-      name()->name() +
-      "' are expected to have the following signature: " + pre_hook_schema +
-      " with a return type of either 'None'" + single_output + " or 'Tuple[" +
-      input_types + "]'.";
+      name()->name() + "' are expected to have the following signature: "
+      + pre_hook_schema + " with a return type of either 'None'" +
+      single_output + " or 'Tuple[" + input_types + "]'.";
   return return_string;
 }
 
@@ -1174,8 +1173,8 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   std::string hook_schema = hook_name + "(self, input: Tuple[" +
                             input_types + "], output: " + output_types + ")";
   std::string return_string =
-      "This error occured while scripting the forward hook '" + hook_name +
-      "' on module " + name()->name() +
+      "This error occured while scripting the forward hook '"
+      + hook_name + "' on module " + name()->name() +
       ". If you did not want to script this hook remove it from" +
       " the original NN module before scripting. This hook was" +
       " expected to have the following signature: " + hook_schema +
@@ -1201,7 +1200,8 @@ void checkForwardHookInputArguments(
       "expected the input argument to be typed as a Tuple but found type: '",
       input_arg.type()->annotation_str(),
       "' instead.\n",
-      hook_err_msg);
+      hook_err_msg
+   );
 
   const at::ArrayRef<TypePtr> input_tuple_types = input_arg.type()->castRaw<TupleType>()->elements();
   if (forward_args.size() == 1) {
@@ -1275,17 +1275,16 @@ void ClassType::checkForwardPreHookSchema(
   );
   const Argument return_arg = pre_hook_schema.returns()[0];
   std::string wrong_type_returned_err_msg = hook_id +
-      "returned the wrong type of: '" + return_arg.type()->annotation_str() +
-      "'.";
+      "returned the wrong type of: '" +
+      return_arg.type()->annotation_str() + "'.";
 
   if (return_arg.type()->kind() == NoneType::get()->kind()) {
     return;
   }
   if (forward_args.size() == 2 && *forward_args[1].type() == *return_arg.type()) {
-    // TORCH_CHECK below is for the edge case where forward's input is a tuple
-    // and the pre-hook returns a matching tuple. Eager doesn't support this-
-    // the working eager return for a tuple type is the forward's input tuple
-    // wrapped inside of another tuple.
+    // TORCH_CHECK below is for the edge case where forward's input is a tuple and the
+    // pre-hook returns a matching tuple. Eager doesn't support this- the working eager return
+    // for a tuple type is the forward's input tuple wrapped inside of another tuple.
     TORCH_CHECK(
         return_arg.type()->cast<TupleType>() == nullptr,
         wrong_type_returned_err_msg,
@@ -1339,8 +1338,8 @@ void ClassType::checkForwardPreHookSchema(
 }
 
 void ClassType::checkForwardHookSchema(
-    int hook_idx,
-    const FunctionSchema& hook_schema) const {
+      int hook_idx,
+      const FunctionSchema& hook_schema) const {
   const torch::jit::Function* hook = forward_hooks_[hook_idx];
   std::string hook_id =
       "Hook '" + hook->name() + "' on module '" + name()->name() + "' ";

@@ -588,6 +588,20 @@ BAD_EXAMPLES = [
         {'scale': torch.tensor([0., 1.], requires_grad=True)},
         {'scale': torch.tensor([1., -1.], requires_grad=True)},
     ]),
+    Example(LKJCholesky, [
+        {
+            'dim': -2,
+            'concentration': 0.1
+        },
+        {
+            'dim': 1,
+            'concentration': 2.,
+        },
+        {
+            'dim': 2,
+            'concentration': 0.,
+        },
+    ]),
     Example(Laplace, [
         {
             'loc': torch.tensor([1., 1.], requires_grad=True),
@@ -2578,7 +2592,7 @@ class TestDistributions(TestCase):
 
         for dim in range(2, 5):
             log_probs = []
-            lkj = LKJCholesky(dim, concentration=1.)
+            lkj = LKJCholesky(dim, concentration=1., validate_args=True)
             for i in range(2):
                 sample = lkj.sample()
                 sample_tril = tril_matrix_to_vec(sample, diag=-1)
@@ -2591,6 +2605,8 @@ class TestDistributions(TestCase):
                 # for dim=2, pdf = 0.5 (jacobian adjustment factor is 0.)
                 self.assertTrue(all([x == torch.tensor(0.5).log() for x in log_probs]))
             self.assertEqual(log_probs[0], log_probs[1])
+            invalid_sample = torch.cat([sample, sample.new_ones(1, dim)], dim=0)
+            self.assertRaises(ValueError, lambda: lkj.log_prob(invalid_sample))
 
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:

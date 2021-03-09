@@ -2614,6 +2614,47 @@ TEST(LoopNest, UnrollMultipleStatements) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
+TEST(LoopNest, UnrollNonLiteralConstantBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 2 - 1; i < 12 / 3; i++) {
+  //     for (int j = 0; j < 4; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  BufHandle a_buf("A", {3, 4}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto inner_for = For::make(j, 0, 4, for_body);
+  auto outer_for = For::make(
+      i,
+      IntImm::make(2) - IntImm::make(1),
+      IntImm::make(12) / IntImm::make(3),
+      inner_for);
+  auto b = Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(loops[0], &unrolled);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int j = 0; j < 4; j++) {
+# CHECK:   A[1, j] = j;
+# CHECK: }
+# CHECK: for (int j = 0; j < 4; j++) {
+# CHECK:   A[2, j] = 2 * j;
+# CHECK: }
+# CHECK: for (int j = 0; j < 4; j++) {
+# CHECK:   A[3, j] = 3 * j;
+# CHECK: })IR";
+
+  std::ostringstream oss;
+  oss << *unrolled;
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 TEST(LoopNest, UnrollEmpty) {
   const std::string actual = constantUpperBoundLoopIR(0);
   const std::string& verification_pattern = R"IR(
@@ -3061,6 +3102,51 @@ TEST(LoopNest, FlattenLoopNestAfterNormalize) {
     eval1(inp1);
     SimpleIREvaluator eval2(flattened, {a_buf});
     PaddedBuffer<int> inp2(8, 12);
+    eval2(inp2);
+    ExpectAllNear(inp1, inp2, 1e-5);
+  }
+}
+
+TEST(LoopNest, FlattenLoopNestWithNonLiteralConstantBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 15-5; i++) {
+  //     for (int j = 0; j < 20/4; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto inner_for =
+      For::make(j, 0, IntImm::make(20) / IntImm::make(4), for_body);
+  auto outer_for =
+      For::make(i, 0, IntImm::make(15) - IntImm::make(5), inner_for);
+  auto b = Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_TRUE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i_flat = 0; i_flat < 50; i_flat++) {
+        # CHECK:   A[i_flat / 5, i_flat % 5] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  {
+    SimpleIREvaluator eval1(loops[0], {a_buf});
+    PaddedBuffer<int> inp1(10, 5);
+    eval1(inp1);
+    SimpleIREvaluator eval2(flattened, {a_buf});
+    PaddedBuffer<int> inp2(10, 5);
     eval2(inp2);
     ExpectAllNear(inp1, inp2, 1e-5);
   }
@@ -3526,8 +3612,8 @@ TEST(LoopNest, DeadStoreElimination) {
   KernelScope kernel_scope;
   VarHandle y("y", kInt);
   VarHandle x("x_tail", kInt);
-  BufHandle f("f", {26, 5}, kFloat);
-  BufHandle g("g", {26, 5}, kFloat);
+  BufHandle f("f", {26, 5}, kInt);
+  BufHandle g("g", {26, 5}, kInt);
   ExprHandle x_outer_end = 5;
   ExprHandle x_2 = x + x_outer_end * 4;
   For* stmt1 = For::make(
@@ -3578,9 +3664,9 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
-  BufHandle f("f", {26 * 5}, kFloat);
-  BufHandle g("g", {26 * 5}, kFloat);
-  BufHandle h("h", {26, 5}, kFloat);
+  BufHandle f("f", {26 * 5}, kInt);
+  BufHandle g("g", {26 * 5}, kInt);
+  BufHandle h("h", {26, 5}, kInt);
   ExprHandle x_outer_end = 5;
   ExprHandle x_2 = x + x_outer_end * 4;
   For* stmt1 = For::make(x, 0, 26 * 5, Store::make(f, {x}, x));
@@ -3741,6 +3827,98 @@ TEST(LoopNest, InlineFromLoad) {
 # CHECK-NEXT: B[j] = j
 )IR",
       oss.str());
+}
+
+static std::pair<std::unique_ptr<Placeholder>, Tensor*> colReduce(
+    int M,
+    int N) {
+  auto a =
+      std::make_unique<Placeholder>("a", kFloat, std::vector<ExprHandle>{M, N});
+  Tensor* t = Reduce(
+      "b",
+      {{N, "n"}},
+      Sum(),
+      [&](const VarHandle& n, const VarHandle& m) { return a->load(m, n); },
+      {{M, "m"}});
+  return {std::move(a), t};
+}
+
+static Stmt* splitTailReorder(Tensor* b) {
+  constexpr int kVectorWidth = 8;
+  For *outer, *inner, *tail;
+  LoopNest nest({b});
+  auto loops = nest.getLoopStmtsFor(b);
+  nest.splitWithTail(loops[0], kVectorWidth, &outer, &inner, &tail);
+  loops = nest.getLoopStmtsFor(b);
+  nest.reorderAxis(loops[1], loops[2]);
+  nest.prepareForCodegen();
+  return nest.root_stmt();
+}
+
+static Stmt* splitMaskReorder(Tensor* b) {
+  constexpr int kVectorWidth = 8;
+  For *outer, *inner;
+  LoopNest nest({b});
+  auto loops = nest.getLoopStmtsFor(b);
+  nest.splitWithMask(loops[0], kVectorWidth, &outer, &inner);
+  loops = nest.getLoopStmtsFor(b);
+  nest.reorderAxis(loops[1], loops[2]);
+  std::clog << *nest.root_stmt() << "\n";
+  nest.prepareForCodegen();
+  return nest.root_stmt();
+}
+
+static void checkColReduce(Stmt* s, Placeholder& p, Tensor* t) {
+  int M = immediateAs<int>(p.dim(0));
+  int N = immediateAs<int>(p.dim(1));
+  PaddedBuffer<float> a(M, N);
+  PaddedBuffer<float> b(N);
+  PaddedBuffer<float> ref(N);
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      a(i, j) = 1.0f;
+    }
+  }
+  for (int i = 0; i < N; i++) {
+    b(i) = 0.0f;
+  }
+  for (int i = 0; i < N; i++) {
+    ref(i) = 76.0f;
+  }
+  SimpleIREvaluator(s, {p, t}).call({a, b});
+  ExpectAllNear(b, ref, 1e-5);
+}
+
+TEST(LoopNest, ColReduceSplitTailEvenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 128;
+  auto p = colReduce(M, N);
+  Stmt* s = splitTailReorder(p.second);
+  checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, DISABLED_ColReduceSplitTailUnevenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 100;
+  auto p = colReduce(M, N);
+  Stmt* s = splitTailReorder(p.second);
+  checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, ColReduceSplitMaskEvenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 128;
+  auto p = colReduce(M, N);
+  Stmt* s = splitMaskReorder(p.second);
+  checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, DISABLED_ColReduceSplitMaskUnevenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 100;
+  auto p = colReduce(M, N);
+  Stmt* s = splitMaskReorder(p.second);
+  checkColReduce(s, *p.first, p.second);
 }
 
 } // namespace jit

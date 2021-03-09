@@ -352,20 +352,27 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # setting the USE_TENSORPIPE compile definition, this target will just end
     # up being empty. Downstream targets should also add a #ifdef guard.
     if(NOT WIN32)
-      add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
+      add_library(process_group_agent
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.h"
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h"
+      )
       target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
       add_dependencies(process_group_agent torch c10d)
 
-      add_library(tensorpipe_agent
-        "${TORCH_SRC_DIR}/csrc/distributed/rpc/macros.h"
-        "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
-        "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
-        "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
-        "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.h"
-        )
-      target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
-      add_dependencies(tensorpipe_agent torch c10d)
       if(USE_TENSORPIPE)
+        add_library(tensorpipe_agent
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.h"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/macros.h"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.h"
+          )
+        target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
+        add_dependencies(tensorpipe_agent torch c10d)
         if(USE_CUDA)
           target_compile_definitions(tensorpipe_agent PUBLIC USE_CUDA)
         endif()
@@ -435,6 +442,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_fft_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_linalg_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
     )
 
   set(GENERATED_H_PYTHON
@@ -479,6 +487,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_fft_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_linalg_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
@@ -851,6 +860,8 @@ if(USE_CUDA OR USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/UnpackRaw.cuh
   )
 
   file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include/nvfuser_resources")
@@ -912,15 +923,16 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
   endif()
 
-
-  set(TH_CPU_INCLUDE
-    # dense
-    aten/src/TH
-    ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
-    ${TORCH_ROOT}/aten/src
-    ${CMAKE_CURRENT_BINARY_DIR}/aten/src
-    ${CMAKE_BINARY_DIR}/aten/src)
-  target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
+  if(NOT BUILD_LITE_INTERPRETER)
+    set(TH_CPU_INCLUDE
+      # dense
+      aten/src/TH
+      ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
+      ${TORCH_ROOT}/aten/src
+      ${CMAKE_CURRENT_BINARY_DIR}/aten/src
+      ${CMAKE_BINARY_DIR}/aten/src)
+    target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
+  endif()
 
   set(ATen_CPU_INCLUDE
     ${TORCH_ROOT}/aten/src
@@ -1062,7 +1074,12 @@ if(USE_OPENMP AND OPENMP_FOUND)
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
-  target_compile_options(torch_cpu PRIVATE ${OpenMP_CXX_FLAGS})
+  if(UNIX)
+    separate_arguments(OpenMP_CXX_OPTIONS UNIX_COMMAND "${OpenMP_CXX_FLAGS}")
+  else()
+    separate_arguments(OpenMP_CXX_OPTIONS WINDOWS_COMMAND "${OpenMP_CXX_FLAGS}")
+  endif()
+  target_compile_options(torch_cpu PRIVATE ${OpenMP_CXX_OPTIONS})
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
