@@ -85,6 +85,61 @@ import unittest
 import io
 from typing import Callable
 
+class BinaryOp(torch.nn.Module):
+    def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
+        """ ibinary_op means inplace binary op
+        """
+        super().__init__()
+        self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
+        self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
+        self.is_scalar = is_scalar
+        self.op = ibinary_op if ibinary_op and is_inplace else binary_op
+
+    def forward(self, x, y):
+        x = self.conv1(x)
+        y = 3 if self.is_scalar else self.conv2(y)
+        # x = x + y
+        x = self.op(x, y)
+        # x = y + x
+        x = self.op(y, x)
+        return x
+
+class BinaryOpNonQuantizedInput(torch.nn.Module):
+    def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
+        """ ibinary_op means inplace binary op
+        """
+        super().__init__()
+        self.is_scalar = is_scalar
+        self.op = ibinary_op if ibinary_op and is_inplace else binary_op
+
+    def forward(self, x, y):
+        y = 3 if self.is_scalar else y
+        x = self.op(x, y)
+        return x
+
+class BinaryOpRelu(torch.nn.Module):
+    def __init__(self, binary_op, ibinary_op, is_inplace, is_functional_relu,
+                 is_scalar):
+        """ ibinary_op means inplace binary op
+        """
+        super().__init__()
+        self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
+        self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
+        self.op = ibinary_op if ibinary_op and is_inplace else binary_op
+        self.is_functional_relu = is_functional_relu
+        self.is_scalar = is_scalar
+        self.relu = F.relu if self.is_functional_relu \
+            else torch.nn.ReLU()
+
+    def forward(self, x, y):
+        x = self.conv1(x)
+        y = 3 if self.is_scalar else self.conv2(y)
+        x = self.op(x, y)
+        x = self.relu(x)
+        x = self.op(y, x)
+        x = self.relu(x)
+        return x
+
 class TestFuseFx(QuantizationTestCase):
     def test_fuse_conv_bn_relu(self):
         class M(torch.nn.Module):
@@ -1707,6 +1762,46 @@ class TestQuantizeFx(QuantizationTestCase):
 
         checkModel(m, data, ref_weight, ref_bias, ref_res)
 
+    def test_preserve_qconfig(self):
+        """
+        Test to make sure the temporary config option to preserve qconfig attributes
+        in the model works
+        """
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = torch.nn.Sigmoid()
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = self.mods2(x)
+                return x
+
+        model = M().eval()
+        qconfig_dict = {
+            "object_type": [
+                (torch.nn.functional.linear, float16_dynamic_qconfig),
+            ],
+        }
+        m = prepare_fx(model, qconfig_dict)
+        m(torch.rand(5, 5))
+        m = convert_fx(m, _remove_qconfig=False)
+
+        self.assertTrue(hasattr(m.mods2, 'qconfig'))
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
@@ -2096,37 +2191,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                     quantized_nodes[dim])
 
 
-    def _test_quantized_binary_op_impl(self, binary_op, ibinary_op, quantized_op):
-        class Op(torch.nn.Module):
-            def __init__(self, is_inplace, is_scalar):
-                super(Op, self).__init__()
-                self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
-                self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
-                self.is_scalar = is_scalar
-                self.op = ibinary_op if is_inplace else binary_op
-
-            def forward(self, x, y):
-                x = self.conv1(x)
-                y = 3 if self.is_scalar else self.conv2(y)
-                # x = x + y
-                x = self.op(x, y)
-                # x = y + x
-                x = self.op(y, x)
-                return x
-
-        # This tests the binary op should be quantized even when it is not feed with a
-        # quantized input
-        class NonQuantizedInput(torch.nn.Module):
-            def __init__(self, is_inplace, is_scalar):
-                super(NonQuantizedInput, self).__init__()
-                self.is_scalar = is_scalar
-                self.op = ibinary_op if is_inplace else binary_op
-
-            def forward(self, x, y):
-                y = 3 if self.is_scalar else y
-                x = self.op(x, y)
-                return x
-
+    def _test_binary_op_int8_impl(self, binary_op, ibinary_op, quantized_op):
         data = (torch.randn(1, 1, 1, 1, dtype=torch.float),
                 torch.randn(1, 1, 1, 1, dtype=torch.float))
         quantized_node = ns.call_function(quantized_op)
@@ -2135,10 +2200,17 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # testing for default int8 static quant
         for is_inplace, is_scalar in options:
             self.checkGraphModeFxOp(
-                Op(is_inplace, is_scalar), data, quant_type, quantized_node)
+                BinaryOp(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type, quantized_node)
+            # This tests the binary op should be quantized even when it is not feed with a
+            # quantized input
             self.checkGraphModeFxOp(
-                NonQuantizedInput(is_inplace, is_scalar), data, quant_type, quantized_node)
+                BinaryOpNonQuantizedInput(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type, quantized_node)
 
+
+    def _test_binary_op_float16_impl(self, binary_op, ibinary_op):
+        data = (torch.randn(1, 1, 1, 1, dtype=torch.float),
+                torch.randn(1, 1, 1, 1, dtype=torch.float))
+        quant_type = QuantType.STATIC
         # testing for fp16 static quant
         # we are producing fp16 patterns
         options = itertools.product([True, False], [True, False])
@@ -2152,7 +2224,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_method("to"): 3 if is_scalar else 4
             }
             self.checkGraphModeFxOp(
-                Op(is_inplace, is_scalar), data, quant_type,
+                BinaryOp(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type,
                 expected_node_occurrence=node_occurrence,
                 custom_qconfig_dict=custom_qconfig_dict)
 
@@ -2162,33 +2234,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_method("to"): 2 if is_scalar else 3
             }
             self.checkGraphModeFxOp(
-                NonQuantizedInput(is_inplace, is_scalar), data, quant_type,
+                BinaryOpNonQuantizedInput(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type,
                 expected_node_occurrence=node_occurrence,
                 custom_qconfig_dict=custom_qconfig_dict)
 
-
-    def _test_quantized_binary_op_relu_impl(self, binary_op, ibinary_op, quantized_op):
-        class OpRelu(torch.nn.Module):
-            def __init__(self, is_inplace, is_functional_relu,
-                         is_scalar):
-                super(OpRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
-                self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
-                self.op = ibinary_op if is_inplace else binary_op
-                self.is_functional_relu = is_functional_relu
-                self.is_scalar = is_scalar
-                self.relu = F.relu if self.is_functional_relu \
-                    else torch.nn.ReLU()
-
-            def forward(self, x, y):
-                x = self.conv1(x)
-                y = 3 if self.is_scalar else self.conv2(y)
-                x = self.op(x, y)
-                x = self.relu(x)
-                x = self.op(y, x)
-                x = self.relu(x)
-                return x
-
+    def _test_binary_op_relu_int8_impl(self, binary_op, ibinary_op, quantized_op):
         data = (torch.rand((1, 1, 1, 1), dtype=torch.float),
                 torch.rand((1, 1, 1, 1), dtype=torch.float))
         quant_type = QuantType.STATIC
@@ -2197,9 +2247,13 @@ class TestQuantizeFxOps(QuantizationTestCase):
             [True, False], [True, False], [True, False])
         for is_inplace_op, is_functional_relu, is_scalar in options:
             self.checkGraphModeFxOp(
-                OpRelu(is_inplace_op, is_functional_relu, is_scalar),
+                BinaryOpRelu(binary_op, ibinary_op, is_inplace_op, is_functional_relu, is_scalar),
                 data, quant_type, quantized_node)
 
+    def _test_binary_op_relu_float16_impl(self, binary_op, ibinary_op):
+        data = (torch.rand((1, 1, 1, 1), dtype=torch.float),
+                torch.rand((1, 1, 1, 1), dtype=torch.float))
+        quant_type = QuantType.STATIC
         options = itertools.product(
             [True, False], [True, False], [True, False])
         custom_qconfig_dict = {
@@ -2211,31 +2265,103 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_method("to"): 3 if is_scalar else 4
             }
             self.checkGraphModeFxOp(
-                OpRelu(is_inplace_op, is_functional_relu, is_scalar),
+                BinaryOpRelu(binary_op, ibinary_op, is_inplace_op, is_functional_relu, is_scalar),
                 data, quant_type, custom_qconfig_dict=custom_qconfig_dict,
-                expected_node_occurrence=node_occurrence,
-                print_debug_info=True)
+                expected_node_occurrence=node_occurrence)
 
 
     @skipIfNoFBGEMM
     def test_add(self):
-        self._test_quantized_binary_op_impl(
+        self._test_binary_op_int8_impl(
             operator.add, operator.iadd, torch.ops.quantized.add)
+        self._test_binary_op_float16_impl(
+            operator.add, operator.iadd)
+
+    def test_sub(self):
+        self._test_binary_op_float16_impl(operator.sub, operator.isub)
+        self._test_binary_op_float16_impl(torch.sub, None)
+
+    def test_div(self):
+        self._test_binary_op_float16_impl(operator.truediv, operator.itruediv)
+        self._test_binary_op_float16_impl(torch.div, None)
 
     @skipIfNoFBGEMM
     def test_mul(self):
-        self._test_quantized_binary_op_impl(
+        self._test_binary_op_int8_impl(
             operator.mul, operator.imul, torch.ops.quantized.mul)
+        self._test_binary_op_float16_impl(operator.mul, operator.imul)
+
+    def test_sum(self):
+        class Sum(torch.nn.Module):
+            def forward(self, x):
+                x = torch.sum(x, [1], keepdim=True)
+                x = torch.sum(x, [1])
+                return x
+
+
+        data = torch.randn(1, 2, 3, 4, dtype=torch.float)
+        quant_type = QuantType.STATIC
+        # testing for fp16 static quant
+        # we are producing fp16 patterns
+        custom_qconfig_dict = {
+            "object_type": [(torch.sum, float16_static_qconfig)]
+        }
+        node_occurrence = {
+            # input_sum1, output_sum1, output_sum2
+            ns.call_method("to"): 3
+        }
+        self.checkGraphModeFxOp(
+            Sum(), data, quant_type,
+            expected_node_occurrence=node_occurrence,
+            custom_qconfig_dict=custom_qconfig_dict)
+
+    def test_bmm(self):
+        class BMMMethod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x.bmm(y)
+
+        data = (torch.randn(1, 1, 1, dtype=torch.float),
+                torch.randn(1, 1, 1, dtype=torch.float))
+        quant_type = QuantType.STATIC
+        # testing for fp16 static quant
+        # we are producing fp16 patterns
+        custom_qconfig_dict = {
+            "object_type": [(torch.bmm, float16_static_qconfig),
+                            ("bmm", float16_static_qconfig)]
+        }
+        node_occurrence = {
+            # input_bmm1, input_bmm2, output_bmm
+            ns.call_method("to"): 3
+        }
+        self.checkGraphModeFxOp(
+            BinaryOpNonQuantizedInput(torch.bmm, None, False, False), data, quant_type,
+            expected_node_occurrence=node_occurrence,
+            custom_qconfig_dict=custom_qconfig_dict)
+
+        # TODO: support call_method("bmm")
+        # we can transform call_method("bmm") to call_function(torch.bmm)
+        # self.checkGraphModeFxOp(
+        #     BMMMethod(), data, quant_type,
+        #     expected_node_occurrence=node_occurrence,
+        #     custom_qconfig_dict=custom_qconfig_dict,
+        #     print_debug_info=True)
 
     @skipIfNoFBGEMM
     def test_add_relu(self):
-        self._test_quantized_binary_op_relu_impl(
+        self._test_binary_op_relu_int8_impl(
             operator.add, operator.iadd, torch.ops.quantized.add_relu)
+        self._test_binary_op_relu_float16_impl(
+            operator.add, operator.iadd)
 
     @skipIfNoFBGEMM
     def test_mul_relu(self):
-        self._test_quantized_binary_op_relu_impl(
+        self._test_binary_op_relu_int8_impl(
             operator.mul, operator.imul, torch.ops.quantized.mul_relu)
+        self._test_binary_op_relu_float16_impl(
+            operator.mul, operator.imul)
 
     # TODO(future PR): make more generic
     def _test_quantized_add_mul_qat(self, model, expected_node_occurrence):
@@ -2542,10 +2668,51 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModeFxOp(
                 M(is_module), data, quant_type, quantized_nodes[is_module])
 
+    def _test_norm_float16_impl(
+            self, float_module, float_op, op_args, data,
+            skip_op_arg_for_functional=False):
+        ''' Test for normalization op, float_op can be torch op or functional op,
+        op_args is a list of positional argument for the module/op
+        '''
+        class M(torch.nn.Module):
+            def __init__(self, is_module):
+                super(M, self).__init__()
+                self.is_module = is_module
+                if self.is_module:
+                    self.op = float_module(*op_args)
+                else:
+                    self.op = float_op
+
+            def forward(self, input):
+                if self.is_module:
+                    return self.op(input)
+                else:
+                    args = [input]
+                    if not skip_op_arg_for_functional:
+                        args += op_args
+                    return self.op(*args)
+
+        options = itertools.product([True, False], self.static_quant_types)
+        qconfig_dict = {
+            "object_type": [
+                (float_module, float16_static_qconfig),
+                (float_op, float16_static_qconfig)
+            ]
+        }
+        node_occurrence = {
+            ns.call_method("to"): 2
+        }
+        for is_module, quant_type in options:
+            self.checkGraphModeFxOp(
+                M(is_module), data, quant_type, custom_qconfig_dict=qconfig_dict, expected_node_occurrence=node_occurrence)
+
     def test_layer_norm(self):
         data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
         self._test_norm_impl(
             nn.LayerNorm, F.layer_norm, [[2, 5, 5]], data, nnq.LayerNorm, torch.ops.quantized.layer_norm)
+
+        self._test_norm_float16_impl(
+            nn.LayerNorm, F.layer_norm, [[2, 5, 5]], data)
 
     def test_instance_norm(self):
         data_1d = (torch.rand((1, 4, 5), dtype=torch.float),)
@@ -2568,6 +2735,29 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 module, F.instance_norm, [4], data,
                 quantized_module, torch.ops.quantized.instance_norm,
                 skip_op_arg_for_functional=True)
+
+    def test_silu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.silu = torch.nn.SiLU()
+
+            def forward(self, x):
+                x = self.silu(x)
+                x = torch.nn.functional.silu(x)
+                return x
+
+        data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
+        quant_type = QuantType.STATIC
+        qconfig_dict = {
+            "": float16_static_qconfig
+        }
+        node_occurrence = {
+            ns.call_method("to"): 3
+        }
+        m = self.checkGraphModeFxOp(
+            M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
+            expected_node_occurrence=node_occurrence)
 
     @skipIfNoFBGEMM
     def test_clamp(self):
@@ -2605,6 +2795,35 @@ class TestQuantizeFxOps(QuantizationTestCase):
         for quant_type in self.static_quant_types:
             m = self.checkGraphModeFxOp(
                 M(), data, quant_type, expected_node_list=node_list)
+
+    def test_fixed_qparams_ops_fp16(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x):
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                x = x.sigmoid()
+                x = self.tanh(x)
+                x = torch.tanh(x)
+                x = x.tanh()
+                return x
+
+        data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
+        quant_type = QuantType.STATIC
+        qconfig_dict = {
+            "": float16_static_qconfig
+        }
+        node_occurrence = {
+            ns.call_method("to"): 7
+        }
+        m = self.checkGraphModeFxOp(
+            M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
+            expected_node_occurrence=node_occurrence)
+
 
     @skipIfNoFBGEMM
     def test_general_shape_ops(self):

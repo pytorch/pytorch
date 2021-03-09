@@ -3,11 +3,7 @@ import operator_benchmark as op_bench
 import torch
 import torch.nn.quantized as nnq
 import torch.quantization as tq
-from torch.quantization._learnable_fake_quantize import (
-    _LearnableFakeQuantizePerTensorOp,
-    _LearnableFakeQuantizePerChannelOp
-)
-
+import torch.nn as nn
 
 """Microbenchmarks for general quantization operations."""
 
@@ -174,17 +170,9 @@ op_bench.generate_pt_test(
 
 
 # op_type is used to describe the type of operator used in benchmarking:
-# py_module represents the operator written in Python that can
-# backpropagate on scale and zero point.
 # learnable_kernel represents the c++ kernel that can backpropagate on
 # scale and zero point.
 # original_kernel represents the original fake quantize c++ kernel.
-
-def fakeQuantizePerTensorPyModule(
-    input, scale, zero_point,
-    quant_min: int, quant_max: int
-):
-    return _LearnableFakeQuantizePerTensorOp.apply(input, scale, zero_point, quant_min, quant_max, 1.0)
 
 def fakeQuantizePerTensorLearnableKernel(
     input, scale, zero_point,
@@ -200,7 +188,6 @@ def fakeQuantizePerTensorOriginalKernel(
 
 fake_quantize_per_tensor_ops = op_bench.op_list(
     attrs=(
-        ('py_module', fakeQuantizePerTensorPyModule),
         ('learnable_kernel', fakeQuantizePerTensorLearnableKernel),
         ('original_kernel', fakeQuantizePerTensorOriginalKernel)
     ),
@@ -227,9 +214,9 @@ class FakeQuantizePerTensorBaseOpBenchmark(op_bench.TorchBenchmarkBase):
         self.quant_min = 0
         self.quant_max = 2 ** nbits - 1
         self.quant_range = 2 ** nbits
-        self.input = torch.rand(N, C, H, W, dtype=torch.float, device=device, requires_grad=self.auto_set())
-        self.scale = torch.tensor([1.], requires_grad=self.auto_set()).to(device)
-        self.zero_point = torch.tensor([0.], requires_grad=self.auto_set()).to(device)
+        self.input = nn.Parameter(torch.rand(N, C, H, W, dtype=torch.float, device=device), requires_grad=self.auto_set())
+        self.scale = nn.Parameter(torch.tensor([1.]).to(device), requires_grad=self.auto_set())
+        self.zero_point = nn.Parameter(torch.tensor([0.]).to(device), requires_grad=self.auto_set())
 
         self.inputs = {
             "input": self.input,
@@ -257,12 +244,6 @@ op_bench.generate_pt_gradient_tests_from_op_list(
     FakeQuantizePerTensorBaseOpBenchmark
 )
 
-def fakeQuantizePerChannelPyModule(
-    input, scale, zero_point, axis: int,
-    quant_min: int, quant_max: int
-):
-    return _LearnableFakeQuantizePerChannelOp.apply(input, scale, zero_point, axis, quant_min, quant_max, 1.0)
-
 def fakeQuantizePerChannelLearnableKernel(
     input, scale, zero_point, axis: int,
     quant_min: int, quant_max: int
@@ -277,7 +258,6 @@ def fakeQuantizePerChannelOriginalKernel(
 
 fake_quantize_per_channel_ops = op_bench.op_list(
     attrs=(
-        ('py_module', fakeQuantizePerChannelPyModule),
         ('learnable_kernel', fakeQuantizePerChannelLearnableKernel),
         ('original_kernel', fakeQuantizePerChannelOriginalKernel)
     ),
@@ -292,14 +272,14 @@ class FakeQuantizePerChannelOpBenchmark(op_bench.TorchBenchmarkBase):
         self.quant_range = 2 ** nbits
         # Axis is chosen with respect to the number of channels: C.
         self.axis = 1
-        self.input = torch.rand(N, C, H, W, dtype=torch.float, device=device, requires_grad=self.auto_set())
+        self.input = nn.Parameter(torch.rand(N, C, H, W, dtype=torch.float, device=device, requires_grad=self.auto_set()))
 
         if op_func.__name__ == 'fakeQuantizePerChannelOriginalKernel':
             self.scale = torch.ones(C, device=device, dtype=torch.float32, requires_grad=False)
             self.zero_point = torch.zeros(C, device=device, dtype=torch.int64, requires_grad=False)
         else:
-            self.scale = torch.ones(C, device=device, dtype=torch.float32, requires_grad=self.auto_set())
-            self.zero_point = torch.zeros(C, device=device, dtype=torch.float32, requires_grad=self.auto_set())
+            self.scale = nn.Parameter(torch.ones(C, device=device, dtype=torch.float32), requires_grad=self.auto_set())
+            self.zero_point = nn.Parameter(torch.zeros(C, device=device, dtype=torch.float32), requires_grad=self.auto_set())
 
         self.inputs = {
             "input": self.input,
