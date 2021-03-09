@@ -500,7 +500,6 @@ class TestFunctionalIterDataPipe(TestCase):
 
     @skipIfNoTorchVision
     def test_transforms_datapipe(self):
-        torch.set_default_dtype(torch.float)
         # A sequence of numpy random numbers representing 3-channel images
         w = h = 32
         inputs = [np.random.randint(0, 255, (h, w, 3), dtype=np.uint8) for i in range(10)]
