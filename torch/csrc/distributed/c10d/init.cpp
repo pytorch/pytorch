@@ -1,9 +1,9 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10d/Utils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/TCPStore.hpp>
+#include <c10d/Utils.hpp>
 #ifndef _WIN32
 #include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroupRoundRobin.hpp>
@@ -323,11 +323,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "get_ddp_logging_data",
           &::c10d::Logger::get_ddp_logging_data,
           py::call_guard<py::gil_scoped_release>())
-        .def(
-            "_set_comm_hook_name",
-            &::c10d::Logger::set_comm_hook,
-            py::arg("comm_hook"),
-            py::call_guard<py::gil_scoped_release>());
+      .def(
+          "_set_comm_hook_name",
+          &::c10d::Logger::set_comm_hook,
+          py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
       An enum whose values correspond to different debug settings of the
@@ -335,9 +335,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       and DETAIL, which can be set via the TORCH_DISTRIBUTED_DEBUG environment
       variable.
   )")
-  .value("OFF", ::c10d::DistributedDebugLevel::OFF)
-  .value("INFO", ::c10d::DistributedDebugLevel::INFO)
-  .value("DETAIL", ::c10d::DistributedDebugLevel::DETAIL);
+      .value("OFF", ::c10d::DistributedDebugLevel::OFF)
+      .value("INFO", ::c10d::DistributedDebugLevel::INFO)
+      .value("DETAIL", ::c10d::DistributedDebugLevel::DETAIL);
 
   module.def(
       "_get_debug_mode",
@@ -1279,7 +1279,7 @@ Arguments:
                 Note that ``fut.done()`` returns only whether the operation has been enqueued on the GPU.
            )");
 
-py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
+  py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
       .def_readwrite("world_size", &c10::DDPLoggingData::world_size)
       .def_readwrite("rank", &c10::DDPLoggingData::rank)
@@ -1316,7 +1316,9 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
           "nccl_socket_ifname", &c10::DDPLoggingData::nccl_socket_ifname)
       .def_readwrite(
           "nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
-      .def_readwrite("nccl_async_error_handling", &c10::DDPLoggingData::nccl_async_error_handling)
+      .def_readwrite(
+          "nccl_async_error_handling",
+          &c10::DDPLoggingData::nccl_async_error_handling)
       .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
       .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
       .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout)
