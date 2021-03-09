@@ -417,7 +417,7 @@ void TensorPipeAgent::prepareNames() {
   auto nameToId = collectNames(
       rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
 
-  for (const auto& entry: nameToId) {
+  for (const auto& entry : nameToId) {
     const auto& workerName = entry.first;
     const auto& workerId = entry.second;
     workerIdToInfo_.emplace(workerId, WorkerInfo(workerName, workerId));
