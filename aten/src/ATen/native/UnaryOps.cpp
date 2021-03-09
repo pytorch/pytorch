@@ -23,8 +23,18 @@
 #include <map>
 
 namespace at {
-namespace native {
 
+namespace meta {
+
+TORCH_META_FUNC(sin) (
+  const Tensor& self
+) {
+  build_unary_float_op(maybe_get_output(), self);
+}
+
+} // namespace meta
+
+namespace native {
 // NOTE: These are helper functions that reduce redundant code in implementing the most typical kind of unary operators.
 // YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
@@ -365,9 +375,9 @@ Tensor& sgn_out(const Tensor& self, Tensor& result) {
 Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
-Tensor& sin_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, sin_stub); }
-Tensor sin(const Tensor& self) { return unary_op_impl_float(self, sin_stub); }
-Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
+TORCH_IMPL_FUNC(sin_out) (const Tensor& self, const Tensor& result) {
+  sin_stub(device_type(), *this);
+}
 
 Tensor& cos_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cos_stub); }
 Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
@@ -534,7 +544,7 @@ Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   return result;
 }
 
-Tensor& signbit_out(Tensor& result, const Tensor& self) {
+Tensor& signbit_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
   TORCH_CHECK(result.scalar_type() == at::kBool, "signbit does not support non-boolean outputs.");
   result.resize_(self.sizes());
@@ -728,6 +738,5 @@ DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trigamma_stub);
 DEFINE_DISPATCH(trunc_stub);
 DEFINE_DISPATCH(lgamma_stub);
-
 } // namespace native
 } // namespace at
