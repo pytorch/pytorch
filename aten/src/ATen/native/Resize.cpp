@@ -30,7 +30,7 @@ void resize_output(Tensor& output, IntArrayRef shape) {
 // Ideally, once external backends have access to meta functions
 // We can write one for resize_ and get rid of this.
 void resize_output_cpu(Tensor& output, IntArrayRef shape) {
-  at::detail::resize_output_check(output, shape);
+  resize_output_check(output, shape);
   at::native::resize_(output, shape);
 }
 
