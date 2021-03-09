@@ -205,6 +205,13 @@ void BlockToONNX(
       DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
 }
 
+// Example: NegativeLogLikelihoodLoss ignore_index is an attribute,
+// and it is input 4 of aten::nll_loss / aten::nll_loss2d.
+const std::unordered_map<torch::jit::NodeKind, std::vector<size_t>>
+    node_type_to_constant_idx_map = {
+        {aten::nll_loss, {4}},
+        {aten::nll_loss2d, {4}}};
+
 void NodeToONNX(
     Node* old_node,
     Block* new_block,
@@ -322,6 +329,28 @@ void NodeToONNX(
 
     WithInsertPoint insert_point_guard(new_block);
     WithCurrentScope scope_guard(*new_block->owningGraph(), n->scope());
+
+    // For the onnx operators which has the attributes, the attribute need a
+    // constant input. When such an input can be obtained in ConstantValueMap,
+    // we create a constant node for it.
+    if (node_type_to_constant_idx_map.find(n->kind()) !=
+        node_type_to_constant_idx_map.end()) {
+      auto idx_vector = node_type_to_constant_idx_map.at(n->kind());
+      for (const auto idx : idx_vector) {
+        auto input_node = envFn(n->input(idx))->node();
+        if (input_node->kind() != c10::onnx::Constant &&
+            ConstantValueMap::HasValue(input_node->output()->debugName())) {
+          auto value =
+              ConstantValueMap::GetValue(input_node->output()->debugName())
+                  .value();
+          Node* const_node = n->owningGraph()->create(c10::onnx::Constant);
+          const_node->t_(attr::value, value);
+          const_node->output()->setType(TensorType::create(value));
+          py_inputs[idx] = const_node->output();
+        }
+      }
+    }
+
     py::object raw_output = onnx.attr("_run_symbolic_function")(
         new_block->owningGraph(),
         new_block,

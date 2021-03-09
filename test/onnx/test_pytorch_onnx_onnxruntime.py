@@ -5634,6 +5634,35 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(NLLModel(), (input, target))
 
     @skipIfUnsupportedMinOpsetVersion(12)
+    def test_nllloss_dynamic_ignore_index(self):
+        import torch.nn.functional as F
+
+        def linear_combination(x, y, epsilon):
+            return epsilon * x + (1 - epsilon) * y
+
+        def reduce_loss(loss, reduction='mean'):
+            return loss.mean() if reduction == 'mean' else loss.sum() if reduction == 'sum' else loss
+
+        class LabelSmoothingCrossEntropy(torch.nn.Module):
+            def __init__(self, epsilon: float = 0.1, reduction='mean'):
+                super().__init__()
+                self.epsilon = epsilon
+                self.reduction = reduction
+
+            def forward(self, preds, target, start_position):
+                n = preds.size()[-1]
+                log_preds = F.log_softmax(preds, dim=-1)
+                ignore_index = start_position.size(1)
+                nll = F.nll_loss(log_preds, target, reduction=self.reduction, ignore_index=ignore_index)
+                return nll + start_position.float()
+
+        N = 5
+        preds = torch.randn(N, 16)
+        target = torch.randint(5, (N,))
+        start_position = torch.randint(10, (N, N))
+        self.run_test(LabelSmoothingCrossEntropy(), (preds, target, start_position))
+
+    @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean_ignore_index_weights(self):
         class NLLModel(torch.nn.Module):
             def __init__(self):
@@ -6091,6 +6120,55 @@ class TestONNXRuntime(unittest.TestCase):
         x[2] = x[0] = 1
         embedding_matrix = torch.rand(10, 3)
         self.run_test(model, (x, embedding_matrix))
+
+        x = torch.randint(4, (4, 3, 2))
+        x[2] = 1
+        x[0][1] = 1
+        self.run_test(model, (x, embedding_matrix))
+        self.run_test(model, (x, embedding_matrix), training=torch.onnx.TrainingMode.TRAINING)
+
+        class EmbedModelWithoutPaddingIdx(torch.nn.Module):
+            def forward(self, input, emb):
+                return torch.nn.functional.embedding(input, emb)
+
+        model = EmbedModelWithoutPaddingIdx()
+        x = torch.randint(4, (4, 3, 2))
+        self.run_test(model, (x, embedding_matrix))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_embedding_module(self):
+        class EmbedModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(4, 3, padding_idx=1)
+                self.emb2 = torch.nn.Embedding(4, 3, padding_idx=1)
+                with torch.no_grad():
+                    self.emb2.weight[1] = torch.ones(3)
+
+            def forward(self, input):
+                return self.emb(input), self.emb2(input)
+
+        model = EmbedModel()
+        x = torch.randint(4, (4, ))
+        x[2] = x[0] = 1
+        self.run_test(model, (x, ))
+
+        x = torch.randint(4, (4, 3, 2))
+        x[2] = 1
+        x[0][1] = 1
+        self.run_test(model, (x, ))
+
+        class EmbedModelWithoutPaddingIdx(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(4, 3)
+
+            def forward(self, input):
+                return self.emb(input)
+
+        model = EmbedModelWithoutPaddingIdx()
+        x = torch.randint(4, (4, 3, 2))
+        self.run_test(model, (x, ))
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
