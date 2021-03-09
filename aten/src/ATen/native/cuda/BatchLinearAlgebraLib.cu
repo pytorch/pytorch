@@ -17,6 +17,25 @@
 namespace at {
 namespace native {
 
+// Some cuBLAS and cuSOLVER batched routines require input to be a device array of pointers to device individual matrices
+// 'input' must be a contiguous tensor
+template <typename scalar_t>
+static Tensor get_device_pointers(const Tensor& input) {
+  auto input_data = input.data_ptr<scalar_t>();
+  int64_t input_mat_stride = matrixStride(input);
+
+  // cublas/cusolver interface requires 'int'
+  int batch_size = cuda_int_cast(batchCount(input), "batch_size");
+
+  // if batch_size==0, then start=0 and end=1
+  // if input_mat_stride==0, then step=sizeof(scalar_t)
+  return at::arange(
+      /*start=*/reinterpret_cast<int64_t>(input_data),
+      /*end=*/reinterpret_cast<int64_t>(&input_data[(std::max<int>(batch_size, 1) - 1) * input_mat_stride]) + 1,
+      /*step=*/static_cast<int64_t>(std::max<int64_t>(input_mat_stride, 1) * sizeof(scalar_t)),
+      input.options().dtype(at::kLong));
+}
+
 template <typename scalar_t>
 static void apply_triangular_solve(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
@@ -71,21 +90,13 @@ static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool upper, boo
   auto alpha = scalar_t{1};
 
   // cuBLAS batched trsm requires input to be the device array of pointers to device single matrices
-  Tensor A_array = at::arange(
-    reinterpret_cast<int64_t>(A_data),
-    reinterpret_cast<int64_t>(&A_data[(std::max<int>(batch_size, 1) - 1) * A_mat_stride]) + 1,
-    static_cast<int64_t>(std::max<int64_t>(A_mat_stride, 1) * sizeof(scalar_t)), A.options().dtype(at::kLong));
-
-  Tensor B_array = at::arange(
-    reinterpret_cast<int64_t>(B_data),
-    reinterpret_cast<int64_t>(&B_data[(std::max<int>(batch_size, 1) - 1) * B_mat_stride]) + 1,
-    static_cast<int64_t>(std::max<int64_t>(B_mat_stride, 1) * sizeof(scalar_t)), B.options().dtype(at::kLong));
-
-  auto A_array_data = reinterpret_cast<scalar_t**>(A_array.data_ptr());
-  auto B_array_data = reinterpret_cast<scalar_t**>(B_array.data_ptr());
+  Tensor A_ptr_array = get_device_pointers<scalar_t>(A);
+  Tensor B_ptr_array = get_device_pointers<scalar_t>(B);
+  auto A_ptr_array_data = reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr());
+  auto B_ptr_array_data = reinterpret_cast<scalar_t**>(B_ptr_array.data_ptr());
 
   auto handle = at::cuda::getCurrentCUDABlasHandle();
-  at::cuda::blas::trsmBatched(handle, side, uplo, trans, diag, n, nrhs, &alpha, A_array_data, lda, B_array_data, lda, batch_size);
+  at::cuda::blas::trsmBatched(handle, side, uplo, trans, diag, n, nrhs, &alpha, A_ptr_array_data, lda, B_ptr_array_data, lda, batch_size);
 }
 
 void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
