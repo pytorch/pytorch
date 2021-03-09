@@ -10,7 +10,7 @@ namespace at { struct TensorIterator; }
 namespace at { namespace native {
 
 using unary_fn = void(*)(TensorIterator&);
-using unary_fn_with_scalar = void(*)(TensorIterator&, Scalar a);
+using unary_fn_with_scalar = void(*)(TensorIterator&, const Scalar& a);
 
 DECLARE_DISPATCH(unary_fn, abs_stub);
 DECLARE_DISPATCH(unary_fn, angle_stub);
@@ -76,7 +76,7 @@ DECLARE_DISPATCH(void(*)(TensorIterator&, const uint64_t, const int64_t, c10::op
 DECLARE_DISPATCH(void(*)(TensorIterator&, c10::optional<Generator>), random_full_64_bits_range_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, c10::optional<Generator>), random_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t), polygamma_stub);
-DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar a, Scalar b), clamp_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar& a, const Scalar& b), clamp_stub);
 DECLARE_DISPATCH(
     void (*)(Tensor&, const Tensor&, int64_t, c10::optional<Generator>),
     multinomial_with_replacement_stub);

@@ -104,8 +104,8 @@ Tensor addmm(
     const Tensor& bias,
     const Tensor& input,
     const Tensor& weight,
-    Scalar beta,
-    Scalar alpha) {
+    const Scalar& beta,
+    const Scalar& alpha) {
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(input.dim() == 2 && weight.dim() == 2);
   TORCH_CHECK(beta.toFloat() == 1.0f);
@@ -204,19 +204,19 @@ Tensor upsample_nearest2d_vec(
   return mpscnn::upsample_nearest2d_vec(input, output_size, scale_factors);
 }
 
-Tensor add_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
+Tensor add_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
   return mpscnn::add(input1, input2.is_metal() ? input2 : input2.metal());
 }
 
-Tensor& add__Tensor(Tensor& input1, const Tensor& input2, Scalar alpha) {
+Tensor& add__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
   return mpscnn::add_(input1, input2.is_metal() ? input2 : input2.metal());
 }
 
-Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
+Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
   return mpscnn::sub(input1, input2.is_metal() ? input2 : input2.metal());
@@ -235,7 +235,7 @@ Tensor adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
   return mpscnn::global_avg_pool2d(input, output_size);
 }
 
-Tensor& hardtanh_(Tensor& input, Scalar min_val, Scalar max_val) {
+Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
   TORCH_CHECK(input.is_metal());
   return mpscnn::hardtanh_(input, min_val, max_val);
 }

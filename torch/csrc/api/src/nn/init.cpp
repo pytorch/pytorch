@@ -66,7 +66,7 @@ double calculate_gain(NonlinearityType nonlinearity, double param) {
   return 1.0;
 }
 
-Tensor constant_(Tensor tensor, Scalar value) {
+Tensor constant_(Tensor tensor, const Scalar& value) {
   NoGradGuard guard;
   return tensor.fill_(value);
 }

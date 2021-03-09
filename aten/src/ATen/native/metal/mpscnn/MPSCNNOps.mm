@@ -288,7 +288,7 @@ Tensor tanh(const Tensor& input) {
 }
 
 API_AVAILABLE(ios(10.0), macos(10.13))
-Tensor& hardtanh_(Tensor& input, Scalar min_val, Scalar max_val) {
+Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   MPSImage* Y = [MPSImage temporaryImageFromSize:input.sizes().vec()

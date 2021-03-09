@@ -661,7 +661,7 @@ struct TORCH_API IValue final {
   }
 
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
-  IValue(at::Scalar s) : IValue() {
+  IValue(const at::Scalar& s) : IValue() {
     if (s.isFloatingPoint()) {
       *this = s.toDouble();
     } else if (s.isComplex()) {

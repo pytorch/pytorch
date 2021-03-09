@@ -5,7 +5,7 @@
 namespace at { namespace native {
 
 template<template<class> class Op>
-std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
+std::vector<Tensor> foreach_binary_op(TensorList tensors, const Scalar& scalar) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
     vec_res.reserve(tensors.size());
@@ -30,7 +30,7 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
 }
 
 template<template<class> class Op>
-void foreach_binary_op_(TensorList tensors, Scalar scalar) {
+void foreach_binary_op_(TensorList tensors, const Scalar& scalar) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors.vec());
 
@@ -47,7 +47,7 @@ void foreach_binary_op_(TensorList tensors, Scalar scalar) {
 }
 
 #define FOREACH_BINARY_OP_SCALAR(NAME, OP)                                                          \
-void foreach_tensor_##NAME##_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {               \
+void foreach_tensor_##NAME##_scalar_kernel_cuda_(TensorList tensors, const Scalar& scalar) {               \
     check_foreach_api_restrictions(tensors);                                                        \
     if (!can_use_fast_route(tensors, scalar)) {                                                     \
         return at::native::foreach_tensor_##NAME##_scalar_kernel_slow_(tensors, scalar);            \
@@ -56,7 +56,7 @@ void foreach_tensor_##NAME##_scalar_kernel_cuda_(TensorList tensors, Scalar scal
     foreach_binary_op_<OP>(tensors, scalar);                                                        \
 }                                                                                                   \
                                                                                                     \
-std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(TensorList tensors, Scalar scalar) { \
+std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(TensorList tensors, const Scalar& scalar) { \
     check_foreach_api_restrictions(tensors);                                                        \
     if (!can_use_fast_route(tensors, scalar)) {                                                     \
         return at::native::foreach_tensor_##NAME##_scalar_kernel_slow(tensors, scalar);             \
