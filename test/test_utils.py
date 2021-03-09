@@ -289,7 +289,7 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2)
             out.sum().backward()
 
-class TestDataLoader(TestCase):
+class TestDataLoaderUtils(TestCase):
     def setUp(self):
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
@@ -669,7 +669,7 @@ class TestAssert(TestCase):
             ms(torch.tensor([False], dtype=torch.bool))
 
 
-@unittest.skipIf(IS_SANDCASTLE or IS_WINDOWS, "cpp_extension is OSS only and temp disabling for Windows")
+@unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
     def test_load_standalone(self):
         build_dir = tempfile.mkdtemp()

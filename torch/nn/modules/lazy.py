@@ -3,11 +3,11 @@ from typing_extensions import Protocol
 import warnings
 
 import torch
-from ..parameter import UninitializedParameter
+from ..parameter import is_lazy
 
 
 class _LazyProtocol(Protocol):
-    """This is to avoid errors with mypy checks for 
+    """This is to avoid errors with mypy checks for
     The attributes in a mixin:
     https://mypy.readthedocs.io/en/latest/more_types.html#mixin-classes
     """
@@ -59,10 +59,10 @@ class LazyModuleMixin:
     Modules that lazily initialize parameters, or "lazy modules",
     derive the shapes of their parameters from the first input(s)
     to their forward method. Until that first forward they contain
-    :class:`torch.nn.UninitializedParameter`s that should not be accessed
-    or used, and afterward they contain regular :class:`torch.nn.Parameter`s.
+    :class:`torch.nn.UninitializedParameter` s that should not be accessed
+    or used, and afterward they contain regular :class:`torch.nn.Parameter` s.
     Lazy modules are convenient since they don't require computing some
-    module arguments, like the `in_features` argument of a
+    module arguments, like the :attr:`in_features` argument of a
     typical :class:`torch.nn.Linear`.
 
     After construction, networks with lazy modules should first
@@ -176,18 +176,19 @@ class LazyModuleMixin:
                       'so changes to the API or functionality can happen at any moment.')
 
     def _save_to_state_dict(self: _LazyProtocol, destination, prefix, keep_vars):
-        # This should be ideally implemented as a hook, 
+        # This should be ideally implemented as a hook,
         # but we should override `detach` in the UninitializedParameter to return itself
         # which is not clean
         for name, param in self._parameters.items():
             if param is not None:
-                if isinstance(param, UninitializedParameter):
-                    destination[prefix + name] = param
-                else:
-                    destination[prefix + name] = param if keep_vars else param.detach()
+                if not (is_lazy(param) or keep_vars):
+                    param = param.detach()
+                destination[prefix + name] = param
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
-                destination[prefix + name] = buf if keep_vars else buf.detach()
+                if not (is_lazy(buf) or keep_vars):
+                    buf = buf.detach()
+                destination[prefix + name] = buf
 
     def _lazy_load_hook(
             self: _LazyProtocol, state_dict, prefix, local_metadata, strict,
@@ -201,15 +202,14 @@ class LazyModuleMixin:
         See comment in ``torch.nn.Module._register_load_state_dict_pre_hook``
         for the details of the hook specification.
         """
-        local_state = {k: v for k, v in self._parameters.items() if v is not None}
-        for name, param in local_state.items():
+        for name, param in itertools.chain(self._parameters.items(), self._buffers.items()):
             key = prefix + name
-            if key in state_dict:
+            if key in state_dict and param is not None:
                 input_param = state_dict[key]
-                if isinstance(param, UninitializedParameter): 
+                if is_lazy(param):
                     # The current parameter is not initialized but the one being loaded one is
                     # create a new parameter based on the uninitialized one
-                    if not isinstance(input_param, UninitializedParameter):
+                    if not is_lazy(input_param):
                         with torch.no_grad():
                             param.materialize(input_param.shape)
 
@@ -226,8 +226,9 @@ class LazyModuleMixin:
         # This is to avoid the JIT to track this parameter and force
         # custom modules __setstate__ to add it
         params = self._parameters.values()
-        for param in itertools.chain(params):
-            if isinstance(param, (UninitializedParameter)):
+        buffers = self._buffers.values()
+        for param in itertools.chain(params, buffers):
+            if is_lazy(param):
                 return True
         return False
 
@@ -241,7 +242,7 @@ class LazyModuleMixin:
         The module is set into evaluation mode before running the forward pass in order
         to avoid saving statistics or calculating gradients
         """
-        module.initialize_parameters(*input) 
+        module.initialize_parameters(*input)
         if module.has_uninitialized_params():
             raise RuntimeError('module {} has not been fully initialized'.format(self._get_name()))
         module._initialize_hook.remove()
@@ -254,4 +255,4 @@ class LazyModuleMixin:
 
     def _replicate_for_data_parallel(self: _LazyProtocol):
         raise RuntimeError('Modules with uninitialized parameters can\'t be used with `DataParallel`. '
-                           'Run a dummy forward pass to correctly initialize the modules')                    
+                           'Run a dummy forward pass to correctly initialize the modules')

@@ -1,5 +1,5 @@
 import torch
-from . import functional as F
+from . import _functional as F
 from .optimizer import Optimizer
 
 
@@ -73,6 +73,7 @@ class AdamW(Optimizer):
             max_exp_avg_sqs = []
             state_steps = []
             amsgrad = group['amsgrad']
+            beta1, beta2 = group['betas']
 
             for p in group['params']:
                 if p.grad is None:
@@ -101,7 +102,6 @@ class AdamW(Optimizer):
                 if amsgrad:
                     max_exp_avg_sqs.append(state['max_exp_avg_sq'])
 
-                beta1, beta2 = group['betas']
                 # update the steps for each param group update
                 state['step'] += 1
                 # record the step after step update

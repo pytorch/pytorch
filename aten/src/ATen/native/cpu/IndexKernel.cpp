@@ -36,9 +36,8 @@ struct Indexer {
     for (int j = 0; j < num_indexers; j++) {
       int64_t value = *(int64_t*)&indexers[j][idx * indexer_strides[j]];
       int64_t size = original_sizes[j];
-      if (value < -size || value >= size) {
-        TORCH_CHECK_INDEX(false, "index ", value, " is out of bounds for dimension ", j, " with size ", size);
-      }
+      TORCH_CHECK_INDEX(value >= -size && value < size,
+                        "index ", value, " is out of bounds for dimension ", j, " with size ", size);
       if (value < 0) {
         value += size;
       }
@@ -111,8 +110,13 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "index_put", [&] {
     if (accumulate) {
-      bool use_parallel_for = ((iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
-      if (iter.dtype() == ScalarType::Float && use_parallel_for) {
+      // See Note [Enabling Deterministic Operations]
+      // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
+      // must enable serial execution if deterministic algorithms are enabled.
+      bool is_deterministic = at::globalContext().deterministicAlgorithms();
+      bool use_parallel_for = (!is_deterministic) && (
+        (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
+      if (use_parallel_for && iter.dtype() == ScalarType::Float) {
         cpu_index_kernel<float>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
           cpu_atomic_add_float((float*)(dst + offset), *(float*)src);
         });
@@ -146,11 +150,9 @@ void index_fill_kernel(
       for (int64_t elem = 0; elem < n; ++elem) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
-        if (idx < -self_dim_size || idx >= self_dim_size) {
-          TORCH_CHECK_INDEX(false,
-            "index ", idx, " is out of bounds for dimension ",
-            dim, " with size ", self_dim_size);
-        }
+        TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
+                          "index ", idx, " is out of bounds for dimension ",
+                          dim, " with size ", self_dim_size);
         if (idx < 0) {
           idx += self_dim_size;
         }
@@ -165,11 +167,9 @@ void index_fill_kernel(
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
       auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
-      if (idx < -self_dim_size || idx >= self_dim_size) {
-        TORCH_CHECK_INDEX(false,
-          "index ", idx, " is out of bounds for dimension ",
-          dim, " with size ", self_dim_size);
-      }
+      TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
+                        "index ", idx, " is out of bounds for dimension ",
+                        dim, " with size ", self_dim_size);
       if (idx < 0) {
         idx += self_dim_size;
       }

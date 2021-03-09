@@ -18,6 +18,7 @@ class SubgraphMatcher:
         if len(pattern.nodes) == 0:
             raise ValueError("SubgraphMatcher cannot be initialized with an "
                              "empty pattern")
+        # `self.pattern_anchor` is the output Node in `pattern`
         self.pattern_anchor = next(iter(reversed(pattern.nodes)))
         # Ensure that there is only a single output value in the pattern
         # since we don't support multiple outputs
@@ -39,6 +40,7 @@ class SubgraphMatcher:
 
     # Compare the pattern node `pn` against the graph node `gn`
     def _match_nodes(self, pn : Node, gn : Node) -> bool:
+
         # Check if we've already matched these nodes in the current
         # traversal
         if pn in self.nodes_map:
@@ -65,8 +67,13 @@ class SubgraphMatcher:
         if (pn.op != "output"
                 and len(pn.all_input_nodes) != len(gn.all_input_nodes)):
             return False
-        match_found = all(self._match_nodes(pn_, gn_) for pn_, gn_
-                          in zip(pn.all_input_nodes, gn.all_input_nodes))
+        if pn.op == "output":
+            match_found = any(self._match_nodes(pn.all_input_nodes[0], gn_)
+                              for gn_ in gn.all_input_nodes)
+        else:
+            match_found = (len(pn.all_input_nodes) == len(gn.all_input_nodes)
+                           and all(self._match_nodes(pn_, gn_) for pn_, gn_
+                                   in zip(pn.all_input_nodes, gn.all_input_nodes)))
         if not match_found:
             self.nodes_map.pop(pn)
             return False
@@ -74,7 +81,7 @@ class SubgraphMatcher:
         return True
 
 
-def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable) -> None:
+def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable) -> List[Match]:
     """
     Matches all possible non-overlapping sets of operators and their
     data dependencies (``pattern``) in the Graph of a GraphModule
@@ -85,6 +92,19 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
         ``gm``: The GraphModule that wraps the Graph to operate on
         ``pattern``: The subgraph to match in ``gm`` for replacement
         ``replacement``: The subgraph to replace ``pattern`` with
+
+    Returns:
+        List[Match]: A list of ``Match`` objects representing the places
+        in the original graph that ``pattern`` was matched to. The list
+        is empty if there are no matches. ``Match`` is defined as:
+
+        .. code-block:: python
+
+            class Match(NamedTuple):
+                # Node from which the match was found
+                anchor: Node
+                # Maps nodes in the pattern subgraph to nodes in the larger graph
+                nodes_map: Dict[Node, Node]
 
     Examples:
 
@@ -234,7 +254,7 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
     # as part of a pattern match
     replaced_nodes: Set[Node] = set()
 
-    # Return TRUE if one of the nodes in the current match has already
+    # Return True if one of the nodes in the current match has already
     # been used as part of another match
     def overlaps_with_prev_match(match : Match) -> bool:
         for n in match.nodes_map.values():
@@ -287,14 +307,41 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
         with original_graph.inserting_before(subgraph_output):
             copied_output = original_graph.graph_copy(replacement_graph,
                                                       val_map)
-        assert isinstance(copied_output, Node)
 
-        # We only want to copy in the output node from `pattern` if we
-        # have an output-output match. Otherwise, we leave out the
-        # `pattern` output node so we don't have two outputs in the
-        # resultant graph
+        # Hook the output Node of the replacement subgraph in to the
+        # original Graph at the correct location
+
+        # CASE 1: We need to hook the replacement subgraph in somewhere
+        # in the middle of the graph. We replace the Node in the
+        # original graph that corresponds to the end of the pattern
+        # subgraph
         if subgraph_output.op != "output":
-            subgraph_output = subgraph_output.args[0]    # type: ignore
+            # `subgraph_output` may have multiple args. These args could
+            # be from the orignal graph, or they could have come from
+            # the insertion of `replacement_subgraph`. We need to find
+            # the Node that was originally matched as part of
+            # `pattern` (i.e. a Node from the original graph). We can
+            # figure this out by looking in `match.nodes_map`. The map
+            # was created before `replacement_subgraph` was spliced in,
+            # so we know that, if a Node is in `match.nodes_map.values`,
+            # it must have come from the original graph
+            for n in subgraph_output.all_input_nodes:
+                if (n.op != "placeholder"
+                        and n in match.nodes_map.values()):
+                    subgraph_output = n
+                    break
+            assert subgraph_output.op != "output"
+        # CASE 2: The pattern subgraph match extends to the end of the
+        # original graph, so we need to change the current graph's
+        # output Node to reflect the insertion of the replacement graph.
+        # We'll keep the current output Node, but update its args and
+        # `_input_nodes` as necessary
+        else:
+            subgraph_output.args = ((copied_output,))
+            if isinstance(copied_output, Node):
+                subgraph_output._input_nodes = {copied_output: None}
+
+        assert isinstance(copied_output, Node)
         subgraph_output.replace_all_uses_with(copied_output)
 
         # Erase the `pattern` nodes
@@ -305,3 +352,5 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
     # Update the passed-in GraphModule to reflect the new state of
     # `original_graph`
     gm.recompile()
+
+    return matches

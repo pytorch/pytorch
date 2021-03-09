@@ -309,4 +309,11 @@ inline std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
   return args_sizes;
 }
 
+inline std::vector<ScalarType> to_args_scalartypes(TensorList tensors) {
+  std::vector<ScalarType> args_scalartypes(tensors.size());
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    args_scalartypes[i] = tensors[i].scalar_type();
+  }
+  return args_scalartypes;
+}
 }} // namespace torch::autograd

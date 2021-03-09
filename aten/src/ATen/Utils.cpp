@@ -1,8 +1,11 @@
-#include <ATen/Utils.h>
 #include <ATen/Context.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Functions.h>
-#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
+
+
 #include <stdarg.h>
 #include <cstdlib>
 #include <stdexcept>
@@ -39,7 +42,7 @@ Tensor empty_cpu(
     allocator = at::getCPUAllocator();
   }
 
-  int64_t nelements = prod_intlist(size);
+  int64_t nelements = c10::multiply_integers(size);
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(dtype_or_default(dtype_opt));
   int64_t size_bytes = nelements * dtype.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(

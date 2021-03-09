@@ -4,7 +4,7 @@
 namespace at {
 namespace native {
 namespace {
-// Check foreach API restrictions 
+// Check foreach API restrictions
 // - Tensor lists must be non-empty.
 // - All tensors in all lists must have the same dtype.
 // - All TensorLists and ScalarLists must have the same number of elements.
@@ -98,6 +98,7 @@ bool can_use_fast_route(TensorList tensors) {
   return false;
 #else
   auto expected_device = tensors[0].device();
+
   for (auto t : tensors) {
     if (!has_same_attributes(expected_device, {t})) {
       return false;
@@ -132,10 +133,16 @@ bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else
+  auto expected_device = tensors[0].device();
+
   for (int i = 0; i < tensors.size(); i++) {
     if (will_promote_tensor(tensors[i], scalars[i])) {
       return false;
     }
+  }
+
+  if (!has_same_attributes(expected_device, tensors)) {
+      return false;
   }
 
   return true;
@@ -211,7 +218,22 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
 }
 
 bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<Scalar> scalars) {
-  return can_use_fast_route(tensors1, tensors2, tensors3);
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
+  auto expected_device = tensors1[0].device();
+  for (int64_t i = 0; i < tensors1.size(); i++) {
+    if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i], tensors3[i]})) {
+      return false;
+    }
+
+    if (will_promote_tensor(tensors1[i], scalars[i])) {
+      return false;
+    }
+  }
+
+  return true;
+#endif
 }
 
 }

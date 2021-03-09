@@ -108,7 +108,7 @@ private:
     caffe2::TypeMeta type_meta = typeMetaFor(src);
     at::Device device = src.device();
 #ifdef __HIP_PLATFORM_HCC__
-    if (device.type() == at::DeviceType::CUDA) {
+    if (device.is_cuda()) {
       device = at::Device(at::DeviceType::HIP, device.index());
     }
 #endif

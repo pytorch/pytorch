@@ -21,7 +21,7 @@ namespace c10 {
   _(DictType)               \
   _(NumberType)             \
   _(FloatType)              \
-  _(ComplexDoubleType)      \
+  _(ComplexType)      \
   _(FutureType)             \
   _(RRefType)               \
   _(IntType)                \

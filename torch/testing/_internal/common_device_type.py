@@ -5,7 +5,7 @@ import runpy
 import threading
 from enum import Enum
 from functools import wraps
-from typing import List, Any, ClassVar, Optional, Sequence
+from typing import List, Any, ClassVar, Optional, Sequence, Tuple
 import unittest
 import os
 import torch
@@ -232,9 +232,6 @@ class DeviceTypeTestBase(TestCase):
             return self.precision
         return test.precision_overrides.get(dtype, self.precision)
 
-    def _should_stop_test_suite(self, rte):
-        return False
-
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test, *, generic_cls=None):
@@ -290,7 +287,7 @@ class DeviceTypeTestBase(TestCase):
                     result = test_fn(self, *args)
                 except RuntimeError as rte:
                     # check if rte should stop entire test suite.
-                    self._stop_test_suite = self._should_stop_test_suite(rte)
+                    self._stop_test_suite = self._should_stop_test_suite()
                     # raise the runtime error as is for the test suite to record.
                     raise rte
                 finally:
@@ -345,6 +342,9 @@ class DeviceTypeTestBase(TestCase):
 class CPUTestBase(DeviceTypeTestBase):
     device_type = 'cpu'
 
+    # No critical error should stop CPU test suite
+    def _should_stop_test_suite(self):
+        return False
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
@@ -354,15 +354,6 @@ class CUDATestBase(DeviceTypeTestBase):
     cudnn_version: ClassVar[Any]
     no_magma: ClassVar[bool]
     no_cudnn: ClassVar[bool]
-
-    def _should_stop_test_suite(self, rte):
-        # CUDA device side error will cause subsequence test cases to fail.
-        # stop entire test suite if catches RuntimeError during torch.cuda.synchronize().
-        try:
-            torch.cuda.synchronize()
-        except RuntimeError as rte:
-            return True
-        return False
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -872,7 +863,7 @@ def skipCUDAIfNoMagma(fn):
 
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
     version = _get_torch_cuda_version()
-    if version >= [10, 2]:
+    if version >= (10, 2):
         return fn
     else:
         # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
@@ -886,6 +877,21 @@ def skipCUDAIfRocm(fn):
 def skipCUDAIfNotRocm(fn):
     return skipCUDAIf(not TEST_WITH_ROCM, "test doesn't currently work on the CUDA stack")(fn)
 
+# Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
+def skipCUDAVersionIn(versions : List[Tuple[int, int]] = None):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            version = _get_torch_cuda_version()
+            if version == (0, 0):  # cpu
+                return fn(self, *args, **kwargs)
+            if version in (versions or []):
+                reason = "test skipped for CUDA version {0}".format(version)
+                raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
+    return dec_fn
 
 # Skips a test on CUDA if cuDNN is unavailable or its version is lower than requested.
 def skipCUDAIfCudnnVersionLessThan(version=0):

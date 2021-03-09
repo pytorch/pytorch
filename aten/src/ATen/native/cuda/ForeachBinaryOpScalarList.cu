@@ -24,6 +24,7 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, at::ArrayRef<Scalar> s
                                                                   /* depth */ 2,
                                                                   /* r_args_depth */ 1,
                                                                   /* res_arg_index */ 1>(),
+
                                         Op<opmath_t>());
     });
     return tensor_lists[1];
@@ -39,30 +40,30 @@ void foreach_binary_op_(TensorList tensors, at::ArrayRef<Scalar> scalars) {
         multi_tensor_apply<1, opmath_t>(tensor_lists,
                                         scalars,
                                         BinaryOpScalarListFunctor<scalar_t,
-                                                                    /* depth */ 1,
-                                                                    /* r_args_depth */ 1,
-                                                                    /* res_arg_index */ 0>(),
+                                                                  /* depth */ 1,
+                                                                  /* r_args_depth */ 1,
+                                                                  /* res_arg_index */ 0>(),
                                         Op<opmath_t>());
     });
 }
 
-#define FOREACH_BINARY_OP_SCALARLIST(NAME, OP)                                                                          \
-void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef<Scalar> scalars) {                \
-    check_foreach_api_restrictions(tensors, scalars);                                                                   \
-    if (!can_use_fast_route(tensors, scalars)) {                                                                        \
-        return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow_(tensors, scalars);                           \
-    }                                                                                                                   \
-                                                                                                                        \
-    foreach_binary_op_<OP>(tensors, scalars);                                                                           \
-}                                                                                                                       \
-                                                                                                                        \
-std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList tensors, at::ArrayRef<Scalar> scalars) {  \
-    check_foreach_api_restrictions(tensors, scalars);                                                                   \
-    if (!can_use_fast_route(tensors, scalars)) {                                                                        \
-        return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow(tensors, scalars);                            \
-    }                                                                                                                   \
-                                                                                                                        \
-    return foreach_binary_op<OP>(tensors, scalars);                                                                     \
+#define FOREACH_BINARY_OP_SCALARLIST(NAME, OP)                                                                           \
+void foreach_tensor_##NAME##_scalarlist_kernel_cuda_(TensorList tensors, at::ArrayRef<Scalar> scalars) {                 \
+    check_foreach_api_restrictions(tensors, scalars);                                                                    \
+    if (!can_use_fast_route(tensors, scalars)) {                                                                         \
+        return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow_(tensors, scalars);                            \
+    }                                                                                                                    \
+                                                                                                                         \
+    foreach_binary_op_<OP>(tensors, scalars);                                                                            \
+}                                                                                                                        \
+                                                                                                                         \
+std::vector<Tensor> foreach_tensor_##NAME##_scalarlist_kernel_cuda(TensorList tensors, at::ArrayRef<Scalar> scalars) {   \
+    check_foreach_api_restrictions(tensors, scalars);                                                                    \
+    if (!can_use_fast_route(tensors, scalars)) {                                                                         \
+        return at::native::foreach_tensor_##NAME##_scalarlist_kernel_slow(tensors, scalars);                             \
+    }                                                                                                                    \
+                                                                                                                         \
+    return foreach_binary_op<OP>(tensors, scalars);                                                                      \
 }
 
 FOREACH_BINARY_OP_SCALARLIST(add, std::plus);

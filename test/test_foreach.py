@@ -4,7 +4,10 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, skipCUDAIfRocm
 from torch._six import inf, nan
 
-N_values = [20] if not TEST_WITH_SLOW else [30, 300]
+# Includes some values such that N * N won't be a multiple of 4,
+# which should ensure we test the vectorized and non-vectorized
+# kernel code paths.
+N_values = [20, 23] if not TEST_WITH_SLOW else [23, 30, 300]
 
 class TestForeach(TestCase):
     bin_ops = [
@@ -51,7 +54,8 @@ class TestForeach(TestCase):
         if dtype in [torch.bfloat16, torch.bool, torch.float16]:
             tensors = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
         elif dtype in torch.testing.get_all_int_dtypes():
-            tensors = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
+            # Constrains the range between 1 and 10 for less stress on int8 tensors.
+            tensors = [torch.randint(1, 10, (N, N), device=device, dtype=dtype) for _ in range(N)]
         else:
             tensors = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
 
@@ -77,14 +81,15 @@ class TestForeach(TestCase):
 
     def _test_pointwise_op(self, device, dtype, foreach_op, foreach_op_, torch_op):
         for N in N_values:
-            values = [2 + i for i in range(N)]
+            # Constrains the range a bit for int8 tensors.
+            values = [2 + (i % 5) for i in range(N)]
             for vals in [values[0], values]:
                 tensors = self._get_test_data(device, dtype, N)
                 tensors1 = self._get_test_data(device, dtype, N)
                 tensors2 = self._get_test_data(device, dtype, N)
 
                 # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-                control_dtype = torch.float32 if (self.device_type == 'cuda' and 
+                control_dtype = torch.float32 if (self.device_type == 'cuda' and
                                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
 
                 if not isinstance(vals, list):
@@ -103,7 +108,7 @@ class TestForeach(TestCase):
                 self.assertEqual(res, tensors)
 
                 if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                    self.assertEqual(tensors, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
+                    self.assertEqual(tensors, expected, atol=3.e-3, rtol=self.dtype_precisions[dtype][0])
                 else:
                     self.assertEqual(tensors, expected)
 
@@ -119,12 +124,14 @@ class TestForeach(TestCase):
                     with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N - 1)])
 
+                    msg = "Tensor lists must have the same number of tensors, got {} and {}".format(N + 1, N)
+
                     tensors = self._get_test_data(device, dtype, N + 1)
-                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 21 and 20"):
+                    with self.assertRaisesRegex(RuntimeError, msg):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
                     tensors1 = self._get_test_data(device, dtype, N + 1)
-                    with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 21 and 20"):
+                    with self.assertRaisesRegex(RuntimeError, msg):
                         op(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
     def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op):
@@ -204,13 +211,18 @@ class TestForeach(TestCase):
 
     # Separate test for abs due to a lot of special cases
     # Absolute value of a complex number a + bj is defined as sqrt(a^2 + b^2), i.e. a floating point
-    @dtypes(*(torch.testing.floating_and_complex_types_and(torch.bfloat16, torch.half)))
+    @dtypes(*torch.testing.get_all_dtypes())
     def test_abs(self, device, dtype):
         for N in N_values:
             tensors1 = self._get_test_data(device, dtype, N)
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
             control_dtype = torch.float32 if (self.device_type == 'cuda' and
                                               (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+
+            if dtype == torch.bool and self.device_type == 'cpu':
+                with self.assertRaisesRegex(RuntimeError, r"not implemented for"):
+                    expected = [torch.abs(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
+                continue
 
             expected = [torch.abs(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
             res = torch._foreach_abs(tensors1)
@@ -478,16 +490,16 @@ class TestForeach(TestCase):
                 # Bool case
                 if dtype == torch.bool:
                     if foreach_bin_op == torch._foreach_sub:
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
                             expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
 
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
                             res = foreach_bin_op(tensors, scalars)
 
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
                             [t.sub_(scalar) for t, scalar in zip(tensors, scalars)]
 
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"): 
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
                             foreach_bin_op_(tensors, scalars)
                         continue
 

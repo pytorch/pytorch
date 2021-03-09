@@ -9,7 +9,7 @@ const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
       {"int", IntType::get()},
       {"float", FloatType::get()},
       {"bool", BoolType::get()},
-      {"complex", ComplexDoubleType::get()},
+      {"complex", ComplexType::get()},
       {"str", StringType::get()},
       {"Device", DeviceObjType::get()},
       {"Stream", StreamObjType::get()},

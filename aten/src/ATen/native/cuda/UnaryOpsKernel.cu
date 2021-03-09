@@ -122,7 +122,7 @@ void logit_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
-      iter.dtype(),
+      iter.common_dtype(),
       "logit_cuda",
       [&]() {
         using T_ACC = acc_type<scalar_t, true>;

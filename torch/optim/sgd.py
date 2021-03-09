@@ -1,5 +1,5 @@
 import torch
-from . import functional as F
+from . import _functional as F
 from .optimizer import Optimizer, required
 
 
@@ -38,7 +38,7 @@ class SGD(Optimizer):
                 p_{t+1} & = p_{t} - \text{lr} * v_{t+1},
             \end{aligned}
 
-        where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the 
+        where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the
         parameters, gradient, velocity, and momentum respectively.
 
         This is in contrast to Sutskever et. al. and

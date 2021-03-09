@@ -1194,25 +1194,25 @@ See :func:`torch.dist`
 """)
 
 add_docstr_all('div', r"""
-div(value) -> Tensor
+div(value, *, rounding_mode=None) -> Tensor
 
 See :func:`torch.div`
 """)
 
 add_docstr_all('div_', r"""
-div_(value) -> Tensor
+div_(value, *, rounding_mode=None) -> Tensor
 
 In-place version of :meth:`~Tensor.div`
 """)
 
 add_docstr_all('divide', r"""
-divide(value) -> Tensor
+divide(value, *, rounding_mode=None) -> Tensor
 
 See :func:`torch.divide`
 """)
 
 add_docstr_all('divide_', r"""
-divide_(value) -> Tensor
+divide_(value, *, rounding_mode=None) -> Tensor
 
 In-place version of :meth:`~Tensor.divide`
 """)
@@ -1759,15 +1759,15 @@ Example::
 
 add_docstr_all('index_fill_',
                r"""
-index_fill_(dim, index, val) -> Tensor
+index_fill_(dim, index, value) -> Tensor
 
-Fills the elements of the :attr:`self` tensor with value :attr:`val` by
+Fills the elements of the :attr:`self` tensor with value :attr:`value` by
 selecting the indices in the order given in :attr:`index`.
 
 Args:
     dim (int): dimension along which to index
     index (LongTensor): indices of :attr:`self` tensor to fill in
-    val (float): the value to fill with
+    value (float): the value to fill with
 
 Example::
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float)
@@ -2724,14 +2724,13 @@ Returns the quantization scheme of a given QTensor.
 """)
 
 add_docstr_all('quantile', r"""
-quantile(q, *, interpolation='linear', dim=None, keepdim=False) -> Tensor
+quantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.quantile`
 """)
 
-add_docstr_all('nanquantile',
-               r"""
-nanquantile(q, dim=None, keepdim=False, *, interpolation='linear') -> Tensor
+add_docstr_all('nanquantile', r"""
+nanquantile(q, dim=None, keepdim=False) -> Tensor
 
 See :func:`torch.nanquantile`
 """)

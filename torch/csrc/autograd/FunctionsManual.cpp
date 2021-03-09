@@ -2,19 +2,19 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
+#include <ATen/BatchedTensorImpl.h>
+#include <ATen/core/Reduction.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/native/IndexingUtils.h>
+#include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/SparseTensorUtils.h>
 #include <ATen/Utils.h>
-#include <c10/core/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/ExpandUtils.h>
-#include <ATen/core/Reduction.h>
-#include <ATen/BatchedTensorImpl.h>
-#include <ATen/Dispatch.h>
-#include <ATen/ScalarOps.h>
-#include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/native/IndexingUtils.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/accumulate.h>
 
 #include <ciso646>
 #include <algorithm>
@@ -306,14 +306,30 @@ Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   return handle_r_to_c(self_st, out);
 }
 
-Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, c10::string_view rounding_mode) {
+  if (rounding_mode != "true") {
+    return at::zeros_like(grad, grad.options().dtype(self_st));
+  }
+
   auto result = grad / other.conj();
   return handle_r_to_c(self_st, result);
 }
 
-Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+  return div_tensor_self_backward(grad, other, self_st, "true");
+}
+
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, c10::string_view rounding_mode) {
+  if (rounding_mode != "true") {
+    return at::zeros_like(grad, grad.options().dtype(other.scalar_type()));
+  }
+
   auto result = -grad * ((self / other) / other).conj();
   return handle_r_to_c(other, result);
+}
+
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
+  return div_tensor_other_backward(grad, self, other, "true");
 }
 
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
@@ -553,23 +569,36 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
   return self;
 }
 
-std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
+std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, const std::vector<ScalarType> &dtypes, int64_t dim) {
   std::vector<Tensor> grad_inputs(sizes.size());
   if (!grad.defined()) {
     return grad_inputs;
   }
   dim = at::legacy_cat_wrap_dim(dim, sizes);
   int64_t accumulate = 0;
+
+  Tensor grad_;
+  bool grad_is_complex = grad.is_complex();
+  if (grad_is_complex) {
+    grad_ = at::real(grad);
+  }
   for (size_t i = 0; i < sizes.size(); ++i) {
+    Tensor grad_val;
+    if (!at::isComplexType(dtypes[i]) && grad_is_complex) {
+      // R -> C
+      grad_val = grad_;
+    } else {
+      grad_val = grad;
+    }
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
     if (shape == std::vector<int64_t>({0})) {
-      grad_inputs[i] = at::zeros({0}, grad.options());
+      grad_inputs[i] = at::zeros({0}, grad_val.options());
       continue;
     }
     auto size = shape[dim];
     accumulate += size;
-    grad_inputs[i] = grad.narrow(dim, accumulate - size, size);
+    grad_inputs[i] = grad_val.narrow(dim, accumulate - size, size);
   }
   return grad_inputs;
 }
@@ -662,7 +691,7 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
 // and they must have the same shape.
 // Note that the `output` must have the same `indices` as the `mask` so we are using just a clone.
 // However, to get `values` we have to use specific helper function for CPU/CUDA and use the `mask` data to filter `values`
-// That's why we created this `_sparse_matrix_mask_helper` function.
+// That's why we created this `_sparse_mask_helper` function.
 Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask){
   Tensor output = at::empty_like(mask);
   Tensor mask_indices = mask._indices().clone();
@@ -670,7 +699,7 @@ Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask){
   if (mask._nnz() == 0) {
     r_values = at::zeros_like(mask._values());
   } else {
-    r_values = _sparse_matrix_mask_helper(input, mask_indices.contiguous());
+    r_values = _sparse_mask_helper(input, mask_indices.contiguous());
   }
   at::sparse::get_sparse_impl(output)->set_indices_and_values_unsafe(mask_indices, r_values);
   return output;
@@ -1222,6 +1251,23 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
     return smooth_l1_loss_backward(grad, input, target, reduction, beta);
   }
   auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction, beta);
+  return (r * grad).sum();
+}
+
+Tensor huber_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, double delta) {
+  auto d = (input - target).abs();
+  auto grad_input = grad * (d < delta);
+  if (reduction == at::Reduction::Mean) {
+    grad_input /= input.numel();
+  }
+  return grad_input;
+}
+
+Tensor huber_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction, double delta) {
+  if (reduction == at::Reduction::None) {
+    return huber_loss_backward(grad, input, target, reduction, delta);
+  }
+  auto r = huber_loss_backward(ones_like(grad_output), input, target, reduction, delta);
   return (r * grad).sum();
 }
 
@@ -2707,9 +2753,9 @@ infinitely_differentiable_native_layer_norm_backward(
   const auto input_ndim = X.dim();
   const int axis = input_ndim - normalized_ndim;
   const int64_t M =
-      at::prod_intlist(input_shape.cbegin(), input_shape.cbegin() + axis);
+      c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
   const int64_t N =
-      at::prod_intlist(input_shape.cbegin() + axis, input_shape.cend());
+      c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
 
   Tensor dX;
   Tensor dgamma;
@@ -2908,15 +2954,8 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
   return grad / (self + 1).conj();
 }
 
-Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices, IntArrayRef values_shape) {
-  // TODO: improve this backward by writing a kernel (maybe)
-  auto dense_grad = sparse_grad_out.is_sparse() ? sparse_grad_out.to_dense() : sparse_grad_out;
-  auto full_size = sparse_grad_out.sizes();
-  auto flattened_grad_shape = values_shape.vec();
-  flattened_grad_shape[0] = at::prod_intlist(full_size.slice(0, indices.size(0)));
-  auto flattened_dense_grad = dense_grad.view(flattened_grad_shape);
-  auto flattened_indices = at::sparse::flatten_indices(indices, full_size);
-  return flattened_dense_grad.index_select(0, flattened_indices);
+Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices) {
+  return _sparse_mask_helper(sparse_grad_out.coalesce(), indices.contiguous());
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
@@ -2963,6 +3002,19 @@ bool any_variable_defined(variable_list& variables) {
     }
   }
   return false;
+}
+
+std::tuple<Tensor, Tensor> polar_backward(
+    const Tensor& grad,
+    const Tensor& result) {
+  Tensor grad_abs, grad_angle;
+  if (grad.defined()) {
+    auto grad_conj = grad.conj();
+    grad_abs = at::real(grad_conj * at::sgn(result));
+    auto result_mul_1_j = result * Scalar(c10::complex<double>{0.0, 1.0});
+    grad_angle = at::real(grad_conj * result_mul_1_j);
+  }
+  return std::make_tuple(grad_abs, grad_angle);
 }
 
 } // namespace details

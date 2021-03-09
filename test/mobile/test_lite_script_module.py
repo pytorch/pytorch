@@ -237,7 +237,7 @@ class TestLiteScriptModule(TestCase):
             mobile_module_forward_result
         )
 
-    def test_unsupported_createobject(self):
+    def test_unsupported_classtype(self):
         class Foo():
             def __init__(self):
                 return
@@ -252,7 +252,6 @@ class TestLiteScriptModule(TestCase):
 
         script_module = torch.jit.script(MyTestModule())
         with self.assertRaisesRegex(RuntimeError,
-                                    r"^CREATE_OBJECT is not supported in mobile module\. "
                                     r"Workaround: instead of using arbitrary class type \(class Foo\(\)\), "
                                     r"define a pytorch class \(class Foo\(torch\.nn\.Module\)\)\.$"):
             script_module._save_to_buffer_for_lite_interpreter()

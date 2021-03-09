@@ -12,6 +12,7 @@
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/MDBuilder.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/MCSubtargetInfo.h>
 #include <llvm/Support/Host.h>
@@ -33,6 +34,7 @@
 
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
+#include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -82,6 +84,27 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
   }
 }
 
+llvm::CmpInst::Predicate llvm_fp_comparison_predicate(
+    CompareSelectOperation compare_op) {
+  switch (compare_op) {
+    case CompareSelectOperation::kEQ:
+      return llvm::FCmpInst::FCMP_OEQ;
+    case CompareSelectOperation::kNE:
+      return llvm::FCmpInst::FCMP_ONE;
+    case CompareSelectOperation::kGT:
+      return llvm::FCmpInst::FCMP_OGT;
+    case CompareSelectOperation::kGE:
+      return llvm::FCmpInst::FCMP_OGE;
+    case CompareSelectOperation::kLT:
+      return llvm::FCmpInst::FCMP_OLT;
+    case CompareSelectOperation::kLE:
+      return llvm::FCmpInst::FCMP_OLE;
+    default:
+      // TODO: change to a proper error report
+      throw std::runtime_error("invalid operator type");
+  }
+}
+
 #if LLVM_VERSION_MAJOR <= 9
 int ElementCount(int lanes) {
   return lanes;
@@ -90,10 +113,10 @@ int ElementCount(int lanes) {
 llvm::ElementCount ElementCount(int lanes) {
 #if LLVM_VERSION_MAJOR <= 11
   return llvm::ElementCount(static_cast<unsigned>(lanes), false);
-#elif LLVM_VERSION_MAJOR == 12
+#elif LLVM_VERSION_MAJOR >= 12
   return llvm::ElementCount::getFixed(lanes);
 #else
-#error Only LLVM versions 8 through 12 are supported.
+#error Only LLVM versions 8 and above are supported.
 #endif
 }
 #endif
@@ -115,6 +138,7 @@ class LLVMCodeGenImpl : public IRVisitor {
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
 #undef LLVM_TYPE_DECLARE
+  llvm::Type* Int8PtrTy_;
 
   std::unordered_map<const Var*, int> varToArg_;
   std::unordered_map<const Var*, llvm::Value*> varToVal_;
@@ -187,6 +211,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(const Free* v) override;
   void visit(const Let* v) override;
   void visit(const Cond* v) override;
+  void visit(const ExternalCall* v) override;
 
   void emitIsNan(const Intrinsics* v);
 
@@ -298,6 +323,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   HalfTy_ = llvm::Type::getHalfTy(getContext());
   FloatTy_ = llvm::Type::getFloatTy(getContext());
   DoubleTy_ = llvm::Type::getDoubleTy(getContext());
+  Int8PtrTy_ = llvm::Type::getInt8PtrTy(getContext());
   BoolTy_ = ByteTy_;
 
   llvm::InitializeNativeTarget();
@@ -623,7 +649,11 @@ void LLVMCodeGenImpl::visit(const Rshift* v) {
   bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   if (!lfp && !rfp) {
-    value_ = irb_.CreateLShr(lhs, rhs);
+    if (v->lhs()->dtype().is_signed()) {
+      value_ = irb_.CreateAShr(lhs, rhs);
+    } else {
+      value_ = irb_.CreateLShr(lhs, rhs);
+    }
   } else {
     throw malformed_input("llvm_codgen: bad type in Rshift", v);
   }
@@ -690,53 +720,93 @@ void LLVMCodeGenImpl::visit(const Min* v) {
 }
 
 void LLVMCodeGenImpl::visit(const CompareSelect* v) {
-  v->lhs()->accept(this);
-  auto lhs = this->value_;
-  v->rhs()->accept(this);
-  auto rhs = this->value_;
-  v->ret_val1()->accept(this);
-  auto retval1 = this->value_;
-  v->ret_val2()->accept(this);
-  auto retval2 = this->value_;
+  auto genUnbiased = [this, v]() -> llvm::Value* {
+    v->lhs()->accept(this);
+    auto lhs = this->value_;
+    v->rhs()->accept(this);
+    auto rhs = this->value_;
+    v->ret_val1()->accept(this);
+    auto retval1 = this->value_;
+    v->ret_val2()->accept(this);
+    auto retval2 = this->value_;
 
-  auto type_used = v->lhs()->dtype().scalar_type();
+    auto type_used = v->lhs()->dtype().scalar_type();
 
-  llvm::Value* cmp_;
-  CompareSelectOperation cmp_op_ = v->compare_select_op();
+    llvm::Value* cmp_;
+    CompareSelectOperation cmp_op_ = v->compare_select_op();
 
-  if (is_integral(type_used)) {
-    cmp_ = irb_.CreateICmp(
-        llvm_comparison_predicate(cmp_op_, type_used), lhs, rhs);
-  } else if (is_floating_point(type_used)) { // FP32
-    switch (cmp_op_) {
-      case CompareSelectOperation::kEQ:
-        cmp_ = irb_.CreateFCmpOEQ(lhs, rhs);
-        break;
-      case CompareSelectOperation::kNE:
-        cmp_ = irb_.CreateFCmpONE(lhs, rhs);
-        break;
-      case CompareSelectOperation::kGT:
-        cmp_ = irb_.CreateFCmpOGT(lhs, rhs);
-        break;
-      case CompareSelectOperation::kGE:
-        cmp_ = irb_.CreateFCmpOGE(lhs, rhs);
-        break;
-      case CompareSelectOperation::kLT:
-        cmp_ = irb_.CreateFCmpOLT(lhs, rhs);
-        break;
-      case CompareSelectOperation::kLE:
-        cmp_ = irb_.CreateFCmpOLE(lhs, rhs);
-        break;
-      default:
-        // TODO: change to a proper error report
-        throw std::runtime_error("invalid operator type");
+    if (is_integral(type_used)) {
+      cmp_ = irb_.CreateICmp(
+          llvm_comparison_predicate(cmp_op_, type_used), lhs, rhs);
+    } else if (is_floating_point(type_used)) {
+      cmp_ = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op_), lhs, rhs);
+    } else {
+      throw std::runtime_error("invalid type for CompareSelect");
     }
-  } else {
-    throw std::runtime_error("invalid type for CompareSelect");
-  }
 
-  value_ = irb_.CreateSelect(cmp_, retval1, retval2);
-  return;
+    return irb_.CreateSelect(cmp_, retval1, retval2);
+  };
+
+  auto genBiased = [this, v]() -> llvm::Value* {
+    v->lhs()->accept(this);
+    auto lhs = this->value_;
+    v->rhs()->accept(this);
+    auto rhs = this->value_;
+
+    auto cmp_type = v->lhs()->dtype().scalar_type();
+    auto cmp_op = v->compare_select_op();
+    llvm::Value* cmp;
+
+    if (is_integral(cmp_type)) {
+      cmp = irb_.CreateICmp(
+          llvm_comparison_predicate(cmp_op, cmp_type), lhs, rhs);
+    } else if (is_floating_point(cmp_type)) {
+      cmp = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op), lhs, rhs);
+    } else {
+      throw std::runtime_error("invalid type for CompareSelect");
+    }
+
+    auto lanes = v->lhs()->dtype().lanes();
+    if (lanes > 1) {
+      auto maskType = llvm::Type::getIntNTy(getContext(), lanes);
+      auto zero = llvm::ConstantInt::get(maskType, 0);
+      auto mask = irb_.CreateBitOrPointerCast(cmp, maskType);
+      cmp = irb_.CreateICmpNE(mask, zero);
+    }
+
+    auto then_block = llvm::BasicBlock::Create(getContext(), "then", fn_);
+    auto else_block = llvm::BasicBlock::Create(getContext(), "else", fn_);
+    auto end_block = llvm::BasicBlock::Create(getContext(), "block", fn_);
+    constexpr int32_t total_weight = 100000;
+    auto true_weight = v->bias() == kLikely ? total_weight : 0;
+    auto false_weight = total_weight - true_weight;
+    irb_.CreateCondBr(
+        cmp,
+        then_block,
+        else_block,
+        llvm::MDBuilder(getContext())
+            .createBranchWeights(true_weight, false_weight));
+
+    irb_.SetInsertPoint(then_block);
+    v->ret_val1()->accept(this);
+    llvm::Value* then_val = value_;
+    then_block = irb_.GetInsertBlock();
+    irb_.CreateBr(end_block);
+
+    irb_.SetInsertPoint(else_block);
+    v->ret_val2()->accept(this);
+    llvm::Value* else_val = value_;
+    else_block = irb_.GetInsertBlock();
+    irb_.CreateBr(end_block);
+
+    irb_.SetInsertPoint(end_block);
+    llvm::PHINode* phi = irb_.CreatePHI(then_val->getType(), 2);
+    phi->addIncoming(then_val, then_block);
+    phi->addIncoming(else_val, else_block);
+    return phi;
+  };
+
+  value_ = v->bias() == kUnbiased ? genUnbiased() : genBiased();
 }
 
 template <typename T>
@@ -1006,7 +1076,11 @@ void LLVMCodeGenImpl::visit(const Load* v) {
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(loadType, 0));
+#if LLVM_VERSION_MAJOR >= 13
+      value_ = irb_.CreateAlignedLoad(vaddr, llvm::MaybeAlign(4));
+#else
       value_ = irb_.CreateAlignedLoad(vaddr, 4);
+#endif
       return;
     }
   }
@@ -1185,8 +1259,12 @@ void LLVMCodeGenImpl::visit(const Store* v) {
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(val->getType(), 0));
-      irb_.CreateAlignedStore(val, vaddr, 4);
 
+#if LLVM_VERSION_MAJOR >= 13
+      irb_.CreateAlignedStore(val, vaddr, llvm::MaybeAlign(4));
+#else
+      irb_.CreateAlignedStore(val, vaddr, 4);
+#endif
       value_ = llvm::ConstantInt::get(IntTy_, 0);
       return;
     }
@@ -1291,7 +1369,7 @@ struct FunctionCallee {
 };
 
 #else
-#error Only LLVM versions 8 through 12 are supported.
+#error Only LLVM versions 8 and above are supported.
 #endif
 
 } // namespace
@@ -1569,6 +1647,120 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 
 void LLVMCodeGenImpl::visit(const FunctionCall* v) {
   throw unimplemented_lowering(v);
+}
+
+void LLVMCodeGenImpl::visit(const ExternalCall* v) {
+  constexpr int max_buffers = 10;
+  constexpr int max_dimensions = 40;
+
+  auto& func_registry = getNNCFunctionRegistry();
+  if (!func_registry.count(v->func_name())) {
+    throw unimplemented_lowering(v);
+  }
+
+  // Prepare a vector of bufs that we need to pass to the external function.
+  // This vector is the output buf followed by the buf_args.
+  std::vector<const Buf*> bufs(v->buf_args());
+  bufs.insert(bufs.begin(), v->buf());
+
+  int64_t bufs_num = bufs.size();
+  int64_t args_num = v->args().size();
+
+  // Count the size of dims array - it consists of dimension of all bufs
+  // concatenated together.
+  int64_t dims_num = 0;
+  for (const Buf* b : bufs) {
+    dims_num += b->dims().size();
+  }
+
+  llvm::Value* buf_ptrs = irb_.CreateAlloca(
+      Int8PtrTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
+  llvm::Value* buf_ranks = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
+  llvm::Value* buf_dims = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, dims_num));
+  llvm::Value* buf_dtypes = irb_.CreateAlloca(
+      ByteTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
+  llvm::Value* extra_args = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, args_num));
+
+  int i = 0;
+  int dim_idx = 0;
+  for (const Buf* b : bufs) {
+    // Store value for buf pointer
+    auto gep = irb_.CreateInBoundsGEP(
+        buf_ptrs, {llvm::ConstantInt::getSigned(IntTy_, i)});
+    b->base_handle()->accept(this);
+    auto buf_ptr = this->value_;
+    auto buf_void_ptr = irb_.CreatePointerCast(buf_ptr, Int8PtrTy_);
+    irb_.CreateStore(buf_void_ptr, gep);
+
+    // Store dtype of the buf
+    gep = irb_.CreateInBoundsGEP(
+        buf_dtypes, {llvm::ConstantInt::getSigned(IntTy_, i)});
+    irb_.CreateStore(
+        llvm::ConstantInt::getSigned(ByteTy_, (int8_t)b->dtype().scalar_type()),
+        gep);
+
+    // Store rank of the buf
+    gep = irb_.CreateInBoundsGEP(
+        buf_ranks, {llvm::ConstantInt::getSigned(IntTy_, i)});
+    irb_.CreateStore(
+        llvm::ConstantInt::getSigned(LongTy_, b->dims().size()), gep);
+
+    // Store dims of the buf
+    for (int dim = 0; dim < b->dims().size(); dim++) {
+      gep = irb_.CreateInBoundsGEP(
+          buf_dims, {llvm::ConstantInt::getSigned(IntTy_, dim_idx)});
+      b->dims()[dim]->accept(this);
+      auto dim_val = this->value_;
+      irb_.CreateStore(irb_.CreateZExt(dim_val, LongTy_), gep);
+      dim_idx++;
+    }
+
+    i++;
+  }
+
+  i = 0;
+  for (const Expr* arg : v->args()) {
+    auto gep = irb_.CreateInBoundsGEP(
+        extra_args, {llvm::ConstantInt::getSigned(IntTy_, i)});
+    arg->accept(this);
+    irb_.CreateStore(irb_.CreateZExtOrBitCast(this->value_, LongTy_), gep);
+    i++;
+  }
+
+  // Generate the call itself
+  std::string fname = v->func_name();
+  FunctionCallee callee = module_->getOrInsertFunction(
+      fname,
+      llvm::FunctionType::get(
+          llvm::Type::getVoidTy(getContext()), // return type
+          {LongTy_, // int64_t bufs_num
+           Int8PtrTy_->getPointerTo(), // void** buf_data
+           LongTy_->getPointerTo(), // int64_t* buf_ranks
+           LongTy_->getPointerTo(), // int64_t* buf_dims
+           ByteTy_->getPointerTo(), // int64_t* buf_dtypes
+           LongTy_, // int64_t args_num
+           LongTy_->getPointerTo()}, // int64_t* extra_args
+          false)); // is var_arg
+
+  auto call_ty = callee.getFunctionType();
+  auto call_fn = callee.getCallee();
+  llvm::cast<llvm::Function>(call_fn)->addFnAttr(llvm::Attribute::NoUnwind);
+
+  irb_.CreateCall(
+      call_ty,
+      call_fn,
+      {llvm::ConstantInt::getSigned(LongTy_, bufs_num),
+       buf_ptrs,
+       buf_ranks,
+       buf_dims,
+       buf_dtypes,
+       llvm::ConstantInt::getSigned(LongTy_, args_num),
+       extra_args});
+
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
 void LLVMCodeGenImpl::visit(const Allocate* v) {

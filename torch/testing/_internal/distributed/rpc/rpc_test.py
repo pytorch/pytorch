@@ -69,7 +69,7 @@ EXPECTED_REMOTE_EVENTS = [
     "aten::add",
     "aten::mul",
     "aten::relu",
-    "aten::threshold",
+    "aten::clamp_min",
     "aten::sigmoid",
 ]
 
@@ -788,6 +788,17 @@ class RpcTest(RpcAgentTestFixture):
             )
 
     @dist_init(setup_rpc=False)
+    def test_duplicate_name_2(self):
+        with self.assertRaisesRegex(RuntimeError, "is not unique"):
+            rpc.init_rpc(
+                name=worker_name(self.rank % (self.world_size - 1)),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+    @dist_init(setup_rpc=False)
     def test_reinit(self):
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -884,6 +895,16 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
         self.assertEqual(ret, torch.ones(n, n) * 2)
+
+    @staticmethod
+    def return_callee_id():
+        return rpc.get_worker_info().id
+
+    @dist_init
+    def test_int_callee(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        ret = rpc.rpc_sync(dst_rank, RpcTest.return_callee_id)
+        self.assertEqual(ret, dst_rank)
 
     @dist_init
     def test_add_with_id(self):
@@ -2340,47 +2361,102 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rets, [11, 12, 13])
 
     @dist_init
-    def test_rref_type(self):
+    def _test_rref_type(self, blocking):
 
         def launched_rpc(events):
-            expected_name = "rpc_sync#_rref_typeof_on_owner"
+            expected_name = f"rpc_{RPCExecMode.ASYNC.value}#_rref_typeof_on_owner"
             return any([e.name.startswith(expected_name) for e in events])
 
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, torch.add, args=(torch.ones(2), 1))
 
         with torch.autograd.profiler.profile() as p:
-            t = rref._get_type()
+            t = rref._get_type(blocking=blocking)
+            if not blocking:
+                t = t.wait()
 
         self.assertTrue(launched_rpc(p.function_events))
-        self.assertEqual(t, type(torch.ones(2)))
+        expected_type = type(torch.ones(2))
+        self.assertEqual(t, expected_type)
+
+        futs = []
+
+        def verify(fut):
+            self.assertEqual(fut.value(), expected_type)
 
         with torch.autograd.profiler.profile() as p:
             for _ in range(10):
-                t = rref._get_type()
+                t = rref._get_type(blocking=blocking)
+                if not blocking:
+                    futs.append(t)
+                    t.add_done_callback(verify)
+                    t = t.wait()
+                self.assertEqual(t, expected_type)
 
+        if not blocking:
+            # Note that cached calls with blocking=False all return the same
+            # cached original future.
+            first_fut = futs[0]
+            for f in futs[1:]:
+                self.assertTrue(f is first_fut)
+        # Ensure we never launch another RPC, other than for the very
+        # first call.
         self.assertFalse(launched_rpc(p.function_events))
         self.assertEqual(t, type(torch.ones(2)))
 
         rref = rpc.remote(dst, MyClass, args=(0,))
-        self.assertEqual(rref._get_type(), MyClass)
+        rref_type = rref._get_type(blocking=blocking)
+        if not blocking:
+            rref_type = rref_type.wait()
+        self.assertEqual(rref_type, MyClass)
+
+    def test_rref_type_blocking(self):
+        self._test_rref_type(blocking=True)
+
+    def test_rref_type_non_blocking(self):
+        self._test_rref_type(blocking=False)
 
     @dist_init
-    def test_rref_type_with_error(self):
+    def _test_rref_type_with_error(self, blocking):
         dst = worker_name((self.rank + 1) % self.world_size)
         # 10 ms timeout
         rref = rpc.remote(dst, raise_func)
+        # Blocking: error raised inline
+        if blocking:
+            with self.assertRaisesRegex(ValueError, "Expected error"):
+                rref._get_type(blocking=blocking)
+        else:
+            # Non-blocking: Immediately return future, block on wait
+            fut = rref._get_type(blocking=blocking)
+            with self.assertRaisesRegex(ValueError, "Expected error"):
+                fut.wait()
 
-        with self.assertRaisesRegex(ValueError, "Expected error"):
-            rref._get_type()
+
+    def test_rref_type_with_error_blocking(self):
+        self._test_rref_type_with_error(blocking=True)
+
+    def test_rref_type_with_error_non_blocking(self):
+        self._test_rref_type_with_error(blocking=False)
 
     @dist_init
-    def test_rref_type_owner(self):
+    def _test_rref_type_owner(self, blocking):
         rref = RRef(torch.ones(2) + 1)
-        self.assertEqual(rref._get_type(), type(torch.ones(2)))
+        rref_type = rref._get_type(blocking=blocking)
+        if not blocking:
+            rref_type = rref_type.wait()
+        self.assertEqual(rref_type, type(torch.ones(2)))
 
         rref = RRef(MyClass(0))
-        self.assertEqual(rref._get_type(), MyClass)
+        rref_type = rref._get_type(blocking=blocking)
+        if not blocking:
+            rref_type = rref_type.wait()
+        self.assertEqual(rref_type, MyClass)
+
+    def test_rref_type_owner_blocking(self):
+        self._test_rref_type_owner(blocking=True)
+
+    def test_rref_type_owner_non_blocking(self):
+        self._test_rref_type_owner(blocking=False)
 
     @staticmethod
     def _slow_add(x, y):
@@ -5246,8 +5322,44 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
         )
 
+    @staticmethod
+    def _gpu_add_wrong_gpus(x, y):
+        if x.is_cuda and y.is_cuda:
+            return x.cpu() + y.cuda()
+        else:
+            raise ValueError("Wrong device affinity")
+
+    @skip_if_lt_x_gpu(1)
+    def test_device_mismatch(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {0: 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        x = torch.zeros(2).to(0)
+        y = torch.ones(2).to(0)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected all tensors to be on the same device, but found at least two devices"
+        ):
+            rets = rpc.rpc_sync(
+                dst,
+                TensorPipeAgentRpcTest._gpu_add_wrong_gpus,
+                args=(x, y)
+            )
+
+        rpc.shutdown()
+
     @dist_init
-    def test_rref_get_type_timeout(self):
+    def _test_rref_get_type_timeout(self, blocking):
         # Test where we try to get the type of a RRef from an owner, but RRef
         # creation is slower than timeout passed into _get_type.
         dst_rank = (self.rank + 1) % self.world_size
@@ -5255,8 +5367,21 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         slow_rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), True))
         timeout = 0.5
         expected_err = self.get_timeout_error_regex()
-        with self.assertRaisesRegex(RuntimeError, expected_err):
-            slow_rref._get_type(timeout=timeout)
+        # Blocking: blocks on inline call
+        if blocking:
+            with self.assertRaisesRegex(RuntimeError, expected_err):
+                slow_rref._get_type(timeout=timeout, blocking=blocking)
+        # Non-blocking: blocks on wait
+        else:
+            fut = slow_rref._get_type(timeout=timeout, blocking=blocking)
+            with self.assertRaisesRegex(RuntimeError, expected_err):
+                fut.wait()
+
+    def test_rref_get_type_timeout_blocking(self):
+        self._test_rref_get_type_timeout(blocking=True)
+
+    def test_rref_get_type_timeout_non_blocking(self):
+        self._test_rref_get_type_timeout(blocking=False)
 
     @dist_init
     def test_op_with_invalid_args(self):

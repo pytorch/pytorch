@@ -103,8 +103,8 @@ nn_functional_tests = [
     ('tanh', (S, S, S), (), '', (True,)),
     ('sigmoid', (S, S, S), (), '', (True,)),
     ('log_softmax', (S, S, S), (0,), '', (True,)),
-    ('linear', (S, S), ((M, S),), '', (True, ['aten::t', 'aten::matmul'])),
-    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::add', 'aten::mm'])),
+    ('linear', (S, S), ((M, S),), '', (True, ['aten::linear'])),
+    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::linear'])),
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
@@ -129,9 +129,11 @@ nn_functional_tests = [
     ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
     ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
     ('smooth_l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('huber_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('mse_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('smooth_l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
+    ('huber_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('mse_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
@@ -294,7 +296,7 @@ def gen_script_fn_and_args(method_name, func_type, *args, **kwargs):
 # returns a function takes in (args, kwargs) and runs the compiled function
 def create_script_fn(self, method_name, func_type):
     # function returns tuple containing original output and
-    # filtered output to be used in checking gradients 
+    # filtered output to be used in checking gradients
     def script_fn(*args, **kwargs):
         fn, tensors = gen_script_fn_and_args(method_name, func_type, *args, **kwargs)
         self.assertExportImport(fn.graph, tensors)
