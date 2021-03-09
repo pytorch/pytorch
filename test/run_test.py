@@ -238,9 +238,9 @@ RUN_PARALLEL_BLOCKLIST = [
     'test_overrides',
     'test_show_pickle',
     'test_tensorexpr',
-] + [test for test in TESTS if test.startswith('distributed/')
-] + [test for test in TESTS if test.startswith('test_jit')
 ]
+RUN_PARALLEL_BLOCKLIST += [test for test in TESTS if test.startswith('distributed/')]
+RUN_PARALLEL_BLOCKLIST += [test for test in TESTS if test.startswith('test_jit')]
 
 WINDOWS_COVERAGE_BLOCKLIST = [
 ]
