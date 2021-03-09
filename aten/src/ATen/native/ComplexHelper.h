@@ -4,7 +4,7 @@
 
 namespace at { namespace native {
 
-// View tensor with new dtype, storage offset, sizes and strides 
+// View tensor with new dtype, storage offset, sizes and strides
 inline Tensor view_tensor(
     const Tensor &tensor, ScalarType dtype,
     int64_t offset, IntArrayRef sizes, IntArrayRef strides) {

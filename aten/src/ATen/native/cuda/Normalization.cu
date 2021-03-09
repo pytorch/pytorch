@@ -1,5 +1,9 @@
 #include <ATen/native/cuda/Normalization.cuh>
 
+inline bool batch_norm_use_channels_last_kernels(const at::Tensor& self) {
+  return self.is_contiguous(at::MemoryFormat::ChannelsLast) || self.ndimension() == 2;
+}
+
 namespace at { namespace native {
 
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(Tensor& output, Tensor& save_mean, Tensor& save_invstd, const Tensor& self, const Tensor& weight, const Tensor& bias,
@@ -74,9 +78,15 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
 }
 
 std::tuple<Tensor, Tensor> batch_norm_stats_cuda(const Tensor& self, double epsilon) {
+  bool use_channels_last_kernel = batch_norm_use_channels_last_kernels(self);
+
   return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "batch_norm_stats_cuda", [&] {
     if (cuda::detail::canUse32BitIndexMath(self)) {
-      return batch_norm_stats_cuda_template<scalar_t, int32_t>(self, epsilon);
+      if (use_channels_last_kernel) {
+        return batch_norm_stats_channels_last_cuda_template<scalar_t>(self, epsilon);
+      } else {
+        return batch_norm_stats_cuda_template<scalar_t, int32_t>(self, epsilon);
+      }
     } else {
       return batch_norm_stats_cuda_template<scalar_t, int64_t>(self, epsilon);
     }
@@ -85,13 +95,18 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda(const Tensor& self, double epsi
 
 Tensor batch_norm_elemt_cuda(const Tensor& self, const Tensor& weight, const Tensor& bias,
                              const Tensor& mean, const Tensor& invstd, double epsilon) {
-  auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto output = at::empty_like(self, self.suggest_memory_format());
   batch_norm_elemt_cuda_out(output, self, weight, bias, mean, invstd, epsilon);
   return output;
 }
 
 Tensor& batch_norm_elemt_cuda_out(Tensor& output, const Tensor& self, const Tensor& weight, const Tensor& bias,
                              const Tensor& mean, const Tensor& invstd, double epsilon) {
+  if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
+    batch_norm_elemt_channels_last_cuda_template(output, self, weight, bias, mean, invstd, epsilon);
+    return output;
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "batch_norm_elemt", [&] {
     auto mean_st = mean.dtype();
     auto invstd_st = invstd.dtype();
@@ -142,6 +157,11 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const Tensor& self, const Tensor& input, const Tensor& mean, const Tensor& invstd,
                                                                            const Tensor& weight, bool input_g, bool weight_g, bool bias_g) {
+  // self is grad_output
+  if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
+    return batch_norm_backward_reduce_cuda_channels_last_template(self, input, mean, invstd, weight, input_g, weight_g, bias_g);
+  }
+
   return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "batch_norm_backward_reduce", [&] {
     auto mean_st = mean.dtype();
     auto invstd_st = invstd.dtype();
@@ -165,7 +185,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const
 }
 
 Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, const Tensor& mean, const Tensor& invstd,
-                                      const Tensor& weight, const Tensor& mean_dy, const Tensor& mean_dy_xmu) {
+                                      const Tensor& weight, const Tensor& sum_dy, const Tensor& sum_dy_xmu, const Tensor& count) {
+  if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
+    return batch_norm_backward_elemt_channels_last_cuda_template(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
+  }
+
   return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "batch_norm_backward_elemt", [&] {
     auto mean_st = mean.dtype();
     auto invstd_st = invstd.dtype();
@@ -174,15 +198,15 @@ Tensor batch_norm_backward_elemt_cuda(const Tensor& self, const Tensor& input, c
     bool is_bfloat16_float = std::is_same<scalar_t, at::BFloat16>::value && mean_st == at::kFloat;
     if (cuda::detail::canUse32BitIndexMath(self)) {
       if (is_half_float || is_bfloat16_float) {
-        return batch_norm_backward_elemt_cuda_template<scalar_t, float, int32_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+        return batch_norm_backward_elemt_cuda_template<scalar_t, float, int32_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
       } else {
-        return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int32_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+        return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int32_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
       }
     } else {
       if (is_half_float || is_bfloat16_float) {
-        return batch_norm_backward_elemt_cuda_template<scalar_t, float, int64_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+        return batch_norm_backward_elemt_cuda_template<scalar_t, float, int64_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
       } else {
-        return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int64_t>(self, input, mean, invstd, weight, mean_dy, mean_dy_xmu);
+        return batch_norm_backward_elemt_cuda_template<scalar_t, scalar_t, int64_t>(self, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count);
       }
     }
   });
