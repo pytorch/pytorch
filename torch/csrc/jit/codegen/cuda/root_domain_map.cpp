@@ -310,9 +310,14 @@ bool ComputeAtRootDomainMap::canMap(
     for (const auto& key_b : getConcretizedKeys(td_b, id_b)) {
       const bool mappable = canMap(key_a, key_b);
       mappable_pair_found = mappable_pair_found || mappable;
-      // If both concrete IDs are not broadcast, they must be mappable
+      // If both concrete IDs are not broadcast, they must be
+      // mappable. Also, if either of the concrete IDs is a reduction,
+      // that means a trivial reduction (i.e., broadcast immediately
+      // followed by reduction), which does not prevent any mapping.
       if (!key_a.concreteId()->isBroadcast() &&
-          !key_b.concreteId()->isBroadcast() && !mappable) {
+          !key_b.concreteId()->isBroadcast() &&
+          !key_a.concreteId()->isReduction() &&
+          !key_b.concreteId()->isReduction() && !mappable) {
         return false;
       }
     }
@@ -345,12 +350,20 @@ bool ComputeAtRootDomainMap::canMap(
   // except when a id_b concrete is broadcast.
   const bool key_a_bcast =
       key_a.concreteId() && key_a.concreteId()->isBroadcast();
+  const bool key_a_reduction =
+      (key_a.concreteId() && key_a.concreteId()->isReduction()) ||
+      key_a.id()->isReduction();
   bool mappable_pair_found = false;
   for (const auto& key_b : getConcretizedKeys(td_b, id_b)) {
     const bool mappable = canMap(key_a, key_b);
     mappable_pair_found = mappable_pair_found || mappable;
-    // If both concrete IDs are not broadcast, they must be mappable
-    if (!key_a_bcast && !key_b.concreteId()->isBroadcast() && !mappable) {
+    // If both concrete IDs are not broadcast, they must be mappable.
+    // However, if key_b's concrete ID is a reduction, the concrete ID
+    // is a result of a trivial reduction, so it should not prevent
+    // any other mapping. Similarly, if key_a is a reduction, it just
+    // needs to find any concrete ID of key_b that can be mapped.
+    if (!key_a_bcast && !key_b.concreteId()->isBroadcast() &&
+        !key_b.concreteId()->isReduction() && !key_a_reduction && !mappable) {
       return false;
     }
   }

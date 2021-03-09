@@ -3254,6 +3254,33 @@ TEST(NVFuserTest, FusionRootMappingBroadcast_CUDA) {
       {false, false, true});
 }
 
+// Reproducer of issue #723
+TEST(NVFuserTest, FusionRootMappingTrivialReduction_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  auto tv1 = makeSymbolicTensor(2);
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv0, {true, false});
+  auto tv3 = sum(tv2, {0});
+  auto tv4 = add(tv2, tv1);
+
+  fusion.addOutput(tv3);
+  fusion.addOutput(tv4);
+
+  ComputeAtRootDomainMap map;
+  map.build();
+
+  checkIdMapped(
+      map, tv2, tv2->getRootDomain()[0], tv4, tv4->getRootDomain()[0], true);
+  checkIdMapped(
+      map, tv2, tv2->getRootDomain()[0], tv3, tv3->getRootDomain()[0], true);
+}
+
 TEST(NVFuserTest, FusionComputeAtFailDueToRootMapping_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
