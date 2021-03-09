@@ -6,11 +6,11 @@ import json
 import subprocess
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
 
 import boto3  # type: ignore[import]
 import botocore  # type: ignore[import]
-from typing_extensions import TypedDict
+from typing_extensions import Literal, TypedDict
 
 
 def get_git_commit_history(
@@ -36,31 +36,70 @@ def get_object_summaries(*, bucket: Any, sha: str) -> Dict[str, List[Any]]:
     return dict(by_job)
 
 
-class Case(TypedDict):
-    name: str
+# TODO: consolidate these typedefs with the identical ones in
+# torch/testing/_internal/print_test_stats.py
+
+Commit = str  # 40-digit SHA-1 hex string
+Status = Optional[Literal['errored', 'failed', 'skipped']]
+
+
+class CaseMeta(TypedDict):
     seconds: float
+
+
+class Version1Case(CaseMeta):
+    name: str
     errored: bool
     failed: bool
     skipped: bool
 
 
-class Suite(TypedDict):
+class Version1Suite(TypedDict):
     total_seconds: float
-    cases: List[Case]
+    cases: List[Version1Case]
 
 
-class ReportMeta(TypedDict):
+class ReportMetaMeta(TypedDict):
     build_pr: str
     build_tag: str
-    build_sha1: str
+    build_sha1: Commit
     build_branch: str
     build_job: str
     build_workflow_id: str
 
 
-class Report(ReportMeta):
+class ReportMeta(ReportMetaMeta):
     total_seconds: float
-    suites: Dict[str, Suite]
+
+
+class Version1Report(ReportMeta):
+    suites: Dict[str, Version1Suite]
+
+
+class Version2Case(CaseMeta):
+    status: Status
+
+
+class Version2Suite(TypedDict):
+    total_seconds: float
+    cases: Dict[str, Version2Case]
+
+
+class Version2File(TypedDict):
+    total_seconds: float
+    suites: Dict[str, Version2Suite]
+
+
+class VersionedReport(ReportMeta):
+    format_version: int
+
+
+# report: Version2Report implies report['format_version'] == 2
+class Version2Report(VersionedReport):
+    files: Dict[str, Version2File]
+
+
+Report = Union[Version1Report, VersionedReport]
 
 
 def get_jsons(
@@ -77,32 +116,63 @@ def get_jsons(
     }
 
 
+# TODO: consolidate this with the case_status function from
+# torch/testing/_internal/print_test_stats.py
+def case_status(case: Version1Case) -> Status:
+    for k in {'errored', 'failed', 'skipped'}:
+        if case[k]:  # type: ignore[misc]
+            return cast(Status, k)
+    return None
+
+
+# TODO: consolidate this with the newify_case function from
+# torch/testing/_internal/print_test_stats.py
+def newify_case(case: Version1Case) -> Version2Case:
+    return {
+        'seconds': case['seconds'],
+        'status': case_status(case),
+    }
+
+
+# TODO: consolidate this with the simplify function from
+# torch/testing/_internal/print_test_stats.py
 def get_cases(
     *,
     data: Report,
+    filename: Optional[str],
     suite_name: Optional[str],
     test_name: str,
-) -> List[Case]:
-    cases = []
-    suites = data['suites']
-    for name, suite in suites.items():
-        if name == suite_name or not suite_name:
-            for case in suite['cases']:
-                if case['name'] == test_name:
-                    cases.append(case)
+) -> List[Version2Case]:
+    cases: List[Version2Case] = []
+    if 'format_version' not in data:  # version 1 implicitly
+        v1report = cast(Version1Report, data)
+        suites = v1report['suites']
+        for sname, v1suite in suites.items():
+            if sname == suite_name or not suite_name:
+                for v1case in v1suite['cases']:
+                    if v1case['name'] == test_name:
+                        cases.append(newify_case(v1case))
+    else:
+        v_report = cast(VersionedReport, data)
+        version = v_report['format_version']
+        if version == 2:
+            v2report = cast(Version2Report, v_report)
+            for fname, v2file in v2report['files'].items():
+                if fname == filename or not filename:
+                    for sname, v2suite in v2file['suites'].items():
+                        if sname == suite_name or not suite_name:
+                            v2case = v2suite['cases'].get(test_name)
+                            if v2case:
+                                cases.append(v2case)
+        else:
+            raise RuntimeError(f'Unknown format version: {version}')
     return cases
-
-
-def case_status(case: Case) -> Optional[str]:
-    for k in {'errored', 'failed', 'skipped'}:
-        if case[k]:  # type: ignore[misc]
-            return k
-    return None
 
 
 def make_column(
     *,
     data: Optional[Report],
+    filename: Optional[str],
     suite_name: Optional[str],
     test_name: str,
     digits: int,
@@ -112,12 +182,13 @@ def make_column(
     if data:
         cases = get_cases(
             data=data,
+            filename=filename,
             suite_name=suite_name,
             test_name=test_name
         )
         if cases:
             case = cases[0]
-            status = case_status(case)
+            status = case['status']
             omitted = len(cases) - 1
             if status:
                 return f'{status.rjust(num_length)} ', omitted
@@ -134,6 +205,7 @@ def make_columns(
     jobs: List[str],
     jsons: Dict[str, Report],
     omitted: Dict[str, int],
+    filename: Optional[str],
     suite_name: Optional[str],
     test_name: str,
     digits: int,
@@ -145,6 +217,7 @@ def make_columns(
         data = jsons.get(job)
         column, omitted_suites = make_column(
             data=data,
+            filename=filename,
             suite_name=suite_name,
             test_name=test_name,
             digits=digits,
@@ -156,7 +229,7 @@ def make_columns(
     if total_omitted > 0:
         columns.append(f'({total_omitted} S3 reports omitted)')
     if total_suites > 0:
-        columns.append(f'({total_suites}) matching suites omitted)')
+        columns.append(f'({total_suites} matching suites omitted)')
     return ' '.join(columns)
 
 
@@ -165,6 +238,7 @@ def make_lines(
     jobs: Set[str],
     jsons: Dict[str, Report],
     omitted: Dict[str, int],
+    filename: Optional[str],
     suite_name: Optional[str],
     test_name: str,
 ) -> List[str]:
@@ -172,12 +246,13 @@ def make_lines(
     for job, data in jsons.items():
         cases = get_cases(
             data=data,
+            filename=filename,
             suite_name=suite_name,
             test_name=test_name,
         )
         if cases:
             case = cases[0]
-            status = case_status(case)
+            status = case['status']
             line = f'{job} {case["seconds"]}s{f" {status}" if status else ""}'
             if job in omitted and omitted[job] > 0:
                 line += f' ({omitted[job]} S3 reports omitted)'
@@ -197,6 +272,7 @@ def display_history(
     bucket: Any,
     commits: List[Tuple[str, datetime]],
     jobs: Optional[List[str]],
+    filename: Optional[str],
     suite_name: Optional[str],
     test_name: str,
     delta: int,
@@ -226,6 +302,7 @@ def display_history(
                 jobs=jobs,
                 jsons=jsons,
                 omitted=omitted,
+                filename=filename,
                 suite_name=suite_name,
                 test_name=test_name,
                 digits=digits,
@@ -236,6 +313,7 @@ def display_history(
                 jobs=set(jobs or []),
                 jsons=jsons,
                 omitted=omitted,
+                filename=filename,
                 suite_name=suite_name,
                 test_name=test_name,
             )
@@ -265,7 +343,7 @@ In multiline mode, each line next includes the name of a CircleCI job,
 followed by the time of the specified test in that job at that commit.
 Example:
 
-    $ tools/test_history.py multiline --ref=594a66 --delta=0 --sha-length=8 \\
+    $ tools/test_history.py multiline --ref=594a66 --sha-length=8 \\
       test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
     2021-02-10 03:13:34 594a66d7 pytorch_linux_xenial_py3_6_gcc5_4_test 0.36s
     2021-02-10 03:13:34 594a66d7 pytorch_linux_xenial_py3_6_gcc7_test 0.573s errored
@@ -281,7 +359,7 @@ Example:
 
 Another multiline example, this time with the --all flag:
 
-    $ tools/test_history.py multiline --all --ref=321b9 --sha-length=8 \\
+    $ tools/test_history.py multiline --all --ref=321b9 --delta=12 --sha-length=8 \\
       test_qr_square_many_batched_complex_cuda
     2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 424.284s
     2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
@@ -296,7 +374,7 @@ In columns mode, the name of the job isn't printed, but the order of the
 columns is guaranteed to match the order of the jobs passed on the
 command line. Example:
 
-    $ tools/test_history.py columns --ref=3cf783 --delta=0 --sha-length=8 \\
+    $ tools/test_history.py columns --ref=3cf783 --sha-length=8 \\
       test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
     2021-02-10 04:18:50 3cf78395    0.644s    0.312s
     2021-02-10 03:13:34 594a66d7    0.360s  errored
@@ -333,7 +411,7 @@ indicated test was not found in that report.
         '--delta',
         type=int,
         help='minimum number of hours between commits',
-        default=12,
+        default=0,
     )
     parser.add_argument(
         '--sha-length',
@@ -351,6 +429,10 @@ indicated test was not found in that report.
         '--all',
         action='store_true',
         help='(multiline) ignore listed jobs, show all jobs for each commit',
+    )
+    parser.add_argument(
+        '--file',
+        help='name of the file containing the test',
     )
     parser.add_argument(
         '--suite',
@@ -381,6 +463,7 @@ indicated test was not found in that report.
         bucket=bucket,
         commits=commits,
         jobs=jobs,
+        filename=args.file,
         suite_name=args.suite,
         test_name=args.test,
         delta=args.delta,

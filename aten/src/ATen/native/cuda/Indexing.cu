@@ -984,7 +984,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, Scalar value) {
       .add_output(self)
       .add_input(self)
       .add_input(b_mask)
-      .build();  
+      .build();
 
   if (b_mask.dtype() == at::ScalarType::Byte) {
     TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
