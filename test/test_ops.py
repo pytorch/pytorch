@@ -399,9 +399,9 @@ class TestCommon(JitCommonTestCase):
         original_name_inplace = original_name + "_"
         expected_dtype = op(*sample.input, *sample.args, **sample.kwargs).dtype
 
-        for a_op in op.aliases:  
+        for a_op in op.aliases:
             inplace = a_op.inplace_variant
-            method_or_inplace = [a_op.inplace_variant, a_op.method_variant]            
+            method_or_inplace = [a_op.inplace_variant, a_op.method_variant]
             variants = (v for v in (a_op.op, a_op.method_variant, a_op.inplace_variant) if v is not None)
 
             # Test scripting:

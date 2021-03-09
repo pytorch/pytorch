@@ -14,6 +14,11 @@
 
 #include <ATen/core/grad_mode.h>
 
+#if C10_MOBILE
+#define C10_DISPATCHER_INLINE_UNLESS_MOBILE inline
+#else
+#define C10_DISPATCHER_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
+#endif
 namespace c10 {
 
 class TORCH_API OperatorHandle;
@@ -422,7 +427,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
 }
 
 template<class Return, class... Args>
-C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
+C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(
