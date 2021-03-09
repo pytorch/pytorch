@@ -140,7 +140,7 @@ def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
         first_use = in_node
         prefix = "_output"
 
-    if first_use:
+    if first_use and first_use.name in quantizer.node_name_to_scope:
         module_path, _ = quantizer.node_name_to_scope[first_use.name]
     else:
         # TODO: it's not used, so actually we can skip quantization
