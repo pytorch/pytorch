@@ -3399,16 +3399,16 @@
     CPU, CUDA: logit_out
 
 - func: sin(Tensor self) -> Tensor
+  structured_delegate: sin.out
   variants: function, method
-  dispatch:
-    DefaultBackend: sin
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: sin.out
   variants: function, method
-  dispatch:
-    DefaultBackend: sin_
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sin_out
 
@@ -6136,7 +6136,6 @@
   variants: function, method
 
 - func: signbit.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: signbit_out
     CUDA: signbit_out
