@@ -24,6 +24,8 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+std::unordered_map<const Var*, const For*> LoopNest::index_loop_mapping;
+
 LoopNest::LoopNest(const LoopNest& other)
     : root_stmt_(Stmt::clone(other.root_stmt_)),
       output_bufs_(other.output_bufs_) {
@@ -504,6 +506,7 @@ void LoopNest::initialize(
   }
 
   std::vector<Stmt*> loops;
+  std::vector<For*> worklist;
   for (Tensor* t : tensors_to_compute) {
     Stmt* loop = t->stmt();
     if (loop->get_parent()) {
@@ -519,6 +522,24 @@ void LoopNest::initialize(
       }
     } else {
       loops.push_back(loop);
+      if (For* f = dynamic_cast<For*>(loop)) {
+        worklist.push_back(f);
+      }
+    }
+  }
+
+  // Traverse all inner-most loops to build index-loop mapping
+  while (worklist.size()) {
+    For* f = worklist.back();
+    index_loop_mapping[f->var()] = f;
+    worklist.pop_back();
+
+    if (Block* body = dynamic_cast<Block*>(f->body())) {
+      for (Stmt* s2 : *body) {
+        if (For* f2 = dynamic_cast<For*>(s2)) {
+          worklist.push_back(f2);
+        }
+      }
     }
   }
 

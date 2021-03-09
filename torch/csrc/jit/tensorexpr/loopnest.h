@@ -118,6 +118,8 @@ class TORCH_API LoopNest {
     return output_bufs_;
   }
 
+  static std::unordered_map<const Var*, const For*> index_loop_mapping;
+
  private:
   void initialize(
       const std::vector<Tensor*>& output_tensors,

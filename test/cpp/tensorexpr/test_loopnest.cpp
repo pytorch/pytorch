@@ -3921,5 +3921,52 @@ TEST(LoopNest, DISABLED_ColReduceSplitMaskUnevenReorder) {
   checkColReduce(s, *p.first, p.second);
 }
 
+TEST(LoopNest, SimplifyMod_1) {
+  KernelScope kernel_scope;
+  const int M = 100;
+  Placeholder a_buf("a", kFloat, {M});
+  Tensor* tensor = Compute("b", {{M, "i"}}, [&](const ExprHandle& i) {
+    return a_buf.load(i % 100) + 1.0f;
+  });
+
+  LoopNest l({tensor});
+  l.simplify();
+  std::ostringstream oss;
+  oss << *l.root_stmt();
+
+  const std::string& expected_ir =
+      R"IR(
+      # CHECK: for (int i = 0; i < 100; i++) {
+      # CHECK-NOT: b[i] = (a[i % 100]) + 1.f;
+      # CHECK:     b[i] = (a[i]) + 1.f;
+    )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+TEST(LoopNest, SimplifyMod_2) {
+  KernelScope kernel_scope;
+  const int M = 100;
+  const int N = 100;
+  Placeholder a_buf("a", kFloat, {M, N});
+  Tensor* tensor = Compute(
+      "b", {{M, "i"}, {N, "j"}}, [&](const ExprHandle& i, const ExprHandle& j) {
+        return a_buf.load(i % 100, j % 100) + 1.0f;
+      });
+
+  LoopNest l({tensor});
+  l.simplify();
+  std::ostringstream oss;
+  oss << *l.root_stmt();
+
+  const std::string& expected_ir =
+      R"IR(
+      # CHECK: for (int i = 0; i < 100; i++) {
+      # CHECK:   for (int j = 0; j < 100; j++) {
+      # CHECK-NOT: b[i, j] = (a[i % 100, j % 100]) + 1.f;
+      # CHECK:     b[i, j] = (a[i, j]) + 1.f;
+    )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
 } // namespace jit
 } // namespace torch

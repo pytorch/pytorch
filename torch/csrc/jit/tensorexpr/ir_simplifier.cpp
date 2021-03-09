@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 namespace torch {
 namespace jit {
@@ -1018,6 +1019,28 @@ const Expr* PolynomialTransformer::mutate(const Mod* v) {
   // x % x => 0.
   if (hasher_.hash(lhs_new) == hasher_.hash(rhs_new)) {
     return getImmediateByType(v->dtype(), 0);
+  }
+
+  // x % C => x, if x is known in [0, C), e.g. x is a loop index
+  // with constant
+  if (rhs_new->isConstant()) {
+    const Var* lVar = dynamic_cast<const Var*>(lhs_new);
+    if (lVar != nullptr) {
+      auto iter = LoopNest::index_loop_mapping.find(lVar);
+      if (iter != LoopNest::index_loop_mapping.end()) {
+        const For* f = iter->second;
+        auto start_expr = IRSimplifier::simplify(f->start());
+        auto stop_expr = IRSimplifier::simplify(f->stop());
+        if (start_expr->isConstant() && stop_expr->isConstant()) {
+          int start_val = immediateAs<int>(start_expr);
+          int stop_val = immediateAs<int>(stop_expr);
+          int rhs_val = immediateAs<int>(rhs_new);
+          if (start_val >= 0 && stop_val > start_val && rhs_val >= stop_val) {
+            return lhs_new;
+          }
+        }
+      }
+    }
   }
 
   const Term* lhsTerm = dynamic_cast<const Term*>(lhs_new);
