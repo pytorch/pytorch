@@ -14,6 +14,9 @@ def einsum(g, equation, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
     return g.op("Einsum", *tensors, equation_s=equation)
 
+@parse_args('v', 'v')
+def outer(g, input, other):
+    return g.op("Einsum", input, other, equation_s='i,j->ij')
 
 @parse_args('v', 'f', 'i')
 def dropout(g, input, p, train):
