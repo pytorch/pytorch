@@ -427,12 +427,20 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   if (asyncErrorHandling_) {
     workCleanupThread_ = std::thread(&ProcessGroupNCCL::workCleanupLoop, this);
   }
+
+  const char * ncclDebugLevel = std::getenv("NCCL_DEBUG");
+
+  if (!ncclDebugLevel) {
+    ncclDebugLevel = "UNSET";
+  }
+
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialized with following options:"
             << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
             << "\nTIMEOUT(ms): " << opTimeout_.count()
-            << "\nUSE_HIGH_PRIORITY_STREAM: " << isHighPriorityStream_;
+            << "\nUSE_HIGH_PRIORITY_STREAM: " << isHighPriorityStream_
+            << "\nNCCL_DEBUG: " << ncclDebugLevel;
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {

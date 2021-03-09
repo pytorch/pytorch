@@ -5,10 +5,8 @@ import inspect
 import io
 import linecache
 from weakref import WeakValueDictionary
-import pickle
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
-import _compat_pickle  # type: ignore
 import types
 import os.path
 from pathlib import Path
@@ -18,6 +16,7 @@ from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _
 from ._file_structure_representation import _create_folder_from_file_list, Folder
 from ._glob_group import GlobPattern
 from ._mock_zipreader import MockZipReader
+from ._package_unpickler import PackageUnpickler
 from ._mangling import PackageMangler, demangle
 from .importer import Importer
 
@@ -92,7 +91,7 @@ class PackageImporter(Importer):
         self._mangler = PackageMangler()
 
         # used for torch.serialization._load
-        self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self.import_module, *args, **kwargs)
+        self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
 
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
@@ -474,21 +473,6 @@ class PackageImporter(Importer):
 _NEEDS_LOADING = object()
 _ERR_MSG_PREFIX = 'No module named '
 _ERR_MSG = _ERR_MSG_PREFIX + '{!r}'
-
-class _UnpicklerWrapper(pickle._Unpickler):  # type: ignore
-    def __init__(self, importer, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._importer = importer
-
-    def find_class(self, module, name):
-        # Subclasses may override this.
-        if self.proto < 3 and self.fix_imports:
-            if (module, name) in _compat_pickle.NAME_MAPPING:
-                module, name = _compat_pickle.NAME_MAPPING[(module, name)]
-            elif module in _compat_pickle.IMPORT_MAPPING:
-                module = _compat_pickle.IMPORT_MAPPING[module]
-        mod = self._importer(module)
-        return getattr(mod, name)
 
 class _PathNode:
     pass
