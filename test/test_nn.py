@@ -9057,7 +9057,7 @@ class TestNN(NNTestCase):
                     out_size = int(math.floor(in_t.shape[-1] * scale_factor))
                     with warnings.catch_warnings(record=True) as w:
                         out_t = m(in_t)
-                    self.assertEqual(torch.ones(1, 2, out_size, out_size).contiguous(memory_format=memory_format), out_t.data)
+                    self.assertEqual(torch.ones(1, 2, out_size, out_size), out_t.data)
                     # Assert that memory format is carried through to the output
                     self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
@@ -9185,7 +9185,7 @@ class TestNN(NNTestCase):
                     out_size = int(math.floor(in_t.shape[-1] * scale_factor))
                     with warnings.catch_warnings(record=True) as w:
                         out_t = m(in_t)
-                    self.assertEqual(torch.ones(1, 2, out_size, out_size, out_size).contiguous(memory_format=memory_format), out_t.data)
+                    self.assertEqual(torch.ones(1, 2, out_size, out_size, out_size), out_t.data)
                     # Assert that memory format is carried through to the output
                     self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
