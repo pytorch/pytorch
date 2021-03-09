@@ -1,8 +1,14 @@
+#include <ideep/abstract_types.hpp>
 #include <torch/csrc/jit/tensorexpr/external_functions.h>
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
+#include <ideep.hpp>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/ConvUtils.h>
+#include <unordered_map>
+#include "c10/core/ScalarType.h"
 
 namespace torch {
 namespace jit {
@@ -39,6 +45,88 @@ std::vector<at::Tensor> constructTensors(
         at::from_blob(buf_data_vec[i], buf_dims_vec[i], options));
   }
   return tensors;
+}
+
+std::vector<ideep::tensor> constructItensors(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes) {
+
+
+  std::vector<void*> buf_data_vec;
+  std::vector<std::vector<int64_t>> buf_dims_vec;
+  std::vector<c10::ScalarType> buf_dtypes_vec;
+
+  int64_t buf_dims_idx = 0;
+  for (int64_t i = 0; i < bufs_num; i++) {
+    buf_data_vec.push_back(buf_data[i]);
+    buf_dims_vec.emplace_back();
+    for (int64_t dim = 0; dim < buf_ranks[i]; dim++) {
+      buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
+    }
+    buf_dtypes_vec.push_back(static_cast<c10::ScalarType>(buf_dtypes[i]));
+  }
+
+  // TODO: support more types
+  std::unordered_map<c10::ScalarType, ideep::data_type> c102it {{c10::ScalarType::Float, ideep::data_type::f32}};
+  auto tag = ideep::format_tag::undef;
+  // TODO: support more layouts         0            1             2    3              4  
+  std::vector<ideep::format_tag> tags {tag, ideep::format_tag::a, tag, tag, ideep::format_tag::nchw};
+
+  std::vector<ideep::tensor> tensors;
+  for (size_t i = 0; i < buf_data_vec.size(); i++) {
+    tensors.emplace_back(ideep::tensor(buf_dims_vec[i], c102it.at(buf_dtypes_vec[i]), tags[buf_dims_vec[i].size()], buf_data_vec[i]));
+  }
+  return tensors;
+}
+
+void nnc_aten_conv2d_out(
+  int64_t bufs_num,
+  void** buf_data,
+  int64_t* buf_ranks,
+  int64_t* buf_dims,
+  int8_t* buf_dtypes,
+  int64_t args_num,
+  int64_t* extra_args) {
+
+  if (args_num > 0) {
+    // Check that if the extra arguments are provided, then the bias tensor is
+    // also present
+    TORCH_INTERNAL_ASSERT(args_num == 7 && bufs_num == 4);
+
+    auto tensors =
+      constructItensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
+    auto&  r = tensors[0];
+    const auto&  x = tensors[1];
+    const auto&  w = tensors[2];
+    const auto& b = tensors[3];
+    int64_t strideH = extra_args[0];
+    int64_t strideW = extra_args[1];
+    int64_t paddingH = extra_args[2];
+    int64_t paddingW = extra_args[3];
+    int64_t dilationH = extra_args[4];
+    int64_t dilationW = extra_args[5];
+    int64_t groups = extra_args[6];
+
+    float* out_buffer = reinterpret_cast<float**>(buf_data)[0];
+    float* r_out = reinterpret_cast<float*>(r.get_data_handle());
+    float* x_out = reinterpret_cast<float*>(x.get_data_handle());
+    float* w_out = reinterpret_cast<float*>(x.get_data_handle());
+    std::vector<int64_t> output_sizes = at::native::conv_output_size(x.get_dims(), w.get_dims(), {paddingH, paddingW}, {strideH, strideW}, {dilationH, dilationW});
+    ideep::tensor y;
+    try {
+      ideep::convolution_forward::compute(
+        x, w, b, {output_sizes.cbegin(), output_sizes.cend()}, y, {strideH, strideW}, {dilationH, dilationW}, {paddingH, paddingW}, {paddingH, paddingW},
+        groups);
+        y.reorder_to(r);
+    } catch (...) {
+      std::cerr << "some error occured\n";
+    }
+  } else {
+    nnc_aten_conv2d(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes, args_num, extra_args);
+  }
 }
 
 void nnc_aten_conv2d(
@@ -175,7 +263,7 @@ void nnc_aten_addmm(
 
 static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
-    nnc_aten_conv2d);
+    nnc_aten_conv2d_out);
 static RegisterNNCExternalFunction nnc_matmul(
     "nnc_aten_matmul",
     nnc_aten_matmul);
