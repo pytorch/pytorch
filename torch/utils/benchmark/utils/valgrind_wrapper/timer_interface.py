@@ -618,8 +618,9 @@ class _ValgrindWrapper(object):
                 run_loop_cmd = ["python", script_file]
             else:
                 run_loop_exec = cpp_jit.compile_callgrind_template(
-                    task_spec.stmt,
-                    task_spec.setup,
+                    stmt=task_spec.stmt,
+                    setup=task_spec.setup,
+                    global_setup=task_spec.global_setup,
                 )
                 run_loop_cmd = [
                     run_loop_exec,
