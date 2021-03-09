@@ -1825,23 +1825,25 @@ t1.start()
 t2.start()
 """])
 
-    def test_cuda_assert_async(self):
+    # ROCm doesn't support device side asserts
+    @skipIfRocm
+    def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
-            torch.assert_async(torch.tensor([], device="cuda"))
+            torch._assert_async(torch.tensor([], device="cuda"))
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with more than one value is ambiguous"):
-            torch.assert_async(torch.tensor([0, 0], device="cuda"))
+            torch._assert_async(torch.tensor([0, 0], device="cuda"))
 
-        torch.assert_async(torch.tensor(1, device="cuda"))
-        torch.assert_async(torch.tensor(0.1, device="cuda"))
-        torch.assert_async(torch.tensor(-0.1, device="cuda"))
-        torch.assert_async(torch.tensor(True, device="cuda"))
-        torch.assert_async(torch.tensor(0 + 0.1j, device="cuda"))
+        torch._assert_async(torch.tensor(1, device="cuda"))
+        torch._assert_async(torch.tensor(0.1, device="cuda"))
+        torch._assert_async(torch.tensor(-0.1, device="cuda"))
+        torch._assert_async(torch.tensor(True, device="cuda"))
+        torch._assert_async(torch.tensor(0 + 0.1j, device="cuda"))
 
         fail_stmts = [
-            "torch.assert_async(torch.tensor(0, device='cuda'))",
-            "torch.assert_async(torch.tensor(0.0, device='cuda'))",
-            "torch.assert_async(torch.tensor(False, device='cuda'))",
-            "torch.assert_async(torch.tensor(0+ 0 j, device='cuda'))",
+            "torch._assert_async(torch.tensor(0, device='cuda'))",
+            "torch._assert_async(torch.tensor(0.0, device='cuda'))",
+            "torch._assert_async(torch.tensor(False, device='cuda'))",
+            "torch._assert_async(torch.tensor(0 + 0j, device='cuda'))",
         ]
 
         import subprocess

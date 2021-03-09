@@ -4354,6 +4354,10 @@ for shape in [(1,), ()]:
         out = a.as_strided((3,), (1,))
         self.assertIsNone(out.grad_fn._saved_storage_offset)
 
+        a = torch.ones(2, requires_grad=True)
+        out = torch.tanh(a)
+        self.assertEqual(out, out.grad_fn._saved_result)                  # saved variable when output
+
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected

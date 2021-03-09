@@ -10,6 +10,7 @@ import threading
 import time
 import traceback
 import unittest
+from unittest import mock
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce
@@ -18,6 +19,11 @@ from sys import platform
 
 import torch
 import torch.distributed as c10d
+
+if not c10d.is_available():
+    print("c10d not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
@@ -55,10 +61,6 @@ from torch.testing._internal.common_utils import (
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
 
 
 if platform == "darwin":
@@ -474,20 +476,18 @@ class RendezvousEnvTest(TestCase):
             "WORLD_SIZE": "1",
             "RANK": "0",
             "MASTER_ADDR": "127.0.0.1",
-            "MASTER_PORT": common.find_free_port(),
+            "MASTER_PORT": str(common.find_free_port()),
         }
 
         class Env(object):
             def __init__(self, vars):
-                self.vars = vars
+                self.env_patcher = mock.patch.dict(os.environ, vars, clear=True)
 
             def __enter__(self):
-                for key, value in self.vars.items():
-                    os.environ[key] = str(value)
+                self.env_patcher.start()
 
             def __exit__(self, type, value, traceback):
-                for key in self.vars.keys():
-                    del os.environ[key]
+                self.env_patcher.stop()
 
         def without(d, key):
             d = d.copy()
@@ -501,6 +501,7 @@ class RendezvousEnvTest(TestCase):
             return d
 
         with Env(without(vars, "WORLD_SIZE")):
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             with self.assertRaisesRegex(ValueError, "WORLD_SIZE expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
@@ -510,6 +511,7 @@ class RendezvousEnvTest(TestCase):
             c10d.destroy_process_group()
 
         with Env(without(vars, "RANK")):
+            self.assertEqual(None, os.environ.get("RANK"))
             with self.assertRaisesRegex(ValueError, "RANK expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
@@ -519,6 +521,8 @@ class RendezvousEnvTest(TestCase):
             c10d.destroy_process_group()
 
         with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+            self.assertEqual(None, os.environ.get("RANK"))
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             c10d.init_process_group(backend="nccl", rank=0, world_size=1)
             self.assertEqual(c10d.get_rank(), 0)
             self.assertEqual(c10d.get_world_size(), 1)
@@ -531,26 +535,32 @@ class RendezvousEnvTest(TestCase):
             c10d.destroy_process_group()
 
         with Env(without(vars, "MASTER_ADDR")):
+            self.assertEqual(None, os.environ.get("MASTER_ADDR"))
             with self.assertRaisesRegex(ValueError, "MASTER_ADDR expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
 
         with Env(without(vars, "MASTER_PORT")):
+            self.assertEqual(None, os.environ.get("MASTER_PORT"))
             with self.assertRaisesRegex(ValueError, "MASTER_PORT expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
 
         with Env(without(vars, "WORLD_SIZE")):
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             gen = c10d.rendezvous("env://?world_size={}".format(1))
             _, _, size = next(gen)
             self.assertEqual(size, 1)
 
         with Env(without(vars, "RANK")):
+            self.assertEqual(None, os.environ.get("RANK"))
             gen = c10d.rendezvous("env://?rank={}".format(0))
             _, rank, _ = next(gen)
             self.assertEqual(rank, 0)
 
         with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+            self.assertEqual(None, os.environ.get("RANK"))
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             gen = c10d.rendezvous("env://?rank={}&world_size={}".format(0, 1))
             _, rank, size = next(gen)
             self.assertEqual(rank, 0)
@@ -4710,11 +4720,11 @@ class CommTest(MultiProcessTestCase):
     def test_distributed_debug_mode(self):
         # Default should be off
         default_debug_mode = dist._get_debug_mode()
-        self.assertEqual(default_debug_mode, dist._DistributedDebugMode.OFF)
+        self.assertEqual(default_debug_mode, dist._DistributedDebugLevel.OFF)
         mapping = {
-            "OFF": dist._DistributedDebugMode.OFF,
-            "INFO": dist._DistributedDebugMode.INFO,
-            "DETAIL": dist._DistributedDebugMode.DETAIL,
+            "OFF": dist._DistributedDebugLevel.OFF,
+            "INFO": dist._DistributedDebugLevel.INFO,
+            "DETAIL": dist._DistributedDebugLevel.DETAIL,
         }
         invalid_debug_modes = ["foo", 0, 1, -1]
 
@@ -4729,9 +4739,8 @@ class CommTest(MultiProcessTestCase):
 
         for mode in invalid_debug_modes:
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-            with self.assertRaisesRegex(ValueError, f"Invalid value {str(mode)}"):
+            with self.assertRaisesRegex(RuntimeError, "to be one of"):
                 dist._get_debug_mode()
-
 
 if __name__ == "__main__":
     assert (

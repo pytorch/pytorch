@@ -112,7 +112,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   std::unordered_set<c10::Stream> leaf_streams;
 
-  void init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad);
+  void init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad, uint64_t min_topo_nr);
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
@@ -332,7 +332,7 @@ struct TORCH_API Engine {
 
  protected:
   Engine();
-  void compute_dependencies(Node* root, GraphTask& task);
+  void compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo_nr);
 
   // initialize the thread local ready queue with the ready queue that is created
   // elsewhere (i.e. thread_init, Engine::execute, etc), or create a new

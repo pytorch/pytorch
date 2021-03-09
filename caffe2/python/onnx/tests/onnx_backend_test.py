@@ -142,7 +142,7 @@ backend_test.exclude('(test_if_.*'  # added support for sequence type inputs
                      '|test_unsqueeze_.*'  # axes is now an input (not attr)
                      '|test_MaxPool1d_stride_padding_dilation_.*'
                      '|test_MaxPool2d_stride_padding_dilation_.*'
-                     ')') 
+                     ')')
 
 # Skip vgg to speed up CI
 if 'JENKINS_URL' in os.environ:
