@@ -4514,6 +4514,29 @@ class TestValidation(TestCase):
             for param in params:
                 Dist(validate_args=True, **param)
 
+    def test_invalid_log_probs_arg(self):
+        # Check that validation errors are indeed disabled,
+        # but they might raise another error
+        for Dist, params in EXAMPLES:
+            if Dist == TransformedDistribution:
+                # TransformedDistribution has a distribution instance
+                # as the argument, so we cannot do much about that
+                continue
+            for param in params:
+                d_nonval = Dist(validate_args=False, **param)
+                d_val = Dist(validate_args=True, **param)
+                for v in torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0]):
+                    try:
+                        log_prob = d_val.log_prob(v)
+                    except IndexError:
+                        pass
+                    except ValueError as e:
+                        if e.args and 'must be within the support' in e.args[0]:
+                            try:
+                                log_prob = d_nonval.log_prob(v)
+                            except (IndexError, RuntimeError):
+                                pass
+
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
