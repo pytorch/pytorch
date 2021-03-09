@@ -2047,9 +2047,11 @@ class TestTensorCreation(TestCase):
             self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
                              exact_dtype=True, rtol=1e-05, atol=1e-08)
 
-        self.assertEqual(torch.tensor(np.array([]), device=device), torch.from_numpy(np.array([])), exact_dtype=True, rtol=1e-05, atol=1e-08)
+        self.assertEqual(torch.tensor(np.array([]), device=device), torch.from_numpy(np.array([])), 
+                         exact_dtype=True, rtol=1e-05, atol=1e-08)
         # An example which shows that by default torch.tensor will produce contiguous tensors from iterables of numpy arrays.
-        self.assertTrue(torch.tensor([A.T, A.T], as_contiguous=True).stride() == torch.tensor([A.T, A.T]).stride() == torch.from_numpy(np.ascontiguousarray(np.stack([A.T, A.T]))).stride())
+        self.assertTrue(torch.tensor([A.T, A.T], as_contiguous=True).stride() == torch.tensor([A.T, A.T]).stride()
+                         == torch.from_numpy(np.ascontiguousarray(np.stack([A.T, A.T]))).stride())
 
     # TODO: this test should be updated
     @suppress_warnings
