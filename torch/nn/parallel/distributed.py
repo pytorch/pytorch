@@ -1326,6 +1326,6 @@ class DistributedDataParallel(Module):
         after 10 iterations runtime stats are recorded once every
         "kDDPRuntimeLoggingSampleRate=100" training iterations.
         """
-        if sample_rate <= 0:
-            raise ValueError("DDP runtime logging sample rate should be larger than 0")
+        if sample_rate < 1:
+            raise ValueError("DDP runtime logging sample rate should be equal or greater than 1")
         self.reducer._set_ddp_runtime_logging_sample_rate(sample_rate)
