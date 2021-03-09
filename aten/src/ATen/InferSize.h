@@ -46,6 +46,7 @@ inline void infer_size_impl(IntArrayRef shape, int64_t numel, ResultVec &res) {
                "value and is ambiguous");
       res[*infer_dim] = numel / newsize;
     }
+    return;
   }
 
   std::ostringstream ss;
