@@ -643,11 +643,15 @@ void ONNXAssignOutputShape(
               ->setType(MergeInferredType(
                   graph->outputs().at(outputs_index)->type(),
                   ListType::create(elem_type)));
-          outputs_index++;
-          TORCH_INTERNAL_ASSERT(
-              outputs_index <= graph->outputs().size(),
-              "Incorrect number of elements provided as example outputs.");
+        } else {
+          graph->outputs()
+              .at(outputs_index)
+              ->setType(graph->outputs().at(outputs_index)->type());
         }
+        outputs_index++;
+        TORCH_INTERNAL_ASSERT(
+            outputs_index <= graph->outputs().size(),
+            "Incorrect number of elements provided as example outputs.");
       } else { // When torch output is a list type, but ONNX node is not a
                // sequence type. Like prim::ListConstruct
         size_t list_len = PyList_GET_SIZE(elem);

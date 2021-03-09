@@ -12,12 +12,6 @@ class CustomBackend : public torch::jit::PyTorchBackendInterface {
   explicit CustomBackend() {}
   virtual ~CustomBackend() = default;
 
-  c10::IValue preprocess(
-      c10::IValue mod,
-      c10::impl::GenericDict method_compile_spec) override {
-    return mod;
-  }
-
   c10::impl::GenericDict compile(
       c10::IValue processed,
       c10::impl::GenericDict method_compile_spec) override {

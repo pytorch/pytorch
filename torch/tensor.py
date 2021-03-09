@@ -57,7 +57,7 @@ class Tensor(torch._C._TensorBase):
         if id(self) in memo:
             return memo[id(self)]
         with torch.no_grad():
-            if self.is_sparse or self.device.type == 'xla':
+            if self.is_sparse or self.device.type == 'xla' or self.device.type == 'mlc':
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
@@ -123,6 +123,12 @@ class Tensor(torch._C._TensorBase):
                        str(self.device),
                        self.requires_grad)
             return (torch._utils._rebuild_xla_tensor, arg_xla)
+        if self.device.type == 'mlc':
+            arg_mlc = (self.cpu().numpy(),
+                       self.dtype,
+                       str(self.device),
+                       self.requires_grad)
+            return (torch._utils._rebuild_mlc_tensor, arg_mlc)
         if self.is_quantized:
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]]
@@ -587,7 +593,7 @@ class Tensor(torch._C._TensorBase):
             warnings.warn('Iterating over a tensor might cause the trace to be incorrect. '
                           'Passing a tensor of different shape won\'t change the number of '
                           'iterations executed (and might lead to errors or silently give '
-                          'incorrect results).', category=RuntimeWarning)
+                          'incorrect results).', category=torch.jit.TracerWarning, stacklevel=2)
         return iter(self.unbind(0))
 
     def __hash__(self):
@@ -818,15 +824,20 @@ class Tensor(torch._C._TensorBase):
         Examples:
             >>> torch.randn(3, 4, 1).unflatten(1, (2, 2)).shape
             torch.Size([3, 2, 2, 1])
+            >>> torch.randn(3, 4, 1).unflatten(1, (-1, 2)).shape # the size -1 is inferred from the size of dimension 1
+            torch.Size([3, 2, 2, 1])
             >>> torch.randn(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2)))
             tensor([[[-1.1772,  0.0180],
                     [ 0.2412,  0.1431]],
-
                     [[-1.1819, -0.8899],
                     [ 1.5813,  0.2274]]], names=('A', 'B1', 'B2'))
+            >>> torch.randn(2, names=('A',)).unflatten('A', (('B1', -1), ('B2', 1)))
+            tensor([[-0.8591],
+                    [ 0.3100]], names=('B1', 'B2'))
 
         .. warning::
             The named tensor API is experimental and subject to change.
+
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.unflatten, (self,), self, dim, sizes)

@@ -9,7 +9,7 @@ on:
 jobs:
   build-publish-docker:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-18.04
+    runs-on: linux.2xlarge
     env:
       GHCR_PAT: ${{ secrets.GHCR_PAT }}
     steps:

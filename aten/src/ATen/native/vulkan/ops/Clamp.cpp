@@ -54,6 +54,7 @@ Tensor clamp(
           },
           VK_KERNEL(clamp),
           v_output.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -119,6 +120,7 @@ Tensor& clamp_(
           },
           VK_KERNEL(clamp_),
           v_self.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(

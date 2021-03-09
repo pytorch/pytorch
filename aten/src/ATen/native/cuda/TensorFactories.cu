@@ -43,7 +43,7 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 }
 
 Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
-  AT_ASSERT(device_or_default(device_opt).type() == at::DeviceType::CUDA);
+  AT_ASSERT(device_or_default(device_opt).is_cuda());
   TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 

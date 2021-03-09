@@ -70,7 +70,11 @@ class ProcessGroupGloo : public ProcessGroup {
   //
   class AsyncWork : public ProcessGroup::Work {
    public:
-    AsyncWork(const char* profilingTitle = nullptr):  ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle) {}
+    AsyncWork(
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt)
+        : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors) {
+    }
 
     static void execute(c10::intrusive_ptr<AsyncWork> work) {
       std::exception_ptr eptr;
@@ -113,7 +117,8 @@ class ProcessGroupGloo : public ProcessGroup {
    public:
     explicit RecvWork(
         at::Tensor& tensor,
-        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+        const char* profilingTitle = nullptr);
 
     int sourceRank() const override;
 
@@ -136,7 +141,7 @@ class ProcessGroupGloo : public ProcessGroup {
   };
 
   const std::string getBackendName() const override {
-      return std::string(GLOO_BACKEND_NAME);
+    return std::string(GLOO_BACKEND_NAME);
   }
 
   // Helper functions to create a new device object.

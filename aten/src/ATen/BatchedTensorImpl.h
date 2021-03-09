@@ -80,11 +80,11 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
 #ifdef DEBUG
   bool has_storage() const override;
 #endif
-  const Storage& storage() const override;
 
  private:
   // see NOTE: [BatchedTensorImpl levels invariant]
   void checkInvariants() const;
+  const char* tensorimpl_type_name() const override;
 
   Tensor value_;
 

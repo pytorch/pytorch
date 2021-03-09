@@ -107,7 +107,7 @@ class MixtureSameFamily(Distribution):
 
     @constraints.dependent_property
     def support(self):
-        # FIXME this may have the wrong shape when support contains batched 
+        # FIXME this may have the wrong shape when support contains batched
         # parameters
         return self._component_distribution.support
 

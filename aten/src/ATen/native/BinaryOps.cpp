@@ -368,11 +368,11 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
 }
 
 Tensor mul(const Tensor& self, Scalar other) {
-  return native::mul(self, wrapped_scalar_tensor(other));
+  return at::mul(self, wrapped_scalar_tensor(other)); // redispatch!
 }
 
 Tensor& mul_(Tensor& self, Scalar other) {
-  return native::mul_(self, wrapped_scalar_tensor(other));
+  return at::mul_out(self, self, wrapped_scalar_tensor(other)); // redispatch!
 }
 
 // multiply, alias for mul
