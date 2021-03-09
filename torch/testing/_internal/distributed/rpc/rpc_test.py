@@ -788,6 +788,17 @@ class RpcTest(RpcAgentTestFixture):
             )
 
     @dist_init(setup_rpc=False)
+    def test_duplicate_name_2(self):
+        with self.assertRaisesRegex(RuntimeError, "is not unique"):
+            rpc.init_rpc(
+                name=worker_name(self.rank % (self.world_size - 1)),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+    @dist_init(setup_rpc=False)
     def test_reinit(self):
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -3210,7 +3221,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
         with self.assertRaisesRegex(
-            RuntimeError,
+            TypeError,
             "my\\_function\\(\\) missing 2 required positional arguments"
         ):
             cb_fut.wait()
@@ -3223,7 +3234,7 @@ class RpcTest(RpcAgentTestFixture):
         fut1 = fut0.then(lambda x: x + 1)
 
         with self.assertRaisesRegex(
-            RuntimeError,
+            TypeError,
             "unsupported operand type\\(s\\) for \\+"
         ):
             fut1.wait()
