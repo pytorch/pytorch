@@ -674,7 +674,6 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('overload_name', str(f.func.name.overload_name)),
         ('manual_kernel_registration', f.manual_kernel_registration),
         ('category_override', f.category_override if f.category_override is not None else ''),
-        ('matches_jit_signature', True),
         ('schema_string', f'aten::{f.func}'),
         ('arguments', arguments),
         ('schema_order_cpp_signature', schema_order_cpp_signature),
