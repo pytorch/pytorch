@@ -500,7 +500,7 @@ struct TORCH_API ViewInfo {
 ///   warning will be thrown.
 /// - DEFAULT is for all other cases
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
-                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE, NO_VARIABLE_TYPE };
+                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE, NO_VARIABLE_TYPE_VIEW };
 
 /// Handles correctly propagating CreationMeta when a new view is created from a previous view.
 /// In general, we don't want the new view to be _less_ restrictive than the previous view

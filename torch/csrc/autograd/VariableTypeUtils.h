@@ -138,7 +138,7 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
         bool is_fw_differentiable, std::function<Tensor(const Tensor&)> view_func=nullptr,
         CreationMeta creation_meta=CreationMeta::DEFAULT, bool allow_tensor_metadata_change=true) {
   // FIXME: properly set CreationMeta
-  creation_meta = c10::InferenceMode::is_enabled() ? CreationMeta::NO_VARIABLE_TYPE: creation_meta;
+  creation_meta = c10::InferenceMode::is_enabled() ? CreationMeta::NO_VARIABLE_TYPE_VIEW: creation_meta;
   if (!isForwardADEnabled()) {
     // Fast codepath for backward only code
     // It is useful as it avoids the creation of the temporary c10<optional> which makes
@@ -209,7 +209,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
   c10::optional<ViewInfo> new_fw_info = c10::nullopt;
 
   // FIXME: properly set CreationMeta
-  creation_meta = c10::InferenceMode::is_enabled() ? CreationMeta::NO_VARIABLE_TYPE: creation_meta;
+  creation_meta = c10::InferenceMode::is_enabled() ? CreationMeta::NO_VARIABLE_TYPE_VIEW: creation_meta;
   if (is_bw_differentiable) {
     if (base.is_view()) {
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));

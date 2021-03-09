@@ -11,6 +11,9 @@
 
 
 using namespace at;
+using torch::autograd::CreationMeta;
+using torch::autograd::as_view;
+using torch::autograd::increment_version;
 
 namespace torch {
 

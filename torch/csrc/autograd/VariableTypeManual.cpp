@@ -141,7 +141,7 @@ bool is_leaf(const Tensor & self) {
     auto autograd_meta = impl::get_autograd_meta(self);
     if (self.is_view()) {
       auto diff_autograd_meta = static_cast<DifferentiableViewMeta*>(autograd_meta);
-      if (diff_autograd_meta->get_creation_meta() == CreationMeta::NO_VARIABLE_TYPE) return false;
+      if (diff_autograd_meta->get_creation_meta() == CreationMeta::NO_VARIABLE_TYPE_VIEW) return false;
     }
     return autograd_meta->grad_fn_ == nullptr;
   } else {

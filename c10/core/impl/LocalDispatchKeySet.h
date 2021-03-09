@@ -49,6 +49,8 @@ static_assert(std::is_pod<PODLocalDispatchKeySet>::value, "PODLocalDispatchKeySe
 struct C10_API LocalDispatchKeySet {
   /* implicit */ LocalDispatchKeySet(PODLocalDispatchKeySet x)
     : included_(x.included()), excluded_(x.excluded()) {}
+  //LocalDispatchKeySet(const LocalDispatchKeySet& x)
+    //: included_(x.included_), excluded_(x.excluded_) {}
   DispatchKeySet included_;
   DispatchKeySet excluded_;
 };

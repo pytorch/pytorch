@@ -6,7 +6,7 @@ namespace c10 {
 namespace impl {
 
 // NB: POD, zero initialized!
-thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
+thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set {DispatchKeySet(DispatchKey::InplaceOrView).raw_repr()};
 
 #if defined(_MSC_VER) || defined(C10_ANDROID)
 LocalDispatchKeySet tls_local_dispatch_key_set() {

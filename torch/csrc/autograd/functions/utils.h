@@ -70,6 +70,12 @@ struct AssertNoInferenceTensor : IterArgs<AssertNoInferenceTensor> {
 
 template <typename... Args>
 inline void assert_no_inference_tensor(Args&&... args) {
+  // Inside InferenceMode, inference tensor is allowed to go through
+  // VariableType kernel if any other inputs has Autograd keys.
+  // We haven't seen a use case mixing inference tensor and normal
+  // tensor outside InferenceMode yet, thus simply throw out error
+  // when it happens. We might consider supporting it if there's a
+  // valid use case in the future.
   if (!c10::InferenceMode::is_enabled()) {
     AssertNoInferenceTensor().apply(std::forward<Args>(args)...);
   }
