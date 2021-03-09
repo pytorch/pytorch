@@ -120,7 +120,7 @@ C10_HOST_DEVICE __ubsan_ignore_float_divide_by_zero__ inline T exponential(T val
       // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
       // we need log to be not 0, and not underflow when converted to half
       // fast __logf approximation can underflow, so set log to -epsilon/2 for 1 or close to 1 args
-  auto log = val >= ::nextafter<T>(static_cast<T>(1.0), static_cast<T>(0.0))
+  auto log = val >= static_cast<T>(1.) - std::numeric_limits<T>::epsilon() / 2
       ? -std::numeric_limits<T>::epsilon() / 2
       : at::log(val);
   return static_cast<T>(-1.0) / lambda * log;
