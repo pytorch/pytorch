@@ -305,8 +305,9 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
   ClipRangesGatherRangesLengthsToOffsets(graph);
   ClipRangesGatherSigridHash(graph);
   ClipRangesGatherRangesSigridHash(graph);
-  ClipRangesGatherRangesX2SigridHash(graph);
-  ClipRangesGatherRangesX2SigridHashPrecompute(graph);
+  // TODO: re-enable after bug fix
+  // ClipRangesGatherRangesX2SigridHash(graph);
+  // ClipRangesGatherRangesX2SigridHashPrecompute(graph);
 
   // prioritize clip_ranges+gather_ranges+sigrid_hash fusion over
   // clip_ranges+gather_ranges
