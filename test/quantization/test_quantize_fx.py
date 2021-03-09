@@ -1686,9 +1686,11 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_getattr_with_nontensor_result(self):
         """
-        TODO(before land): explain
+        Verifies that binary ops get quantized correctly if some
+        of the args are nodes but not Tensors, such as an `x.ndim`
+        pattern.
         """
-        class M(torch.nn.Module):
+        class M1(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -1699,19 +1701,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = torch.add(x, dims_sub2)
                 return x
 
-        m = M().eval()
-        m(torch.rand(4, 4, 4, 4))
-        qconfig_dict = {'': torch.quantization.default_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
-        mp(torch.rand(4, 4, 4, 4))
-        mc = convert_fx(mp)
-        # TODO(before land): test for correct graph
-
-    def test_getattr_with_nontensor_result2(self):
-        """
-        TODO(before land): explain
-        """
-        class M(torch.nn.Module):
+        class M2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -1723,17 +1713,18 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = x.view(dims_list)
                 return x
 
-        m = M().eval()
-        m(torch.rand(4, 4, 4, 4))
-        qconfig_dict = {'': torch.quantization.default_qconfig}
-        mp = prepare_fx(m, qconfig_dict)
-        mp(torch.rand(4, 4, 4, 4))
-        mc = convert_fx(mp)
-        # TODO(before land): test for correct graph
+        for cls in (M1, M2):
+            m = cls().eval()
+            m(torch.rand(4, 4, 4, 4))
+            qconfig_dict = {'': torch.quantization.default_qconfig}
+            mp = prepare_fx(m, qconfig_dict)
+            mp(torch.rand(4, 4, 4, 4))
+            mc = convert_fx(mp)
 
     def test_assert_on_size_after_quant_layer(self):
         """
-        TODO(before land): explain
+        Verifies that calculating a size of a quantized tensor works
+        correctly in quantization passes.
         """
         class M(torch.nn.Module):
             def __init__(self):
@@ -1752,7 +1743,6 @@ class TestQuantizeFx(QuantizationTestCase):
         mp(torch.rand(4, 1, 4, 4))
         mc = convert_fx(mp)
         mc(torch.rand(4, 1, 4, 4))
-        # TODO(before land): test for correct graph
 
     def test_state_dict(self):
         """ Make sure packed params appear in state_dict
