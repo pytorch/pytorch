@@ -40,6 +40,8 @@ import __main__  # type: ignore[import]
 import errno
 from typing import cast, Any, Dict, Iterable, Iterator, Optional
 
+import numpy as np
+
 from torch.testing._internal import expecttest
 from torch.testing import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type,
@@ -381,26 +383,30 @@ TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 # it felt a little awkward.
 TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 
-if TEST_NUMPY:
-    import numpy as np
+# Dict of NumPy dtype -> torch dtype (when the correspondence exists)
+numpy_to_torch_dtype_dict = {
+    np.bool_      : torch.bool,
+    np.uint8      : torch.uint8,
+    np.int8       : torch.int8,
+    np.int16      : torch.int16,
+    np.int32      : torch.int32,
+    np.int64      : torch.int64,
+    np.float16    : torch.float16,
+    np.float32    : torch.float32,
+    np.float64    : torch.float64,
+    np.complex64  : torch.complex64,
+    np.complex128 : torch.complex128
+}
 
-    # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
-    numpy_to_torch_dtype_dict = {
-        np.bool_      : torch.bool,
-        np.uint8      : torch.uint8,
-        np.int8       : torch.int8,
-        np.int16      : torch.int16,
-        np.int32      : torch.int32,
-        np.int64      : torch.int64,
-        np.float16    : torch.float16,
-        np.float32    : torch.float32,
-        np.float64    : torch.float64,
-        np.complex64  : torch.complex64,
-        np.complex128 : torch.complex128
-    }
+if IS_WINDOWS:
+    # Size of `np.intc` is platform defined.
+    # It is returned by functions like `bitwise_not`.
+    # On Windows `int` is 32-bit
+    # https://docs.microsoft.com/en-us/cpp/cpp/data-type-ranges?view=msvc-160
+    numpy_to_torch_dtype_dict[np.intc] = torch.int
 
-    # Dict of torch dtype -> NumPy dtype
-    torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
+# Dict of torch dtype -> NumPy dtype
+torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
@@ -1290,28 +1296,6 @@ class TestCase(expecttest.TestCase):
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
-    def maybeWarnsRegex(self, category, regex=''):
-        """Context manager for code that *may* warn, e.g. ``TORCH_WARN_ONCE``.
-
-        This filters expected warnings from the test log and fails the test if
-        any unexpected warnings are caught.
-        """
-        with warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            # Ignore expected warnings
-            warnings.filterwarnings("ignore", message=regex, category=category)
-            try:
-                yield
-            finally:
-                if len(ws) != 0:
-                    msg = 'Caught unexpected warnings:\n'
-                    for w in ws:
-                        msg += warnings.formatwarning(
-                            str(w.message), w.category, w.filename, w.lineno, w.line)
-                        msg += '\n'
-                    self.fail(msg)
-
-    @contextmanager
     def assertWarnsOnceRegex(self, category, regex=''):
         """Context manager for code that *must always* warn
 
@@ -1328,13 +1312,12 @@ class TestCase(expecttest.TestCase):
                 yield
             finally:
                 torch.set_warn_always(prev)
-                if len(ws) == 0:
-                    self.fail('no warning caught')
-                if len(ws) > 1:
-                    self.fail('too many warnings caught: %s' % '\n    '.join([str(w) for w in ws]))
-                self.assertTrue(type(ws[0].message) is category)
-                self.assertTrue(re.match(pattern, str(ws[0].message)),
-                                f'{pattern}, {ws[0].message}')
+            if len(ws) == 0:
+                self.fail('no warning caught')
+            for w in ws:
+                self.assertTrue(type(w.message) is category)
+                self.assertTrue(re.match(pattern, str(w.message)),
+                                f'{pattern}, {w.message}')
 
     def assertExpected(self, s, subname=None):
         r"""
@@ -1526,7 +1509,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix and tensor generation
 
 # Used in test_autograd.py and test_torch.py
-def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None, 
+def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, high=None,
                 requires_grad: bool = False, discontiguous: bool = False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
@@ -2004,10 +1987,10 @@ dtype2prec_DONTUSE = {torch.float: 1e-5,
                       torch.bfloat16: 1e-1}
 
 
-def _wrap_maybe_warns(regex):
+def _wrap_warn_once(regex):
     def decorator(fn):
         def inner(self, *args, **kwargs):
-            with self.maybeWarnsRegex(UserWarning, regex):
+            with self.assertWarnsOnceRegex(UserWarning, regex):
                 fn(self, *args, **kwargs)
         return inner
     return decorator

@@ -5,6 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -100,6 +101,18 @@ at::Tensor& flatten_out(
     shape.push_back(self.sizes()[i]);
   }
   return reshape_out(out, self, shape, false);
+}
+
+at::Tensor& to_copy_out(Tensor& out, const Tensor& self, bool non_blocking) {
+  if (!out.options().memory_format_opt().has_value()) {
+    at::native::resize_impl_cpu_(
+        out.unsafeGetTensorImpl(), self.sizes(), self.strides());
+    at::native::copy_(out, self, non_blocking);
+    return out;
+  }
+  at::native::resize_(out, self.sizes());
+  at::native::copy_(out, self, non_blocking);
+  return out;
 }
 } // namespace native
 } // namespace at
@@ -562,10 +575,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     if (!te->supports(in0_t)) {
-      out_t.resize_({0});
+      fastResizeToZero(out_t);
       at::native::tanh_out(out_t, in0_t);
     } else {
-      out_t.resize_as_(in0_t);
+      at::native::resize_as_(out_t, in0_t, c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
@@ -583,10 +596,10 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out_t = p_node->Output(0).toTensor();
         if (!te->supports(in0_t)) {
-          out_t.resize_({0});
+          fastResizeToZero(out_t);
           at::native::sigmoid_out(out_t, in0_t);
         } else {
-          out_t.resize_as_(in0_t);
+          at::native::resize_as_(out_t, in0_t, c10::nullopt);
           (*te)(
               out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
         }
@@ -613,7 +626,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       at::native::logit_out(out_t, in0_t, in1_d);
     } else {
-      out_t.resize_as_(in0_t);
+      at::native::resize_as_(out_t, in0_t, c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
     }
   };
@@ -630,11 +643,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
     at::native::copy_(out_t, in0_t, false);
   };
 });
-REGISTER_OPERATOR_FUNCTOR_OPT(
+REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_rowwise_offsets,
     quantized_embedding_bag_byte_rowwise_offsets,
-    false, // don't reuse byte inputs
-    true,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         const auto& weight = p_node->Input(0).toTensor();
@@ -647,8 +658,7 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
             p_node->Input(7).toOptional<at::Tensor>();
         const auto include_last_offset = p_node->Input(8).toBool();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) =
-              at::empty({0}, weight.options().dtype(at::kFloat));
+          p_node->Output(0) = create_empty_from(weight, at::kFloat);
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
@@ -665,11 +675,9 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
             include_last_offset);
       };
     });
-REGISTER_OPERATOR_FUNCTOR_OPT(
+REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_4bit_rowwise_offsets,
     embedding_bag_4bit_rowwise_offsets,
-    false, // don't reuse byte inputs
-    true,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         const auto& weight = p_node->Input(0).toTensor();
@@ -682,8 +690,7 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
             p_node->Input(7).toOptional<at::Tensor>();
         const auto include_last_offset = p_node->Input(8).toBool();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) =
-              at::empty({0}, weight.options().dtype(at::kFloat));
+          p_node->Output(0) = create_empty_from(weight, at::kFloat);
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
@@ -747,7 +754,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
         const auto& in0_t = p_node->Input(0).toTensor();
         if (p_node->Input(1).isTensor()) {
           dtype = at::native::result_type(in0_t, p_node->Input(1).toTensor());
-          p_node->Output(0) = at::empty({0}, in0_t.options().dtype(dtype));
+          p_node->Output(0) = create_empty_from(in0_t, dtype);
         } else {
           dtype = at::native::result_type(in0_t, p_node->Input(1).toScalar());
           p_node->Output(0) = at::native::empty_like(
@@ -774,6 +781,37 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
       at::native::pow_out(
           out_t, p_node->Input(0).toScalar(), p_node->Input(1).toTensor());
     }
+  };
+});
+// out variant takes precedence over native
+REGISTER_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    // support 4- or 5-arg for adindexer/adfinder models
+    DCHECK(p_node->inputs().size() >= 4);
+    const auto& in0_t = p_node->Input(0).toTensor();
+    auto in2_i = p_node->Input(2).toBool(); // non_blocking
+    // ignore input 3 (copy)
+    if (p_node->Output(0).isNone()) {
+      auto in1_i = p_node->Input(1).toScalarType();
+      c10::optional<c10::MemoryFormat> in4_o = c10::nullopt;
+      if (p_node->inputs().size() > 4 && p_node->Input(4).isInt()) {
+        in4_o = p_node->Input(4).toOptional<c10::MemoryFormat>();
+      }
+      if (in4_o.value_or(c10::MemoryFormat::Preserve) ==
+          c10::MemoryFormat::Preserve) {
+        if (in0_t.is_non_overlapping_and_dense()) {
+          in4_o = c10::nullopt;
+        } else {
+          in4_o = in0_t.suggest_memory_format();
+        }
+      }
+      // See Note [Explicit nullopt MemoryFormat argument]
+      p_node->Output(0) = at::detail::empty_cpu(
+          {0}, in1_i, in0_t.layout(), in0_t.device(), c10::nullopt, in4_o);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::to_copy_out(out_t, in0_t, in2_i);
   };
 });
 
@@ -876,7 +914,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
         stack.emplace_back(p_node->Input(i));
       }
       // run op
-      auto* node = p_node->get_node();
+      auto* node = p_node->node();
       const auto& type = node->output()->type()->expect<TupleType>();
       if (type->name().has_value()) {
         namedTupleConstruct(stack, type, node->inputs().size());
@@ -898,7 +936,7 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       // run op
       listConstruct(
           stack,
-          p_node->get_node()->output()->type()->expectRef<ListType>(),
+          p_node->node()->output()->type()->expectRef<ListType>(),
           p_node->inputs().size());
       // put output back
       p_node->Output(0) = std::move(stack[0]);

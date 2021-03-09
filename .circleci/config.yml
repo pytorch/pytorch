@@ -1390,6 +1390,28 @@ jobs:
       - store_test_results:
           path: test/test-reports
 
+  pytorch_macos_10_13_py3_lite_interpreter_build_test:
+    environment:
+      BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
+    macos:
+      xcode: "12.0"
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/workspace
+      - run_brew_for_macos_build
+      - run:
+          name: Test
+          no_output_timeout: "1h"
+          command: |
+            set -e
+            export IN_CI=1
+            export BUILD_LITE_INTERPRETER=1
+            chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
+            unbuffer ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
+      - store_test_results:
+          path: test/test-reports
+
   pytorch_android_gradle_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build
@@ -6691,6 +6713,12 @@ workflows:
           name: "docker-pytorch-linux-bionic-py3.8-gcc9"
           image_name: "pytorch-linux-bionic-py3.8-gcc9"
       - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
+          image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
+      - docker_build_job:
           name: "docker-pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7"
           image_name: "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7"
       - docker_build_job:
@@ -6702,6 +6730,9 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
           image_name: "pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7"
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
           image_name: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
@@ -7158,6 +7189,10 @@ workflows:
           name: pytorch_macos_10_13_py3_build
       - pytorch_macos_10_13_py3_test:
           name: pytorch_macos_10_13_py3_test
+          requires:
+            - pytorch_macos_10_13_py3_build
+      - pytorch_macos_10_13_py3_lite_interpreter_build_test:
+          name: pytorch_macos_10_13_py3_lite_interpreter_build_test
           requires:
             - pytorch_macos_10_13_py3_build
       - pytorch_linux_build:
