@@ -21,12 +21,12 @@
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/lib/c10d/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
-/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088
+/torch/lib/c10d/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang
+/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang
 
 # Distributed tests
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma
-/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang
