@@ -15,7 +15,7 @@ namespace at {
 // below
 //
 template <typename ResultVec>
-inline void infer_size_impl(ResultVec &res, IntArrayRef shape, int64_t numel) {
+inline void infer_size_impl(IntArrayRef shape, int64_t numel, ResultVec &res) {
   int64_t newsize = 1;
   auto infer_dim = c10::optional<int64_t>();
   for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
@@ -46,7 +46,6 @@ inline void infer_size_impl(ResultVec &res, IntArrayRef shape, int64_t numel) {
                "value and is ambiguous");
       res[*infer_dim] = numel / newsize;
     }
-    return;
   }
 
   std::ostringstream ss;
@@ -56,13 +55,13 @@ inline void infer_size_impl(ResultVec &res, IntArrayRef shape, int64_t numel) {
 
 inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
   auto res = shape.vec();
-  infer_size_impl(res, shape, numel);
+  infer_size_impl(shape, numel, res);
   return res;
 }
 
 inline at::DimVector infer_size_dv(IntArrayRef shape, int64_t numel) {
   auto res = at::DimVector(shape);
-  infer_size_impl(res, shape, numel);
+  infer_size_impl(shape, numel, res);
   return res;
 }
 
