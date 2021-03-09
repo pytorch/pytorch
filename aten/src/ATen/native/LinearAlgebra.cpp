@@ -195,86 +195,61 @@ Tensor pinverse(const Tensor& self, double rcond) {
   return at::linalg_pinv(self, rcond, /*hermitian=*/false);
 }
 
-Tensor& linalg_matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
+// matrix_power implementation
+namespace {
+
+/**
+ * @brief Raises the input matrix to the given power n
+ *
+ * If the exponent n is negative, the inverse of the input
+ * matrix will be raised to power abs(n).
+ *
+ * @param self (batched) square matrix to raise to power n
+ * @param n exponent to raise matrix (or matrices in batch) to
+ * @param _out optional tensor to write the output to
+ * @return Tensor input matrix raised to power n
+ */
+Tensor linalg_matrix_power_impl(
+    const Tensor& self,
+    int64_t n,
+    c10::optional<Tensor> _out = c10::nullopt) {
+  auto out = _out.value_or(Tensor());
+
   squareCheckInputs(self);
-  checkSameDevice("matrix_power", result, self);
-  checkLinalgCompatibleDtype("matrix_power", result, self);
-  at::native::resize_output(result, self.sizes());
+  if (_out.has_value()) {
+    checkSameDevice("matrix_power", out, self);
+    checkLinalgCompatibleDtype("matrix_power", out, self);
+    at::native::resize_output(out, self.sizes());
+  }
 
-  // Fast paths for exponents <= 3
+  // For n=0 we return the identity matrix of the same shape as input.
   if (n == 0) {
-    return result.copy_(at::eye(self.size(-2), self.options()));
-  } else if (n == 1) {
-    return result.copy_(self);
-  } else if (n == -1) {
-    return at::linalg_inv_out(result, self);
-  }
-
-  auto a = n < 0 ? at::linalg_inv(self) : self;
-  n = std::abs(n);
-
-  if (n == 2) {
-    return at::matmul_out(result, a, a);
-  } else if (n == 3) {
-    return at::matmul_out(result, at::matmul(a, a), a);
-  }
-
-  // This is a binary decomposition of n.
-  // Moving from the least significant bit to the most significant bit
-  // This is done to reduce the number of matrix multiplications
-  // by raising the input matrix in powers of 2
-  // The total number of matrix multiplications are
-  // number of bits + number of bits that equal 1 ~ O(log n)
-  // instead of O(n)
-  Tensor z, res;
-  while (true) {
-    auto bit = n % 2;
-    n = n / 2;
-    z = z.defined() ? at::matmul(z, z) : a;
-    if (bit == 1) {
-      if (n <= 0) {
-        if (res.defined()) {
-          at::matmul_out(result, res, z);
-        } else {
-          result.copy_(z);
-        }
-        break;
-      } else {
-        res = res.defined() ? at::matmul(res, z) : z;
-      }
+    if (!_out.has_value()) {
+      // Clone input to include result in the autograd graph
+      out = self.clone(at::MemoryFormat::Contiguous);
     }
+    return out.copy_(at::eye(self.size(-2), self.options()));
   }
-
-  return result;
-}
-
-Tensor linalg_matrix_power(const Tensor& self, int64_t n) {
-  squareCheckInputs(self);
-
-  // For n=0 we return the identity matrix of the same shape
-  // as input. We are cloning here to include the result in
-  // the autograd graph.
-  if (n == 0) {
-    return self.clone(at::MemoryFormat::Contiguous)
-        .copy_(at::eye(self.size(-2), self.options()));
-  }
-
-  // Handle n=1 separately as it's the only other case
-  // for which input needs to be cloned
   if (n == 1) {
-    return self.clone(at::MemoryFormat::Contiguous);
+    return _out.has_value() ? out.copy_(self)
+                            : self.clone(at::MemoryFormat::Contiguous);
+  }
+  if (n == -1) {
+    return _out.has_value() ? at::linalg_inv_out(out, self)
+                            : at::linalg_inv(self);
   }
 
+  // For negative n we inverte the input matrix before raising to power abs(n)
   auto a = n < 0 ? at::linalg_inv(self) : self;
   n = std::abs(n);
 
-  // Fast paths for exponents <= 3
-  if (n == 1) {
-    return a;
-  } else if (n == 2) {
-    return at::matmul(a, a);
-  } else if (n == 3) {
-    return at::matmul(at::matmul(a, a), a);
+  // Fast paths for small powers
+  if (n == 2) {
+    return _out.has_value() ? at::matmul_out(out, a, a) : at::matmul(a, a);
+  }
+  if (n == 3) {
+    return _out.has_value() ? at::matmul_out(out, at::matmul(a, a), a)
+                            : at::matmul(at::matmul(a, a), a);
   }
 
   // This is a binary decomposition of n.
@@ -286,14 +261,30 @@ Tensor linalg_matrix_power(const Tensor& self, int64_t n) {
   // instead of O(n)
   Tensor z, result;
   while (n > 0) {
+    const auto bit = n % 2;
+    n = n / 2;
     z = z.defined() ? at::matmul(z, z) : a;
-    if (n % 2 == 1) {
+    if (bit == 1) {
+      if (_out.has_value() && n <= 0) {
+        // Last multiplication can use the out version
+        return result.defined() ? at::matmul_out(out, result, z) : out.copy_(z);
+      }
       result = result.defined() ? at::matmul(result, z) : z;
     }
-    n = n / 2;
   }
 
   return result;
+}
+
+} // namespace
+
+Tensor& linalg_matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
+  linalg_matrix_power_impl(self, n, result);
+  return result;
+}
+
+Tensor linalg_matrix_power(const Tensor& self, int64_t n) {
+  return linalg_matrix_power_impl(self, n, c10::nullopt);
 }
 
 Tensor matrix_power(const Tensor& self, int64_t n) {
