@@ -121,10 +121,10 @@
 # Not assert because it's a keyword; not Assert because FX already
 # took that syntax
 # TODO: need to specify this is side-effectful somehow
-- func: assert_async(Tensor self) -> ()
+- func: _assert_async(Tensor self) -> ()
   dispatch:
-    CPU: assert_async_cpu
-    CUDA: assert_async_cuda
+    CPU: _assert_async_cpu
+    CUDA: _assert_async_cuda
 
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
@@ -1647,6 +1647,7 @@
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
+    Meta: empty_strided_meta
 
 - func: erf(Tensor self) -> Tensor
   variants: function, method
