@@ -1254,6 +1254,23 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
   return (r * grad).sum();
 }
 
+Tensor huber_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, double delta) {
+  auto d = (input - target).abs();
+  auto grad_input = grad * (d < delta);
+  if (reduction == at::Reduction::Mean) {
+    grad_input /= input.numel();
+  }
+  return grad_input;
+}
+
+Tensor huber_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction, double delta) {
+  if (reduction == at::Reduction::None) {
+    return huber_loss_backward(grad, input, target, reduction, delta);
+  }
+  auto r = huber_loss_backward(ones_like(grad_output), input, target, reduction, delta);
+  return (r * grad).sum();
+}
+
 Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, int64_t reduction) {
   auto grad_input = 2 * grad;
   if (reduction == at::Reduction::Mean) {

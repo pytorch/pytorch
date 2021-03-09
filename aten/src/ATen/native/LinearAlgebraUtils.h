@@ -357,26 +357,26 @@ static inline void checkSameDevice(const std::string& fn_name, Tensor result, Te
 
 // Check the dtype of result and input tensors (for _out variants).
 // Most linear algebra functions have the same dtype for input and output
-// (either floating or complex type input), so we can check whether both result and input are compatible.
+// (either floating or complex type input), so we can check whether input's dtype can be casted to result's dtype.
 // According to https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
-// if input is complex result can only be complex, if input is float result can be both float and complex
+// c10::canCast is used for checking the "safe copy" dtype requirements.
 static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result") {
   bool can_cast = c10::canCast(input.scalar_type(), result.scalar_type());
   TORCH_CHECK(
       can_cast,
       fn_name,
-      ": Expected ", result_name, " to be compatible with ", input.scalar_type(), " dtype, but got ",
+      ": Expected ", result_name, " to be safely castable from ", input.scalar_type(), " dtype, but got ",
       result_name, " with dtype ", result.scalar_type());
 }
 
-// Alternatively, we can check whether out tensor dtype (out_type) is compatible with the specific expected type (result_type)
+// Alternatively, we can check whether the specific expected output type (result_type) can be safely casted to out tensor dtype (out_type)
 static inline void checkLinalgCompatibleDtype(const std::string& fn_name, ScalarType out_type, ScalarType result_type, const std::string& out_name = "result") {
   bool can_cast = c10::canCast(result_type, out_type);
   TORCH_CHECK(
       can_cast,
       fn_name,
-      ": Expected ", out_name, " to be compatible with ", result_type, " dtype, but got ",
-      out_name, " with dtype ", result_type);
+      ": Expected ", out_name, " to be safely castable from ", result_type, " dtype, but got ",
+      out_name, " with dtype ", out_type);
 }
 
 }}  // namespace at::native

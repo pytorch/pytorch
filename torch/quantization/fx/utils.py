@@ -330,3 +330,46 @@ def create_qparam_nodes(quantizer: QuantizerCls, node_name: str, scale: Any, zer
     scale_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_scale_"), scale)
     zero_point_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_zero_point_"), zero_point)
     return (scale_node, zero_point_node)
+
+
+def all_node_args_have_no_tensors(node: Node) -> bool:
+    """
+    If we know for sure that all of this node's args have no
+    tensors (are primitives), return True.  If we either
+    find a tensor or are not sure, return False. Note: this
+    function is not exact.
+    """
+    if not isinstance(node, Node):
+        return True
+    elif node.op == 'placeholder':
+        return False
+    elif node.op == 'call_module':
+        return False
+    elif node.op == 'get_attr':
+        return False
+    elif node.target is getattr and node.args[1] == 'ndim':
+        # x1 = x0.ndim
+        return True
+    elif node.op == 'call_method' and node.target == 'size':
+        # x1 = x0.size(0)
+        return True
+
+    found_one_tensor = False
+    for arg in node.args:
+        if isinstance(arg, list):
+            for list_el in arg:
+                if isinstance(list_el, Node):
+                    this_list_el_args_have_no_tensors = \
+                        all_node_args_have_no_tensors(list_el)
+                    found_one_tensor = found_one_tensor or \
+                        (not this_list_el_args_have_no_tensors)
+        elif isinstance(arg, int):
+            pass
+        else:
+            if isinstance(arg, Node):
+                this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg)
+                found_one_tensor = found_one_tensor or \
+                    (not this_arg_args_have_no_tensors)
+            else:
+                found_one_tensor = True
+    return not found_one_tensor
