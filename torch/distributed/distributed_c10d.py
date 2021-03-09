@@ -7,6 +7,7 @@ import warnings
 import time
 from torch._six import string_classes
 from datetime import timedelta
+from os import getenv
 from typing import Dict, Optional, Tuple, Union
 
 # This module is wildcard imported from torch.distributed.
@@ -532,6 +533,7 @@ def _new_process_group_helper(world_size,
                               group_ranks,
                               backend,
                               store,
+                              pg_options=None,
                               group_name=None,
                               timeout=default_pg_timeout):
     """
@@ -558,6 +560,10 @@ def _new_process_group_helper(world_size,
     if not isinstance(timeout, timedelta):
         raise RuntimeError("Expected timeout argument to be of type"
                            "datetime.timedelta")
+
+    if pg_options is not None and timeout != default_pg_timeout:
+        raise RuntimeError("Please pass in either pg_options or timeout, passing"
+                           " both is confusing.")
 
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = (len(group_ranks) == 0)
@@ -588,22 +594,36 @@ def _new_process_group_helper(world_size,
         prefix_store = PrefixStore(group_name, store)
 
         if backend == Backend.GLOO:
+            if pg_options is None:
+                pg_options = ProcessGroupGloo.Options()
+                pg_options.timeout = timeout
+                ifname_env = getenv("GLOO_SOCKET_IFNAME")
+                if ifname_env is not None:
+                    pg_options.devices = [ProcessGroupGloo.create_device(interface=iface) for iface in ifname_env.split(",")]
+                else:
+                    pg_options.devices = [ProcessGroupGloo.create_default_device()]
+                
             pg = ProcessGroupGloo(
                 prefix_store,
                 rank,
                 world_size,
-                timeout=timeout)
+                pg_options)
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif backend == Backend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL "
                                    "built in")
+            if pg_options is None:
+                pg_options = ProcessGroupNCCL.Options()
+                pg_options.is_high_priority_stream = False
+                pg_options.timeout = timeout
+
             pg = ProcessGroupNCCL(
                 prefix_store,
                 rank,
                 world_size,
-                timeout)
+                pg_options)
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
@@ -2430,7 +2450,7 @@ def barrier(group=GroupMember.WORLD,
         work.wait()
 
 
-def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
+def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
     """
     Creates a new distributed group.
 
@@ -2508,6 +2528,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
                                    ranks,
                                    backend,
                                    default_store,
+                                   pg_options=pg_options,
                                    timeout=timeout)
 
     # Create the global rank to group rank mapping
