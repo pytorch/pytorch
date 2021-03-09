@@ -1647,6 +1647,7 @@
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
+    Meta: empty_strided_meta
 
 - func: erf(Tensor self) -> Tensor
   variants: function, method

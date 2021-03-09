@@ -605,7 +605,7 @@ def _new_process_group_helper(world_size,
                     pg_options.devices = [ProcessGroupGloo.create_device(interface=iface) for iface in ifname_env.split(",")]
                 else:
                     pg_options.devices = [ProcessGroupGloo.create_default_device()]
-                
+
             pg = ProcessGroupGloo(
                 prefix_store,
                 rank,

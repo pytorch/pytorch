@@ -1113,38 +1113,6 @@ Arguments:
               int,
               int,
               c10::intrusive_ptr<::c10d::ProcessGroupGloo::Options>>(),
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                      int rank,
-                      int size,
-                      std::chrono::milliseconds timeout) {
-            auto options = ::c10d::ProcessGroupGloo::Options::create();
-
-            // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            char* ifnameEnv = getenv(::c10d::GLOO_SOCKET_IFNAME_ENV);
-            if (ifnameEnv) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
-                options->devices.push_back(
-                    ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
-              }
-            } else {
-              // If no hostname is specified, this function looks up
-              // the machine's hostname and returns a device instance
-              // associated with the address that the hostname resolves to.
-              options->devices.push_back(
-                  ::c10d::ProcessGroupGloo::createDefaultDevice());
-            }
-
-            options->timeout = timeout;
-            options->threads = options->devices.size() * 2;
-            return c10::make_intrusive<::c10d::ProcessGroupGloo>(
-                store, rank, size, options);
-          }),
-          py::arg("store"),
-          py::arg("rank"),
-          py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000), // NOLINT
           py::call_guard<py::gil_scoped_release>());
 #endif
 
@@ -1158,23 +1126,6 @@ Arguments:
                   int,
                   int,
                   c10::intrusive_ptr<::c10d::ProcessGroupNCCL::Options>>(),
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size,
-                          const std::chrono::milliseconds& timeout) {
-                auto options = ::c10d::ProcessGroupNCCL::Options::create();
-                options->is_high_priority_stream = false;
-                options->timeout = timeout;
-                return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
-                    store, rank, size, options);
-              }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              py::arg("timeout") = std::chrono::milliseconds(
-                  ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
               py::call_guard<py::gil_scoped_release>());
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
