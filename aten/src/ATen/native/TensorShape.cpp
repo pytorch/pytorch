@@ -1977,7 +1977,7 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
     TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
   }
 
-  DimVector inferred_size;
+  std::vector<int64_t> inferred_size;
   try {
     inferred_size = at::infer_size(sizes, self.size(dim));
   } catch (const std::runtime_error& e) {
