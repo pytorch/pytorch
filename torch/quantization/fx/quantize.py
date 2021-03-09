@@ -63,6 +63,7 @@ from .utils import (
     collect_producer_nodes,
     graph_module_from_producer_nodes,
     assert_and_get_unique_device,
+    node_return_type_is_int,
 )
 
 from .qconfig_utils import *
@@ -689,10 +690,8 @@ class Quantizer:
                     ' in quantized or non quantized environment, env: ' + \
                     str(env) + ' quant_env:' + str(quant_env)
                 quant_env_node = quant_env[n.name]
-                # TODO(before land): make it nicer
-                if quant_env_node.op == 'call_method' and quant_env_node.target == 'size':
-                    # if we take a size of a quantized tensor, it is an integer
-                    # and it does not make sense to dequantize it
+                if node_return_type_is_int(quant_env_node):
+                    # we don't need to dequantize integers
                     env[n.name] = quant_env[n.name]
                 else:
                     env[n.name] = Proxy(quant_env[n.name]).dequantize().node
@@ -712,7 +711,6 @@ class Quantizer:
             else:
                 return env[n.name]
 
-        # TODO(before land): add a "load from quantized if exists, otherwise non-quantized" concept?
         def load_arg(quantized: Optional[Union[List[int], bool, Tuple[int, ...]]]
                      ) -> Callable[[Node], Argument]:
             """

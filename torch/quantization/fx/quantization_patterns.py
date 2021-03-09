@@ -143,7 +143,6 @@ class BinaryOp(QuantizeHandler):
         self.all_node_args_are_tensors = \
             (self.num_tensor_args == len(self.binary_op_node.args))
 
-        # self.num_node_args = len([a for a in self.binary_op_node.args[:2] if isinstance(a, Node)])
         qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
             operator.add: torch.ops.quantized.add,
             torch.add: torch.ops.quantized.add,
