@@ -555,7 +555,7 @@ __global__ void batch_norm_backward_elemt_kernel(
     const GenericPackedTensorAccessor<stat_accscalar_t, 1, DefaultPtrTraits, index_t> sum_dy_xmu,
     GenericPackedTensorAccessor<input_scalar_t, 3, DefaultPtrTraits, index_t> grad_input,
     const int* __restrict__ numel, const int world_size) {
-  
+
   int64_t div = 0;
   for (int i = 0; i < world_size; i ++) {
     div += numel[i];
@@ -955,7 +955,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda_template(
 }
 
 // welford kernel for c last tensor calculating mean/biased_variance/unbiased_variance
-// original apex name: welford_kernel_c_last 
+// original apex name: welford_kernel_c_last
 template
    <template<typename T> class VarTransform,
     typename scalar_t,
@@ -1632,7 +1632,7 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
     });
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
- 
+
   return grad_input;
 }
 
