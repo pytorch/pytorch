@@ -889,9 +889,7 @@ class {test_classname}(torch.nn.Module):
                 excluded_nodes = {
                     ('placeholder', 'x'),
                     ('call_function', torch.conv2d),
-                    ('call_function', torch.nn.functional.max_pool2d),
                     ('call_function', operator.add),
-                    ('call_function', torch.nn.functional.adaptive_avg_pool2d),
                     ('call_function', torch.flatten),
                     ('output', 'output'),
                 }
