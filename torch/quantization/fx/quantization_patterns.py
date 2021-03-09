@@ -929,7 +929,12 @@ class CopyNode(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+        qconfig = quantizer.qconfig_map[node.name]
+        if activation_is_int8_quantized(qconfig):
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+        else:
+            # fp16 static quantization
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
 # Default quantization handler, used for quantization of input and output
 # of quantizable objects (e.g. modules and functionals)

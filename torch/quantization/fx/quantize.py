@@ -1155,7 +1155,8 @@ class Quantizer:
                 root_node, matched_nodes, matched_pattern, quantize_handler, \
                     qconfig = matches[node.name]
                 # don't attach observer/fake_quant for CopyNode
-                if isinstance(quantize_handler, CopyNode):
+                if isinstance(quantize_handler, CopyNode) and \
+                   activation_is_int8_quantized(qconfig):
                     qconfig = None
                 if root_node is node and \
                         input_output_observed(quantize_handler):
