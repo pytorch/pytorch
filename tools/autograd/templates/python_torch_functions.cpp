@@ -49,7 +49,6 @@ using at::DeviceGuard;
 using at::TensorOptions;
 using at::IntArrayRef;
 using at::Generator;
-using at::ScalarList;
 using at::TensorList;
 using at::Dimname;
 using at::DimnameList;
