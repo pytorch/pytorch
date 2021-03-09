@@ -343,7 +343,8 @@ How do these equations translate into complex space :math:`ℂ`?
 
     .. math::
         \begin{aligned}
-            z_{n+1} &= x_n - (s/2) * \frac{\partial L}{\partial x} + 1j * (y_n - (s/2) * \frac{\partial L}{\partial y}) \\
+            z_{n+1} &= x_{n+1} + 1j y_{n+1} \\
+                    &= x_n - (s/2) * \frac{\partial L}{\partial x} + 1j * (y_n - (s/2) * \frac{\partial L}{\partial y}) \\
                     &= z_n - s * 1/2 * (\frac{\partial L}{\partial x} + j \frac{\partial L}{\partial y}) \\
                     &= z_n - s * \frac{\partial L}{\partial z^*}
         \end{aligned}
