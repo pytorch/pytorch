@@ -668,7 +668,7 @@ struct TORCH_API IValue final {
       *this = s.toComplexDouble();
     } else if (s.isBoolean()) {
       *this = s.toBool();
-    } else if (s.isIntegral()) {
+    } else if (s.isIntegral(false)) {
       *this = s.toLong();
     } else {
       TORCH_CHECK(false, "Unknown type in Scalar");
