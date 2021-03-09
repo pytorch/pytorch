@@ -2385,7 +2385,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            # CUDA gradchecks are slow and triangular solve backward is a composite operation
            # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
            skips=(SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
@@ -2512,7 +2512,7 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
@@ -2527,7 +2527,7 @@ op_db: List[OpInfo] = [
                     check_batched_gradgrad=False,
                     supports_tensor_out=True,
                     sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
-                    decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+                    decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
                     skips=(
                         # cuda gradchecks are slow
                         # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
