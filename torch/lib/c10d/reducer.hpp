@@ -173,10 +173,6 @@ class Reducer {
   // Work handle for allreduce on local_used_maps_
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
 
-  void verify_replicas_within_process();
-
-  void verify_replica0_across_processes();
-
   void mark_variable_ready_dense(VariableIndex index);
 
   void mark_variable_ready_sparse(VariableIndex index);
@@ -434,4 +430,15 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<bool>& expect_sparse_gradient = {},
     const std::vector<int64_t>& tensor_indices = {});
 
+// Verify model replicas in this process are the same with respect to no. of
+// params, requires grad, and matching dtype/size/layout.
+void verify_replicas_within_process(
+    std::vector<std::vector<torch::autograd::Variable>> model_replicas,
+    std::vector<std::vector<bool>> expect_sparse_gradients);
+
+// Verify models across all processes are the same as model on rank 0 with
+// respect to no. of params and matching dtype/size/layout.
+void verify_replica0_across_processes(
+    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
+    std::vector<std::vector<torch::autograd::Variable>> model_replicas);
 } // namespace c10d
