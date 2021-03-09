@@ -92,9 +92,13 @@ class ProcessGroupMPI : public ProcessGroup {
 
   class AsyncWork : public ProcessGroup::Work {
    public:
-    AsyncWork(at::Tensor tensor, MPI_Request request,
-    const char * profilingTitle = nullptr,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt);
+    AsyncWork(
+        at::Tensor tensor,
+        MPI_Request request,
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt);
+
     virtual ~AsyncWork();
 
     bool isCompleted() override;

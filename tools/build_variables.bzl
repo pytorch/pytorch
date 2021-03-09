@@ -16,6 +16,7 @@ GENERATED_CPP = [
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_linalg_functions.cpp",
+    "autograd/generated/python_special_functions.cpp",
     "autograd/generated/python_torch_functions.cpp",
     "autograd/generated/python_variable_methods.cpp",
 ]
@@ -610,6 +611,7 @@ libtorch_python_distributed_core_sources = [
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
     "torch/csrc/distributed/autograd/init.cpp",
+    "torch/csrc/distributed/rpc/agent_utils.cpp",
     "torch/csrc/distributed/rpc/init.cpp",
     "torch/csrc/distributed/rpc/process_group_agent.cpp",
     "torch/csrc/distributed/rpc/py_rref.cpp",
@@ -631,6 +633,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "autograd/generated/python_nn_functions.cpp",
         "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_linalg_functions.cpp",
+        "autograd/generated/python_special_functions.cpp",
         "autograd/generated/python_torch_functions.cpp",
         "autograd/generated/python_variable_methods.cpp",
     ]]
@@ -729,7 +732,6 @@ aten_cpu_source_list = [
 # Files in ATen/native with a few exceptions
 # TODO: move the exceptions to proper locations
 aten_native_source_list = [
-    "aten/src/ATen/native/RNN.cpp",
     "aten/src/ATen/native/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/quantized/cpu/int_repr_quant.cpp",
     "aten/src/ATen/native/quantized/cpu/make_per_tensor_quantized_tensor.cpp",

@@ -7,7 +7,7 @@ from ..parameter import is_lazy
 
 
 class _LazyProtocol(Protocol):
-    """This is to avoid errors with mypy checks for 
+    """This is to avoid errors with mypy checks for
     The attributes in a mixin:
     https://mypy.readthedocs.io/en/latest/more_types.html#mixin-classes
     """
@@ -176,7 +176,7 @@ class LazyModuleMixin:
                       'so changes to the API or functionality can happen at any moment.')
 
     def _save_to_state_dict(self: _LazyProtocol, destination, prefix, keep_vars):
-        # This should be ideally implemented as a hook, 
+        # This should be ideally implemented as a hook,
         # but we should override `detach` in the UninitializedParameter to return itself
         # which is not clean
         for name, param in self._parameters.items():
@@ -242,7 +242,7 @@ class LazyModuleMixin:
         The module is set into evaluation mode before running the forward pass in order
         to avoid saving statistics or calculating gradients
         """
-        module.initialize_parameters(*input) 
+        module.initialize_parameters(*input)
         if module.has_uninitialized_params():
             raise RuntimeError('module {} has not been fully initialized'.format(self._get_name()))
         module._initialize_hook.remove()
@@ -255,4 +255,4 @@ class LazyModuleMixin:
 
     def _replicate_for_data_parallel(self: _LazyProtocol):
         raise RuntimeError('Modules with uninitialized parameters can\'t be used with `DataParallel`. '
-                           'Run a dummy forward pass to correctly initialize the modules')                    
+                           'Run a dummy forward pass to correctly initialize the modules')
