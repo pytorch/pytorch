@@ -257,8 +257,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, msnpu, mlc, xla, vulkan"
-            " device type at start of device string",
+            r"Expected one of .+ device type at start of device string",
         ):
             list(
                 self._create_remote_module_iter(

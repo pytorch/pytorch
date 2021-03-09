@@ -39,39 +39,42 @@ fi
 ################################################################################
 # C++ tests #
 ################################################################################
-echo "Running C++ tests.."
-for test in $(find "$cpp_test_dir" -executable -type f); do
-  case "$test" in
-    # skip tests we know are hanging or bad
-    */mkl_utils_test|*/aten/integer_divider_test)
-      continue
-      ;;
-    */scalar_tensor_test|*/basic|*/native_test)
-      if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+# Don't run cpp tests a second time in the sharded ort_test2 job
+if [[ "$BUILD_ENVIRONMENT" != *ort_test2* ]]; then
+  echo "Running C++ tests.."
+  for test in $(find "$cpp_test_dir" -executable -type f); do
+    case "$test" in
+      # skip tests we know are hanging or bad
+      */mkl_utils_test|*/aten/integer_divider_test)
         continue
-      else
-        LD_LIBRARY_PATH="$ld_library_path" "$test"
-      fi
-      ;;
-    */*_benchmark)
-      LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
-      ;;
-    *)
-      # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
-      # planning to migrate to gtest as the common PyTorch c++ test suite, we
-      # currently do NOT use the xml test reporter, because Catch doesn't
-      # support multiple reporters
-      # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
-      # which means that enabling XML output means you lose useful stdout
-      # output for Jenkins.  It's more important to have useful console
-      # output than it is to have XML output for Jenkins.
-      # Note: in the future, if we want to use xml test reporter once we switch
-      # to all gtest, one can simply do:
-      LD_LIBRARY_PATH="$ld_library_path" \
-          "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
-      ;;
-  esac
-done
+        ;;
+      */scalar_tensor_test|*/basic|*/native_test)
+        if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+          continue
+        else
+          LD_LIBRARY_PATH="$ld_library_path" "$test"
+        fi
+        ;;
+      */*_benchmark)
+        LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
+        ;;
+      *)
+        # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
+        # planning to migrate to gtest as the common PyTorch c++ test suite, we
+        # currently do NOT use the xml test reporter, because Catch doesn't
+        # support multiple reporters
+        # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
+        # which means that enabling XML output means you lose useful stdout
+        # output for Jenkins.  It's more important to have useful console
+        # output than it is to have XML output for Jenkins.
+        # Note: in the future, if we want to use xml test reporter once we switch
+        # to all gtest, one can simply do:
+        LD_LIBRARY_PATH="$ld_library_path" \
+            "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
+        ;;
+    esac
+  done
+fi
 
 ################################################################################
 # Python tests #

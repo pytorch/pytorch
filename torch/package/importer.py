@@ -74,9 +74,12 @@ class Importer(ABC):
             # TODO: I guess we should do copyreg too?
             reduce = getattr(obj, "__reduce__", None)
             if reduce is not None:
-                rv = reduce()
-                if isinstance(rv, str):
-                    name = rv
+                try:
+                    rv = reduce()
+                    if isinstance(rv, str):
+                        name = rv
+                except Exception:
+                    pass
         if name is None:
             name = getattr(obj, "__qualname__", None)
         if name is None:
