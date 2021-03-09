@@ -22,13 +22,17 @@ std::vector<uint8_t> HashStore::compareSet(
     const std::string& key,
     const std::vector<uint8_t>& currentValue,
     const std::vector<uint8_t>& newValue) {
-  if (get(key) == currentValue){
-    set(key, newValue);
+  std::unique_lock<std::mutex> lock(m_);
+  auto it = map_.find(key);
+  if (it == map_.end()){
+    return currentValue;
+  }
+  else if (it->second == currentValue){
+    map_[key] = newValue;
+    cv_.notify_all();
     return newValue;
   }
-  else{
-    return get(key);
-  }
+  return it->second;
 }
 
 std::vector<uint8_t> HashStore::get(const std::string& key) {
