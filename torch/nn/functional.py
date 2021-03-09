@@ -380,7 +380,11 @@ Args:
 
 
 def fractional_max_pool2d_with_indices(
-    input: Tensor, kernel_size: BroadcastingList2[int], output_size: Optional[BroadcastingList2[int]] = None, output_ratio: Optional[BroadcastingList2[float]] = None, return_indices: bool = False, _random_samples: Optional[Tensor] = None
+    input: Tensor, kernel_size: BroadcastingList2[int],
+    output_size: Optional[BroadcastingList2[int]] = None,
+    output_ratio: Optional[BroadcastingList2[float]] = None,
+    return_indices: bool = False,
+    _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
     # noqa
     r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
@@ -436,7 +440,11 @@ def fractional_max_pool2d_with_indices(
 
 
 def _fractional_max_pool2d(
-    input: Tensor, kernel_size: BroadcastingList2[int], output_size: Optional[BroadcastingList2[int]] = None, output_ratio: Optional[BroadcastingList2[float]] = None, return_indices: bool = False, _random_samples: Optional[Tensor] = None
+    input: Tensor, kernel_size: BroadcastingList2[int],
+    output_size: Optional[BroadcastingList2[int]] = None,
+    output_ratio: Optional[BroadcastingList2[float]] = None,
+    return_indices: bool = False,
+    _random_samples: Optional[Tensor] = None
 ) -> Tensor:
     # noqa
     if has_torch_function_unary(input):
@@ -467,7 +475,11 @@ fractional_max_pool2d = boolean_dispatch(
 
 
 def fractional_max_pool3d_with_indices(
-    input: Tensor, kernel_size: BroadcastingList3[int], output_size: Optional[BroadcastingList3[int]] = None, output_ratio: Optional[BroadcastingList3[float]] = None, return_indices: bool = False, _random_samples: Optional[Tensor] = None
+    input: Tensor, kernel_size: BroadcastingList3[int],
+    output_size: Optional[BroadcastingList3[int]] = None,
+    output_ratio: Optional[BroadcastingList3[float]] = None,
+    return_indices: bool = False,
+    _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
     # noqa
     r"""Applies 3D fractional max pooling over an input signal composed of several input planes.
@@ -528,7 +540,11 @@ def fractional_max_pool3d_with_indices(
 
 
 def _fractional_max_pool3d(
-    input: Tensor, kernel_size: BroadcastingList3[int], output_size: Optional[BroadcastingList3[int]] = None, output_ratio: Optional[BroadcastingList3[float]] = None, return_indices: bool = False, _random_samples: Optional[Tensor] = None
+    input: Tensor, kernel_size: BroadcastingList3[int],
+    output_size: Optional[BroadcastingList3[int]] = None,
+    output_ratio: Optional[BroadcastingList3[float]] = None,
+    return_indices: bool = False,
+    _random_samples: Optional[Tensor] = None
 ) -> Tensor:
     # noqa
     if has_torch_function_unary(input):
@@ -559,7 +575,12 @@ fractional_max_pool3d = boolean_dispatch(
 
 
 def max_pool1d_with_indices(
-    input: Tensor, kernel_size: BroadcastingList1[int], stride: Optional[BroadcastingList1[int]] = None, padding: BroadcastingList1[int] = 0, dilation: BroadcastingList1[int] = 1, ceil_mode: bool = False, return_indices: bool = False
+    input: Tensor, kernel_size: BroadcastingList1[int],
+    stride: Optional[BroadcastingList1[int]] = None,
+    padding: BroadcastingList1[int] = 0,
+    dilation: BroadcastingList1[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     # noqa
     r"""Applies a 1D max pooling over an input signal composed of several input
@@ -584,7 +605,14 @@ def max_pool1d_with_indices(
     return torch.max_pool1d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-def _max_pool1d(input: Tensor, kernel_size: BroadcastingList1[int], stride: Optional[BroadcastingList1[int]] = None, padding: BroadcastingList1[int] = 0, dilation: BroadcastingList1[int] = 1, ceil_mode: bool = False, return_indices: bool = False) -> Tensor:
+def _max_pool1d(
+    input: Tensor, kernel_size: BroadcastingList1[int],
+    stride: Optional[BroadcastingList1[int]] = None,
+    padding: BroadcastingList1[int] = 0,
+    dilation: BroadcastingList1[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
+) -> Tensor:
     # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -615,7 +643,12 @@ max_pool1d = boolean_dispatch(
 
 
 def max_pool2d_with_indices(
-    input: Tensor, kernel_size: BroadcastingList2[int], stride: Optional[BroadcastingList2[int]] = None, padding: BroadcastingList2[int] = 0, dilation: BroadcastingList2[int] = 1, ceil_mode: bool = False, return_indices: bool = False
+    input: Tensor, kernel_size: BroadcastingList2[int],
+    stride: Optional[BroadcastingList2[int]] = None,
+    padding: BroadcastingList2[int] = 0,
+    dilation: BroadcastingList2[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     # noqa
     r"""Applies a 2D max pooling over an input signal composed of several input
@@ -640,7 +673,14 @@ def max_pool2d_with_indices(
     return torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-def _max_pool2d(input: Tensor, kernel_size: BroadcastingList2[int], stride: Optional[BroadcastingList2[int]] = None, padding: BroadcastingList2[int] = 0, dilation: BroadcastingList2[int] = 1, ceil_mode: bool = False, return_indices: bool = False) -> Tensor:
+def _max_pool2d(
+    input: Tensor, kernel_size: BroadcastingList2[int],
+    stride: Optional[BroadcastingList2[int]] = None,
+    padding: BroadcastingList2[int] = 0,
+    dilation: BroadcastingList2[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
+) -> Tensor:
     # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -671,7 +711,12 @@ max_pool2d = boolean_dispatch(
 
 
 def max_pool3d_with_indices(
-    input: Tensor, kernel_size: BroadcastingList3[int], stride: Optional[BroadcastingList3[int]] = None, padding: BroadcastingList3[int] = 0, dilation: BroadcastingList3[int] = 1, ceil_mode: bool = False, return_indices: bool = False
+    input: Tensor, kernel_size: BroadcastingList3[int],
+    stride: Optional[BroadcastingList3[int]] = None,
+    padding: BroadcastingList3[int] = 0,
+    dilation: BroadcastingList3[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     # noqa
     r"""Applies a 3D max pooling over an input signal composed of several input
@@ -696,7 +741,14 @@ def max_pool3d_with_indices(
     return torch._C._nn.max_pool3d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-def _max_pool3d(input: Tensor, kernel_size: BroadcastingList3[int], stride: Optional[BroadcastingList3[int]] = None, padding: BroadcastingList3[int] = 0, dilation: BroadcastingList3[int] = 1, ceil_mode: bool = False, return_indices: bool = False) -> Tensor:
+def _max_pool3d(
+    input: Tensor, kernel_size: BroadcastingList3[int],
+    stride: Optional[BroadcastingList3[int]] = None,
+    padding: BroadcastingList3[int] = 0,
+    dilation: BroadcastingList3[int] = 1,
+    ceil_mode: bool = False,
+    return_indices: bool = False
+) -> Tensor:
     # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -759,7 +811,13 @@ def _unpool_output_size(
     return ret
 
 
-def max_unpool1d(input: Tensor, indices: Tensor, kernel_size: BroadcastingList1[int], stride: Optional[BroadcastingList1[int]] = None, padding: BroadcastingList1[int] = 0, output_size: Optional[BroadcastingList1[int]] = None) -> Tensor:
+def max_unpool1d(
+    input: Tensor, indices: Tensor,
+    kernel_size: BroadcastingList1[int],
+    stride: Optional[BroadcastingList1[int]] = None,
+    padding: BroadcastingList1[int] = 0,
+    output_size: Optional[BroadcastingList1[int]] = None
+) -> Tensor:
     # noqa
     r"""Computes a partial inverse of :class:`MaxPool1d`.
 
@@ -790,7 +848,13 @@ def max_unpool1d(input: Tensor, indices: Tensor, kernel_size: BroadcastingList1[
     return torch._C._nn.max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3), output_size).squeeze(3)
 
 
-def max_unpool2d(input: Tensor, indices: Tensor, kernel_size: BroadcastingList2[int], stride: Optional[BroadcastingList2[int]] = None, padding: BroadcastingList2[int] = 0, output_size: Optional[BroadcastingList2[int]] = None) -> Tensor:
+def max_unpool2d(
+    input: Tensor, indices: Tensor,
+    kernel_size: BroadcastingList2[int],
+    stride: Optional[BroadcastingList2[int]] = None,
+    padding: BroadcastingList2[int] = 0,
+    output_size: Optional[BroadcastingList2[int]] = None
+) -> Tensor:
     # noqa
     r"""Computes a partial inverse of :class:`MaxPool2d`.
 
@@ -817,7 +881,13 @@ def max_unpool2d(input: Tensor, indices: Tensor, kernel_size: BroadcastingList2[
     return torch._C._nn.max_unpool2d(input, indices, output_size)
 
 
-def max_unpool3d(input: Tensor, indices: Tensor, kernel_size: BroadcastingList3[int], stride: Optional[BroadcastingList3[int]] = None, padding: BroadcastingList3[int] = 0, output_size: Optional[BroadcastingList3[int]] = None) -> Tensor:
+def max_unpool3d(
+    input: Tensor, indices: Tensor,
+    kernel_size: BroadcastingList3[int],
+    stride: Optional[BroadcastingList3[int]] = None,
+    padding: BroadcastingList3[int] = 0,
+    output_size: Optional[BroadcastingList3[int]] = None
+) -> Tensor:
     # noqa
     r"""Computes a partial inverse of :class:`MaxPool3d`.
 
@@ -844,7 +914,12 @@ def max_unpool3d(input: Tensor, indices: Tensor, kernel_size: BroadcastingList3[
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
 
 
-def lp_pool2d(input: Tensor, norm_type: float, kernel_size: int, stride: Optional[BroadcastingList2[int]] = None, ceil_mode: bool = False) -> Tensor:
+def lp_pool2d(
+    input: Tensor, norm_type: float,
+    kernel_size: int,
+    stride: Optional[BroadcastingList2[int]] = None,
+    ceil_mode: bool = False
+) -> Tensor:
     r"""Applies a 2D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -864,7 +939,12 @@ def lp_pool2d(input: Tensor, norm_type: float, kernel_size: int, stride: Optiona
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1.0 / norm_type)
 
 
-def lp_pool1d(input: Tensor, norm_type: float, kernel_size: int, stride: Optional[BroadcastingList1[int]] = None, ceil_mode: bool = False) -> Tensor:
+def lp_pool1d(
+    input: Tensor, norm_type: float,
+    kernel_size: int,
+    stride: Optional[BroadcastingList1[int]] = None,
+    ceil_mode: bool = False
+) -> Tensor:
     r"""Applies a 1D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -883,7 +963,9 @@ def lp_pool1d(input: Tensor, norm_type: float, kernel_size: int, stride: Optiona
     return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1.0 / norm_type)
 
 
-def adaptive_max_pool1d_with_indices(input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False) -> Tuple[Tensor, Tensor]:
+def adaptive_max_pool1d_with_indices(
+    input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False
+) -> Tuple[Tensor, Tensor]:
     r"""Applies a 1D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -919,7 +1001,10 @@ adaptive_max_pool1d = boolean_dispatch(
 )
 
 
-def adaptive_max_pool2d_with_indices(input: Tensor, output_size: BroadcastingList2[int], return_indices: bool = False) -> Tuple[Tensor, Tensor]:
+def adaptive_max_pool2d_with_indices(
+    input: Tensor, output_size: BroadcastingList2[int],
+    return_indices: bool = False
+) -> Tuple[Tensor, Tensor]:
     r"""Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -957,7 +1042,10 @@ adaptive_max_pool2d = boolean_dispatch(
 )
 
 
-def adaptive_max_pool3d_with_indices(input: Tensor, output_size: BroadcastingList3[int], return_indices: bool = False) -> Tuple[Tensor, Tensor]:
+def adaptive_max_pool3d_with_indices(
+    input: Tensor, output_size: BroadcastingList3[int],
+    return_indices: bool = False
+) -> Tuple[Tensor, Tensor]:
     r"""Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -4293,7 +4381,12 @@ def assert_int_or_pair(arg: List[int], arg_name: str, message: str) -> None:
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
-def unfold(input: Tensor, kernel_size: BroadcastingList2[int], dilation: BroadcastingList2[int] = 1, padding: BroadcastingList2[int] = 0, stride: BroadcastingList2[int] = 1) -> Tensor:
+def unfold(
+    input: Tensor, kernel_size: BroadcastingList2[int],
+    dilation: BroadcastingList2[int] = 1,
+    padding: BroadcastingList2[int] = 0,
+    stride: BroadcastingList2[int] = 1
+) -> Tensor:
     # noqa
     r"""Extracts sliding local blocks from a batched input tensor.
 
@@ -4327,7 +4420,13 @@ def unfold(input: Tensor, kernel_size: BroadcastingList2[int], dilation: Broadca
         raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
 
 
-def fold(input: Tensor, output_size: BroadcastingList2[int], kernel_size: BroadcastingList2[int], dilation: BroadcastingList2[int] = 1, padding: BroadcastingList2[int] = 0, stride: BroadcastingList2[int] = 1) -> Tensor:
+def fold(
+    input: Tensor, output_size: BroadcastingList2[int],
+    kernel_size: BroadcastingList2[int],
+    dilation: BroadcastingList2[int] = 1,
+    padding: BroadcastingList2[int] = 0,
+    stride: BroadcastingList2[int] = 1
+) -> Tensor:
     # noqa
     r"""Combines an array of sliding local blocks into a large containing
     tensor.
