@@ -228,8 +228,9 @@ ROCM_BLOCKLIST = [
 
 RUN_PARALLEL_BLOCKLIST = [
     'test_cpp_extensions_jit',
+    'test_cuda_primary_ctx',
     'test_expecttest',
-    'test_jit_disabled',
+    'test_functional_autograd_benchmark',
     'test_mobile_optimizer',
     'test_multiprocessing',
     'test_multiprocessing_spawn',
@@ -237,8 +238,9 @@ RUN_PARALLEL_BLOCKLIST = [
     'test_overrides',
     'test_show_pickle',
     'test_tensorexpr',
-    'test_cuda_primary_ctx',
-] + [test for test in TESTS if test.startswith('distributed/')]
+] + [test for test in TESTS if test.startswith('distributed/')
+] + [test for test in TESTS if test.startswith('test_jit')
+]
 
 WINDOWS_COVERAGE_BLOCKLIST = [
 ]
