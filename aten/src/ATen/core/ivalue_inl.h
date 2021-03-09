@@ -908,7 +908,7 @@ static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
 }
 
 template <typename T>
-static std::vector<T> createVectorFromList(const c10::List<T>& impl) {
+std::vector<T> createVectorFromList(const c10::List<T>& impl) {
   std::vector<T> result;
   result.reserve(impl.size());
   for (size_t i = 0, N = impl.size(); i < N; ++i) {

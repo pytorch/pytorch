@@ -37,19 +37,19 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
   return result;
 }
 
-template <typename Stub>
-static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub) {
+template <typename Stub, typename ...Args>
+static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub, Args... args) {
   auto iter = TensorIterator::unary_float_op(result, self);
-  stub(iter.device_type(), iter);
+  stub(iter.device_type(), iter, args...);
   iter.cast_outputs();
   return result;
 }
 
-template <typename Stub>
-Tensor unary_op_impl_float(const Tensor& self, Stub& stub) {
+template <typename Stub, typename ...Args>
+static inline Tensor unary_op_impl_float(const Tensor& self, Stub& stub, Args... args) {
   Tensor result;
   auto iter = TensorIterator::unary_float_op(result, self);
-  stub(iter.device_type(), iter);
+  stub(iter.device_type(), iter, args...);
   return iter.output();
 }
 
@@ -427,16 +427,13 @@ Tensor& logit_out(
     Tensor& result,
     const Tensor& self,
     c10::optional<double> eps) {
-  auto iter = TensorIterator::unary_op(result, self);
-  logit_stub(iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
-  return result;
+  return unary_op_impl_float_out(
+      result, self, logit_stub, Scalar(eps ? eps.value() : -1.0));
 }
-
 Tensor logit(const Tensor& self, c10::optional<double> eps) {
-  Tensor result = at::empty({0}, self.options());
-  return at::logit_out(result, self, eps);
+  return unary_op_impl_float(
+      self, logit_stub, Scalar(eps ? eps.value() : -1.0));
 }
-
 Tensor& logit_(Tensor& self, c10::optional<double> eps) {
   return at::logit_out(self, self, eps);
 }
@@ -672,6 +669,11 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 Tensor& lgamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, lgamma_stub); }
 Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub); }
 Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
+
+// alias for lgamma, implements special.gammanln equivalent to
+// scipy.special.gammaln
+Tensor special_gammaln(const Tensor& self) { return self.lgamma(); }
+Tensor& special_gammaln_out(const Tensor& self, Tensor& result) { return at::lgamma_out(result, self); }
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(angle_stub);
