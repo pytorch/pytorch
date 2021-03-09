@@ -542,11 +542,13 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       py::cast(kDefaultNumSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
-      .def(py::init([](std::string workerName,
+      .def(py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                       std::string workerName,
                        const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
         return std::make_unique<ProcessGroupAgent>(
+            store,
             std::move(workerName),
             pg,
             numSendRecvThreads,
