@@ -235,9 +235,11 @@ RUN_PARALLEL_BLOCKLIST = [
     'test_multiprocessing',
     'test_multiprocessing_spawn',
     'test_namedtuple_return_api',
+    'test_op_aliases',
     'test_overrides',
     'test_show_pickle',
     'test_tensorexpr',
+    'distributions/test_constraints',
 ]
 RUN_PARALLEL_BLOCKLIST += [test for test in TESTS if test.startswith('distributed/')]
 RUN_PARALLEL_BLOCKLIST += [test for test in TESTS if test.startswith('test_jit')]
