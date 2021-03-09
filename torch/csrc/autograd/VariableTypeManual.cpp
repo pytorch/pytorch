@@ -134,8 +134,10 @@ Tensor data(const Tensor & self) {
 
 bool is_leaf(const Tensor & self) {
   if (impl::get_autograd_meta(self)) {
-    // view of normal (non-inference) tensor created in inference mode has autograd_meta but it
-    // shouldn't be considered as leaf.
+    // view of normal (non-inference) tensor created in inference mode has
+    // autograd_meta->grad_fn == nullptr but it shouldn't be considered as leaf.
+    // Its autograd_meta->grad_fn is nullptr simply because it didn't go through
+    // VariableType kernel to set up grad_fn.
     auto autograd_meta = impl::get_autograd_meta(self);
     if (self.is_view()) {
       auto diff_autograd_meta = static_cast<DifferentiableViewMeta*>(autograd_meta);

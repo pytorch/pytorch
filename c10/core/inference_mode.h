@@ -31,8 +31,8 @@ struct TORCH_API AutoInferenceMode {
   //    c10::AutoInferenceMode guard(true);
   //    k.add_(2);
   //  }
-  //  `k.add_(2)` still go through InplaceOrView kernel so that it's prepared
-  //  for future autograd
+  //  `k.add_(2)` still need to go through InplaceOrView kernel so that it's
+  //  prepared for future autograd.
   c10::impl::ExcludeDispatchKeyGuard autograd_guard_;
 };
 } // namespace c10

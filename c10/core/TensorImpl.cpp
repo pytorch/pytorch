@@ -88,8 +88,6 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   if (c10::InferenceMode::is_enabled()) {
     key_set_ = key_set;
   } else {
-    // TODO: Ideally this logic fits best in Variable/Autograd layer so that we only
-    // add AutogradBackend key when the tensor requires grad.
     // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]
     DispatchKey k = key_set.highestPriorityBackendTypeId();
