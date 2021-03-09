@@ -1667,7 +1667,6 @@ op_db: List[OpInfo] = [
                     dtypes=floating_and_complex_types(),
                     test_inplace_grad=False,
                     check_batched_gradgrad=False,
-                    supports_tensor_out=True,
                     sample_inputs_func=sample_inputs_linalg_cholesky,
                     decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
                     skips=(
@@ -1957,7 +1956,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
            check_batched_gradgrad=False,
-           supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_invertible,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -1973,7 +1971,6 @@ op_db: List[OpInfo] = [
                     # got: vmap: Calling Tensor.as_strided is not supported
                     # unless the batch dims being vmapped over are at the front of the tensor (in memory layout).
                     check_batched_gradgrad=False,
-                    supports_tensor_out=True,
                     sample_inputs_func=sample_inputs_linalg_cholesky,
                     decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
                     skips=(
@@ -1987,9 +1984,6 @@ op_db: List[OpInfo] = [
                     dtypes=floating_and_complex_types(),
                     test_inplace_grad=False,
                     check_batched_gradgrad=False,
-                    # TODO: TypeError: empty_like(): argument 'input' (position 1) must be Tensor,
-                    # not torch.return_types.linalg_eigh
-                    supports_tensor_out=False,
                     sample_inputs_func=sample_inputs_linalg_eigh,
                     output_func=lambda out: (out[0], abs(out[1])),  # gauge invariant loss function
                     decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
@@ -2020,8 +2014,6 @@ op_db: List[OpInfo] = [
            op=torch.linalg.qr,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           # TODO: TypeError: empty_like(): argument 'input' (position 1) must be Tensor, not torch.return_types.linalg_qr
-           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_qr,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -2221,7 +2213,6 @@ op_db: List[OpInfo] = [
            op=torch.qr,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_qr,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
