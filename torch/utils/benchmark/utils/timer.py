@@ -32,7 +32,7 @@ class CPPTimer:
         self,
         stmt: str,
         setup: str,
-        global_setup: Optional[str],
+        global_setup: str,
         timer: Callable[[], float],
         globals: Dict[str, Any],
     ) -> None:
@@ -51,7 +51,7 @@ class CPPTimer:
 
         self._stmt: str = textwrap.dedent(stmt)
         self._setup: str = textwrap.dedent(setup)
-        self._global_setup: str = textwrap.dedent(global_setup or "")
+        self._global_setup: str = textwrap.dedent(global_setup)
         self._timeit_module: Optional[TimeitModuleType] = None
 
     def timeit(self, number: int) -> float:
@@ -179,7 +179,7 @@ class Timer(object):
         self,
         stmt: str = "pass",
         setup: str = "pass",
-        global_setup: Optional[str] = None,
+        global_setup: str = "",
         timer: Callable[[], float] = timer,
         globals: Optional[Dict[str, Any]] = None,
         label: Optional[str] = None,
@@ -201,7 +201,7 @@ class Timer(object):
             # Include `torch` if not specified as a convenience feature.
             self._globals.setdefault("torch", torch)
             self._language: Language = Language.PYTHON
-            if global_setup is not None:
+            if global_setup:
                 raise ValueError(
                     f"global_setup is C++ only, got `{global_setup}`. Most "
                     "likely this code can simply be moved to `setup`."
