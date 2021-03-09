@@ -19,7 +19,7 @@ void resize_output(Tensor& output, IntArrayRef shape) {
       "t.resize_(0).");
   }
 
-  output.resize_(shape);
+  at::native::resize_(output, shape);
 }
 
 // Call the sparse implementation in SparseTensor.cpp directly.
