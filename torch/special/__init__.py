@@ -38,7 +38,7 @@ Computes the entropy on :attr:`input`, elementwise.
     \text{entr(x)} = \begin{cases}
         -x * \log(x)  & x > 0 \\
         0 &  x = 0.0 \\
-        \infty & x < 0
+        -\infty & x < 0
     \end{cases}
 """ + """
 Args:
