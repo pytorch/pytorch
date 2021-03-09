@@ -256,6 +256,9 @@ class LazyBatchNorm1d(_LazyBatchNorm):
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
@@ -359,6 +362,9 @@ class LazyBatchNorm2d(_LazyBatchNorm):
     from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
 
     Args:
         eps: a value added to the denominator for numerical stability.
@@ -465,6 +471,9 @@ class LazyBatchNorm3d(_LazyBatchNorm):
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
@@ -565,7 +574,7 @@ class SyncBatchNorm(_BatchNorm):
         >>> # creating process group (optional)
         >>> # ranks is a list of int identifying rank ids.
         >>> ranks = list(range(8))
-        >>> r1, r2 = ranks[:4], ranks[4:] 
+        >>> r1, r2 = ranks[:4], ranks[4:]
         >>> # Note: every rank calls into new_group for every
         >>> # process group created, even if that rank is not
         >>> # part of the group.
@@ -706,7 +715,7 @@ class SyncBatchNorm(_BatchNorm):
             >>> # creating process group (optional)
             >>> # ranks is a list of int identifying rank ids.
             >>> ranks = list(range(8))
-            >>> r1, r2 = ranks[:4], ranks[4:] 
+            >>> r1, r2 = ranks[:4], ranks[4:]
             >>> # Note: every rank calls into new_group for every
             >>> # process group created, even if that rank is not
             >>> # part of the group.
