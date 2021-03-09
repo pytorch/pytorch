@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 import pathlib
+import sys
 import unittest
 from typing import Tuple
 
 import torch
 from torch import Tensor, nn
+import torch.distributed as dist
+
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 from torch.distributed.nn.jit import instantiator
 from torch.testing._internal.common_utils import run_tests
 
