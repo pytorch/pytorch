@@ -17,7 +17,7 @@ namespace impl {
 // always_included to get inlined, constexpr not necessary)
 // Note DispatchKey::Autograd used to be in this set and it now has been
 // moved to TensorImpl constructor.
-const DispatchKeySet always_included{DispatchKey::BackendSelect};
+constexpr DispatchKeySet always_included{DispatchKey::BackendSelect, DispatchKey::AlwaysCall};
 
 // Take a DispatchKeySet for a Tensor and determine what the actual dispatch
 // DispatchKey should be, taking into account TLS, and skipping backends which
