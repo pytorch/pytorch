@@ -294,7 +294,6 @@ struct BoxedKernelWrapper<
     constexpr int RetCount = std::tuple_size<Result>();
 
     torch::jit::Stack stack = boxArgs(args...);
-
     (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       stack.size() == RetCount,
@@ -302,7 +301,7 @@ struct BoxedKernelWrapper<
       "but instead returned ", stack.size(), " values."
     );
 
-    auto result = guts::tuple_take<ArgTuple, -RetCount>(ArgTuple{std::forward<Args>(args)...});
+    auto result = guts::tuple_take<ArgTuple, -RetCount>(ArgTuple{args...});
     static_assert(
         std::is_same<Result, decltype(result)>::value,
         "The parameter list of an op returning a tuple of Tensor references "
