@@ -1,11 +1,13 @@
 #pragma once
 
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
+#include "ATen/core/ivalue.h"
 
 #include <ATen/ATen.h>
 
@@ -162,6 +164,15 @@ class ProcessGroup : public torch::CustomClassHolder {
     // When profiling, the callback to record end of operation event. This
     // callback needs to be called when collective operation is complete.
     std::function<void()> recordFunctionEndCallback_;
+  };
+
+  struct Options : torch::CustomClassHolder {
+    explicit Options(std::chrono::milliseconds timeout, std::string backend)
+        : timeout(timeout), backend(backend) {}
+    virtual ~Options() = default;
+
+    std::chrono::milliseconds timeout;
+    std::string backend;
   };
 
   explicit ProcessGroup(int rank, int size);

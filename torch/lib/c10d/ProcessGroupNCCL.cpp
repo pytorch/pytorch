@@ -404,8 +404,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       ncclCommCounter_(0),
       terminateProcessGroup_(false),
-      opTimeout_(options->opTimeout),
-      isHighPriorityStream_(options->isHighPriorityStream) {
+      opTimeout_(options->timeout),
+      isHighPriorityStream_(options->is_high_priority_stream) {
   TORCH_CHECK(at::cuda::getNumGPUs() != 0,
     "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
@@ -982,9 +982,12 @@ void ProcessGroupNCCL::workEnqueue(
     workMetaList_.emplace_back(WorkNCCL(*work));
   }
 }
-ProcessGroupNCCL::Options::Options()
-    : opTimeout(kProcessGroupNCCLOpTimeoutMillis),
-      isHighPriorityStream(false) {}
+
+ProcessGroupNCCL::Options::Options(
+    std::chrono::milliseconds timeout,
+    bool is_high_stream)
+    : ProcessGroup::Options(timeout, "nccl"),
+      is_high_priority_stream(is_high_stream) {}
 
 template <typename Fn, typename PreProcess, typename PostProcess>
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(

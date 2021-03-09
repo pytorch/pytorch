@@ -132,11 +132,15 @@ class ProcessGroupGloo : public ProcessGroup {
     int srcRank_;
   };
 
-  struct Options {
+  struct Options : public ProcessGroup::Options {
     explicit Options();
 
+    // return intrusive_ptr of the object
+    static c10::intrusive_ptr<Options> create() {
+      return c10::make_intrusive<Options>();
+    }
+
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
-    std::chrono::milliseconds timeout;
     int threads;
   };
 
@@ -166,7 +170,7 @@ class ProcessGroupGloo : public ProcessGroup {
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
-      Options options = Options());
+      c10::intrusive_ptr<Options> options = Options::create());
 
   virtual ~ProcessGroupGloo();
 
