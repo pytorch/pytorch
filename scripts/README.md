@@ -15,7 +15,7 @@ export ANDROID_NDK=YOUR_NDK_PATH
 #in your PyTorch root directory
 bash scripts/build_android.sh
 ```
-If succeeded, the libraries and headers would be generated to build_android/install directory. You can then copy these files from build_android/install to your Android project for further usage. 
+If succeeded, the libraries and headers would be generated to build_android/install directory. You can then copy these files from build_android/install to your Android project for further usage.
 
 You can also override the cmake flags via command line, e.g., following command will also compile the executable binary files:
 ```bash
@@ -37,4 +37,4 @@ brew install cmake automake libtool
 #in your PyTorch root directory
 bash scripts/build_ios.sh
 ```
-If succeeded, the libraries and headers would be generated to build_ios/install directory. You can then copy these files  to your Xcode project for further usage. 
+If succeeded, the libraries and headers would be generated to build_ios/install directory. You can then copy these files  to your Xcode project for further usage.
