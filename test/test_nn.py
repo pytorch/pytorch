@@ -9015,27 +9015,29 @@ class TestNN(NNTestCase):
     def test_upsamplingNearest2d(self):
         for memory_format in [torch.contiguous_format, torch.channels_last]:
             m = nn.Upsample(size=4, mode='nearest')
-            in_t = torch.ones(1, 1, 2, 2).contiguous(memory_format=memory_format)
-            in_uint8_t = torch.ones(1, 1, 2, 2, dtype=torch.uint8).contiguous(memory_format=memory_format)
+            in_t = torch.ones(1, 2, 2, 2).contiguous(memory_format=memory_format)
+            in_uint8_t = torch.ones(1, 2, 2, 2, dtype=torch.uint8).contiguous(memory_format=memory_format)
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
                 out_uint8_t = m(in_uint8_t)
-            self.assertEqual(torch.ones(1, 1, 4, 4).contiguous(memory_format=memory_format), out_t.data)
-            self.assertEqual(torch.ones(1, 1, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
+            self.assertEqual(torch.ones(1, 2, 4, 4).contiguous(memory_format=memory_format), out_t.data)
+            self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
+            # Assert that memory format is carried through to the output
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
             # test forward when input's height is not same as width
             m = nn.Upsample(size=(4, 2), mode='nearest')
-            in_t = torch.ones(1, 1, 2, 1).contiguous(memory_format=memory_format)
+            in_t = torch.ones(1, 2, 2, 1).contiguous(memory_format=memory_format)
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
-            self.assertEqual(torch.ones(1, 1, 4, 2).contiguous(memory_format=memory_format), out_t.data)
+            self.assertEqual(torch.ones(1, 2, 4, 2).contiguous(memory_format=memory_format), out_t.data)
 
             # test backward when input's height is not same as width
-            input = torch.ones(1, 1, 2, 1, requires_grad=True).contiguous(memory_format=memory_format)
+            input = torch.ones(1, 2, 2, 1, requires_grad=True).contiguous(memory_format=memory_format)
             gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
             gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
 
-            input = torch.randn(1, 1, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
+            input = torch.randn(1, 2, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
             self.assertEqual(
                 F.interpolate(input, 4, mode='nearest'),
                 F.interpolate(input, scale_factor=2, mode='nearest'))
@@ -9046,17 +9048,21 @@ class TestNN(NNTestCase):
         for align_corners in [True, False]:
             kwargs = dict(mode='bilinear', align_corners=align_corners)
 
-            # test float scale factor up & downsampling
-            for scale_factor in [0.5, 1.5, 2]:
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                in_t = torch.ones(1, 1, 2, 2)
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                with warnings.catch_warnings(record=True) as w:
-                    out_t = m(in_t)
-                self.assertEqual(torch.ones(1, 1, out_size, out_size), out_t.data)
+            for memory_format in [torch.contiguous_format, torch.channels_last]:
 
-                input = torch.randn(1, 1, 2, 2, requires_grad=True)
-                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                # test float scale factor up & downsampling
+                for scale_factor in [0.5, 1.5, 2]:
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                    in_t = torch.ones(1, 2, 2, 2).contiguous(memory_format=memory_format)
+                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    with warnings.catch_warnings(record=True) as w:
+                        out_t = m(in_t)
+                    self.assertEqual(torch.ones(1, 2, out_size, out_size).contiguous(memory_format=memory_format), out_t.data)
+                    # Assert that memory format is carried through to the output
+                    self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+
+                    input = torch.randn(1, 2, 2, 2, requires_grad=True)
+                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingBicubic2d(self):
         # test output against known input: align_corners=False result must match opencv
@@ -9154,36 +9160,41 @@ class TestNN(NNTestCase):
     def test_upsamplingNearest3d(self):
         for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
             m = nn.Upsample(size=4, mode='nearest')
-            in_t = torch.ones(1, 1, 2, 2, 2).contiguous(memory_format=memory_format)
-            in_uint8_t = torch.ones(1, 1, 2, 2, 2, dtype=torch.uint8).contiguous(memory_format=memory_format)
+            in_t = torch.ones(1, 2, 2, 2, 2).contiguous(memory_format=memory_format)
+            in_uint8_t = torch.ones(1, 2, 2, 2, 2, dtype=torch.uint8).contiguous(memory_format=memory_format)
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
                 out_uint8_t = m(in_uint8_t)
-            self.assertEqual(torch.ones(1, 1, 4, 4, 4).contiguous(memory_format=memory_format), out_t.data)
-            self.assertEqual(torch.ones(1, 1, 4, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
+            self.assertEqual(torch.ones(1, 2, 4, 4, 4).contiguous(memory_format=memory_format), out_t.data)
+            self.assertEqual(torch.ones(1, 2, 4, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
+            # Assert that memory format is carried through to the output
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
-            input = torch.randn(1, 1, 2, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
+            input = torch.randn(1, 2, 2, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
             gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
     def test_upsamplingTrilinear3d(self):
         for align_corners in [True, False]:
             kwargs = dict(mode='trilinear', align_corners=align_corners)
 
-            # test float scale factor up & downsampling
-            for scale_factor in [0.5, 1.5, 2]:
-                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-                in_t = torch.ones(1, 1, 2, 2, 2)
-                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                with warnings.catch_warnings(record=True) as w:
-                    out_t = m(in_t)
-                self.assertEqual(torch.ones(1, 1, out_size, out_size, out_size), out_t.data)
+            for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
+                # test float scale factor up & downsampling
+                for scale_factor in [0.5, 1.5, 2]:
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                    in_t = torch.ones(1, 2, 2, 2, 2).contiguous(memory_format=memory_format)
+                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                    with warnings.catch_warnings(record=True) as w:
+                        out_t = m(in_t)
+                    self.assertEqual(torch.ones(1, 2, out_size, out_size, out_size).contiguous(memory_format=memory_format), out_t.data)
+                    # Assert that memory format is carried through to the output
+                    self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
-                input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
-                self.assertEqual(
-                    F.interpolate(input, (out_size, out_size, out_size), **kwargs),
-                    F.interpolate(input, scale_factor=scale_factor, **kwargs))
-                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                    input = torch.randn(1, 2, 2, 2, 2, requires_grad=True)
+                    self.assertEqual(
+                        F.interpolate(input, (out_size, out_size, out_size), **kwargs),
+                        F.interpolate(input, scale_factor=scale_factor, **kwargs))
+                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                    gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsamplingTrilinear3d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
