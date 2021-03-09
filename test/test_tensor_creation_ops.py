@@ -1975,6 +1975,7 @@ class TestTensorCreation(TestCase):
             for _ in range(repeats):
                 stack = []
                 stack.append([np.array(1).astype(dtype)])
+                stack.append([np.array(1).astype(dtype), np.array(2).astype(dtype), np.array(3).astype(dtype)])
                 stack.append([np.random.randn(1).astype(dtype)])
                 stack.append([np.random.randn(100).astype(dtype) for _ in range(repeats)])
                 stack.append([np.random.randn(10, 10).astype(dtype) for _ in range(repeats)])
@@ -2036,11 +2037,19 @@ class TestTensorCreation(TestCase):
         A = np.random.rand(2, 3, 4)[:, 0, :]
         stack.append([A for _ in range(10)])
 
+        # An example where the list contains C-contiguous, F-contiguous and discontiguous arrays. 
+        A = np.random.rand(4, 5)
+        A2 = np.asfortranarray(A)
+        A3 = np.random.rand(4, 3, 5)[:, 0, :]
+        stack.append([[A, A2, A3], [A, A, A], [A2, A2, A2], [A3, A3, A3]])
+
         for arrays in stack:
             self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
                              exact_dtype=True, rtol=1e-05, atol=1e-08)
 
-        return
+        self.assertEqual(torch.tensor(np.array([]), device=device), torch.from_numpy(np.array([])), exact_dtype=True, rtol=1e-05, atol=1e-08)
+        # An example which shows that by default torch.tensor will produce contiguous tensors from iterables of numpy arrays.
+        self.assertTrue(torch.tensor([A.T, A.T], as_contiguous=True).stride() == torch.tensor([A.T, A.T]).stride() == torch.from_numpy(np.ascontiguousarray(np.stack([A.T, A.T]))).stride())
 
     # TODO: this test should be updated
     @suppress_warnings

@@ -3,6 +3,7 @@
 #include <torch/csrc/utils/numpy_stub.h>
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
+#include <ATen/Dispatch.h>
 
 #ifndef USE_NUMPY
 namespace torch { namespace utils {
@@ -420,39 +421,63 @@ inline bool _shape_match_ndarray(std::vector<int64_t> & shape, PyArrayObject* ar
   return true;
 }
 
-void _populate_shape_vector(std::vector<int64_t> & shape, PyArrayObject* array) {
+
+inline int _validate_ndarray(PyObject* obj, std::vector<int64_t> & shape, std::vector<int64_t> & ndarray_shape, int64_t depth) {
   /*
-  A utility function for filling up the shape vector with entries from the shape array of the numpy array. 
+  This returns -1 if obj is a scalar array, 0 if obj is not array else if 1 given no exception is raised.
+  A ValueError will be raised if the depth of obj within the input iterable, as given to _extract_ndarrays,
+  is not the same as any other array within the input iterable OR if its shape does not match any other
+  array's shape in the iterable.
   */
-  int64_t ndim = PyArray_NDIM(array);
-  npy_intp* array_shape = PyArray_DIMS(array);
-  for (int64_t i = 0; i < ndim; ++i) {
-    shape.emplace_back(array_shape[i]);
+
+  PyArrayObject* array;
+  if (PyArray_Check(obj)) {
+    array = (PyArrayObject*) obj;
+  } else {
+    return 0;
+  } 
+
+  if (PyArray_NDIM(array) == 0) {
+    return -1;
   }
+
+  if (ndarray_shape.size() == 0) {
+    /*
+    If ndarray_shape is an empty vector, then ndarray_shape[0] is set to the depth of the array in the iterable and
+    ndarray_shape[1:] is set to the shape of array.
+    */
+    ndarray_shape.emplace_back(depth);
+    int64_t ndim = PyArray_NDIM(array);
+    npy_intp* array_shape = PyArray_DIMS(array);
+    ndarray_shape.insert(ndarray_shape.end(), array_shape, array_shape + ndim);
+  }
+  else if ((ndarray_shape[0] != depth) || !_shape_match_ndarray(ndarray_shape, array, 1)) {
+    /*
+    If the depth of 'array' in the iterable is not the same as any other array's depth OR if the shape of 'array' does not
+    match with any other array's shape in the iterable, we raise a ValueError.
+    */
+    auto true_shape_str = get_buffer_str<npy_intp> (static_cast<void*>(PyArray_DIMS(array)), 0, PyArray_NDIM(array));
+    auto expected_shape_str = get_vector_str(ndarray_shape, 1);
+    std::ostringstream err;
+    err << "expected numpy array of shape " << expected_shape_str <<" at dim " << ndarray_shape[0] << " (got " << true_shape_str << " at dim " << depth << ")";
+    throw ValueError(err.str());  
+  }
+
+  return 1;
 }
 
-bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<int64_t> & ndarray_shape, int64_t shape_idx, std::vector<PyArrayObject*> & array_ptr_storage) {
+bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<int64_t> & ndarray_shape, int64_t depth, std::vector<PyArrayObject*> & array_ptr_storage) {
   /*
   This is a helper function for extracting all the numpy arrays embedded within PySequences (recursively) representd by obj. This is done recursively in a 
   depth first search style. It puts the numpy array pointers in the array_ptr_storage for later use. In case there is a non numpy array type within obj, 
-  this function immediately returns false. If only all the items inside obj are just numpy arrays, it returns true. It throws a ValueError in case of a dimension
-  mismatch. This function is used in extract_ndarrays() function below.
+  this function immediately returns false. If only all the items inside obj are just non-scalar numpy arrays, it returns true. It throws a ValueError in case
+  of a dimension and/or depth mismatch (See _validate_ndarray for more info). This function is used in extract_ndarrays() function below.
   */
-  if (PyArray_Check(obj)) {
-    if (PyArray_NDIM((PyArrayObject*) obj) == 0) {
-      return false;
-    }
 
-    if (ndarray_shape.size() == 0) {
-      ndarray_shape.emplace_back(shape_idx);
-      _populate_shape_vector(ndarray_shape, (PyArrayObject*) obj);
-    }
-    else if ((ndarray_shape[0] != shape_idx) || !_shape_match_ndarray(ndarray_shape, (PyArrayObject*) obj, 1)) {
-      auto true_shape_str = get_buffer_str<npy_intp> (static_cast<void*>(PyArray_DIMS((PyArrayObject*) obj)), 0, PyArray_NDIM((PyArrayObject*) obj));
-      auto expected_shape_str = get_vector_str(ndarray_shape, 1);
-      std::ostringstream err;
-      err << "expected numpy array of shape " << expected_shape_str <<" at dim " << ndarray_shape[0] << " (got " << true_shape_str << " at dim " << shape_idx << ")";
-      throw ValueError(err.str());  
+  int validation_flag = _validate_ndarray(obj, shape, ndarray_shape, depth);
+  if (validation_flag != 0) {
+    if (validation_flag == -1) { // If obj is a scalar array, fall back to the slower path.
+      return false;
     }
     array_ptr_storage.push_back((PyArrayObject*) obj);
     return true;
@@ -462,13 +487,13 @@ bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<
       throw python_error();
     }
     Py_ssize_t seq_len = PySequence_Fast_GET_SIZE(seq.get());
-    if (seq_len != shape[shape_idx]) {
+    if (seq_len != shape[depth]) {
       throw ValueError("expected sequence of length %lld at dim %lld (got %lld)",
-        (long long)shape[shape_idx], (long long)shape_idx, (long long)seq_len);
+        (long long)shape[depth], (long long)depth, (long long)seq_len);
     }
     PyObject** items = PySequence_Fast_ITEMS(seq.get());
     for (Py_ssize_t i = 0; i < seq_len; ++i) {
-      if (!_extract_ndarrays(items[i], shape, ndarray_shape, shape_idx+1, array_ptr_storage)) {
+      if (!_extract_ndarrays(items[i], shape, ndarray_shape, depth+1, array_ptr_storage)) {
         return false;
       }
     }
@@ -542,27 +567,17 @@ inline void memcpy_cpu(void* dst, const void* src, size_t num_items, bool isalig
 }
 
 
+template <int N> struct alignas(N) OpaqueType { char data[N]; };
+
 inline void* store_ndarray(void* tensor_ptr, void* ndarray_ptr, at::ScalarType scalarType, size_t num_items, int itemsize, bool isaligned) {
   /* 
   This utility function is used for copying elements from a raw numpy array memory to a tensor memory location by using memcpy_cpu and proper type matching.
   */
-  switch (scalarType) {
-    case at::kByte: memcpy_cpu<uint8_t> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((uint8_t *)tensor_ptr) + num_items);
-    case at::kChar: memcpy_cpu<char> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((char *)tensor_ptr) + num_items);
-    case at::kShort: memcpy_cpu<int16_t> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((int16_t *)tensor_ptr) + num_items);
-    case at::kInt: memcpy_cpu<int32_t> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((int32_t *)tensor_ptr) + num_items);
-    case at::kLong: memcpy_cpu<int64_t> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((uint64_t *)tensor_ptr) + num_items);
-    case at::kHalf: memcpy_cpu<at::Half> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((at::Half *)tensor_ptr) + num_items);
-    case at::kFloat: memcpy_cpu<float> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((float *)tensor_ptr) + num_items);
-    case at::kDouble: memcpy_cpu<double> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((double *)tensor_ptr) + num_items);
-    case at::kComplexHalf: memcpy_cpu<c10::complex<at::Half>> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((c10::complex<at::Half> *)tensor_ptr) + num_items);
-    case at::kComplexFloat: memcpy_cpu<c10::complex<float>> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((c10::complex<float> *)tensor_ptr) + num_items);
-    case at::kComplexDouble: memcpy_cpu<c10::complex<double>> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((c10::complex<double> *)tensor_ptr) + num_items);
-    case at::kBool: memcpy_cpu<bool> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((bool *)tensor_ptr) + num_items);
-    case at::kBFloat16: memcpy_cpu<at::BFloat16> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((at::BFloat16 *)tensor_ptr) + num_items);
-    default: throw std::runtime_error("invalid type");
-  }
-  return NULL;
+  return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, scalarType, "store_ndarray", [&] {
+    using dtype = OpaqueType<sizeof(scalar_t)>;
+    memcpy_cpu<dtype> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned);
+    return (void*)(((dtype *) tensor_ptr) + num_items);
+  });
 }
 
 

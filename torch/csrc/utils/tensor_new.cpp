@@ -256,7 +256,8 @@ Tensor internal_new_from_data(
     bool copy_variables,
     bool copy_numpy,
     bool type_inference,
-    bool pin_memory = false) {
+    bool pin_memory = false,
+    bool as_contiguous = true) {
 
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
@@ -277,7 +278,6 @@ Tensor internal_new_from_data(
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
   }
 
-  bool use_batched_array_extraction = false;
   auto sizes = compute_sizes(data);
   Tensor tensor;
   ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
@@ -309,8 +309,12 @@ Tensor internal_new_from_data(
   // instead recusrive_store as shown below will be used for copying.
   std::vector<PyArrayObject*> array_ptr_storage;
   if (torch::utils::extract_ndarrays(data, sizes, array_ptr_storage)) {
+    at::AutoNonVariableTypeMode guard;
+    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = torch::utils::tensor_from_ndarray_batch(array_ptr_storage, sizes, inferred_scalar_type, pin_memory);
-    use_batched_array_extraction = true;
+    if (as_contiguous) {
+      tensor = tensor.contiguous();
+    }
   }
 
 #endif
@@ -318,7 +322,7 @@ Tensor internal_new_from_data(
   // This exists to prevent us from tracing the call to empty().  The actual
   // autograd code doesn't really matter, because requires_grad is always false
   // here.
-  if (!use_batched_array_extraction) {
+  if (!tensor.defined()) {
     at::AutoNonVariableTypeMode guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
@@ -743,10 +747,10 @@ void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
 
 Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None)",
+    "tensor(PyObject* data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False, DimnameList? names=None, bool as_contiguous=True)",
   });
 
-  constexpr int ctor_num_args = 6;
+  constexpr int ctor_num_args = 7;
   ParsedArgs<ctor_num_args> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
@@ -769,7 +773,8 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
                /*copy_variables=*/true,
                /*copy_numpy=*/true,
                /*type_inference=*/type_inference,
-               pin_memory);
+               pin_memory,
+               r.toBool(6));
     auto names = r.toDimnameListOptional(5);
     if (names) {
       at::namedinference::propagate_names(new_tensor, *names, /*validate_names=*/true);
