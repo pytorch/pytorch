@@ -403,9 +403,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
 
   Tensor grad = grad_.contiguous();
   auto indices_arg = TensorArg(indices, "indices", 1);
-  //auto offsets_arg = TensorArg(offsets, "offsets", 1);
   auto grad_arg = TensorArg(grad, "grad", 1);
-  //checkSameGPU("embedding_bag_cuda", grad_arg, offsets_arg);
   checkSameGPU("embedding_bag_cuda", grad_arg, indices_arg);
 
 
