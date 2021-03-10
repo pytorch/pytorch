@@ -17,7 +17,7 @@ from torch.testing import \
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex)
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
+    (skipIf, skipMeta, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
@@ -3076,7 +3076,7 @@ def method_tests():
         ('kthvalue', (S, S, S), (2,)),
         ('kthvalue', (S, S, S), (2, 1,), 'dim', (), [1]),
         ('kthvalue', (S, S, S), (2, 1,), 'dim_alert_nondeterministic', (), [1],
-            [expectedAlertNondeterministic('kthvalue CUDA', 'cuda')]),
+            [skipMeta, expectedAlertNondeterministic('kthvalue CUDA', 'cuda')]),
         ('kthvalue', (S, S, S), (2, 1, True,), 'keepdim_dim', (), [1]),
         ('kthvalue', (S,), (2, 0,), 'dim_1d', (), [1]),
         ('kthvalue', (S,), (2, 0, True,), 'keepdim_dim_1d', (), [1]),
@@ -3096,7 +3096,7 @@ def method_tests():
         ('median', (S, S, S), NO_ARGS),
         ('median', (S, S, S), (1,), 'dim', (), [0]),
         ('median', (S, S, S), (1,), 'dim_alert_nondeterministic', (), [0],
-            [expectedAlertNondeterministic('median CUDA with indices output', 'cuda')]),
+            [skipMeta, expectedAlertNondeterministic('median CUDA with indices output', 'cuda')]),
         ('median', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
         ('median', (), NO_ARGS, 'scalar'),
         ('median', (), (0,), 'scalar_dim', (), [0]),
@@ -3382,7 +3382,7 @@ def method_tests():
             [expectedAlertNondeterministic('index_add_cuda_', 'cuda')]),
         ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', (), [0]),
         ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim_alert_nondeterministic', (), [0],
-            [expectedAlertNondeterministic('index_copy')]),
+            [skipMeta, expectedAlertNondeterministic('index_copy')]),
         ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', (), [0]),
         ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', (), [0]),
         ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', (), [0]),
