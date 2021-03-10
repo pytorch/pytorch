@@ -101,7 +101,7 @@ static inline __host__ __device__ B complex_pow_(B base, E exp) {
 }
 #endif
 
-void pow_tensor_tensor_kernel(TensorIterator& iter) {
+void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
@@ -124,7 +124,7 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
 }
 
 template<typename Base_type, typename Exp_type>
-void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
+void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
                                                  Exp_type exp) {
   const auto d_exp = static_cast<double>(exp);
   if (d_exp == 0.5) {
@@ -158,7 +158,7 @@ void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
   }
 }
 
-void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
+void pow_tensor_scalar_kernel(TensorIteratorBase& iter, Scalar exp_scalar) {
   if (isComplexType(iter.dtype()) || exp_scalar.isComplex()) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
