@@ -828,7 +828,7 @@ def get_comparison_dtype(a, b):
 class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
     def __exit__(self, exc_type, exc_value, tb):
         if issubclass(exc_type, NotImplementedError):
-            self.test_case.skipTest("not_implemented: {exc_value}")
+            self.test_case.skipTest("not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
 
 class TestCase(expecttest.TestCase):
@@ -1294,15 +1294,21 @@ class TestCase(expecttest.TestCase):
 
     def assertRaises(self, expected_exception, *args, **kwargs):
         if self._ignore_not_implemented_error:
-            context = AssertRaisesContextIgnoreNotImplementedError(expected_exception, self)
-            return context.handle('assertRaises', args, kwargs)
+            context: Optional[AssertRaisesContextIgnoreNotImplementedError] = \
+                AssertRaisesContextIgnoreNotImplementedError(expected_exception, self)  # type: ignore[call-arg]
+            try:
+                return context.handle('assertRaises', args, kwargs)  # type: ignore[union-attr]
+            finally:
+                # see https://bugs.python.org/issue23890
+                context = None
         else:
             return super().assertRaises(expected_exception, *args, **kwargs)
 
     def assertRaisesRegex(self, expected_exception, expected_regex, *args, **kwargs):
         if self._ignore_not_implemented_error:
-            context = AssertRaisesContextIgnoreNotImplementedError(expected_exception, self, expected_regex)
-            return context.handle('assertRaisesRegex', args, kwargs)
+            context = AssertRaisesContextIgnoreNotImplementedError(  # type: ignore[call-arg]
+                expected_exception, self, expected_regex)
+            return context.handle('assertRaisesRegex', args, kwargs)  # type: ignore[attr-defined]
         else:
             return super().assertRaisesRegex(expected_exception, expected_regex, *args, **kwargs)
 
