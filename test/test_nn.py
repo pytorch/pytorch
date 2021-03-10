@@ -9020,8 +9020,8 @@ class TestNN(NNTestCase):
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
                 out_uint8_t = m(in_uint8_t)
-            self.assertEqual(torch.ones(1, 2, 4, 4).contiguous(memory_format=memory_format), out_t.data)
-            self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
+            self.assertEqual(torch.ones(1, 2, 4, 4), out_t)
+            self.assertEqual(torch.ones(1, 2, 4, 4, dtype=torch.uint8), out_uint8_t)
             # Assert that memory format is carried through to the output
             self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
@@ -9030,7 +9030,8 @@ class TestNN(NNTestCase):
             in_t = torch.ones(1, 2, 2, 1).contiguous(memory_format=memory_format)
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
-            self.assertEqual(torch.ones(1, 2, 4, 2).contiguous(memory_format=memory_format), out_t.data)
+            self.assertEqual(torch.ones(1, 2, 4, 2), out_t)
+            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
             # test backward when input's height is not same as width
             input = torch.ones(1, 2, 2, 1, requires_grad=True).contiguous(memory_format=memory_format)
@@ -9165,8 +9166,8 @@ class TestNN(NNTestCase):
             with warnings.catch_warnings(record=True) as w:
                 out_t = m(in_t)
                 out_uint8_t = m(in_uint8_t)
-            self.assertEqual(torch.ones(1, 2, 4, 4, 4).contiguous(memory_format=memory_format), out_t.data)
-            self.assertEqual(torch.ones(1, 2, 4, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
+            self.assertEqual(torch.ones(1, 2, 4, 4, 4), out_t)
+            self.assertEqual(torch.ones(1, 2, 4, 4, 4, dtype=torch.uint8), out_uint8_t)
             # Assert that memory format is carried through to the output
             self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
