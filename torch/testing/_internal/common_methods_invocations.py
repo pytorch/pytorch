@@ -1404,15 +1404,15 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
         )  # type: ignore
     elif variant == 'scalar':
         # Scalar Other
-        samples = (
+        samples = (  # type: ignore
             SampleInput((_make_tensor_helper((S, S)), 0.5)),
             SampleInput((_make_tensor_helper(()), 0.5)),
 
             SampleInput((_make_tensor_helper((S, S)), 0.5), kwargs=dict(alpha=alpha)),
             SampleInput((_make_tensor_helper(()), 0.5), kwargs=dict(alpha=alpha)),
-        )  # type: ignore
+        )
     else:
-        return Exception("Invalid variant!")
+        raise Exception("Invalid variant!")
 
     return samples
 
