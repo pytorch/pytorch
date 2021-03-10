@@ -22,6 +22,8 @@ _(aten, __xor__) \
 _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
+_(aten, _amp_foreach_non_finite_check_and_unscale_) \
+_(aten, _amp_update_scale) \
 _(aten, _arange) \
 _(aten, _argmax) \
 _(aten, _argmin) \
