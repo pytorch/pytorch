@@ -33,6 +33,13 @@ Therefore, it mainly operates on the gradients on each replica before allreduce,
 which are bucketized to increase the overlap between communication and computation.
 Particularly, :class:`torch.distributed.GradBucket` represents a bucket of gradient tensors to be allreduced.
 
+.. autoclass:: torch.distributed.GradBucket
+
+.. autofunction:: torch.distributed.GradBucket.get_index
+.. autofunction:: torch.distributed.GradBucket.get_tensors
+.. autofunction:: torch.distributed.GradBucket.get_per_parameter_tensors
+.. autofunction:: torch.distributed.GradBucket.is_the_last_bucket_to_allreduce
+
 Default Communication Hooks
 ---------------------------
 
