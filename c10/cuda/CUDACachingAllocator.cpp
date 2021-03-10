@@ -223,8 +223,8 @@ struct PrivatePool {
   PrivatePool() :
     use_count(1),
     cudaMalloc_count(0),
-    large_blocks(BlockComparator, false, this),
-    small_blocks(BlockComparator, true, this) {}
+    large_blocks(BlockComparator, /*is_small=*/false, this),
+    small_blocks(BlockComparator, /*is_small=*/true, this) {}
   PrivatePool(const PrivatePool&) = delete;
   PrivatePool(PrivatePool&&) = delete;
   PrivatePool& operator=(const PrivatePool&) = delete;
@@ -313,8 +313,8 @@ class DeviceCachingAllocator {
  public:
 
   DeviceCachingAllocator() :
-      large_blocks(BlockComparator, false),
-      small_blocks(BlockComparator, true) {}
+      large_blocks(BlockComparator, /*is_small=*/false),
+      small_blocks(BlockComparator, /*is_small=*/true) {}
 
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
@@ -410,7 +410,7 @@ class DeviceCachingAllocator {
       remaining->ptr = static_cast<char*>(remaining->ptr) + size;
       remaining->size -= size;
       bool inserted = pool.blocks.insert(remaining).second;
-      TORCH_INTERNAL_ASSERT(inserted);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
       if (already_split) {
         // An already-split inactive block is being shrunk by size bytes.
@@ -429,7 +429,7 @@ class DeviceCachingAllocator {
 
     block->allocated = true;
     bool inserted = active_blocks.insert(block).second;
-    TORCH_INTERNAL_ASSERT(inserted);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
     c10::reportMemoryUsageToProfiler(
         block, block->size, c10::Device(c10::DeviceType::CUDA, device));
@@ -651,7 +651,8 @@ class DeviceCachingAllocator {
   // Called by CUDAGraph::reset
   void notifyCaptureDestroy(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    // The graph's been destroyed. We can't blindly delete and cudaFree its mempool, because
+    // The instantiated cudaGraphExec_t has been destroyed. We can't blindly delete and cudaFree
+    // the mempool its capture used, because
     //  1. other graph(s) might share the same pool
     //  2. the user might still hold references to output tensors allocated during capture.
     // To handle 1 and 2, we track the number of graphs using this particular mempool.
