@@ -1402,7 +1402,7 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
         # SampleInput((_make_tensor_helper(()), _make_tensor_helper((S, S)), 0.4)),
         # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), 0.4)),
         # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
-    )
+    )  # type: ignore
 
     if dtype.is_complex:
         samples = samples + (
@@ -1414,7 +1414,7 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
             SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 0.4j)),
             # broadcast rhs scalar-tensor
             SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 0.4j)),
-        )
+        )  # type: ignore
 
     return samples
 
