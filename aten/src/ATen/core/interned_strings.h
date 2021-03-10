@@ -17,7 +17,7 @@ namespace c10 {
 #define FORALL_NS_SYMBOLS(_)         \
   _(namespaces, prim)                \
   _(namespaces, aten)                \
-  _(namespaces, _cuda)               \
+  _(namespaces, cuda)               \
   _(namespaces, onnx)                \
   _(namespaces, attr)                \
   _(namespaces, scope)               \
@@ -294,9 +294,9 @@ namespace c10 {
   _(aten, zero_)                     \
   _(aten, fill_)                     \
   _(aten, masked_fill_)              \
-  _(_cuda, set_device)               \
-  _(_cuda, set_stream)               \
-  _(_cuda, current_device)           \
+  _(cuda, _set_device)               \
+  _(cuda, set_stream)                \
+  _(cuda, _current_device)           \
   _(aten, swapaxes)                  \
   _(aten, swapaxes_)                 \
   _(aten, swapdims)                  \
@@ -400,7 +400,7 @@ namespace c10 {
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
   _(namespaces, aten)              \
-  _(namespaces, _cuda)             \
+  _(namespaces, cuda)              \
   _(namespaces, onnx)              \
   _(namespaces, attr)              \
   _(namespaces, scope)             \
@@ -471,7 +471,7 @@ struct TORCH_API Symbol {
   // (and if it's not, you should add it to the built-ins list above.)
   static Symbol attr(const std::string & s);
   static Symbol aten(const std::string & s);
-  static Symbol _cuda(const std::string & s);
+  static Symbol cuda(const std::string & s);
   static Symbol onnx(const std::string & s);
   static Symbol prim(const std::string & s);
   static Symbol user(const std::string & s);
@@ -543,7 +543,7 @@ FORALL_NS_SYMBOLS(DEFINE_SYMBOL)
 
 inline Symbol Symbol::attr(const std::string & s) { return Symbol::fromQualString("attr::" + s); }
 inline Symbol Symbol::aten(const std::string & s)  { return Symbol::fromQualString("aten::" + s); }
-inline Symbol Symbol::_cuda(const std::string & s)  { return Symbol::fromQualString("_cuda::" + s); }
+inline Symbol Symbol::cuda(const std::string & s)  { return Symbol::fromQualString("cuda::" + s); }
 inline Symbol Symbol::onnx(const std::string & s)  { return Symbol::fromQualString("onnx::" + s); }
 inline Symbol Symbol::prim(const std::string & s)  { return Symbol::fromQualString("prim::" + s); }
 inline Symbol Symbol::scope(const std::string & s) { return Symbol::fromQualString("scope::" + s); }
@@ -552,7 +552,7 @@ inline Symbol Symbol::caffe2(const std::string & s) { return Symbol::fromQualStr
 inline Symbol Symbol::dimname(const std::string & s) { return Symbol::fromQualString("dimname::" + s); }
 inline bool Symbol::is_attr() const { return ns() == namespaces::attr; }
 inline bool Symbol::is_aten() const { return ns() == namespaces::aten; }
-inline bool Symbol::is_cuda() const { return ns() == namespaces::_cuda; }
+inline bool Symbol::is_cuda() const { return ns() == namespaces::cuda; }
 inline bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
 inline bool Symbol::is_user() const { return ns() == namespaces::user; }

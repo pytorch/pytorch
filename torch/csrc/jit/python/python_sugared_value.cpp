@@ -233,8 +233,15 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       "set_stream"};
 
   if (cuda_ops.find(field) != cuda_ops.end()) {
+    // Both current_device and set_device API's are a part of c10::cuda namespace.
+    // Hence, to resolve the conflict for jit, we append _ to both these APIs.
+    if(field == "current_device" || field == "set_device") {
+      return std::make_shared<BuiltinFunction>(
+        Symbol::cuda("_"+field), c10::nullopt);
+    } else {
     return std::make_shared<BuiltinFunction>(
-        Symbol::_cuda(field), c10::nullopt);
+        Symbol::cuda(field), c10::nullopt);
+    }
   }
 
   py::object member = getattr(loc, field);
