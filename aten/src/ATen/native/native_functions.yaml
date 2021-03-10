@@ -684,10 +684,10 @@
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
 
-- func: quantized_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor
+- func: batch_norm_quantized_cpu(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    QuantizedCPU: quantized_batch_norm
+    QuantizedCPU: batch_norm_quantized_cpu
 
 - func: _batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -1590,7 +1590,7 @@
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    CPU: empty_affine_quantized_other_backends_stub
+    CPU: empty_affine_other_backends_stub_quantized_cpu
     QuantizedCPU, QuantizedCUDA: empty_affine_quantized
 
 # it's a factory function receiving a tensor argument, thus overriding explicitly
@@ -1599,7 +1599,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   category_override: factory
   dispatch:
-    CPU: empty_per_channel_affine_quantized_other_backends_stub
+    CPU: empty_per_channel_affine_other_backends_stub_quantized_cpu
     QuantizedCPU, QuantizedCUDA: empty_per_channel_affine_quantized
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
@@ -1608,7 +1608,7 @@
   dispatch:
     CPU: resize_
     CUDA: resize_cuda_
-    QuantizedCPU: quantized_resize_cpu_
+    QuantizedCPU: resize_cpu_quantized_cpu
     Meta: resize_meta_
 
 - func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
@@ -1996,7 +1996,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: index
-    QuantizedCPU: quantized_index
+    QuantizedCPU: index_quantized_cpu
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor Tensor::index(ArrayRef<TensorIndex> indices)
@@ -2196,9 +2196,9 @@
 
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
 
-- func: fbgemm_pack_quantized_matrix(Tensor input) -> Tensor
+- func: fbgemm_pack_matrix_quantized_cpu(Tensor input) -> Tensor
 
-- func: fbgemm_pack_quantized_matrix.KN(Tensor input, int K, int N) -> Tensor
+- func: fbgemm_pack_matrix.KN_quantized_cpu(Tensor input, int K, int N) -> Tensor
 
 - func: ldexp.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -2514,13 +2514,13 @@
   dispatch:
     MkldnnCPU: mkldnn_max_pool3d_backward
 
-- func: quantized_max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
+- func: max_pool1d_quantized_cpu(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    QuantizedCPU: quantized_max_pool1d
+    QuantizedCPU: max_pool1d_quantized_cpu
 
-- func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+- func: max_pool2d_quantized_cpu(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    QuantizedCPU: quantized_max_pool2d
+    QuantizedCPU: max_pool2d_quantized_cpu
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
@@ -4237,7 +4237,7 @@
     CPU, CUDA: clone
     SparseCPU, SparseCUDA: clone_sparse
     MkldnnCPU: mkldnn_clone
-    QuantizedCPU, QuantizedCUDA: quantized_clone
+    QuantizedCPU, QuantizedCUDA: clone_quantized_cpu
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   variants: function, method
@@ -4696,14 +4696,14 @@
     QuantizedCPU: int_repr_quantized_cpu
     QuantizedCUDA: int_repr_quantized_cuda
 
-- func: _make_per_tensor_quantized_tensor(Tensor self, float scale, int zero_point) -> Tensor
+- func: _make_per_tensor_tensor_quantized_cpu(Tensor self, float scale, int zero_point) -> Tensor
   dispatch:
-    CPU: make_per_tensor_quantized_tensor_cpu
-    CUDA: make_per_tensor_quantized_tensor_cuda
+    CPU: make_per_tensor_tensor_cpu_quantized_cpu
+    CUDA: make_per_tensor_tensor_cuda_quantized_cpu
 
-- func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor
+- func: _make_per_channel_tensor_quantized_cpu(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor
   dispatch:
-    CPU: make_per_channel_quantized_tensor_cpu
+    CPU: make_per_channel_tensor_cpu_quantized_cpu
 
 - func: qscheme(Tensor self) -> QScheme
   variants: method
@@ -4874,28 +4874,28 @@
 # Quantized RNN layer registration has been moved to C10 dispatch in `RNN.cpp`
 
 # Quantized RNN layers
-# - func: quantized_lstm(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)
+# - func: lstm_quantized_cpu(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)
 
 
-# - func: quantized_lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)
+# - func: lstm.data_quantized_cpu(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)
 
 
 # Quantized GRU layers
 
-# - func: quantized_gru.input(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
+# - func: gru.input_quantized_cpu(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
 #
 
-# - func: quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
+# - func: gru.data_quantized_cpu(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
 #
 
 # Quantized RNN cells
-- func: quantized_lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
+- func: lstm_cell_quantized_cpu(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
 
-- func: quantized_gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
+- func: gru_cell_quantized_cpu(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
 
-- func: quantized_rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
+- func: rnn_relu_cell_quantized_cpu(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
 
-- func: quantized_rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
+- func: rnn_tanh_cell_quantized_cpu(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
 
 # PackedSequence utilities
 - func: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
@@ -4920,7 +4920,7 @@
   dispatch:
     CPU: set_storage_cpu_
     CUDA: set_storage_cuda_
-    QuantizedCPU, QuantizedCUDA: set_storage_quantized_
+    QuantizedCPU, QuantizedCUDA: set_storage_quantized_cpu
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
