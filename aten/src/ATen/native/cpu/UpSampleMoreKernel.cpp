@@ -425,8 +425,8 @@ void upsample_linearNd_kernel_impl(
     .declare_static_dtype_and_device(input.scalar_type(), input.device())
     .add_output(output)
     .add_input(restrided_input);
-  
-  for (auto & idx_weight: indices_weights) { 
+
+  for (auto & idx_weight: indices_weights) {
     for (auto& tensor : idx_weight) {
       config.add_input(tensor);
     }
