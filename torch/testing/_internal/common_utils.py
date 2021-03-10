@@ -287,8 +287,11 @@ def run_tests(argv=UNITTEST_ARGS):
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []
         for i in range(RUN_PARALLEL):
+            env = os.environ.copy()
+            if torch.version.cuda or torch.version.hip:
+                env['CUDA_VISIBLE_DEVICES'] = i
             command = [sys.executable] + argv + ['--log-suffix=-shard-{}'.format(i + 1)] + test_batches[i]
-            processes.append(subprocess.Popen(command, universal_newlines=True))
+            processes.append(subprocess.Popen(command, universal_newlines=True, env=env))
         failed = False
         for i, p in enumerate(processes):
             code = wait_for_process(p)
