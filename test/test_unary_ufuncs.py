@@ -295,7 +295,7 @@ class TestUnaryUfuncs(TestCase):
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on given tensors
     def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
-        def _helper_test_reference(expected, actual, msg, exact_dtype, equal_nan=True):
+        def _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan=True):
             if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
                 exact_dtype = False
 
@@ -326,10 +326,11 @@ class TestUnaryUfuncs(TestCase):
 
             exact_dtype = True
             if isinstance(actual, torch.Tensor):
-                _helper_test_reference(expected, actual, msg, exact_dtype, equal_nan)
+                _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan)
             else:
                 for x, y in zip(expected, actual):
-                    _helper_test_reference(x, y, msg, exact_dtype, equal_nan)
+                    # testing multi-outputs results
+                    _helper_reference_numerics(x, y, msg, exact_dtype, equal_nan)
 
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on a range of tensors, including empty tensors, scalar tensors,
@@ -584,6 +585,20 @@ class TestUnaryUfuncs(TestCase):
 
     @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False))
+    def test_frexp(self, device, dtype):
+        input = make_tensor((50, 50), device, dtype)
+        mantissa, exponent = torch.frexp(input)
+        np_mantissa, np_exponent = np.frexp(input.cpu().numpy())
+
+        self.assertEqual(mantissa, np_mantissa)
+        self.assertEqual(exponent, np_exponent)
+
+        # torch.frexp returns exponent in int32 to be compatible with np.frexp
+        self.assertTrue(exponent.dtype == torch.int32)
+        self.assertTrue(torch_to_numpy_dtype_dict[exponent.dtype] == np_exponent.dtype)
+
+    @skipCUDAIfRocm
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False))
     def test_frexp_out(self, device, dtype):
         input = make_tensor((50, 50), device, dtype)
         outputs = (
@@ -596,9 +611,6 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(mantissa, np_mantissa)
             self.assertEqual(exponent, np_exponent)
 
-            # torch.frexp returns exponent in int32 to be compatible with np.frexp
-            self.assertTrue(exponent.dtype == torch.int32)
-            self.assertTrue(torch_to_numpy_dtype_dict[exponent.dtype] == np_exponent.dtype)
 
         # The warning is given when output tensors have wrong shape
         with warnings.catch_warnings(record=True) as w:
