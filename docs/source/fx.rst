@@ -209,7 +209,7 @@ can be found below.
         node.replace_all_uses_with(new_node)
 
 For simple transformations that only consist of substitutions, you can also
-make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/master/torch/fx/subgraph_rewriter.py>`__
+make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/release/1.8/torch/fx/subgraph_rewriter.py>`__
 
 Subgraph Rewriting With replace_pattern()
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -397,7 +397,7 @@ Examples of the Interpreter Pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Shape
-   Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/shape_prop.py>`__
+   Propagation <https://github.com/pytorch/pytorch/blob/release/1.8/torch/fx/passes/shape_prop.py>`__
 -  `Performance Profiler <https://github.com/pytorch/tutorials/pull/1319>`__
 
 
@@ -725,8 +725,7 @@ For example, let’s examine the following program:
 ::
 
     def func_to_trace(x):
-        dim0 = x.size[0]
-        if dim0 == 3:
+        if x.sum() > 0:
             return torch.relu(x)
         else:
             return torch.neg(x)
@@ -735,7 +734,7 @@ For example, let’s examine the following program:
     """
       <...>
       File "dyn.py", line 6, in func_to_trace
-        if dim0 == 3:
+        if x.sum() > 0:
       File "pytorch/torch/fx/proxy.py", line 155, in __bool__
         return self.tracer.to_bool(self)
       File "pytorch/torch/fx/proxy.py", line 85, in to_bool
@@ -743,8 +742,8 @@ For example, let’s examine the following program:
     torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
     """
 
-The condition to the ``if`` statement relies on the value of ``dim0``,
-which eventually relies on the value of ``x``, a function input. Since
+The condition to the ``if`` statement relies on the value of ``x.sum()``,
+which relies on the value of ``x``, a function input. Since
 ``x`` can change (i.e. if you pass a new input tensor to the traced
 function), this is *dynamic control flow*. The traceback walks back up
 through your code to show you where this situation happens.
@@ -807,8 +806,8 @@ code. This is a valid pattern that is supported by symbolic tracing.
 Many instances of dynamic control flow are semantically static control
 flow. These instances can be made to support symbolic tracing by
 removing the data dependencies on input values, for example by moving
-values to ``Module`` attributes or by passing constant values during
-symbolic tracing:
+values to ``Module`` attributes or by binding concrete values to arguments
+during symbolic tracing:
 
 ::
 
@@ -818,11 +817,7 @@ symbolic tracing:
 
         fx.symbolic_trace(f) # Fails!
 
-        def wrapper(flag):
-            return lambda x: f(x, flag)
-
-        new_f = wrapper(flag=True)
-        fx.symbolic_trace(new_f)
+        fx.symbolic_trace(f, concrete_args={'flag': True})
 
 In the case of truly dynamic control flow, the sections of the program
 that contain this code can be traced as calls to the Method (see
@@ -834,7 +829,7 @@ Non-\ ``torch`` Functions
 
 FX uses ``__torch_function__`` as the mechanism by which it intercepts
 calls (see the `technical
-overview <https://github.com/pytorch/pytorch/blob/master/torch/fx/OVERVIEW.md#technical-details>`__
+overview <https://github.com/pytorch/pytorch/blob/release/1.8/torch/fx/OVERVIEW.md#technical-details>`__
 for more information about this). Some functions, such as builtin Python
 functions or those in the ``math`` module, are things that are not
 covered by ``__torch_function__``, but we would still like to capture
@@ -968,7 +963,18 @@ Miscellanea
       ``ones_like`` or ``zeros_like`` may be a viable substitute.
    -  Nondeterministic constructors (``rand``, ``randn``) will have a
       single random value embedded in the trace. This is likely not the
-      intended behavior.
+      intended behavior. One workaround is to wrap ``torch.randn`` in a ``torch.fx.wrap`` function and call that instead.
+
+    ::
+
+        @torch.fx.wrap
+        def torch_randn(x, shape):
+            return torch.randn(shape)
+
+        def f(x):
+            return x + torch_randn(x, 5)
+        fx.symbolic_trace(f)
+
    -  This behavior may be fixed in a future release.
 
 -  Type annotations
@@ -1004,6 +1010,7 @@ API Reference
 
 .. autoclass:: torch.fx.Tracer
   :members:
+  :inherited-members:
 
 .. autoclass:: torch.fx.Proxy
 
