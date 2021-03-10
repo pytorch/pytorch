@@ -7,6 +7,7 @@
 #include <c10/util/string_view.h>
 
 #include "caffe2/core/blob.h"
+#include "caffe2/core/common.h"
 #include "caffe2/utils/proto_utils.h"
 
 C10_DEFINE_int(
@@ -43,16 +44,16 @@ class Range {
   Range(Iter b, Iter e) : begin_{b}, end_{e} {}
   Range(Iter b, size_t size) : begin_{b}, end_{b + size} {}
 
-  [[nodiscard]] constexpr Iter data() const {
+  CAFFE2_NODISCARD constexpr Iter data() const {
     return begin_;
   }
-  [[nodiscard]] constexpr Iter begin() const {
+  CAFFE2_NODISCARD constexpr Iter begin() const {
     return begin_;
   }
-  [[nodiscard]] constexpr Iter end() const {
+  CAFFE2_NODISCARD constexpr Iter end() const {
     return end_;
   }
-  [[nodiscard]] constexpr size_t size() const {
+  CAFFE2_NODISCARD constexpr size_t size() const {
     return end_ - begin_;
   }
 
