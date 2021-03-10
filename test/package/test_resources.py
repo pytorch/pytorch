@@ -78,16 +78,16 @@ class TestResources(PackageTestCase):
         """Packaged modules should be able to use the importlib.resources API to access
         resources saved in the package.
         """
-        mod_src = """\
-        import importlib.resources
-        import my_cool_resources
+        mod_src = dedent("""\
+            import importlib.resources
+            import my_cool_resources
 
-        def secret_message():
-            return importlib.resources.read_text(my_cool_resources, 'sekrit.txt')
-        """
+            def secret_message():
+                return importlib.resources.read_text(my_cool_resources, 'sekrit.txt')
+            """)
         buffer = BytesIO()
         with PackageExporter(buffer, verbose=False) as pe:
-            pe.save_source_string("foo.bar", dedent(mod_src))
+            pe.save_source_string("foo.bar", mod_src)
             pe.save_text("my_cool_resources", "sekrit.txt", "my sekrit plays")
 
         buffer.seek(0)
@@ -101,35 +101,15 @@ class TestResources(PackageTestCase):
         with PackageExporter(filename, verbose=False) as he:
             he.save_text("main", "main", "my string")
             he.save_binary("main", "main_binary", "my string".encode("utf-8"))
-            src = """\
-import importlib
-import torch_package_importer as resources
+            src = dedent("""\
+                import importlib
+                import torch_package_importer as resources
 
-t = resources.load_text('main', 'main')
-b = resources.load_binary('main', 'main_binary')
-"""
+                t = resources.load_text('main', 'main')
+                b = resources.load_binary('main', 'main_binary')
+                """)
             he.save_source_string("main", src, is_package=True)
         hi = PackageImporter(filename)
-        m = hi.import_module("main")
-        self.assertEqual(m.t, "my string")
-        self.assertEqual(m.b, "my string".encode("utf-8"))
-
-    def test_importer_access(self):
-        buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
-            he.save_text("main", "main", "my string")
-            he.save_binary("main", "main_binary", "my string".encode("utf-8"))
-            src = """\
-import importlib
-import torch_package_importer as resources
-
-t = resources.load_text('main', 'main')
-b = resources.load_binary('main', 'main_binary')
-"""
-            he.save_source_string("main", src, is_package=True)
-
-        buffer.seek(0)
-        hi = PackageImporter(buffer)
         m = hi.import_module("main")
         self.assertEqual(m.t, "my string")
         self.assertEqual(m.b, "my string".encode("utf-8"))

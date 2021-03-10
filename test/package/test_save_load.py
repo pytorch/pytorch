@@ -1,5 +1,6 @@
 import pickle
 from io import BytesIO
+from textwrap import dedent
 
 from torch.package import PackageExporter, PackageImporter, sys_importer
 from torch.testing._internal.common_utils import run_tests
@@ -32,10 +33,10 @@ class TestSaveLoad(PackageTestCase):
     def test_saving_string(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
-            src = """\
-import math
-the_math = math
-"""
+            src = dedent("""\
+                import math
+                the_math = math
+                """)
             he.save_source_string("my_mod", src)
         hi = PackageImporter(filename)
         m = hi.import_module("math")

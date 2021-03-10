@@ -1,4 +1,5 @@
 from sys import version_info
+from textwrap import dedent
 from unittest import skipIf
 
 from torch.package import (
@@ -49,10 +50,10 @@ class TestDependencyAPI(PackageTestCase):
             he.save_module("package_a")
             he.save_source_string(
                 "test_module",
-                """\
-import package_a.subpackage
-import module_a
-""",
+                dedent("""\
+                    import package_a.subpackage
+                    import module_a
+                    """),
             )
         hi = PackageImporter(filename)
         import module_a
@@ -104,10 +105,10 @@ import module_a
                 exporter.deny(["package_a.*", "module_*"])
                 exporter.save_source_string(
                     "test_module",
-                    """\
-import package_a.subpackage
-import module_a
-""",
+                    dedent("""\
+                        import package_a.subpackage
+                        import module_a
+                        """),
                 )
 
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
@@ -139,10 +140,10 @@ import module_a
             he.save_module("package_a")
             he.save_source_string(
                 "test_module",
-                """\
-import package_a.subpackage
-import module_a
-""",
+                dedent("""\
+                    import package_a.subpackage
+                    import module_a
+                    """),
             )
         hi = PackageImporter(filename)
         import package_a.subpackage

@@ -1,6 +1,7 @@
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from textwrap import dedent
 from unittest import skipIf
 
 import torch
@@ -119,15 +120,15 @@ class ModelTest(PackageTestCase):
             # note that this source is the same for all models in this approach
             # so it can be made part of an API that just takes the model and
             # packages it with this source.
-            src = """\
-import importlib
-import torch_package_importer as resources
+            src = dedent("""\
+                import importlib
+                import torch_package_importer as resources
 
-# server knows to call model.load() to get the model,
-# maybe in the future it passes options as arguments by convension
-def load():
-    return resources.load_pickle('model', 'pickled')
-        """
+                # server knows to call model.load() to get the model,
+                # maybe in the future it passes options as arguments by convension
+                def load():
+                    return resources.load_pickle('model', 'pickled')
+                """)
             e.save_source_string("model", src, is_package=True)
 
         f2 = self.temp()
@@ -136,20 +137,20 @@ def load():
         # + but this code can be edited later to adjust adapt the model later
         with PackageExporter(f2, verbose=False) as e:
             e.save_pickle("model", "state_dict", resnet.state_dict())
-            src = """\
-import importlib
-import torch_package_importer as resources
+            src = dedent("""\
+                import importlib
+                import torch_package_importer as resources
 
-from torchvision.models.resnet import resnet18
-def load():
-    # if you want, you can later edit how resnet is constructed here
-    # to edit the model in the package, while still loading the original
-    # state dict weights
-    r = resnet18()
-    state_dict = resources.load_pickle('model', 'state_dict')
-    r.load_state_dict(state_dict)
-    return r
-        """
+                from torchvision.models.resnet import resnet18
+                def load():
+                    # if you want, you can later edit how resnet is constructed here
+                    # to edit the model in the package, while still loading the original
+                    # state dict weights
+                    r = resnet18()
+                    state_dict = resources.load_pickle('model', 'state_dict')
+                    r.load_state_dict(state_dict)
+                    return r
+                """)
             e.save_source_string("model", src, is_package=True)
 
         # regardless of how we chose to package, we can now use the model in a server in the same way
