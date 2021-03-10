@@ -23,7 +23,7 @@ void THCPGraph_init(PyObject *module) {
   auto torch_C_m = py::handle(module).cast<py::module>();
 
   torch_C_m
-      .def("graph_pool_handle", &::at::cuda::graph_pool_handle);
+      .def("_graph_pool_handle", &::at::cuda::graph_pool_handle);
 
   shared_ptr_class_<::at::cuda::CUDAGraph>(torch_C_m, "_CudaGraphBase")
       .def(py::init<>())

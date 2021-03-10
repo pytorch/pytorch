@@ -3114,7 +3114,7 @@ torch.cuda.synchronize()
 
         torch.cuda.empty_cache()
 
-        for share_mem in (False, True):
+        for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
             g0 = torch.cuda._Graph()
             g1 = torch.cuda._Graph()
 
@@ -3125,14 +3125,15 @@ torch.cuda.synchronize()
                 y = t.clone() + val
                 return x + y
 
-            g0.capture_begin()
+            g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
+            g0.capture_begin(*g0_args)
             b = a.clone()
             for _ in range(5):
                 b = func_with_temps(b, 1)
             g0.capture_end()
 
-            args = (g0.pool(),) if share_mem else ()
-            g1.capture_begin(*args)
+            g1_args = (g0.pool(),) if share_mem == "via pool()" else g0_args
+            g1.capture_begin(*g1_args)
             for _ in range(5):
                 b = func_with_temps(b, 1)
             g1.capture_end()
@@ -3151,7 +3152,7 @@ torch.cuda.synchronize()
             self.assertEqual(b.sum().item(), size * 3070)
             self.assertEqual(c.sum().item(), size * 442)
 
-            if share_mem:
+            if share_mem != "Don't share":
                 self.assertEqual(reserved_no_sharing - torch.cuda.memory_stats()["reserved_bytes.all.current"],
                                  kSmallBuffer)
             else:
@@ -3173,7 +3174,7 @@ torch.cuda.synchronize()
             y = t.clone() + val
             return x + y
 
-        for share_mem in (False, True):
+        for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
             g0 = torch.cuda._Graph()
             g1 = torch.cuda._Graph()
 
@@ -3182,15 +3183,15 @@ torch.cuda.synchronize()
 
             a = torch.ones((size,), device="cuda")
 
-            g0.capture_begin()
+            g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
+            g0.capture_begin(*g0_args)
             b = a.clone()
             for _ in range(5):
                 b = func_with_temps(b, 1)
             g0.capture_end()
 
-            args = (g0.pool(),) if share_mem else ()
-
-            g1.capture_begin(*args)
+            g1_args = (g0.pool(),) if share_mem == "via pool()" else g0_args
+            g1.capture_begin(*g1_args)
             c = a.clone()
             for _ in range(5):
                 c = func_with_temps(c, 2)
@@ -3205,7 +3206,7 @@ torch.cuda.synchronize()
             torch.cuda.current_stream().wait_stream(s0)
             torch.cuda.current_stream().wait_stream(s1)
 
-            if share_mem:
+            if share_mem != "Don't share":
                 # Confirms concurrent replays using the same mempool corrupted each other.
                 self.assertNotEqual(b.sum().item(), size * 94)
                 self.assertNotEqual(c.sum().item(), size * 156)
@@ -3225,20 +3226,21 @@ torch.cuda.synchronize()
 
         size = 1000
 
-        for share_mem in (False, True):
+        for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
             a = torch.ones((size,), device="cuda")
 
             g0 = torch.cuda._Graph()
             g1 = torch.cuda._Graph()
             g2 = torch.cuda._Graph()
 
-            g0.capture_begin()
+            g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
+            g0.capture_begin(*g0_args)
             b = a.clone()
             c = b + 1
             d = b + 2
             g0.capture_end()
 
-            args = (g0.pool(),) if share_mem else ()
+            args = (g0.pool(),) if share_mem == "via pool()" else g0_args
 
             g1.capture_begin(*args)
             e = c + 3
@@ -3264,7 +3266,7 @@ torch.cuda.synchronize()
 
             # If share_mem is True, g2's capture should have reused c's memory for f. We replayed g2 then g1,
             # so we expect g1's captured "e = c + 3" mistakenly filled e with "f's vals + 3".
-            self.assertEqual(e.sum().item(), size * (7 + 3) if share_mem else size * 5)
+            self.assertEqual(e.sum().item(), size * (7 + 3) if share_mem != "Don't share" else size * 5)
             self.assertEqual(f.sum().item(), size * 7)
 
             del a, b, d, e, f, g0, g1, g2

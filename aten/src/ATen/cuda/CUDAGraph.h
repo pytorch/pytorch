@@ -31,8 +31,12 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaGraphExec_t graph_exec_ = NULL;
 #endif
 
-  // internal states for error checking
+  // internal states so reset() can do its best cleaning up
+  // Set to true in capture_end if cudaStreamEndCapture succeeded
+  // Set back to false soon after, when graph_ is consumed by cudaGraphInstantiate
+  // to create graph_exec_, then graph_ is deleted
   bool has_graph_ = false;
+  // Set to true in capture_end if cudaGraphInstantiate succeeded
   bool has_graph_exec_ = false;
 
   // uuid of this instance's current capture, retrieved from Cuda

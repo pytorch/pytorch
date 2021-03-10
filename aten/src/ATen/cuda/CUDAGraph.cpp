@@ -9,11 +9,16 @@ namespace at {
 namespace cuda {
 
 MempoolId_t graph_pool_handle() {
+#if CUDA_VERSION >= 11000
   // uuid count starts at 1. 0 is reserved to mean "wasn't set by graph_pool_handle".
   static std::atomic<CaptureId_t> uuid{1};
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
   return {0, uuid++};
+#else
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+  return {0, 0};
+#endif
 }
 
 /**

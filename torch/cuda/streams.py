@@ -204,3 +204,4 @@ class Event(torch._C._CudaEventBase):
             return '<torch.cuda.Event uninitialized>'
 
 _Graph = torch._C._CudaGraphBase
+_graph_pool_handle = torch._C._graph_pool_handle
