@@ -9,6 +9,7 @@ import onnxruntime as ort
 import onnx
 import io
 
+torch.ops.load_library("/home/jay/repos/fatcat-z/pytorch/build/lib/libort_ops.so")
 
 old_call = torch._C.ScriptMethod.__call__
 
@@ -30,10 +31,12 @@ class NeuralNet_All(nn.Module):
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(hidden_size, num_classes)
 
+    @torch.jit.script
     def forward(self, x):
         out = self.fc1(x)
         out = self.relu(out)
         out = self.fc2(out)
+        out = torch.ops.nezha_ops.ort_execute(out, out)
         out = self.relu(out)
         out = self.relu(out)
 
@@ -89,18 +92,24 @@ x = torch.randn(32, 5)
 y = torch.randn(15, 6)
 
 
+out = torch.ops.nezha_ops.ort_execute(x, y)
+
+
+
+
 print('Start normal model.')
 with torch.no_grad():
-    test_module = BadModule(total_input_size, total_hidden_size, total_num_classes)
-    test_module.eval()
+    # test_module = BadModule(total_input_size, total_hidden_size, total_num_classes)
+    # test_module.eval()
 
-    temp_results = test_module(dummy_input)
+    # temp_results = test_module(dummy_input)
 
-    f = io.BytesIO()
-    test_trace_module = torch.jit.trace(test_module, dummy_input)
+    # f = io.BytesIO()
+    # test_trace_module = torch.jit.trace(test_module, dummy_input)
     
-    full_graph, unsupported_ops = utils._find_missing_ops_onnx_export(test_module, (dummy_input,), f,
-                                                                     opset_version=9)
+    # full_graph, unsupported_ops = utils._find_missing_ops_onnx_export(test_module, (dummy_input,), f,
+    #                                                                  opset_version=9)
+
     m_all = NeuralNet_All(total_input_size, total_hidden_size, total_num_classes)
     m_all.eval()
 
