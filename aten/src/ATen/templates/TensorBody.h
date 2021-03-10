@@ -15,6 +15,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Deprecated.h>
+#include <c10/util/MaybeOwned.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
@@ -124,6 +125,24 @@ class TORCH_API Tensor {
       return __dispatch_contiguous(memory_format);
     }
   }
+
+  /// Should be used if *this can reasonably be expected to be contiguous and
+  /// performance is important.
+  /// Compared to contiguous, it saves a reference count
+  /// increment/decrement if *this is already contiguous, at the cost
+  /// in all cases of an extra pointer of stack usage, an extra branch
+  /// to access, and an extra branch at destruction time.
+  c10::MaybeOwned<Tensor> expect_contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const & {
+    if (is_contiguous(memory_format)) {
+      return c10::MaybeOwned<Tensor>::borrowed(*this);
+    } else {
+      return c10::MaybeOwned<Tensor>::owned(__dispatch_contiguous(memory_format));
+    }
+  }
+
+  // Use .contiguous() instead. Trying to borrow from a prvalue Tensor
+  // will only lead to trouble and dangling references.
+  c10::MaybeOwned<Tensor> expect_contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) && = delete;
 
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
