@@ -2693,16 +2693,14 @@ class TestTensorCreation(TestCase):
         self.assertEqual(a, b, exact_dtype=False)
 
     # See NOTE [Linspace+Logspace precision override]
-    @skipMeta  # See https://github.com/pytorch/pytorch/issues/53647
     @skipCPUIf(True, "compares with CPU")
     @precisionOverride({torch.half: 0.0039 + LINSPACE_LOGSPACE_EXTRA_EPS})
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
+    @dtypes(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
     def test_linspace_device_vs_cpu(self, device, dtype):
         self._test_linspace(device, dtype, steps=10)
 
-    @skipMeta  # See https://github.com/pytorch/pytorch/issues/53647
     @skipCPUIf(True, "compares with CPU")
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
+    @dtypes(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
     def test_linspace_special_steps(self, device, dtype):
         for steps in self.LINSPACE_LOGSPACE_SPECIAL_STEPS:
             self._test_linspace(device, dtype, steps=steps)

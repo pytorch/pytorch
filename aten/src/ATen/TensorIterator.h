@@ -300,6 +300,8 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
 
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
+  void build_unary_float_op(const Tensor& out, const Tensor& a);
+  void build_unary_op(const Tensor& out, const Tensor& a);
 
 protected:
   // Mutable reference as it moves tensors out of TensorIteratorConfig

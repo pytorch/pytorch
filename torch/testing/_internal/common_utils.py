@@ -823,8 +823,14 @@ def get_comparison_dtype(a, b):
 
     return compare_dtype
 
-# The year is 2021: this private class hierarchy hasn't changed since 2010,
-# seems low risk to inherit from
+# This implements a variant of assertRaises/assertRaisesRegex where we first test
+# if the exception is NotImplementedError, and if so just skip the test instead
+# of failing it.
+#
+# This is implemented by inheriting from the (private) implementation of
+# assertRaises from unittest.case, and slightly tweaking it for this new
+# behavior.  The year is 2021: this private class hierarchy hasn't changed since
+# 2010, seems low risk to inherit from.
 class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
     def __exit__(self, exc_type, exc_value, tb):
         if issubclass(exc_type, NotImplementedError):
@@ -861,6 +867,9 @@ class TestCase(expecttest.TestCase):
 
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
+
+    # When True, if a test case raises a NotImplementedError, instead of failing
+    # the test, skip it instead.
     _ignore_not_implemented_error = False
 
     def __init__(self, method_name='runTest'):
@@ -1292,6 +1301,8 @@ class TestCase(expecttest.TestCase):
                 return
         raise AssertionError("object not found in iterable")
 
+    # Reimplemented to provide special behavior when
+    # _ignore_not_implemented_error is True
     def assertRaises(self, expected_exception, *args, **kwargs):
         if self._ignore_not_implemented_error:
             context: Optional[AssertRaisesContextIgnoreNotImplementedError] = \
@@ -1304,6 +1315,8 @@ class TestCase(expecttest.TestCase):
         else:
             return super().assertRaises(expected_exception, *args, **kwargs)
 
+    # Reimplemented to provide special behavior when
+    # _ignore_not_implemented_error is True
     def assertRaisesRegex(self, expected_exception, expected_regex, *args, **kwargs):
         if self._ignore_not_implemented_error:
             context = AssertRaisesContextIgnoreNotImplementedError(  # type: ignore[call-arg]

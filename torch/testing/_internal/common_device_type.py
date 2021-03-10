@@ -346,6 +346,8 @@ class CPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+# The meta device represents tensors that don't have any storage; they have
+# all metadata (size, dtype, strides) but they don't actually do any compute
 class MetaTestBase(DeviceTypeTestBase):
     device_type = 'meta'
     _ignore_not_implemented_error = True
