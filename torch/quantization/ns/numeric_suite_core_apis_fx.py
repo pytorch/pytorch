@@ -20,6 +20,7 @@ from .utils import (
 from .weight_utils import (
     get_conv_mod_weight,
     get_linear_mod_weight,
+    get_lstm_mod_weights,
     get_linear_fun_weight,
 )
 
@@ -189,16 +190,20 @@ def _extract_weights_one_model(
                 (type(mod), nn.Conv2d) in type_a_related_to_b
             related_to_linear_mod = isinstance(mod, nn.Linear) or \
                 (type(mod), nn.Linear) in type_a_related_to_b
+            related_to_lstm_mod = isinstance(mod, nn.LSTM) or \
+                (type(mod), nn.LSTM) in type_a_related_to_b
 
             # TODO(future PR): other module types
             if related_to_conv2d_mod:
-                weight = get_conv_mod_weight(mod)
+                weights = [get_conv_mod_weight(mod)]
+            elif related_to_lstm_mod:
+                weights = get_lstm_mod_weights(mod)
             else:
                 assert related_to_linear_mod, f"module type {type(mod)} not handled yet"
-                weight = get_linear_mod_weight(mod)
+                weights = [get_linear_mod_weight(mod)]
             results[ref_name][res_type][model_name] = [{
                 'type': res_type,
-                'values': [weight],
+                'values': weights,
                 'prev_node_name': node.name,
                 'prev_node_target_type': str(type(mod)),
                 'ref_node_name': node.name,
