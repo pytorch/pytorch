@@ -174,10 +174,6 @@ Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
      This implementation gives a similar performance on GPU but a
      noticeable (up to x10) speed-up on CPU.
    */
-  // Trivial case
-  if (w.numel() <= 1) {
-    return w;
-  }
   const auto w_cumsum = w.cumsum(dim);
   const auto w_sum = w_cumsum.select(dim, -1).unsqueeze(dim);
   return w_sum - w_cumsum + w;
@@ -255,7 +251,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
 
     dF / dx_z1 = sum_{z1 <= j < z2} grad_output[j] * (dy_j / dx_z1)
 
-    This case has a subtlety though. To comptue (dy_j / dx_z1), we cannot use the formula
+    This case has a subtlety though. To compute (dy_j / dx_z1), we cannot use the formula
 
     dy_j / dx_z1 = y_j / x_z1
 
@@ -268,7 +264,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.dim());
-  int64_t dim_size = input.size(dim);
+  const int64_t dim_size = input.size(dim);
   if (dim_size == 1) {
     return grad;
   }
@@ -357,7 +353,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
 
     auto ones_size = input.sizes().vec();
     ones_size[dim] = 1;
-    Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
+    const Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
     Tensor prods_from_k_plus_1;
     Tensor omitted_products;
     for (int k = 0; k < dim_size; ++k) {
@@ -365,10 +361,10 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
         prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
         omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
       } else if (k == dim_size - 1) {
-        Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+        const Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
         omitted_products = prods_until_k;
       } else {
-        Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+        const Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
         prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
         omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
         omitted_products = at::cat({prods_until_k, omitted_products}, dim);
