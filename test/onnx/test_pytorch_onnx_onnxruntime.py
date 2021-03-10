@@ -1765,6 +1765,15 @@ class TestONNXRuntime(unittest.TestCase):
         indices = (torch.rand(25) * mask.shape[0]).to(torch.int64)
         self.run_test(IndexPutModel(), (mask, indices))
 
+        class IndexPutModel2(torch.nn.Module):
+            def forward(self, mask, indices):
+                mask[indices] = torch.tensor(5.5)
+                return mask
+
+        mask = torch.rand(100, dtype=torch.float)
+        indices = (torch.rand(50) * mask.shape[0]).to(torch.int64)
+        self.run_test(IndexPutModel2(), (mask, indices))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_accumulate(self):
         class IndexPutModel(torch.nn.Module):
