@@ -18,7 +18,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
       - name: Ensure consistent CircleCI YAML config
         run: |
           pip install -r requirements.txt
@@ -67,7 +67,7 @@ jobs:
       - name: Fetch PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
       - name: Run flake8
         run: |
           set -eux
@@ -99,7 +99,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0 # deep clone, to allow us to use git merge-base
       - name: Install dependencies
         run: |
@@ -198,7 +198,7 @@ jobs:
       - name: Fetch PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.sha }}
       - name: Run cmakelint
         run: |
           set -eux
