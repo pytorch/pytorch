@@ -1010,6 +1010,7 @@ API Reference
 
 .. autoclass:: torch.fx.Tracer
   :members:
+  :inherited-members:
 
 .. autoclass:: torch.fx.Proxy
 
