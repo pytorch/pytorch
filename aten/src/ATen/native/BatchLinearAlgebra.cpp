@@ -1849,13 +1849,13 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
     if (values.is_complex()) {
       values = at::complex_out(values, real_values, imag_values);
     } else {
-      TORCH_CHECK(false, "linalg_eig: imaginary part of eigenvalues is non-zero, can't safely cast eigenvalues to non-complex dtype.")
+      TORCH_CHECK(false, "torch.linalg.eig: imaginary part of eigenvalues is non-zero, can't safely cast eigenvalues to non-complex dtype.")
     }
     if (compute_eigenvectors) {
       if (vectors.is_complex()) {
           vectors = linalg_eig_make_complex_eigenvectors(vectors, values, maybe_complex_vectors);
       } else {
-        TORCH_CHECK(false, "linalg_eig: imaginary part of eigenvectors is non-zero, can't safely cast eigenvectors to non-complex dtype.")
+        TORCH_CHECK(false, "torch.linalg.eig: imaginary part of eigenvectors is non-zero, can't safely cast eigenvectors to non-complex dtype.")
       }
     }
   }
@@ -1866,8 +1866,8 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
 std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values, Tensor& vectors) {
   squareCheckInputs(input);
 
-  checkLinalgCompatibleDtype("linalg_eig", values, input, "eigenvalues");
-  checkLinalgCompatibleDtype("linalg_eig", vectors, input, "eigenvectors");
+  checkLinalgCompatibleDtype("torch.linalg.eig", values, input, "eigenvalues");
+  checkLinalgCompatibleDtype("torch.linalg.eig", vectors, input, "eigenvectors");
 
   // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   auto options = input.options().device(at::kCPU);
@@ -1944,9 +1944,9 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
 
   // Now check LAPACK/MAGMA error codes
   if (input.dim() > 2) {
-    batchCheckErrors(infos, "linalg_eig");
+    batchCheckErrors(infos, "torch.linalg.eig");
   } else {
-    singleCheckErrors(infos.item().toInt(), "linalg_eig");
+    singleCheckErrors(infos.item().toInt(), "torch.linalg.eig");
   }
 
   return std::tuple<Tensor&, Tensor&>(values, vectors);
@@ -1976,7 +1976,7 @@ std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
 
 Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   squareCheckInputs(input);
-  checkLinalgCompatibleDtype("linalg_eig", values, input, "eigenvalues");
+  checkLinalgCompatibleDtype("torch.linalg.eigvals", values, input, "eigenvalues");
 
   // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   auto options = input.options().device(at::kCPU);
@@ -2024,9 +2024,9 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 
   // Now check LAPACK/MAGMA error codes
   if (input.dim() > 2) {
-    batchCheckErrors(infos, "linalg_eigvals");
+    batchCheckErrors(infos, "torch.linalg.eigvals");
   } else {
-    singleCheckErrors(infos.item().toInt(), "linalg_eigvals");
+    singleCheckErrors(infos.item().toInt(), "torch.linalg.eigvals");
   }
 
   return values;
