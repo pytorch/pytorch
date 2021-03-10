@@ -250,6 +250,12 @@ class ProcessGroup : public torch::CustomClassHolder {
     throw std::runtime_error("ProcessGroup does not support alltoall");
   }
 
+  virtual void monitoredBarrier(
+      const BarrierOptions& opts = BarrierOptions()) {
+    throw std::runtime_error(
+        "ProcessGroup does not support monitoredBarrier, only Gloo process group supports monitored barrier.");
+  }
+
   virtual c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,

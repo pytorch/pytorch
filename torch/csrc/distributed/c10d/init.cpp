@@ -1047,7 +1047,17 @@ Arguments:
               "barrier",
               &::c10d::ProcessGroup::barrier,
               py::arg("opts") = ::c10d::BarrierOptions(),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "monitored_barrier",
+              []( const c10::intrusive_ptr<::c10d::ProcessGroup>& self, double timeoutSeconds) {
+                  ::c10d::BarrierOptions opts;
+                  long timeoutMillis = static_cast<long>(timeoutSeconds * 1000);
+                  opts.timeout = std::chrono::milliseconds(timeoutMillis);
+                  return self->monitoredBarrier(opts);
+              },
+              py::call_guard<py::gil_scoped_release>()
+          );
 
 #ifndef _WIN32
   module.def(
@@ -1761,7 +1771,16 @@ static const auto ProcessGroupTorchBind =
             [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self) {
               ::c10d::BarrierOptions opts;
               return self->barrier(opts);
-            });
+            })
+        .def(
+            "monitored_barrier",
+            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self, double timeoutSeconds) {
+                ::c10d::BarrierOptions opts;
+                long timeoutMillis = static_cast<long>(timeoutSeconds * 1000);
+                opts.timeout = std::chrono::milliseconds(timeoutMillis);
+                return self->monitoredBarrier(opts);
+            }
+        );
 
 #ifdef USE_C10D_NCCL
 // XXX: Ideally the Options of ProcessGroupNCCL should be

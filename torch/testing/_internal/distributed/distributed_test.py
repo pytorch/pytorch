@@ -5037,3 +5037,30 @@ class DistributedTest:
                                 )
                         else:
                             self.assertFalse(True, "DDP error not raised")
+
+        @require_backend({"gloo",})
+        @require_backends_available({"gloo",})
+        def test_monitored_barrier_gloo(self):
+            process_group = dist.new_group(ranks=[i for i in range(int(self.world_size))])
+            tensors = [torch.ones(10) * self.rank]
+            # Kick off some allreduce work on all ranks
+            for _ in range(10):
+                process_group.allreduce(tensors).wait()
+            # Run monitored barrier
+            timeout = 5
+            process_group.monitored_barrier(timeout)
+            # All ranks besides 1 call into barrier, rank 0 should report failure
+            # while others report gloo error.
+            failed_rank = 1
+            if self.rank == failed_rank:
+                return
+            if self.rank == 0:
+                with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
+                    process_group.monitored_barrier(timeout)
+            else:
+                # Other ranks will report standard gloo error, only rank 0 knows
+                # ranks that failed to respond to barrier.
+                try:
+                    process_group.monitored_barrier(timeout)
+                except RuntimeError as e:
+                    pass

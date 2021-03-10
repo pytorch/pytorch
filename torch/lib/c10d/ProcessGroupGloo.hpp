@@ -241,6 +241,9 @@ class ProcessGroupGloo : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
+  void monitoredBarrier(
+      const BarrierOptions& opts = BarrierOptions()) override;
+
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
 

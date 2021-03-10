@@ -426,6 +426,43 @@ void testBarrier(const std::string& path) {
           std::move(event_lists), GLOO_STR, size, allShapes, /* verify_shapes */ false);
 }
 
+void testMonitoredBarrier(const std::string& path) {
+  const auto size = 2;
+  auto tests = CollectiveTest::initialize(path, size);
+  // Non-failure case: all ranks pass the blocking monitored barrier.
+  auto runMonitoredBarrier = [&](int i) {
+      tests[i].getProcessGroup().monitoredBarrier();
+  };
+  std::vector<std::thread> threads;
+  threads.reserve(size);
+  for (int r = 0; r < size; r++) {
+    threads.emplace_back(std::thread([=]() { LOG(INFO) << "r is " << r ; runMonitoredBarrier(r); }));
+  }
+  for (auto & t : threads) {
+    t.join();
+  }
+  // Failure case: Only rank 0 calls into monitored barrier, should result in error
+  auto runMonitoredBarrierWithException = [&](int i) {
+      if (i != 0) return;
+      bool exceptionCaught = false;
+      try {
+          tests[i].getProcessGroup().monitoredBarrier();
+      } catch (const std::exception& e) {
+          exceptionCaught = true;
+          auto pos = std::string(e.what()).find("Rank 1");
+          EXPECT_TRUE(pos != std::string::npos);
+      }
+      EXPECT_TRUE(exceptionCaught);
+  };
+  threads.clear();
+  for (int r = 0; r < size; r++) {
+      threads.emplace_back(std::thread([=]() { runMonitoredBarrierWithException(r); }));
+  }
+  for (auto & t : threads) {
+      t.join();
+  }
+}
+
 void testWaitDelay(const std::string& path) {
   const auto size = 2;
   auto tests = CollectiveTest::initialize(path, size, /* delay */ true);
@@ -601,6 +638,11 @@ TEST(ProcessGroupGlooTest, testBarrier) {
     TemporaryFile file;
     testBarrier(file.path);
   }
+}
+
+TEST(ProcessGroupGlooTest, testMonitoredBarrier) {
+  TemporaryFile file;
+  testMonitoredBarrier(file.path);
 }
 
 TEST(ProcessGroupGlooTest, testSend) {
