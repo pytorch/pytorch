@@ -4693,7 +4693,12 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     @staticmethod
     def _gpu_add(x, y):
         if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 1]):
-            return (x + y).to(0)
+            z = (x + y).to(0)
+            # see [RPC Function Uses New Device]
+            s0 = torch.cuda.current_stream(device=0)
+            s1 = torch.cuda.current_stream(device=1)
+            s1.wait_stream(s0)
+            return z
         else:
             raise ValueError("Wrong device affinity")
 
@@ -4711,13 +4716,15 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
+        sizes = [2000, 20000]
+        expected = (torch.zeros(sizes) + torch.ones(sizes)).to(1)
         ret = rpc.rpc_sync(
             dst,
             TensorPipeAgentRpcTest._gpu_add,
-            args=(torch.zeros(2).to(0), torch.ones(2).to(0))
+            args=(torch.zeros(sizes).to(0), torch.ones(sizes).to(0))
         )
+        self.assertEqual(ret, expected)
         self.assertEqual(ret.device, torch.device(1))
-        self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(1))
         rpc.shutdown()
 
     @staticmethod
@@ -4728,7 +4735,19 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             y.is_cuda,
             y.device.index == y_to
         ]):
-            return x.to(z_to) + y.to(z_to)
+            ret = x.to(z_to) + y.to(z_to)
+            if z_to not in [x_to, y_to]:
+                # [RPC Function Uses New Device]
+                # this RPC user function uses a different device than the ones
+                # used by request Tensors. Synchronize the ops on the new
+                # device to one current stream on the existing device to
+                # enforce response communication only occurs after the Tensors
+                # are ready.
+
+                z_stream = torch.cuda.current_stream(device=z_to)
+                x_stream = torch.cuda.current_stream(device=x_to)
+                x_stream.wait_stream(z_stream)
+            return ret
         else:
             raise ValueError("Wrong device affinity")
 
@@ -5000,6 +5019,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     @staticmethod
     def _gpu_add_return_to_gpu(x, y):
         if x.device.type == 'cpu' and y.device.type == 'cpu':
+            # FIXME: How do we sync ops on new device with CPU-only requests?
             return (x + y).to(0), (x - y).to(1), (x * y).to(2), (x / y).to(3)
         else:
             raise ValueError("Wrong device affinity")
@@ -5073,6 +5093,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
     @staticmethod
     def _add_to_gpu(x, y):
+        # FIXME: How do we sync ops on new device with CPU-only requests?
         return (x + y).to(0)
 
     def _test_device_maps_missing_config(self, mode):

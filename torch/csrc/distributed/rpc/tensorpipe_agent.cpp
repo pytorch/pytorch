@@ -770,6 +770,19 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
             futureResponseMessage = cb_->operator()(requestMessage);
+            // FIXME: The user function might use a different devices than the
+            // ones used in request Tensors. The agent is not aware of which
+            // streams are used on the new devices. It is also not accetable
+            // to blindly use default/current stream on response devices as
+            // proxy, because that would force all RPC responses to sync to the
+            // same stream. A temporary workaround is to use request Tensor
+            // streams as barrier proxy. More specifically, the user function
+            // should synchronize new streams or streams on new devices to
+            // the current stream on one of the request Tensor. Then, the agent
+            // guarantees that all subsequent communication on new devices will
+            // also wait for those barrier streams, i.e.,
+            //   new_device_stream -> existing_device_stream -> new_device_comm
+            ctx->recordBarrierEvents();
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
                 std::make_shared<JitFuture>(at::AnyClassType::get());
