@@ -25,13 +25,20 @@ the hook before the training loop as below.
 :func:`torch.nn.parallel.DistributedDataParallel.register_comm_hook`
     :noindex:
 
+What Does a Communication Hook Operate On?
+------------------------------------------
+
+Communication hook provides a flexible way to allreduce gradients.
+Therefore, it mainly operates on the gradients on each replica before allreduce,
+which are bucketized to increase the overlap between communication and computation.
+Particularly, :class:`torch.distributed.GradBucket` represents a bucket of gradient tensors to be allreduced.
+
 Default Communication Hooks
 ---------------------------
 
 Default communication hooks are simple **stateless** hooks, so the input state
 in ``register_comm_hook`` is either a process group or ``None``.
-The input ``bucket`` is a :class:`torch.distributed.GradBucket` object,
-which mainly contains a flattened 1D gradient tensor that will be allreduced.
+The input ``bucket`` is a :class:`torch.distributed.GradBucket` object.
 
 .. automodule:: torch.distributed.algorithms.ddp_comm_hooks.default_hooks
     :members:
