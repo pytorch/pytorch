@@ -20,10 +20,7 @@ class Logger {
 
   // Stream insertion operator for logging data to stream under
   // TORCH_DISTRIBUTED_DEBUG.
-  friend std::ostream& operator<<(
-    std::ostream& output,
-    const Logger& logger
-  );
+  friend std::ostream& operator<<(std::ostream& output, const Logger& logger);
 
   // Set environment variables.
   void set_env_variables();
