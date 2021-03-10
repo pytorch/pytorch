@@ -6,9 +6,12 @@
 
 namespace at { namespace native {
 
-void resize_output(Tensor& output, IntArrayRef shape) {
+bool resize_output(Tensor& output, IntArrayRef shape) {
+  if (output.sizes().equals(shape)) {
+    return false;
+  }
   // Tests for resizing of tensors with one more elements
-  if (output.numel() != 0 && !output.sizes().equals(shape)) {
+  if (output.numel() != 0) {
     TORCH_WARN(
       "An output with one or more elements was resized since it had ",
       "shape ", output.sizes(), ", which does not match the required ",
@@ -18,8 +21,8 @@ void resize_output(Tensor& output, IntArrayRef shape) {
       "reuse an out tensor t by resizing it, inplace, to zero elements with ",
       "t.resize_(0).");
   }
-
   output.resize_(shape);
+  return true;
 }
 
 // Call the sparse implementation in SparseTensor.cpp directly.

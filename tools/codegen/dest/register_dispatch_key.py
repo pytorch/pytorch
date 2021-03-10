@@ -271,6 +271,7 @@ if (strides.empty()) {
 if (strides.empty()) {{
     outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
 }} else {{
+    // TODO: assert options.memory_format_opt() is nullopt (debug only?)
     outputs_[output_idx] = {empty_strided_impl}(sizes, strides, {expanded_topts});
 }}
 """
@@ -279,12 +280,17 @@ if (strides.empty()) {{
         elif k is SchemaKind.out:
             return f"""
 {maybe_set_guard}
-at::native::resize_output(outputs_[output_idx], sizes);
-if (!strides.empty()) {{
-    TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
-    at::native::as_strided_(outputs_[output_idx], sizes, strides);
-}} else if (options.memory_format_opt().has_value()) {{
-    outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+bool resized = at::native::resize_output(outputs_[output_idx], sizes);
+// Only restride if a resize occurred; otherwise we ignore the (advisory)
+// strides from the meta function and directly use the output tensor's
+// preexisting strides
+if (resized) {{
+    if (!strides.empty()) {{
+        TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+        at::native::as_strided_(outputs_[output_idx], sizes, strides);
+    }} else if (options.memory_format_opt().has_value()) {{
+        outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+    }}
 }}
 """
         else:
