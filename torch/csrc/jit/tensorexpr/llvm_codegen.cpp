@@ -171,7 +171,6 @@ class LLVMCodeGenImpl : public IRVisitor {
 #undef LLVM_TYPE_DECLARE
   llvm::Type* Int8PtrTy_;
   llvm::Type* VoidTy_;
-  llvm::Type* VoidPtrTy_;
 
   std::unordered_map<const Var*, int> varToArg_;
   std::unordered_map<const Var*, llvm::Value*> varToVal_;
@@ -294,9 +293,7 @@ void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
       USE_TRIGGER(llvm_codegen_parallel_dispatched);
       std::unique_lock<std::mutex> l(m);
       remaining_tasks--;
-      while (remaining_tasks != 0) {
-        cv.wait(l);
-      }
+      cv.wait(l, [&] { return remaining_tasks == 0; });
     }
   }
 }
@@ -1357,7 +1354,6 @@ void LLVMCodeGenImpl::visit(const For* v) {
   auto exit = llvm::BasicBlock::Create(getContext(), "exit", fn_);
 
   // Create the stop condition.
-  irb_.SetInsertPoint(condBlock);
   auto cond = irb_.CreateICmpSLT(idx, stop);
   irb_.CreateCondBr(cond, body, exit);
 
