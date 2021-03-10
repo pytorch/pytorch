@@ -1017,6 +1017,24 @@ class TestFreezing(JitTestCase):
         m_f = torch._C._freeze_module(m_s._c)
         self.assertTrue(m_f.hasattr('conv1'))
 
+    def test_freeze_module_no_forward(self):
+
+        class FreezeMe(nn.Module):
+            def __init__(self):
+                super(FreezeMe, self).__init__()
+                self.lin = nn.Linear(10, 1)
+
+            @torch.jit.export
+            def foo(self, x):
+                return self.lin(x)
+
+        m = FreezeMe()
+        m_s = torch.jit.script(m)
+        m_s.eval()
+        m_f = torch._C._freeze_module(m_s._c, preservedAttrs=['foo'])
+        input = torch.ones(10)
+        self.assertEqual(m_s.foo(input), m_f.foo(input))
+
 
     def test_freeze_module_in_training_mode(self):
         class Net(nn.Module):
@@ -1310,10 +1328,10 @@ class TestFreezing(JitTestCase):
         self.assertEqual(mod_eager(True), frozen_mod(True))
         self.assertEqual(mod_eager(False), frozen_mod(False))
 
-    def test_freeze_module_with_non_static_module_dict_index(self):
+    def test_freeze_module_with_non_static_module_container_index(self):
         """
-        Test that a Module contained a non-static ModuleDict index
-        cannot be frozen.
+        Test that Modules containing non-static ModuleDict or ModuleList
+        indexing cannot be frozen.
         """
         @torch.jit.interface
         class ModuleInterface(torch.nn.Module):
@@ -1327,8 +1345,7 @@ class TestFreezing(JitTestCase):
 
                 return inp
 
-        # Test annotation of submodule.
-        class Mod(torch.nn.Module):
+        class ModWithDict(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
@@ -1337,9 +1354,23 @@ class TestFreezing(JitTestCase):
                 value: ModuleInterface = self.d[key]
                 return value.forward(x)
 
-        m = torch.jit.script(Mod())
+        m = torch.jit.script(ModWithDict())
         m.eval()
-        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleDictIndex is not supported"):
+        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleContainerIndex is not supported"):
+            mf = torch._C._freeze_module(m._c)
+
+        class ModWithList(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.ModuleList([ImplementsInterface()])
+
+            def forward(self, x: torch.Tensor, idx: int) -> Any:
+                value: ModuleInterface = self.l[idx]
+                return value.forward(x)
+
+        m = torch.jit.script(ModWithList())
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleContainerIndex is not supported"):
             mf = torch._C._freeze_module(m._c)
 
     def test_freeze_non_module_class_getattr(self):
@@ -1747,16 +1778,16 @@ class TestFrozenOptimizations(JitTestCase):
                     self.add_z = add_z
 
                 def forward(self, x):
-                    identity = x
-                    x = self.conv(x)
+                    z = self.conv(x)
+                    out = self.conv(x)
                     if self.add_z:
-                        x = x + identity
-                    x = self.relu(x)
-                    return x
+                        out += z
+                    out = self.relu(out)
+                    return out
 
-            mod_eager = Net(3, 3, kernel_size=3, stride=2).eval().cuda()
+            mod_eager = Net(3, 6, kernel_size=2, stride=1).eval().cuda()
 
-            inps = [4, 3, 4]
+            inps = [5, 3, 4]
             if conv == nn.Conv2d:
                 inps.append(inps[-1])
             if conv == nn.Conv3d:

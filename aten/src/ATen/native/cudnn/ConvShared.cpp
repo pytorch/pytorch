@@ -501,59 +501,29 @@ Tensor cudnn_convolution_add_relu(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  // Skip all the shape and type checking because frozen-model opt should
-  // catch problems during the compilation
-  TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2};
-
-  auto memory_format = cudnn_conv_use_channels_last(*input, *weight)
-      ? at::MemoryFormat::ChannelsLast
-      : at::MemoryFormat::Contiguous;
   auto output_t = at::native::empty_cuda(
       conv_output_size(
-          input->sizes(), weight->sizes(), padding, stride, dilation),
-      /*dtype=*/input->scalar_type(),
+          input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
+      /*dtype=*/input_t.scalar_type(),
       /*layout=*/c10::nullopt,
       /*device=*/kCUDA,
       /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/memory_format);
+      /*memory_format=*/at::MemoryFormat::Contiguous);
   if (output_t.numel() == 0) {
     return output_t;
   }
   TensorArg output{output_t, "result", 0};
 
-  // See #4500
-  Tensor weight_contig = weight->contiguous(memory_format);
-  // Make sure that NC11 strides follow formula
-  weight_contig.resize_(weight_contig.sizes(), memory_format);
-  Tensor input_contig = input->contiguous(memory_format);
-  input_contig.resize_(input_contig.sizes(), memory_format);
-
-  Tensor bias_contig;
-  if (bias_t.has_value()) {
-    TensorArg bias{bias_t.value(), "bias", 3};
-    bias_contig = bias->contiguous(memory_format);
-    bias_contig.resize_(bias_contig.sizes(), memory_format);
-  } else {
-    bias_contig = *output;
-  }
-
-  float alpha = 0;
-  Tensor z_contig;
-  if (z_t.has_value()) {
-    TensorArg z{z_t.value(), "z", 4};
-    z_contig = z->contiguous(memory_format);
-    z_contig.resize_(z_contig.sizes(), memory_format);
-    alpha = alpha_t.has_value() ? alpha_t.value().to<float>() : 1;
-  } else {
-    z_contig = *output;
-  }
+  float alpha = z_t.has_value()
+      ? (alpha_t.has_value() ? alpha_t.value().to<float>() : 1)
+      : 0;
 
   raw_cudnn_convolution_add_relu_out(
       *output,
-      input_contig,
-      weight_contig,
-      bias_contig,
-      z_contig,
+      input_t,
+      weight_t,
+      bias_t.has_value() ? bias_t.value() : zeros({output_t.size(1)}, output_t.options()),
+      z_t.has_value() ? z_t.value() : output_t,
       alpha,
       padding,
       stride,

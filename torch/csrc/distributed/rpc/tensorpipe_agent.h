@@ -231,7 +231,7 @@ class TensorPipeAgent : public RpcAgent {
   void removeFromTimeoutMap(uint64_t messageId);
 
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
-  void collectNames();
+  void prepareNames();
 
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
 

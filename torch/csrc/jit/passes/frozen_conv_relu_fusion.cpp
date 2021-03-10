@@ -50,14 +50,45 @@ void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
         conv_add_relu_rstring.format(env), conv_add_relu_fused);
   }
 
-  auto is_cuda = [](const Match& match,
-                    const std::unordered_map<std::string, Value*>& vmap) {
-    // auto input = toIValue(match.values_map.at(vmap.at("input"))).value();
-    // if (input.toTensor().suggest_memory_format() !=
-    // at::MemoryFormat::ChannelsLast)
-    //  return false;
-    auto weight = toIValue(match.values_map.at(vmap.at("weight"))).value();
-    return weight.toTensor().storage().data_ptr().device().is_cuda();
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    auto weight = toIValue(match.values_map.at(vmap.at("weight")));
+    if (!weight.has_value() || !weight.value().isTensor()) {
+      return false;
+    }
+    const at::Tensor& weight_t = weight.value().toTensor();
+    if (!weight_t.device().is_cuda() || !weight_t.is_contiguous()) {
+      return false;
+    }
+
+    // bias is optional
+    if (vmap.find("bias") != vmap.end()) {
+      auto bias = toIValue(match.values_map.at(vmap.at("bias")));
+      if (bias.has_value() && bias.value().isTensor()) {
+        const at::Tensor& bias_t = bias.value().toTensor();
+        if (bias_t.dtype() != weight_t.dtype() || bias_t.ndimension() != 1 ||
+            bias_t.size(0) != weight_t.size(0) ||
+            !bias_t.device().is_cuda()) {
+          return false;
+        }
+      }
+    }
+
+    // z is optional
+    if (vmap.find("z") != vmap.end()) {
+      auto zz = match.values_map.at(vmap.at("z"));
+      auto z = toIValue(match.values_map.at(vmap.at("z")));
+      if (z.has_value() && z.value().isTensor()) {
+        const at::Tensor& z_t = z.value().toTensor();
+        if (z_t.dtype() != weight_t.dtype() ||
+            z_t.size(0) != weight_t.size(0) ||
+            !z_t.is_contiguous() ||
+            !z_t.device().is_cuda()) {
+          return false;
+        }
+      }
+    }
+    return true;
   };
 
   // Convert _convolution and in-place operators for simpler replacement pattern
@@ -67,7 +98,7 @@ void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
     return node->kind() == aten::add_ || node->kind() == aten::relu_;
   });
 
-  rewriter.runOnGraph(graph, is_cuda);
+  rewriter.runOnGraph(graph, filter);
 #endif
 }
 } // namespace

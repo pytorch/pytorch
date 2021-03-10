@@ -1002,8 +1002,7 @@ void initJitScriptBindings(PyObject* module) {
           &Module::dump_to_str,
           py::arg("code") = true,
           py::arg("attrs") = true,
-          py::arg("params") = true,
-          py::arg("indent") = 0)
+          py::arg("params") = true)
       .def(
           "_replicate_for_data_parallel",
           [](Module& module) {
@@ -1126,6 +1125,22 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("apply", &Module::apply)
       .def("__copy__", &Module::copy)
+      .def(
+          "__hash__",
+          [](const Module& self) {
+            // Similar to Tensor's `__hash__`, which is `id()`.
+            return std::hash<c10::ivalue::Object*>{}(self._ivalue().get());
+          })
+      .def(
+          "__eq__",
+          [](const Module& self, const py::object& other) {
+            // TODO: call UDF if it exists
+            if (!py::isinstance<Module>(other)) {
+              return false;
+            }
+            return self._ivalue().get() ==
+                py::cast<Module>(other)._ivalue().get();
+          })
       .def(
           "__deepcopy__",
           [](const Module& self, const py::dict& memo) {
@@ -1353,6 +1368,7 @@ void initJitScriptBindings(PyObject* module) {
             // see: [pybind11 varargs]
             HANDLE_TH_ERRORS
             Method& method = py::cast<Method&>(args[0]);
+
             return invokeScriptMethodFromPython(
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
             END_HANDLE_TH_ERRORS_PYBIND
@@ -1382,19 +1398,22 @@ void initJitScriptBindings(PyObject* module) {
           [](Method& self) {
             return self.get_executor().debugFlushCompilationCache();
           })
-      .def_property_readonly("code_with_constants", [](Method& self) {
-        std::vector<at::IValue> constants;
-        PrintDepsTable deps;
-        PythonPrint pp(constants, deps);
-        pp.printMethod(self.function());
-        std::map<std::string, at::IValue> consts;
-        int i = 0;
-        for (auto const& constant : constants) {
-          consts["c" + std::to_string(i)] = constant;
-          i += 1;
-        }
-        return std::make_tuple(pp.str(), consts);
-      });
+      .def_property_readonly(
+          "code_with_constants",
+          [](Method& self) {
+            std::vector<at::IValue> constants;
+            PrintDepsTable deps;
+            PythonPrint pp(constants, deps);
+            pp.printMethod(self.function());
+            std::map<std::string, at::IValue> consts;
+            int i = 0;
+            for (auto const& constant : constants) {
+              consts["c" + std::to_string(i)] = constant;
+              i += 1;
+            }
+            return std::make_tuple(pp.str(), consts);
+          })
+      .def_property_readonly("owner", &Method::owner);
   m.def(
       "_jit_script_compile",
       [](const std::string& qualname,
