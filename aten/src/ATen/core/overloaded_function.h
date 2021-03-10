@@ -7,6 +7,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <pybind11/detail/common.h>
 #include <pybind11/pytypes.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <functional>
 #include <utility>
 
@@ -17,6 +18,8 @@ struct IValue;
 
 namespace torch {
 namespace jit {
+
+struct SourceRange;
 
 struct OverloadedFunction : public Function {
   OverloadedFunction(
@@ -45,6 +48,25 @@ struct OverloadedFunction : public Function {
 
   void run(Stack&& stack) override {
     callable_(stack);
+  }
+
+  std::vector<const at::FunctionSchema*> loadPossibleSchemas(
+      const at::ClassTypePtr& owner_class,
+      const SourceRange& loc) {
+    auto overloadedMethods = owner_class->findOverloadedMethod(name());
+    std::vector<const at::FunctionSchema*> schemas;
+
+    for (auto method : overloadedMethods) {
+      try {
+        method->ensure_defined();
+      } catch (const RecursiveMethodCallError&) {
+        throw ErrorReport(loc)
+            << " method '" << method->name() << "' is called recursively. "
+            << "Recursive calls are not supported";
+      }
+      schemas.push_back(&(method->getSchema()));
+    }
+    return schemas;
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(

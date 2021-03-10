@@ -942,15 +942,7 @@ struct CodeImpl {
         break;
       case prim::CallMethod:
         if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
-          if (class_type->findOverloadedMethod(node->s(attr::name)).size() >
-              1) {
-            auto overloaded_method =
-                class_type->getMangledOverloadedMethod(node->s(attr::name));
-            emitCall(overloaded_method, node->inputs());
-          } else {
-            emitCall(
-                &class_type->getMethod(node->s(attr::name)), node->inputs());
-          }
+          emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
         } else {
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }

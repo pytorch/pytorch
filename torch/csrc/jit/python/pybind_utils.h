@@ -792,36 +792,6 @@ struct VISIBILITY_HIDDEN tuple_slice {
   int64_t e;
 };
 
-inline bool canCreateStackFromSchema(
-    const FunctionSchema& schema,
-    const tuple_slice& args,
-    const py::kwargs& kwargs,
-    const c10::optional<IValue>& self) {
-  size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
-  size_t arguments_without_kwargs = (self ? 1 : 0) + args.size();
-  if (all_arguments > schema.arguments().size()) {
-    return false;
-  }
-
-  size_t consumed_kwargs = 0;
-  for (size_t i = arguments_without_kwargs; i < schema.arguments().size();
-       ++i) {
-    const auto& arg = schema.arguments()[i];
-    if (kwargs.contains(arg.name().c_str())) {
-      consumed_kwargs += 1;
-    } else if (arg.default_value()) {
-      continue;
-    } else {
-      return false;
-    }
-  }
-
-  if (consumed_kwargs != kwargs.size()) {
-    return false;
-  }
-  return true;
-};
-
 inline Stack createStackForSchema(
     const FunctionSchema& schema,
     const tuple_slice& args,

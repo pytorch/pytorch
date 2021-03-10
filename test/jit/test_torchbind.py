@@ -330,9 +330,17 @@ class TestTorchbind(JitTestCase):
     def test_torchbind_overloaded_method(self):
         def f():
             val = torch.classes._TorchScriptTesting._FooOverload(3, 5)
-            stuff1 = val.increment(4)
-            stuff2 = val.increment(4, 5)
-            return stuff1, stuff2
+            stuff1 = val.increment(4, 5)
+            stuff2 = val.increment(4)
+            stuff3 = val.increment(4, "hi")
+            return stuff1, stuff2, stuff3
+        self.checkScript(f, ())
+
+    def test_torchbind_overloaded_method_init(self):
+        def f():
+            val = torch.classes._TorchScriptTesting._FooOverloadInit(3, 4, "hi")
+            stuff = val.increment(4)
+            return stuff
         self.checkScript(f, ())
 
     def test_torchbind_pass_wrong_type(self):

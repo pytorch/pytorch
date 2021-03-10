@@ -61,6 +61,10 @@ struct TORCH_API Method {
     return *function_;
   }
 
+  c10::optional<Method> matchOverloadedMethods(
+      const struct tuple_slice& args,
+      const pybind11::kwargs& kwargs) const;
+
  private:
   // Methods are uniqued onwed by a single module. This raw pointer allows
   // looking up the module.

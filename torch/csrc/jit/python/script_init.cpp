@@ -1360,7 +1360,6 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("__doc__", [](const StrongFunctionPtr& self) {
         return self.function_->doc_string();
       });
-  // TODO: ove rhere too
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
       .def(
           "__call__",
@@ -1368,28 +1367,15 @@ void initJitScriptBindings(PyObject* module) {
             // see: [pybind11 varargs]
             HANDLE_TH_ERRORS
             Method& method = py::cast<Method&>(args[0]);
-            auto self = method.owner();
-            auto methods = self.get_overloaded_methods(method.name());
-
             auto input_args = tuple_slice(std::move(args), 1);
+            ;
             auto input_kwargs = std::move(kwargs);
-
-            for (auto& overloaded_method : methods) {
-              // TODO: this is pretty stupid method that is essentially a copy
-              // of createStackFromSchema. When createStackFromSchema throws a
-              // schema error, for some reason this code seg faults. So I
-              // created a function that gives a boolean instead of throwing
-              // error.
-              if (canCreateStackFromSchema(
-                      overloaded_method.function().getSchema(),
-                      input_args,
-                      input_kwargs,
-                      self._ivalue())) {
-                return invokeScriptMethodFromPython(
-                    overloaded_method, input_args, input_kwargs);
-              }
+            auto resolved_method =
+                method.matchOverloadedMethods(input_args, input_kwargs);
+            if (resolved_method.has_value()) {
+              return invokeScriptMethodFromPython(
+                  resolved_method.value(), input_args, input_kwargs);
             }
-
             return invokeScriptMethodFromPython(
                 method, input_args, input_kwargs);
             END_HANDLE_TH_ERRORS_PYBIND
