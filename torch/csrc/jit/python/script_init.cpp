@@ -1368,10 +1368,9 @@ void initJitScriptBindings(PyObject* module) {
             HANDLE_TH_ERRORS
             Method& method = py::cast<Method&>(args[0]);
             auto input_args = tuple_slice(std::move(args), 1);
-            ;
             auto input_kwargs = std::move(kwargs);
             auto resolved_method =
-                method.matchOverloadedMethods(input_args, input_kwargs);
+                matchOverloadedMethods(method, input_args, input_kwargs);
             if (resolved_method.has_value()) {
               return invokeScriptMethodFromPython(
                   resolved_method.value(), input_args, input_kwargs);

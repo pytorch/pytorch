@@ -5,8 +5,6 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
-#include <pybind11/detail/common.h>
-#include <pybind11/pytypes.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <functional>
 #include <utility>
