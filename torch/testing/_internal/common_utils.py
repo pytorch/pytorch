@@ -205,7 +205,7 @@ if RUN_PARALLEL == 0:
         RUN_PARALLEL = multiprocessing.cpu_count()
     except (ImportError, NotImplementedError):
         RUN_PARALLEL = 1
-    if torch.version.cuda or torch.version.rocm:
+    if torch.version.cuda or torch.version.hip:
         gpus = get_gpu_count()
         if gpus > 0:
             RUN_PARALLEL = min(RUN_PARALLEL, gpus)
