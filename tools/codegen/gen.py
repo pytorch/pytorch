@@ -78,7 +78,22 @@ def parse_native_yaml(path: str) -> List[NativeFunction]:
         funcs = e.get('func')
         with context(f'in {loc}:\n  {funcs}'):
             rs.append(NativeFunction.from_yaml(e, loc))
+    error_check_native_functions(rs)
     return rs
+
+# Some assertions are already performed during parsing, but those are only within a single NativeFunction.
+# Assertions here are meant to be performed across NativeFunctions.
+def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
+    func_map: Dict[OperatorName, NativeFunction] = {}
+    for f in funcs:
+        func_map[f.func.name] = f
+    for f in funcs:
+        if f.structured_delegate is not None:
+            delegate_func = func_map[f.structured_delegate]
+            assert delegate_func.structured, \
+                f"{f.func.name} is marked as a structured_delegate pointing to " \
+                f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. " \
+                f"Consider adding 'structured=True' to the delegated operator"
 
 def cpp_string(s: str) -> str:
     """Convert a python string into a c++ string literal """

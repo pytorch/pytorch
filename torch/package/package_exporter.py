@@ -4,7 +4,7 @@ import collections
 import io
 import pickletools
 from .find_file_dependencies import find_files_source_depends_on
-from ._custom_import_pickler import create_custom_import_pickler
+from ._package_pickler import create_pickler
 from ._file_structure_representation import _create_folder_from_file_list, Folder
 from ._glob_group import GlobPattern, _GlobGroup
 from ._importlib import _normalize_path
@@ -12,10 +12,24 @@ from ._mangling import is_mangled
 from ._stdlib import is_stdlib_module
 from .importer import Importer, OrderedImporter, sys_importer
 import types
-from typing import List, Any, Callable, Dict, Sequence, Tuple, Union, BinaryIO, Optional
+from typing import List, Any, Callable, Dict, Set, Sequence, Tuple, Union, BinaryIO, Optional
 from pathlib import Path
 import linecache
 from urllib.parse import quote
+
+
+class EmptyMatchError(Exception):
+    """This is an exception that is thrown when a mock or extern is marked as
+    allow_empty=False, and is not matched with any module during packaging.
+    """
+    pass
+
+
+class DeniedModuleError(Exception):
+    """This is an exception that is thrown when a pattern added with deny matches
+    a module required during the packaging process.
+    """
+    pass
 
 
 class PackageExporter:
@@ -89,8 +103,10 @@ class PackageExporter:
                                 f"got {type(importer)} instead.")
             self.importer = OrderedImporter(*importer)
 
-        self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
+        self.patterns : List[Tuple[Any, Callable[[str], None], bool]] = []  # 'any' is 're.Pattern' but breaks old mypy
+        self.matched_patterns : Set[int] = set()
         self.debug_deps : List[Tuple[str, str]] = []
+        self._unique_id = 0
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
         """Adds the local file system `file_or_directory` to the source package to provide the code
@@ -135,17 +151,23 @@ class PackageExporter:
             self.save_source_string(module_name, _read_file(file_or_directory), is_package, dependencies, file_or_directory)
 
     def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> Folder:
-        """Returns a file structure representation of package's zipfile. 
+        """Returns a file structure representation of package's zipfile.
 
         Args:
             include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
-                for the names of the files to be inluded in the zipfile representation. This can also be 
+                for the names of the files to be inluded in the zipfile representation. This can also be
                 a glob-style pattern, as described in :meth:`mock`
 
             exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
         """
-        return _create_folder_from_file_list(self.zip_file.archive_name(), self.zip_file.get_all_written_records(), 
+        return _create_folder_from_file_list(self.zip_file.archive_name(), self.zip_file.get_all_written_records(),
                                              include, exclude)
+
+    def get_unique_id(self) -> str:
+        """Get an id. This id is guaranteed to only be handed out once for this package."""
+        ret = str(self._unique_id)
+        self._unique_id += 1
+        return ret
 
     def save_source_string(self, module_name: str, src: str, is_package: bool = False,
                            dependencies: bool = True, orig_file_name: str = None):
@@ -256,9 +278,10 @@ node [shape=box];
             self.save_extern_module(root_name)
             return
 
-        for pattern, action in self.patterns:
+        for i, (pattern, action, _) in enumerate(self.patterns):
             if pattern.matches(module_name):
                 action(module_name)
+                self.matched_patterns.add(i)
                 return
 
         self.save_module(module_name, dependencies)
@@ -294,7 +317,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = create_custom_import_pickler(data_buf, self.importer)
+        pickler = create_pickler(data_buf, self.importer)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
@@ -341,7 +364,7 @@ node [shape=box];
         filename = self._filename(package, resource)
         self._write(filename, binary)
 
-    def mock(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = ()):
+    def mock(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = (), allow_empty: bool = True):
         """Replace some required modules with a mock implementation.  Mocked modules will return a fake
         object for any attribute accessed from it. Because we copy file-by-file, the dependency resolution will sometimes
         find files that are imported by model files but whose functionality is never used
@@ -361,10 +384,15 @@ node [shape=box];
             exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
                 e.g. include='torch.**', exclude='torch.foo' will mock all torch packages except 'torch.foo' Default: []
 
-        """
-        self.patterns.append((_GlobGroup(include, exclude), self.save_mock_module))
+            allow_empty (bool): An optional flag that specifies whether the mock implementation(s) specified by this call
+                to the `mock` method must be matched to some module during packaging. If a mock is added with allow_empty=False,
+                and `close` is called (either explicitly or via `__exit__`) and the mock has not been matched to a module
+                used by the package being exported, an exception is thrown. If allow_empty=True, no such exception is thrown.
 
-    def extern(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = ()):
+        """
+        self.patterns.append((_GlobGroup(include, exclude), self.save_mock_module, allow_empty))
+
+    def extern(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = (), allow_empty: bool = True):
         """Include `module` in the list of external modules the package can import.
         This will prevent dependency discover from saving
         it in the package. The importer will load an external module directly from the standard import system.
@@ -376,8 +404,25 @@ node [shape=box];
 
             exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
 
+            allow_empty (bool): An optional flag that specifies whether the extern modules specified by this call
+                to the `extern` method must be matched to some module during packaging. If an extern module glob pattern is added
+                with allow_empty=False, and `close` is called (either explicitly or via `__exit__`) before any modules match that
+                pattern, an exception is thrown. If allow_empty=True, no such exception is thrown.
+
         """
-        self.patterns.append((_GlobGroup(include, exclude), self.save_extern_module))
+        self.patterns.append((_GlobGroup(include, exclude), self.save_extern_module, allow_empty))
+
+    def deny(self, include: 'GlobPattern', *, exclude: 'GlobPattern' = ()):
+        """Blocklist modules who names match the given glob patterns from the list of modules the package can import.
+        If a dependency on any matching packages is found, an error is thrown.
+
+        Args:
+            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
+                for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`
+
+            exclude (Union[List[str], str]): An optional pattern that excludes some patterns that match the include string.
+        """
+        self.patterns.append((_GlobGroup(include, exclude), self._reject_denied_module, True))
 
     def save_extern_module(self, module_name: str):
         """Add `module_name` to the list of external modules, regardless of whether it is
@@ -399,6 +444,12 @@ node [shape=box];
         is_package = hasattr(self._import_module(module_name), '__path__')
         self.save_source_string(module_name, _MOCK_IMPL, is_package, dependencies=False)
 
+    def _reject_denied_module(self, module_name: str):
+        """Throw an exception containing a message that `module_name` was explicitly blocklisted via
+        `deny` and was still required during packaging.
+        """
+        raise DeniedModuleError(f"{module_name} was required during packaging but has been explicitly blocklisted")
+
     def _module_is_already_provided(self, qualified_name: str) -> bool:
         for mod in self.external:
             if qualified_name == mod or qualified_name.startswith(mod + '.'):
@@ -406,11 +457,6 @@ node [shape=box];
         return qualified_name in self.provided
 
     def _persistent_id(self, obj):
-        # FIXME: the docs say that persistent_id should only return a string
-        # but torch store returns tuples. This works only in the binary protocol
-        # see
-        # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
-        # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
             obj_key = str(obj._cdata)
@@ -422,6 +468,9 @@ node [shape=box];
                     obj_key,
                     location,
                     obj.size())
+        if hasattr(obj, '__reduce_package__'):
+            return ('reduce_package', *obj.__reduce_package__(self))
+
         return None
 
     def __enter__(self):
@@ -447,6 +496,11 @@ node [shape=box];
         """
         if self.verbose:
             print(f"Dependency graph for exported package: \n{self._write_dep_graph()}")
+
+        # Check that all mock and extern modules with allow_empty=False were matched.
+        for i, (pattern, _, allow_empty) in enumerate(self.patterns):
+            if not allow_empty and i not in self.matched_patterns:
+                raise EmptyMatchError(f"Exporter did not match any modules to {pattern}, which was marked as allow_empty=False")
 
         # Write each tensor to a file named tensor/the_tensor_key in the zip archive
         for key in sorted(self.serialized_storages.keys()):

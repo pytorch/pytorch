@@ -51,9 +51,6 @@ struct Foo : torch::CustomClassHolder {
   int64_t combine(c10::intrusive_ptr<Foo> b) {
     return this->info() + b->info();
   }
-  ~Foo() {
-    // std::cout<<"Destroying object with values: "<<x<<' '<<y<<std::endl;
-  }
 };
 
 struct _StaticMethod : torch::CustomClassHolder {
@@ -61,6 +58,41 @@ struct _StaticMethod : torch::CustomClassHolder {
   static int64_t staticMethod(int64_t input) {
     return 2 * input;
   }
+};
+
+struct FooGetterSetter : torch::CustomClassHolder {
+  FooGetterSetter() : x(0), y(0) {}
+  FooGetterSetter(int64_t x_, int64_t y_) : x(x_), y(y_) {}
+
+  int64_t getX() {
+    // to make sure this is not just attribute lookup
+    return x + 2;
+  }
+  void setX(int64_t z) {
+    // to make sure this is not just attribute lookup
+    x = z + 2;
+  }
+
+  int64_t getY() {
+    // to make sure this is not just attribute lookup
+    return y + 4;
+  }
+
+ private:
+  int64_t x, y;
+};
+
+struct FooGetterSetterLambda : torch::CustomClassHolder {
+  int64_t x;
+  FooGetterSetterLambda() : x(0) {}
+  FooGetterSetterLambda(int64_t x_) : x(x_) {}
+};
+
+struct FooReadWrite : torch::CustomClassHolder {
+  int64_t x;
+  const int64_t y;
+  FooReadWrite() : x(0), y(0) {}
+  FooReadWrite(int64_t x_, int64_t y_) : x(x_), y(y_) {}
 };
 
 struct LambdaInit : torch::CustomClassHolder {
@@ -231,7 +263,17 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
   std::vector<InstructionType> instructions_;
 };
 
+struct ReLUClass : public torch::CustomClassHolder {
+  at::Tensor run(const at::Tensor& t) {
+    return t.relu();
+  }
+};
+
 TORCH_LIBRARY(_TorchScriptTesting, m) {
+  m.class_<ReLUClass>("_ReLUClass")
+      .def(torch::init<>())
+      .def("run", &ReLUClass::run);
+
   m.class_<_StaticMethod>("_StaticMethod")
       .def(torch::init<>())
       .def_static("staticMethod", &_StaticMethod::staticMethod);
@@ -258,6 +300,26 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("increment", &Foo::increment)
       .def("add", &Foo::add)
       .def("combine", &Foo::combine);
+
+  m.class_<FooGetterSetter>("_FooGetterSetter")
+      .def(torch::init<int64_t, int64_t>())
+      .def_property("x", &FooGetterSetter::getX, &FooGetterSetter::setX)
+      .def_property("y", &FooGetterSetter::getY);
+
+  m.class_<FooGetterSetterLambda>("_FooGetterSetterLambda")
+      .def(torch::init<int64_t>())
+      .def_property(
+          "x",
+          [](const c10::intrusive_ptr<FooGetterSetterLambda>& self) {
+            return self->x;
+          },
+          [](const c10::intrusive_ptr<FooGetterSetterLambda>& self,
+             int64_t val) { self->x = val; });
+
+  m.class_<FooReadWrite>("_FooReadWrite")
+      .def(torch::init<int64_t, int64_t>())
+      .def_readwrite("x", &FooReadWrite::x)
+      .def_readonly("y", &FooReadWrite::y);
 
   m.class_<LambdaInit>("_LambdaInit")
       .def(torch::init([](int64_t x, int64_t y, bool swap) {

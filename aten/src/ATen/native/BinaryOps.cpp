@@ -365,11 +365,11 @@ Tensor& floor_divide_(Tensor& self, const Tensor& other) {
 // TODO: Make this structured to undo the perf regression from native:: removal
 // in call here
 Tensor mul(const Tensor& self, Scalar other) {
-  return at::mul(self, wrapped_scalar_tensor(other));
+  return at::mul(self, wrapped_scalar_tensor(other)); // redispatch!
 }
 
 Tensor& mul_(Tensor& self, Scalar other) {
-  return self.mul_(wrapped_scalar_tensor(other));
+  return at::mul_out(self, self, wrapped_scalar_tensor(other)); // redispatch!
 }
 
 // multiply, alias for mul

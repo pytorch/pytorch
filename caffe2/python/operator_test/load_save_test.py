@@ -1,7 +1,3 @@
-
-
-
-
 import errno
 import hypothesis.strategies as st
 from hypothesis import given, assume, settings
@@ -10,7 +6,7 @@ import os
 import shutil
 import unittest
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple, Type
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, test_util, workspace
@@ -427,6 +423,76 @@ class TestLoadSave(TestLoadSaveBase):
             load_all=False)
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
+
+    def create_test_blobs(
+        self, size: int = 1234, feed: bool = True
+    ) -> List[Tuple[str, np.ndarray]]:
+        def int_array(dtype: Type[np.integer], size: int) -> np.ndarray:
+            info = np.iinfo(dtype)
+            return np.random.randint(info.min, info.max, size, dtype=dtype)
+
+        def float_array(dtype: Type[np.floating], size: int) -> np.ndarray:
+            return np.random.random_sample(size).astype(dtype)
+
+        blobs = [
+            ("int8_data", int_array(np.int8, size)),
+            ("int16_data", int_array(np.int16, size)),
+            ("int32_data", int_array(np.int32, size)),
+            ("int64_data", int_array(np.int64, size)),
+            ("uint8_data", int_array(np.uint8, size)),
+            ("uint16_data", int_array(np.uint16, size)),
+            ("float16_data", float_array(np.float16, size)),
+            ("float32_data", float_array(np.float32, size)),
+            ("float64_data", float_array(np.float64, size)),
+        ]
+
+        if feed:
+            for name, data in blobs:
+                workspace.FeedBlob(name, data)
+
+        return blobs
+
+    def load_and_check_blobs(
+        self,
+        blobs: List[Tuple[str, np.ndarray]],
+        dbs: List[str],
+        db_type: Optional[str] = None
+    ) -> None:
+        workspace.ResetWorkspace()
+        self.assertEqual(len(workspace.Blobs()), 0)
+        load_op = core.CreateOperator(
+            "Load",
+            [],
+            [name for name, data in blobs],
+            absolute_path=1,
+            dbs=dbs,
+            db_type=db_type or self._db_type,
+        )
+        self.assertTrue(workspace.RunOperatorOnce(load_op))
+        self.assertEqual(len(workspace.Blobs()), len(blobs))
+        for name, data in blobs:
+            np.testing.assert_array_equal(workspace.FetchBlob(name), data)
+
+    def testSaveWithChunkSize(self) -> None:
+        tmp_folder = self.make_tempdir()
+        tmp_file = str(tmp_folder / "save.output")
+
+        blobs = self.create_test_blobs()
+
+        # Saves the blobs to a local db.
+        save_op = core.CreateOperator(
+            "Save",
+            [name for name, data in blobs],
+            [],
+            absolute_path=1,
+            db=tmp_file,
+            db_type=self._db_type,
+            chunk_size=32,
+        )
+        self.assertTrue(workspace.RunOperatorOnce(save_op))
+
+        self.load_and_check_blobs(blobs, [tmp_file])
+
 
 
 if __name__ == '__main__':

@@ -23,6 +23,7 @@ static int te_cuda_pointwise_block_size = -1;
 static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
 static bool te_must_use_llvm_on_cpu = true;
+static bool cat_wo_conditionals = false; // NOLINT
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -85,6 +86,10 @@ bool& getTEGenerateBlockCode() {
 
 bool& getTEMustUseLLVMOnCPU() {
   return te_must_use_llvm_on_cpu;
+}
+
+bool& getCatWoConditionals() {
+  return cat_wo_conditionals;
 }
 
 c10::optional<at::Device> pickDeviceType(
@@ -1387,6 +1392,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     }
 
     case aten::cat: {
+      if (getCatWoConditionals()) {
+        return computeCatWoConditionals(v);
+      }
       return Compute(
           "aten_cat",
           dimsFromSizes(sizesForValue(v)),
@@ -1531,13 +1539,12 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
   }
 }
 
-Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
-  // Find all tensors we need to compute (including dependencies) and put them
-  // in a topological order
-  std::vector<Tensor*> tensors_to_compute =
-      findAllNeededTensors(tensorOutputs_);
-
-  torch::jit::tensorexpr::LoopNest l(tensorOutputs_, tensors_to_compute);
+Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
+  std::unordered_set<const Buf*> output_bufs;
+  for (auto t : tensorOutputs_) {
+    output_bufs.insert(t->buf());
+  }
+  torch::jit::tensorexpr::LoopNest l(st, output_bufs);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
@@ -1658,23 +1665,6 @@ std::string TensorExprKernel::getCodeGenName(BackendType backendType) {
   }
 }
 
-std::vector<CodeGen::BufferArg> TensorExprKernel::prepareBufferArgs() {
-  std::vector<CodeGen::BufferArg> params;
-  for (auto const& arg : kernelArgs_) {
-    params.push_back(arg.buffer());
-    for (auto const& size : arg.sizes()) {
-      params.emplace_back(size.var);
-    }
-    for (auto const& stride : arg.strides()) {
-      params.emplace_back(stride.var);
-    }
-  }
-  for (auto& o : tensorOutputs_) {
-    params.emplace_back(o);
-  }
-  return params;
-}
-
 template <typename T>
 static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
   return !a.has_value() || *a == b;
@@ -1702,13 +1692,48 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
   return backendType;
 }
 
+static bool isValidIdentifierChar(char c, size_t pos) {
+  return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
+}
+
+// replaces all invalid characters with underscore
+std::string sanitizeName(const std::string& input_name) {
+  std::stringstream sanitized_name;
+  for (size_t i = 0; i < input_name.size(); ++i) {
+    if (isValidIdentifierChar(input_name[i], i)) {
+      sanitized_name << input_name[i];
+    } else {
+      sanitized_name << "_";
+    }
+  }
+  return sanitized_name.str();
+}
+
+// we use the debug names in printing cuda code, they need to be removed
+// of characters that can't be used in a variable identifier
+void TensorExprKernel::genInputDebugNames() {
+  std::unordered_map<std::string, const torch::jit::Value*> name_to_value;
+  std::unordered_set<std::string> name_set;
+  std::unordered_map<const torch::jit::Value*, std::string> value_to_name;
+  for (const torch::jit::Value* input : graph_->inputs()) {
+    std::string sanitized_name = sanitizeName(input->debugName());
+    // we could get fancier here, but name conflict is extremely unlikely
+    while (name_set.count(sanitized_name)) {
+      sanitized_name = sanitized_name + "_";
+    }
+    value_to_name[input] = sanitized_name;
+    name_set.insert(sanitized_name);
+  }
+  input_name_map_ = std::move(value_to_name);
+}
+
 void TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& t = input->type();
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
       Placeholder inBuffer(
-          "t" + input->debugName(),
+          "t" + input_name_map_[input],
           ToDtype(static_cast<ScalarType>(*tt->scalarType())),
           {0});
       std::vector<DimArg> inputTensorDims;
@@ -1730,25 +1755,24 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
                 }
                 return inBuffer.load(idx);
               }));
-      kernelArgs_.emplace_back(
-          inBuffer, std::vector<ShapeArg>(), std::vector<ShapeArg>());
+      bufferArgs_.emplace_back(inBuffer);
       break;
     }
     case TypeKind::FloatType: {
-      VarHandle v("v" + input->debugName(), kDouble);
-      kernelArgs_.emplace_back(v);
+      VarHandle v("v" + input_name_map_[input], kDouble);
+      bufferArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
     }
     case TypeKind::BoolType: {
-      VarHandle v("v" + input->debugName(), kBool);
-      kernelArgs_.emplace_back(v);
+      VarHandle v("v" + input_name_map_[input], kBool);
+      bufferArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
     }
     case TypeKind::IntType: {
-      VarHandle v("v" + input->debugName(), kLong);
-      kernelArgs_.emplace_back(v);
+      VarHandle v("v" + input_name_map_[input], kLong);
+      bufferArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
     }
@@ -1929,22 +1953,137 @@ Tensor* TensorExprKernel::computeSoftmax(
       },
       {output_dims[softmax_dim]});
   if (!log_softmax) {
-    return Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
-      return e->call(indices) / sum->call(remove_softmax_dim_index(indices));
-    });
+    auto result =
+        Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
+          return e->call(indices) /
+              sum->call(remove_softmax_dim_index(indices));
+        });
+    return new Tensor(
+        result->buf(),
+        new Block({max->stmt(), e->stmt(), sum->stmt(), result->stmt()}));
   }
 
   auto log_sum = Compute(
       "aten_softmax_log_sum", non_softmax_dims, [&](ParameterList& indices) {
         return log(sum->call(indices));
       });
-  return Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
-    auto inp = tensorOrConstant(
-        v->node()->inputs()[0], convert_indices_to_expr_handle(indices));
-    auto non_softmax_indices = remove_softmax_dim_index(indices);
-    return inp - max->call(non_softmax_indices) -
-        log_sum->call(non_softmax_indices);
-  });
+  auto result =
+      Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
+        auto inp = tensorOrConstant(
+            v->node()->inputs()[0], convert_indices_to_expr_handle(indices));
+        auto non_softmax_indices = remove_softmax_dim_index(indices);
+        return inp - max->call(non_softmax_indices) -
+            log_sum->call(non_softmax_indices);
+      });
+  return new Tensor(
+      result->buf(),
+      new Block(
+          {max->stmt(),
+           e->stmt(),
+           sum->stmt(),
+           log_sum->stmt(),
+           result->stmt()}));
+}
+
+Tensor* TensorExprKernel::computeCatWoConditionals(const torch::jit::Value* v) {
+  auto const& n = v->node();
+  auto inputs = n->inputs()[0]->node()->inputs();
+  if (inputs.size() == 0) {
+    throw std::runtime_error("Empty input list is passed to aten::cat");
+  }
+
+  // Some of the inputs can be empty tensors, we need to skip them
+  // when we construct the expression, but we need to take them into
+  // account in dtype promotion.
+  std::vector<const torch::jit::Value*> nonempty_inputs;
+  for (auto input : inputs) {
+    if (input->type()->kind() == TypeKind::TensorType) {
+      auto tt = input->type()->cast<TensorType>();
+      if (tt->isComplete() && tt->sizes().size() && tt->sizes()[0] &&
+          *tt->sizes()[0]) {
+        nonempty_inputs.push_back(input);
+      }
+    }
+  }
+
+  // Promote input types.
+  // Note that we need to consider all inputs, including empty - they
+  // also affect the resultant dtype.
+  auto maybe_dtype = findDtypeForValue(inputs[0]);
+  TORCH_INTERNAL_ASSERT(
+      maybe_dtype, "Cannot find dtype for one of aten::cat inputs");
+  ScalarType highType = *maybe_dtype;
+  for (const auto input : inputs) {
+    auto maybe_dtype = findDtypeForValue(input);
+    TORCH_INTERNAL_ASSERT(
+        maybe_dtype, "Cannot find dtype for one of aten::cat inputs");
+    highType = promoteTypes(highType, *maybe_dtype);
+  }
+
+  // Now we build one loop per input:
+  //
+  // for i
+  //   for j
+  //     for k
+  //       output[i,j,k] = inp1[i,j,k]
+  // for i
+  //   for j
+  //     for k
+  //       output[i,j+l1,k] = inp2[i,j,k]
+  // for i
+  //   for j
+  //     for k
+  //       output[i,j+l2,k] = inp3[i,j,k]
+
+  auto output_sizes = inferSizesForValue(v);
+  auto output_sizes_expr = ExprHandleVectorToExprVector(output_sizes);
+  auto output_buf = new Buf("aten_cat", output_sizes_expr, ToDtype(highType));
+
+  int64_t concat_dim = n->input(1)->node()->i(attr::value);
+  auto shape = sizesForValue(inputs[0]);
+  size_t norm_concat_dim = normalizeAndCheckIndex(concat_dim, shape.size());
+
+  auto gen_code_for_input = [&](const torch::jit::Value* inp,
+                                size_t inp_pos,
+                                const Expr* concat_dim_size,
+                                const std::vector<ExprHandle>& dims) {
+    std::vector<Var*> for_vars(dims.size());
+    std::vector<const Expr*> load_indices(dims.size());
+    std::vector<const Expr*> store_indices(dims.size());
+    for (size_t i = 0; i < dims.size(); ++i) {
+      for_vars[i] = new Var(
+          "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i), kInt);
+      load_indices[i] = for_vars[i];
+      if (i == norm_concat_dim) {
+        store_indices[i] = new Add(for_vars[i], concat_dim_size);
+      } else {
+        store_indices[i] = for_vars[i];
+      }
+    }
+    auto inp_buf = tensors_.at(inp->unique())->buf();
+    auto load_expr = new Load(inp_buf, load_indices, new IntImm(1));
+    auto load_promoted = promoteToDtype(ExprHandle(load_expr), highType);
+    Stmt* st = new Store(
+        output_buf, store_indices, load_promoted.node(), new IntImm(1));
+    for (size_t i = dims.size(); i > 0; --i) {
+      st = new For(for_vars[i - 1], new IntImm(0), dims[i - 1].node(), st);
+    }
+    return st;
+  };
+
+  Expr* concat_dim_size = nullptr;
+  auto block = new Block({});
+  for (size_t i = 0; i < nonempty_inputs.size(); ++i) {
+    auto input_dims = sizesForValue(nonempty_inputs[i]);
+    if (concat_dim_size == nullptr) {
+      concat_dim_size = new IntImm(0);
+    }
+    block->append_stmt(
+        gen_code_for_input(nonempty_inputs[i], i, concat_dim_size, input_dims));
+    concat_dim_size =
+        new Add(concat_dim_size, input_dims[norm_concat_dim].node());
+  }
+  return new Tensor(output_buf, IRSimplifier::simplify(block));
 }
 
 TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(
@@ -2102,11 +2241,19 @@ Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
 void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
+
+  // Vector to collect the Stmts corresponding to all tensors.
+  std::vector<Stmt*> tensor_stmts;
+
   // Bind inputs to buffers.
   nInputs_ = graph_->inputs().size();
+  genInputDebugNames();
   for (auto const& input : graph_->inputs()) {
     bindInput(input);
     inputTypes_.push_back(input->type());
+    if (input->type()->kind() == TypeKind::TensorType) {
+      tensor_stmts.push_back(Stmt::clone(tensors_.at(input->unique())->stmt()));
+    }
   }
 
   // Bind nodes to tensor compute expressions.
@@ -2117,6 +2264,8 @@ void TensorExprKernel::compile() {
       for (auto const& output : n->outputs()) {
         if (output->hasUses()) {
           tensors_.emplace(output->unique(), computeValue(output));
+          tensor_stmts.push_back(
+              Stmt::clone(tensors_.at(output->unique())->stmt()));
         }
       }
     }
@@ -2137,6 +2286,9 @@ void TensorExprKernel::compile() {
     // since NNC views it as contiguous. Only convert it to the right
     // strides at the end of the kernel (if already contiguous it's a no-op)
     Tensor* properly_strided_output = convertOutputToCorrectStrides(output);
+    if (tensors_.at(output->unique()) != properly_strided_output) {
+      tensor_stmts.push_back(Stmt::clone(properly_strided_output->stmt()));
+    }
     tensors_[output->unique()] = properly_strided_output;
     const auto& tt = output->type()->expect<TensorType>();
     auto sizes = *tt->sizes().concrete_sizes();
@@ -2152,6 +2304,7 @@ void TensorExprKernel::compile() {
     }
 
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
+    bufferArgs_.emplace_back(tensors_.at(output->unique()));
     tensorOutputTensorOptions_.emplace_back(
         c10::TensorOptions(tensorType(tensors_[output->unique()]))
             .device(device_));
@@ -2159,15 +2312,13 @@ void TensorExprKernel::compile() {
   }
 
   BackendType backendType = inferBackendTypeFromDevice(device_);
-  Stmt* stmt = generateStmt(backendType);
-  // Set up formal params (inputs, then outputs) for kernel.
-  std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
+  Stmt* stmt = transformLoops(backendType, new Block(tensor_stmts));
 
   // Generate code.
   codegen_ = CreateCodeGen(
       getCodeGenName(backendType),
       stmt,
-      params,
+      bufferArgs_,
       device_,
       SubgraphUtils::generateNameForGraph(graph_));
 }
@@ -2212,8 +2363,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   std::vector<CodeGen::CallArg> runArgs;
   runArgs.reserve(inputs.size() + tensorOutputs_.size());
 
-  for (size_t i = 0, e = inputs.size(); i < e; i++) {
-    auto const& input = inputs[i];
+  for (const auto& input : inputs) {
     if (input.isInt()) {
       runArgs.emplace_back(input.toInt());
     } else if (input.isDouble()) {
