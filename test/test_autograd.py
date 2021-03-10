@@ -302,12 +302,23 @@ class TestAutograd(TestCase):
                 t5 = t1 * t2 + t3
                 t4 *= scale
                 t5 *= scale
+
+                # Save scale
+                ctx.scale = scale
+                ctx.save_for_backward(t1, t2, t3)
                 return scale, t4, None, True, t5, "bar", t1
 
             @staticmethod
             @once_differentiable
-            def backward(ctx, *args):
-                return (args[0], args[1], None, args[2])
+            def backward(ctx, *grads):
+                scale = ctx.scale
+                var1, var2, var3 = ctx.saved_tensors
+                return (
+                    grads[0] * scale + grads[1] * var2 * scale + grads[2],
+                    grads[0] * var3 * scale + grads[1] * var1 * scale,
+                    None,
+                    grads[0] * var2 * scale + grads[1] * scale,
+                )
 
         t1 = torch.rand(10, requires_grad=True)
         t2 = torch.rand(10, requires_grad=True)
@@ -324,9 +335,12 @@ class TestAutograd(TestCase):
 
         # Validate running backward.
         torch.autograd.backward([res[1].sum(), res[4].sum(), res[6].sum()])
-        self.assertEqual(torch.ones_like(t1), t1.grad)
-        self.assertEqual(torch.ones_like(t2), t2.grad)
-        self.assertEqual(None, t3.grad)
+        self.assertIsNotNone(t1.grad)
+        self.assertIsNotNone(t2.grad)
+        self.assertIsNone(t3.grad)
+
+        # Test gradcheck
+        gradcheck(MyFunction.apply, (t1, t2, scale, t3))
 
     def test_custom_function_no_tensors(self):
         class MyFunction(Function):

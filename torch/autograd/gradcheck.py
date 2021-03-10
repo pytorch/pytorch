@@ -289,7 +289,7 @@ def _as_tuple(x):
 
 
 def _differentiable_outputs(x):
-    return tuple(o for o in _as_tuple(x) if o.requires_grad)
+    return tuple(o for o in _as_tuple(x) if torch.is_tensor(o) and o.requires_grad)
 
 
 # Note [VarArg of Tensors]
@@ -411,8 +411,8 @@ def gradcheck(
                     return fail_test('Numerical gradient for function expected to be zero')
         return True
 
-    for i, o in enumerate(output):
-        if not o.requires_grad:
+    for i, o in enumerate(func_out):
+        if not (torch.is_tensor(o) and o.requires_grad):
             continue
 
         def fn(input):

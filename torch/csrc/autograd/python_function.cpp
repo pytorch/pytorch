@@ -390,9 +390,9 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
         self->output_info.emplace_back(wrapped_outputs[tensor_output_idx]);
       }
       Py_INCREF(obj);
-      PyTuple_SetItem(outputs, i, obj);
+      PyTuple_SET_ITEM(outputs, i, obj);
     } else {
-      PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_outputs[tensor_output_idx++]));
+      PyTuple_SET_ITEM(outputs, i, THPVariable_Wrap(wrapped_outputs[tensor_output_idx++]));
     }
   }
 }
