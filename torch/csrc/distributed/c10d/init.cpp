@@ -1,9 +1,9 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10d/Utils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/TCPStore.hpp>
+#include <c10d/Utils.hpp>
 #ifndef _WIN32
 #include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroupRoundRobin.hpp>
@@ -301,10 +301,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "save_thread_local_state",
           &::c10d::Reducer::save_thread_local_state,
           py::call_guard<py::gil_scoped_release>())
-      .def("_set_ddp_runtime_logging_sample_rate",
-           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
-           py::arg("sample_rate"),
-           py::call_guard<py::gil_scoped_release>());
+      .def(
+          "_set_ddp_runtime_logging_sample_rate",
+          &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
+          py::arg("sample_rate"),
+          py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
@@ -323,15 +324,15 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "set_runtime_stats_and_log",
           &::c10d::Logger::set_runtime_stats_and_log,
           py::call_guard<py::gil_scoped_release>())
-        .def(
+      .def(
           "_get_ddp_logging_data",
           &::c10d::Logger::get_ddp_logging_data,
           py::call_guard<py::gil_scoped_release>())
-        .def(
-            "_set_comm_hook_name",
-            &::c10d::Logger::set_comm_hook,
-            py::arg("comm_hook"),
-            py::call_guard<py::gil_scoped_release>());
+      .def(
+          "_set_comm_hook_name",
+          &::c10d::Logger::set_comm_hook,
+          py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
       An enum whose values correspond to different debug settings of the
@@ -339,9 +340,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       and DETAIL, which can be set via the TORCH_DISTRIBUTED_DEBUG environment
       variable.
   )")
-  .value("OFF", ::c10d::DistributedDebugLevel::OFF)
-  .value("INFO", ::c10d::DistributedDebugLevel::INFO)
-  .value("DETAIL", ::c10d::DistributedDebugLevel::DETAIL);
+      .value("OFF", ::c10d::DistributedDebugLevel::OFF)
+      .value("INFO", ::c10d::DistributedDebugLevel::INFO)
+      .value("DETAIL", ::c10d::DistributedDebugLevel::DETAIL);
 
   module.def(
       "_get_debug_mode",
@@ -1283,7 +1284,7 @@ Arguments:
                 Note that ``fut.done()`` returns only whether the operation has been enqueued on the GPU.
            )");
 
-py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
+  py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
       .def_readwrite("world_size", &c10::DDPLoggingData::world_size)
       .def_readwrite("rank", &c10::DDPLoggingData::rank)
@@ -1344,18 +1345,13 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def_readwrite(
           "avg_backward_compute_comm_overlap_time",
           &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time)
+      .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook)
       .def_readwrite(
-          "comm_hook",
-          &c10::DDPLoggingData::comm_hook)
+          "forward_compute_time", &c10::DDPLoggingData::forward_compute_time)
       .def_readwrite(
-          "forward_compute_time",
-          &c10::DDPLoggingData::forward_compute_time)
+          "backward_compute_time", &c10::DDPLoggingData::backward_compute_time)
       .def_readwrite(
-          "backward_compute_time",
-          &c10::DDPLoggingData::backward_compute_time)
-      .def_readwrite(
-          "backward_comm_time",
-          &c10::DDPLoggingData::backward_comm_time)
+          "backward_comm_time", &c10::DDPLoggingData::backward_comm_time)
       .def_readwrite(
           "backward_compute_comm_overlap_time",
           &c10::DDPLoggingData::backward_compute_comm_overlap_time)

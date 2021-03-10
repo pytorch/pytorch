@@ -1,5 +1,5 @@
-#include <c10d/logger.hpp>
 #include <c10d/Utils.hpp>
+#include <c10d/logger.hpp>
 #include <fmt/format.h>
 
 namespace c10d {
@@ -14,25 +14,21 @@ const int kMilliSecondToNanosSecond = 1000000;
 
 } // anonymous namespace
 
-std::ostream& operator<<(
-  std::ostream& output,
-  const Logger& logger
-) {
+std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   auto& ddp_logging_data = logger.ddp_logging_data_;
 
   std::string loggerInfo = fmt::format(
-    "[Rank {} / {}] Training {} unused_parameter_size={} \n "
-    "Avg forward compute time: {} \n Avg backward compute time: {} \n"
-    "Avg backward comm. time: {} \n Avg backward comm/comp overlap time: {}",
-    ddp_logging_data->rank,
-    ddp_logging_data->world_size,
-    ddp_logging_data->module_name,
-    ddp_logging_data->unused_parameter_size,
-    ddp_logging_data->avg_forward_compute_time,
-    ddp_logging_data->avg_backward_compute_time,
-    ddp_logging_data->avg_backward_comm_time,
-    ddp_logging_data->avg_backward_compute_comm_overlap_time
-  );
+      "[Rank {} / {}] Training {} unused_parameter_size={} \n "
+      "Avg forward compute time: {} \n Avg backward compute time: {} \n"
+      "Avg backward comm. time: {} \n Avg backward comm/comp overlap time: {}",
+      ddp_logging_data->rank,
+      ddp_logging_data->world_size,
+      ddp_logging_data->module_name,
+      ddp_logging_data->unused_parameter_size,
+      ddp_logging_data->avg_forward_compute_time,
+      ddp_logging_data->avg_backward_compute_time,
+      ddp_logging_data->avg_backward_comm_time,
+      ddp_logging_data->avg_backward_compute_comm_overlap_time);
 
   if (ddp_logging_data->comm_hook != "") {
     loggerInfo +=
@@ -56,7 +52,8 @@ void Logger::set_env_variables() {
   ddp_logging_data_->gloo_device_transport = parse_env("GLOO_DEVICE_TRANSPORT");
   ddp_logging_data_->nccl_socket_ifname = parse_env("NCCL_SOCKET_IFNAME");
   ddp_logging_data_->nccl_blocking_wait = parse_env("NCCL_BLOCKING_WAIT");
-  ddp_logging_data_->nccl_async_error_handling = parse_env("NCCL_ASYNC_ERROR_HANDLING");
+  ddp_logging_data_->nccl_async_error_handling =
+      parse_env("NCCL_ASYNC_ERROR_HANDLING");
   ddp_logging_data_->nccl_debug = parse_env("NCCL_DEBUG");
   ddp_logging_data_->nccl_nthreads = parse_env("NCCL_NTHREADS");
   ddp_logging_data_->nccl_ib_timeout = parse_env("NCCL_IB_TIMEOUT");
@@ -124,9 +121,7 @@ void Logger::set_construction_data_and_log(
 
   if (parseDistDebugLevel() != DistributedDebugLevel::OFF) {
     std::string initInfo = fmt::format(
-      "[Rank {}]: DDP Initialized with: \n",
-      ddp_logging_data_->rank
-    );
+        "[Rank {}]: DDP Initialized with: \n", ddp_logging_data_->rank);
     LOG(INFO) << initInfo << *ddp_logging_data_;
   }
 
@@ -149,8 +144,7 @@ void Logger::calculate_avg_cpu_time(
     return;
   }
   time_duration = cpu_end_time - cpu_start_time;
-  avg_time = (time_duration +
-              avg_time * (num_iterations_stats_recorded_ - 1)) /
+  avg_time = (time_duration + avg_time * (num_iterations_stats_recorded_ - 1)) /
       num_iterations_stats_recorded_;
 }
 
@@ -172,8 +166,7 @@ void Logger::calculate_avg_gpu_time(
     return;
   }
   time_duration = int64_t(milliseconds * kMilliSecondToNanosSecond);
-  avg_time = (time_duration +
-              avg_time * (num_iterations_stats_recorded_ - 1)) /
+  avg_time = (time_duration + avg_time * (num_iterations_stats_recorded_ - 1)) /
       num_iterations_stats_recorded_;
 }
 #endif
@@ -267,7 +260,7 @@ void Logger::set_runtime_stats_and_log() {
 
     calculate_avg_cpu_time(
         ddp_logging_data_->avg_backward_compute_time,
-         ddp_logging_data_->backward_compute_time,
+        ddp_logging_data_->backward_compute_time,
         reducer_->cpu_timer_.backward_compute_start_time,
         reducer_->cpu_timer_.backward_compute_end_time);
 
