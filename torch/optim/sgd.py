@@ -12,7 +12,7 @@ class SGD(Optimizer):
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
-        lr (float): learning rate
+        lr (float, optional): learning rate (default: 1e-3)
         momentum (float, optional): momentum factor (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
@@ -53,9 +53,9 @@ class SGD(Optimizer):
         The Nesterov version is analogously modified.
     """
 
-    def __init__(self, params, lr=required, momentum=0, dampening=0,
+    def __init__(self, params, lr=1e-3, momentum=0, dampening=0,
                  weight_decay=0, nesterov=False):
-        if lr is not required and lr < 0.0:
+        if lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
             raise ValueError("Invalid momentum value: {}".format(momentum))
