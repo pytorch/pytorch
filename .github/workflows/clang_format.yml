@@ -13,10 +13,9 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        uses: ./.github/actions/checkout-pr-tip
-        id: get_pr_tip
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Run clang-format
         run: |
           set -eu

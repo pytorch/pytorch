@@ -16,10 +16,9 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        uses: ./.github/actions/checkout-pr-tip
-        id: get_pr_tip
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Ensure consistent CircleCI YAML config
         run: |
           pip install -r requirements.txt
@@ -66,10 +65,9 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        uses: ./.github/actions/checkout-pr-tip
-        id: get_pr_tip
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Run flake8
         run: |
           set -eux
@@ -99,10 +97,9 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        uses: ./.github/actions/checkout-pr-tip
-        id: get_pr_tip
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Install dependencies
         run: |
           set -eux
@@ -198,10 +195,9 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        uses: ./.github/actions/checkout-pr-tip
-        id: get_pr_tip
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Run cmakelint
         run: |
           set -eux
