@@ -194,9 +194,9 @@ sampleMultinomialOnce(int64_t* dest,
     scalar_t val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
-      CUDA_KERNEL_ASSERT(val >= zero);
-      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::isinf(val));
       CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::isnan(val));
+      CUDA_KERNEL_ASSERT(!THCNumerics<scalar_t>::isinf(val));
+      CUDA_KERNEL_ASSERT(val >= zero);
       sum = sum + static_cast<accscalar_t>(val);
     }
 
