@@ -17,7 +17,7 @@ namespace c10 {
 #define FORALL_NS_SYMBOLS(_)         \
   _(namespaces, prim)                \
   _(namespaces, aten)                \
-  _(namespaces, cuda)               \
+  _(namespaces, cuda)                \
   _(namespaces, onnx)                \
   _(namespaces, attr)                \
   _(namespaces, scope)               \
