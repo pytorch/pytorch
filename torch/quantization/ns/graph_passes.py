@@ -93,7 +93,6 @@ def remove_observers_add_loggers(
         elif node in node_to_instrument_to_ref_node_name:
             ref_name = node_to_instrument_to_ref_node_name[node]
             if should_log_inputs:
-                # TODO(before land): comment this code better
                 if type(node.args[0]) == Node:
                     # create a single input logger
                     prev_node = env[node.args[0].name]
@@ -517,8 +516,6 @@ def create_a_shadows_b(
                     assert isinstance(input_logger, list)
                     for input_logger_inner in input_logger:
                         input_logger_mod = getattr(gm_b, input_logger_inner.name)
-                        # TODO(before land): distinguish the ref_node_name by index, or
-                        # add a separate field to the loggers by index of logger
                         input_logger_mod.ref_node_name = cur_node.name
 
             # hook up a logger to the mod_b copy
