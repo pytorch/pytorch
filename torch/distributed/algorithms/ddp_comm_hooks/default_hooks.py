@@ -65,3 +65,31 @@ def fp16_compress_hook(
         return [decompressed_tensor]
 
     return fut.then(decompress)
+
+def fp16_compress_wrapper(hook: callable) -> callable:
+    """
+    This wrapper applies ``float 32`` to ``float 16`` compression to an arbitrary DDP communication hook.
+
+    Example::
+    >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1, start_powerSGD_iter=10)
+    >>> ddp_model.register_comm_hook(state, fp16_compress_wrapper(powerSGD_hook))
+    """
+
+    def comm_hook_with_fp16(hook_state, bucket: dist.GradBucket) -> torch.futures.Future:
+        # Cast tensors to FP16.
+        bucket_tensors = bucket.get_tensors()
+        bucket_tensors[0] = bucket_tensors[0].to(torch.float16)
+
+        fut = hook(hook_state, bucket)
+
+        def decompress(fut):
+            decompressed_tensor = bucket.get_tensors()[0]
+            # Decompress in place to reduce the peak memory.
+            # See: https://github.com/pytorch/pytorch/issues/45968
+            decompressed_tensor.copy_(fut.value()[0])
+            return [decompressed_tensor]
+
+        # Decompress after hook has run.
+        return fut.then(decompress)
+
+    return comm_hook_with_fp16
