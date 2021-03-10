@@ -1382,11 +1382,11 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
-    alpha = 2
+    alpha = 2  # type: ignore
     if dtype.is_complex:
-        alpha = 1 + 2j
+        alpha = 1 + 2j  # type: ignore
     elif dtype.is_floating_point:
-        alpha = 0.1
+        alpha = 0.1  # type: ignore
 
     if variant == 'tensor':
         samples = (
@@ -1401,7 +1401,7 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
             SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S))), kwargs=dict(alpha=alpha)),
             SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,))), kwargs=dict(alpha=alpha)),
             SampleInput((_make_tensor_helper(()), _make_tensor_helper(())), kwargs=dict(alpha=alpha)),
-        )
+        )  # type: ignore
     elif variant == 'scalar':
         # Scalar Other
         samples = (
@@ -1410,9 +1410,9 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
 
             SampleInput((_make_tensor_helper((S, S)), 0.5), kwargs=dict(alpha=alpha)),
             SampleInput((_make_tensor_helper(()), 0.5), kwargs=dict(alpha=alpha)),
-        )
+        )  # type: ignore
     else:
-        raise("Invalid variant!")
+        return Exception("Invalid variant!")
 
     return samples
 
