@@ -51,6 +51,9 @@ struct OverloadedFunction : public Function {
   std::vector<const at::FunctionSchema*> loadPossibleSchemas(
       const at::ClassTypePtr& owner_class,
       const SourceRange& loc) {
+    // Even though overloaded methods are inserted into graph with
+    // a mangled name, the original name can still be found with
+    // name(). Therefore, we don't need to check for mangled names here.
     auto overloadedMethods = owner_class->findOverloadedMethod(name());
     std::vector<const at::FunctionSchema*> schemas;
 

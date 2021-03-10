@@ -1384,21 +1384,15 @@ torch::jit::Function* ClassType::findMethod(const std::string& name) const {
       return method;
     }
   }
+
+  if (auto method = getMangledOverloadedMethod(name)) {
+    return method;
+  }
+
   return nullptr;
 }
 torch::jit::Function& ClassType::getMethod(const std::string& name) const {
   auto method = findMethod(name);
-
-  if (!method) {
-    if (findOverloadedMethod(name).size() == 1) {
-      method = findOverloadedMethod(name)[0];
-    }
-  }
-
-  if (!method) {
-    method = getMangledOverloadedMethod(name);
-  }
-
   TORCH_CHECK(
       method != nullptr,
       "Couldn't find method: '",

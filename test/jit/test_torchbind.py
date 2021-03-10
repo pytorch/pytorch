@@ -111,7 +111,7 @@ class TestTorchbind(JitTestCase):
         # Ensure we are creating the object and calling __init__
         # rather than calling the __init__wrapper nonsense
         fc = FileCheck().check('prim::CreateObject()')\
-                        .check('prim::CallMethod[name="__init__"]')
+                        .check('prim::CallMethod[name="__init____0"]')
         fc.run(str(scripted.graph))
         out = scripted()
         self.assertEqual(out.pop(), "mom")
