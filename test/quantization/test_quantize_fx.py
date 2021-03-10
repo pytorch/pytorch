@@ -1802,6 +1802,24 @@ class TestQuantizeFx(QuantizationTestCase):
 
         self.assertTrue(hasattr(m.mods2, 'qconfig'))
 
+    def test_not_used(self):
+        """ Test quantizing a not used value"""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = x + x
+                x.sigmoid_()
+                return x
+
+        m = M().eval()
+        qconfig_dict = {"": float16_static_qconfig}
+        # make sure quantization runs
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
