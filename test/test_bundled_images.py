@@ -2,13 +2,10 @@
 import torch
 import torch.utils.bundled_inputs
 import io
-from torch.testing._internal.common_utils import TestCase, IS_FBCODE
-
-if not IS_FBCODE:
-    import pytest
-    pytestmark = pytest.mark.skip
-
 import cv2
+from torch.testing._internal.common_utils import TestCase
+
+torch.ops.load_library("//caffe2/torch/fb/operators:decode_bundled_image")
 
 def model_size(sm):
     buffer = io.BytesIO()
@@ -42,10 +39,6 @@ def bundle_jpeg_image(img_tensor, quality):
     return obj
 
 class TestBundledInputs(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        torch.ops.load_library("//caffe2/torch/fb/operators:decode_bundled_image")
-
     def test_single_tensors(self):
         class SingleTensorModel(torch.nn.Module):
             def forward(self, arg):
