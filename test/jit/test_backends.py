@@ -1,4 +1,5 @@
 from torch.testing._internal.jit_utils import JitTestCase
+import io
 import os
 import sys
 import unittest
@@ -61,6 +62,9 @@ class BasicModule(torch.nn.Module):
         return x - h
 
 
+# This is ignored in IS_WINDOWS or IS_MACOS cases. Hence we need the one in TestBackends.
+@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+                 "Non-portable load_library call used in test")
 class JitBackendTestCase(JitTestCase):
     """
     A common base class for JIT backend tests that contains common utility
@@ -69,8 +73,6 @@ class JitBackendTestCase(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
-            raise unittest.SkipTest("non-portable load_library call used in test")
         torch_root = Path(__file__).resolve().parent.parent.parent
         p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
         torch.ops.load_library(str(p))
@@ -166,6 +168,46 @@ class BasicModuleTest(JitBackendTestCase):
 
         # Loaded module should produce the same outputs.
         self.test_execution()
+
+
+class BasicModuleUnavailableTest(JitBackendTestCase):
+    """
+    Tests for BasicModule with a backend that is not available.
+    Fundamentally:
+      * _jit_to_backend is successful.
+      * Execution fails with an exception.
+      * Saving is successful.
+      * Loading fails with an exception.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Create Python, JIT and backend versions of BasicModule.
+        self.module = BasicModule()
+        self.scripted_module = torch.jit.script(BasicModule())
+        self.lowered_module = torch._C._jit_to_backend(
+            "test_backend_unavailable",
+            self.scripted_module,
+            {"forward": {"": ""}},
+        )
+
+    def test_execution(self):
+        # Test execution with backend fails because the backend that is not available.
+        input = torch.randn(5)
+
+        # Test exception is thrown.
+        with self.assertRaisesRegex(Exception, r"Backend is not available."):
+            backend_method = self.lowered_module.__getattr__("forward")
+            backend_output = backend_method(*(input, input))
+
+    @skipIfRocm
+    def test_save_load(self):
+        # Test that saving the lowered module is OK but loading fails because the backend is not available.
+        buffer = io.BytesIO()
+        torch.jit.save(self.lowered_module, buffer)
+        buffer.seek(0)
+        with self.assertRaisesRegex(Exception, r"Backend is not available."):
+            imported = torch.jit.load(buffer)
 
 
 class NestedModuleTest(JitBackendTestCase):
@@ -376,6 +418,9 @@ class SelectiveLoweringTest(JitBackendTestCase):
             to_test_backend_selective(torch.jit.script(mod), {"forward": ""}, ["sub1.submodule"])
 
 
+# This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
+@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
+                 "Non-portable load_library call used in test")
 class TestBackends(JitTestCase):
     """
     This class wraps and invokes all subclasses of JitBackendTestCase so that each one
@@ -385,6 +430,7 @@ class TestBackends(JitTestCase):
     def __init__(self, name):
         super().__init__(name)
         self.basic_module_test = BasicModuleTest(name)
+        self.basic_module_unavailable_test = BasicModuleUnavailableTest(name)
         self.nested_module_test = NestedModuleTest(name)
         self.selective_lowering_test = SelectiveLoweringTest(name)
 
@@ -392,18 +438,21 @@ class TestBackends(JitTestCase):
         super().setUp()
         if not TEST_WITH_ROCM:
             self.basic_module_test.setUp()
+            self.basic_module_unavailable_test.setUp()
             self.nested_module_test.setUp()
             self.selective_lowering_test.setUp()
 
     @skipIfRocm
     def test_execution(self):
         self.basic_module_test.test_execution()
+        self.basic_module_unavailable_test.test_execution()
         self.nested_module_test.test_execution()
         self.selective_lowering_test.test_execution()
 
     @skipIfRocm
     def test_save_load(self):
         self.basic_module_test.test_save_load()
+        self.basic_module_unavailable_test.test_save_load()
         self.nested_module_test.test_save_load()
         self.selective_lowering_test.test_save_load()
 
