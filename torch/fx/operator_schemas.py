@@ -41,7 +41,8 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
     for arg in ts_schema.arguments:
         arg_type = _torchscript_type_to_python_type(arg.type)
         default = arg.default_value if arg.has_default_value() else inspect.Parameter.empty
-        name = arg.name
+        # TODO: HACK!!!!
+        name = arg.name if arg.name != 'self' else 'input'
         kind = inspect.Parameter.KEYWORD_ONLY if arg.kwarg_only else inspect.Parameter.POSITIONAL_OR_KEYWORD
         parameters.append(inspect.Parameter(name=name, kind=kind, default=default, annotation = arg_type))
     return_types = [_torchscript_type_to_python_type(ret.type) for ret in ts_schema.returns]
