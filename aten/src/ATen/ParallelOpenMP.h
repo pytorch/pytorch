@@ -26,7 +26,7 @@ inline void parallel_for(
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
   // Work around memory leak when using 1 thread in nested "omp parallel"
-  // caused by some buggy OpenMP versions and the fact that omp_in_parallel()
+  // caused by some buggy OpenMP versions, and the fact that omp_in_parallel()
   // returns false when omp_get_max_threads() == 1 inside nested "omp parallel"
   // See issue gh-32284
 
