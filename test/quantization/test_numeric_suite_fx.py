@@ -713,21 +713,91 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
         # assume success if no exceptions
         results = get_matching_subgraph_pairs(mp, mq)
 
-class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
 
-    @override_qengines
-    def test_extract_weights_mod(self):
-        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
+class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
+    def _test_extract_weights(self, m, results_len=0):
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = extract_weights('fp32_prepared', mp, 'int8', mq)
-        self.assertTrue(len(results) == 2)
+        self.assertTrue(len(results) == results_len)
         self.assert_ns_compare_dict_valid(results)
 
-    @override_qengines
+    def _test_match_activations(
+        self, m, data, prepared_expected_node_occurrence=None, results_len=0,
+        should_log_inputs=False,
+    ):
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        mp(*data)
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+
+        mp_ns, mq_ns = add_loggers(
+            'fp32_prepared', mp, 'int8', mq, OutputLogger,
+            should_log_inputs=should_log_inputs)
+
+        if prepared_expected_node_occurrence:
+            self.checkGraphModuleNodes(
+                mp_ns, expected_node_occurrence=prepared_expected_node_occurrence)
+            self.checkGraphModuleNodes(
+                mq_ns, expected_node_occurrence=prepared_expected_node_occurrence)
+
+        mp_ns = torch.jit.script(mp_ns)
+        mq_ns = torch.jit.script(mq_ns)
+
+        # calibrate
+        mp_ns(*data)
+        mq_ns(*data)
+
+        # check activation result correctness
+        act_compare_dict = extract_logger_info(mp_ns, mq_ns, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == results_len)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
+
+    def _test_match_shadow_activations(
+        self, m, data, prepared_expected_node_occurrence=None, results_len=0,
+        should_log_inputs=False,
+    ):
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        mp(*data)
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+
+        mp_shadows_mq = add_shadow_loggers(
+            'fp32_prepared', mp, 'int8', mq, OutputLogger,
+            should_log_inputs=should_log_inputs)
+
+        if prepared_expected_node_occurrence:
+            self.checkGraphModuleNodes(
+                mp_shadows_mq, expected_node_occurrence=prepared_expected_node_occurrence)
+
+        # TODO(before land): test both scripted and non-scripted
+        mp_shadows_mq = torch.jit.script(mp_shadows_mq)
+
+        # calibrate
+        mp_shadows_mq(*data)
+
+        # check activation result correctness
+        act_compare_dict = extract_shadow_logger_info(
+            mp_shadows_mq, OutputLogger)
+        self.assertTrue(len(act_compare_dict) == results_len)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
+
+
+class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
+
+    @skipIfNoFBGEMM
+    def test_extract_weights_mod(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
+        self._test_extract_weights(m, results_len=2)
+
+    @skipIfNoFBGEMM
     def test_extract_weights_fun(self):
         class M(nn.Module):
             def __init__(self):
@@ -743,54 +813,22 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
                 return x
 
         m = M().eval()
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(1, 4))
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
-        mp_copy = copy.deepcopy(mp)
-        mq = convert_fx(mp_copy)
-        results = extract_weights('fp32_prepared', mp, 'int8', mq)
-        self.assertTrue(len(results) == 2)
-        self.assert_ns_compare_dict_valid(results)
+        self._test_extract_weights(m, results_len=2)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_match_activations_mod(self):
         m = nn.Sequential(
             torch.quantization.QuantStub(),
             nn.Conv2d(1, 1, 1),
             nn.Conv2d(1, 1, 1),
         ).eval()
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(2, 1, 2, 2))
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
-        mp_copy = copy.deepcopy(mp)
-        mq = convert_fx(mp_copy)
-
-        mp_ns, mq_ns = add_loggers(
-            'fp32_prepared', mp, 'int8', mq, OutputLogger)
-
         expected_occurrence = {
             ns.call_module(OutputLogger): 2,
         }
-        self.checkGraphModuleNodes(
-            mp_ns, expected_node_occurrence=expected_occurrence)
-        self.checkGraphModuleNodes(
-            mq_ns, expected_node_occurrence=expected_occurrence)
-
-        # TODO(before land): test both scripted and non-scripted
-        mp_ns = torch.jit.script(mp_ns)
-        mq_ns = torch.jit.script(mq_ns)
-
-        # calibrate
-        input_fp32 = torch.randn(2, 1, 2, 2)
-        mp_ns(input_fp32)
-        mq_ns(input_fp32)
-
-        # check activation result correctness
-        act_compare_dict = extract_logger_info(mp_ns, mq_ns, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_compare_dict_valid(act_compare_dict)
+        self._test_match_activations(
+            m, (torch.randn(2, 1, 2, 2),),
+            prepared_expected_node_occurrence=expected_occurrence,
+            results_len=2)
 
     @override_qengines
     def test_match_activations_fun(self):
@@ -811,67 +849,24 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
                 return x
 
         m = M().eval()
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(4, 4))
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
-        mp_copy = copy.deepcopy(mp)
-        mq = convert_fx(mp_copy)
-
-        mp_ns, mq_ns = add_loggers(
-            'fp32_prepared', mp, 'int8', mq, OutputLogger)
-
         expected_occurrence = {
             ns.call_module(OutputLogger): 2,
         }
-        self.checkGraphModuleNodes(
-            mp_ns, expected_node_occurrence=expected_occurrence)
-        self.checkGraphModuleNodes(
-            mq_ns, expected_node_occurrence=expected_occurrence)
+        self._test_match_activations(
+            m, (torch.randn(4, 4),),
+            prepared_expected_node_occurrence=expected_occurrence,
+            results_len=2)
 
-        # TODO(before land): test both scripted and non-scripted
-        mp_ns = torch.jit.script(mp_ns)
-        mq_ns = torch.jit.script(mq_ns)
-
-        # calibrate
-        input_fp32 = torch.randn(4, 4)
-        mp_ns(input_fp32)
-        mq_ns(input_fp32)
-
-        # check activation result correctness
-        act_compare_dict = extract_logger_info(mp_ns, mq_ns, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_compare_dict_valid(act_compare_dict)
-
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_add_shadow_loggers_mod(self):
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
             nn.Conv2d(1, 1, 1),
         ).eval()
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(1, 1, 4, 4))
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
-        mp_copy = copy.deepcopy(mp)
-        mq = convert_fx(mp_copy)
+        self._test_match_shadow_activations(
+            m, (torch.randn(1, 1, 4, 4),), results_len=2)
 
-        mp_shadows_mq = add_shadow_loggers('fp32_prepared', mp, 'int8', mq, OutputLogger)
-
-        # TODO(before land): test both scripted and non-scripted
-        mp_shadows_mq = torch.jit.script(mp_shadows_mq)
-
-        # calibrate
-        input_fp32 = torch.randn(1, 1, 4, 4)
-        mp_shadows_mq(input_fp32)
-
-        # check activation result correctness
-        act_compare_dict = extract_shadow_logger_info(
-            mp_shadows_mq, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_compare_dict_valid(act_compare_dict)
-
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_add_shadow_loggers_fun(self):
         class M(nn.Module):
             def __init__(self):
@@ -890,27 +885,8 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
                 return x
 
         m = M().eval()
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(4, 4))
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
-        mp_copy = copy.deepcopy(mp)
-        mq = convert_fx(mp_copy)
-
-        mp_shadows_mq = add_shadow_loggers('fp32_prepared', mp, 'int8', mq, OutputLogger)
-
-        # TODO(before land): test both scripted and non-scripted
-        mp_shadows_mq = torch.jit.script(mp_shadows_mq)
-
-        # calibrate
-        input_fp32 = torch.randn(4, 4)
-        mp_shadows_mq(input_fp32)
-
-        # check activation result correctness
-        act_compare_dict = extract_shadow_logger_info(
-            mp_shadows_mq, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_compare_dict_valid(act_compare_dict)
+        self._test_match_shadow_activations(
+            m, (torch.randn(4, 4),), results_len=2)
 
     @skipIfNoFBGEMM
     def test_add_shadow_loggers_multiple_dtype_casts(self):
@@ -928,23 +904,16 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
                 return x
 
         m = M().eval()
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(4, 4))
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
-        mp_copy = copy.deepcopy(mp)
-        mq = convert_fx(mp_copy)
-
-        mp_shadows_mq = add_shadow_loggers('fp32_prepared', mp, 'int8', mq, OutputLogger)
-
         expected_occurrence = {
             # 3 dequantize function calls from the 3 dtype casts for [x, x, x]
             ns.call_function(torch.dequantize): 3,
             # 1 dequantize method call for module output
             ns.call_method("dequantize"): 1,
         }
-        self.checkGraphModuleNodes(
-            mp_shadows_mq, expected_node_occurrence=expected_occurrence)
+        self._test_match_shadow_activations(
+            m, (torch.randn(4, 4),),
+            prepared_expected_node_occurrence=expected_occurrence,
+            results_len=1)
 
     @skipIfNoFBGEMM
     def test_logging_inputs(self):
@@ -962,98 +931,37 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
                 return x
 
         m = M().eval()
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(1, 1, 4, 4))
-        # TODO(future PR): prevent the need for copying here, we can copy the
-        # modules but should reuse the underlying tensors
-        mp_copy = copy.deepcopy(mp)
-        mq = convert_fx(mp_copy)
-
-        mp_shadows_mq = add_shadow_loggers(
-            'fp32_prepared', mp, 'int8', mq, OutputLogger, should_log_inputs=True)
-        mp_shadows_mq(torch.randn(1, 1, 4, 4))
-
-        act_compare_dict = extract_shadow_logger_info(
-            mp_shadows_mq, OutputLogger)
-
-        self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_compare_dict_valid(act_compare_dict)
+        self._test_match_shadow_activations(
+            m, (torch.randn(1, 1, 4, 4),),
+            results_len=2,
+            should_log_inputs=True)
 
 
-class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
+class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
     Tests numeric suite core APIs on non-toy models.
     """
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_sparsenn_compare_activations(self):
         for should_log_inputs in (True, False):
             sparse_nn = SparseNNModel().eval()
-
-            # quantize the embeddings and the dense part separately, using FX graph mode
-            sparse_nn.dense_top = prepare_fx(
-                sparse_nn.dense_top,
-                {'': torch.quantization.default_qconfig},
-            )
-
-            # calibrate
             idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
             offsets = torch.LongTensor([0, 4])
             x = torch.randn(2, 4)
-            sparse_nn(idx, offsets, x)
-
-            # convert
-            sparse_nn_q = copy.deepcopy(sparse_nn)
-            sparse_nn_q.dense_top = convert_fx(sparse_nn_q.dense_top)
-
-            # test out compare activations API
-            sparse_nn.dense_top, sparse_nn_q.dense_top = add_loggers(
-                'fp32_prepared', sparse_nn.dense_top, 'int8', sparse_nn_q.dense_top, OutputLogger,
+            self._test_match_activations(
+                sparse_nn, (idx, offsets, x),
+                results_len=4,
                 should_log_inputs=should_log_inputs)
 
-            # calibrate
-            sparse_nn(idx, offsets, x)
-            sparse_nn_q(idx, offsets, x)
-
-            # inspect results
-            act_compare_dict = extract_logger_info(
-                sparse_nn, sparse_nn_q, OutputLogger)
-            self.assertTrue(len(act_compare_dict) == 4)
-            self.assert_ns_compare_dict_valid(act_compare_dict)
-
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_sparsenn_shadow(self):
-        # for should_log_inputs in (True, False):
-        for should_log_inputs in (True,):
+        for should_log_inputs in (True, False):
             sparse_nn = SparseNNModel().eval()
-
-            # quantize the embeddings and the dense part separately, using FX graph mode
-            sparse_nn.dense_top = prepare_fx(
-                sparse_nn.dense_top,
-                {'': torch.quantization.default_qconfig},
-            )
-
-            # calibrate
             idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
             offsets = torch.LongTensor([0, 4])
             x = torch.randn(2, 4)
-            sparse_nn(idx, offsets, x)
-
-            # convert
-            sparse_nn_q = copy.deepcopy(sparse_nn)
-            sparse_nn_q.dense_top = convert_fx(sparse_nn_q.dense_top)
-
-            # test out compare shadow activations API
-            sparse_nn_q.dense_top = add_shadow_loggers(
-                'fp32_prepared', sparse_nn.dense_top,
-                'int8', sparse_nn_q.dense_top, OutputLogger,
+            self._test_match_activations(
+                sparse_nn, (idx, offsets, x),
+                results_len=4,
                 should_log_inputs=should_log_inputs)
-
-            # calibrate
-            sparse_nn_q(idx, offsets, x)
-
-            # check activation result correctness
-            act_compare_dict = extract_shadow_logger_info(
-                sparse_nn_q, OutputLogger)
-            self.assertTrue(len(act_compare_dict) == 4)
-            self.assert_ns_compare_dict_valid(act_compare_dict)
