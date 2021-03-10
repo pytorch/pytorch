@@ -49,7 +49,7 @@ run_tests() {
     for path in  /c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe /c/Windows/System32/nvidia-smi.exe; do
         if [ -x $path ]; then
             $path;
-             break
+            break
         fi
     done
 
