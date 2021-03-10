@@ -368,23 +368,6 @@ set_property(
     TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
-# cusolver
-add_library(caffe2::cusolver INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
-    set_property(
-        TARGET caffe2::cusolver PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a"
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a"
-        )
-else()
-    set_property(
-        TARGET caffe2::cusolver PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDA_cusolver_LIBRARY})
-endif()
-set_property(
-    TARGET caffe2::cusolver PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-    ${CUDA_INCLUDE_DIRS})
-
 # nvrtc
 add_library(caffe2::nvrtc UNKNOWN IMPORTED)
 set_property(
