@@ -1081,20 +1081,12 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
               grad = bucket_view_in;
             } else {
               if (!grad.is_alias_of(bucket_view_in)) {
-                grad.copy_(bucket_view_in);
-                TORCH_WARN_ONCE(
+                TORCH_CHECK(false,
                     "Detected at least one parameter gradient is not the "
-                    "expected DDP bucket view when setting "
-                    "gradient_as_bucket_view=True. This can happen when "
-                    "multiple parameters sharing the same gradient. For "
-                    "example, param0 and param1 share the same gradient "
-                    "grad0. In this case, grad0 would first point to "
-                    "bucket_view_in0 when param0 is ready. Later, when "
-                    "param1 is ready, it will override grad0 to point to "
-                    "bucket_view_in1. However, param0 still expects grad0 "
-                    "to point to bucket_view_in0, and hence hit this "
-                    "warning. If you saw this message, please double-check if "
-                    "the above situation is expected for your application.");
+                    "expected DDP bucket view with gradient_as_bucket_view=True. "
+                    "This may happen (for example) if multiple allreduce hooks "
+                    "were registered onto the same parameter. If you hit this error, "
+                    "please file an issue with a minimal repro.");
               }
             }
             // The grad is modified and needs to be written back.
