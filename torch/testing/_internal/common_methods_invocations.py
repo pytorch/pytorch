@@ -1216,6 +1216,39 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
 def sample_inputs_linalg_svd(op_info, device, dtype, requires_grad=False):
     return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=True)
 
+def sample_inputs_eig(op_info, device, dtype, requires_grad=False):
+    eigvecs = make_tensor((S, S), device=device, dtype=dtype,
+                          low=None, high=None)
+    eigvals = make_tensor((S,), device=device, dtype=dtype,
+                          low=None, high=None)
+    input = (eigvecs * eigvals.unsqueeze(-2)) @ eigvecs.inverse()
+    input.requires_grad_(requires_grad)
+
+    def process_input(eigpair):
+        eigvals, eigvecs = eigpair
+        if dtype.is_complex:
+            # eig produces eigenvectors which are normalized to 1 norm.
+            # Note that if v is an eigenvector, so is v * e^{i \phi},
+            # and |v| = |v * e^{i \phi}| = 1.
+            # This, however, makes the eigenvector computation process
+            # rather unstable under a perturbation that gradcheck is using,
+            # resulting in failures of both torch.autograd.gradcheck and
+            # torch.autograd.gradgradcheck.
+            # Hence for complex inputs we ignore the phases and check only
+            # the absolute values. Again, we can do so because the eigenvectors
+            # are normalized to 1 norm.
+            return eigvals, eigvecs.abs()
+        else:
+            return eigvals, eigvecs
+
+    return [
+        SampleInput(
+            input,
+            kwargs=dict(eigenvectors=True),
+            output_process_fn_grad=process_input
+        ),
+    ]
+
 def sample_inputs_pinverse(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.pinverse with distinct singular values so that autograd is always stable.
@@ -2413,6 +2446,16 @@ op_db: List[OpInfo] = [
                         # These tests do not take into account custom op.get_op()
                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),)
                     ),
+    OpInfo('eig',
+           op=torch.eig,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_eig,
+           decorators=[
+               skipCUDAIfNoMagma,
+               skipCPUIfNoLapack,
+           ],),
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
