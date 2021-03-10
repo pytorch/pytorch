@@ -712,7 +712,7 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
         scale_grad_by_freq, mode, per_sample_weights, padding_idx);
   } else {
     return at::_embedding_bag_dense_backward(
-        grad, indices, offsets, offset2bag_, bag_size_, max_indices_, num_weights,
+        grad, indices, offset2bag_, bag_size_, max_indices_, num_weights,
         scale_grad_by_freq, mode, per_sample_weights, padding_idx);
   }
 }
@@ -779,7 +779,6 @@ template <typename scalar_t>
 void _embedding_bag_dense_backward_cpu_sum_mean(
     const Tensor& grad,
     const Tensor& indices_,
-    const Tensor& offsets_,
     const Tensor& offset2bag__,
     const Tensor& bag_size_,
     int64_t num_weights,
@@ -810,11 +809,10 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
   // explicitly capture all required variables to work around windows build
   // TODO: fix this when windows can correctly capture variables in nested lambda
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "_embedding_bag_dense_backward_cpu_sum_mean",
-    [&indices, &offsets_, &offset2bag, &bag_size_, &num_weights, &numel, &per_sample_weights,
+    [&indices, &offset2bag, &bag_size_, &num_weights, &numel, &per_sample_weights,
       &per_sample_weights_data, &per_sample_weights_stride, &mode, &scale_grad_by_freq,
       &grad, &index_grad_weight, &padding_idx] {
     auto* indices_data = indices.data_ptr<index_t>();
-    auto* offsets_data = offsets_.data_ptr<index_t>();
     auto* offset2bag_data = offset2bag.data_ptr<index_t>();
     auto* bag_size_data = bag_size_.data_ptr<index_t>();
 
@@ -825,7 +823,7 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
     auto loop =
       [&next_unique_index_idx, &indices_data, &offset2bag_data, &bag_size_data, &per_sample_weights,
         &mode, &per_sample_weights_data, &per_sample_weights_stride, &scale_grad_by_freq,
-        &counts, &offsets_, &indices, &offsets_data, &grad, &index_grad_weight, &padding_idx
+        &counts, &grad, &index_grad_weight, &padding_idx
       ](index_t start, index_t end) {
       for (index_t i = start; i < end; i++) {
         index_t start = i == 0 ? 0 : next_unique_index_idx[i - 1];
@@ -867,14 +865,13 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
 }
 
 Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indices_,
-                                  const Tensor &offsets_,
                                   const Tensor &offset2bag__,
                                   const Tensor &bag_size_,
                                   const Tensor& max_indices_, int64_t num_weights,
                                   bool scale_grad_by_freq, int64_t mode,
                                   const Tensor& per_sample_weights_,
                                   int64_t padding_idx) {
-  // indices_, offsets_ and offset2bag__ are assumed having correct dtypes and
+  // indices_ and offset2bag__ are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward above.
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
   // for more details.
@@ -893,7 +890,7 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
 
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "embedding_bag_backward", [&] {
       _embedding_bag_dense_backward_cpu_sum_mean<scalar_t>(
-          grad, indices_, offsets_, offset2bag__, bag_size_, num_weights,
+          grad, indices_, offset2bag__, bag_size_, num_weights,
           scale_grad_by_freq, mode, per_sample_weights_, index_grad_weight,
           padding_idx);
   });

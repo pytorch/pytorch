@@ -215,8 +215,8 @@ Tensor embedding_bag_backward_cuda_sum_avg(
     }
   });
   return embedding_backward_cuda_kernel(grad, orig_indices, sorted_indices,
-      count, num_weights, padding_idx, scale_grad_by_freq,
-      mode == MODE_MEAN, offset2bag, bag_size, per_sample_weights);
+      count, num_weights, padding_idx, mode == MODE_MEAN, offset2bag,
+      bag_size, per_sample_weights);
 }
 
 template <typename scalar_t, typename index_t>
@@ -384,7 +384,6 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
 }
 
 Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &indices,
-                                   const Tensor &offsets,
                                    const Tensor &offset2bag,
                                    const Tensor &bag_size_,
                                    const Tensor &max_indices,
@@ -396,7 +395,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_embedding_bag_dense_backward_cuda");
 
-  // indices, offsets and offset2bag are assumed having correct dtypes and
+  // indices and offset2bag are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward in
   // EmbeddingBag.cpp.
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
@@ -404,9 +403,9 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
 
   Tensor grad = grad_.contiguous();
   auto indices_arg = TensorArg(indices, "indices", 1);
-  auto offsets_arg = TensorArg(offsets, "offsets", 1);
+  //auto offsets_arg = TensorArg(offsets, "offsets", 1);
   auto grad_arg = TensorArg(grad, "grad", 1);
-  checkSameGPU("embedding_bag_cuda", grad_arg, offsets_arg);
+  //checkSameGPU("embedding_bag_cuda", grad_arg, offsets_arg);
   checkSameGPU("embedding_bag_cuda", grad_arg, indices_arg);
 
 
