@@ -3712,9 +3712,12 @@ class TestNN(NNTestCase):
 
     def test_embedding_from_pretrained_padding_idx(self):
         padding_idx = 2
+        padding_vec = torch.ones(3) * 7
         embeddings = torch.rand(4, 3, requires_grad=True)
+        with torch.no_grad():
+            embeddings[padding_idx] = padding_vec
         embedding_nn = nn.Embedding.from_pretrained(embeddings, padding_idx=padding_idx)
-        self.assertEqual(embedding_nn.weight[padding_idx].sum(), 0)
+        self.assertEqual(embedding_nn.weight[padding_idx], padding_vec)
 
     def test_embedding_bag_from_pretrained_padding_idx(self):
         padding_idx = 2
@@ -5185,6 +5188,23 @@ class TestNN(NNTestCase):
 
                 hx.sum().backward()
 
+    def test_RNN_cell_forward_input_size(self):
+        input = torch.randn(3, 11)
+        hx = torch.randn(3, 20)
+        for module in (nn.RNNCell, nn.GRUCell):
+            cell = module(10, 20)
+            self.assertRaises(Exception, lambda: cell(input, hx))
+
+    def test_RNN_cell_forward_hidden_size(self):
+        input = torch.randn(3, 10)
+        hx = torch.randn(3, 21)
+        cell_shared_param = (10, 20)
+        for cell in (nn.RNNCell(*cell_shared_param, nonlinearity="relu"),
+                     nn.RNNCell(*cell_shared_param, nonlinearity="tanh"),
+                     nn.GRUCell(*cell_shared_param)):
+            self.assertRaises(Exception, lambda: cell(input, hx))
+
+
     def _test_loss_equal_input_target_shape(self, cast):
         # Tests losses whose inputs should have the same size.
         losses = {
@@ -5335,6 +5355,22 @@ class TestNN(NNTestCase):
             grad_gpu, = torch.autograd.grad(res_gpu, log_probs, grad_out.cuda())
         self.assertEqual(res_cpu, res_gpu, atol=1e-4, rtol=0)
         self.assertEqual(grad_cpu, grad_gpu, atol=1e-4, rtol=0)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_critical_target_len(self):
+        # cudnn has an unexpected problem with target length 256, see issue #53505
+        N = 1
+        S = 256
+        C = 10
+        T = 500
+        target = torch.randint(low=1, high=C, size=(S,), dtype=torch.int)
+        input_lengths = torch.full(size=(N,), fill_value=T, dtype=torch.int)
+        target_lengths = torch.tensor(S, dtype=torch.int)
+        inp = torch.randn(T, N, C, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
+        with cudnn.flags(enabled=True):
+            res_gpu = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+        res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
+        self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
@@ -5598,6 +5634,22 @@ class TestNN(NNTestCase):
                 hx, cx = lstm(input, (hx, cx))
 
             (hx + cx).sum().backward()
+
+    def test_LSTM_cell_forward_input_size(self):
+        input = torch.randn(3, 11)
+        hx = torch.randn(3, 20)
+        cx = torch.randn(3, 20)
+        lstm = nn.LSTMCell(10, 20)
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+
+    def test_LSTM_cell_forward_hidden_size(self):
+        input = torch.randn(3, 10)
+        hx = torch.randn(3, 21)
+        cx = torch.randn(3, 20)
+        lstm = nn.LSTMCell(10, 20)
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+        self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
+
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_pack_sequence_batch_sizes_throw(self):
@@ -12344,15 +12396,6 @@ class TestNNDeviceType(NNTestCase):
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))
 
-        def fn_wrapper(device):
-            def padding_fn(weight):
-                inp = torch.tensor([[0, 1, 1, 2], [1, 1, 0, 2]], dtype=torch.long).to(device)
-                return torch.nn.functional.embedding(inp, weight, padding_idx=1)
-            return padding_fn
-
-        fn = fn_wrapper(device)
-        _assertGradAndGradgradChecks(self, fn, (weight, ))
-
     def test_embedding_scalar_weight_error(self, device):
         indices = torch.rand(2, 2, device=device).long()
         weight = torch.tensor(1.0, device=device)
@@ -12424,6 +12467,15 @@ class TestNNDeviceType(NNTestCase):
         output = embedding(input)
         self.assertEqual(output[0][2].sum(), 0)
         self.assertEqual(output[1][1].sum(), 0)
+
+        # change padding vector
+        padding_vector = torch.ones(20, dtype=dtype, device=device)
+        embedding = nn.Embedding(10, 20, padding_idx=2, sparse=True).to(device, dtype)
+        with torch.no_grad():
+            embedding.weight[2] = padding_vector
+        input = torch.tensor([0, 2], dtype=torch.long).to(device)
+        output = embedding(input)
+        self.assertEqual(output[1], padding_vector)
 
         # out of bounds check for padding_idx
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=25)

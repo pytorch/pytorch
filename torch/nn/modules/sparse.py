@@ -129,7 +129,7 @@ class Embedding(Module):
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
             self.weight = Parameter(_weight)
-            self._fill_padding_idx_with_zero()
+
         self.sparse = sparse
 
     def reset_parameters(self) -> None:
