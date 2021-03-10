@@ -38,18 +38,6 @@ class Adagrad(Optimizer):
                         initial_accumulator_value=initial_accumulator_value)
         super(Adagrad, self).__init__(params, defaults)
 
-        for group in self.param_groups:
-            for p in group['params']:
-                state = self.state[p]
-                state['step'] = 0
-                state['sum'] = torch.full_like(p, initial_accumulator_value, memory_format=torch.preserve_format)
-
-    def share_memory(self):
-        for group in self.param_groups:
-            for p in group['params']:
-                state = self.state[p]
-                state['sum'].share_memory_()
-
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -74,6 +62,11 @@ class Adagrad(Optimizer):
                     params_with_grad.append(p)
                     grads.append(p.grad)
                     state = self.state[p]
+                    # Lazy state initialization
+                    if len(state) == 0:
+                        state['step'] = 0
+                        state['sum'] = torch.full_like(p, group['initial_accumulator_value'],
+                                                       memory_format=torch.preserve_format)
                     state_sums.append(state['sum'])
                     # update the steps for each param group update
                     state['step'] += 1
