@@ -50,7 +50,7 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
 
-  // Heuristic: For small batch size or large matrix size, we use for-loop to iterate over the batches instead of 
+  // Heuristic: For small batch size or large matrix size, we use for-loop to iterate over the batches instead of
   //            calling the batched cublas routine.
   if (batch_size <= 8 || /* batch_size > 8 && */ n >= 512) {
     for (int64_t i = 0; i < batch_size; i++) {

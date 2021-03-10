@@ -26,7 +26,7 @@ std::vector<Tensor> foreach_tensor_##OP##_scalar_kernel_slow(TensorList tensors,
 }
 
 #define FOREACH_BINARY_OP_SCALARLIST(OP)                                                                                \
-void foreach_tensor_##OP##_scalarlist_kernel_slow_(TensorList tensors, at::ArrayRef<double> scalars) {                  \
+void foreach_tensor_##OP##_scalarlist_kernel_slow_(TensorList tensors, at::ArrayRef<Scalar> scalars) {                  \
   check_foreach_api_restrictions(tensors, scalars);                                                                     \
                                                                                                                         \
   for (const auto i : c10::irange(tensors.size())) {                                                                    \
@@ -34,7 +34,7 @@ void foreach_tensor_##OP##_scalarlist_kernel_slow_(TensorList tensors, at::Array
     }                                                                                                                   \
 }                                                                                                                       \
                                                                                                                         \
-std::vector<Tensor> foreach_tensor_##OP##_scalarlist_kernel_slow(TensorList tensors, at::ArrayRef<double> scalars) {    \
+std::vector<Tensor> foreach_tensor_##OP##_scalarlist_kernel_slow(TensorList tensors, at::ArrayRef<Scalar> scalars) {    \
   check_foreach_api_restrictions(tensors, scalars);                                                                     \
   std::vector<Tensor> result;                                                                                           \
   result.reserve(tensors.size());                                                                                       \
@@ -129,7 +129,7 @@ void foreach_tensor_##OP##_scalar_slow_(TensorList input, TensorList tensors1, T
 }                                                                                                                                    \
 
 #define FOREACH_POINTWISE_OP_SCALARLIST(OP)                                                                                                             \
-std::vector<Tensor> foreach_tensor_##OP##_scalarlist_slow(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<double> scalars) {   \
+std::vector<Tensor> foreach_tensor_##OP##_scalarlist_slow(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {   \
   check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                   \
                                                                                                                                                         \
   std::vector<Tensor> result;                                                                                                                           \
@@ -140,7 +140,7 @@ std::vector<Tensor> foreach_tensor_##OP##_scalarlist_slow(TensorList input, Tens
   return result;                                                                                                                                        \
 }                                                                                                                                                       \
                                                                                                                                                         \
-void foreach_tensor_##OP##_scalarlist_slow_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<double> scalars) {                 \
+void foreach_tensor_##OP##_scalarlist_slow_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {                 \
   check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                   \
                                                                                                                                                         \
   for(const auto i : c10::irange(input.size())) {                                                                                                       \

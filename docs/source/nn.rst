@@ -349,8 +349,18 @@ From the ``torch.nn.utils`` module
 .. autosummary::
     :toctree: generated
     :nosignatures:
+
+    parametrize.register_parametrization
+    parametrize.remove_parametrizations
+    parametrize.cached
+    parametrize.is_parametrized
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
     :template: classtemplate.rst
 
+    parametrize.ParametrizationList
     prune.BasePruningMethod
 
 .. autosummary::
