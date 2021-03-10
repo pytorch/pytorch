@@ -1882,7 +1882,6 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
   // for NumPy compatibility we can't determine the dtype of eigenvalues before running the computation
   // for real-valued inputs NumPy can return either real- or complex-valued output, we will create values_tmp of complex type
   // for complex-valued inputs we can use values' storage directly if dtype matches
-  // bool values_input_same_type = input.is_complex() ? (values.scalar_type() == input.scalar_type()) : false;
   bool values_expected_type = (values.scalar_type() == toComplexType(input.scalar_type()));
   bool vectors_expected_type = (vectors.scalar_type() == toComplexType(input.scalar_type()));
 
@@ -1985,7 +1984,6 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   // for NumPy compatibility we can't determine the dtype of eigenvalues before running the computation
   // for real-valued inputs NumPy can return either real- or complex-valued output, we will create values_tmp of complex type
   // for complex-valued inputs we can use values' storage directly if dtype matches
-  // bool values_input_same_type = input.is_complex() ? (values.scalar_type() == input.scalar_type()) : false;
   bool values_expected_type = (values.scalar_type() == toComplexType(input.scalar_type()));
 
   auto expected_values_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // input.shape[:-1]
