@@ -18,14 +18,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v1
       - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
+        uses: ./.github/actions/checkout-pr-tip
         id: get_pr_tip
       - name: Ensure consistent CircleCI YAML config
         run: |
@@ -75,14 +68,7 @@ jobs:
       - name: Fetch PyTorch
         uses: actions/checkout@v1
       - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
+        uses: ./.github/actions/checkout-pr-tip
         id: get_pr_tip
       - name: Run flake8
         run: |
@@ -115,14 +101,7 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v1
       - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
+        uses: ./.github/actions/checkout-pr-tip
         id: get_pr_tip
       - name: Install dependencies
         run: |
@@ -221,14 +200,7 @@ jobs:
       - name: Fetch PyTorch
         uses: actions/checkout@v1
       - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
+        uses: ./.github/actions/checkout-pr-tip
         id: get_pr_tip
       - name: Run cmakelint
         run: |
