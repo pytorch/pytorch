@@ -88,27 +88,6 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             self.assertTrue(v["float"].shape == v["quantized"].shape)
 
     @override_qengines
-    def test_compare_weights_linear_dynamic_fx(self):
-        r"""Compare the weights of float and dynamic quantized linear layer"""
-
-        qconfig_dict = {"object_type": [(nn.Linear, default_dynamic_qconfig)]}
-
-        float_model = SingleLayerLinearDynamicModel()
-        float_model.eval()
-
-        prepared_model = prepare_fx(float_model, qconfig_dict)
-
-        prepared_float_model = copy.deepcopy(prepared_model)
-        prepared_float_model.eval()
-
-        q_model = convert_fx(prepared_model)
-
-        expected_weight_dict_keys = {"fc1._packed_params._packed_params"}
-        self.compare_and_validate_model_weights_results_fx(
-            prepared_float_model, q_model, expected_weight_dict_keys
-        )
-
-    @override_qengines
     def test_compare_weights_lstm_dynamic_fx(self):
         r"""Compare the weights of float and dynamic quantized lstm layer"""
 
@@ -665,8 +644,10 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
 
 
 class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
-    def _test_extract_weights(self, m, results_len=0):
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+    def _test_extract_weights(self, m, results_len=0, qconfig_dict=None):
+        if qconfig_dict is None:
+            qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
@@ -676,6 +657,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
             len(results) == results_len,
             f"expected len {results_len}, got len {len(results)}")
         self.assert_ns_compare_dict_valid(results)
+        return results
 
     def _test_match_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
@@ -912,11 +894,16 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     @skipIfNoFBGEMM
     def test_compare_weights_linear(self):
         test_cases = (
-            (SingleLayerLinearModel(), ),
+            (SingleLayerLinearModel(), None),
+            (
+                SingleLayerLinearDynamicModel(),
+                {"object_type": [(nn.Linear, default_dynamic_qconfig)]},
+            ),
         )
-        for m, in test_cases:
+        for m, qconfig_dict in test_cases:
             m.eval()
-            self._test_extract_weights(m, results_len=1)
+            res = self._test_extract_weights(
+                m, results_len=1, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
     def test_sparsenn_compare_activations(self):
