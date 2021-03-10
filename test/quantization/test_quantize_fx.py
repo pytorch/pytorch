@@ -72,7 +72,7 @@ from torch.testing._internal.common_quantized import (
 
 from torch.testing._internal.common_utils import TemporaryFileName
 
-from torch.testing._internal.common_distributed import skip_if_not_multigpu
+from torch.testing._internal.common_distributed import skip_if_not_multigpu as _skip_if_not_multigpu, TEST_SKIPS
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
@@ -84,6 +84,28 @@ import operator
 import unittest
 import io
 from typing import Callable
+import functools
+
+
+# torch.testing._internal.common_distributed.skip_if_not_multigpu does not skip a test if the condition is not met, but
+# rather raises a SystemExit that is handled in
+# torch.testing._internal.common_distributed.MultiProcessTestCase._check_return_codes(). Since we are not subclassing
+# this test case here, we emulate the functionality.
+def skip_if_not_multigpu(func):
+    skip = TEST_SKIPS["multi-gpu"]
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return _skip_if_not_multigpu(func)(*args, **kwargs)
+        except SystemExit as exit:
+            if exit.code != skip.exit_code:
+                raise exit
+
+            raise unittest.SkipTest(skip.message)
+
+    return wrapper
+
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
