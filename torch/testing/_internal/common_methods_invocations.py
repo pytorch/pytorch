@@ -1919,24 +1919,16 @@ op_db: List[OpInfo] = [
            op=torch.linalg.eig,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
+           supports_autograd=False,
            sample_inputs_func=sample_inputs_linalg_inv,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # TODO: RuntimeError: derivative for linalg_eig is not implemented
-               SkipInfo('TestGradients'),
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-               SkipInfo('TestCommon', 'test_variant_consistency_eager'))),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.eigvals',
            aten_name='linalg_eigvals',
            op=torch.linalg.eigvals,
            dtypes=floating_and_complex_types(),
+           supports_autograd=False,
            sample_inputs_func=sample_inputs_linalg_inv,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # torch.linalg.eigvals is not differentiable
-               SkipInfo('TestGradients'),
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-               SkipInfo('TestCommon', 'test_variant_consistency_eager'))),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
