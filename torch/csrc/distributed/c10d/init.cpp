@@ -1301,12 +1301,12 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
           &c10::DDPLoggingData::gradient_as_bucket_view)
       .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name)
       .def_readwrite("iteration", &c10::DDPLoggingData::iteration)
-      .def_readwrite("dtype", &c10::DDPLoggingData::dtype)
       .def_readwrite(
           "total_parameter_size_bytes",
           &c10::DDPLoggingData::total_parameter_size_bytes)
       .def_readwrite(
           "num_parameter_tensors", &c10::DDPLoggingData::num_parameter_tensors)
+      .def_readwrite("dtypes", &c10::DDPLoggingData::dtypes)
       .def_readwrite("bucket_sizes", &c10::DDPLoggingData::bucket_sizes)
       .def_readwrite("master_port", &c10::DDPLoggingData::master_port)
       .def_readwrite("master_addr", &c10::DDPLoggingData::master_addr)

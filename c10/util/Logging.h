@@ -345,8 +345,9 @@ struct DDPLoggingData {
   std::vector<int> device_ids = std::vector<int>();
   int output_device = -1;
   std::string backend_name = "";
-  // Parameter's data type
-  std::string dtype = "";
+  // Parameters' data types, there may be multiple data
+  // types for mixed precision training.
+  std::vector<std::string> dtypes = std::vector<std::string>();
   // Total parameters size (Bytes)
   int64_t total_parameter_size_bytes = -1;
   // The number of parameter tensors
@@ -431,12 +432,17 @@ struct DDPLoggingData {
 
     std::string devicesStr = toString(deviceIdsStream, ddp_logging_data.device_ids);
     std::string bucketSizesStr = toString(bucketSizesStream, ddp_logging_data.bucket_sizes);
+    std::string dtypesStr;
+    for (const auto & dtype : ddp_logging_data.dtypes) {
+      dtypesStr += dtype;
+      dtypesStr += " ";
+    }
 
     std::string ddpLoggingDataInfo = c10::str(
       "world_size: ", ddp_logging_data.world_size, ", module_name: ",
       ddp_logging_data.module_name, ", device_ids: ", devicesStr, ", output_device: ",
       ddp_logging_data.output_device, ", backend_name: ", ddp_logging_data.backend_name,
-      ", parameter_dtype: ", ddp_logging_data.dtype, ", total_parameter_size_in_bytes: ",
+      ", parameter_dtype: ", dtypesStr, ", total_parameter_size_in_bytes: ",
       ddp_logging_data.total_parameter_size_bytes, ", num_parameter_tensors: ",
       ddp_logging_data.num_parameter_tensors, " bucket_sizes: ", bucketSizesStr,
       ", CUDA_VISIBLE_DEVICES: ", ddp_logging_data.cuda_visible_devices, ", broadcast_buffers: ",

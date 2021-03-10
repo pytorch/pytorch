@@ -65,9 +65,14 @@ void Logger::set_env_variables() {
 void Logger::set_parameter_stats() {
   ddp_logging_data_->num_parameter_tensors = reducer_->replicas_[0].size();
   ddp_logging_data_->total_parameter_size_bytes = 0;
-  for (const auto& t : reducer_->replicas_[0]) {
+  std::set<std::string> unique_dtypes;
+  for (auto t : reducer_->replicas_[0]) {
     ddp_logging_data_->total_parameter_size_bytes +=
         t.numel() * t.element_size();
+    unique_dtypes.insert(std::string(t.dtype().name()));
+  }
+  for (auto dtype : unique_dtypes) {
+    ddp_logging_data_->dtypes.push_back(dtype);
   }
 }
 
@@ -100,8 +105,6 @@ void Logger::set_construction_data_and_log(
   ddp_logging_data_->world_size = reducer_->process_group_->getSize();
   ddp_logging_data_->rank = reducer_->process_group_->getRank();
   ddp_logging_data_->iteration = 0;
-  ddp_logging_data_->dtype =
-      std::string(reducer_->replicas_[0][0].dtype().name());
   ddp_logging_data_->is_multi_device_module = reducer_->is_multi_device_module_;
 
   set_parameter_stats();
