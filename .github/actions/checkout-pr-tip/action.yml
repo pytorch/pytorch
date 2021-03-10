@@ -4,7 +4,8 @@ outputs:
 runs:
   using: composite
   steps:
-    - run: |
+    - shell: bash
+      run: |
         set -eux
         if [[ "${{ github.event_name }}" == "pull_request" ]]; then
           # We are on a PR, so actions/checkout leaves us on a merge commit.
