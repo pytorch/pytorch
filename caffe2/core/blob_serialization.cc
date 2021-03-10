@@ -4,6 +4,8 @@
 #include <sstream>
 #include <utility>
 
+#include <c10/util/string_view.h>
+
 #include "caffe2/core/blob.h"
 #include "caffe2/utils/proto_utils.h"
 
@@ -631,7 +633,7 @@ struct DeserializeParams {
   DeserializeParams(Range<T*> dst, const TensorProto& proto, BaseContext& ctx)
       : dest{dst}, tensor_proto{proto}, context{ctx} {}
 
-  void LiteralCopy(std::string_view src) const {
+  void LiteralCopy(c10::string_view src) const {
     // Simply copy the data as-is from src to dest
     CAFFE_ENFORCE_EQ(
         dest.size() * sizeof(T),
