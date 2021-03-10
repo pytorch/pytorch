@@ -752,14 +752,14 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     if (p_node->Input(0).isTensor()) {
       if (p_node->Input(1).isTensor()) {
-        at::native::pow_out(
+        at::cpu::pow_out(
             out_t, p_node->Input(0).toTensor(), p_node->Input(1).toTensor());
       } else {
-        at::native::pow_out(
+        at::cpu::pow_out(
             out_t, p_node->Input(0).toTensor(), p_node->Input(1).toScalar());
       }
     } else {
-      at::native::pow_out(
+      at::cpu::pow_out(
           out_t, p_node->Input(0).toScalar(), p_node->Input(1).toTensor());
     }
   };
