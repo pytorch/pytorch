@@ -22,7 +22,10 @@ void THCPGraph_init(PyObject *module) {
   // but CI linter and some builds prefer "module".
   auto torch_C_m = py::handle(module).cast<py::module>();
 
-  shared_ptr_class_<::at::cuda::CUDAGraph>(module, "_CudaGraphBase")
+  torch_C_m
+      .def("graph_pool_handle", &::at::cuda::graph_pool_handle);
+
+  shared_ptr_class_<::at::cuda::CUDAGraph>(torch_C_m, "_CudaGraphBase")
       .def(py::init<>())
       // I'm not sure this is the correct order of all the arguments. Pybind11 docs
       // aren't clear. But it works.
@@ -30,7 +33,7 @@ void THCPGraph_init(PyObject *module) {
            &::at::cuda::CUDAGraph::capture_begin,
            py::call_guard<py::gil_scoped_release>(),
            R"(``capture_begin`` begins Cuda graph capture on the current stream.)",
-           py::arg("pool") = 0)
+           py::arg("pool") = c10::cuda::MempoolId_t{0, 0})
       .def("capture_end",
            &::at::cuda::CUDAGraph::capture_end,
            py::call_guard<py::gil_scoped_release>(),

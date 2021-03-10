@@ -11,15 +11,19 @@ class CUDAGeneratorImpl;
 
 namespace cuda {
 
+// Standalone way to get a unique mempool id usable as a pool=... argument
+// to CUDAGraph::capture_begin
+TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
+
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
   ~CUDAGraph();
 
-  void capture_begin(CaptureId_t pool=0);
+  void capture_begin(MempoolId_t pool={0, 0});
   void capture_end();
   void replay();
   void reset();
-  CaptureId_t pool();
+  MempoolId_t pool();
 
   protected:
 #if CUDA_VERSION >= 11000
@@ -35,12 +39,18 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CaptureId_t id_;
 
   // uuid used to request a particular private mempool from CUDACachingAllocator.
-  // By default, this will be set to id_, but if capture_begin is called with
-  // "pool=other_graph.pool()", this graph's mempool_id_ will be set to the other
-  // graph's mempool_id_, and therefore share a mempool with that other graph.
+  // By default, this will be set to {id_, 0}.
+  //
+  // If capture_begin is called with "pool=other_graph.pool()", this graph's mempool_id_
+  // will be set to the other graph's mempool_id_, and therefore share a mempool with the
+  // other graph.
+  //
+  // If capture_begin is called with "pool=handle" where "handle" came from graph_pool_handle(),
+  // it will share a mempool with any other captures that used "pool=handle".
+  //
   // Sharing a mempool across graphs saves memory, and it's safe if you
   // know you'll replay those graphs in the same order you captured them.
-  CaptureId_t mempool_id_;
+  MempoolId_t mempool_id_;
 
   // Stream on which capture began
   at::cuda::CUDAStream capture_stream_;

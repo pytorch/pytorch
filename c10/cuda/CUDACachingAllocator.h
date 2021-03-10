@@ -122,9 +122,11 @@ C10_CUDA_API void resetPeakStats(int device);
 C10_CUDA_API std::vector<SegmentInfo> snapshot();
 
 // CUDAGraph interactions
-C10_CUDA_API void notifyCaptureBegin(int device, CaptureId_t graph_id, CaptureId_t mempool_id);
+C10_CUDA_API void notifyCaptureBegin(int device,
+                                     CaptureId_t graph_id,
+                                     MempoolId_t mempool_id);
 C10_CUDA_API void notifyCaptureEnd(int device, CaptureId_t graph_id);
-C10_CUDA_API void notifyCaptureDestroy(int device, CaptureId_t mempool_id);
+C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id);
 
 C10_CUDA_API std::mutex* getFreeMutex();
 

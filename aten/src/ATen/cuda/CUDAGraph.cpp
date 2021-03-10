@@ -8,6 +8,11 @@
 namespace at {
 namespace cuda {
 
+MempoolId_t graph_pool_handle() {
+  static std::atomic<CaptureId_t> uuid{1};
+  return {0, uuid++};
+}
+
 /**
  * Note [CUDA Graph Wrapper Class]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -37,7 +42,7 @@ CUDAGraph::CUDAGraph()
 #endif
 }
 
-void CUDAGraph::capture_begin(CaptureId_t pool/*=0*/) {
+void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
 #if CUDA_VERSION >= 11000
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
@@ -78,12 +83,16 @@ void CUDAGraph::capture_begin(CaptureId_t pool/*=0*/) {
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 
   TORCH_INTERNAL_ASSERT(id_ > 0);
-  if (pool != 0) {
-    // pool != 0 means the user requested we share the memory pool that value identifies.
+  if (pool.first != 0 || pool.second != 0) {
+    // Either value being nonzero means the user supplied a pool to share.
+    // But only one should be nonzero.
+    // If pool was created by another graph's capture_begin, first should be nonzero.
+    // If pool was created by graph_pool_handle, second should be nonzero.
+    TORCH_INTERNAL_ASSERT(!(pool.first && pool.second));
     mempool_id_ = pool;
   } else {
     // User did not ask us to share a mempool. Use our own id_ as our mempool_id_.
-    mempool_id_ = id_;
+    mempool_id_ = {id_, 0};
   }
 
   // When CUDACachingAllocator allocates while a capture is underway, it calls cudaStreamGetCaptureInfo
@@ -202,8 +211,7 @@ void CUDAGraph::reset() {
 }
 
 // Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
-// For simplicity, we just use the id_ as given by
-CaptureId_t CUDAGraph::pool() {
+MempoolId_t CUDAGraph::pool() {
 #if CUDA_VERSION >= 11000
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::pool() without a preceding successful capture.");

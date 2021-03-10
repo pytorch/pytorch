@@ -241,6 +241,12 @@ struct PrivatePool {
   BlockPool small_blocks;
 };
 
+struct MempoolIdHash {
+  std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
+    return mempool_id.first != 0 ? mempool_id.first : mempool_id.second;
+  }
+};
+
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() == at::cuda::CaptureStatus::None) {
@@ -294,14 +300,15 @@ class DeviceCachingAllocator {
   // Members specific to CUDA graphs
 
   // Private pools for CUDA graphs
-  std::unordered_map<CaptureId_t/*pool id*/, std::unique_ptr<PrivatePool>> graph_pools;
+  std::unordered_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash> graph_pools;
   // Pools no longer referenced by any graph. Their BlockPools are eligible for free_blocks.
-  // Needs to be a map (not a vector) because (like graph_pools) we might erase entries in any order.
-  std::unordered_map<CaptureId_t/*pool id*/, PrivatePool*> graph_pools_freeable;
+  // Can't be a vector or deque because we might erase entries in any order.
+  // Could be an std::list, but we don't care much, access and insert/erase are rare.
+  std::unordered_map<MempoolId_t, PrivatePool*, MempoolIdHash> graph_pools_freeable;
 
   // Maps a capturing stream to its assigned private pool,
   // in case we want multiple captures to share the same pool
-  std::unordered_map<CaptureId_t/*capture id*/, CaptureId_t/*pool id*/> capture_to_pool_map;
+  std::unordered_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
 
  public:
 
@@ -613,7 +620,7 @@ class DeviceCachingAllocator {
   // See Note [Interaction with CUDA graph capture]
 
   // Called by CUDAGraph::capture_begin
-  void notifyCaptureBegin(CaptureId_t graph_id, CaptureId_t mempool_id) {
+  void notifyCaptureBegin(CaptureId_t graph_id, MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     captures_underway++;
     auto it = graph_pools.find(mempool_id);
@@ -633,7 +640,7 @@ class DeviceCachingAllocator {
   }
 
   // Called by CUDAGraph::capture_end
-  void notifyCaptureEnd(CaptureId_t graph_id) {
+  void  notifyCaptureEnd(CaptureId_t graph_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     captures_underway--;
     auto it = capture_to_pool_map.find(graph_id);
@@ -642,7 +649,7 @@ class DeviceCachingAllocator {
   }
 
   // Called by CUDAGraph::reset
-  void notifyCaptureDestroy(CaptureId_t mempool_id) {
+  void notifyCaptureDestroy(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     // The graph's been destroyed. We can't blindly delete and cudaFree its mempool, because
     //  1. other graph(s) might share the same pool
@@ -1258,7 +1265,9 @@ std::vector<SegmentInfo> snapshot() {
 }
 
 // CUDAGraph interactions
-void notifyCaptureBegin(int device, CaptureId_t graph_id, CaptureId_t mempool_id) {
+void notifyCaptureBegin(int device,
+                        CaptureId_t graph_id,
+                        MempoolId_t mempool_id) {
   assertValidDevice(device);
   caching_allocator.device_allocator[device]->notifyCaptureBegin(graph_id, mempool_id);
 }
@@ -1268,7 +1277,7 @@ void notifyCaptureEnd(int device, CaptureId_t graph_id) {
   caching_allocator.device_allocator[device]->notifyCaptureEnd(graph_id);
 }
 
-void notifyCaptureDestroy(int device, CaptureId_t mempool_id) {
+void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
   assertValidDevice(device);
   caching_allocator.device_allocator[device]->notifyCaptureDestroy(mempool_id);
 }
