@@ -44,6 +44,14 @@ inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo
   return torch::linalg_eigvalsh_out(result, self, uplo);
 }
 
+inline Tensor householder_product(const Tensor& input, const Tensor& tau) {
+  return torch::linalg_householder_product(input, tau);
+}
+
+inline Tensor& householder_product_out(Tensor& result, const Tensor& input, const Tensor& tau) {
+  return torch::linalg_householder_product_out(result, input, tau);
+}
+
 inline Tensor norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
@@ -166,6 +174,17 @@ inline Tensor eigvalsh(const Tensor& self, std::string uplo) {
 
 inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
   return detail::eigvalsh_out(result, self, uplo);
+}
+
+/// Computes the product of Householder matrices
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.householder_product
+inline Tensor householder_product(const Tensor& input, const Tensor& tau) {
+  return detail::householder_product(input, tau);
+}
+
+inline Tensor& householder_product_out(Tensor& result, const Tensor& input, const Tensor& tau) {
+  return detail::householder_product_out(result, input, tau);
 }
 
 inline Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {

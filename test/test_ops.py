@@ -421,7 +421,7 @@ class TestCommon(JitCommonTestCase):
                 scripted(*inp, *sample.args, **sample.kwargs)
                 inp = (clone_input_helper(input) for input in sample.input)
                 graph = scripted.graph_for(*inp, *sample.args, **sample.kwargs)
-                FileCheck().check(op_name).check_not(variant_name).run(graph)
+                FileCheck().check(op.aten_name).check_not(variant_name).run(graph)
 
             # Test tracing:
             for variant in variants:

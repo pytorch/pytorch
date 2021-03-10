@@ -248,7 +248,7 @@ namespace c10 {
   _(aten, ger)                       \
   _(aten, outer)                     \
   _(aten, orgqr)                     \
-  _(aten, householder_product)       \
+  _(aten, linalg_householder_product)\
   _(aten, transpose)                 \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \

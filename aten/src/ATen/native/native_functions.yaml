@@ -6001,16 +6001,7 @@
     CPU: legacy::cpu::_th_geqrf
     CUDA: legacy::cuda::_th_geqrf
 
-- func: householder_product(Tensor input, Tensor tau) -> Tensor
-  variants: function
-  dispatch:
-    CPU: householder_product
-
-- func: householder_product.out(Tensor input, Tensor tau, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: householder_product_out
-
-# orgqr, alias for householder_product
+# orgqr, alias for linalg_householder_product
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
   variants: method, function
 
@@ -9063,6 +9054,17 @@
   python_module: linalg
   dispatch:
     DefaultBackend: linalg_eigvalsh_out
+
+- func: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU: linalg_householder_product
+
+- func: linalg_householder_product.out(Tensor input, Tensor tau, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    CPU: linalg_householder_product_out
 
 - func: _linalg_inv_out_helper_(Tensor(a!) self, Tensor(b!) infos_lu, Tensor(c!) infos_getri) -> Tensor(a!)
   variants: function

@@ -3681,64 +3681,6 @@ Example::
     tensor([ 0.,  2.,  1.,  0.])
 """.format(**common_args))
 
-add_docstr(torch.householder_product,
-           r"""
-householder_product(input, tau, *, out=None) -> Tensor
-
-Computes the product of Householder matrices.
-
-Householder matrices are stored in compressed vector form as columns of a `(m × n)` matrix :attr:`input`,
-or columns of each matrix in a batched :attr:`input`.
-:attr:`tau` is a tensor of scalar scale factors for each Householder vector.
-For the single matrix :attr:`input` taking its `i`-th column as `vᵢ` and `τ = tau[i]`
-gives the `i`-th Householder matrix as `Hᵢ = I − τ vᵢ vᵢᴴ`.
-The result of this function is `H₁ H₂ ... Hᵣ`, where `r` is equal to `tau.shape[-1]`.
-This function is commonly used together with :func:`torch.geqrf`
-to explitly form the `Q` matrix of the QR decomposition.
-See `Representation of Orthogonal or Unitary Matrices`_ for further details.
-
-.. note:: LAPACK's `orgqr` is used for the computations.
-
-.. note:: Only values below the main diagonal of :attr:`input` are used in the computations
-          and other values are ignored.
-
-.. note:: If :attr:`input` doesn't satisfy the requirement `m >= n`,
-          or :attr:`tau` doesn't satisfy the requirement `n >= r`, then a RuntimeError will be thrown. 
-
-Args:
-    input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
-                    batch dimensions consisting of `(m × n)` matrices.
-    tau (Tensor): the input tensor of size `(*, r)` where `*` is zero or more
-                    batch dimensions consisting of `r`-dimensional vectors.
-
-Keyword args:
-    out (Tensor, optional): The output tensor. Ignored if `None`. Default: `None`
-
-Examples::
-
-    >>> a = torch.randn(2, 2)
-    >>> h, tau = torch.geqrf(a)
-    >>> q = torch.householder_product(h, tau)
-    >>> torch.allclose(q, torch.linalg.qr(a)[0])
-    True
-
-    >>> h = torch.randn(3, 2, 2, dtype=torch.complex128)
-    >>> tau = torch.randn(3, 1, dtype=torch.complex128)
-    >>> q = torch.householder_product(h, tau)
-    >>> q
-    tensor([[[ 1.8034+0.4184j,  0.2588-1.0174j],
-            [-0.6853+0.7953j,  2.0790+0.5620j]],
-
-            [[ 1.4581+1.6989j, -1.5360+0.1193j],
-            [ 1.3877-0.6691j,  1.3512+1.3024j]],
-
-            [[ 1.4766+0.5783j,  0.0361+0.6587j],
-            [ 0.6396+0.1612j,  1.3693+0.4481j]]], dtype=torch.complex128)
-
-.. _Representation of Orthogonal or Unitary Matrices:
-    https://www.netlib.org/lapack/lug/node128.html
-""")
-
 add_docstr(torch.hypot,
            r"""
 hypot(input, other, *, out=None) -> Tensor
@@ -6710,16 +6652,7 @@ add_docstr(torch.orgqr,
            r"""
 orgqr(input, tau) -> Tensor
 
-Computes the orthogonal matrix `Q` of a QR factorization, from the `(input, tau)`
-tuple returned by :func:`torch.geqrf`.
-
-This directly calls the underlying LAPACK function `orgqr`.
-
-Alias for :func:`torch.householder_product`.
-
-Args:
-    input (Tensor): the `a` from :func:`torch.geqrf`.
-    tau (Tensor): the `tau` from :func:`torch.geqrf`.
+Alias for :func:`torch.linalg.householder_product`.
 """)
 
 add_docstr(torch.ormqr,

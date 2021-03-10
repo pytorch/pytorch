@@ -1327,7 +1327,7 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
 DEFINE_DISPATCH(orgqr_stub);
 
 /*
-  The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
+  The householder_product (orgqr) function allows reconstruction of an orthogonal (or unitary) matrix Q,
   from a sequence of elementary reflectors, such as is produced by the geqrf function.
 
   Args:
@@ -1382,28 +1382,46 @@ Tensor& householder_product_out_info(const Tensor& input, const Tensor& tau, Ten
   return result;
 }
 
-Tensor& householder_product_out(const Tensor& input, const Tensor& tau, Tensor& result) {
-  TORCH_CHECK(input.dim() >= 2, "orgqr: input must have at least 2 dimensions.");
-  TORCH_CHECK(input.size(-2) >= input.size(-1), "orgqr: input.shape[-2] must be greater than or equal to input.shape[-1]");
-  TORCH_CHECK(input.size(-1) >= tau.size(-1), "orgqr: input.shape[-1] must be greater than or equal to tau.shape[-1]");
+Tensor& linalg_householder_product_out(const Tensor& input, const Tensor& tau, Tensor& result) {
+  TORCH_CHECK(input.dim() >= 2, "torch.linalg.householder_product: input must have at least 2 dimensions.");
+  TORCH_CHECK(
+      input.size(-2) >= input.size(-1),
+      "torch.linalg.householder_product: input.shape[-2] must be greater than or equal to input.shape[-1]");
+  TORCH_CHECK(
+      input.size(-1) >= tau.size(-1),
+      "torch.linalg.householder_product: input.shape[-1] must be greater than or equal to tau.shape[-1]");
 
-  TORCH_CHECK(input.dim() - tau.dim() == 1, "orgqr: Expected tau to have one dimension less than input, but got tau.ndim equal to ",
-              tau.dim(), " and input.ndim is equal to ", input.dim());
+  TORCH_CHECK(
+      input.dim() - tau.dim() == 1,
+      "torch.linalg.householder_product: Expected tau to have one dimension less than input, but got tau.ndim equal to ",
+      tau.dim(),
+      " and input.ndim is equal to ",
+      input.dim());
   if (input.dim() > 2) {
-    auto expected_batch_tau_shape = IntArrayRef(input.sizes().data(), input.dim()-2);  // input.shape[:-2]
-    auto actual_batch_tau_shape = IntArrayRef(tau.sizes().data(), tau.dim()-1);  // tau.shape[:-1]
-    TORCH_CHECK(actual_batch_tau_shape.equals(expected_batch_tau_shape), "orgqr: Expected batch dimensions of tau to be equal to input.shape[:-2], but got ",
-                actual_batch_tau_shape);
+    auto expected_batch_tau_shape = IntArrayRef(input.sizes().data(), input.dim() - 2); // input.shape[:-2]
+    auto actual_batch_tau_shape = IntArrayRef(tau.sizes().data(), tau.dim() - 1); // tau.shape[:-1]
+    TORCH_CHECK(
+        actual_batch_tau_shape.equals(expected_batch_tau_shape),
+        "torch.linalg.householder_product: Expected batch dimensions of tau to be equal to input.shape[:-2], but got ",
+        actual_batch_tau_shape);
   }
 
-  TORCH_CHECK(tau.scalar_type() == input.scalar_type(),
-    "orgqr: tau dtype ", tau.scalar_type(), " does not match input dtype ", input.scalar_type());
-  TORCH_CHECK(input.device() == tau.device(),
-              "orgqr: Expected input and tau to be on the same device, but found input on ",
-              input.device(), " and tau on ", tau.device(), " instead.");
+  TORCH_CHECK(
+      tau.scalar_type() == input.scalar_type(),
+      "torch.linalg.householder_product: tau dtype ",
+      tau.scalar_type(),
+      " does not match input dtype ",
+      input.scalar_type());
+  TORCH_CHECK(
+      input.device() == tau.device(),
+      "torch.linalg.householder_product: Expected input and tau to be on the same device, but found input on ",
+      input.device(),
+      " and tau on ",
+      tau.device(),
+      " instead.");
 
-  checkSameDevice("orgqr", result, input);
-  checkLinalgCompatibleDtype("orgqr", result, input);
+  checkSameDevice("torch.linalg.householder_product", result, input);
+  checkLinalgCompatibleDtype("torch.linalg.householder_product", result, input);
 
   // TODO: uncomment the following when passing incorrectly sized 'result' is not allowed
   // if (result.numel() != 0) {
@@ -1441,25 +1459,25 @@ Tensor& householder_product_out(const Tensor& input, const Tensor& tau, Tensor& 
 
   // Now check LAPACK/MAGMA error codes
   if (result.dim() > 2) {
-    batchCheckErrors(infos, "orgqr");
+    batchCheckErrors(infos, "torch.linalg.householder_product");
   } else {
-    singleCheckErrors(infos.item().toInt(), "orgqr");
+    singleCheckErrors(infos.item().toInt(), "torch.linalg.householder_product");
   }
   return result;
 }
 
-Tensor householder_product(const Tensor& input, const Tensor& tau) {
+Tensor linalg_householder_product(const Tensor& input, const Tensor& tau) {
   Tensor result = at::empty({0}, input.options());
-  result = at::orgqr_outf(input, tau, result);
+  result = at::linalg_householder_product_outf(input, tau, result);
   return result;
 }
 
 Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
-  return at::householder_product_outf(input, tau, result);
+  return at::linalg_householder_product_outf(input, tau, result);
 }
 
 Tensor orgqr(const Tensor& input, const Tensor& tau) {
-  return at::householder_product(input, tau);
+  return at::linalg_householder_product(input, tau);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

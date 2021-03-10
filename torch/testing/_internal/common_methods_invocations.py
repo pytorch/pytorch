@@ -1023,17 +1023,11 @@ class TriangularOpInfo(OpInfo):
 
 def sample_inputs_householder_product(op_info, device, dtype, requires_grad):
     """
-    This function generates input for torch.householder_product (torch.orgqr).
+    This function generates input for torch.linalg.householder_product (torch.orgqr).
     The first argument should be a square matrix or batch of square matrices, the second argument is a vector or batch of vectors.
     Empty, square, rectangular, batched square and batched rectangular input is generated.
     """
     samples = (
-        SampleInput((make_tensor((0, 0), device, dtype, low=None, high=None, requires_grad=requires_grad),
-                    make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad))),
-
-        SampleInput((make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
-                    make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad))),
-
         SampleInput((make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
                     make_tensor((S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
 
@@ -1045,6 +1039,12 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad):
 
         SampleInput((make_tensor((2, 1, S + 1, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
                     make_tensor((2, 1, S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((0, 0), device, dtype, low=None, high=None, requires_grad=requires_grad),
+                    make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad))),
     )
 
     return samples
@@ -1943,9 +1943,9 @@ op_db: List[OpInfo] = [
            decorators=[_wrap_warn_once("floor_divide is deprecated, and will be removed")],
            supports_autograd=False,
            ),
-    OpInfo('householder_product',
-           aten_name='householder_product',
-           op=torch.householder_product,
+    OpInfo('linalg.householder_product',
+           aten_name='linalg_householder_product',
+           op=torch.linalg.householder_product,
            aliases=('orgqr', ),
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
