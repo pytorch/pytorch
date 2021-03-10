@@ -6,6 +6,7 @@ import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.multiprocessing as mp
+import torch.distributed
 
 # graph mode quantization based on fx
 from torch.quantization.quantize_fx import (
@@ -3381,6 +3382,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         prepared = prepare_fx_fn(model, qconfig_dict)
 
         if mode == 'ddp':
+            world_size = torch.distributed.get_world_size()
             mp.spawn(run_ddp,
                      args=(world_size, prepared),
                      nprocs=world_size,
