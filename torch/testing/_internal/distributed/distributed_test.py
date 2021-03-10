@@ -1515,7 +1515,6 @@ class DistributedTest:
                 return [event for event in prof.function_events if event.name.endswith(postfix)]
 
             if expect_event and dist.get_backend() in PROFILING_SUPPORTED_BACKENDS:
-                print(f"Profiling enabled, prof is {prof.key_averages().table()}")
                 events = get_event(profiling_title_postfix)
                 self.assertEqual(len(events), len(op_calls))
                 for e in events:

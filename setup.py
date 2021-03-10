@@ -212,6 +212,7 @@ import os
 import json
 import glob
 import importlib
+import time
 
 from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN, IS_LINUX,
@@ -297,26 +298,50 @@ report("Building wheel {}-{}".format(package_name, version))
 cmake = CMake()
 
 
+def get_submodule_folders():
+    git_modules_path = os.path.join(cwd, ".gitmodules")
+    default_modules_path = [os.path.join(third_party_path, name) for name in [
+                            "gloo", "cpuinfo", "tbb", "onnx",
+                            "foxi", "QNNPACK", "fbgemm"
+                            ]]
+    if not os.path.exists(git_modules_path):
+        return default_modules_path
+    with open(git_modules_path) as f:
+        return [os.path.join(cwd, line.split("=", 1)[1].strip()) for line in
+                f.readlines() if line.strip().startswith("path")]
+
+
 def check_submodules():
-    def check_file(f):
-        if bool(os.getenv("USE_SYSTEM_LIBS", False)):
-            return
-        if not os.path.exists(f):
-            report("Could not find {}".format(f))
+    def check_for_files(folder, files):
+        if not any(os.path.exists(os.path.join(folder, f)) for f in files):
+            report("Could not find any of {} in {}".format(", ".join(files), folder))
             report("Did you run 'git submodule update --init --recursive'?")
             sys.exit(1)
 
-    check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
-    check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
-    check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'foxi', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'fbgemm', 'third_party',
-                            'asmjit', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'onnx', 'third_party',
-                            'benchmark', 'CMakeLists.txt'))
+    def not_exists_or_empty(folder):
+        return not os.path.exists(folder) or (os.path.isdir(folder) and len(os.listdir(folder)) == 0)
+
+    if bool(os.getenv("USE_SYSTEM_LIBS", False)):
+        return
+    folders = get_submodule_folders()
+    # If none of the submodule folders exists, try to initialize them
+    if all(not_exists_or_empty(folder) for folder in folders):
+        try:
+            print(' --- Trying to initialize submodules')
+            start = time.time()
+            subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=cwd)
+            end = time.time()
+            print(' --- Submodule initialization took {:.2f} sec'.format(end - start))
+        except Exception:
+            print(' --- Submodule initalization failed')
+            print('Please run:\n\tgit submodule update --init --recursive')
+            sys.exit(1)
+    for folder in folders:
+        check_for_files(folder, ["CMakeLists.txt", "Makefile", "setup.py", "LICENSE"])
+    check_for_files(os.path.join(third_party_path, 'fbgemm', 'third_party',
+                                 'asmjit'), ['CMakeLists.txt'])
+    check_for_files(os.path.join(third_party_path, 'onnx', 'third_party',
+                                 'benchmark'), ['CMakeLists.txt'])
 
 
 # all the work we need to do _before_ setup runs
@@ -466,9 +491,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
-        system_c_flags = distutils.sysconfig.get_config_var('CFLAGS')
+        system_c_flags = str(distutils.sysconfig.get_config_var('CFLAGS'))
         if IS_LINUX and '-fstack-clash-protection' in system_c_flags and 'clang' in os.environ.get('CC', ''):
-            os.environ['CC'] = distutils.sysconfig.get_config_var('CC')
+            os.environ['CC'] = str(distutils.sysconfig.get_config_var('CC'))
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -961,6 +986,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/utils/*.h',
+                'include/torch/csrc/tensor/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
                 'include/TH/*.h*',
