@@ -44,14 +44,16 @@ class AnnotateTypesWithSchema(Transformer):
                 assert not isinstance(target, str)
                 dispatched = boolean_dispatched[target]
                 if_true, if_false = dispatched['if_true'], dispatched['if_false']
-                if inspect.signature(if_true).parameters != inspect.signature(if_false).parameters:
+                # TODO: can we emit the union of these? What are the implications on TorchScript
+                # compilation?
+                if inspect.signature(if_true).return_annotation != inspect.signature(if_false).return_annotation:
                     return super().call_function(target, args, kwargs)
                 target_for_analysis = if_true
 
             python_ret_type = self._extract_python_return_type(target_for_analysis)
 
         return_proxy = super().call_function(target, args, kwargs)
-        return_proxy.node.type = python_ret_type
+        return_proxy.node.type = return_proxy.node.type if return_proxy.node.type else python_ret_type
         return return_proxy
 
     def call_module(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
@@ -63,7 +65,7 @@ class AnnotateTypesWithSchema(Transformer):
             if getattr(torch.nn, classname, None) == submod.__class__:
                 python_ret_type = self._extract_python_return_type(submod.forward)
         return_proxy = super().call_module(target, args, kwargs)
-        return_proxy.node.type = python_ret_type
+        return_proxy.node.type = return_proxy.node.type if return_proxy.node.type else python_ret_type
         return return_proxy
 
     def get_attr(self, target : torch.fx.node.Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):

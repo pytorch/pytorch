@@ -868,6 +868,9 @@ class {test_classname}(torch.nn.Module):
                 self.assertTrue(check in {('placeholder', 'x'), ('call_function', operator.add),
                                           ('call_function', torch.flatten), ('output', 'output')})
 
+        # Smoke test torchscript compilation since now we're emitting type annotations
+        torch.jit.script(traced_modules_annotated)
+
         class FunctionalTracer(torch.fx.Tracer):
             def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
                 # `leaves` contains the set of standard `nn.Modules` that are not
@@ -881,19 +884,19 @@ class {test_classname}(torch.nn.Module):
         for node in traced_functionals_annotated.graph.nodes:
             if node.type is None:
                 check = (node.op, node.target)
-                # FIXME: some nn.functional instances (e.g. max_pool2d) are using some
-                # BroadcastingList type annotation thing. This is encoded in python2
-                # style type annotations and these types are thus not available to
-                # `inspect.signature`. Follow-up with torchscript team to see if there's
-                # a fix
                 excluded_nodes = {
                     ('placeholder', 'x'),
                     ('call_function', torch.conv2d),
+                    # Return type differs based on boolean dispatch :(
+                    ('call_function', torch.nn.functional.max_pool2d),
                     ('call_function', operator.add),
                     ('call_function', torch.flatten),
                     ('output', 'output'),
                 }
                 self.assertTrue(check in excluded_nodes)
+
+        # Smoke test torchscript compilation since now we're emitting type annotations
+        torch.jit.script(traced_functionals_annotated)
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
