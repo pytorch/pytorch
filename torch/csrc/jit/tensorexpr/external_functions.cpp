@@ -3,15 +3,15 @@
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
-#include <ideep.hpp>
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ideep.hpp>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 #include <tuple>
 #include <unordered_map>
 #include "c10/core/ScalarType.h"
 #include "c10/util/Exception.h"
-#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -56,12 +56,11 @@ std::tuple<std::vector<ideep::tensor>, bool> constructItensors(
     int64_t* buf_ranks,
     int64_t* buf_dims,
     int8_t* buf_dtypes) {
-
   std::vector<void*> buf_data_vec;
   std::vector<std::vector<int64_t>> buf_dims_vec;
   std::vector<c10::ScalarType> buf_dtypes_vec;
 
-  std::vector<ideep::tensor> empty {};
+  std::vector<ideep::tensor> empty{};
 
   int64_t buf_dims_idx = 0;
   for (int64_t i = 0; i < bufs_num; i++) {
@@ -74,80 +73,113 @@ std::tuple<std::vector<ideep::tensor>, bool> constructItensors(
   }
 
   // TODO: MKLDNN can support more types but let's start with floats
-  std::unordered_map<c10::ScalarType, ideep::data_type> c102it {{c10::ScalarType::Float, ideep::data_type::f32}};
+  std::unordered_map<c10::ScalarType, ideep::data_type> c102it{
+      {c10::ScalarType::Float, ideep::data_type::f32}};
   auto tag = ideep::format_tag::undef;
-  // TODO: support more layouts         0            1             2    3              4  
-  std::vector<ideep::format_tag> tags {tag, ideep::format_tag::a, tag, tag, ideep::format_tag::nchw};
+  // TODO: support more layouts         0            1             2    3 4
+  std::vector<ideep::format_tag> tags{
+      tag, ideep::format_tag::a, tag, tag, ideep::format_tag::nchw};
   std::vector<ideep::tensor> tensors;
   for (size_t i = 0; i < buf_data_vec.size(); i++) {
-    TORCH_INTERNAL_ASSERT(buf_dims_vec[i].size() == 1 || buf_dims_vec[i].size() == 4);
+    TORCH_INTERNAL_ASSERT(
+        buf_dims_vec[i].size() == 1 || buf_dims_vec[i].size() == 4);
     if (c102it.count(buf_dtypes_vec[i]) == 0) {
       return std::make_tuple(empty, false);
     }
-    tensors.emplace_back(ideep::tensor(buf_dims_vec[i], c102it.at(buf_dtypes_vec[i]), tags[buf_dims_vec[i].size()], buf_data_vec[i]));
+    tensors.emplace_back(ideep::tensor(
+        buf_dims_vec[i],
+        c102it.at(buf_dtypes_vec[i]),
+        tags[buf_dims_vec[i].size()],
+        buf_data_vec[i]));
   }
   return std::make_tuple(tensors, true);
 }
 
 void nnc_aten_conv2d_out(
-  int64_t bufs_num,
-  void** buf_data,
-  int64_t* buf_ranks,
-  int64_t* buf_dims,
-  int8_t* buf_dtypes,
-  int64_t args_num,
-  int64_t* extra_args) {
-
-    std::vector<ideep::tensor> tensors;
-    bool args_valid_for_mkldnn;
-    std::tie(tensors, args_valid_for_mkldnn) =
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<ideep::tensor> tensors;
+  bool args_valid_for_mkldnn;
+  std::tie(tensors, args_valid_for_mkldnn) =
       constructItensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
 
-    if (!args_valid_for_mkldnn) {
-      nnc_aten_conv2d(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes, args_num, extra_args);
-      return;
+  if (!args_valid_for_mkldnn) {
+    nnc_aten_conv2d(
+        bufs_num,
+        buf_data,
+        buf_ranks,
+        buf_dims,
+        buf_dtypes,
+        args_num,
+        extra_args);
+    return;
+  }
+
+  auto& r = tensors[0];
+  const auto& x = tensors[1];
+  const auto& w = tensors[2];
+  int64_t strideH = 1;
+  int64_t strideW = 1;
+  int64_t paddingH = 0;
+  int64_t paddingW = 0;
+  int64_t dilationH = 1;
+  int64_t dilationW = 1;
+  int64_t groups = 1;
+
+  if (args_num > 0) {
+    TORCH_INTERNAL_ASSERT(args_num == 7);
+    strideH = extra_args[0];
+    strideW = extra_args[1];
+    paddingH = extra_args[2];
+    paddingW = extra_args[3];
+    dilationH = extra_args[4];
+    dilationW = extra_args[5];
+    groups = extra_args[6];
+  }
+
+  std::vector<int64_t> output_sizes = at::native::conv_output_size(
+      x.get_dims(),
+      w.get_dims(),
+      {paddingH, paddingW},
+      {strideH, strideW},
+      {dilationH, dilationW});
+  ideep::tensor y;
+  try {
+    if (bufs_num == 4) {
+      const auto& b = tensors[3];
+      ideep::convolution_forward::compute(
+          x,
+          w,
+          b,
+          {output_sizes.cbegin(), output_sizes.cend()},
+          y,
+          {strideH, strideW},
+          {dilationH, dilationW},
+          {paddingH, paddingW},
+          {paddingH, paddingW},
+          groups);
+    } else {
+      ideep::convolution_forward::compute(
+          x,
+          w,
+          {output_sizes.cbegin(), output_sizes.cend()},
+          y,
+          {strideH, strideW},
+          {dilationH, dilationW},
+          {paddingH, paddingW},
+          {paddingH, paddingW},
+          groups);
     }
-
-    auto&  r = tensors[0];
-    const auto&  x = tensors[1];
-    const auto&  w = tensors[2];
-    int64_t strideH = 1;
-    int64_t strideW = 1; 
-    int64_t paddingH = 0; 
-    int64_t paddingW = 0; 
-    int64_t dilationH = 1; 
-    int64_t dilationW = 1; 
-    int64_t groups = 1;
-
-    if (args_num > 0) {
-      TORCH_INTERNAL_ASSERT(args_num == 7);
-      strideH = extra_args[0];
-      strideW = extra_args[1];
-      paddingH = extra_args[2];
-      paddingW = extra_args[3];
-      dilationH = extra_args[4];
-      dilationW = extra_args[5];
-      groups = extra_args[6];
-    }
-
-    std::vector<int64_t> output_sizes = at::native::conv_output_size(x.get_dims(), w.get_dims(), {paddingH, paddingW}, {strideH, strideW}, {dilationH, dilationW});
-    ideep::tensor y;
-    try {
-      if (bufs_num == 4) {
-            const auto& b = tensors[3];
-            ideep::convolution_forward::compute(
-              x, w, b, {output_sizes.cbegin(), output_sizes.cend()}, y, {strideH, strideW}, {dilationH, dilationW}, {paddingH, paddingW}, {paddingH, paddingW},
-              groups);
-      } else {
-            ideep::convolution_forward::compute(
-              x, w, {output_sizes.cbegin(), output_sizes.cend()}, y, {strideH, strideW}, {dilationH, dilationW}, {paddingH, paddingW}, {paddingH, paddingW},
-              groups);
-      }
-      y.reorder_to(r);
-    } catch (...) {
-      GRAPH_DEBUG("Exception thrown while executing ideep::convolution_forward::compute");
-    }
-
+    y.reorder_to(r);
+  } catch (...) {
+    GRAPH_DEBUG(
+        "Exception thrown while executing ideep::convolution_forward::compute");
+  }
 }
 
 void nnc_aten_conv2d(
