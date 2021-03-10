@@ -1423,10 +1423,18 @@ void Reducer::ensure_prior_reduction_finished() {
   }
 }
 
+void Reducer::set_ddp_runtime_logging_sample_rate(int sample_rate) {
+  ddp_runtime_logging_sample_rate_ = sample_rate;
+}
+
+int Reducer::get_ddp_runtime_logging_sample_rate() {
+  return ddp_runtime_logging_sample_rate_;
+}
+
 bool Reducer::should_collect_runtime_stats() {
   if (num_iterations_ > 0 &&
     (num_iterations_ <= 10 ||
-    num_iterations_ % kDDPRuntimeLoggingSampleRate == 0)) {
+    num_iterations_ % get_ddp_runtime_logging_sample_rate() == 0)) {
     return true;
   }
   return false;

@@ -406,6 +406,12 @@ struct DDPLoggingData {
   int64_t avg_backward_comm_time = 0;
   int64_t avg_backward_compute_comm_overlap_time = 0;
 
+  // Performance stats for the current iteration.
+  int64_t forward_compute_time = 0;
+  int64_t backward_compute_time = 0;
+  int64_t backward_comm_time = 0;
+  int64_t backward_compute_comm_overlap_time = 0;
+
   // Stream insertion operator for logging i.e. to standard output/error.
   friend std::ostream& operator<<(
     std::ostream& output,
@@ -467,7 +473,6 @@ struct DDPLoggingData {
     ddpLoggingDataInfo += commHookInfo;
     return output << ddpLoggingDataInfo;
   }
-
 };
 
 C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);

@@ -300,7 +300,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "save_thread_local_state",
           &::c10d::Reducer::save_thread_local_state,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def("_set_ddp_runtime_logging_sample_rate",
+           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
+           py::arg("sample_rate"),
+           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
@@ -319,8 +323,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "set_runtime_stats_and_log",
           &::c10d::Logger::set_runtime_stats_and_log,
           py::call_guard<py::gil_scoped_release>())
-      .def(
-          "get_ddp_logging_data",
+        .def(
+          "_get_ddp_logging_data",
           &::c10d::Logger::get_ddp_logging_data,
           py::call_guard<py::gil_scoped_release>())
         .def(
@@ -1316,7 +1320,9 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
           "nccl_socket_ifname", &c10::DDPLoggingData::nccl_socket_ifname)
       .def_readwrite(
           "nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
-      .def_readwrite("nccl_async_error_handling", &c10::DDPLoggingData::nccl_async_error_handling)
+      .def_readwrite(
+          "nccl_async_error_handling",
+          &c10::DDPLoggingData::nccl_async_error_handling)
       .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
       .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
       .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout)
@@ -1338,7 +1344,21 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def_readwrite(
           "avg_backward_compute_comm_overlap_time",
           &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time)
-      .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook);
+      .def_readwrite(
+          "comm_hook",
+          &c10::DDPLoggingData::comm_hook)
+      .def_readwrite(
+          "forward_compute_time",
+          &c10::DDPLoggingData::forward_compute_time)
+      .def_readwrite(
+          "backward_compute_time",
+          &c10::DDPLoggingData::backward_compute_time)
+      .def_readwrite(
+          "backward_comm_time",
+          &c10::DDPLoggingData::backward_comm_time)
+      .def_readwrite(
+          "backward_compute_comm_overlap_time",
+          &c10::DDPLoggingData::backward_compute_comm_overlap_time);
 
   module.def(
       "_compute_bucket_assignment_by_size",
