@@ -261,6 +261,8 @@ Supports input of float, double, cfloat and cdouble dtypes.
 .. note:: See :func:`torch.linalg.eigvals` for a related function that computes only eigenvalues.
           However, that function is not differentiable.
 
+.. warning:: Differentiation support for this function is not implemented yet.
+
 Args:
     input (Tensor): the `n \times n` matrix or the batch of such matrices of size
                     `(*, n, n)` where `*` is one or more batch dimensions.
