@@ -481,16 +481,15 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
   return -at::matmul(grad_self, solution.conj().transpose(-2, -1));
 }
 
-Tensor cumsum_backward(const Tensor & x, int64_t dim, const Tensor & result) {
-  // Need to check numel to see if there are no values (such as shape [0,2], and dim to see if x is a scalar.
-  if (x.dim() == 0 || x.numel() == 0) {
-    return x;
+Tensor cumsum_backward(const Tensor & grad, int64_t dim) {
+  // Trivial case
+  if (grad.numel() <= 1) {
+    return grad;
   }
-  auto result_sum = result.narrow(dim, result.size(dim) - 1, 1)
-                          .clone(at::MemoryFormat::Preserve)
-                          .expand_as(result);
-  // This is equivalent to x.flip(dim).cumsum(dim).flip(dim), but we save the cumsum
-  return result_sum - result + x;
+  const auto grad_cumsum = grad.cumsum(dim);
+  const auto grad_sum = grad_cumsum.select(dim, -1).unsqueeze(dim);
+  // This is equivalent to grad.flip(dim).cumsum(dim).flip(dim), but we save the copying
+  return grad_sum - grad_cumsum + grad;
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {

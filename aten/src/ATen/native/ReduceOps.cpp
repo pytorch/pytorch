@@ -170,7 +170,17 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
 }
 
 Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
-  return w.flip(dim).cumsum(dim).flip(dim);
+  /* Implements w.flip(dim).cumsum(dim).flip(dim) without copying.
+     This implementation gives a similar performance on GPU but a
+     noticeable (up to x10) speed-up on CPU.
+   */
+  // Trivial case
+  if (w.numel() <= 1) {
+    return w;
+  }
+  const auto w_cumsum = w.cumsum(dim);
+  const auto w_sum = w_cumsum.select(dim, -1).unsqueeze(dim);
+  return w_sum - w_cumsum + w;
 }
 
 Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, const Tensor& output) {
@@ -254,7 +264,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     dy_j / dx_z1 = prod(x[:z1]) * (grad_output[z1] + sum(grad_output[z1+1:z2] * cumprod(x[z1+1:z2])))
   */
 
-  if (input.dim() == 0 || input.numel() == 0) {
+  if (input.numel() <= 1) {
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.dim());
