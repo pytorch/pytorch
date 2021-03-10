@@ -127,7 +127,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
                     params_dict=None, dynamic_axes=None, input_names=None, module=None):
     # Inline everything
     torch._C._jit_pass_inline(graph)
-
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
@@ -424,6 +423,19 @@ def _get_named_param_dict(graph, params):
     return _params_dict
 
 
+def _remove_none_list(inputs):
+    ret = []
+    for el in inputs:
+        if not isinstance(el, (list, tuple)):
+            if el is not None:
+                ret.append(el)
+        else:
+            l = _remove_none_list(el)
+            if l != []:
+                ret.append(l)
+    return ret
+
+
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
@@ -465,10 +477,7 @@ def _model_to_graph(model, args, verbose=False,
         if not (isinstance(torch_out, list) or isinstance(torch_out, tuple)):
             output_wrapped = [torch_out]  # type: ignore
         else:
-            output_wrapped = []  # type: ignore
-            for el in torch_out:
-                if el is not None:
-                    output_wrapped.append(el)
+            output_wrapped = _remove_none_list(torch_out)  # type: ignore
 
         output_tensors, out_desc = torch._C._jit_flatten(tuple(output_wrapped))
         torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
