@@ -1403,6 +1403,19 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
         # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), 0.4)),
         # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
     )
+
+    if dtype.is_complex:
+        samples = samples + (
+            # no broadcast
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 0.4j)),
+            # broadcast rhs
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), 0.4j)),
+            # scalar tensor
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 0.4j)),
+            # broadcast rhs scalar-tensor
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 0.4j)),
+        )
+
     return samples
 
 # Operator database (sorted alphabetically)
@@ -2396,6 +2409,16 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half),
            dtypesIfROCM=floating_types_and(torch.half),
            sample_inputs_func=sample_inputs_lerp,
+           skips=(
+               # E       RuntimeError: expected ) but found 'ident' here:
+               # E         File "<string>", line 3
+               # E
+               # E       def the_method(i0, i1):
+               # E           return torch.lerp(i0, i1, 0.4j)
+               # E                                        ~ <--- HERE
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.cfloat, torch.cdouble]),
+           ),
            assert_autodiffed=True),
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
