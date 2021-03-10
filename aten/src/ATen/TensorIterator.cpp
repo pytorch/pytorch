@@ -631,7 +631,7 @@ void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
   int64_t numel = this->numel();
   if (numel == 0) {
     return;
-  } else if (numel < internal::GRAIN_SIZE || at::get_num_threads() == 1) {
+  } else if (numel < grain_size || at::get_num_threads() == 1) {
     return serial_for_each(loop, {0, numel});
   } else {
     at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
@@ -769,6 +769,27 @@ void TensorIteratorBase::build_binary_op(const Tensor& out, const Tensor& a, con
     .enforce_safe_casting_to_output(true));
 }
 
+void TensorIteratorBase::build_unary_float_op(const Tensor& out, const Tensor& a) {
+  build(TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(out)
+      .add_input(a)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .promote_integer_inputs_to_float(true));
+}
+
+void TensorIteratorBase::build_unary_op(const Tensor& out, const Tensor& a) {
+  build(TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(out)
+      .add_input(a)
+      .cast_common_dtype_to_outputs(false)
+      .enforce_safe_casting_to_output(false)
+      .check_all_same_dtype(true));
+}
+
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   TensorIterator iter;
   iter.build_binary_op(out, a, b);
@@ -823,26 +844,15 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
 }
 
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
-  return TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .add_output(out)
-    .add_input(a)
-    .cast_common_dtype_to_outputs(false)
-    .enforce_safe_casting_to_output(false)
-    .check_all_same_dtype(true)
-    .build();
+  TensorIterator iter;
+  iter.build_unary_op(out, a);
+  return iter;
 }
 
 TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a) {
-  return TensorIteratorConfig()
-      .set_check_mem_overlap(true)
-      .add_output(out)
-      .add_input(a)
-      .promote_inputs_to_common_dtype(true)
-      .cast_common_dtype_to_outputs(true)
-      .enforce_safe_casting_to_output(true)
-      .promote_integer_inputs_to_float(true)
-      .build();
+  TensorIterator iter;
+  iter.build_unary_float_op(out, a);
+  return iter;
 }
 
 TensorIterator TensorIterator::nullary_op(Tensor& out) {
