@@ -2392,6 +2392,9 @@ op_db: List[OpInfo] = [
                    handles_complex_extremals=False),
     OpInfo('lerp',
            dtypes=floating_and_complex_types(),
+           # CUDA and ROCM don't support complex inputs
+           dtypesIfCUDA=floating_types_and(torch.half),
+           dtypesIfROCM=floating_types_and(torch.half),
            sample_inputs_func=sample_inputs_lerp,
            assert_autodiffed=True),
     OpInfo('linalg.inv',
