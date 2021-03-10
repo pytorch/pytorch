@@ -1621,7 +1621,7 @@ class TestLinalg(TestCase):
             run_test(shape)
             run_test(shape, symmetric=True)
 
-    @skipCPUIfNoLapack
+    @onlyCUDA
     @skipCUDAIfNoMagma
     @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
@@ -1637,37 +1637,36 @@ class TestLinalg(TestCase):
 
             actual = torch.linalg.eig(a)
 
-            if torch.cuda.is_available():
-                complementary_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            complementary_device = 'cpu'
 
-                # compare with CPU if dtype=='cuda' else with CUDA
-                expected = torch.linalg.eig(a.to(complementary_device))
-                self.assertEqual(expected[0], actual[0])
-                self.assertEqual(expected[1], actual[1])
+            # compare with CPU 
+            expected = torch.linalg.eig(a.to(complementary_device))
+            self.assertEqual(expected[0], actual[0])
+            self.assertEqual(expected[1], actual[1])
 
-                # check out= variant
-                complex_dtype = dtype
-                if not dtype.is_complex and not symmetric:
-                    complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
-                out0 = torch.empty(0, dtype=complex_dtype, device=device)
-                out1 = torch.empty(0, dtype=complex_dtype, device=device)
+            # check out= variant
+            complex_dtype = dtype
+            if not dtype.is_complex and not symmetric:
+                complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
+            out0 = torch.empty(0, dtype=complex_dtype, device=device)
+            out1 = torch.empty(0, dtype=complex_dtype, device=device)
+            ans = torch.linalg.eig(a, out=(out0, out1))
+            self.assertEqual(ans[0], out0)
+            self.assertEqual(ans[1], out1)
+            self.assertEqual(expected[0].to(complex_dtype), out0)
+            self.assertEqual(expected[1].to(complex_dtype), out1)
+
+            # check non-contiguous out
+            if a.numel() > 0:
+                out0 = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
+                out1 = torch.empty(2 * shape[0], *shape[1:], dtype=complex_dtype, device=device)[::2]
+                self.assertFalse(out0.is_contiguous())
+                self.assertFalse(out1.is_contiguous())
                 ans = torch.linalg.eig(a, out=(out0, out1))
                 self.assertEqual(ans[0], out0)
                 self.assertEqual(ans[1], out1)
                 self.assertEqual(expected[0].to(complex_dtype), out0)
                 self.assertEqual(expected[1].to(complex_dtype), out1)
-
-                # check non-contiguous out
-                if a.numel() > 0:
-                    out0 = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
-                    out1 = torch.empty(2 * shape[0], *shape[1:], dtype=complex_dtype, device=device)[::2]
-                    self.assertFalse(out0.is_contiguous())
-                    self.assertFalse(out1.is_contiguous())
-                    ans = torch.linalg.eig(a, out=(out0, out1))
-                    self.assertEqual(ans[0], out0)
-                    self.assertEqual(ans[1], out1)
-                    self.assertEqual(expected[0].to(complex_dtype), out0)
-                    self.assertEqual(expected[1].to(complex_dtype), out1)
 
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
@@ -1787,7 +1786,7 @@ class TestLinalg(TestCase):
             run_test(shape)
             run_test(shape, symmetric=True)
 
-    @skipCPUIfNoLapack
+    @onlyCUDA
     @skipCUDAIfNoMagma
     @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
@@ -1803,29 +1802,28 @@ class TestLinalg(TestCase):
 
             actual = torch.linalg.eigvals(a)
 
-            if torch.cuda.is_available():
-                complementary_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            complementary_device = 'cpu'
 
-                # compare with CPU if dtype=='cuda' else with CUDA
-                expected = torch.linalg.eigvals(a.to(complementary_device))
-                self.assertEqual(expected, actual)
+            # compare with CPU
+            expected = torch.linalg.eigvals(a.to(complementary_device))
+            self.assertEqual(expected, actual)
 
-                # check out= variant
-                complex_dtype = dtype
-                if not dtype.is_complex and not symmetric:
-                    complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
-                out = torch.empty(0, dtype=complex_dtype, device=device)
+            # check out= variant
+            complex_dtype = dtype
+            if not dtype.is_complex and not symmetric:
+                complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
+            out = torch.empty(0, dtype=complex_dtype, device=device)
+            ans = torch.linalg.eigvals(a, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(expected.to(complex_dtype), out)
+
+            # check non-contiguous out
+            if a.numel() > 0:
+                out = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
+                self.assertFalse(out.is_contiguous())
                 ans = torch.linalg.eigvals(a, out=out)
                 self.assertEqual(ans, out)
                 self.assertEqual(expected.to(complex_dtype), out)
-
-                # check non-contiguous out
-                if a.numel() > 0:
-                    out = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
-                    self.assertFalse(out.is_contiguous())
-                    ans = torch.linalg.eigvals(a, out=out)
-                    self.assertEqual(ans, out)
-                    self.assertEqual(expected.to(complex_dtype), out)
 
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
