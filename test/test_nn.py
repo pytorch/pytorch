@@ -4624,12 +4624,12 @@ class TestNN(NNTestCase):
             with torch.backends.mkldnn.flags(enabled=enabled):
                 gradcheck(F.conv2d, (input, mod.weight))
 
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_Conv2d_OneDNN(self):
-        def run_once():
-            group_val = 24
-            ifm = torch.ones([1, group_val, 6, 6], dtype=torch.float32)
+        for group_val in [24, 48, 96]:
+            x = torch.ones([1, group_val, 6, 6], dtype=torch.float32)
             weights = torch.ones([group_val, 1, 3, 3], dtype=torch.float32)
-            op = torch.nn.Conv2d(
+            conv2d = torch.nn.Conv2d(
                 in_channels=group_val,
                 out_channels=group_val,
                 kernel_size=[3, 3],
@@ -4640,20 +4640,14 @@ class TestNN(NNTestCase):
                 bias=False,
                 padding_mode='zeros'
             )
-
-            op.weight.data = weights
-            res = op(ifm)
-            grad_in = torch.ones(res.shape, dtype=torch.float32)
-            res.backward(grad_in)
-            return op.weight.grad
-
-        with torch.backends.mkldnn.flags(enabled=False):
-            without_onednn = run_once()
-
-        with torch.backends.mkldnn.flags(enabled=True):
-            with_onednn = run_once()
-
-        self.assertEqual(without_onednn, with_onednn)
+            conv2d.weight.data = weights
+            mkldnn_conv2d = deepcopy(conv2d)
+            y_mkldnn = mkldnn_conv2d(x).sum()
+            y_mkldnn.backward()
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_aten = conv2d(x).sum()
+                y_aten.backward()
+            self.assertEqual(mkldnn_conv2d.weight.grad, conv2d.weight.grad)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
