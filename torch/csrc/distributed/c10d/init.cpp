@@ -195,9 +195,9 @@ where each tensor in the list refers to the replica on each device.
 Since DDP communication hook only supports single process single device mode at this time,
 only exactly one tensor is stored in this bucket.
 This tensor is actually a flattened 1D tensor,
-which can be further decomposed into a list of per-parameter tensors
+which can be further decomposed into a list of per-parameter tensors within this bucket
 (returned by :meth:`~torch.distributed.GradBucket.get_per_parameter_tensors`)
-to apply layer-wise operation.
+to apply layer-wise operations.
 )")
       .def(
           py::init<
