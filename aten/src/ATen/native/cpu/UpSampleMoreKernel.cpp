@@ -45,7 +45,7 @@ static inline void compute_source_index_and_lambda(
 
 // Helper structs and methods for cpu_upsample_linear
 //
-// Interpolation methods that used below are separable, and as such we can compute the interpolation 
+// Interpolation methods that used below are separable, and as such we can compute the interpolation
 // independently per dimension in a recursive way. Please, refer to #10482 for more context.
 //
 // Linear Interpolation structure to compute output value in n-dimensional case.
@@ -96,26 +96,26 @@ static inline bool is_contiguous_stride(const int64_t* strides) {
 }
 
 
-// Helper class to recursively check if all input strides corresponding to interpolated dimensions 
+// Helper class to recursively check if all input strides corresponding to interpolated dimensions
 // are equal zero except on a single dimension.
-// 
+//
 // Inputs: array of strides of size N, non_zero_stride_dim which can be -1, 0, 1, 2, ...
 //   if non_zero_stride_dim, we check that all strides are equal zero, otherwise
 //   4 strides corresponding to the strides for index_0, weight_0, index_1 and weight_1 for non_zero_stride_dim
 //   dimension should be non zero.
-// 
-// Unit check of the recursion is to verify whether 4 strides for one interpolated dimension are either zero, 
+//
+// Unit check of the recursion is to verify whether 4 strides for one interpolated dimension are either zero,
 // see method is_zero_stride, or (sizeof(index_t), sizeof(scalar_t), sizeof(index_t), sizeof(scalar_t)), see
 // method is_contiguous_stride.
-// 
+//
 // In practice, we have the following cases:
-// - for ND, float32, channel first, strides are 
+// - for ND, float32, channel first, strides are
 //         dimN-1,              dim1,           dim0
 //         i0, w0, i1, w1, ..., i0, w0, i1, w1, i0, w0, i1, w1
 // strides=(0,  0,  0,  0, ...,  0,  0,  0,  0,  4,  4,  4,  4)
 //
 // if size dim0 is 1 then its strides are 0 and dim1 strides are equal 4
-// 
+//
 // - for ND, float32, channel last, strides are
 //         dimN-1,         dimN-2,             dim0
 //         i0, w0, i1, w1, i0, w0, i1, w1, ... i0, w0, i1, w1
@@ -155,7 +155,7 @@ static inline void basic_loop(char** data, const int64_t* strides, int64_t n) {
 }
 
 // Linear upsampling computation method using TensorIterator for Nd case.
-// 
+//
 // Single loop function for 1d, 2d and 3d cases.
 // For N dimensions, output value up to Di dimension can be computed as
 //
@@ -337,7 +337,7 @@ void cpu_upsample_linear_backward(
 //
 template<typename scalar_t>
 std::vector<Tensor> compute_indices_weights_linear(
-  int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims, int64_t reshape_dim, 
+  int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims, int64_t reshape_dim,
   bool align_corners, const c10::optional<double> opt_scale
 ) {
 
@@ -348,7 +348,7 @@ std::vector<Tensor> compute_indices_weights_linear(
   new_shape[reshape_dim] = output_size;
 
   output.emplace_back(empty(new_shape, CPU(at::kLong)));
-  output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<scalar_t>())));  
+  output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<scalar_t>())));
   output.emplace_back(empty(new_shape, CPU(at::kLong)));
   output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<scalar_t>())));
 
@@ -356,7 +356,7 @@ std::vector<Tensor> compute_indices_weights_linear(
   auto lambda0_ptr = output[1].data_ptr<scalar_t>();
   auto input_index1_ptr = output[2].data_ptr<int64_t>();
   auto lambda1_ptr = output[3].data_ptr<scalar_t>();
-  
+
   for (int64_t i=0; i<output_size; i++) {
 
     compute_source_index_and_lambda<scalar_t>(
@@ -375,7 +375,7 @@ std::vector<Tensor> compute_indices_weights_linear(
 }
 
 // Upsampling linear interpolation kernel for N-d case.
-// Input is assumed to be like NCHW, NCL, NCKHW - interpolated spatial dimension 
+// Input is assumed to be like NCHW, NCL, NCKHW - interpolated spatial dimension
 // are those from the end up to batch size N and number of channels C.
 //
 // Internally, it uses TensorIterator to optimize the computations.
