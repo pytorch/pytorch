@@ -2093,6 +2093,56 @@ class TestFX(JitTestCase):
     def test_graph_module_init_buffer_param_copied_mod_init(self):
         self._test_graph_module_init_buffer_param_copied(use_dict_init=False)
 
+    def test_annotations_with_no_forward_references(self):
+        class A:
+            def __call__(self, x: torch.Tensor):
+                return torch.add(x, x)
+
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor, a: A) -> torch.Tensor:
+                return a(x)
+
+        self.checkGraphModule(M(), (torch.rand(2, 3), A()), kwargs=None)
+
+    def test_annotations_with_forward_references(self):
+        class A:
+            def __call__(self, x: torch.Tensor):
+                return torch.add(x, x)
+
+        class M(torch.nn.Module):
+            def forward(self, x: 'torch.Tensor', a: 'A') -> 'torch.Tensor':
+                return a(x)
+
+        self.checkGraphModule(M(), (torch.rand(2, 3), A()), kwargs=None)
+
+    def test_annotations_with_non_torch_reference_and_no_internal_forward_references(self):
+        class A:
+            def __call__(self, x: torch.Tensor):
+                return torch.add(x, x)
+
+        class M(torch.nn.Module):
+            def forward(self, x: List[torch.Tensor], a: A) -> torch.Tensor:
+                return a(x[0])
+
+        self.checkGraphModule(M(), (torch.rand(2, 3), A()), kwargs=None)
+
+    def test_annotations_with_non_torch_reference_and_internal_forward_references(self):
+        class A:
+            def __call__(self, x: torch.Tensor):
+                return torch.add(x, x)
+
+        class M(torch.nn.Module):
+            def forward(self, x: List['torch.Tensor'], a: A) -> 'torch.Tensor':
+                return a(x)[0]
+
+        self.checkGraphModule(M(), (torch.rand(2, 3), A()), kwargs=None)
+
+    def test_annotation_with_future(self):
+        try:
+            import fx.test_future    # noqa: F401
+        finally:
+            del sys.modules["__future__"]
+
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
     _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
