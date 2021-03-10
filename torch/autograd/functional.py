@@ -268,11 +268,8 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
                                    "user-provided function returns "
                                    "a single Tensor with a single element.")
 
-    if create_graph:
-        with torch.enable_grad():
-            grad_res = _autograd_grad(outputs, inputs, v, create_graph=create_graph)
-            vjp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "back")
-    else:
+    enable_grad = True if create_graph else torch.is_grad_enabled()
+    with torch.set_grad_enabled(enable_grad):
         grad_res = _autograd_grad(outputs, inputs, v, create_graph=create_graph)
         vjp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "back")
 
@@ -785,11 +782,8 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
         jac = _autograd_grad(outputs, inputs, create_graph=True)
         _check_requires_grad(jac, "jacobian", strict=strict)
 
-    if create_graph:
-        with torch.enable_grad():
-            grad_res = _autograd_grad(jac, inputs, v, create_graph=create_graph)
-            vhp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "double_back")
-    else:
+    enable_grad = True if create_graph else torch.is_grad_enabled()
+    with torch.set_grad_enabled(enable_grad):
         grad_res = _autograd_grad(jac, inputs, v, create_graph=create_graph)
         vhp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "double_back")
 
@@ -893,11 +887,8 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
         double_back = _autograd_grad(jac, inputs, grad_jac, create_graph=True)
         _check_requires_grad(jac, "hessian", strict=strict)
 
-    if create_graph:
-        with torch.enable_grad():
-            grad_res = _autograd_grad(double_back, grad_jac, v, create_graph=create_graph)
-            hvp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "double_back_trick")
-    else:
+    enable_grad = True if create_graph else torch.is_grad_enabled()
+    with torch.set_grad_enabled(enable_grad):
         grad_res = _autograd_grad(double_back, grad_jac, v, create_graph=create_graph)
         hvp = _fill_in_zeros(grad_res, inputs, strict, create_graph, "double_back_trick")
 
