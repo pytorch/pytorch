@@ -120,7 +120,8 @@ class ModelTest(PackageTestCase):
             # note that this source is the same for all models in this approach
             # so it can be made part of an API that just takes the model and
             # packages it with this source.
-            src = dedent("""\
+            src = dedent(
+                """\
                 import importlib
                 import torch_package_importer as resources
 
@@ -128,7 +129,8 @@ class ModelTest(PackageTestCase):
                 # maybe in the future it passes options as arguments by convension
                 def load():
                     return resources.load_pickle('model', 'pickled')
-                """)
+                """
+            )
             e.save_source_string("model", src, is_package=True)
 
         f2 = self.temp()
@@ -137,7 +139,8 @@ class ModelTest(PackageTestCase):
         # + but this code can be edited later to adjust adapt the model later
         with PackageExporter(f2, verbose=False) as e:
             e.save_pickle("model", "state_dict", resnet.state_dict())
-            src = dedent("""\
+            src = dedent(
+                """\
                 import importlib
                 import torch_package_importer as resources
 
@@ -150,7 +153,8 @@ class ModelTest(PackageTestCase):
                     state_dict = resources.load_pickle('model', 'state_dict')
                     r.load_state_dict(state_dict)
                     return r
-                """)
+                """
+            )
             e.save_source_string("model", src, is_package=True)
 
         # regardless of how we chose to package, we can now use the model in a server in the same way

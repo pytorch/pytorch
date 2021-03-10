@@ -33,10 +33,12 @@ class TestSaveLoad(PackageTestCase):
     def test_saving_string(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
-            src = dedent("""\
+            src = dedent(
+                """\
                 import math
                 the_math = math
-                """)
+                """
+            )
             he.save_source_string("my_mod", src)
         hi = PackageImporter(filename)
         m = hi.import_module("math")

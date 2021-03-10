@@ -20,7 +20,8 @@ class TestMisc(PackageTestCase):
     def test_file_structure(self):
         filename = self.temp()
 
-        export_plain = dedent("""\
+        export_plain = dedent(
+            """\
                 ├── main
                 │   └── main
                 ├── obj
@@ -29,14 +30,18 @@ class TestMisc(PackageTestCase):
                 │   ├── __init__.py
                 │   └── subpackage.py
                 └── module_a.py
-            """)
-        export_include = dedent("""\
+            """
+        )
+        export_include = dedent(
+            """\
                 ├── obj
                 │   └── obj.pkl
                 └── package_a
                     └── subpackage.py
-            """)
-        import_exclude = dedent("""\
+            """
+        )
+        import_exclude = dedent(
+            """\
                 ├── .data
                 │   ├── extern_modules
                 │   └── version
@@ -48,7 +53,8 @@ class TestMisc(PackageTestCase):
                 │   ├── __init__.py
                 │   └── subpackage.py
                 └── module_a.py
-            """)
+            """
+        )
 
         with PackageExporter(filename, verbose=False) as he:
             import module_a
@@ -64,19 +70,22 @@ class TestMisc(PackageTestCase):
             export_file_structure = he.file_structure()
             # remove first line from testing because WINDOW/iOS/Unix treat the filename differently
             self.assertEqual(
-                dedent("\n".join(str(export_file_structure).split("\n")[1:])), export_plain
+                dedent("\n".join(str(export_file_structure).split("\n")[1:])),
+                export_plain,
             )
             export_file_structure = he.file_structure(
                 include=["**/subpackage.py", "**/*.pkl"]
             )
             self.assertEqual(
-                dedent("\n".join(str(export_file_structure).split("\n")[1:])), export_include
+                dedent("\n".join(str(export_file_structure).split("\n")[1:])),
+                export_include,
             )
 
         hi = PackageImporter(filename)
         import_file_structure = hi.file_structure(exclude="**/*.storage")
         self.assertEqual(
-            dedent("\n".join(str(import_file_structure).split("\n")[1:])), import_exclude
+            dedent("\n".join(str(import_file_structure).split("\n")[1:])),
+            import_exclude,
         )
 
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
