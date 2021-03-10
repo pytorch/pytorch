@@ -1600,7 +1600,7 @@ class TestLinalg(TestCase):
             expected = (np.take_along_axis(expected[0], ind, axis=-1), np.take_along_axis(expected[1], ind[:, None], axis=-1))
 
             # sort PyTorch output
-            # torch.argsort doesn't work well with complex inputs, NumPy sorting on CPU is used instead
+            # torch.argsort doesn't work with complex inputs, NumPy sorting on CPU is used instead
             # RuntimeError: _th_sort not supported on CUDAType for ComplexDouble
             # RuntimeError: "sorting_kernel_method_name" not implemented for 'ComplexDouble'
             ind = np.argsort(actual[0].cpu().numpy(), axis=-1)[::-1]
@@ -1769,7 +1769,7 @@ class TestLinalg(TestCase):
             expected = np.take_along_axis(expected, ind, axis=-1)
 
             # sort PyTorch output
-            # torch.argsort doesn't work well with complex inputs, NumPy sorting on CPU is used instead
+            # torch.argsort doesn't work with complex inputs, NumPy sorting on CPU is used instead
             # RuntimeError: _th_sort not supported on CUDAType for ComplexDouble
             # RuntimeError: "sorting_kernel_method_name" not implemented for 'ComplexDouble'
             ind = np.argsort(actual.cpu().numpy(), axis=-1)[::-1]
