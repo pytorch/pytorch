@@ -329,26 +329,26 @@ class SaveOp final : public Operator<Context> {
 };
 
 template <typename... Ts>
-string FormatString(const string& pattern, Ts... values) {
-  // Note(Yangqing): We believe that 1024 is enough, but who are we to assert
-  // that?
-  // As a result, if things go wrong, we'll just throw the towel and quit loud.
-  // Yeah, I know that there is snprintf, but it is not present in *some*
-  // platforms unfortunately.
-  char buffer[1024];
-  int written = sprintf(buffer, pattern.c_str(), values...);
-  if (written < 0 || written + 1 > 1024) {
-    LOG(FATAL) << "FormatString fails: total bytes written " << written;
+std::string FormatString(const std::string& pattern, Ts... values) {
+  // Start with an initial buffer size that is probably enough most of the time.
+  std::string buffer(256, '\0');
+  auto bytes_written =
+      snprintf(&buffer[0], buffer.size(), pattern.c_str(), values...);
+  if (bytes_written < 0) {
+    throw std::runtime_error("FormatString failed");
   }
-  return string(buffer);
-  /*
-   * The following is the snprintf version that is safe; enable it one day?
-  unsigned int required =
-      std::snprintf(nullptr, 0, pattern.c_str(), values...) + 1;
-  char bytes[required];
-  std::snprintf(bytes, required, pattern.c_str(), values...);
-  return string(bytes);
-  */
+  if (bytes_written > buffer.size()) {
+    // Our initial buffer size wasn't enough, resize and run again.
+    buffer.resize(bytes_written + 1);
+    bytes_written =
+        snprintf(&buffer[0], buffer.size(), pattern.c_str(), values...);
+    if (bytes_written < 0) {
+      throw std::runtime_error("FormatString failed");
+    }
+  }
+  // Truncate the string to the correct size to trim off the nul terminator.
+  buffer.resize(bytes_written);
+  return buffer;
 }
 
 // CheckpointOp is a wrapper over a SaveFloatTensorOp that basically allows

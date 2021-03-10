@@ -612,6 +612,14 @@ class DistributedDataParallel(Module):
                 for replica in self._module_copies
             ]
 
+        # Deduplicate any parameters that might be shared across child modules.
+        memo = set()
+        modules_and_parameters = [
+            # "p not in memo" is the deduplication check.
+            # "not memo.add(p)" is always True, and it's only there to cause "add(p)" if needed.
+            [(m, p) for m, p in replica_mps if p not in memo and not memo.add(p)]
+            for replica_mps in modules_and_parameters]
+
         # Build list of parameters.
         parameters = [
             list(parameter for _, parameter in replica)
