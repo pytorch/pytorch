@@ -1,8 +1,8 @@
-set(extra_src)
+set(Aten_TH_AVX_extra_src)
 
 # IF AVX FOUND
 if(C_AVX_FOUND)
-  list(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX.cpp)
+  list(APPEND Aten_TH_AVX_extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX.cpp)
 endif(C_AVX_FOUND)
 
 set(hdr
@@ -22,11 +22,15 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THVector.cpp
-  ${extra_src}
+  ${Aten_TH_AVX_extra_src}
   )
 # Remember that PARENT_SCOPE variables are not in the current scope
 set(ATen_TH_SRCS ${ATen_TH_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} ${ATen_TH_SRCS} PARENT_SCOPE)
+
+# Aten_TH_AVX_extra_src is used in aten/src/ATen/CMakeLists.txt
+# when built with BUILD_LITE_INTERPRETER=1
+set(Aten_TH_AVX_extra_src ${Aten_TH_AVX_extra_src} PARENT_SCOPE)
 ######################################################
 
 
