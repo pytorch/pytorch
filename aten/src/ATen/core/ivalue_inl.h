@@ -139,7 +139,9 @@ inline c10::complex<double> IValue::toComplexDouble() const {
   return (*ptr).val;
 }
 inline at::Tensor IValue::toTensor() && {
-  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
   auto result = std::move(payload.as_tensor);
   // As far as I can tell, omitting the usual explicit destructor call
   // is not UB in and of itself, and it's a slight perf win. The
@@ -154,11 +156,15 @@ inline at::Tensor IValue::toTensor() && {
   return result;
 }
 inline at::Tensor& IValue::toTensor() & {
-  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
   return payload.as_tensor;
 }
 inline const at::Tensor& IValue::toTensor() const& {
-  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
   return payload.as_tensor;
 }
 inline c10::Storage IValue::toStorage() && {
@@ -908,7 +914,7 @@ static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
 }
 
 template <typename T>
-static std::vector<T> createVectorFromList(const c10::List<T>& impl) {
+std::vector<T> createVectorFromList(const c10::List<T>& impl) {
   std::vector<T> result;
   result.reserve(impl.size());
   for (size_t i = 0, N = impl.size(); i < N; ++i) {

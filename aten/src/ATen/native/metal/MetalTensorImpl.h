@@ -2,9 +2,8 @@
 #define MetalTensorImpl_h
 
 #include <ATen/OpaqueTensorImpl.h>
-#include <ATen/Tensor.h>
 #include <ATen/WrapDimUtils.h>
-#import <ATen/native/metal/MetalTensor.h>
+#import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/mpscnn/MPSImageWrapper.h>
 
 namespace at {
@@ -41,8 +40,8 @@ struct TORCH_API MetalTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
   }
 
   void release_resources() override {
-    using MetalTensor = at::native::metal::MetalTensor;
-    auto&& handle = (MetalTensor)this->opaque_handle();
+    using MetalTensorImplStorage = at::native::metal::MetalTensorImplStorage;
+    auto&& handle = (MetalTensorImplStorage)this->opaque_handle();
     handle.texture()->recycleImage();
     OpaqueTensorImpl<OpaqueHandle>::release_resources();
   }
