@@ -1586,7 +1586,7 @@ class TestLinalg(TestCase):
                 # for symmetric real-valued inputs eigenvalues and eigenvectors are also real-valued
                 a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
             else:
-                a = torch.randn(*shape, dtype=dtype, device=device)
+                a = make_tensor(shape, dtype=dtype, device=device)
 
             actual = torch.linalg.eig(a)
 
@@ -1633,7 +1633,7 @@ class TestLinalg(TestCase):
                 # for symmetric real-valued inputs eigenvalues and eigenvectors are also real-valued
                 a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
             else:
-                a = torch.randn(*shape, dtype=dtype, device=device)
+                a = make_tensor(shape, dtype=dtype, device=device)
 
             actual = torch.linalg.eig(a)
 
@@ -1684,12 +1684,12 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     def test_eig_errors_and_warnings(self, device, dtype):
         # eig requires the input to be at least 2 dimensional tensor
-        a = torch.randn(2, device=device, dtype=dtype)
+        a = make_tensor(2, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
             torch.linalg.eig(a)
 
         # eig requires a square matrix
-        a = torch.randn(2, 3, device=device, dtype=dtype)
+        a = make_tensor((2, 3), dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.linalg.eig(a)
 
@@ -1707,7 +1707,7 @@ class TestLinalg(TestCase):
                 torch.linalg.eig(a, out=(out0, out1))
 
         # dtypes should be safely castable
-        a = torch.randn(3, 3, device=device, dtype=dtype)
+        a = make_tensor((3, 3), dtype=dtype, device=device)
         out0 = torch.empty(0, dtype=torch.int, device=device)
         out1 = torch.empty(0, dtype=torch.int, device=device)
         with self.assertRaisesRegex(RuntimeError, "but got eigenvalues with dtype Int"):
@@ -1718,7 +1718,7 @@ class TestLinalg(TestCase):
             torch.linalg.eig(a, out=(out0, out1))
 
         # if non-empty out tensor with wrong shape is passed a warning is given
-        a = torch.randn(3, 3, device=device, dtype=dtype)
+        a = make_tensor((3, 3), dtype=dtype, device=device)
         out0 = torch.empty(1, device=device, dtype=torch.complex128)
         out1 = torch.empty(1, device=device, dtype=torch.complex128)
         with warnings.catch_warnings(record=True) as w:
@@ -1755,7 +1755,7 @@ class TestLinalg(TestCase):
                 # for symmetric real-valued inputs eigenvalues and eigenvectors are also real-valued
                 a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
             else:
-                a = torch.randn(*shape, dtype=dtype, device=device)
+                a = make_tensor(shape, dtype=dtype, device=device)
 
             actual = torch.linalg.eigvals(a)
 
@@ -1799,7 +1799,7 @@ class TestLinalg(TestCase):
                 # for symmetric real-valued inputs eigenvalues and eigenvectors are also real-valued
                 a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
             else:
-                a = torch.randn(*shape, dtype=dtype, device=device)
+                a = make_tensor(shape, dtype=dtype, device=device)
 
             actual = torch.linalg.eigvals(a)
 
@@ -1842,12 +1842,12 @@ class TestLinalg(TestCase):
     @dtypes(*floating_and_complex_types())
     def test_eigvals_errors_and_warnings(self, device, dtype):
         # eig requires the input to be at least 2 dimensional tensor
-        a = torch.randn(2, device=device, dtype=dtype)
+        a = make_tensor(2, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
             torch.linalg.eigvals(a)
 
         # eig requires a square matrix
-        a = torch.randn(2, 3, device=device, dtype=dtype)
+        a = make_tensor((2, 3), dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.linalg.eigvals(a)
 
@@ -1860,7 +1860,7 @@ class TestLinalg(TestCase):
                 torch.linalg.eigvals(a, out=out)
 
         # dtypes should be safely castable
-        a = torch.randn(3, 3, device=device, dtype=dtype)
+        a = make_tensor((3, 3), dtype=dtype, device=device)
         out = torch.empty(0, dtype=torch.int, device=device)
         with self.assertRaisesRegex(RuntimeError, "but got eigenvalues with dtype Int"):
             torch.linalg.eigvals(a, out=out)
