@@ -232,7 +232,7 @@ class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
     return cuda_analysis_->gpu_thread_extents();
   }
 
-  std::string getCodeText(std::string attr = "") override {
+  const std::string getCodeText(const std::string attr = "") override {
     return oss_.str();
   }
 

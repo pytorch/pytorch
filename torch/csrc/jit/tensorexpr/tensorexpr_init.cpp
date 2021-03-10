@@ -368,7 +368,7 @@ void initTensorExprBindings(PyObject* module) {
           })
       .def(
           "getCodeText",
-          [](CodeGen& self, std::string attr = "") {
+          [](CodeGen& self, const std::string attr = "") {
             return self.getCodeText(attr);
           },
           py::arg("attr") = "");

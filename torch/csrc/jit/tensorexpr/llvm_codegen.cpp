@@ -231,10 +231,10 @@ class LLVMCodeGenImpl : public IRVisitor {
       llvm::Value* val);
 
   void optimize(llvm::Module& M);
-  std::string getLLVMCodeText() {
+  const std::string getLLVMCodeText() {
     return llvmCode;
   }
-  std::string getASMCodeText() {
+  const std::string getASMCodeText() {
     return asmCode;
   }
 };
@@ -309,7 +309,7 @@ void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
   return (void*)impl->getKernelAddress();
 }
 
-std::string LLVMCodeGen::getCodeText(std::string attr /*=""*/) {
+const std::string LLVMCodeGen::getCodeText(const std::string attr /*=""*/) {
   if (attr == "asm") {
     return impl_->getASMCodeText();
   } else {
