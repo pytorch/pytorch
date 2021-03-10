@@ -944,6 +944,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.checkGraphModuleNodes(
             mp_shadows_mq, expected_node_occurrence=expected_occurrence)
 
+    @override_qengines
     def test_logging_inputs(self):
         """
         Verifies that logging inputs works correctly
@@ -972,15 +973,8 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
 
         act_compare_dict = get_matching_activations_a_shadows_b(
             mp_shadows_mq, OutputLogger)
-        for k, v in act_compare_dict.items():
-            ref_a = v['fp32_prepared']['ref_node_name']
-            ref_b = v['int8']['ref_node_name']
-            # compare conv to conv_shadow_copy_0
-            assert ref_a.startswith(ref_b), f"expected {ref_a} to start with {ref_b}"
 
-        # 1 input of conv, 1 output of conv, 2 inputs of cat, 1 output of cat
-        # 5 total
-        self.assertTrue(len(act_compare_dict) == 5)
+        self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
 
@@ -1022,10 +1016,7 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
             # inspect results
             act_compare_dict = get_matching_activations(
                 sparse_nn, sparse_nn_q, OutputLogger)
-            if should_log_inputs:
-                self.assertTrue(len(act_compare_dict) == 9)
-            else:
-                self.assertTrue(len(act_compare_dict) == 4)
+            self.assertTrue(len(act_compare_dict) == 4)
             self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @override_qengines
@@ -1062,8 +1053,5 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
             # check activation result correctness
             act_compare_dict = get_matching_activations_a_shadows_b(
                 sparse_nn_q, OutputLogger)
-            if should_log_inputs:
-                self.assertTrue(len(act_compare_dict) == 9)
-            else:
-                self.assertTrue(len(act_compare_dict) == 4)
+            self.assertTrue(len(act_compare_dict) == 4)
             self.assert_ns_compare_dict_valid(act_compare_dict)

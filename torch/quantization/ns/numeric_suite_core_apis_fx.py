@@ -33,6 +33,64 @@ from .ns_types import (
 
 from typing import Dict, Tuple, Callable, List, Any
 
+
+class OutputLogger(nn.Module):
+    stats: List[torch.Tensor]
+
+    def __init__(
+        self,
+        ref_node_name: str,
+        prev_node_name: str,
+        model_name: str,
+        ref_name: str,
+        prev_node_target_type: str,
+        results_type: str,
+        index_within_arg: int,
+    ):
+        super().__init__()
+        self.stats: List[torch.Tensor] = []
+
+        # name of the node which was responsible for adding this logger
+        # Note:
+        # - if we are logging node outputs, this is the same as prev_node_name
+        # - if we are logging node inputs, this is the name of the node
+        #   whose input this logger is logging.
+        #
+        # example, where logger1 is logging input of op1 and logger2 is logging
+        #    the output of op1:
+        #
+        #  x1 -> logger1 -> op1 -> logger2 -> x2
+        #
+        # in this example,
+        #   - logger1's prev_node_name is x1 and ref_node_name is op1
+        #   - logger2's prev_node_name is op1 and ref_node_name is op1
+        self.ref_node_name = ref_node_name
+        # name of the node whose output this Logger is capturing
+        self.prev_node_name = prev_node_name
+
+        # name of the model from which the node originated from
+        self.model_name = model_name
+        # reference name, used to match loggers from separate models
+        # to each other
+        self.ref_name = ref_name
+        # type of the target of the node whose output this logger is logging
+        self.prev_node_target_type = prev_node_target_type
+        # what kind of values are inside of stats
+        self.results_type = results_type
+        # index of this node within the arg of the input/output node
+        # for example, in cat([x1, x2, x3], dim=0), x2 would have index_within_arg == 1
+        self.index_within_arg = index_within_arg
+
+    def forward(self, x: torch.Tensor):
+        self.stats.append(x.detach())
+        return x
+
+    def __repr__(self):
+        return f"""OutputLogger(ref_name={self.ref_name}, model_name={self.model_name},
+prev_node_name={self.prev_node_name}, ref_node_name={self.ref_node_name},
+results_type={self.results_type}, index_within_arg={self.index_within_arg})"""
+
+
 # TODO(future PR): see if we can use typing_extensions's TypedDict instead
 # to properly type the various keys
 # {
@@ -49,19 +107,26 @@ from typing import Dict, Tuple, Callable, List, Any
 #       # name of the node responsible for adding this logger
 #       # Note: this may differ from prev_node_name if we are logging inputs
 #       'ref_node_name': 'linear1',
+#       # index of this node within the arg of the input/output node
+#       # for example, in cat([x1, x2, x3], dim=0), x2 would have index_within_arg == 1
+#       'index_within_arg': 0,
 #     },
 #   },
 # }
 NSSingleResultType = Dict[str, Any]
 
 # {
-#   'logger_name_1': {
-#     'model_name_a': NSSingleResultType,
-#     'model_name_b': NSSingleResultType,
+#   'layer_name_1': {  # subgraph name
+#     'node_output': {  # results type (node_output, node_input, weight)
+#       'model_name_a':  # model name
+#          [NSSingleResultType, ...],  # results, ordered by index_within_arg
+#       'model_name_b':
+#          [NSSingleResultType, ...],
+#     },
 #   },
 # }
 #
-NSResultsType = Dict[str, Dict[str, NSSingleResultType]]
+NSResultsType = Dict[str, Dict[str, Dict[str, List[NSSingleResultType]]]]
 
 
 class NSTracer(Tracer):
@@ -89,8 +154,9 @@ def _add_weight_info_to_dict(
 
     for node, ref_name in nodes_and_names_to_instrument:
 
+        res_type = NSSingleResultValuesType.WEIGHT.value
         if ref_name not in results:
-            results[ref_name] = {}
+            results[ref_name] = {res_type: {}}
 
         if node.op == 'call_function':
 
@@ -101,13 +167,14 @@ def _add_weight_info_to_dict(
 
             if related_to_linear:
                 weight = get_linear_fun_weight(node, model)
-                results[ref_name][model_name] = {
-                    'type': NSSingleResultValuesType.WEIGHT.value,
+                results[ref_name][res_type][model_name] = [{
+                    'type': res_type,
                     'values': [weight],
                     'prev_node_name': node.name,
                     'prev_node_target_type': str(node.target),
                     'ref_node_name': node.name,
-                }
+                    'index_within_arg': 0,
+                }]
 
         else:  # call_module
             # for call_module, we need to look up the modules to do the type check
@@ -122,13 +189,14 @@ def _add_weight_info_to_dict(
             # TODO(future PR): other module types
             if related_to_conv2d_mod:
                 weight = get_conv_mod_weight(mod)
-                results[ref_name][model_name] = {
-                    'type': NSSingleResultValuesType.WEIGHT.value,
+                results[ref_name][res_type][model_name] = [{
+                    'type': res_type,
                     'values': [weight],
                     'prev_node_name': node.name,
                     'prev_node_target_type': str(type(mod)),
                     'ref_node_name': node.name,
-                }
+                    'index_within_arg': 0,
+                }]
 
 
 def _compare_weights_impl(
@@ -171,59 +239,6 @@ def compare_weights(
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
     return _compare_weights_impl(model_name_a, gm_a, model_name_b, gm_b)
-
-
-class OutputLogger(nn.Module):
-    stats: List[torch.Tensor]
-
-    def __init__(
-        self,
-        ref_node_name: str,
-        prev_node_name: str,
-        model_name: str,
-        ref_name: str,
-        prev_node_target_type: str,
-        results_type: str,
-    ):
-        super().__init__()
-        self.stats: List[torch.Tensor] = []
-
-        # name of the node which was responsible for adding this logger
-        # Note:
-        # - if we are logging node outputs, this is the same as prev_node_name
-        # - if we are logging node inputs, this is the name of the node
-        #   whose input this logger is logging.
-        #
-        # example, where logger1 is logging input of op1 and logger2 is logging
-        #    the output of op1:
-        #
-        #  x1 -> logger1 -> op1 -> logger2 -> x2
-        #
-        # in this example,
-        #   - logger1's prev_node_name is x1 and ref_node_name is op1
-        #   - logger2's prev_node_name is op1 and ref_node_name is op1
-        self.ref_node_name = ref_node_name
-        # name of the node whose output this Logger is capturing
-        self.prev_node_name = prev_node_name
-
-        # name of the model from which the node originated from
-        self.model_name = model_name
-        # reference name, used to match loggers from separate models
-        # to each other
-        self.ref_name = ref_name
-        # type of the target of the node whose output this logger is logging
-        self.prev_node_target_type = prev_node_target_type
-        # what kind of values are inside of stats
-        self.results_type = results_type
-
-    def forward(self, x: torch.Tensor):
-        self.stats.append(x.detach())
-        return x
-
-    def __repr__(self):
-        return f"""OutputLogger(ref_name={self.ref_name}, model_name={self.model_name},
-prev_node_name={self.prev_node_name}, ref_node_name={self.ref_node_name},
-results_type={self.results_type})"""
 
 
 def _prepare_single_model_output(
@@ -310,13 +325,22 @@ def add_activation_info_to_dict(
                 results[key] = {}
             assert mod.model_name not in results[key], \
                 f"{mod.model_name} is already present in results"
-            results[key][mod.model_name] = {
+            if mod.results_type not in results[key]:
+                results[key][mod.results_type] = {}
+            if mod.model_name not in results[key][mod.results_type]:
+                results[key][mod.results_type][mod.model_name] = []
+            results[key][mod.results_type][mod.model_name].append({
                 'type': mod.results_type,
                 'values': mod.stats,
                 'ref_node_name': mod.ref_node_name,
                 'prev_node_name': mod.prev_node_name,
                 'prev_node_target_type': mod.prev_node_target_type,
-            }
+                'index_within_arg': mod.index_within_arg,
+            })
+            # ensure the list stays sorted
+            results[key][mod.results_type][mod.model_name].sort(
+                key=lambda res: res['index_within_arg']
+            )
 
 
 # TODO(future PR): align on naming

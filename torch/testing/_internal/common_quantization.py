@@ -675,35 +675,39 @@ class QuantizationTestCase(TestCase):
             2. number of seen tensors match
             3. shapes of each pair of seen tensors match
             """
-            for layer_name, layer_data in act_compare_dict.items():
-                self.assertTrue(
-                    len(layer_data) == 2,
-                    f"Layer {layer_name} does not have exactly two model results.")
-                model_name_0, model_name_1 = layer_data.keys()
-                self.assertTrue(
-                    layer_data[model_name_0]['type'] == layer_data[model_name_1]['type'],
-                    f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same type.")
-                self.assertTrue(
-                    len(layer_data[model_name_0]['values']) ==
-                    len(layer_data[model_name_1]['values']),
-                    f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same number of seen Tensors.")
-                for idx in range(len(layer_data[model_name_0]['values'])):
+            for layer_name, result_type_to_data in act_compare_dict.items():
+                for result_type, layer_data in result_type_to_data.items():
                     self.assertTrue(
-                        layer_data[model_name_0]['values'][idx].shape ==
-                        layer_data[model_name_1]['values'][idx].shape,
-                        f"Layer {layer_name}, {model_name_0} and {model_name_1} have a shape mismatch at idx {idx}.")
+                        len(layer_data) == 2,
+                        f"Layer {layer_name} does not have exactly two model results.")
+                    model_name_0, model_name_1 = layer_data.keys()
+                    for res_idx in range(len(layer_data[model_name_0])):
+                        layer_data_0 = layer_data[model_name_0][res_idx]
+                        layer_data_1 = layer_data[model_name_1][res_idx]
+                        self.assertTrue(
+                            layer_data_0['type'] == layer_data_0['type'],
+                            f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same type.")
+                        self.assertTrue(
+                            len(layer_data_0['values']) ==
+                            len(layer_data_1['values']),
+                            f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same number of seen Tensors.")
+                        for idx in range(len(layer_data_0['values'])):
+                            self.assertTrue(
+                                layer_data_0['values'][idx].shape ==
+                                layer_data_1['values'][idx].shape,
+                                f"Layer {layer_name}, {model_name_0} and {model_name_1} have a shape mismatch at idx {idx}.")
 
-                # verify that ref_node_name is valid
-                ref_node_name_0 = layer_data[model_name_0]['ref_node_name']
-                ref_node_name_1 = layer_data[model_name_1]['ref_node_name']
-                prev_node_name_0 = layer_data[model_name_0]['prev_node_name']
-                prev_node_name_1 = layer_data[model_name_1]['prev_node_name']
-                if layer_data[model_name_0]['type'] == NSSingleResultValuesType.NODE_OUTPUT.value:
-                    self.assertTrue(ref_node_name_0 == prev_node_name_0)
-                    self.assertTrue(ref_node_name_1 == prev_node_name_1)
-                elif layer_data[model_name_0]['type'] == NSSingleResultValuesType.NODE_INPUT.value:
-                    self.assertTrue(ref_node_name_0 != prev_node_name_0)
-                    self.assertTrue(ref_node_name_1 != prev_node_name_1)
+                        # verify that ref_node_name is valid
+                        ref_node_name_0 = layer_data_0['ref_node_name']
+                        ref_node_name_1 = layer_data_1['ref_node_name']
+                        prev_node_name_0 = layer_data_0['prev_node_name']
+                        prev_node_name_1 = layer_data_1['prev_node_name']
+                        if layer_data_0['type'] == NSSingleResultValuesType.NODE_OUTPUT.value:
+                            self.assertTrue(ref_node_name_0 == prev_node_name_0)
+                            self.assertTrue(ref_node_name_1 == prev_node_name_1)
+                        elif layer_data_0['type'] == NSSingleResultValuesType.NODE_INPUT.value:
+                            self.assertTrue(ref_node_name_0 != prev_node_name_0)
+                            self.assertTrue(ref_node_name_1 != prev_node_name_1)
 
         def checkGraphModeFxOp(self, model, inputs, quant_type,
                                expected_node=None,
