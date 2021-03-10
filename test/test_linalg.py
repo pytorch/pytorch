@@ -1639,7 +1639,7 @@ class TestLinalg(TestCase):
 
             complementary_device = 'cpu'
 
-            # compare with CPU 
+            # compare with CPU
             expected = torch.linalg.eig(a.to(complementary_device))
             self.assertEqual(expected[0], actual[0])
             self.assertEqual(expected[1], actual[1])
