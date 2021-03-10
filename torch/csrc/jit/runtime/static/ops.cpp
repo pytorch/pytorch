@@ -121,35 +121,16 @@ namespace torch {
 namespace jit {
 
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
-// View ops with out variants are registered separately
-C10_DEFINE_REGISTRY(SRViewOperatorRegistry, SROperatorFunctor);
 
 bool canRunOutOfPlace(Node* n) {
-  auto op_name = std::string(n->kind().toQualString());
-  return SROperatorRegistry()->Has(op_name) ||
-      SRViewOperatorRegistry()->Has(op_name);
-}
-
-// Same as "canRunOutOfPlace" but excluds view operations
-bool canReuseInputsOutputs(Node* n) {
   auto op_name = std::string(n->kind().toQualString());
   return SROperatorRegistry()->Has(op_name);
 }
 
-bool canReuseInputs(Node* n) {
-  auto op_name = std::string(n->kind().toQualString());
-  if (SROperatorRegistry()->Has(op_name)) {
-    return SROperatorRegistry()->Create(op_name)->CanReuseInput();
-  }
-  return false;
-}
-
-bool canReuseOutputs(Node* n) {
-  auto op_name = std::string(n->kind().toQualString());
-  if (SROperatorRegistry()->Has(op_name)) {
-    return SROperatorRegistry()->Create(op_name)->CanReuseOutput();
-  }
-  return false;
+// Keep function canReuseInputsOutputs because the name canReuseInputsOutputs is
+// more informative where it's used
+bool canReuseInputsOutputs(Node* n) {
+  return canRunOutOfPlace(n);
 }
 
 // TODO: expand to include all view producing ops, mostly in
@@ -883,9 +864,6 @@ std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
   auto op_name = n->kind().toQualString();
   if (SROperatorRegistry()->Has(op_name)) {
     return SROperatorRegistry()->Create(op_name)->Generate(n);
-  }
-  if (SRViewOperatorRegistry()->Has(op_name)) {
-    return SRViewOperatorRegistry()->Create(op_name)->Generate(n);
   }
 
   return [](ProcessedNode*) { TORCH_CHECK(0); };
