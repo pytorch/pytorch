@@ -4716,7 +4716,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        sizes = [2000, 20000]
+        sizes = [2000, 2000]
         expected = (torch.zeros(sizes) + torch.ones(sizes)).to(1)
         ret = rpc.rpc_sync(
             dst,
