@@ -1868,6 +1868,8 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
 
   checkLinalgCompatibleDtype("torch.linalg.eig", values, input, "eigenvalues");
   checkLinalgCompatibleDtype("torch.linalg.eig", vectors, input, "eigenvectors");
+  checkSameDevice("torch.linalg.eig", values, input, "eigenvalues");
+  checkSameDevice("torch.linalg.eig", vectors, input, "eigenvectors");
 
   // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   auto options = input.options().device(at::kCPU);
@@ -1900,9 +1902,8 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
   vectors_tmp_needed |= !vectors_expected_type;
   // we will allocate a temporary tensor and do the copy
 
-  // "out=" variants shouldn't allow result and input to be on different devices
-  // however here if result tensors are on CPU while input is on GPU then additional copy is avoided
   // because MAGMA's GEEV takes CPU inputs and returns CPU outputs
+  // "out" tensors that are on GPU device can't be used directly
   values_tmp_needed |= values.is_cuda();
   vectors_tmp_needed |= vectors.is_cuda();
 
@@ -1952,12 +1953,9 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
 }
 
 std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
-  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
-  auto options = input.options().device(at::kCPU);
-
   ScalarType complex_dtype = toComplexType(input.scalar_type());
-  Tensor values = at::empty({0}, options.dtype(complex_dtype));
-  Tensor vectors = at::empty({0}, options.dtype(complex_dtype));
+  Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
+  Tensor vectors = at::empty({0}, input.options().dtype(complex_dtype));
 
   at::linalg_eig_outf(input, values, vectors);
 
@@ -1968,14 +1966,13 @@ std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
     vectors = at::real(vectors);
   }
 
-  auto out_values = values.to(input.device());
-  auto out_vectors = vectors.to(input.device());
-  return std::tuple<Tensor, Tensor>(out_values, out_vectors);
+  return std::tuple<Tensor, Tensor>(values, vectors);
 }
 
 Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   squareCheckInputs(input);
   checkLinalgCompatibleDtype("torch.linalg.eigvals", values, input, "eigenvalues");
+  checkSameDevice("torch.linalg.eigvals", values, input, "eigenvalues");
 
   // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   auto options = input.options().device(at::kCPU);
@@ -1997,9 +1994,8 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   values_tmp_needed |= !values_expected_type;
   // we will allocate a temporary tensor and do the copy
 
-  // "out=" variants shouldn't allow result and input to be on different devices
-  // however here if result tensors are on CPU while input is on GPU then additional copy is avoided
   // because MAGMA's GEEV takes CPU inputs and returns CPU outputs
+  // 'values' tensor that is on GPU device can't be used directly
   values_tmp_needed |= values.is_cuda();
 
   // determine the appropriate scalar_type for the temporary tensors
@@ -2031,11 +2027,8 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
 }
 
 Tensor linalg_eigvals(const Tensor& input) {
-  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
-  auto options = input.options().device(at::kCPU);
-
   ScalarType complex_dtype = toComplexType(input.scalar_type());
-  Tensor values = at::empty({0}, options.dtype(complex_dtype));
+  Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
 
   at::linalg_eigvals_outf(input, values);
 
@@ -2045,8 +2038,7 @@ Tensor linalg_eigvals(const Tensor& input) {
     values = at::real(values);
   }
 
-  auto out_values = values.to(input.device());
-  return out_values;
+  return values;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
