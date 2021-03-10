@@ -1745,7 +1745,7 @@ c10::optional<class ModRound*> isModRound(const Term* e) {
   const Expr* divisor{nullptr};
   const Expr* mod_divisor{nullptr};
   const Expr* multiplier = e->scalar();
-  const Expr* scalar = new IntImm(1);
+  const Expr* scalar{nullptr};
   const Expr* other{nullptr};
 
   for (auto* m : e->variables()) {
@@ -1759,6 +1759,21 @@ c10::optional<class ModRound*> isModRound(const Term* e) {
         return c10::nullopt;
       }
     } else {
+      // Take care of special cases before multiplying the scalar and variable.
+      if (multiplier->isConstant()) {
+        // Take care of lane mismatch first.
+        if (multiplier->dtype().lanes() != m->dtype().lanes()) {
+          multiplier = new Broadcast(multiplier, m->dtype().lanes());
+        }
+        // Take care of scalar type mismatch.
+        if (multiplier->dtype().scalar_type() != m->dtype().scalar_type()) {
+          multiplier = new Cast(m->dtype(), multiplier);
+          if (m->dtype().lanes() == 1) {
+            multiplier = evaluateOp(multiplier);
+          }
+        }
+      }
+
       // All non-mod vairables are considered as part of the multiplier.
       multiplier = new Mul(multiplier, m);
     }
@@ -1816,6 +1831,10 @@ c10::optional<class ModRound*> isModRound(const Term* e) {
   // Deny cases in which divisor=1. Such cases are considered as Mods.
   if (divisor->isConstant() && immediateEquals(divisor, 1)) {
     return c10::nullopt;
+  }
+
+  if (!scalar) {
+    scalar = getImmediateByType(multiplier->dtype(), 1);
   }
 
   return new ModRound(scalar, denom, divisor, mod_divisor);
