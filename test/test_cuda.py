@@ -1825,6 +1825,39 @@ t1.start()
 t2.start()
 """])
 
+    # ROCm doesn't support device side asserts
+    @skipIfRocm
+    def test_fixed_cuda_assert_async(self):
+        with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
+            torch._assert_async(torch.tensor([], device="cuda"))
+        with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with more than one value is ambiguous"):
+            torch._assert_async(torch.tensor([0, 0], device="cuda"))
+
+        torch._assert_async(torch.tensor(1, device="cuda"))
+        torch._assert_async(torch.tensor(0.1, device="cuda"))
+        torch._assert_async(torch.tensor(-0.1, device="cuda"))
+        torch._assert_async(torch.tensor(True, device="cuda"))
+        torch._assert_async(torch.tensor(0 + 0.1j, device="cuda"))
+
+        fail_stmts = [
+            "torch._assert_async(torch.tensor(0, device='cuda'))",
+            "torch._assert_async(torch.tensor(0.0, device='cuda'))",
+            "torch._assert_async(torch.tensor(False, device='cuda'))",
+            "torch._assert_async(torch.tensor(0 + 0j, device='cuda'))",
+        ]
+
+        import subprocess
+        for stmt in fail_stmts:
+            with self.subTest(stmt=stmt):
+                r = subprocess.call([sys.executable, '-c', f"""\
+import torch
+
+{stmt}
+torch.cuda.synchronize()
+"""])
+                self.assertTrue(r != 0)
+
+
     def test_grad_scaling_unscale(self, dtype=torch.float):
         inv_scale = torch.full((1,), 0.25, dtype=torch.float, device="cuda:0")
         found_inf = torch.full((1,), 0.0, dtype=torch.float, device="cuda:0")

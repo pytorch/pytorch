@@ -1,6 +1,5 @@
 #include <ATen/Tensor.h>
 #import <ATen/native/metal/MetalCommandBuffer.h>
-#import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
 @interface MPSImage (Tensor)

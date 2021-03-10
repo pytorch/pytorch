@@ -150,6 +150,7 @@ class Node:
 
         # If set, use this fn to print this node
         self._repr_fn : Optional[Callable[[Node], str]] = None
+        self._stack_trace : Optional[str] = None
 
     @property
     def next(self) -> 'Node':
@@ -264,6 +265,20 @@ class Node:
             ``Node``, in that order.
         """
         return list(self._input_nodes.keys())
+
+    @property
+    def stack_trace(self) -> Optional[str]:
+        """
+        Return the Python stack trace that was recorded during tracing, if any.
+        This property is usually populated by `Tracer.create_proxy`. To record
+        stack traces during tracing for debug purposes, set
+        `record_stack_traces = True` on the `Tracer` instance.
+        """
+        return self._stack_trace
+
+    @stack_trace.setter
+    def stack_trace(self, trace : Optional[str]):
+        self._stack_trace = trace
 
     def __update_args_kwargs(self, new_args : Tuple['Argument', ...], new_kwargs : Dict[str, 'Argument']):
         """
