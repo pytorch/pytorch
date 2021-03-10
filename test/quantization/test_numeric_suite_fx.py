@@ -41,12 +41,12 @@ from torch.quantization.ns.graph_matcher import (
     GraphMatchingException,
 )
 from torch.quantization.ns.numeric_suite_core_apis_fx import (
-    compare_weights,
-    prepare_model_outputs,
+    extract_weights,
+    add_loggers,
     OutputLogger,
-    prepare_model_with_stubs,
-    get_matching_activations,
-    get_matching_activations_a_shadows_b,
+    add_shadow_loggers,
+    extract_logger_info,
+    extract_shadow_logger_info,
 )
 
 
@@ -716,19 +716,19 @@ class TestFXGraphMatcherModels(QuantizationTestCase):
 class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
 
     @override_qengines
-    def test_compare_weights_mod(self):
+    def test_extract_weights_mod(self):
         m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
-        results = compare_weights('fp32_prepared', mp, 'int8', mq)
+        results = extract_weights('fp32_prepared', mp, 'int8', mq)
         self.assertTrue(len(results) == 2)
         self.assert_ns_compare_dict_valid(results)
 
     @override_qengines
-    def test_compare_weights_fun(self):
+    def test_extract_weights_fun(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -749,7 +749,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
-        results = compare_weights('fp32_prepared', mp, 'int8', mq)
+        results = extract_weights('fp32_prepared', mp, 'int8', mq)
         self.assertTrue(len(results) == 2)
         self.assert_ns_compare_dict_valid(results)
 
@@ -767,7 +767,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
-        mp_ns, mq_ns = prepare_model_outputs(
+        mp_ns, mq_ns = add_loggers(
             'fp32_prepared', mp, 'int8', mq, OutputLogger)
 
         expected_occurrence = {
@@ -788,7 +788,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq_ns(input_fp32)
 
         # check activation result correctness
-        act_compare_dict = get_matching_activations(mp_ns, mq_ns, OutputLogger)
+        act_compare_dict = extract_logger_info(mp_ns, mq_ns, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
@@ -818,7 +818,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
-        mp_ns, mq_ns = prepare_model_outputs(
+        mp_ns, mq_ns = add_loggers(
             'fp32_prepared', mp, 'int8', mq, OutputLogger)
 
         expected_occurrence = {
@@ -839,12 +839,12 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq_ns(input_fp32)
 
         # check activation result correctness
-        act_compare_dict = get_matching_activations(mp_ns, mq_ns, OutputLogger)
+        act_compare_dict = extract_logger_info(mp_ns, mq_ns, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @override_qengines
-    def test_prepare_model_with_stubs_mod(self):
+    def test_add_shadow_loggers_mod(self):
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
             nn.Conv2d(1, 1, 1),
@@ -856,7 +856,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
-        mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+        mp_shadows_mq = add_shadow_loggers('fp32_prepared', mp, 'int8', mq, OutputLogger)
 
         # TODO(before land): test both scripted and non-scripted
         mp_shadows_mq = torch.jit.script(mp_shadows_mq)
@@ -866,13 +866,13 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_shadows_mq(input_fp32)
 
         # check activation result correctness
-        act_compare_dict = get_matching_activations_a_shadows_b(
+        act_compare_dict = extract_shadow_logger_info(
             mp_shadows_mq, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @override_qengines
-    def test_prepare_model_with_stubs_fun(self):
+    def test_add_shadow_loggers_fun(self):
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -897,7 +897,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
-        mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+        mp_shadows_mq = add_shadow_loggers('fp32_prepared', mp, 'int8', mq, OutputLogger)
 
         # TODO(before land): test both scripted and non-scripted
         mp_shadows_mq = torch.jit.script(mp_shadows_mq)
@@ -907,13 +907,13 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_shadows_mq(input_fp32)
 
         # check activation result correctness
-        act_compare_dict = get_matching_activations_a_shadows_b(
+        act_compare_dict = extract_shadow_logger_info(
             mp_shadows_mq, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @skipIfNoFBGEMM
-    def test_prepare_model_with_stubs_multiple_dtype_casts(self):
+    def test_add_shadow_loggers_multiple_dtype_casts(self):
         """
         Verifies that for nodes where the first input arg is a list,
         such as `cat`, we insert an individual dtype cast for each
@@ -935,7 +935,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
-        mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+        mp_shadows_mq = add_shadow_loggers('fp32_prepared', mp, 'int8', mq, OutputLogger)
 
         expected_occurrence = {
             # 3 dequantize function calls from the 3 dtype casts for [x, x, x]
@@ -969,11 +969,11 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
-        mp_shadows_mq = prepare_model_with_stubs(
+        mp_shadows_mq = add_shadow_loggers(
             'fp32_prepared', mp, 'int8', mq, OutputLogger, should_log_inputs=True)
         mp_shadows_mq(torch.randn(1, 1, 4, 4))
 
-        act_compare_dict = get_matching_activations_a_shadows_b(
+        act_compare_dict = extract_shadow_logger_info(
             mp_shadows_mq, OutputLogger)
 
         self.assertTrue(len(act_compare_dict) == 2)
@@ -1007,7 +1007,7 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
             sparse_nn_q.dense_top = convert_fx(sparse_nn_q.dense_top)
 
             # test out compare activations API
-            sparse_nn.dense_top, sparse_nn_q.dense_top = prepare_model_outputs(
+            sparse_nn.dense_top, sparse_nn_q.dense_top = add_loggers(
                 'fp32_prepared', sparse_nn.dense_top, 'int8', sparse_nn_q.dense_top, OutputLogger,
                 should_log_inputs=should_log_inputs)
 
@@ -1016,7 +1016,7 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
             sparse_nn_q(idx, offsets, x)
 
             # inspect results
-            act_compare_dict = get_matching_activations(
+            act_compare_dict = extract_logger_info(
                 sparse_nn, sparse_nn_q, OutputLogger)
             self.assertTrue(len(act_compare_dict) == 4)
             self.assert_ns_compare_dict_valid(act_compare_dict)
@@ -1044,7 +1044,7 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
             sparse_nn_q.dense_top = convert_fx(sparse_nn_q.dense_top)
 
             # test out compare shadow activations API
-            sparse_nn_q.dense_top = prepare_model_with_stubs(
+            sparse_nn_q.dense_top = add_shadow_loggers(
                 'fp32_prepared', sparse_nn.dense_top,
                 'int8', sparse_nn_q.dense_top, OutputLogger,
                 should_log_inputs=should_log_inputs)
@@ -1053,7 +1053,7 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
             sparse_nn_q(idx, offsets, x)
 
             # check activation result correctness
-            act_compare_dict = get_matching_activations_a_shadows_b(
+            act_compare_dict = extract_shadow_logger_info(
                 sparse_nn_q, OutputLogger)
             self.assertTrue(len(act_compare_dict) == 4)
             self.assert_ns_compare_dict_valid(act_compare_dict)
