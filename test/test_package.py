@@ -182,13 +182,15 @@ the_math = math
         self.assertIsInstance(obj_loaded.obj, sp.PackageASubpackageObject)
         self.assertIsNot(package_a.subpackage.PackageASubpackageObject, sp.PackageASubpackageObject)
 
-    def test_resources(self):
+    def test_importer_access(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
             he.save_text('main', 'main', "my string")
             he.save_binary('main', 'main_binary', "my string".encode('utf-8'))
             src = """\
-import resources
+import importlib
+import torch_package_importer as resources
+
 t = resources.load_text('main', 'main')
 b = resources.load_binary('main', 'main_binary')
 """
@@ -521,7 +523,8 @@ import module_a
             # so it can be made part of an API that just takes the model and
             # packages it with this source.
             src = """\
-import resources # gives you access to the importer from within the package
+import importlib
+import torch_package_importer as resources
 
 # server knows to call model.load() to get the model,
 # maybe in the future it passes options as arguments by convension
@@ -537,7 +540,9 @@ def load():
         with PackageExporter(f2, verbose=False) as e:
             e.save_pickle('model', 'state_dict', resnet.state_dict())
             src = """\
-import resources # gives you access to the importer from within the package
+import importlib
+import torch_package_importer as resources
+
 from torchvision.models.resnet import resnet18
 def load():
     # if you want, you can later edit how resnet is constructed here
@@ -723,6 +728,7 @@ def load():
         self.assertTrue(packaged_dependency is not package_a.subpackage)
 
 
+@skipIf(version_info < (3, 7), 'ResourceReader API introduced in Python 3.7')
 class TestPackageResources(TestCase):
     def test_resource_reader(self):
         """Test compliance with the get_resource_reader importlib API."""
