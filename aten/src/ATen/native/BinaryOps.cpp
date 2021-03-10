@@ -34,6 +34,24 @@ TORCH_META_FUNC2(mul, Tensor) (
   build_binary_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC2(div, Tensor) (const Tensor& self, const Tensor& other) {
+  build_binary_float_op(maybe_get_output(), self, other);
+}
+
+TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, std::string rounding_mode) {
+  if (rounding_mode == "true") {
+    build_binary_float_op(maybe_get_output(), self, other);
+  } else if (rounding_mode == "trunc") {
+    build_binary_op(maybe_get_output(), self, other);
+  } else if (rounding_mode == "floor") {
+    build_binary_op(maybe_get_output(), self, other);
+  }
+
+  TORCH_CHECK(false,
+      "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
+      "but found '", rounding_mode, "'");
+}
+
 } // namespace meta
 
 
@@ -108,6 +126,22 @@ TORCH_IMPL_FUNC(mul_out) (
   mul_stub(device_type(), *this);
 }
 
+TORCH_IMPL_FUNC(div_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
+  div_true_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(div_out_mode) (
+  const Tensor& self, const Tensor& other, std::string rounding_mode, const Tensor& result
+) {
+  if (rounding_mode == "true") {
+    div_true_stub(device_type(), *this);
+  } else if (rounding_mode == "trunc") {
+    div_trunc_stub(device_type(), *this);
+  } else if (rounding_mode == "floor") {
+    div_floor_stub(device_type(), *this);
+  }
+}
+
 Tensor& add_relu_impl(
     Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other);
@@ -179,48 +213,6 @@ Tensor& copysign_(Tensor& self, Scalar other) {
   return native::copysign_(self, wrapped_scalar_tensor(other));
 }
 
-Tensor& div_true_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  div_true_stub(iter.device_type(), iter);
-  if (!result.defined()) {
-    result = iter.output();
-  }
-  return result;
-}
-
-Tensor& div_trunc_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  div_trunc_stub(iter.device_type(), iter);
-  if (!result.defined()) {
-    result = iter.output();
-  }
-  return result;
-}
-
-Tensor& div_floor_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  div_floor_stub(iter.device_type(), iter);
-  if (!result.defined()) {
-    result = iter.output();
-  }
-  return result;
-}
-
-Tensor& div_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  return div_true_out(self, other, result);
-}
-
-Tensor div(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  div_true_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
-Tensor& div_(Tensor& self, const Tensor& other) {
-  return div_true_out(self, other, self);
-}
-
 // WARNING: There doesn't appear to be any testing for this function
 // with sparse self input.
 Tensor div(const Tensor& self, Scalar other) {
@@ -233,30 +225,6 @@ Tensor div(const Tensor& self, Scalar other) {
 // used for Python)
 Tensor& div_(Tensor& self, Scalar other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
-}
-
-Tensor& div_out(const Tensor& self, const Tensor& other, std::string rounding_mode, Tensor& result) {
-  if (rounding_mode == "true") {
-    return div_true_out(self, other, result);
-  } else if (rounding_mode == "trunc") {
-    return div_trunc_out(self, other, result);
-  } else if (rounding_mode == "floor") {
-    return div_floor_out(self, other, result);
-  }
-
-  TORCH_CHECK(false,
-      "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
-      "but found '", rounding_mode, "'");
-}
-
-Tensor div(const Tensor& self, const Tensor& other, std::string rounding_mode) {
-  Tensor result;
-  native::div_out(self, other, std::move(rounding_mode), result);
-  return result;
-}
-
-Tensor& div_(Tensor& self, const Tensor& other, std::string rounding_mode) {
-  return native::div_out(self, other, std::move(rounding_mode), self);
 }
 
 Tensor div(const Tensor& self, Scalar other, std::string rounding_mode) {
@@ -355,7 +323,12 @@ Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other
     "or for actual floor division, use torch.div(a, b, rounding_mode='floor')."
   );
   // FIXME: Not actually doing floor division (#43874)
-  return div_trunc_out(self, other, result);
+  auto iter = TensorIterator::binary_op(result, self, other);
+  div_trunc_stub(iter.device_type(), iter);
+  if (!result.defined()) {
+    result = iter.output();
+  }
+  return result;
 }
 
 Tensor floor_divide(const Tensor& self, const Tensor& other) {
