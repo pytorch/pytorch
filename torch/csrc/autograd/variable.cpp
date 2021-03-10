@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/inference_mode.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
@@ -34,7 +35,7 @@ DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
     : AutogradMeta(self_impl),
       backward_info_(std::move(backward_info)),
       forward_info_(std::move(forward_info)),
-      creation_meta(creation_meta) {
+      creation_meta(InferenceMode::is_enabled() ? CreationMeta::NO_VARIABLE_TYPE_VIEW : creation_meta) {
   is_view_ = true;
   if (backward_info_.has_value()) {
     self_impl->set_version_counter(impl::version_counter(backward_info_.value().base_));
@@ -534,11 +535,9 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
                        "starting from version 1.8. Consider using `unsafe_` "
                        "version of the function that produced this view or "
                        "don't modify this view inplace.");
-      } else if (creation_meta == CreationMeta::NO_VARIABLE_TYPE_VIEW) {
-        msg = c10::str(msg, " This view is created in InferenceMode without proper autograd setup. Inplace update"
-                       "on this tensor cannot be properly propogated back to its base tensor.");
-
       } else {
+        TORCH_INTERNAL_ASSERT(creation_meta != CreationMeta::NO_VARIABLE_TYPE_VIEW,
+            "CreationMeta::NO_VARIABLE_TYPE_VIEW tensor shouldn't participate in autograd");
         TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
       }
 

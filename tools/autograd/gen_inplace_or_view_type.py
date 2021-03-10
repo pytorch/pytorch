@@ -133,7 +133,7 @@ ${assign_return_values} ([&]() {
 THROW_IF_VARIABLETYPE_ON = """
 TORCH_CHECK(c10::impl::tls_is_dispatch_keyset_excluded(c10::autograd_dispatch_keyset),
   "Calling inplace/view ops on inference tensor outside InferenceMode is not allowed, ",
-  "consider making a clone first.",
+  "consider making a clone first. ",
   "If you have a valid use case, please make a feature request to PyTorch.");
 """
 
@@ -345,7 +345,8 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     # their base tensor doesn't have complete information about view/version).
     # This is possible to do, but we currently don't see such use cases so
     # simply throwing errors here.
-    inplace_view_body.append(THROW_IF_VARIABLETYPE_ON)
+    if len(f.func.returns):
+        inplace_view_body.append(THROW_IF_VARIABLETYPE_ON)
     if modifies_arguments(f):  # inplace op
         inplace_view_body.append(INPLACE_REDISPATCH.substitute(
             api_name=api_name,
