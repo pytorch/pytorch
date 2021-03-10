@@ -2450,7 +2450,7 @@ op_db: List[OpInfo] = [
            op=torch.eig,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           supports_tensor_out=False,
+           supports_out=False,
            sample_inputs_func=sample_inputs_eig,
            decorators=[
                skipCUDAIfNoMagma,
