@@ -45,13 +45,13 @@ if [[ "${CIRCLE_JOB}" == *11* ]]; then
 fi
 
 run_tests() {
-    if [[ "${CIRCLE_JOB}" == *10.1* ]]; then
-        # nvidia-smi for CUDA <= 10.1
-        "/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe"
-    elif [[ "${CIRCLE_JOB}" == *10.2* ]] || [[ "${CIRCLE_JOB}" == *11* ]]; then
-        # nvidia-smi for CUDA >= 10.2
-        "/c/Windows/System32/nvidia-smi.exe"
-    fi
+    # Run nvidia-smi if available
+    for path in  /c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe /c/Windows/System32/nvidia-smi.exe; do
+        if [ -x $path ]; then
+            $path;
+             break
+        fi
+    done
 
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
         $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"
