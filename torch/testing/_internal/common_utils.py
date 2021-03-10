@@ -188,6 +188,28 @@ if not expecttest.ACCEPT:
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
+GPU_COUNT = -1
+def get_gpu_count():
+    global GPU_COUNT
+    if GPU_COUNT == -1:
+        # do this in subprocess to avoid initializing gpu runtime
+        code = 'import torch,sys; c = torch.cuda.device_count(); sys.exit(c)'
+        GPU_COUNT = subprocess.call([sys.executable, '-c', code])
+    return GPU_COUNT
+
+# determine sensible default for parallel jobs if caller wants "max", e.g., 0
+# CPU and GPU tests are not currently separate; we use min() to be safe
+if RUN_PARALLEL == 0:
+    try:
+        import multiprocessing
+        RUN_PARALLEL = multiprocessing.cpu_count()
+    except (ImportError, NotImplementedError):
+        RUN_PARALLEL = 1
+    if torch.version.cuda or torch.version.rocm:
+        gpus = get_gpu_count()
+        if gpus > 0:
+            RUN_PARALLEL = min(RUN_PARALLEL, gpus)
+
 def wait_for_process(p):
     try:
         return p.wait()
