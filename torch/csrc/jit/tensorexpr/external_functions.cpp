@@ -96,6 +96,7 @@ std::tuple<std::vector<ideep::tensor>, bool> constructItensors(
 }
 
 void nnc_aten_conv2d_out(
+
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -103,6 +104,7 @@ void nnc_aten_conv2d_out(
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
+#if AT_MKLDNN_ENABLED()
   std::vector<ideep::tensor> tensors;
   bool args_valid_for_mkldnn;
   std::tie(tensors, args_valid_for_mkldnn) =
@@ -180,6 +182,17 @@ void nnc_aten_conv2d_out(
     GRAPH_DEBUG(
         "Exception thrown while executing ideep::convolution_forward::compute");
   }
+#else
+  nnc_aten_conv2d(
+      bufs_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_dtypes,
+      args_num,
+      extra_args);
+  return;
+#endif
 }
 
 void nnc_aten_conv2d(
