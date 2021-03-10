@@ -273,6 +273,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
   // O(n) implementation. The derivative of this implementation is _not_
   // the second derivative of cumprod. As such, we fallback to a less efficient
   // O(n^2) implementation when at::GradMode::is_enabled().
+  Tensor grad_input = at::zeros(input.sizes(), grad.options());
   if (not at::GradMode::is_enabled()) {
     // From here on we need to use some mask gymnastics to
     // account for the tensorial dimensions
@@ -290,7 +291,6 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // Note that the logic_and with cumsum == 1 accounts
     // for the case when there is no first zero
     const auto cumsum = is_zero.cumsum(dim);
-    auto grad_input = at::zeros(input.sizes(), grad.options());
 
     // select everything before the first zero [0, z1)
     auto mask = cumsum == 0;
@@ -315,13 +315,14 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // here we compute
     // dy_j / dx_z1 = sum(cumprod(input[z1+1:z2] * grad[z1+1:z2])) * prod(output[z1-1])
     // relu_() necessary as gather does not support negative indices
-    const auto deriv = input.masked_fill(~mask, 1.).cumprod(dim)
-                        .mul_(grad.masked_fill(cumsum != 1, 0.))
-                        .sum(dim, /*keepdim*/true)
-                        .mul_(at::gather(output, dim, (first_zero_index - 1).relu_())
-                              .masked_fill_(first_zero_index == 0, 1.));
-    grad_input.masked_scatter_(first_zero_mask, deriv.masked_select(first_zero_mask));
-    return grad_input;
+    // finally, we do grad_input[z1] = dy_j / dx_z1
+    grad_input.masked_scatter_(first_zero_mask,
+                               input.masked_fill(~mask, 1.).cumprod(dim)
+                                    .mul_(grad.masked_fill(cumsum != 1, 0.))
+                                    .sum(dim, /*keepdim*/true)
+                                    .mul_(at::gather(output, dim, (first_zero_index - 1).relu_())
+                                          .masked_fill_(first_zero_index == 0, 1.))
+                                    .masked_select(first_zero_mask));
   } else { // GradMode::enabled()
     /*
     If the input is nonzero, we need to calculate the dy_j / dx_k
@@ -347,7 +348,6 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     auto ones_size = input.sizes().vec();
     ones_size[dim] = 1;
     Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
-    Tensor grad_input = at::zeros(input.sizes(), grad.options());
     Tensor prods_from_k_plus_1;
     Tensor omitted_products;
     for (int k = 0; k < dim_size; ++k) {
@@ -372,9 +372,8 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
       grad_input.select(dim, k).copy_(
           at::sum(grad.slice(dim, k) * omitted_products,dim));
     }
-
-    return grad_input;
   }
+  return grad_input;
 }
 
 // Implement std::is_nan<IntegralType> for MSVC.

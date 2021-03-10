@@ -360,7 +360,7 @@
   self: cumprod_backward(grad.to(self.scalar_type()), self, dim, result)
 
 - name: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-  self: cumsum_backward(grad.to(self.scalar_type()), dim)
+  self: cumsum_backward(grad.to(self.scalar_type()), dim, result)
 
 - name: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
   self: cummaxmin_backward(grad, self, indices, dim)
