@@ -491,7 +491,7 @@ Tensor cumsum_backward(const Tensor & grad, int64_t dim) {
     return grad;
   }
   const auto grad_cumsum = grad.cumsum(dim);
-  const auto grad_sum = grad_cumsum.select(dim, -1).unsqueeze(dim);
+  const auto grad_sum = grad_cumsum.narrow(dim, -1, 1);
   return grad_sum - grad_cumsum + grad;
 }
 

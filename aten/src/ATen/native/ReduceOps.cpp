@@ -175,7 +175,7 @@ Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
      noticeable (up to x10) speed-up on CPU.
    */
   const auto w_cumsum = w.cumsum(dim);
-  const auto w_sum = w_cumsum.select(dim, -1).unsqueeze(dim);
+  const auto w_sum = w_cumsum.narrow(dim, -1, 1);
   return w_sum - w_cumsum + w;
 }
 
@@ -280,7 +280,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
   // the second derivative of cumprod. As such, we fallback to a less efficient
   // O(n^2) implementation when at::GradMode::is_enabled().
   Tensor grad_input = at::zeros(input.sizes(), grad.options());
-  if (not at::GradMode::is_enabled()) {
+  if (!at::GradMode::is_enabled()) {
     // n.b. This could probably be implemented much faster with a kernel
 
     // From here on we need to use some mask gymnastics to
