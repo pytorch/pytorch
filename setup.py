@@ -25,7 +25,7 @@
 #     compiles, because distutils always uses CC to compile, even for C++
 #     files.
 #
-# Environment variables for feature toggles:
+# this line is added by brijesh
 #
 #   USE_CUDNN=0
 #     disables the cuDNN build
