@@ -1919,9 +1919,6 @@ op_db: List[OpInfo] = [
            op=torch.linalg.eig,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           # TODO: TypeError: empty_like(): argument 'input' (position 1) must be Tensor,
-           #  not torch.return_types.linalg_eig
-           supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_inv,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -1933,7 +1930,6 @@ op_db: List[OpInfo] = [
            aten_name='linalg_eigvals',
            op=torch.linalg.eigvals,
            dtypes=floating_and_complex_types(),
-           supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_inv,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
