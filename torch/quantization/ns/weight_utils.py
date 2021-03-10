@@ -14,6 +14,13 @@ def get_conv_mod_weight(mod: nn.Module) -> torch.Tensor:
     else:
         return mod._weight_bias()[0]  # type: ignore
 
+def get_linear_mod_weight(mod: nn.Module) -> torch.Tensor:
+    # TODO(future PR): make more generic, handle everything
+    if isinstance(mod, nn.Linear):
+        return mod.weight.detach()
+    else:
+        return mod._weight_bias()[0]  # type: ignore
+
 def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
     # TODO(future PR): better docblock, with example FX IR
     if node.target in (F.linear,):
