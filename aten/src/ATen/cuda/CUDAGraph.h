@@ -59,22 +59,5 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   uint64_t wholegraph_increment_;
 };
 
-// RAII guard for "cudaStreamCaptureMode", a thread-local value
-// that controls the error-checking strictness of a capture.
-#if CUDA_VERSION >= 11000
-struct TORCH_CUDA_CPP_API CUDAStreamCaptureModeGuard {
-  CUDAStreamCaptureModeGuard(cudaStreamCaptureMode desired) {
-    strictness_ = desired;
-    C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&strictness_));
-  }
-  ~CUDAStreamCaptureModeGuard() {
-    C10_CUDA_CHECK_WARN(cudaThreadExchangeStreamCaptureMode(&strictness_));
-  }
-
-  private:
-  cudaStreamCaptureMode strictness_;
-};
-#endif
-
 } // namespace cuda
 } // namespace at
