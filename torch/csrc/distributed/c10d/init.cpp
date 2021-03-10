@@ -314,6 +314,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "save_thread_local_state",
           &::c10d::Reducer::save_thread_local_state,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_ddp_runtime_logging_sample_rate",
+          &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
+          py::arg("sample_rate"),
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -334,7 +339,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_runtime_stats_and_log,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "get_ddp_logging_data",
+          "_get_ddp_logging_data",
           &::c10d::Logger::get_ddp_logging_data,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -1311,12 +1316,12 @@ Arguments:
           &c10::DDPLoggingData::gradient_as_bucket_view)
       .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name)
       .def_readwrite("iteration", &c10::DDPLoggingData::iteration)
-      .def_readwrite("dtype", &c10::DDPLoggingData::dtype)
       .def_readwrite(
           "total_parameter_size_bytes",
           &c10::DDPLoggingData::total_parameter_size_bytes)
       .def_readwrite(
           "num_parameter_tensors", &c10::DDPLoggingData::num_parameter_tensors)
+      .def_readwrite("dtypes", &c10::DDPLoggingData::dtypes)
       .def_readwrite("bucket_sizes", &c10::DDPLoggingData::bucket_sizes)
       .def_readwrite("master_port", &c10::DDPLoggingData::master_port)
       .def_readwrite("master_addr", &c10::DDPLoggingData::master_addr)
@@ -1354,7 +1359,17 @@ Arguments:
       .def_readwrite(
           "avg_backward_compute_comm_overlap_time",
           &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time)
-      .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook);
+      .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook)
+      .def_readwrite(
+          "forward_compute_time", &c10::DDPLoggingData::forward_compute_time)
+      .def_readwrite(
+          "backward_compute_time", &c10::DDPLoggingData::backward_compute_time)
+      .def_readwrite(
+          "backward_comm_time", &c10::DDPLoggingData::backward_comm_time)
+      .def_readwrite(
+          "backward_compute_comm_overlap_time",
+          &c10::DDPLoggingData::backward_compute_comm_overlap_time)
+      .def_readwrite("is_multi_device_module", &c10::DDPLoggingData::is_multi_device_module);
 
   module.def(
       "_compute_bucket_assignment_by_size",
