@@ -1116,7 +1116,7 @@ SparseTensor& _sspaddmm_out_cpu(
       "sspaddmm: Argument #1: Expected dim 1 size ", dim_k, ", got ", t.size(1));
 
   int64_t nnz        = sparse._nnz();
-  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage  
+  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage
   Tensor indices = sparse._indices().contiguous();
   Tensor values      = sparse._values();
 

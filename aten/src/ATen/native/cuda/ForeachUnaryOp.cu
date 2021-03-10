@@ -33,7 +33,7 @@ template <typename scalar_t, template<class> class Op> void foreach_unary_op_(Te
     multi_tensor_apply<1>(tensor_lists,
                           UnaryOpFunctor<scalar_t,
                                          /* depth */ 1,
-                                         /* r_args_depth */ 1, 
+                                         /* r_args_depth */ 1,
                                          /* res_arg_index */ 0>(),
                           Op<opmath_t>());
 }
@@ -230,7 +230,7 @@ void foreach_tensor_neg_cuda_(TensorList tensors) {
 }
 
 // Abs have to go via slow path in case of a complex type.
-// This is because foreach kernels can't return a different dtype than passed, while 
+// This is because foreach kernels can't return a different dtype than passed, while
 // abs with complex inputs will produce float output.
 template<typename T>
 struct Abs {
@@ -283,7 +283,7 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
         multi_tensor_apply<1>(tensor_lists,
                               ZeroFunctor<scalar_t,
                                           /* depth */ 1,
-                                          /* r_args_depth */ 1, 
+                                          /* r_args_depth */ 1,
                                           /* res_arg_index */ 0>());
     });
 }
