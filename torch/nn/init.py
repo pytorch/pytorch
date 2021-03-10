@@ -77,7 +77,7 @@ def calculate_gain(nonlinearity, param=None):
     Tanh              :math:`\frac{5}{3}`
     ReLU              :math:`\sqrt{2}`
     Leaky Relu        :math:`\sqrt{\frac{2}{1 + \text{negative\_slope}^2}}`
-    SELU              :math:`\frac{3}{4}`
+    SELU              :math:`1`
     ================= ====================================================
 
     Args:
@@ -104,7 +104,7 @@ def calculate_gain(nonlinearity, param=None):
             raise ValueError("negative_slope {} not a valid number".format(param))
         return math.sqrt(2.0 / (1 + negative_slope ** 2))
     elif nonlinearity == 'selu':
-        return 3.0 / 4  # Value found empirically (https://github.com/pytorch/pytorch/pull/50664)
+        return 1.0
     else:
         raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
