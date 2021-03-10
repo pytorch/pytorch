@@ -136,6 +136,10 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     sub_data_shape = sym_help._slice_helper(
         g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[maxsize])
     values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
+    # Check if values is a singular value and expand accordingly
+    rank = sym_help._get_tensor_rank(values)
+    if rank is not None and rank == 0:
+        values = expand(g, values, values_shape, None)
     values = g.op("Reshape", values, values_shape)
 
     if accumulate:
