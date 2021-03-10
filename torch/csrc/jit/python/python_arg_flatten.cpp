@@ -20,6 +20,9 @@ static constexpr char ListClose = ']';
 static constexpr char TupleOpen = '(';
 static constexpr char TupleClose = ')';
 static constexpr char Variable = 'v';
+static constexpr char Bool = 'b';
+static constexpr char Long = 'l';
+static constexpr char Double = 'd';
 static constexpr char String = 's';
 static constexpr char NoneType = 'n';
 } // namespace D
@@ -65,6 +68,28 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.structure.push_back(D::Variable);
   } else if (strcmp(THPUtils_typename(obj), "NoneType") == 0) {
     args.desc.structure.push_back(D::NoneType);
+  } else if (PyBool_Check(obj)) { // Wrap integers in bool tensors
+    at::Tensor tensor = scalar_to_tensor(at::Scalar(THPUtils_unpackBool(obj)));
+    PyObject* wappred_obj = THPVariable_Wrap(tensor);
+    auto& var = reinterpret_cast<THPVariable*>(wappred_obj)->cdata;
+    args.vars.push_back(var);
+    args.desc.metadata.emplace_back(var);
+    args.desc.structure.push_back(D::Bool);
+  } else if (PyLong_Check(obj)) { // Wrap integers in long tensors
+    at::Tensor tensor = scalar_to_tensor(
+        at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(obj))));
+    PyObject* wappred_obj = THPVariable_Wrap(tensor);
+    auto& var = reinterpret_cast<THPVariable*>(wappred_obj)->cdata;
+    args.vars.push_back(var);
+    args.desc.metadata.emplace_back(var);
+    args.desc.structure.push_back(D::Long);
+  } else if (PyFloat_Check(obj)) { // Wrap floating points in double tensors
+    at::Tensor tensor = scalar_to_tensor(THPUtils_unpackDouble(obj));
+    PyObject* wappred_obj = THPVariable_Wrap(tensor);
+    auto& var = reinterpret_cast<THPVariable*>(wappred_obj)->cdata;
+    args.vars.push_back(var);
+    args.desc.metadata.emplace_back(var);
+    args.desc.structure.push_back(D::Double);
   } else {
     std::string msg =
         "Only tuples, lists and Variables are supported as JIT inputs/outputs. "
@@ -141,6 +166,21 @@ py::object unflatten_rec(
     return py::reinterpret_borrow<py::object>(THPUtils_packString(str));
   } else if (type == D::NoneType) {
     return py::reinterpret_borrow<py::object>(py::none());
+  } else if (type == D::Long) { // unwrap integers as variables for tracer
+    if (var_it == var_it_end)
+      throw std::runtime_error("Not enough Variables given to unflatten");
+    auto var = *var_it++;
+    return py::reinterpret_borrow<py::object>(THPVariable_Wrap(var));
+  } else if (type == D::Double) { // unwrap floats as variables for tracer
+    if (var_it == var_it_end)
+      throw std::runtime_error("Not enough Variables given to unflatten");
+    auto var = *var_it++;
+    return py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
+  } else if (type == D::Bool) { // unwrap booleans as variables for tracer
+    if (var_it == var_it_end)
+      throw std::runtime_error("Not enough Variables given to unflatten");
+    auto var = *var_it++;
+    return py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
   } else {
     if (var_it == var_it_end)
       throw std::runtime_error("Not enough Variables given to unflatten");

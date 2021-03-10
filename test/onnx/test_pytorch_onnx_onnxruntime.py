@@ -1339,6 +1339,74 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x)
 
+    def test_arithmetic_prim_long(self):
+        class ArithmeticModule(torch.nn.Module):
+            def forward(self, x, y: int):
+                x = x + y
+                x = x - y
+                x = x * (y * 3)
+                x = x / (y * 4)
+                return x
+
+        x = torch.randn(2, 3, 4)
+        y = 2
+        self.run_test(ArithmeticModule(), (x, y))
+
+        class ArithmeticModule(torch.nn.Module):
+            def forward(self, x):
+                x = x + 2
+                x = x - 3
+                return x.shape[0]
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(ArithmeticModule(), x)
+
+    def test_arithmetic_prim_float(self):
+        class ArithmeticModule(torch.nn.Module):
+            def forward(self, x, y: float):
+                x = x + y
+                x = x - y
+                x = x * (y * 3)
+                x = x / (y * 4)
+                return x
+
+        x = torch.randn(2, 3, 4)
+        y = 2.5
+        self.run_test(ArithmeticModule(), (x, y))
+
+        class ArithmeticModule(torch.nn.Module):
+            def forward(self, x):
+                x = x + 2
+                x = x - 3
+                return x.shape[1] / 2
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(ArithmeticModule(), x)
+
+    def test_arithmetic_prim_bool(self):
+        class ArithmeticModule(torch.nn.Module):
+            def forward(self, x, y: int, z: bool, t: float):
+                x = x + y
+                x = x - y
+                if z:
+                    x = x * (y * 3)
+                    x = x / (y * 4)
+                return x / t, z
+
+        x = torch.randn(2, 3, 4)
+        y = 2
+        z = False
+        t = 2.5
+        self.run_test(ArithmeticModule(), (x, y, z, t))
+
+        class ArithmeticModule(torch.nn.Module):
+            def forward(self, x: float, y: float):
+                return x == y
+
+        x = 3
+        y = 2
+        self.run_test(ArithmeticModule(), (x, y))
+
     # In scripting the first transpose node do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
     @skipIfONNXShapeInference(False)
