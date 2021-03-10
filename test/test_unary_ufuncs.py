@@ -491,8 +491,8 @@ class TestUnaryUfuncs(TestCase):
 
     @ops(unary_ufuncs, dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
-        if not op.supports_tensor_out:
-            self.skipTest("Skipped! Operator %s does not support out=..." % op.name)
+        if not op.supports_out:
+            self.skipTest("Skipped! Op doesn't support out= kwarg.")
 
         input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
@@ -592,9 +592,13 @@ class TestUnaryUfuncs(TestCase):
         )
         for mantissa, exponent in outputs:
             torch.frexp(input, out=(mantissa, exponent))
-            np_exponent, np_mantissa = np.frexp(input.cpu().numpy())
-            self.assertEqual(mantissa, np_exponent)
-            self.assertEqual(exponent, np_mantissa)
+            np_mantissa, np_exponent = np.frexp(input.cpu().numpy())
+            self.assertEqual(mantissa, np_mantissa)
+            self.assertEqual(exponent, np_exponent)
+
+            # torch.frexp returns exponent in int32 to be compatible with np.frexp
+            self.assertTrue(exponent.dtype == torch.int32)
+            self.assertTrue(torch_to_numpy_dtype_dict[exponent.dtype] == np_exponent.dtype)
 
         # The warning is given when output tensors have wrong shape
         with warnings.catch_warnings(record=True) as w:
