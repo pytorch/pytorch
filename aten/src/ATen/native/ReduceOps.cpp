@@ -281,6 +281,8 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
   // O(n^2) implementation when at::GradMode::is_enabled().
   Tensor grad_input = at::zeros(input.sizes(), grad.options());
   if (not at::GradMode::is_enabled()) {
+    // n.b. This could probably be implemented much faster with a kernel
+
     // From here on we need to use some mask gymnastics to
     // account for the tensorial dimensions
     // We do a cumsum of the zeros along the dimension.
@@ -298,6 +300,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // for the case when there is no first zero
     const auto cumsum = is_zero.cumsum(dim);
 
+    // case k < z1
     // select everything before the first zero [0, z1)
     auto mask = cumsum == 0;
     // equiv to grad_input[mask] = deriv[grad]
@@ -306,12 +309,12 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // select everything from the first zero to the second zero [z1, z2)
     mask = cumsum == 1;
 
-    // select the first zero [z1]
+    // case k = z1
+    // We start by select the first zero [z1]
     // We locate the indices of the first zero using the max function
     // We then go from the indices to a mask using scatter_
     // When there is no zero in the slice, max will return the index 0.
-    // To account for this, we need to apply the mask which is true in the range
-    // [z1, z2) to account for this case
+    // To account for this, we need to apply the mask which is true in the range [z1, z2)
     const auto first_zero_index = std::get<1>(mask.max(dim, /*keepdim*/ true));
     const auto first_zero_mask = at::zeros_like(mask)
                                   .scatter_(dim, first_zero_index, /*src*/ true)
