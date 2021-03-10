@@ -3046,7 +3046,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   ArrayRef<at::indexing::TensorIndex> rectangular_view_indices = {
     "...", at::indexing::Slice(), at::indexing::Slice(at::indexing::None, input.size(-1))
   };  // [..., :, :input.shape[-1]]
-  input_.index_put_(rectangular_view_indices, input);
+  input_.index_put_({rectangular_view_indices}, input);
 
   // make sure that all elements of Householder vectors including 0's and 1's are stored explicitly
   // LAPACK assumes implicitly that the diagonal is filled with ones and the upper triangle is zero
@@ -3057,7 +3057,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   auto d_tau = at::zeros_like(tau);
 
   auto d_result = at::zeros(square_shape, grad.options());
-  d_result.index_put_(rectangular_view_indices, grad);
+  d_result.index_put_({rectangular_view_indices}, grad);
 
   auto start_j = tau.size(-1) - 1;
   for (int64_t j = start_j; j >= 0; j--) {
