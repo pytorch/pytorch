@@ -776,6 +776,9 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def("is_interface_type", [](const std::shared_ptr<Type>& self) {
         return self->cast<InterfaceType>() != nullptr;
+      })
+      .def_property_readonly("annotation_str", [](const std::shared_ptr<Type>& self) {
+        return self->annotation_str();
       });
 
   py::class_<AnyType, Type, std::shared_ptr<AnyType>>(m, "AnyType")

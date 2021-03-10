@@ -21,6 +21,7 @@ from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
+from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 
 from torch.fx.proxy import TraceError
@@ -1418,6 +1419,13 @@ class TestFX(JitTestCase):
 
         self.assertEqual(d, deepcopy(d))
         self.assertEqual(l, deepcopy(l))
+
+    def test_get_torch_func_signature(self):
+        for key in dir(torch):
+            obj = getattr(torch, key)
+            if callable(obj):
+                schemas = get_signature_for_torch_op(obj)
+                print(key, schemas)
 
     def test_find_uses(self):
         graph = torch.fx.Graph()
