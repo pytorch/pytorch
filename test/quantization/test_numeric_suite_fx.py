@@ -26,6 +26,7 @@ from torch.testing._internal.common_quantization import (
     ConvBnReLUModel,
     ConvModel,
     QuantizationTestCase,
+    skipIfNoFBGEMM,
     SingleLayerLinearDynamicModel,
     SingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
@@ -911,6 +912,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
+    @skipIfNoFBGEMM
     def test_prepare_model_with_stubs_multiple_dtype_casts(self):
         """
         Verifies that for nodes where the first input arg is a list,
@@ -944,7 +946,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         self.checkGraphModuleNodes(
             mp_shadows_mq, expected_node_occurrence=expected_occurrence)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_logging_inputs(self):
         """
         Verifies that logging inputs works correctly
