@@ -40,8 +40,6 @@ import __main__  # type: ignore[import]
 import errno
 from typing import cast, Any, Dict, Iterable, Iterator, Optional
 
-import numpy as np
-
 from torch.testing._internal import expecttest
 from torch.testing import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type,
@@ -383,30 +381,26 @@ TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 # it felt a little awkward.
 TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 
-# Dict of NumPy dtype -> torch dtype (when the correspondence exists)
-numpy_to_torch_dtype_dict = {
-    np.bool_      : torch.bool,
-    np.uint8      : torch.uint8,
-    np.int8       : torch.int8,
-    np.int16      : torch.int16,
-    np.int32      : torch.int32,
-    np.int64      : torch.int64,
-    np.float16    : torch.float16,
-    np.float32    : torch.float32,
-    np.float64    : torch.float64,
-    np.complex64  : torch.complex64,
-    np.complex128 : torch.complex128
-}
+if TEST_NUMPY:
+    import numpy as np
 
-if IS_WINDOWS:
-    # Size of `np.intc` is platform defined.
-    # It is returned by functions like `bitwise_not`.
-    # On Windows `int` is 32-bit
-    # https://docs.microsoft.com/en-us/cpp/cpp/data-type-ranges?view=msvc-160
-    numpy_to_torch_dtype_dict[np.intc] = torch.int
+    # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
+    numpy_to_torch_dtype_dict = {
+        np.bool_      : torch.bool,
+        np.uint8      : torch.uint8,
+        np.int8       : torch.int8,
+        np.int16      : torch.int16,
+        np.int32      : torch.int32,
+        np.int64      : torch.int64,
+        np.float16    : torch.float16,
+        np.float32    : torch.float32,
+        np.float64    : torch.float64,
+        np.complex64  : torch.complex64,
+        np.complex128 : torch.complex128
+    }
 
-# Dict of torch dtype -> NumPy dtype
-torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
+    # Dict of torch dtype -> NumPy dtype
+    torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
 
 ALL_TENSORTYPES = [torch.float,
                    torch.double,

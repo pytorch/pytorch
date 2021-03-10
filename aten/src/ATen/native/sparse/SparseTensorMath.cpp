@@ -139,7 +139,7 @@ SparseTensor& neg_sparse_(SparseTensor& t) {
 // Values of uncoalesced tensor corresponding to the same indices are summed
 // and asin(summed_value) != asin(v1) + asin(v2)
 
-SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
+SparseTensor& asin_out_sparse(const SparseTensor& t, SparseTensor& r) {
   TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(
@@ -159,7 +159,7 @@ SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
 
 SparseTensor asin_sparse(const SparseTensor& t) {
   auto result = get_result_tensor_for_unary_op(t);
-  return asin_out_sparse(result, t);
+  return asin_out_sparse(t, result);
 }
 
 SparseTensor& asin_sparse_(SparseTensor& t) {
