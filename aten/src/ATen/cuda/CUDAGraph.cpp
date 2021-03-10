@@ -9,7 +9,10 @@ namespace at {
 namespace cuda {
 
 MempoolId_t graph_pool_handle() {
+  // uuid count starts at 1. 0 is reserved to mean "wasn't set by graph_pool_handle".
   static std::atomic<CaptureId_t> uuid{1};
+  // Sets just the second value, to distinguish it from MempoolId_ts created from
+  // cudaStreamGetCaptureInfo id_s in capture_begin.
   return {0, uuid++};
 }
 
@@ -82,6 +85,9 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &id_));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 
+  // Ensures uuid count starts at 1. 0 is reserved to mean "not set by cudaStreamGetCaptureInfo".
+  // (But how do we know GetCaptureInfo never sets id_ to 0? Because that's the current behavior,
+  // and I asked cuda devs to keep it that way, and they agreed.)
   TORCH_INTERNAL_ASSERT(id_ > 0);
   if (pool.first != 0 || pool.second != 0) {
     // Either value being nonzero means the user supplied a pool to share.
@@ -92,6 +98,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
     mempool_id_ = pool;
   } else {
     // User did not ask us to share a mempool. Use our own id_ as our mempool_id_.
+    // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
     mempool_id_ = {id_, 0};
   }
 
