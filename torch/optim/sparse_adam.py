@@ -42,7 +42,7 @@ class SparseAdam(Optimizer):
                         sparse_params.append([index, d_index])
             elif param.is_sparse:
                 sparse_params.append(index)
-        if sparse_params:
+        if len(sparse_params) == 0:
             raise ValueError(
                 f"Sparse params at indices {sparse_params}: SparseAdam requires dense parameter tensors"
             )
