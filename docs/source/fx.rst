@@ -209,7 +209,7 @@ can be found below.
         node.replace_all_uses_with(new_node)
 
 For simple transformations that only consist of substitutions, you can also
-make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/master/torch/fx/subgraph_rewriter.py>`__
+make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/release/1.8/torch/fx/subgraph_rewriter.py>`__
 
 Subgraph Rewriting With replace_pattern()
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -397,7 +397,7 @@ Examples of the Interpreter Pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Shape
-   Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__
+   Propagation <https://github.com/pytorch/pytorch/blob/release/1.8/torch/fx/passes/shape_prop.py>`__
 -  `Performance Profiler <https://github.com/pytorch/tutorials/pull/1319>`__
 
 
@@ -829,7 +829,7 @@ Non-\ ``torch`` Functions
 
 FX uses ``__torch_function__`` as the mechanism by which it intercepts
 calls (see the `technical
-overview <https://github.com/pytorch/pytorch/blob/master/torch/fx/OVERVIEW.md#technical-details>`__
+overview <https://github.com/pytorch/pytorch/blob/release/1.8/torch/fx/OVERVIEW.md#technical-details>`__
 for more information about this). Some functions, such as builtin Python
 functions or those in the ``math`` module, are things that are not
 covered by ``__torch_function__``, but we would still like to capture
