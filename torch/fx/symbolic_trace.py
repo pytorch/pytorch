@@ -202,8 +202,7 @@ class Tracer(TracerBase):
                     return n
             raise NameError('module is not installed as a submodule')
 
-    def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any],
-                    type_expr : Optional[Any] = None) -> Any:
+    def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Method that specifies the behavior of this ``Tracer`` when it encounters
         a call to an ``nn.Module`` instance.
@@ -233,7 +232,7 @@ class Tracer(TracerBase):
         module_qualified_name = self.path_of_module(m)
         if not self.is_leaf_module(m, module_qualified_name):
             return forward(*args, **kwargs)
-        return self.create_proxy('call_module', module_qualified_name, args, kwargs, type_expr=type_expr)
+        return self.create_proxy('call_module', module_qualified_name, args, kwargs)
 
     def create_args_for_root(self, root_fn, is_module, concrete_args=None):
         """

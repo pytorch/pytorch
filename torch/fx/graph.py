@@ -12,7 +12,7 @@ import warnings
 
 
 if TYPE_CHECKING:
-    from .graph_module import GraphModule
+    from .graph_module import GraphModule  # noqa
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -871,7 +871,8 @@ class Graph:
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
-                    body.append(f'{repr(node)}{maybe_type_annotation} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
+                    body.append(f'{repr(node)}{maybe_type_annotation} = '
+                                f'{magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
                     return
                 qualified_name = _get_qualified_name(node.target)
                 global_name = add_global(qualified_name, node.target)
@@ -886,7 +887,8 @@ class Graph:
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
-                body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{repr(node)}{maybe_type_annotation} = '
+                            f'{_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
