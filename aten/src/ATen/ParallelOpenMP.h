@@ -30,7 +30,7 @@ inline void parallel_for(
   // returns false when omp_get_max_threads() == 1 inside nested "omp parallel"
   // See issue gh-32284
 
-#pragma omp parallel if (omp_get_max_threads() > 1 && !omp_in_parallel() && ((end - begin) > grain_size))
+#pragma omp parallel if (!omp_get_level() && ((end - begin) > grain_size))
   {
     // choose number of tasks based on grain size and number of threads
     // can't use num_threads clause due to bugs in GOMP's thread pool (See #32008)
