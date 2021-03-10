@@ -1378,6 +1378,44 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
 
     return samples
 
+def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    alpha = 2
+    if dtype.is_complex:
+        alpha = 1 + 2j
+    elif dtype.is_floating_point:
+        alpha = 0.1
+
+    if variant == 'tensor':
+        samples = (
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)))),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)))),
+            SampleInput((_make_tensor_helper((S,)), _make_tensor_helper((S, S)))),
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()))),
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper((S,)))),
+            SampleInput((_make_tensor_helper((S,)), _make_tensor_helper(()))),
+
+            # with `alpha`
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S))), kwargs=dict(alpha=alpha)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,))), kwargs=dict(alpha=alpha)),
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(())), kwargs=dict(alpha=alpha)),
+        )
+    elif variant == 'scalar':
+        # Scalar Other
+        samples = (
+            SampleInput((_make_tensor_helper((S, S)), 0.5)),
+            SampleInput((_make_tensor_helper(()), 0.5)),
+
+            SampleInput((_make_tensor_helper((S, S)), 0.5), kwargs=dict(alpha=alpha)),
+            SampleInput((_make_tensor_helper(()), 0.5), kwargs=dict(alpha=alpha)),
+        )
+    else:
+        raise("Invalid variant!")
+
+    return samples
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -2190,6 +2228,36 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('rsub',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+           variant_test_name='rsub_tensor',
+           supports_out=False,
+           test_inplace_grad=False,
+           skips=(
+               # RuntimeError: expected ) but found 'ident' here:
+               # E         File "<string>", line 3
+               # E
+               # E       def the_method(i0):
+               # E           return torch.rsub(i0, 0.5, alpha=(1+2j))
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.cfloat, torch.cdouble]),
+           ),
+           sample_inputs_func=partial(sample_inputs_rsub, variant='tensor'),),
+    OpInfo('rsub',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+           variant_test_name='rsub_scalar',
+           supports_out=False,
+           test_inplace_grad=False,
+           sample_inputs_func=partial(sample_inputs_rsub, variant='scalar'),
+           skips=(
+               # RuntimeError: expected ) but found 'ident' here:
+               # E         File "<string>", line 3
+               # E
+               # E       def the_method(i0):
+               # E           return torch.rsub(i0, 0.5, alpha=(1+2j))
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.cfloat, torch.cdouble]),),
+           assert_autodiffed=True,),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
                    dtypes=all_types_and(torch.bfloat16, torch.half),
