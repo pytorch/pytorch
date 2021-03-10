@@ -176,14 +176,16 @@ void TCPStoreDaemon::compareSetHandler(int socket) {
   std::vector<uint8_t> currentValue = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> newValue = tcputil::recvVector<uint8_t>(socket);
 
-  // sets value to new value if the key exists and it's existing value is the
-  // current value
-  auto it = tcpStore_.find(key);
-  if (it != tcpStore_.end() && it->second == currentValue) {
-    it->second = newValue;
-    tcputil::sendVector<uint8_t>(socket, newValue);
-  } else {
+  auto pos = tcpStore_.find(key);
+  if (pos == tcpStore_.end()) {
+    // TODO: This code path is not ideal as we are "lying" to the caller in case
+    // the key does not exist. We should come up with a working solution.
     tcputil::sendVector<uint8_t>(socket, currentValue);
+  } else {
+    if (pos->second == currentValue) {
+      pos->second = std::move(newValue);
+    }
+    tcputil::sendVector<uint8_t>(socket, pos->second);
   }
 }
 
@@ -409,15 +411,24 @@ TCPStore::TCPStore(
   if (isServer_) {
     // Opening up the listening socket
     std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(masterPort);
-    // Now start the daemon
-    tcpStoreDaemon_ = std::unique_ptr<TCPStoreDaemon>(
-        new TCPStoreDaemon(masterListenSocket_));
   }
-  // Connect to the daemon
-  storeSocket_ = tcputil::connect(
-      tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-  if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
-    waitForWorkers();
+  try {
+      if (isServer_) {
+        // Now start the daemon
+        tcpStoreDaemon_ = std::make_unique<TCPStoreDaemon>(masterListenSocket_);
+      }
+      // Connect to the daemon
+      storeSocket_ = tcputil::connect(
+          tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
+      if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
+        waitForWorkers();
+      }
+  } catch (const std::exception&) {
+    if (isServer_) {
+        tcpStoreDaemon_ = nullptr;
+        tcputil::closeSocket(masterListenSocket_);
+    }
+    throw;
   }
 }
 
@@ -426,7 +437,7 @@ TCPStore::~TCPStore() {
   if (isServer_) {
     // Store daemon should end because of closed connection.
     // daemon destructor should join the thread
-    tcpStoreDaemon_.reset(nullptr);
+    tcpStoreDaemon_ = nullptr;
     tcputil::closeSocket(masterListenSocket_);
   }
 }
@@ -576,7 +587,11 @@ void TCPStore::waitHelper_(
   }
 }
 
-PortType TCPStore::getPort() {
+const std::string& TCPStore::getHost() const noexcept {
+  return tcpStoreAddr_;
+}
+
+PortType TCPStore::getPort() const noexcept {
   return tcpStorePort_;
 }
 

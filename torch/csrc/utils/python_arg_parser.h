@@ -56,7 +56,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/python_dimname.h>
 #include <torch/csrc/tensor/python_tensor.h>
-#include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>

@@ -397,6 +397,7 @@ _(aten, is_coalesced) \
 _(aten, is_complex) \
 _(aten, is_contiguous) \
 _(aten, is_cuda) \
+_(aten, is_mlc) \
 _(aten, is_distributed) \
 _(aten, is_floating_point) \
 _(aten, is_nonzero) \
@@ -422,7 +423,6 @@ _(aten, leaky_relu) \
 _(aten, leaky_relu_backward) \
 _(aten, leaky_relu_forward) \
 _(aten, lerp) \
-_(aten, lgamma) \
 _(aten, linear) \
 _(aten, linspace) \
 _(aten, log) \
