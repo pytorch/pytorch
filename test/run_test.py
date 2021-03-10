@@ -16,16 +16,11 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
+from torch.testing._internal.s3_stat_parser import (get_S3_bucket_readonly, HAVE_BOTO3)
+
 import torch.distributed as dist
 from typing import Dict, Optional, Tuple, List, Any
 
-try:
-    import boto3  # type: ignore[import]
-    import botocore  # type: ignore[import]
-    import botocore.exceptions  # type: ignore[import]
-    HAVE_BOTO3 = True
-except ImportError:
-    HAVE_BOTO3 = False
 
 TESTS = [
     'test_public_bindings',
@@ -375,25 +370,19 @@ def get_test_time_reports_from_S3() -> List[Dict[str, Any]]:
     job = os.environ.get("CIRCLE_JOB", "")
     job_minus_shard_number = job.rstrip('0123456789')
 
-    try:
-        s3 = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
-        bucket = s3.Bucket(name="ossci-metrics")
-
-        reports = []
-        commit_index = 0
-        while len(reports) == 0 and commit_index < len(nightly_commits):
-            nightly_commit = nightly_commits[commit_index]
-            print(f'Grabbing reports from nightly commit: {nightly_commit}')
-            summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{job_minus_shard_number}")
-            for summary in summaries:
-                binary = summary.get()["Body"].read()
-                string = bz2.decompress(binary).decode("utf-8")
-                reports.append(json.loads(string))
-            commit_index += 1
-        return reports
-    except botocore.exceptions.ClientError as err:
-        print('Error Message: {}'.format(err.response['Error']['Message']))
-        return []
+    bucket = get_S3_bucket_readonly('ossci-metrics')
+    reports = []
+    commit_index = 0
+    while len(reports) == 0 and commit_index < len(nightly_commits):
+        nightly_commit = nightly_commits[commit_index]
+        print(f'Grabbing reports from nightly commit: {nightly_commit}')
+        summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{job_minus_shard_number}")
+        for summary in summaries:
+            binary = summary.get()["Body"].read()
+            string = bz2.decompress(binary).decode("utf-8")
+            reports.append(json.loads(string))
+        commit_index += 1
+    return reports
 
 
 def calculate_job_times(reports: List[Dict[str, Any]]) -> Dict[str, Tuple[float, int]]:
