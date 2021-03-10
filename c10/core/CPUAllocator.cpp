@@ -55,16 +55,19 @@ void* alloc_cpu(size_t nbytes) {
 #elif defined(_MSC_VER)
   data = _aligned_malloc(nbytes, gAlignment);
 #else
-  int err = posix_memalign(&data, gAlignment, nbytes);
-  if (err != 0) {
-    CAFFE_THROW(
-        "DefaultCPUAllocator: can't allocate memory: you tried to allocate ",
-        nbytes,
-        " bytes. Error code ",
-        err,
-        " (",
-        strerror(err),
-        ")");
+  // Allocate storage with malloc and manually align data pointer
+  // Then stash storage starting address before the first element to free later
+  // This is significantly faster than posix_memalign
+  const size_t align = std::max(gAlignment, sizeof(void*));
+  void* storage = malloc(nbytes + align);
+  if (storage) {
+    auto storage_addr = reinterpret_cast<uintptr_t>(storage);
+    auto data_addr = storage_addr + align;
+    data_addr -= data_addr % align;
+    data = reinterpret_cast<void*>(data_addr);
+    reinterpret_cast<void**>(data_addr)[-1] = storage;
+  } else {
+    data = nullptr;
   }
 #endif
 
@@ -90,10 +93,15 @@ void* alloc_cpu(size_t nbytes) {
 }
 
 void free_cpu(void* data) {
-#ifdef _MSC_VER
+#ifdef __ANDROID__
+  free(data);
+#elif defined(_MSC_VER)
   _aligned_free(data);
 #else
-  free(data);
+  if (data) {
+    void* storage = reinterpret_cast<void**>(data)[-1];
+    free(storage);
+  }
 #endif
 }
 
