@@ -307,7 +307,7 @@ decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
   }
 #else
   // C++14 implementation of if constexpr
-  return if_constexpr<Condition>(std::forward<ThenCallback>(thenCallback), [] (auto) {});
+  return if_constexpr<Condition>(::std::forward<ThenCallback>(thenCallback), [] (auto) {});
 #endif
 }
 
