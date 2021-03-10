@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.quantized as nnq
 import torch.nn.qat as nnqat
+import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
 toq = torch.ops.quantized
 
@@ -29,6 +30,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
             # Note: matching weights may not work with nniqat.ConvBn2d directly
             # leaving that as a problem for a future PR to solve.
             nniqat.ConvBn2d,
+            nniq.ConvReLU2d,
         ]),
         # linear modules
         'torch.nn.Linear': set([
@@ -105,6 +107,7 @@ def get_reversed_fusions() -> Set[Tuple[Callable, Callable]]:
     """
     return set([
         (F.relu, F.linear),
+        (nn.ReLU, nn.Conv2d),
     ])
 
 # TODO(future PR): we should see if we can reuse quantization's fusion
@@ -112,6 +115,7 @@ def get_reversed_fusions() -> Set[Tuple[Callable, Callable]]:
 def end_node_matches_reversed_fusion(
     end_node: Node,
     reversed_fusion: Tuple[Callable, Callable],
+    gm: GraphModule,
 ) -> bool:
     """
     Returns true if a pattern ending with `end_node` matches
@@ -128,7 +132,21 @@ def end_node_matches_reversed_fusion(
             else:
                 return False
         return True
-    # TODO(future PR): handle call_module
+    elif end_node.op == 'call_module':
+        cur_node = end_node
+        for fusion_idx in range(len(reversed_fusion)):
+            cur_fusion_op = reversed_fusion[fusion_idx]
+            assert isinstance(cur_node.target, str)
+            target_mod = getattr_from_fqn(gm, cur_node.target)
+            if not isinstance(cur_fusion_op, type):
+                return False
+            if not isinstance(target_mod, cur_fusion_op):
+                return False
+            if len(cur_node.args) > 0 and isinstance(cur_node.args[0], Node):
+                cur_node = cur_node.args[0]
+            else:
+                return False
+        return True
     return False
 
 
@@ -177,7 +195,7 @@ class _NSGraphMatchableSubgraphsIterator:
             # be made configurable later if needed.
             for _reverse_fusion_ops in get_reversed_fusions():
                 is_match = end_node_matches_reversed_fusion(
-                    cur_end_node, _reverse_fusion_ops)
+                    cur_end_node, _reverse_fusion_ops, self.gm)
                 if is_match:
                     # navigate to the base node
                     for fusion_idx in range(len(_reverse_fusion_ops) - 1):
@@ -441,11 +459,11 @@ def get_matching_subgraph_pairs(
             pass
 
         # look up types of a and b for useful error messages
-        type_a, type_b = None, None
+        type_start_a, type_start_b = None, None
         if cur_end_node_a is not None:
-            type_a = _get_node_target_type(cur_end_node_a, gm_a)
+            type_start_a = _get_node_target_type(cur_start_node_a, gm_a)  # type: ignore
         if cur_end_node_b is not None:
-            type_b = _get_node_target_type(cur_end_node_b, gm_b)
+            type_start_b = _get_node_target_type(cur_start_node_b, gm_b)  # type: ignore
 
         # check for results and determine what to do next
         if cur_end_node_a is not None and cur_end_node_b is not None:
@@ -459,7 +477,9 @@ def get_matching_subgraph_pairs(
                 cur_start_node_a, cur_start_node_b,
                 gm_a, gm_b, type_a_related_to_b)
             if node_relationship == NodeTypeRelationship.NOT_RELATED:
-                msg = f"({cur_start_node_a}, {type_a}) and ({cur_start_node_b}, {type_b}) are not related"
+                msg = f"""
+({cur_start_node_a}, {type_start_a}) and
+({cur_start_node_b}, {type_start_b}) are not related"""
                 raise GraphMatchingException(msg)
             elif node_relationship == NodeTypeRelationship.EQUAL:
                 # For now, skip nodes with equal types. In the future, this can
@@ -483,7 +503,9 @@ def get_matching_subgraph_pairs(
             break
         else:
             # only one node was fetched, no match possible, throw error
-            msg = f"Matchable nodes count mismatch: ({cur_end_node_a}, {type_a}) and ({cur_end_node_b}, {type_b})"
+            msg = f"""
+Matchable nodes count mismatch: ({cur_start_node_a}, {type_start_a}) and
+({cur_start_node_b}, {type_start_b})"""
             raise GraphMatchingException(msg)
 
     return results
