@@ -13050,6 +13050,19 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out_y, out_x.to(device), msg=test)
 
     @onlyCUDA
+    @largeTensorTest('6GB')
+    def test_pool3d_large_size_int64(self, device):
+        # See https://github.com/pytorch/pytorch/issues/52822
+        x = torch.randn(70, 32, 100, 100, 100, dtype=torch.half, device=device)
+        y = torch.nn.functional.max_pool3d(x, 5)
+        torch.cuda.synchronize()
+
+        ref_x = x.cpu().float()  # max_pool3d_cpu is not implemented for half
+        ref_y = torch.nn.functional.max_pool3d(ref_x, 5)
+
+        self.assertEqual(y, ref_y, exact_dtype=False)
+
+    @onlyCUDA
     def test_AvgPool3d_backward_after_cat_dim1_device(self, device):
         # x has to have batch_size 1 to test contiguous checks
         x = torch.randn(1, 3, 4, 4, 4, device=device, requires_grad=True)

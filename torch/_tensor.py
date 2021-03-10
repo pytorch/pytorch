@@ -593,7 +593,7 @@ class Tensor(torch._C._TensorBase):
             warnings.warn('Iterating over a tensor might cause the trace to be incorrect. '
                           'Passing a tensor of different shape won\'t change the number of '
                           'iterations executed (and might lead to errors or silently give '
-                          'incorrect results).', category=RuntimeWarning)
+                          'incorrect results).', category=torch.jit.TracerWarning, stacklevel=2)
         return iter(self.unbind(0))
 
     def __hash__(self):
