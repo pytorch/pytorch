@@ -1196,6 +1196,11 @@ class TestCase(expecttest.TestCase):
                          f"Expected: {x}; Actual: {y}.")
             super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
         elif isinstance(x, dict) and isinstance(y, dict):
+            class DictComparison(Exception):
+                pass
+
+            raise DictComparison
+            
             if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
                 self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
                                  msg=msg, exact_dtype=exact_dtype,
