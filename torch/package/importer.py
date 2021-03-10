@@ -19,7 +19,6 @@ class ObjMismatchError(Exception):
 
     pass
 
-
 class Importer(ABC):
     """Represents an environment to import modules from.
 
