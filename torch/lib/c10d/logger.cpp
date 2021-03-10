@@ -102,6 +102,7 @@ void Logger::set_construction_data_and_log(
   ddp_logging_data_->iteration = 0;
   ddp_logging_data_->dtype =
       std::string(reducer_->replicas_[0][0].dtype().name());
+  ddp_logging_data_->is_multi_device_module = reducer_->is_multi_device_module_;
 
   set_parameter_stats();
   ddp_logging_data_->bucket_sizes = get_bucket_sizes();
