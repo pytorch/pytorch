@@ -393,6 +393,15 @@ Tensor nll_loss_backward_cpu(
   return grad_input;
 }
 
+Tensor cross_entropy_loss(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  return at::nll_loss_nd(
+    at::log_softmax(self, 1, c10::nullopt),
+    target,
+    weight,
+    ignore_index,
+    reduction);
+}
+
 Tensor & nll_loss_out(Tensor & output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
   Tensor total_weight = at::empty({0}, self.options());
   return std::get<0>(at::nll_loss_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
@@ -400,6 +409,64 @@ Tensor & nll_loss_out(Tensor & output, const Tensor & self, const Tensor & targe
 
 Tensor nll_loss(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
   return std::get<0>(at::nll_loss_forward(self, target, weight, reduction, ignore_index));
+}
+
+Tensor nll_loss_nd(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+  if (self.dim() < 2){
+    TORCH_CHECK(false, "Expected 2 or more dimensions (got ", self.dim(), ")");
+  }
+
+  if (self.sizes()[0] != target.sizes()[0]) {
+    TORCH_CHECK(false, "Expected input batch_size (", self.sizes()[0], ") to match target batch_size (", target.sizes()[0], ").");
+  }
+
+  Tensor ret;
+  Tensor input_ = self;
+  Tensor target_ = target;
+  if (input_.dim() == 2) {
+    ret = at::nll_loss(
+          input_,
+          target_,
+          weight,
+          reduction,
+          ignore_index);
+  } else if (input_.dim() == 4) {
+    ret = at::nll_loss2d(
+          input_,
+          target_,
+          weight,
+          reduction,
+          ignore_index);
+  } else {
+    // dim == 3 or dim > 4
+    auto n = input_.sizes()[0];
+    auto c = input_.sizes()[1];
+    auto out_size = input_.sizes().slice(2).vec();
+    out_size.insert(out_size.begin(), n);
+    if (target_.sizes().slice(1) != input_.sizes().slice(2)) {
+      TORCH_CHECK(false, "Expected target size ", IntArrayRef(out_size), ", got ", target_.sizes());
+    }
+    input_ = input_.contiguous();
+    target_ = target_.contiguous();
+    // support empty batches, see #15870
+    if (input_.numel() > 0) {
+      input_ = input_.view({n, c, 1, -1});
+    } else {
+      input_ = input_.view({n, c, 0, 0});
+    }
+    if (target_.numel() > 0) {
+      target_ = target_.view({n, 1, -1});
+    } else {
+      target_ = target_.view({n, 0, 0});
+    }
+    if (reduction == Reduction::None) {
+      ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
+    } else {
+      auto out = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
+      ret = out.view(out_size);
+    }
+  }
+  return ret;
 }
 
 

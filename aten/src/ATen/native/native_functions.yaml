@@ -5834,6 +5834,10 @@
   dispatch:
     DefaultBackend: addcdiv
 
+- func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  python_module: nn
+
 - func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
@@ -7370,6 +7374,10 @@
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_backward
 
 - func: nll_loss.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  python_module: nn
+
+- func: nll_loss_nd(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
 
