@@ -728,6 +728,7 @@ def load():
         self.assertTrue(packaged_dependency is not package_a.subpackage)
 
 
+@skipIf(version_info < (3, 7), 'ResourceReader API introduced in Python 3.7')
 class TestPackageResources(TestCase):
     def test_resource_reader(self):
         """Test compliance with the get_resource_reader importlib API."""
