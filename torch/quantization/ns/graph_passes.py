@@ -41,6 +41,7 @@ def _insert_logger_after_node(
     # create new name
     logger_node_name = \
         get_new_attr_name_with_prefix(node.name + logger_node_name_suffix)(gm)
+    # print('node.name', node.name, 'suffix', logger_node_name_suffix, 'new name', logger_node_name)
     # create a string representation of the node's target type
     target_type = ''
     if node.op == 'call_function':
@@ -408,18 +409,23 @@ def create_a_shadows_b(
                         prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
                         node_b.name, name_b, ref_name_in,
                         NSSingleResultValuesType.NODE_INPUT.value)
-                else:
-                    # logging of inputs which are not lists is not supported yet
+                elif isinstance(node_b.args[0], list):
+                    # first, save the prev_node instances, because they
+                    # will be overwritten in the env after the first logger
+                    # is added
+                    prev_node_c_list = [env_c[arg.name] for arg in node_b.args[0]]
+
                     counter = 0
-                    for arg in node_b.args[0]:
+                    for arg_idx, arg in enumerate(node_b.args[0]):
                         ref_name_in_cur = ref_name + "_" + str(counter)
                         counter += 1
-                        prev_node_c = env_c[arg.name]
+                        prev_node_c = prev_node_c_list[arg_idx]
                         env_c[prev_node_c.name] = _insert_logger_after_node(
                             prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
                             node_b.name, name_b, ref_name_in_cur,
                             NSSingleResultValuesType.NODE_INPUT.value)
                 else:
+                    # logging of inputs which are not lists is not supported yet
                     raise AssertionError(f"type {type(node_b.args[0])} is not handled yet")
             # subgraph so far:
             #
@@ -460,7 +466,7 @@ def create_a_shadows_b(
                 if isinstance(dtype_cast_node, Node):
                     dtype_cast_node = _insert_logger_after_node(
                         dtype_cast_node, gm_b, logger_cls, '_ns_logger_a_inp_',
-                        ref_node_name, name_b, ref_name_in,
+                        ref_node_name, name_a, ref_name_in,
                         NSSingleResultValuesType.NODE_INPUT.value)
                     input_logger: Union[Node, List[Node]] = dtype_cast_node
                 else:
@@ -472,7 +478,7 @@ def create_a_shadows_b(
                         counter += 1
                         dtype_cast_logger = _insert_logger_after_node(
                             dtype_cast_node_inner, gm_b, logger_cls, '_ns_logger_a_inp_',
-                            ref_node_name, name_b, ref_name_in_cur,
+                            ref_node_name, name_a, ref_name_in_cur,
                             NSSingleResultValuesType.NODE_INPUT.value)
                         new_loggers.append(dtype_cast_logger)
                     dtype_cast_node = new_loggers

@@ -2,7 +2,6 @@
 #define MetalTensorImpl_h
 
 #include <ATen/OpaqueTensorImpl.h>
-#include <ATen/Tensor.h>
 #include <ATen/WrapDimUtils.h>
 #import <ATen/native/metal/MetalTensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageWrapper.h>

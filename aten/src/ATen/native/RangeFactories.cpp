@@ -62,7 +62,11 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, c10::optional
   if (steps == 0) {
     // skip
   } else if (steps == 1) {
-    r.fill_(std::pow(base, start.to<double>()));
+    if (isComplexType(r.scalar_type())){
+      r.fill_(std::pow(base, start.to<c10::complex<double>>()));
+    } else {
+      r.fill_(std::pow(base, start.to<double>()));
+    }
   } else if (isComplexType(r.scalar_type())) {
     AT_DISPATCH_COMPLEX_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
       scalar_t scalar_base = static_cast<scalar_t>(base);

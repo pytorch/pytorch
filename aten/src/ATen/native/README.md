@@ -541,7 +541,8 @@ name that we skip in python binding generation, e.g. `*_backward`. Check
 The generated bindings are either exposed as methods on python_variable or functions on
 the torch._C._nn (marked with `python_module: nn`),
 torch._C._fft (marked with `python_module: fft`),
-or torch._C._linalg (marked with `python_module: linalg`) objects.
+torch._C._linalg (marked with `python_module: linalg`) objects,
+or torch._C._special (marked with `python_module: special`) objects.
 
 ### Can it handle being passed Variables?
 

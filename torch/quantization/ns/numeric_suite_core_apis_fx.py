@@ -1,5 +1,4 @@
 import collections
-import enum
 
 import torch
 import torch.nn as nn
@@ -105,8 +104,9 @@ def _add_weight_info_to_dict(
                 results[ref_name][model_name] = {
                     'type': NSSingleResultValuesType.WEIGHT.value,
                     'values': [weight],
-                    'node_name': node.name,
+                    'prev_node_name': node.name,
                     'prev_node_target_type': str(node.target),
+                    'ref_node_name': node.name,
                 }
 
         else:  # call_module
@@ -125,8 +125,9 @@ def _add_weight_info_to_dict(
                 results[ref_name][model_name] = {
                     'type': NSSingleResultValuesType.WEIGHT.value,
                     'values': [weight],
-                    'node_name': node.name,
+                    'prev_node_name': node.name,
                     'prev_node_target_type': str(type(mod)),
+                    'ref_node_name': node.name,
                 }
 
 
@@ -307,6 +308,8 @@ def add_activation_info_to_dict(
             key = mod.ref_name
             if key not in results:
                 results[key] = {}
+            assert mod.model_name not in results[key], \
+                f"{mod.model_name} is already present in results"
             results[key][mod.model_name] = {
                 'type': mod.results_type,
                 'values': mod.stats,

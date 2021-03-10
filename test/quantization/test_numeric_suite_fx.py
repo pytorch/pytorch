@@ -933,7 +933,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
 
-        mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger, should_log_inputs=True)
+        mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger)
 
         expected_occurrence = {
             # 3 dequantize function calls from the 3 dtype casts for [x, x, x]
@@ -943,7 +943,46 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(
             mp_shadows_mq, expected_node_occurrence=expected_occurrence)
-        print(mp_shadows_mq)
+
+    def test_logging_inputs(self):
+        """
+        Verifies that logging inputs works correctly
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.cat([x, x], dim=0)
+                return x
+
+        m = M().eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        mp(torch.randn(1, 1, 4, 4))
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+
+        mp_shadows_mq = prepare_model_with_stubs(
+            'fp32_prepared', mp, 'int8', mq, OutputLogger, should_log_inputs=True)
+        mp_shadows_mq(torch.randn(1, 1, 4, 4))
+
+        act_compare_dict = get_matching_activations_a_shadows_b(
+            mp_shadows_mq, OutputLogger)
+        for k, v in act_compare_dict.items():
+            ref_a = v['fp32_prepared']['ref_node_name']
+            ref_b = v['int8']['ref_node_name']
+            # compare conv to conv_shadow_copy_0
+            assert ref_a.startswith(ref_b), f"expected {ref_a} to start with {ref_b}"
+
+        # 1 input of conv, 1 output of conv, 2 inputs of cat, 1 output of cat
+        # 5 total
+        self.assertTrue(len(act_compare_dict) == 5)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
+
 
 class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
     """
@@ -991,7 +1030,8 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
 
     @override_qengines
     def test_sparsenn_shadow(self):
-        for should_log_inputs in (True, False):
+        # for should_log_inputs in (True, False):
+        for should_log_inputs in (True,):
             sparse_nn = SparseNNModel().eval()
 
             # quantize the embeddings and the dense part separately, using FX graph mode
@@ -1022,16 +1062,8 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
             # check activation result correctness
             act_compare_dict = get_matching_activations_a_shadows_b(
                 sparse_nn_q, OutputLogger)
-            # TODO(before land): align ref_name for input nodes
-            for layer_name, models in act_compare_dict.items():
-                print(layer_name)
-                for model_name, data in models.items():
-                    print('  ', model_name)
-                    for data_k, data_v in data.items():
-                        print('    ', data_k, data_v)
-
             if should_log_inputs:
-                self.assertTrue(len(act_compare_dict) == 10)
+                self.assertTrue(len(act_compare_dict) == 9)
             else:
                 self.assertTrue(len(act_compare_dict) == 4)
             self.assert_ns_compare_dict_valid(act_compare_dict)
