@@ -9579,11 +9579,10 @@ Keyword args:
 
 Example::
 
-    >>> torch.empty(2, 3)
-    tensor(1.00000e-08 *
-           [[ 6.3984,  0.0000,  0.0000],
-            [ 0.0000,  0.0000,  0.0000]])
-
+    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
+    >>> torch.empty_like(a)
+    tensor([[0, 0, 0],
+            [0, 0, 0]], device='cuda:0', dtype=torch.int32)
 """.format(**factory_common_args))
 
 add_docstr(torch.empty_like,
@@ -10571,9 +10570,9 @@ Example::
     device(type='cpu')
 """)
 
-add_docstr(torch.assert_async,
+add_docstr(torch._assert_async,
            r"""
-assert_async(tensor) -> void
+_assert_async(tensor) -> void
 
 Asynchronously assert that the contents of tensor are nonzero.  For CPU tensors,
 this is equivalent to ``assert tensor`` or ``assert tensor.is_nonzero()``; for
