@@ -186,6 +186,9 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
     prefix = f"{name_prefix}." if name_prefix else ""
     submodules = dict(fx_module.named_modules())
     for name, p in parameters:
+        if name.startswith("parent."):
+            continue
+
         if isinstance(p, torch.Tensor):
             weight = serialize_weight(p)
             serialized_dict["weights"][prefix + name] = weight
