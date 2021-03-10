@@ -205,7 +205,7 @@ void multi_margin_loss_backward_out_cpu_template(
   int64_t nframe, dim;
   auto target_arg = TensorArg(target, "target", 2);
   const auto ndims = input.dim();
-  
+
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
 
   multi_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);

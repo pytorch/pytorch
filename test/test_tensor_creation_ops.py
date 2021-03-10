@@ -621,7 +621,7 @@ class TestTensorCreation(TestCase):
         self.assertEqual(a, b)
         self.assertEqual(w[:6], y.view(-1)[:6])
 
-        # Case: 
+        # Case:
         # Reference: https://github.com/pytorch/pytorch/issues/49878
         for dim in [0, 1]:
             x = torch.zeros((10, 5, 2), device=device)
@@ -2359,6 +2359,29 @@ class TestTensorCreation(TestCase):
             self.assertTrue(t[0].item() == a[0])
             self.assertTrue(t[steps - 1].item() == a[steps - 1])
 
+    def _test_linspace_logspace_complex_helper(self, torch_fn, np_fn, device, dtype):
+        start = torch.randn(1, dtype=dtype).item()
+        end = (start + torch.randn(1, dtype=dtype) + random.randint(5, 15)).item()
+
+        def test_fn(torch_fn, numpy_fn, steps):
+            t = torch_fn(start, end, steps, device=device)
+            a = numpy_fn(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
+            t = t.cpu()
+            self.assertEqual(t, torch.from_numpy(a))
+
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
+            test_fn(torch.linspace, np.linspace, steps)
+
+    @dtypes(torch.complex64)
+    def test_linspace_vs_numpy_complex(self, device, dtype):
+        self._test_linspace_logspace_complex_helper(torch.linspace, np.linspace,
+                                                    device, dtype)
+
+    @dtypes(torch.complex64)
+    def test_logspace_vs_numpy_complex(self, device, dtype):
+        self._test_linspace_logspace_complex_helper(torch.logspace, np.logspace,
+                                                    device, dtype)
+
     @precisionOverride({torch.float: 1e-6, torch.double: 1e-10})
     @dtypes(*torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False))
     def test_logspace_vs_numpy(self, device, dtype):
@@ -2374,7 +2397,7 @@ class TestTensorCreation(TestCase):
             self.assertEqual(t[steps - 1], a[steps - 1])
 
     def _linspace_logspace_warning_helper(self, op, device, dtype):
-        with self.maybeWarnsRegex(UserWarning, "Not providing a value for .+"):
+        with self.assertWarnsOnceRegex(UserWarning, "Not providing a value for .+"):
             op(0, 10, device=device, dtype=dtype)
 
     @dtypes(torch.float)
@@ -2610,10 +2633,6 @@ class TestTensorCreation(TestCase):
                          torch.tensor((2, 1, 0), device=device, dtype=dtype),
                          atol=0, rtol=0)
 
-        # Create non-complex tensor from complex numbers
-        if not dtype.is_complex:
-            self.assertRaises(RuntimeError, lambda: torch.linspace(1j, 2j, 3, device=device, dtype=dtype))
-
         # Check for race condition (correctness when applied on a large tensor).
         if dtype not in (torch.int8, torch.uint8, torch.int16, torch.half, torch.bfloat16):
             y = torch.linspace(0, 999999 + (999999j if dtype.is_complex else 0),
@@ -2630,14 +2649,28 @@ class TestTensorCreation(TestCase):
         y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2), dtype=dtype)
         self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype), atol=0, rtol=0)
 
+    def _test_linspace_logspace_deduction_helper(self, fn, device):
+        for start, end in [(1, 2), (1., 2), (1., -2.), (1j, 2j), (0., 2j), (1j, 2)]:
+            dtype = torch.float32
+            if isinstance(start, complex) or isinstance(end, complex):
+                dtype = torch.cfloat
+
+            if dtype == torch.cfloat:
+                # TODO(kshitij12345): Fix unnecessary warning
+                # Reference: https://github.com/pytorch/pytorch/issues/53171
+                with self.assertWarnsRegex(UserWarning,
+                                           "As either `start` or `stop` is complex"):
+                    self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
+            else:
+                self.assertEqual(fn(start, end, steps=100, device=device).dtype, dtype)
+
     def test_linspace_deduction(self, device):
         # Test deduction from input parameters.
-        self.assertEqual(torch.linspace(1, 2, device=device).dtype, torch.float32)
-        self.assertEqual(torch.linspace(1., 2, device=device).dtype, torch.float32)
-        self.assertEqual(torch.linspace(1., -2., device=device).dtype, torch.float32)
-        # TODO: Need fix
-        with self.assertRaises(RuntimeError):
-            torch.linspace(1j, -2j, device=device)
+        self._test_linspace_logspace_deduction_helper(torch.linspace, device)
+
+    def test_logspace_deduction(self, device):
+        # Test deduction from input parameters.
+        self._test_linspace_logspace_deduction_helper(torch.logspace, device)
 
     # The implementation of linspace+logspace goes through a different path
     # when the steps arg is equal to 0 or 1. For other values of `steps`
