@@ -1977,7 +1977,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int6
 // using MAGMA, however it fails on Windows because of some illegal memory reads inside MAGMA.
 // See discussions in https://github.com/pytorch/pytorch/pull/51348 for comparison of cuSOLVER-MAGMA
 // and Windows failure.
-// For reference here is the MAGMA-based implementation: https://gist.github.com/IvanYashchuk/2db50002c9d3c1462ff769e6410ad983 
+// For reference here is the MAGMA-based implementation: https://gist.github.com/IvanYashchuk/2db50002c9d3c1462ff769e6410ad983
 #if defined(USE_CUSOLVER)
   return orgqr_helper_cuda_lib(result, tau, infos, n_columns); // cusolver
 #else
