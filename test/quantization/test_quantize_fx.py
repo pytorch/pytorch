@@ -3591,7 +3591,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
     def test_resnet18_ddp(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
+        name = "resnet18_ddp"
         eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False).eval().float()
         model = models.__dict__[name](pretrained=True).eval().float()
-        self._test_model_impl(
-            'ddp', 'resnet18', model, eager_quantizable_model)
+        self._test_model_impl('ddp', name, model, eager_quantizable_model)
