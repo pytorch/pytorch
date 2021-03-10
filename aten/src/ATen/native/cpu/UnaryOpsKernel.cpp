@@ -600,6 +600,8 @@ static void rsqrt_kernel(TensorIterator& iter) {
 
 static void frexp_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kHalf,
+    // The iter.dtype() here is the dtype of mantissa output.
+    // It's a floating point type and must be the same as the input's dtype.
     iter.dtype(),
     "frexp_cpu", [&]() {
       cpu_kernel_multiple_outputs(

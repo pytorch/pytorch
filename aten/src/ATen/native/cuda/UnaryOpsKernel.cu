@@ -260,6 +260,8 @@ void frexp_kernel_cuda(TensorIterator& iter) {
   TORCH_CHECK(false, "torch.frexp() is not implemented on ROCm platform.");
 #else
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half,
+    // The iter.dtype() here is the dtype of mantissa output.
+    // It's a floating point type and must be the same as the input's dtype.
     iter.dtype(),
     "frexp_cuda", [&]() {
       gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t a) -> thrust::tuple<scalar_t, int32_t> {

@@ -127,6 +127,7 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
   execute_op(data, strides, i, n, std::forward<func_t>(op));
 }
 
+// the recursive variadic template for iterating over the returned tuple
 template<class T, size_t N>
 struct TupleOutput {
   static void handle(char *C10_RESTRICT data[], const int64_t *strides, int64_t i,
@@ -140,6 +141,7 @@ struct TupleOutput {
   }
 };
 
+// Base case for the above recursive template
 template<class T>
 struct TupleOutput<T, 1> {
   static void handle(char *C10_RESTRICT data[], const int64_t *strides, int64_t i,
@@ -159,6 +161,11 @@ void handle_tuple_outputs(char* C10_RESTRICT data[],
   TupleOutput<decltype(tuple), sizeof...(Args)>::handle(data, strides, i, tuple);
 }
 
+// Loop operation for `cpu_kernel_multiple_outputs`.
+// 1. Use `c10::guts::apply` to make dynamic method invocation
+//    for the lambda passed in `cpu_kernel_multiple_outputs`.
+// 2. Iterate over the members of the returned tuple, set the corresponding
+//    output tensor by the tuple member in `handle_tuple_outputs` function.
 template <typename func_t>
 static inline void
 multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t&& op) {
@@ -263,6 +270,15 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op) {
   iter.cast_outputs();
 }
 
+// This function helps write elementwise kernels that requires multiple outputs.
+// It follows the similar structure of cpu_kernel.
+// Instead of `basic_loop` function, a new `multiple_outputs_loop` function is
+// manipulated to handle multiple return values.
+// For now `needs_dynamic_casting` check is not added as the passed lambda (`func_t`)
+// of `multiple_outputs_loop` returns `std::tuple` instead of `scalar_t`.
+// The `gpu_kernel_multiple_outputs` is also implemented without this check,
+// We could extend `needs_dynamic_casting` to support both `std::tuple` and
+// `thrust::tuple` in the future.
 template <typename func_t>
 void cpu_kernel_multiple_outputs(TensorIteratorBase& iter, func_t&& op) {
   using traits = function_traits<func_t>;
