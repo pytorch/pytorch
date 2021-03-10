@@ -3,6 +3,7 @@ import threading
 import time
 import unittest
 from enum import Enum
+import random
 import torch
 from datetime import timedelta
 import torch.distributed as dist
@@ -2264,5 +2265,60 @@ class TensorPipeDistAutogradTest(RpcAgentTestFixture):
             self.assertEqual(torch.ones(10), grads[t2])
             self.assertEqual(t1.device, grads[t1].device)
             self.assertEqual(t2.device, grads[t2].device)
+
+        rpc.shutdown()
+
+    class MyRemoteCompute(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, input):
+            input = input * 2.0
+            return input
+
+    class MyLocalCompute(torch.nn.Module):
+        def __init__(self, next_stage):
+            super().__init__()
+            self.next_stage = next_stage
+
+        def forward(self, input):
+            return self.next_stage.rpc_sync().forward(input)
+
+    @skip_if_lt_x_gpu(4)
+    def test_remote_module(self):
+
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        # The reverse of this device mapping should be used for the backward pass.
+        options.set_device_map(dst, {self.rank: (self.rank + 1) % self.world_size})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        remote_compute = rpc.remote(dst, TensorPipeDistAutogradTest.MyRemoteCompute)
+        local_compute = TensorPipeDistAutogradTest.MyLocalCompute(remote_compute)
+        for _ in range(10):
+            input = torch.rand([1000, 10000], device=self.rank, requires_grad=True)
+            # Run local autograd
+            result = input * 2.0
+            r = random.random()
+            loss = result.sum() * r
+            loss.backward()
+
+            # Run distributed autograd
+            with dist_autograd.context() as context_id:
+                result = local_compute(input)
+                loss = result.sum() * r
+                dist_autograd.backward(context_id, [loss])
+
+                # Compare grads.
+                grads = dist_autograd.get_gradients(context_id)
+                self.assertEqual(input.grad, grads[input])
 
         rpc.shutdown()
