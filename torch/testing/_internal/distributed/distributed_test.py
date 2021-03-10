@@ -17,6 +17,7 @@ import torch
 import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
+from torch.distributed.algorithms.ddp_comm_hooks import quantization as quantization_hooks
 from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
@@ -126,6 +127,12 @@ ddp_find_unused_params_enabled_str = "Since `find_unused_parameters=True` is ena
 ddp_outputs_not_used_in_loss_str = "`forward` function outputs participate in calculating loss"
 
 
+class DDPUnevenTestInput(NamedTuple):
+    name: str
+    model: nn.Module
+    inp: Union[torch.tensor, tuple]
+    sync_interval: int
+
 
 class _FC2(nn.Module):
     def __init__(self):
@@ -201,6 +208,21 @@ class TwoLinLayerNet(nn.Module):
         b = self.b(x)
         return (a, b)
 
+class EmbeddingNet(nn.Module):
+
+    def __init__(self, rank):
+        super().__init__()
+        embedding_dim = 500 if rank == 0 else 50
+        self.embedding = nn.Embedding(
+            num_embeddings=10,
+            embedding_dim=embedding_dim
+        )
+        self.lin = nn.Linear(embedding_dim, 1)
+
+    def forward(self, x):
+        x = self.embedding(x)
+        return self.lin(x)
+
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
@@ -212,6 +234,13 @@ def get_timeout(test_id):
         return CUSTOMIZED_TIMEOUT[test_name]
     else:
         return DEFAULT_TIMEOUT
+
+default_pg_timeout = 60
+# These tests can run slowly and need additional time to complete, otherwise
+# they would be taken down by NCCL_ASYNC_ERROR_HANDLING.
+CUSTOM_PG_TIMEOUT = {
+    "test_ddp_uneven_inputs": 300,
+}
 
 
 def require_backend(backends):
@@ -330,7 +359,10 @@ class TestDistBackend(MultiProcessTestCase):
     def setUpClass(cls):
         os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
         os.environ["MASTER_PORT"] = str(MASTER_PORT)
-        # os.environ["WORLD_SIZE"] = str(WORLD_SIZE)
+        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
+        # such as test_batch_isend_irecv_nccl will test NCCL_BLOCKING_WAIT as
+        # expected.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
         super().setUpClass()
 
     def setUp(self):
@@ -339,6 +371,11 @@ class TestDistBackend(MultiProcessTestCase):
         initialize_temp_directories()
         # initialize Barrier
         Barrier.init()
+        # Skip return code checking for following tests as they are expected to
+        # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
+        self.skip_return_code_checks = [
+            self.test_ddp_model_diff_across_ranks.__wrapped__,
+        ]
 
     def tearDown(self):
         cleanup_temp_dir()
@@ -359,7 +396,10 @@ class TestDistBackend(MultiProcessTestCase):
         if torch.cuda.is_available() and torch.cuda.device_count() < int(self.world_size):
             sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
         try:
-            timeout = timedelta(seconds=60)
+            pg_timeout_seconds = CUSTOM_PG_TIMEOUT.get(
+                test_name, default_pg_timeout
+            )
+            timeout = timedelta(seconds=pg_timeout_seconds)
             dist.init_process_group(
                 init_method=self.init_method,
                 backend=BACKEND,
@@ -2848,11 +2888,13 @@ class DistributedTest:
             return global_bs, input_cpu, target, loss
 
         # END TO END TEST FOR DISTRIBUTEDDATAPARALLEL
-        def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0):
+        def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0, memory_format=None):
             model.train()
             output = model(input_var)
             l = loss(output, target) * scale_factor
             l.backward()
+            if memory_format is not None:
+                self.assertTrue(output.is_contiguous(memory_format=memory_format))
 
         def _assert_equal_param(self, param_gpu, param_DDP):
             self.assertEqual(len(param_gpu), len(param_DDP))
@@ -2861,11 +2903,11 @@ class DistributedTest:
 
         def _test_DDP_5iter(
             self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save,
-            offset=None, world_size=0, zero_grad=False
+            offset=None, world_size=0, zero_grad=False, memory_format=None
         ):
             for idx in range(5):
                 # single cpu/gpu training
-                self._test_DDP_helper(model_base, input, target, loss)
+                self._test_DDP_helper(model_base, input, target, loss, memory_format=memory_format)
 
                 if offset is None:
                     offset = rank * local_bs
@@ -2877,6 +2919,7 @@ class DistributedTest:
                     target[offset: offset + local_bs],
                     loss,
                     world_size * local_bs / batch_size if world_size != 0 else 1,
+                    memory_format=memory_format
                 )
 
                 # Update weights and run a second iteration to shake out errors
@@ -3038,6 +3081,68 @@ class DistributedTest:
                         expected_grad,
                         msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
                     )
+
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
+        def test_ddp_comm_hook_logging(self):
+            hooks = [
+                default.allreduce_hook,
+                default.fp16_compress_hook,
+                powerSGD.powerSGD_hook,
+                powerSGD.batched_powerSGD_hook,
+                quantization_hooks.quantization_pertensor_hook,
+                quantization_hooks.quantization_perchannel_hook,
+            ]
+
+            cpp_builtin_hooks = [
+                dist.BuiltinCommHookType.ALLREDUCE,
+                dist.BuiltinCommHookType.FP16_COMPRESS,
+            ]
+
+            for hook in hooks:
+                ddp_model = torch.nn.parallel.DistributedDataParallel(
+                    torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
+                    device_ids=[self.rank]
+                )
+                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                # Hook not registered yet, so should be empty
+                self.assertEqual(ddp_logging_data.comm_hook, "")
+                ddp_model.register_comm_hook(None, hook)
+                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                self.assertEqual(ddp_logging_data.comm_hook, hook.__qualname__)
+
+            for hook in cpp_builtin_hooks:
+                ddp_model = torch.nn.parallel.DistributedDataParallel(
+                    torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
+                    device_ids=[self.rank]
+                )
+                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                # Hook not registered yet, so should be empty
+                self.assertEqual(ddp_logging_data.comm_hook, "")
+                ddp_model._register_builtin_comm_hook(hook)
+                ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+                self.assertEqual(ddp_logging_data.comm_hook, str(hook))
+
+            # No hook registered
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
+                device_ids=[self.rank]
+            )
+            ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+            # Hook not registered yet, so should be empty
+            self.assertEqual(ddp_logging_data.comm_hook, "")
+            # After second forward pass, hook should still be empty string
+            for i in range(2):
+                inp = torch.ones(1, 1, device=self.rank)
+                loss = ddp_model(inp).sum()
+                loss.backward()
+
+            ddp_logging_data = ddp_model.logger.get_ddp_logging_data()
+            self.assertEqual(ddp_logging_data.comm_hook, "")
 
         def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
@@ -3206,6 +3311,44 @@ class DistributedTest:
                 True,
                 offset,
                 dist.get_world_size()
+            )
+            self._barrier()
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        def test_DistributedDataParallel_SyncBatchNorm_Channels_Last(self):
+            group, group_id, rank = self._init_global_test()
+            num_processes = dist.get_world_size()
+            local_bs = 2
+            bs_offset = int(rank * 2)
+            global_bs = int(num_processes * 2)
+
+            model = ONLY_SBN_NET
+            model_gpu = copy.deepcopy(model).cuda(rank)
+            model_DDP = nn.parallel.DistributedDataParallel(
+                model_gpu, device_ids=[rank]
+            )
+
+            memory_format = torch.channels_last
+            input_gpu = torch.randn(global_bs, 2, 4, 4, dtype=torch.float).cuda(rank).to(memory_format=memory_format)
+            target_gpu = torch.randn(global_bs, 2, 4, 4, dtype=torch.float).cuda(rank).to(memory_format=memory_format)
+            loss = nn.MSELoss()
+
+            # check two model parameters over 5 iterations
+            self._test_DDP_5iter(
+                model_gpu,
+                model_DDP,
+                input_gpu,
+                target_gpu,
+                loss,
+                local_bs,
+                rank,
+                global_bs,
+                True,
+                bs_offset,
+                dist.get_world_size(),
+                memory_format=memory_format
             )
             self._barrier()
 
@@ -3439,6 +3582,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.gloo_device_transport, parse_env("GLOO_DEVICE_TRANSPORT"))
             self.assertEqual(ddp_logging_data.nccl_socket_ifname, parse_env("NCCL_SOCKET_IFNAME"))
             self.assertEqual(ddp_logging_data.nccl_blocking_wait, parse_env("NCCL_BLOCKING_WAIT"))
+            self.assertEqual(ddp_logging_data.nccl_async_error_handling, parse_env("NCCL_ASYNC_ERROR_HANDLING"))
             self.assertEqual(ddp_logging_data.nccl_debug, parse_env("NCCL_DEBUG"))
             self.assertEqual(ddp_logging_data.nccl_nthreads, parse_env("NCCL_NTHREADS"))
             self.assertEqual(ddp_logging_data.nccl_ib_timeout, parse_env("NCCL_IB_TIMEOUT"))
@@ -4036,12 +4180,6 @@ class DistributedTest:
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
         def test_ddp_uneven_inputs(self):
-            class DDPUnevenTestInput(NamedTuple):
-                name: str
-                model: nn.Module
-                inp: Union[torch.tensor, tuple]
-                sync_interval: int
-
             dim = 1000
             batch = 1
             # Create a variety of models to run uneven input tests on.
@@ -4811,6 +4949,33 @@ class DistributedTest:
                 "Expected argument scatter_object_output_list to be a list of size at least 1.",
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_model_diff_across_ranks(self):
+            torch.cuda.set_device(self.rank)
+            # Creates network with different sized embedding table on different
+            # ranks. This should throw an error during DDP init.
+            net = EmbeddingNet(self.rank)
+            # When running with NCCL backend, we don't expect an error on rank 0,
+            # rather, it will be taken down by NCCL_ASYNC_ERROR_HANDLING. When
+            # running with Gloo, we expect the error to be caught inline.
+            rank_0_ctx = (
+                suppress()
+                if dist.get_backend() == dist.Backend.NCCL
+                else self.assertRaisesRegex(RuntimeError, "Connection closed by peer")
+            )
+            ctx = (
+                rank_0_ctx
+                if self.rank == 0
+                else self.assertRaisesRegex(RuntimeError, "appears not to match")
+            )
+            with ctx:
+                net = torch.nn.parallel.DistributedDataParallel(
+                    net.to(self.rank), device_ids=[self.rank]
+                )
+                dist.barrier()
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})

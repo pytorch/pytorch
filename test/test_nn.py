@@ -27,6 +27,7 @@ import torch.nn.functional as F
 import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_
+import torch.nn.utils.parametrize as parametrize
 import torch.nn.utils.prune as prune
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn import Parameter
@@ -1938,6 +1939,354 @@ class TestNN(NNTestCase):
 
         sample = next(model.parameters())[0, 0, 0]
         self.assertTrue(torch.equal(sample.data, vec.data[:5]))
+
+    # torch/nn/utils/parametrize
+    def test_register_and_remove_parametrization(self):
+        r"""Test that it is possible to add a few parametrizations
+        on a parameter or a buffer and that removing them restores the initial state
+        It also tests that backpropagating through them works as expected
+        """
+        # Define a couple matrix parametrizations
+        class Skew(nn.Module):
+            def forward(self, X):
+                X = X.tril(-1)
+                return X - X.T
+
+        class Orthogonal(nn.Module):
+            def forward(self, X):
+                # Cayley map
+                # If X is skew-symmetric it returns an orthogonal matrix
+                Id = torch.eye(X.size(0), device=X.device)
+                return torch.solve(Id - X, Id + X).solution
+
+        # Define a couple vector parametrizations
+        class FirstZero(nn.Module):
+            def forward(self, x):
+                return torch.cat([x.new_zeros(1), x[1:]])
+
+        class LastZero(nn.Module):
+            def forward(self, x):
+                return torch.cat([x[:-1], x.new_zeros(1)])
+
+        model = nn.Linear(8, 8)
+        initial_weight_id = id(model.weight)
+        initial_bias_id = id(model.bias)
+        initial_model = deepcopy(model)
+
+        # Test one parametrization
+        parametrize.register_parametrization(model, "weight", Skew())
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertNotIn("weight", model._parameters)
+        # Result should be skew-symmetric
+        A = model.weight
+        self.assertTrue(torch.allclose(A, -A.T))
+        # Remove and check consistency
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.weight, initial_model.weight)
+        self.assertEqual(id(model.weight), initial_weight_id)
+        self.assertEqual(model.__class__, nn.Linear)
+
+        # Test two parametrizations at the same time and removing them
+        parametrize.register_parametrization(model, "weight", Skew())
+        parametrize.register_parametrization(model, "weight", Orthogonal())
+        # Result should be orthogonal
+        X = model.weight
+        Id = torch.eye(X.size(0), device=X.device)
+        self.assertTrue(torch.allclose(X.T @ X, Id))
+        # Structure tests
+        self.assertTrue(hasattr(model, "parametrizations"))
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertIn("weight", model.parametrizations)
+        self.assertNotIn("weight", model._parameters)
+        # Remove
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertEqual(model.weight, initial_model.weight)
+        self.assertEqual(id(model.weight), initial_weight_id)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.__class__, nn.Linear)
+
+        # Add everything
+        parametrize.register_parametrization(model, "weight", Skew())
+        parametrize.register_parametrization(model, "weight", Orthogonal())
+        parametrize.register_parametrization(model, "bias", FirstZero())
+        parametrize.register_parametrization(model, "bias", LastZero())
+
+        # Basic tests
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "weight"))
+        self.assertTrue(parametrize.is_parametrized(model, "bias"))
+        self.assertEqual(model.bias[0].item(), 0.)
+        self.assertEqual(model.bias[-1].item(), 0.)
+        self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happpened
+        # Should not throw
+        (model.weight.T @ model.bias).sum().backward()
+        with torch.no_grad():
+            for p in model.parameters():
+                p.add_(- p.grad, alpha=0.01)
+
+        # Remove first parametrization.
+        # Check that the model is still parametrized and so is the second parameter
+        parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+        self.assertTrue(parametrize.is_parametrized(model))  # Still parametrized
+        self.assertFalse(parametrize.is_parametrized(model, "weight"))  # Parametrization removed
+        self.assertTrue(parametrize.is_parametrized(model, "bias"))  # Still parametrized
+        self.assertEqual(model.bias[0].item(), 0.)   # Still parametrized
+        self.assertEqual(model.bias[-1].item(), 0.)  # Still parametrized
+        self.assertNotEqual(model.weight, initial_model.weight)  # Has been updated
+        self.assertEqual(id(model.weight), initial_weight_id)  # Keeps the same id
+        self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happened
+        # Should not throw
+        (model.weight.T @ model.bias).sum().backward()
+        with torch.no_grad():
+            for p in model.parameters():
+                p.add_(- p.grad, alpha=0.01)
+
+        # Remove the second parametrization.
+        # Check that the module is not parametrized
+        parametrize.remove_parametrizations(model, "bias", leave_parametrized=False)
+        self.assertFalse(parametrize.is_parametrized(model))  # Still parametrized
+        self.assertNotEqual(model.bias, initial_model.bias)  # Has been updated
+        self.assertNotEqual(model.bias[0].item(), 0.)   # Still parametrized
+        self.assertNotEqual(model.bias[-1].item(), 0.)  # Still parametrized
+        self.assertEqual(id(model.bias), initial_bias_id)
+        self.assertFalse(hasattr(model, "parametrizations"))
+        self.assertEqual(model.__class__, nn.Linear)
+        self.assertEqual(len(list(model.parameters())), 2)
+        # Should not throw
+        (model.weight.T @ model.bias).sum().backward()
+        with torch.no_grad():
+            for p in model.parameters():
+                p.add_(- p.grad, alpha=0.01)
+
+    def test_register_and_remove_buffer_parametrization(self):
+        r"""Test that it is possible to add and remove parametrizations on buffers"""
+        # Define a couple vector parametrizations
+        class FirstZero(nn.Module):
+            def forward(self, x):
+                return torch.cat([x.new_zeros(1), x[1:]])
+
+        class LastZero(nn.Module):
+            def forward(self, x):
+                return torch.cat([x[:-1], x.new_zeros(1)])
+
+        model = nn.Linear(8, 8)
+
+        # Instantiate parametrizations on buffers. It should work as expected
+        delattr(model, "bias")
+        model.register_buffer("bias", torch.ones(8))
+        parametrize.register_parametrization(model, "bias", FirstZero())
+        parametrize.register_parametrization(model, "bias", LastZero())
+        self.assertTrue(parametrize.is_parametrized(model))
+        self.assertTrue(parametrize.is_parametrized(model, "bias"))
+        self.assertEqual(model.bias[0].item(), 0.)
+        self.assertEqual(model.bias[-1].item(), 0.)
+        self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
+        self.assertEqual(len(list(model.parameters())), 1)
+
+        # Remove parametrizations on buffers. It should work as expected
+        parametrize.remove_parametrizations(model, "bias", leave_parametrized=True)
+        self.assertFalse(parametrize.is_parametrized(model))
+        self.assertFalse(parametrize.is_parametrized(model, "bias"))
+        self.assertEqual(model.bias[0].item(), 0.)
+        self.assertEqual(model.bias[-1].item(), 0.)
+        self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
+        self.assertEqual(len(list(model.parameters())), 1)
+
+    def test_serialization_parametrization(self):
+        r"""Test that it is possible to serialize a parametrized model via state_dict"""
+        # A stateful parametrization
+        class Orthogonal(nn.Module):
+            def __init__(self, n):
+                super().__init__()
+                self.register_buffer("id", torch.eye(n))
+                self.register_buffer("B", torch.empty(n, n))
+                init.orthogonal_(self.B)
+
+            def forward(self, X):
+                A = X.triu(1)
+                A = A - A.T
+                return self.B @ torch.solve(self.id - A, self.id + A).solution
+
+        def get_model():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(5, 5),
+                torch.nn.ReLU(),
+                torch.nn.Linear(5, 1),
+            )
+
+            parametrize.register_parametrization(model[0], "weight", Orthogonal(5))
+            return model
+
+        model = get_model()
+
+        prev_weight = model[0].weight
+        prev_B = model[0].parametrizations.weight[0].B
+
+        new_model = get_model()
+        with TemporaryFileName() as fname:
+            torch.save(model.state_dict(), fname)
+            new_model.load_state_dict(torch.load(fname))
+
+        # Integrity tests
+        self.assertTrue(parametrize.is_parametrized(new_model[0], "weight"))
+        self.assertEqual(prev_weight, new_model[0].weight)
+        self.assertEqual(prev_B, new_model[0].parametrizations.weight[0].B)
+
+        # Trying to save the whole parametrized model raises
+        with self.assertRaisesRegex(RuntimeError, "state_dict"):
+            with TemporaryFileName() as fname:
+                torch.save(model, fname)
+
+    def test_initialization_parametrization(self):
+        r"""Test that it is possible to initialize a parametrization when it
+            implements a `right_inverse` method
+        """
+        class Skew(nn.Module):
+            def forward(self, X):
+                A = X.triu(1)
+                return A - A.T
+
+            def is_skew(self, A):
+                return torch.allclose(A, -A.T, atol=1e-6)
+
+            def right_inverse(self, X):
+                if not self.is_skew(X):
+                    raise ValueError("The matrix is not skew-symmetric.")
+                return X.triu(1)
+
+        # Implements a Cayley map where right_inverse is not quite the inverse of forward
+        class Orthogonal(nn.Module):
+            def __init__(self, n):
+                super().__init__()
+                self.register_buffer("B", torch.eye(n))
+
+            def forward(self, A):
+                Id = torch.eye(X.size(0))
+                return self.B @ torch.solve(Id - A, Id + A).solution
+
+            def is_orthogonal(self, X):
+                Id = torch.eye(X.size(0))
+                return torch.allclose(X.T @ X, Id, atol=1e-4)
+
+            def right_inverse(self, X):
+                if not self.is_orthogonal(X):
+                    raise ValueError("The input is not orthogonal.")
+                # cayley(0) == Id, so B @ cayley(0) == B
+                self.B = X
+                return torch.zeros_like(X)
+
+        N = 5
+        model = nn.Linear(N, N)
+        # Register the skew-symmetric onstraint. The result is now skew-symmetric
+        parametrize.register_parametrization(model, "weight", Skew())
+        X = torch.rand(N, N)
+        # X is not skew-symmetric, so it throws an error
+        with self.assertRaises(ValueError):
+            model.weight = X
+        # Make X skew-symmetric
+        X = X - X.T
+        model.weight = X
+        self.assertEqual(model.parametrizations.weight.original, X.triu(1))
+        self.assertEqual(model.weight, X)
+
+        # Having several parametrizations registered should work in the same way
+        parametrize.register_parametrization(model, "weight", Orthogonal(N))
+        # Register now the Cayley map. The result is now orthogonal
+        X = torch.rand(N, N)
+        # X is not orthogonal, so it throws an error
+        with self.assertRaises(ValueError):
+            model.weight = X
+        init.orthogonal_(X)
+        model.weight = X
+        self.assertEqual(model.weight, X)
+        self.assertEqual(model.parametrizations.weight.original, torch.zeros_like(X))
+
+    def test_errors_parametrization(self):
+        # A parametrization shall not change the size of the parameter
+        class ChangeSize(nn.Module):
+            def forward(self, x):
+                return x[:-1]
+
+        # A simple parametrization that does not implement a right_inverse
+        class Double(nn.Module):
+            def forward(self, x):
+                return 2 * x
+
+        module = nn.Linear(3, 4)
+        # This should not throw when registering
+        parametrize.register_parametrization(module, "weight", ChangeSize())
+        # It throws in the forward
+        with self.assertRaisesRegex(RuntimeError, "may not change the size"):
+            module(torch.rand(2))
+        # Undo
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Removing a parametrization from an unparametrized tensor throws
+        with self.assertRaisesRegex(ValueError, "does not have a parametrization"):
+            parametrize.remove_parametrizations(module, "bias")
+        # Nothing odd happens
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Register a parametrization on a non-existing parameter breaks
+        with self.assertRaisesRegex(ValueError, "does not have a parameter"):
+            parametrize.register_parametrization(module, "foo", ChangeSize())
+        self.assertFalse(parametrize.is_parametrized(module))
+
+        # Try to assign to a parametrization that does not implement `right_inverse`
+        parametrize.register_parametrization(module, "weight", Double())
+        with self.assertRaisesRegex(RuntimeError, "right_inverse"):
+            module.weight = torch.rand(4, 3)
+        # Undo
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+        self.assertFalse(parametrize.is_parametrized(module))
+
+    def test_caching_parametrization(self):
+        r"""Test the caching system of a parametrization"""
+        # Define a couple matrix parametrizations
+        class Skew(nn.Module):
+            def forward(self, X):
+                X = X.tril(-1)
+                return X - X.T
+
+        class Orthogonal(nn.Module):
+            def forward(self, X):
+                Id = torch.eye(X.size(0), device=X.device)
+                return torch.solve(Id - X, Id + X).solution
+
+        model = nn.Linear(5, 5)
+        parametrize.register_parametrization(model, "weight", Skew())
+        parametrize.register_parametrization(model, "weight", Orthogonal())
+
+        # Test that the caching system works
+        with parametrize.cached():
+            X = model.weight
+            Y = model.weight
+            self.assertEqual(id(X), id(Y))
+
+    def test_dtype_parametrization(self):
+        r"""Test a case that is not allowed when removing a parametrization"""
+        class ChangeType(nn.Module):
+            def forward(self, X):
+                return X.double()
+
+        module = nn.Linear(4, 4).float()
+        input_ = torch.rand(4).double()
+        # It is allowed to register a parametrization that changes the dtype
+        parametrize.register_parametrization(module, "weight", ChangeType())
+        module(input_)
+        # We can remove it leaving the original tensor
+        parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+        # But leaving it parametrized breaks
+        parametrize.register_parametrization(module, "weight", ChangeType())
+        with self.assertRaisesRegex(ValueError, "changes the dtype"):
+            parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
 
     # torch/nn/utils/prune.py
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
@@ -4777,12 +5126,30 @@ class TestNN(NNTestCase):
 
                 hx.sum().backward()
 
+    def test_RNN_cell_forward_input_size(self):
+        input = torch.randn(3, 11)
+        hx = torch.randn(3, 20)
+        for module in (nn.RNNCell, nn.GRUCell):
+            cell = module(10, 20)
+            self.assertRaises(Exception, lambda: cell(input, hx))
+
+    def test_RNN_cell_forward_hidden_size(self):
+        input = torch.randn(3, 10)
+        hx = torch.randn(3, 21)
+        cell_shared_param = (10, 20)
+        for cell in (nn.RNNCell(*cell_shared_param, nonlinearity="relu"),
+                     nn.RNNCell(*cell_shared_param, nonlinearity="tanh"),
+                     nn.GRUCell(*cell_shared_param)):
+            self.assertRaises(Exception, lambda: cell(input, hx))
+
+
     def _test_loss_equal_input_target_shape(self, cast):
         # Tests losses whose inputs should have the same size.
         losses = {
             'mse_loss': lambda x, y: F.mse_loss(x, y),
             'l1_loss': lambda x, y: F.l1_loss(x, y),
             'smooth_l1_loss': lambda x, y: F.smooth_l1_loss(x, y),
+            'huber_loss': lambda x, y: F.huber_loss(x, y),
             'kl_div': lambda x, y: F.kl_div(x, y),
             'poisson_nll_loss': lambda x, y: F.poisson_nll_loss(x, y),
         }
@@ -5189,6 +5556,22 @@ class TestNN(NNTestCase):
                 hx, cx = lstm(input, (hx, cx))
 
             (hx + cx).sum().backward()
+
+    def test_LSTM_cell_forward_input_size(self):
+        input = torch.randn(3, 11)
+        hx = torch.randn(3, 20)
+        cx = torch.randn(3, 20)
+        lstm = nn.LSTMCell(10, 20)
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+
+    def test_LSTM_cell_forward_hidden_size(self):
+        input = torch.randn(3, 10)
+        hx = torch.randn(3, 21)
+        cx = torch.randn(3, 20)
+        lstm = nn.LSTMCell(10, 20)
+        self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
+        self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
+
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_pack_sequence_batch_sizes_throw(self):
@@ -6857,10 +7240,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
-        if TEST_WITH_ROCM:
-            dtype = torch.float
-        else:
-            dtype = torch.double
+        dtype = torch.double
         self._test_RNN_cpu_vs_cudnn(0, dtype)
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
@@ -7708,6 +8088,14 @@ class TestNN(NNTestCase):
                          loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target,
                                                                    margin=0.5, reduction='none'))
 
+    def test_cosine_embedding_loss_invalid_target_shape(self):
+        input1 = torch.randn(15, 10)
+        input2 = torch.randn(15, 10)
+        target = torch.randn(15, 1).sign()
+
+        with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
+            F.cosine_embedding_loss(input1, input2, target)
+
     def test_margin_ranking_loss_no_reduce(self):
         input1 = torch.randn(15).mul_(10).requires_grad_()
         input2 = torch.randn(15).mul_(10).requires_grad_()
@@ -7773,6 +8161,7 @@ class TestNN(NNTestCase):
             'mse_loss': lambda x, y, r: F.mse_loss(x, y, reduction=r),
             'l1_loss': lambda x, y, r: F.l1_loss(x, y, reduction=r),
             'smooth_l1_loss': lambda x, y, r: F.smooth_l1_loss(x, y, reduction=r),
+            'huber_loss': lambda x, y, r: F.huber_loss(x, y, reduction=r),
         }
 
         input = torch.randn(2, 1, requires_grad=True)
@@ -7799,6 +8188,22 @@ class TestNN(NNTestCase):
     def test_smoothl1loss_negative_beta_not_supported(self):
         with self.assertRaises(RuntimeError):
             F.smooth_l1_loss(torch.randn(2, 2), torch.randn(2, 2), beta=-1.0)
+
+    def test_huber_loss_invalid_delta(self):
+        def _test_huber_loss_delta_error_helper(delta):
+            input, target = torch.randn(2, 2), torch.randn(2, 2)
+            loss = torch.nn.HuberLoss(delta=delta)
+            with self.assertRaises(RuntimeError):
+                loss(input, target)
+
+        def test_huber_loss_negative_delta():
+            _test_huber_loss_delta_error_helper(delta=-0.5)
+
+        def test_huber_loss_zero_delta():
+            _test_huber_loss_delta_error_helper(delta=0.0)
+
+        test_huber_loss_negative_delta()
+        test_huber_loss_zero_delta()
 
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
@@ -9018,7 +9423,6 @@ class TestNN(NNTestCase):
     @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @skipIfRocm
     def test_conv_cudnn_memory_layout_dominance(self):
         # desired behavior here is to have the memory_layout of conv.weight to
         # dominante the layout of output.
@@ -11530,6 +11934,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.multi_margin_loss(input, target, reduction=reduction))
 
             v(lambda: F.kl_div(input, input, reduction=reduction))
+            v(lambda: F.huber_loss(input, input, reduction=reduction))
             v(lambda: F.smooth_l1_loss(input, input, reduction=reduction))
             v(lambda: F.l1_loss(input, input, reduction=reduction))
             v(lambda: F.l1_loss(cinput, cinput, reduction=reduction))
@@ -11557,6 +11962,68 @@ class TestNNDeviceType(NNTestCase):
             # FIXME: should we allow derivatives on these?
             v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input.detach(), reduction=reduction))
             v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
+
+    @onlyOnCPUAndCUDA
+    def test_smooth_l1_loss_vs_huber_loss(self, device):
+        def _make_test_tensor(shape, contiguous=True):
+            if contiguous:
+                test_tensor = torch.randn(shape, device=device)
+            else:
+                # Select every other element in the innermost dimension to
+                # make it non-contiguous.
+                doubled_shape = list(shape)
+                doubled_shape[-1] *= 2
+                test_tensor = torch.randn(doubled_shape, device=device)
+                test_tensor = test_tensor[..., ::2]
+            return test_tensor
+
+        def _test_smooth_l1_loss_vs_huber_loss_helper(input, target, beta, require_equal):
+            for reduction in ['mean', 'sum', 'none']:
+                smooth_l1 = torch.nn.SmoothL1Loss(beta=beta, reduction=reduction)
+                # beta hyper-parameter is called delta for Huber
+                huber = torch.nn.HuberLoss(delta=beta, reduction=reduction)
+                smooth_l1_loss = smooth_l1(input, target)
+                huber_loss = huber(input, target)
+
+                if require_equal:
+                    self.assertEqual(smooth_l1_loss, huber_loss)
+                else:
+                    # Huber loss should be larger than smooth L1 loss by a factor of beta.
+                    self.assertEqual(smooth_l1_loss * beta, huber_loss)
+
+        def _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta, require_equal):
+            # Test the non-vectorized case.
+            shape = (2, 2)
+            _test_smooth_l1_loss_vs_huber_loss_helper(input=_make_test_tensor(shape),
+                                                      target=_make_test_tensor(shape),
+                                                      beta=beta,
+                                                      require_equal=require_equal)
+
+            # Test the vectorized case (innermost dim > 32).
+            shape = (64, 64)
+            _test_smooth_l1_loss_vs_huber_loss_helper(input=_make_test_tensor(shape),
+                                                      target=_make_test_tensor(shape),
+                                                      beta=beta,
+                                                      require_equal=require_equal)
+
+            # Test the non-contiguous case.
+            _test_smooth_l1_loss_vs_huber_loss_helper(input=_make_test_tensor(shape, contiguous=False),
+                                                      target=_make_test_tensor(shape, contiguous=False),
+                                                      beta=beta,
+                                                      require_equal=require_equal)
+
+        def test_equal_when_beta_is_one():
+            _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta=1.0, require_equal=True)
+
+        def test_unequal_when_beta_is_less_than_one():
+            _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta=0.5, require_equal=False)
+
+        def test_unequal_when_beta_is_greater_than_one():
+            _test_smooth_l1_loss_vs_huber_loss_multi_input_helper(beta=1.5, require_equal=False)
+
+        test_equal_when_beta_is_one()
+        test_unequal_when_beta_is_less_than_one()
+        test_unequal_when_beta_is_greater_than_one()
 
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.
@@ -12614,6 +13081,19 @@ class TestNNDeviceType(NNTestCase):
             out_y = fn(y)
             out_x = fn(x)
             self.assertEqual(out_y, out_x.to(device), msg=test)
+
+    @onlyCUDA
+    @largeTensorTest('6GB')
+    def test_pool3d_large_size_int64(self, device):
+        # See https://github.com/pytorch/pytorch/issues/52822
+        x = torch.randn(70, 32, 100, 100, 100, dtype=torch.half, device=device)
+        y = torch.nn.functional.max_pool3d(x, 5)
+        torch.cuda.synchronize()
+
+        ref_x = x.cpu().float()  # max_pool3d_cpu is not implemented for half
+        ref_y = torch.nn.functional.max_pool3d(ref_x, 5)
+
+        self.assertEqual(y, ref_y, exact_dtype=False)
 
     @onlyCUDA
     def test_AvgPool3d_backward_after_cat_dim1_device(self, device):
@@ -13901,7 +14381,6 @@ class TestNNDeviceType(NNTestCase):
     # returning CUDNN_STATUS_BAD_PARAM
     # Disabling that specific test for now [see issue # 33918]
     @onlyCUDA
-    @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.double)
     def test_conv_cudnn_nhwc_support(self, device, dtype):
@@ -14925,6 +15404,14 @@ class TestLazyModules(TestCase):
 
         with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
             param + param
+
+class TestFunctionalPickle(TestCase):
+
+    # issue gh-38137
+    def test_pickle_softsign(self):
+        # Make sure it does not throw an exception
+        s = pickle.dumps(F.softsign)
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 

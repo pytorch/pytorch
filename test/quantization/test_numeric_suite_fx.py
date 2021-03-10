@@ -466,7 +466,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
-        expected_types = {'0': ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d))}
+        expected_types = {
+            'base_op_torch.nn.Conv2d_0':
+                ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
+        }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @override_qengines
@@ -489,7 +492,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
-        expected_types = {'linear': ((F.linear, F.linear), (toq.linear, toq.linear))}
+        expected_types = {
+            'base_op_torch.nn.functional.linear_0':
+                ((F.linear, F.linear), (toq.linear, toq.linear))
+        }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @override_qengines
@@ -514,7 +520,10 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = get_matching_subgraph_pairs(mp, mq)
 
-        expected_types = {'linear_relu': ((F.linear, F.relu), (toq.linear_relu, toq.linear_relu))}
+        expected_types = {
+            'base_op_torch.nn.functional.linear_0':
+                ((F.linear, F.relu), (toq.linear_relu, toq.linear_relu)),
+        }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
     @override_qengines
@@ -595,9 +604,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         results = get_matching_subgraph_pairs(mp, mq)
 
         expected_types = {
-            'cat': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
-            'add_1': ((torch.add, torch.add), (toq.add, toq.add)),
-            'add': ((torch.add, torch.add), (toq.add, toq.add)),
+            'base_op_torch.cat_0': ((torch.cat, torch.cat), (toq.cat, toq.cat)),
+            'base_op_torch.add_0': ((torch.add, torch.add), (toq.add, toq.add)),
+            'base_op_torch.add_1': ((torch.add, torch.add), (toq.add, toq.add)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -624,9 +633,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         results = get_matching_subgraph_pairs(mp, mq)
 
         expected_types = {
-            'add': ((torch.add, torch.add), (toq.add, toq.add)),
-            'add_1': ((torch.add, torch.add), (toq.add, toq.add)),
-            'add_2': ((torch.add, torch.add), (toq.add, toq.add)),
+            'base_op_torch.add_0': ((torch.add, torch.add), (toq.add, toq.add)),
+            'base_op_torch.add_1': ((torch.add, torch.add), (toq.add, toq.add)),
+            'base_op_torch.add_2': ((torch.add, torch.add), (toq.add, toq.add)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -666,8 +675,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # so its type is the same in mp and mq. sigmoid and relu should not be
         # matched because they use the same function in mp and mq.
         expected_types = {
-            'conv1': ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
-            'mul': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
+            'base_op_torch.nn.Conv2d_0':
+                ((nn.Conv2d, nn.Conv2d), (nnq.Conv2d, nnq.Conv2d)),
+            'base_op_torch.mul_0': ((torch.mul, torch.mul), (toq.mul, toq.mul)),
         }
         self.assert_types_for_matched_subgraph_pairs(results, expected_types, mp, mq)
 
@@ -714,7 +724,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = compare_weights('fp32_prepared', mp, 'int8', mq)
         self.assertTrue(len(results) == 2)
-        self.assert_ns_weight_compare_dict_valid(results)
+        self.assert_ns_compare_dict_valid(results)
 
     @override_qengines
     def test_compare_weights_fun(self):
@@ -740,7 +750,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         results = compare_weights('fp32_prepared', mp, 'int8', mq)
         self.assertTrue(len(results) == 2)
-        self.assert_ns_weight_compare_dict_valid(results)
+        self.assert_ns_compare_dict_valid(results)
 
     @override_qengines
     def test_match_activations_mod(self):
@@ -777,10 +787,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq_ns(input_fp32)
 
         # check activation result correctness
-        act_compare_dict = get_matching_activations(
-            'fp32_prepared', mp_ns, 'int8', mq_ns, OutputLogger)
+        act_compare_dict = get_matching_activations(mp_ns, mq_ns, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @override_qengines
     def test_match_activations_fun(self):
@@ -829,10 +838,9 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         mq_ns(input_fp32)
 
         # check activation result correctness
-        act_compare_dict = get_matching_activations(
-            'fp32_prepared', mp_ns, 'int8', mq_ns, OutputLogger)
+        act_compare_dict = get_matching_activations(mp_ns, mq_ns, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @override_qengines
     def test_prepare_model_with_stubs_mod(self):
@@ -860,7 +868,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         act_compare_dict = get_matching_activations_a_shadows_b(
             mp_shadows_mq, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @override_qengines
     def test_prepare_model_with_stubs_fun(self):
@@ -901,7 +909,7 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         act_compare_dict = get_matching_activations_a_shadows_b(
             mp_shadows_mq, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
 class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
     """
@@ -938,9 +946,9 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
 
         # inspect results
         act_compare_dict = get_matching_activations(
-            'fp32_prepared', sparse_nn, 'int8', sparse_nn_q, OutputLogger)
+            sparse_nn, sparse_nn_q, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 4)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
 
     @override_qengines
     def test_sparsenn_shadow(self):
@@ -974,4 +982,4 @@ class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
         act_compare_dict = get_matching_activations_a_shadows_b(
             sparse_nn_q, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 4)
-        self.assert_ns_logger_act_compare_dict_valid(act_compare_dict)
+        self.assert_ns_compare_dict_valid(act_compare_dict)
