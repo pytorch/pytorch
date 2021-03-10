@@ -352,12 +352,19 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # setting the USE_TENSORPIPE compile definition, this target will just end
     # up being empty. Downstream targets should also add a #ifdef guard.
     if(NOT WIN32)
-      add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
+      add_library(process_group_agent
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.h"
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h"
+      )
       target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
       add_dependencies(process_group_agent torch c10d)
 
       if(USE_TENSORPIPE)
         add_library(tensorpipe_agent
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.h"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/macros.h"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
@@ -916,15 +923,16 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
   endif()
 
-
-  set(TH_CPU_INCLUDE
-    # dense
-    aten/src/TH
-    ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
-    ${TORCH_ROOT}/aten/src
-    ${CMAKE_CURRENT_BINARY_DIR}/aten/src
-    ${CMAKE_BINARY_DIR}/aten/src)
-  target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
+  if(NOT BUILD_LITE_INTERPRETER)
+    set(TH_CPU_INCLUDE
+      # dense
+      aten/src/TH
+      ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
+      ${TORCH_ROOT}/aten/src
+      ${CMAKE_CURRENT_BINARY_DIR}/aten/src
+      ${CMAKE_BINARY_DIR}/aten/src)
+    target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
+  endif()
 
   set(ATen_CPU_INCLUDE
     ${TORCH_ROOT}/aten/src
