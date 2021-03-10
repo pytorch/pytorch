@@ -453,10 +453,7 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule or " \
                                             "ScriptFunction."
-        if isinstance(example_outputs, list) or \
-                isinstance(example_outputs, int) or \
-                isinstance(example_outputs, float) or \
-                isinstance(example_outputs, bool):
+        if isinstance(example_outputs, (list, int, float, bool)):
             example_outputs = [example_outputs]
 
         out_vars, desc = torch.jit._flatten(tuple(example_outputs))

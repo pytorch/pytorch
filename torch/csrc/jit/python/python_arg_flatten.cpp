@@ -175,12 +175,12 @@ py::object unflatten_rec(
     if (var_it == var_it_end)
       throw std::runtime_error("Not enough Variables given to unflatten");
     auto var = *var_it++;
-    return py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
+    return py::reinterpret_borrow<py::object>(THPVariable_Wrap(var));
   } else if (type == D::Bool) { // unwrap booleans as variables for tracer
     if (var_it == var_it_end)
       throw std::runtime_error("Not enough Variables given to unflatten");
     auto var = *var_it++;
-    return py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
+    return py::reinterpret_borrow<py::object>(THPVariable_Wrap(var));
   } else {
     if (var_it == var_it_end)
       throw std::runtime_error("Not enough Variables given to unflatten");
