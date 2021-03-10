@@ -159,7 +159,7 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     check whether your Git local or global config file contains any `submodule.*` settings. If yes, remove them and try again.
     (please reference [this doc](https://git-scm.com/docs/git-config#Documentation/git-config.txt-submoduleltnamegturl) for more info).
 
-  - If you encountered error such as 
+  - If you encountered error such as
     ```
     fatal: unable to access 'https://github.com/pybind11/pybind11.git': could not load PEM client certificate ...
     ```
@@ -169,11 +169,11 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     openssl x509 -noout -in <cert_file> -dates
     ```
 
-  - If you encountered error that some third_party modules are not checkout correctly, such as 
+  - If you encountered error that some third_party modules are not checkout correctly, such as
     ```
     Could not find .../pytorch/third_party/pybind11/CMakeLists.txt
     ```
-    remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.  
+    remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
 
 ## Nightly Checkout & Pull
 
