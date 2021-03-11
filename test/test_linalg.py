@@ -1572,7 +1572,8 @@ class TestLinalg(TestCase):
             from torch.testing._internal.common_utils import random_symmetric_matrix
 
             if not dtype.is_complex and symmetric:
-                # for symmetric real-valued inputs eigenvalues and eigenvectors are also real-valued
+                # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
+                # unlike NumPy the result is not cast to float32 or float64 dtype in this case
                 a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
             else:
                 a = make_tensor(shape, dtype=dtype, device=device)
@@ -1619,7 +1620,7 @@ class TestLinalg(TestCase):
             from torch.testing._internal.common_utils import random_symmetric_matrix
 
             if not dtype.is_complex and symmetric:
-                # for symmetric real-valued inputs eigenvalues and eigenvectors are also real-valued
+                # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
                 a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
             else:
                 a = make_tensor(shape, dtype=dtype, device=device)
@@ -1635,7 +1636,7 @@ class TestLinalg(TestCase):
 
             # check out= variant
             complex_dtype = dtype
-            if not dtype.is_complex and not symmetric:
+            if not dtype.is_complex:
                 complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
             out0 = torch.empty(0, dtype=complex_dtype, device=device)
             out1 = torch.empty(0, dtype=complex_dtype, device=device)
@@ -1687,11 +1688,11 @@ class TestLinalg(TestCase):
             a = torch.tensor([[3., -2.], [4., -1.]], dtype=dtype, device=device)
             out0 = torch.empty(0, device=device, dtype=dtype)
             out1 = torch.empty(0, device=device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "can't safely cast eigenvalues to non-complex dtype"):
+            with self.assertRaisesRegex(RuntimeError, "Expected eigenvalues to be safely castable"):
                 torch.linalg.eig(a, out=(out0, out1))
 
             out0 = torch.empty(0, device=device, dtype=torch.complex128)
-            with self.assertRaisesRegex(RuntimeError, "can't safely cast eigenvectors to non-complex dtype"):
+            with self.assertRaisesRegex(RuntimeError, "Expected eigenvectors to be safely castable"):
                 torch.linalg.eig(a, out=(out0, out1))
 
         # dtypes should be safely castable
@@ -1720,12 +1721,12 @@ class TestLinalg(TestCase):
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-            out_w = torch.empty(0, device=wrong_device, dtype=dtype)
-            out_v = torch.empty(0, device=device, dtype=dtype)
+            out_w = torch.empty(0, device=wrong_device, dtype=torch.complex128)
+            out_v = torch.empty(0, device=device, dtype=torch.complex128)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eig(a, out=(out_w, out_v))
-            out_w = torch.empty(0, device=device, dtype=dtype)
-            out_v = torch.empty(0, device=wrong_device, dtype=dtype)
+            out_w = torch.empty(0, device=device, dtype=torch.complex128)
+            out_v = torch.empty(0, device=wrong_device, dtype=torch.complex128)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eig(a, out=(out_w, out_v))
 
@@ -1740,7 +1741,8 @@ class TestLinalg(TestCase):
             from torch.testing._internal.common_utils import random_symmetric_matrix
 
             if not dtype.is_complex and symmetric:
-                # for symmetric real-valued inputs eigenvalues and eigenvectors are also real-valued
+                # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
+                # unlike NumPy the result is not cast to float32 or float64 dtype in this case
                 a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
             else:
                 a = make_tensor(shape, dtype=dtype, device=device)
@@ -1784,7 +1786,7 @@ class TestLinalg(TestCase):
             from torch.testing._internal.common_utils import random_symmetric_matrix
 
             if not dtype.is_complex and symmetric:
-                # for symmetric real-valued inputs eigenvalues and eigenvectors are also real-valued
+                # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
                 a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
             else:
                 a = make_tensor(shape, dtype=dtype, device=device)
@@ -1799,7 +1801,7 @@ class TestLinalg(TestCase):
 
             # check out= variant
             complex_dtype = dtype
-            if not dtype.is_complex and not symmetric:
+            if not dtype.is_complex:
                 complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
             out = torch.empty(0, dtype=complex_dtype, device=device)
             ans = torch.linalg.eigvals(a, out=out)
@@ -1843,7 +1845,7 @@ class TestLinalg(TestCase):
             # The characteristic equation is p(λ) = λ^2 − 2λ + 5 = 0, with roots λ = 1±2i
             a = torch.tensor([[3., -2.], [4., -1.]], dtype=dtype, device=device)
             out = torch.empty(0, device=device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "can't safely cast eigenvalues to non-complex dtype"):
+            with self.assertRaisesRegex(RuntimeError, "Expected eigenvalues to be safely castable"):
                 torch.linalg.eigvals(a, out=out)
 
         # dtypes should be safely castable
@@ -1864,7 +1866,7 @@ class TestLinalg(TestCase):
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-            out_w = torch.empty(0, device=wrong_device, dtype=dtype)
+            out_w = torch.empty(0, device=wrong_device, dtype=torch.complex128)
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigvals(a, out=out_w)
 

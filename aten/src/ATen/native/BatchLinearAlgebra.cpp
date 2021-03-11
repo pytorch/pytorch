@@ -1865,8 +1865,9 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
 std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values, Tensor& vectors) {
   squareCheckInputs(input);
 
-  checkLinalgCompatibleDtype("torch.linalg.eig", values, input, "eigenvalues");
-  checkLinalgCompatibleDtype("torch.linalg.eig", vectors, input, "eigenvectors");
+  // unlike NumPy for real-valued inputs the output is always complex-valued
+  checkLinalgCompatibleDtype("torch.linalg.eig", values.scalar_type(), toComplexType(input.scalar_type()), "eigenvalues");
+  checkLinalgCompatibleDtype("torch.linalg.eig", vectors.scalar_type(), toComplexType(input.scalar_type()), "eigenvectors");
   checkSameDevice("torch.linalg.eig", values, input, "eigenvalues");
   checkSameDevice("torch.linalg.eig", vectors, input, "eigenvectors");
 
@@ -1880,9 +1881,6 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
     is_batched_column_major = vectors.transpose(-2, -1).is_contiguous();
   }
 
-  // for NumPy compatibility we can't determine the dtype of eigenvalues before running the computation
-  // for real-valued inputs NumPy can return either real- or complex-valued output, we will create values_tmp of complex type
-  // for complex-valued inputs we can use values' storage directly if dtype matches
   bool values_expected_type = (values.scalar_type() == toComplexType(input.scalar_type()));
   bool vectors_expected_type = (vectors.scalar_type() == toComplexType(input.scalar_type()));
 
@@ -1958,28 +1956,20 @@ std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
 
   at::linalg_eig_outf(input, values, vectors);
 
-  // if the imaginary part is zero we can transform the output to be real for NumPy compatibility
-  bool is_zero_imag = at::all(at::imag(values) == 0.0).item().toBool();
-  if (is_zero_imag && !input.is_complex()) {
-    values = at::real(values);
-    vectors = at::real(vectors);
-  }
-
   return std::tuple<Tensor, Tensor>(values, vectors);
 }
 
 Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   squareCheckInputs(input);
-  checkLinalgCompatibleDtype("torch.linalg.eigvals", values, input, "eigenvalues");
+
+  // unlike NumPy for real-valued inputs the output is always complex-valued
+  checkLinalgCompatibleDtype("torch.linalg.eigvals", values.scalar_type(), toComplexType(input.scalar_type()), "eigenvalues");
   checkSameDevice("torch.linalg.eigvals", values, input, "eigenvalues");
 
   // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   auto options = input.options().device(at::kCPU);
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, options.dtype(kInt));
 
-  // for NumPy compatibility we can't determine the dtype of eigenvalues before running the computation
-  // for real-valued inputs NumPy can return either real- or complex-valued output, we will create values_tmp of complex type
-  // for complex-valued inputs we can use values' storage directly if dtype matches
   bool values_expected_type = (values.scalar_type() == toComplexType(input.scalar_type()));
 
   auto expected_values_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // input.shape[:-1]
@@ -2030,12 +2020,6 @@ Tensor linalg_eigvals(const Tensor& input) {
   Tensor values = at::empty({0}, input.options().dtype(complex_dtype));
 
   at::linalg_eigvals_outf(input, values);
-
-  // if the imaginary part is zero we can transform the output to be real for NumPy compatibility
-  bool is_zero_imag = at::all(at::imag(values) == 0.0).item().toBool();
-  if (is_zero_imag && !input.is_complex()) {
-    values = at::real(values);
-  }
 
   return values;
 }

@@ -245,8 +245,7 @@ For a single matrix :attr:`input`, the tensor of eigenvalues `w` and the tensor 
 `V` decompose the :attr:`input` such that `input = V diag(w) V⁻¹`, where `V⁻¹` is the inverse of `V`.
 
 The eigenvalues are not necessarily sorted.
-For real-valued input the resulting eigenvalues will be of complex type, unless the imaginary part is zero
-in which case it will be cast to a real type.
+For real-valued input the resulting eigenvalues and eigenvectors will always be of complex type.
 
 Supports input of float, double, cfloat and cdouble dtypes.
 
@@ -304,8 +303,7 @@ Computes the eigenvalues of a square
 matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
 
 The eigenvalues are not necessarily sorted.
-For real-valued input the resulting eigenvalues will be of complex type, unless the imaginary part is zero
-in which case it will be cast to a real type.
+For real-valued input the resulting eigenvalues will always be of complex type.
 
 Supports input of float, double, cfloat and cdouble dtypes.
 
