@@ -12,7 +12,6 @@ namespace at {
 
 using DimMask = TensorIteratorBase::DimMask;
 using PtrVector = TensorIteratorBase::PtrVector;
-using loop_t = TensorIteratorBase::loop_t;
 using loop2d_t = TensorIteratorBase::loop2d_t;
 using StrideVector = TensorIteratorBase::StrideVector;
 
@@ -608,25 +607,6 @@ int TensorIteratorBase::num_reduce_dims() const {
   return count;
 }
 
-#define LOOP_WRAPPER(ntensor, loop) \
-  [=](char** base, const int64_t* strides, int64_t size0, int64_t size1) { \
-    auto data = PtrVector(base, base + ntensor);                          \
-    const int64_t* outer_strides = &strides[ntensor];                     \
-                                                                          \
-    for (int64_t i = 0; i < size1; i++) {                                 \
-      if (i > 0) {                                                        \
-        for (int arg = 0; arg < ntensor; arg++) {                         \
-          data[arg] += outer_strides[arg];                                \
-        }                                                                 \
-      }                                                                   \
-      loop(data.data(), strides, size0);                               \
-    }                                                                     \
-  }
-
-void TensorIteratorBase::for_each(loop_t loop, int64_t grain_size) {
-  for_each(LOOP_WRAPPER(ntensors(), loop), grain_size);
-}
-
 void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
   int64_t numel = this->numel();
   if (numel == 0) {
@@ -648,10 +628,6 @@ StrideVector TensorIteratorBase::get_strides() const {
     }
   }
   return strides;
-}
-
-void TensorIteratorBase::serial_for_each(loop_t loop, Range range) const {
-  serial_for_each(LOOP_WRAPPER(ntensors(), loop), range);
 }
 
 void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
@@ -769,6 +745,27 @@ void TensorIteratorBase::build_binary_op(const Tensor& out, const Tensor& a, con
     .enforce_safe_casting_to_output(true));
 }
 
+void TensorIteratorBase::build_unary_float_op(const Tensor& out, const Tensor& a) {
+  build(TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(out)
+      .add_input(a)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .promote_integer_inputs_to_float(true));
+}
+
+void TensorIteratorBase::build_unary_op(const Tensor& out, const Tensor& a) {
+  build(TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(out)
+      .add_input(a)
+      .cast_common_dtype_to_outputs(false)
+      .enforce_safe_casting_to_output(false)
+      .check_all_same_dtype(true));
+}
+
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   TensorIterator iter;
   iter.build_binary_op(out, a, b);
@@ -823,26 +820,15 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
 }
 
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
-  return TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .add_output(out)
-    .add_input(a)
-    .cast_common_dtype_to_outputs(false)
-    .enforce_safe_casting_to_output(false)
-    .check_all_same_dtype(true)
-    .build();
+  TensorIterator iter;
+  iter.build_unary_op(out, a);
+  return iter;
 }
 
 TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a) {
-  return TensorIteratorConfig()
-      .set_check_mem_overlap(true)
-      .add_output(out)
-      .add_input(a)
-      .promote_inputs_to_common_dtype(true)
-      .cast_common_dtype_to_outputs(true)
-      .enforce_safe_casting_to_output(true)
-      .promote_integer_inputs_to_float(true)
-      .build();
+  TensorIterator iter;
+  iter.build_unary_float_op(out, a);
+  return iter;
 }
 
 TensorIterator TensorIterator::nullary_op(Tensor& out) {
