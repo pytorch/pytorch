@@ -198,10 +198,10 @@ __global__ void compute_mode(
     T* input,
     at::cuda::detail::TensorInfo<T, unsigned int> values,
     at::cuda::detail::TensorInfo<int64_t, unsigned int> indices,
-    int64_t sliceSize) {
+    int64_t sliceSize,
+    int64_t slices) {
   int tidx = threadIdx.x;
-  int stidx =
-      blockDim.x + threadIdx.x; // Second index this thread responsible for
+  int stidx = blockDim.x + threadIdx.x; // Second index this thread responsible for
 
   // First, we need to calculate the offset into the sorted Tensor that
   // represents the start of the slice for this block to calculate the mode for.
@@ -209,6 +209,10 @@ __global__ void compute_mode(
   // in the slice.
   unsigned int blockId = getLinearBlockId<unsigned int>();
   unsigned int linearOffset = blockId * sliceSize;
+
+  if (blockId >= slices) {
+      return;
+  }
 
   // shmem is a dynamically sized buffer we will use throughout the kernel to
   // handle computation efficiently. The size of this shmem must be

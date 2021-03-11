@@ -16,9 +16,6 @@
 #include <ATen/native/cuda/TensorModeKernel.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
-#define MAX_GRID_SIZE 65535
-#define MAX_BLOCK_SIZE 1024
-
 namespace at {
 namespace native {
 
@@ -28,10 +25,10 @@ void calculate_mode(
     Tensor& indices,
     const Tensor& self,
     std::vector<int64_t>& position,
-    thrust::device_vector<int64_t>& sort_buffer,
     int dim) {
-  auto state = globalContext().getTHCState();
+  THCThrustAllocator thrust_allocator(globalContext().lazyInitCUDA());
   auto stream = at::cuda::getCurrentCUDAStream();
+  auto policy = thrust::cuda::par(thrust_allocator).on(stream);
 
   TORCH_INTERNAL_ASSERT(self.is_contiguous());
 
@@ -46,65 +43,54 @@ void calculate_mode(
 
   int64_t ndim = ensure_nonempty_dim(self.dim());
   int64_t n_element = ensure_nonempty_size(self, ndim - 1);
-  THCThrustAllocator thrust_allocator(state);
 
-  // Wrap input data in Thrust device vector
-  thrust::device_ptr<scalar_t> vec_ptr = thrust::device_pointer_cast(data);
-  thrust::device_vector<scalar_t> iter(vec_ptr, vec_ptr + n_element);
+  scalar_t* iter_begin = data;
+  scalar_t* iter_end = data + n_element;
 
-  // Fill sort_buffer with [0, 1, 2, ... n_element - 1]
-  thrust::sequence(
-      thrust::cuda::par(thrust_allocator).on(stream),
-      sort_buffer.begin(),
-      sort_buffer.end());
+  Tensor sort_buffer = at::arange(0, n_element, self.options().dtype(kLong));
+  auto sort_buffer_ptr =
+      thrust::device_pointer_cast(sort_buffer.data_ptr<int64_t>());
 
   // Sort the input data. The original indices of the data are stored in
-  // sort_buffer
-  thrust::sort_by_key(
-      thrust::cuda::par(thrust_allocator).on(stream),
-      iter.begin(),
-      iter.end(),
-      sort_buffer.begin());
+  // sort_buffer_ptr
+  thrust::sort_by_key(policy, iter_begin, iter_end, sort_buffer_ptr);
 
   // Count # of unique elements via an inner product between adjacent elements.
   // Add 1 if two neighboring element are not equal.
   int unique = 1 +
       thrust::inner_product(
-                   thrust::cuda::par(thrust_allocator).on(stream),
-                   iter.begin(),
-                   iter.end() - 1,
-                   iter.begin() + 1,
+                   policy,
+                   iter_begin,
+                   iter_end - 1,
+                   iter_begin + 1,
                    0,
                    thrust::plus<int>(),
                    thrust::not_equal_to<scalar_t>());
 
   // Count frequency of each element
-  thrust::device_vector<scalar_t> keys(unique);
-  thrust::device_vector<int> counts(unique);
+  Tensor keys = at::empty(unique, self.options());
+  Tensor counts = at::empty(unique, self.options().dtype(kLong));
+
+  auto keys_ptr = thrust::device_pointer_cast(keys.data_ptr<scalar_t>());
+  auto counts_ptr = thrust::device_pointer_cast(counts.data_ptr<int64_t>());
+
   thrust::reduce_by_key(
-      thrust::cuda::par(thrust_allocator).on(stream),
-      iter.begin(),
-      iter.end(),
+      policy,
+      iter_begin,
+      iter_end,
       thrust::constant_iterator<int>(1),
-      keys.begin(),
-      counts.begin());
+      keys_ptr,
+      counts_ptr);
 
   // Find index of maximum count
-  auto it = thrust::max_element(
-      thrust::cuda::par(thrust_allocator).on(stream),
-      counts.begin(),
-      counts.end());
-  scalar_t mode = keys[it - counts.begin()];
+  auto it = thrust::max_element(policy, counts_ptr, counts_ptr + unique);
+  scalar_t mode = keys_ptr[it - counts_ptr];
 
   // Find first index within which it occurs
-  auto position_iter = thrust::find(
-      thrust::cuda::par(thrust_allocator).on(stream),
-      iter.begin(),
-      iter.end(),
-      mode);
+  auto position_iter = thrust::find(policy, iter_begin, iter_end, mode);
 
-  TORCH_INTERNAL_ASSERT(position_iter != iter.end());
-  int64_t index = sort_buffer[position_iter - iter.begin()];
+  TORCH_INTERNAL_ASSERT(position_iter != iter_end);
+  int64_t index = sort_buffer_ptr[position_iter - iter_begin];
 
   // Place mode, index in output
   scalar_t* values_data = values.data_ptr<scalar_t>();
@@ -129,19 +115,17 @@ void apply_mode(
     Tensor& indices,
     const Tensor& self,
     std::vector<int64_t>& position,
-    thrust::device_vector<int64_t>& sort_buffer,
     int dim,
     int curDim) {
   // Because we have transposed the Tensor, the data for the dimension we are
   // mode'ing along is always in the innermost dimension
   int64_t ndim = ensure_nonempty_dim(self.dim());
   if (curDim == ndim - 1) {
-    calculate_mode<scalar_t>(values, indices, self, position, sort_buffer, dim);
+    calculate_mode<scalar_t>(values, indices, self, position, dim);
   } else {
     for (int i = 0; i < ensure_nonempty_size(self, curDim); ++i) {
       position[curDim] = i;
-      apply_mode<scalar_t>(
-          values, indices, self, position, sort_buffer, dim, curDim + 1);
+      apply_mode<scalar_t>(values, indices, self, position, dim, curDim + 1);
     }
   }
 }
@@ -152,13 +136,14 @@ void handle_fused_mode(
     const Tensor& self,
     cuda::detail::TensorInfo<scalar_t, unsigned int>& ti_values,
     cuda::detail::TensorInfo<int64_t, unsigned int>& ti_indices,
-    int64_t slice_size) {
+    int64_t slice_size,
+    int64_t slices) {
   const dim3 block(size / 2);
   const auto memsize =
       (sizeof(scalar_t) * size) + (2 * size * sizeof(unsigned int));
   compute_mode<scalar_t, size>
       <<<grid, block, memsize, at::cuda::getCurrentCUDAStream()>>>(
-          self.data_ptr<scalar_t>(), ti_values, ti_indices, slice_size);
+          self.data_ptr<scalar_t>(), ti_values, ti_indices, slice_size, slices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -187,18 +172,18 @@ void fused_mode(
   switch (ceilPowerOf2) {
     case 2048:
       handle_fused_mode<2048, scalar_t>(
-          grid, self, ti_values, ti_indices, slice_size);
+          grid, self, ti_values, ti_indices, slice_size, slices);
       break;
     case 1024:
     case 512:
     case 256:
       handle_fused_mode<1024, scalar_t>(
-          grid, self, ti_values, ti_indices, slice_size);
+          grid, self, ti_values, ti_indices, slice_size, slices);
       break;
     case 128:
     case 64:
       handle_fused_mode<128, scalar_t>(
-          grid, self, ti_values, ti_indices, slice_size);
+          grid, self, ti_values, ti_indices, slice_size, slices);
       break;
     case 32:
     case 16:
@@ -206,7 +191,7 @@ void fused_mode(
     case 4:
     case 2:
       handle_fused_mode<32, scalar_t>(
-          grid, self, ti_values, ti_indices, slice_size);
+          grid, self, ti_values, ti_indices, slice_size, slices);
       break;
     case 1:
     default:
@@ -275,7 +260,11 @@ void mode_kernel_impl(
     // maximum number of blocks for a kernel launch
     // 3. Can use 32-bit index math for indexing (mainly just for implementation
     // conciseness, could be changed)
-    if (slice_size <= MAX_BLOCK_SIZE && slices <= MAX_GRID_SIZE &&
+    //
+    // MAX_BLOCK_SIZE and MAX_GRID_SIZE come from:
+    //     ATen/native/cuda/SortingCommon.cuh
+    if (slice_size <= 2 * MAX_BLOCK_SIZE &&
+        slices <= MAX_GRID_SIZE * MAX_GRID_SIZE * MAX_GRID_SIZE &&
         cuda::detail::canUse32BitIndexMath(self)) {
       fused_mode<scalar_t>(
           values_transposed,
@@ -293,18 +282,8 @@ void mode_kernel_impl(
       // Position will store the dimension values we are processing
       std::vector<int64_t> position(ndim - 1, 0);
 
-      // Sort Buffer is a Storage that will be used in the internal sort
-      // required to calculate the mode efficiently
-      thrust::device_vector<int64_t> sort_buffer(slice_size);
-
       apply_mode<scalar_t>(
-          values_transposed,
-          indices_transposed,
-          contiguous,
-          position,
-          sort_buffer,
-          dim,
-          0);
+          values_transposed, indices_transposed, contiguous, position, dim, 0);
     }
   });
 
