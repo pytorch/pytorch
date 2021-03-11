@@ -1,8 +1,15 @@
 import torch.fx as fx
 from torch.nn.utils.fusion import fuse_conv_bn_eval
-from typing import Type, Dict, Any, Tuple, Iterable
+from typing import Type, Dict, Any, Tuple, Iterable, Optional, List, cast, Callable
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.fx.passes.shape_prop import ShapeProp
 import copy
+from collections import defaultdict
+import torch.utils.mkldnn as th_mkldnn
+import operator
+import time
 
 def _parent_name(target : str) -> Tuple[str, str]:
     """
@@ -34,6 +41,7 @@ def matches_module_pattern(pattern: Iterable[Type], node: fx.Node, modules: Dict
 def replace_node_module(node: fx.Node, modules: Dict[str, Any], new_module: torch.nn.Module):
     assert(isinstance(node.target, str))
     parent_name, name = _parent_name(node.target)
+    modules[node.target] = new_module
     setattr(modules[parent_name], name, new_module)
 
 def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
@@ -41,9 +49,9 @@ def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
     Fuses convolution/BN layers for inference purposes. Will deepcopy your
     model by default, but can modify the model inplace as well.
     """
-    patterns = [(torch.nn.Conv1d, torch.nn.BatchNorm1d),
-                (torch.nn.Conv2d, torch.nn.BatchNorm2d),
-                (torch.nn.Conv3d, torch.nn.BatchNorm3d)]
+    patterns = [(nn.Conv1d, nn.BatchNorm1d),
+                (nn.Conv2d, nn.BatchNorm2d),
+                (nn.Conv3d, nn.BatchNorm3d)]
     if not inplace:
         model = copy.deepcopy(model)
     fx_model = fx.symbolic_trace(model)
@@ -62,3 +70,267 @@ def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
                 node.replace_all_uses_with(node.args[0])
                 new_graph.erase_node(node)
     return fx.GraphModule(fx_model, new_graph)
+
+def remove_dropout(model: nn.Module) -> nn.Module:
+    """
+    Removes all dropout layers from the module.
+    """
+    fx_model = fx.symbolic_trace(model)
+    new_graph = copy.deepcopy(fx_model.graph)
+    modules = dict(fx_model.named_modules())
+    for node in new_graph.nodes:
+        if node.op == 'call_module':
+            cur_module = modules[node.target]
+            if type(cur_module) == nn.Dropout:
+                prv_node = node.args[0]
+                node.replace_all_uses_with(prv_node)
+                new_graph.erase_node(node)
+    new_graph.lint()
+    result = fx.GraphModule(fx_model, new_graph)
+    return result
+
+
+
+def extract_subgraph(orig_module: nn.Module, nodes: List[fx.Node], inputs: List[fx.Node], outputs: List[str]):
+    """
+    Given lists of nodes from an existing graph that represent a subgraph, returns a submodule that executes that subgraph.
+    """
+    new_graph = fx.Graph()
+    env = {}
+    for input in inputs:
+        new_node = new_graph.placeholder(input.name)
+        env[input.name] = new_node
+    for node in nodes:
+        new_node = new_graph.node_copy(node, lambda x: env[x.name])
+        env[node.name] = new_node
+    new_graph.output([env[output] for output in outputs])
+    new_graph.lint()
+    return fx.GraphModule(orig_module, new_graph)
+
+mkldnn_supported = [nn.Conv2d, nn.Linear, nn.BatchNorm2d, nn.ReLU, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d, torch.relu, torch.transpose, F.relu, F.avg_pool2d, F.adaptive_avg_pool2d]
+mkldnn_supported_unknown = [operator.add, operator.mul]
+mkldnn_map = {
+    nn.Conv2d: th_mkldnn.MkldnnConv2d,
+    nn.Linear: th_mkldnn.MkldnnLinear,
+    nn.BatchNorm2d: lambda a, b: th_mkldnn.MkldnnBatchNorm(a)
+}
+
+old_modules: Dict[nn.Module, nn.Module] = {}
+def modules_to_mkldnn(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
+    """
+    For each node, if it's a module that can be preconverted into MKLDNN,
+    then we do so and create a mapping to allow us to convert from the MKLDNN
+    version of the module to the original.
+    """
+    for node in nodes:
+        if node.op == 'call_module':
+            assert(isinstance(node.target, str))
+            cur_module = modules[node.target]
+            if type(cur_module) in mkldnn_map:
+                new_module = mkldnn_map[type(cur_module)](cur_module, torch.float)
+                assert(isinstance(new_module, nn.Module))
+                old_modules[new_module] = copy.deepcopy(cur_module)
+                replace_node_module(node, modules, new_module)
+
+def reset_modules(nodes: List[fx.Node], modules: Dict[str, nn.Module]):
+    """
+    Maps each module that's been changed with `modules_to_mkldnn` back to its
+    original.
+    """
+    for node in nodes:
+        if node.op == 'call_module':
+            assert(isinstance(node.target, str))
+            cur_module = modules[node.target]
+            if cur_module in old_modules:
+                replace_node_module(node, modules, old_modules[cur_module])
+
+class MklSubgraph:
+    def __init__(self, fx_graph: fx.Graph):
+        self.fx_graph = fx_graph
+        self.nodes: List[fx.Node] = []
+        self.start_nodes: List[fx.Node] = []
+        self.end_nodes: List[fx.Node] = []
+
+def gen_mkl_autotuner(example_inputs, iters=10):
+    fx_model = None
+
+    def use_mkl_heuristic(graph: MklSubgraph) -> bool:
+        nonlocal fx_model
+        input_nodes = graph.start_nodes
+        if fx_model is None:
+            fx_model = graph.fx_graph.owning_module
+            ShapeProp(fx_model).propagate(example_inputs)
+        sample_inputs = [torch.randn(node.shape) for node in input_nodes]  # type: ignore
+        output_args = cast(List[fx.Node], [node.args[0] for node in graph.end_nodes])
+        submodule = extract_subgraph(fx_model, graph.nodes, input_nodes, [arg.name for arg in output_args])
+
+        def benchmark(f):
+            begin = time.time()
+            for _ in range(iters):
+                out = f()
+            return time.time() - begin
+
+        mkl_time = benchmark(lambda: [i.to_dense() for i in submodule(*[i.to_mkldnn() for i in sample_inputs])])
+
+        reset_modules(submodule.graph.nodes, dict(submodule.named_modules()))
+        no_mkl_time = benchmark(lambda: submodule(*sample_inputs))
+        return mkl_time < no_mkl_time
+    return use_mkl_heuristic
+
+def use_mkl_length(graph: MklSubgraph) -> bool:
+    return len(graph.nodes) > 2
+
+class UnionFind:
+    def __init__(self, n):
+        self.parent: List[Optional[int]] = [None] * n
+        self.size: List[int] = [0] * n
+
+    def make_set(self, v: int):
+        self.parent[v] = v
+        self.size[v] = 1
+
+    def find(self, v: int) -> int:
+        par = self.parent[v]
+        if v == par:
+            return v
+        assert(par is not None)
+        self.parent[v] = self.find(par)
+        return cast(int, self.parent[v])
+
+    def join(self, a: int, b: int):
+        a, b = self.find(a), self.find(b)
+        if a == b:
+            return a
+        if self.size[a] < self.size[b]:
+            a, b = b, a
+        self.parent[b] = a
+        self.size[a] += self.size[b]
+
+def prepare_for_inference(model: torch.nn.Module, use_mkl_heuristic: Callable[[MklSubgraph], bool] = use_mkl_length) -> torch.nn.Module:
+    """
+    Performs a set of optimization passes to optimize a model for the purposes of inference. Specifically, the passes that are run are:
+    1. Conv/BN fusion
+    2. Dropout removal
+    3. MKL layout optimizations
+
+    The third optimization takes a function `use_mkl_heuristic` that's used to determine whether a subgraph should be explicity run in MKL layout.
+    """
+    model = fuse(model)
+    model = remove_dropout(model)
+    fx_model = fx.symbolic_trace(copy.deepcopy(model))
+    modules: Dict[str, nn.Module] = dict(fx_model.named_modules())
+
+    # Inserts to_mkldnn and to_dense around every node we want to be a MKLDNN node.
+    # If the op is in `mkldnn_supported` then we always treat it as a MKLDNN node.
+    # However, if it's in `mkldnn_supported_unknown`, then we only treat it as
+    # a MKLDNN node if its inputs are MKLDNN nodes.
+    for node in list(fx_model.graph.nodes):
+        supports_mkldnn = 'no'
+        if node.op == 'call_module':
+            cur_module = modules[node.target]
+            if type(cur_module) in mkldnn_supported:
+                supports_mkldnn = 'yes'
+        elif node.op == 'call_function':
+            if node.target in mkldnn_supported:
+                supports_mkldnn = 'yes'
+            elif node.target in mkldnn_supported_unknown:
+                supports_mkldnn = 'unknown'
+
+        if supports_mkldnn != 'no':
+            if supports_mkldnn == 'unknown':
+                if not any([arg.target == 'to_dense' for arg in node.args]):
+                    continue
+            with fx_model.graph.inserting_before(node):
+                mkldnn_args = [fx_model.graph.create_node('call_method', 'to_mkldnn', (arg, )) if isinstance(arg, fx.Node) else arg for arg in node.args]
+
+            node.args = tuple(mkldnn_args)
+
+            with fx_model.graph.inserting_after(node):
+                dense_x = fx_model.graph.create_node('call_method', 'to_dense', (node,))
+                node.replace_all_uses_with(dense_x)
+                dense_x.args = (node,)
+
+    # Does pre-conversion of all modules into MKLDNN (when possible)
+    modules_to_mkldnn(list(fx_model.graph.nodes), modules)
+
+    # optimizes all a -> to_dense -> to_mkldnn -> b patterns into a -> b
+    for node in fx_model.graph.nodes:
+        if node.op == 'call_method' and node.target == 'to_dense':
+            prv_node = node.args[0]
+            users = list(node.users)
+            for user in users:
+                if user.op == 'call_method' and user.target == 'to_mkldnn':
+                    user.replace_all_uses_with(prv_node)
+                    fx_model.graph.erase_node(user)
+            if len(node.users) == 0:
+                fx_model.graph.erase_node(node)
+
+    fx_model.recompile()
+
+    num_nodes = len(fx_model.graph.nodes)
+    uf = UnionFind(num_nodes)
+
+    def get_color(n):
+        if hasattr(n, 'color'):
+            return uf.find(n.color)
+        if hasattr(n, 'start_color'):
+            return uf.find(n.start_color)
+        return None
+
+
+    # This code is to find each MKLDNN subgraph. Each MKLDNN subgraph consists
+    # of input nodes (which are only `to_mkldnn` calls), output nodes
+    # (`to_dense` calls), and intermediate nodes, which are run entirely on
+    # MKLDNN layout tensors.
+    #
+    # Specifically, this code does a flood fill on a directed acyclic graph
+    # (DAG), starting from each possible "start node" (i.e: `to_mkldnn` nodes).
+    # If every node only had one input, this would be sufficient. However, in
+    # the case that a node has multiple inputs coming from different start
+    # nodes (i.e. colors), we need to join these 2 colors into 1. That's done
+    # using a Disjoint Set Union.
+    for cur_idx, node in enumerate(fx_model.graph.nodes):
+        if node.op == 'call_method' and node.target == 'to_mkldnn':
+            node.start_color = cur_idx
+            uf.make_set(cur_idx)
+        elif node.op == 'call_method' and node.target == 'to_dense':
+            assert(get_color(node.args[0]) is not None)
+            node.end_color = get_color(node.args[0])
+        else:
+            cur_colors = list(set([get_color(i) for i in node.args if isinstance(i, fx.Node) if get_color(i) is not None]))
+            if len(cur_colors) == 0:
+                continue
+            assert(not any([i is None for i in cur_colors]))
+            node.color = cur_colors[0]
+            for other_color in cur_colors[1:]:
+                uf.join(cur_colors[0], other_color)
+
+
+    mkldnn_graphs: Dict[int, MklSubgraph] = defaultdict(lambda: MklSubgraph(fx_model.graph))
+    for node in fx_model.graph.nodes:
+        if hasattr(node, 'color'):
+            mkldnn_graphs[uf.find(node.color)].nodes.append(node)
+        if hasattr(node, 'start_color'):
+            mkldnn_graphs[uf.find(node.start_color)].start_nodes.append(node)
+        if hasattr(node, 'end_color'):
+            mkldnn_graphs[uf.find(node.end_color)].end_nodes.append(node)
+
+
+    # Now that we have all the subgraphs, we need to decide which MKLDNN
+    # subgraphs we actually want to keep in MKLDNN.
+    for graph in mkldnn_graphs.values():
+        if not use_mkl_heuristic(graph):
+            for node in graph.start_nodes + graph.end_nodes:
+                prv = node.args[0]
+                node.replace_all_uses_with(prv)
+                fx_model.graph.erase_node(node)
+            reset_modules(graph.nodes, modules)
+
+    mkldnn_conversions = 0
+    for node in fx_model.graph.nodes:
+        if node.target == 'to_mkldnn':
+            mkldnn_conversions += 1
+    # print("mkldnn conversions", mkldnn_conversions)
+    fx_model.graph.lint()
+    result = fx.GraphModule(fx_model, fx_model.graph)
+    return result
