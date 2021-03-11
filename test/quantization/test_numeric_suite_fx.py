@@ -762,7 +762,6 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
         res = self._test_match_activations(
             m, (lstm_input, lstm_hidden), results_len=1, qconfig_dict=qconfig_dict,
             skip_scripting=True)
-        print(res)
 
     @skipIfNoFBGEMM
     def test_sparsenn_compare_activations(self):
