@@ -1,7 +1,10 @@
 #include <ATen/core/ivalue.h>
+#include <pybind11/cast.h>
 #include <pybind11/detail/common.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <sstream>
 #include <stdexcept>
 
 namespace torch {
@@ -61,8 +64,28 @@ void initScriptDictBindings(PyObject* module) {
       .def("__iter__", [](ScriptDictIterator& iter) { return iter; });
 
   py::class_<ScriptDict, std::shared_ptr<ScriptDict>>(m, "ScriptDict")
-      .def(py::init([](const TypePtr& type) {
-        return std::make_shared<ScriptDict>(type);
+      .def(py::init([](py::dict dict) {
+        TypePtr type = nullptr;
+
+        if (dict.size() > 0) {
+          // If the source dictionary is nonempty, try to infer its type.
+          auto inferred_type = tryToInferType(dict);
+
+          if (!inferred_type.success()) {
+            std::stringstream ss;
+            ss << "Unable to infer type of dictionary: "
+               << inferred_type.reason();
+            throw JITException(ss.str());
+          }
+
+          type = inferred_type.type();
+        } else {
+          // If is empty, assume the type is Dict[str, Tensor] as is done in TorchScript code.
+          type = DictType::create(StringType::get(), TensorType::getInferred());
+        }
+
+        auto data = toIValue(std::move(dict), type);
+        return std::make_shared<ScriptDict>(data);
       }))
       .def(py::init([](py::dict dict, const TypePtr& type) {
         auto data = toIValue(std::move(dict), type);
@@ -86,19 +109,23 @@ void initScriptDictBindings(PyObject* module) {
       .def(
           "__contains__",
           [](const std::shared_ptr<ScriptDict>& self, py::object key) {
-            // TODO: What happens if key isn't the right type?
-            return toPyObject(self->contains(
-                toIValue(std::move(key), self->type()->getKeyType())));
+            try {
+              return toPyObject(self->contains(
+                  toIValue(std::move(key), self->type()->getKeyType())));
+            } catch (const py::cast_error& e) {
+              throw py::key_error();
+            }
           })
       .def(
           "__getitem__",
           [](const std::shared_ptr<ScriptDict>& self, py::object key) {
-            // TODO: What happens if key isn't the right type?
             try {
               auto value = self->getItem(
                   toIValue(std::move(key), self->type()->getKeyType()));
               return toPyObject(value);
-            } catch (const std::out_of_range& e) {
+            } catch (const std::out_of_range& e) {  // Key doesn't exist.
+              throw py::key_error();
+            } catch (const py::cast_error& e) {     // Key isn't the right type.
               throw py::key_error();
             }
           },
@@ -110,16 +137,43 @@ void initScriptDictBindings(PyObject* module) {
           [](const std::shared_ptr<ScriptDict>& self,
              py::object key,
              py::object value) {
-            // TODO: What happens if key and/or value isn't the right type?
-            self->setItem(
-                toIValue(std::move(key), self->type()->getKeyType()),
-                toIValue(std::move(value), self->type()->getValueType()));
+            IValue key_ivalue, value_ivalue;
+
+            // Try to convert the key to an IValue.
+            try {
+              key_ivalue = toIValue(std::move(key), self->type()->getKeyType());
+            } catch (const py::cast_error& e) {
+              throw py::key_error();
+            }
+
+            // Try to convert the value to an IValue.
+            try {
+              value_ivalue =
+                  toIValue(std::move(value), self->type()->getValueType());
+            } catch (const py::cast_error& e) {
+              throw py::value_error();
+            }
+
+            self->setItem(key_ivalue, value_ivalue);
           })
       .def(
           "__delitem__",
           [](const std::shared_ptr<ScriptDict>& self, py::object key) {
-            // TODO: What happens if key isn't the right type?
-            self->delItem(toIValue(std::move(key), self->type()->getKeyType()));
+            IValue key_ivalue;
+
+            // Try to convert the key to an IValue.
+            try {
+              key_ivalue = toIValue(std::move(key), self->type()->getKeyType());
+            } catch (const py::cast_error& e) {
+              throw py::key_error();
+            }
+
+            // If removed = false, that means the key didn't exist in the dictionary.
+            bool removed = self->delItem(key_ivalue);
+
+            if (!removed) {
+              throw py::key_error();
+            }
           })
       .def(
           "__iter__",

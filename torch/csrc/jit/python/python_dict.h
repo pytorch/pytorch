@@ -46,21 +46,13 @@ class ScriptDictIterator final {
 /// boundary.
 class ScriptDict final {
  public:
-  // Constructor for empty dictionaries whose type cannot be inferred.
-  ScriptDict(const TypePtr& type) {
-    auto dict_type = type->expect<DictType>();
-    auto d = c10::impl::GenericDict(
-        dict_type->getKeyType(), dict_type->getValueType());
-    dict_ = IValue(d);
-  }
-
-  // Constructor for instances based on existing dictionaries (e.g. a
-  // Python instance or a dictionary nested inside another).
+  // Constructor.
   ScriptDict(IValue data) {
     TORCH_INTERNAL_ASSERT(data.isGenericDict());
     dict_ = std::move(data);
   }
 
+  // Get the type of the dictionary.
   DictTypePtr type() const {
     return dict_.type()->cast<DictType>();
   }
@@ -119,8 +111,8 @@ class ScriptDict final {
   }
 
   // Delete the given key from the dictionary.
-  void delItem(const IValue& key) {
-    (void)dict_.toGenericDict().erase(key);
+  bool delItem(const IValue& key) {
+    return dict_.toGenericDict().erase(key);
   }
 
   // Get the size of the dictionary.

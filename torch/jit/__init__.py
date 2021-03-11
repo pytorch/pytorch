@@ -1,5 +1,8 @@
 import torch._C
 
+from contextlib import contextmanager
+from typing import Iterator
+
 from torch.utils import set_module
 
 # These are imported so users can access them from the `torch.jit` module
@@ -46,7 +49,6 @@ from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized
 
 from torch.jit.cuda import stream
 from torch.jit._freeze import freeze, optimize_frozen_module
-from torch.jit._containers import dict, empty_dict
 
 # For backwards compatibility
 _fork = fork
@@ -138,6 +140,19 @@ def isinstance(obj, target_type):
         m(y)
     """
     return _isinstance(obj, target_type)
+
+
+# Context manager for globally hiding source ranges when printing graphs.
+# Note that these functions are exposed to Python as static members of the
+# Graph class, so mypy checks need to be skipped.
+@contextmanager
+def _hide_source_ranges() -> Iterator[None]:
+    old_enable_source_ranges = torch._C.Graph.global_print_source_ranges  # type: ignore
+    try:
+        torch._C.Graph.set_global_print_source_ranges(False)  # type: ignore
+        yield
+    finally:
+        torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore
 
 
 if not torch._C._jit_init():

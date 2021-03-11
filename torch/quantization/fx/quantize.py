@@ -638,7 +638,8 @@ class Quantizer:
 
     def _convert(self, model: GraphModule, is_reference: bool = False,
                  convert_custom_config_dict: Dict[str, Any] = None,
-                 is_standalone_module: bool = False) -> QuantizedGraphModule:
+                 is_standalone_module: bool = False,
+                 _remove_qconfig_flag: bool = True) -> QuantizedGraphModule:
         """ standalone_module means it a submodule that is not inlined in
         parent module, and will be quantized separately as one unit.
 
@@ -919,7 +920,8 @@ class Quantizer:
                     node, load_arg_simple)
 
         # removes qconfig and activation_post_process modules
-        _remove_qconfig(model)
+        if _remove_qconfig_flag:
+            _remove_qconfig(model)
         model = QuantizedGraphModule(model, act_post_process_removed_graph)
         return model
 
@@ -977,9 +979,10 @@ class Quantizer:
 
     def convert(self, model: GraphModule, is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None,
-                is_standalone_module: bool = False) -> QuantizedGraphModule:
+                is_standalone_module: bool = False,
+                _remove_qconfig: bool = True) -> QuantizedGraphModule:
         quantized = self._convert(
-            model, is_reference, convert_custom_config_dict, is_standalone_module)
+            model, is_reference, convert_custom_config_dict, is_standalone_module, _remove_qconfig_flag=_remove_qconfig)
         if not is_reference:
             quantized = self._fold_weight(quantized)
         return quantized

@@ -62,7 +62,7 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
 
   /// push the a given parameter at the end of the list
   /// And the key of the pair will be discarded, only the value
-  /// will be added into the `ParameterList`  
+  /// will be added into the `ParameterList`
   void append(const OrderedDict<std::string, torch::Tensor>::Item& pair) {
     register_parameter(
         c10::to_string(parameters_.size()),

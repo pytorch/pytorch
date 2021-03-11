@@ -160,12 +160,6 @@ void magmaLuSolveBatched(
     scalar_t** dB_array, magma_int_t lddb, magma_int_t& info,
     magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
-template<class scalar_t>
-void magmaGels(
-    magma_trans_t trans, magma_int_t m, magma_int_t n, magma_int_t nrhs,
-    scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb,
-    scalar_t* hwork, magma_int_t lwork, magma_int_t* info);
-
 template<>
 void magmaSolve<double>(
     magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda,
@@ -1269,56 +1263,6 @@ void magmaLuSolveBatched<c10::complex<float>>(
  info = magma_cgetrs_batched(MagmaNoTrans, n, nrhs, reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, dipiv_array, reinterpret_cast<magmaFloatComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
  AT_CUDA_CHECK(cudaGetLastError());
 }
-
-template<>
-void magmaGels<float>(
-    magma_trans_t trans, magma_int_t m, magma_int_t n, magma_int_t nrhs,
-    float* dA, magma_int_t ldda, float* dB, magma_int_t lddb,
-    float* hwork, magma_int_t lwork, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_sgels_gpu(trans, m, n, nrhs,
-      dA, ldda, dB, lddb,
-      hwork, lwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaGels<double>(
-    magma_trans_t trans, magma_int_t m, magma_int_t n, magma_int_t nrhs,
-    double* dA, magma_int_t ldda, double* dB, magma_int_t lddb,
-    double* hwork, magma_int_t lwork, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_dgels_gpu(trans, m, n, nrhs,
-      dA, ldda, dB, lddb,
-      hwork, lwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaGels<c10::complex<float>>(
-    magma_trans_t trans, magma_int_t m, magma_int_t n, magma_int_t nrhs,
-    c10::complex<float>* dA, magma_int_t ldda, c10::complex<float>* dB, magma_int_t lddb,
-    c10::complex<float>* hwork, magma_int_t lwork, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_cgels_gpu(trans, m, n, nrhs,
-      reinterpret_cast<magmaFloatComplex*>(dA), ldda,
-      reinterpret_cast<magmaFloatComplex*>(dB), lddb,
-      reinterpret_cast<magmaFloatComplex*>(hwork), lwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaGels<c10::complex<double>>(
-    magma_trans_t trans, magma_int_t m, magma_int_t n, magma_int_t nrhs,
-    c10::complex<double>* dA, magma_int_t ldda, c10::complex<double>* dB, magma_int_t lddb,
-    c10::complex<double>* hwork, magma_int_t lwork, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_zgels_gpu(trans, m, n, nrhs,
-      reinterpret_cast<magmaDoubleComplex*>(dA), ldda,
-      reinterpret_cast<magmaDoubleComplex*>(dB), lddb,
-      reinterpret_cast<magmaDoubleComplex*>(hwork), lwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
 #endif
 
 #define ALLOCATE_ARRAY(name, type, size) \
@@ -1470,6 +1414,9 @@ AT_ERROR("inverse: MAGMA library not found in "
     self_inv_array[i] = &self_inv_data[i * self_inv_mat_stride];
     ipiv_array[i] = &ipiv_data[i * n];
   }
+  // magmaLuBatched leaves ipiv_data values unwritten for singular matrices.
+  // Initialize to avoid memory access violations inside magma kernels (gh-51930).
+  std::fill_n(ipiv_data, batch_size * n, 1);
 
   MAGMAQueue magma_queue(self.get_device());
   magmaLuBatched<scalar_t>(
@@ -1947,7 +1894,7 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
   // magma returns early if m <= 0 || n <= 0 for magmaTriangularSolveBatched
-  // magmaTriangularSolve is calling cuBLAS and it prints 
+  // magmaTriangularSolve is calling cuBLAS and it prints
   // ** On entry to DTRSM  parameter number 9 had an illegal value
   // so let's use proper lda parameter here
   magma_int_t lda = std::max<magma_int_t>(1, n);
@@ -2022,7 +1969,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int6
 // using MAGMA, however it fails on Windows because of some illegal memory reads inside MAGMA.
 // See discussions in https://github.com/pytorch/pytorch/pull/51348 for comparison of cuSOLVER-MAGMA
 // and Windows failure.
-// For reference here is the MAGMA-based implementation: https://gist.github.com/IvanYashchuk/2db50002c9d3c1462ff769e6410ad983 
+// For reference here is the MAGMA-based implementation: https://gist.github.com/IvanYashchuk/2db50002c9d3c1462ff769e6410ad983
 #if defined(USE_CUSOLVER)
   return orgqr_helper_cuda_lib(result, tau, infos, n_columns); // cusolver
 #else
@@ -2353,7 +2300,7 @@ std::tuple<Tensor, Tensor> _syevd_helper_cuda(const Tensor& self, bool compute_e
   bool upper = uplo == 'U' ? true : false;
   return _symeig_helper_cuda(self, compute_eigenvectors, upper);
 }
-    
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
@@ -2573,44 +2520,6 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   TORCH_CHECK(info == 0, "MAGMA lu_solve : invalid argument: ", -info);
   return self_working_copy;
 }
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cuda(
-    const Tensor& a, const Tensor& b, double cond, c10::optional<std::string> driver_name) {
-#ifndef USE_MAGMA
-AT_ERROR("torch.linalg.lstsq: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
-#else
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "torch.linalg.lstsq_cuda", [&] {
-    auto trans = MagmaNoTrans;
-    auto m = magma_int_cast(a.size(-2), "m");
-    auto n = magma_int_cast(a.size(-1), "n");
-    auto nrhs = magma_int_cast(b.size(-1), "nrhs");
-    auto ldda = std::max<magma_int_t>(1, m);
-    auto lddb = std::max<magma_int_t>(1, std::max(m, n));
-    auto nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
-    auto lwork = (m - n + nb) * (nrhs + nb) + nrhs * nb;
-    Tensor hwork = at::empty({static_cast<int64_t>(lwork)}, a.scalar_type());
-    auto* hwork_ptr = hwork.data_ptr<scalar_t>();
-    magma_int_t info;
-
-    batch_iterator_with_broadcasting<scalar_t>(a, b,
-      [&](scalar_t* a_working_ptr, scalar_t* b_working_ptr,
-        int64_t a_linear_batch_idx) {
-        magmaGels<scalar_t>(trans, m, n, nrhs,
-          a_working_ptr, ldda, b_working_ptr, lddb,
-          hwork_ptr, lwork, &info);
-        singleCheckErrors(static_cast<int64_t>(info), "torch.linalg.lstsq_cuda");
-      }
-    );
-  });
-
-  Tensor rank, singular_values;
-  return std::make_tuple(b, rank, singular_values);
-#endif
-}
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 }}  // namespace at::native
 

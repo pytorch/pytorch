@@ -1293,28 +1293,6 @@ class TestCase(expecttest.TestCase):
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
-    def maybeWarnsRegex(self, category, regex=''):
-        """Context manager for code that *may* warn, e.g. ``TORCH_WARN_ONCE``.
-
-        This filters expected warnings from the test log and fails the test if
-        any unexpected warnings are caught.
-        """
-        with warnings.catch_warnings(record=True) as ws:
-            warnings.simplefilter("always")  # allow any warning to be raised
-            # Ignore expected warnings
-            warnings.filterwarnings("ignore", message=regex, category=category)
-            try:
-                yield
-            finally:
-                if len(ws) != 0:
-                    msg = 'Caught unexpected warnings:\n'
-                    for w in ws:
-                        msg += warnings.formatwarning(
-                            str(w.message), w.category, w.filename, w.lineno, w.line)
-                        msg += '\n'
-                    self.fail(msg)
-
-    @contextmanager
     def assertWarnsOnceRegex(self, category, regex=''):
         """Context manager for code that *must always* warn
 
@@ -1331,13 +1309,12 @@ class TestCase(expecttest.TestCase):
                 yield
             finally:
                 torch.set_warn_always(prev)
-                if len(ws) == 0:
-                    self.fail('no warning caught')
-                if len(ws) > 1:
-                    self.fail('too many warnings caught: %s' % '\n    '.join([str(w) for w in ws]))
-                self.assertTrue(type(ws[0].message) is category)
-                self.assertTrue(re.match(pattern, str(ws[0].message)),
-                                f'{pattern}, {ws[0].message}')
+            if len(ws) == 0:
+                self.fail('no warning caught')
+            for w in ws:
+                self.assertTrue(type(w.message) is category)
+                self.assertTrue(re.match(pattern, str(w.message)),
+                                f'{pattern}, {w.message}')
 
     def assertExpected(self, s, subname=None):
         r"""
@@ -1601,27 +1578,6 @@ def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
             s[i] = 1
     return u.mm(torch.diag(s).to(dtype)).mm(v.transpose(0, 1))
 
-def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001):
-    """
-    Returns a random rectangular matrix (batch of matrices)
-    with singular values sampled from a Gaussian with
-    mean `mean` and standard deviation `sigma`.
-    The smaller the `sigma`, the better conditioned
-    the output matrix is.
-    """
-    primitive_dtype = {
-        torch.float: torch.float,
-        torch.double: torch.double,
-        torch.cfloat: torch.float,
-        torch.cdouble: torch.double
-    }
-    x = torch.rand(shape, dtype=dtype, device=device)
-    m = x.size(-2)
-    n = x.size(-1)
-    u, _, v = x.svd()
-    s = (torch.randn(*(shape[:-2] + (min(m, n),)), dtype=primitive_dtype[dtype], device=device) * sigma + mean) \
-        .sort(-1, descending=True).values.to(dtype)
-    return (u * s.unsqueeze(-2)) @ v.transpose(-2, -1).conj()
 
 def random_symmetric_matrix(l, *batches, **kwargs):
     dtype = kwargs.get('dtype', torch.double)
@@ -2028,10 +1984,10 @@ dtype2prec_DONTUSE = {torch.float: 1e-5,
                       torch.bfloat16: 1e-1}
 
 
-def _wrap_maybe_warns(regex):
+def _wrap_warn_once(regex):
     def decorator(fn):
         def inner(self, *args, **kwargs):
-            with self.maybeWarnsRegex(UserWarning, regex):
+            with self.assertWarnsOnceRegex(UserWarning, regex):
                 fn(self, *args, **kwargs)
         return inner
     return decorator
