@@ -42,8 +42,6 @@ __MATH_FUNCTIONS_DECL__ double ceil(double x) {
   return ::ceil(x);
 }
 
-namespace{
-
 __MATH_FUNCTIONS_DECL__ float fp32_from_bits(uint32_t w) {
   union {
     uint32_t as_bits;
@@ -60,14 +58,41 @@ __MATH_FUNCTIONS_DECL__ uint32_t fp32_to_bits(float f) {
   return fp32.as_bits;
 }
 
-} //namespace
+template <typename scalar_t>
+__MATH_FUNCTIONS_DECL__ scalar_t fp16_from_bits(uint16_t w) {
+  union {
+    uint16_t as_bits;
+    scalar_t as_value;
+  } fp16 = {w};
+  return fp16.as_value;
+}
+
+template <typename scalar_t>
+__MATH_FUNCTIONS_DECL__ uint16_t fp16_to_bits(scalar_t f) {
+  union {
+    scalar_t as_value;
+    uint16_t as_bits;
+  } fp16 = {f};
+  return fp16.as_bits;
+}
+
+template <typename scalar_t>
+__MATH_FUNCTIONS_DECL__ scalar_t copysignfp16(scalar_t x, scalar_t y) {
+  return fp16_from_bits<scalar_t>(
+      (fp16_to_bits(x) & 0x7fffu) | (fp16_to_bits(y) & 0x8000u));
+}
+
+template <typename scalar_t>
+__MATH_FUNCTIONS_DECL__ scalar_t copysignfp32(scalar_t x, scalar_t y) {
+  return fp32_from_bits(
+      (fp32_to_bits(x) & 0x7fffffffu) | (fp32_to_bits(y) & 0x80000000u));
+}
 
 __MATH_FUNCTIONS_DECL__ float copysign(float x, float y) {
 #if defined(__CUDA_ARCH__)
   return ::copysignf(x, y);
 #else
-  return fp32_from_bits(
-      (fp32_to_bits(x) & 0x7fffffffu) | (fp32_to_bits(y) & 0x80000000u));
+  return copysignfp32(x, y);
 #endif
 }
 
