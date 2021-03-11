@@ -4,7 +4,7 @@
 
 To get the latest source, rerun the docker builds using the Dockerfiles.
 
-Docker images at https://hub.docker.com/r/caffe2ai/caffe2/ are a few months old, but will be refreshed soon.  
+Docker images at https://hub.docker.com/r/caffe2ai/caffe2/ are a few months old, but will be refreshed soon.
 
 **Build like:** `docker build -t caffe2:cuda8-cudnn6-all-options .`
 

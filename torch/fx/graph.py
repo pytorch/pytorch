@@ -519,7 +519,7 @@ class Graph:
 
             return True
 
-        if (self.owning_module and 
+        if (self.owning_module and
                 not _get_attr_reference_exists(self.owning_module, qualified_name)):
             warnings.warn("Attempted to insert a get_attr Node with no "
                           "underlying reference in the owning "
@@ -567,7 +567,7 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
         """
-        if (self.owning_module and 
+        if (self.owning_module and
                 self.owning_module.get_submodule(module_name) is not None):
             warnings.warn("Attempted to insert a get_attr Node with no "
                           "underlying reference in the owning "
@@ -960,7 +960,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
         particular:
         - Checks Nodes have correct ownership (owned by this graph)
         - Checks Nodes appear in topological order
-        - If this Graph has an owning GraphModule, checks that targets 
+        - If this Graph has an owning GraphModule, checks that targets
         exist in that GraphModule
         """
 
@@ -1003,6 +1003,50 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
                             seen_qualname = '.'.join(target_atoms[:i])
                             raise RuntimeError(f'Node {node} target {node.target} references nonexistent attribute '
                                                f'{atom} of {seen_qualname}')
+
+    def eliminate_dead_code(self):
+        """
+        Remove all dead code from the graph, based on each node's number of
+        users, and whether the nodes have any side effects The graph must be
+        topologically sorted before calling.
+
+        Returns:
+          bool: Whether the graph was changed as a result of the pass.
+
+        Example:
+
+        Before dead code is eliminated, `a` from `a = x + 1` below has no users
+        and thus can be eliminated from the graph without having an effect.
+
+        .. code-block:: python
+
+            def forward(self, x):
+                a = x + 1
+                return x + self.attr_1
+
+        After dead code is eliminated, `a = x + 1` has been removed, and the rest
+        of `forward` remains.
+
+        .. code-block:: python
+
+            def forward(self, x):
+                return x + self.attr_1
+
+        """
+        # Lint the graph first to make sure its topologically sorted, otherwise
+        # DCE below will not behave as expected.
+        self.lint()
+
+        # Reverse iterate so that when we remove a node, any nodes used as an
+        # input to that node have an updated user count that no longer reflects
+        # the removed node.
+        changed = False
+        for node in reversed(self.nodes):
+            if not node.is_impure() and len(node.users) == 0:
+                self.erase_node(node)
+                changed = True
+
+        return changed
 
 
 reflectable_magic_methods = {
