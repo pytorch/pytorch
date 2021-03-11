@@ -389,7 +389,7 @@ See `Representation of Orthogonal or Unitary Matrices`_ for further details.
           and other values are ignored.
 
 .. note:: If :attr:`input` doesn't satisfy the requirement `m >= n`,
-          or :attr:`tau` doesn't satisfy the requirement `n >= r`, then a RuntimeError will be thrown. 
+          or :attr:`tau` doesn't satisfy the requirement `n >= r`, then a RuntimeError will be thrown.
 
 Args:
     input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
