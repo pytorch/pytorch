@@ -20,8 +20,9 @@ class OperatorHandle;
  * > template<class T> void func(T&& arg) { func2(std::forward<T>(arg)); }
  *
  * but that relies on inferring the correct reference type (i.e. value vs & vs &&) from the argument.
- * In our case, we cannot rely on the argument as supplied by the caller, but the correct reference
- * type is dictated by the operator signature and must be identical since we cast function pointers
+ * In our case, we cannot rely on the argument as supplied by the caller, because that could infer
+ * a different kind of reference than was used in the kernel function. The correct reference type to
+ * use is dictated by the kernel signature and must be identical since we cast function pointers
  * through void* pointers and mismatches would be UB. So we need a forwarding pattern that determines
  * the reference type to use by looking at the explicitly supplied operator signature, not by looking at
  * the argument we're calling it with.
