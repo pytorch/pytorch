@@ -254,7 +254,7 @@ def prepare_for_inference(
             with fx_model.graph.inserting_before(node):
                 mkldnn_args = fx.map_arg(node.args, lambda n: fx_model.graph.call_method('to_mkldnn', (n, )))
 
-            node.args = tuple(mkldnn_args)
+            node.args = cast(Tuple[fx.node.Argument], mkldnn_args)
 
             with fx_model.graph.inserting_after(node):
                 dense_x = fx_model.graph.create_node('call_method', 'to_dense', (node,))
@@ -341,6 +341,7 @@ def prepare_for_inference(
     for node in fx_model.graph.nodes:
         if node.target == 'to_mkldnn' or node.target == 'to_dense':
             mkldnn_conversions += 1
+
     print("mkldnn conversions", mkldnn_conversions)
     fx_model.graph.lint()
     result = fx.GraphModule(fx_model, fx_model.graph)
