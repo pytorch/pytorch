@@ -122,6 +122,9 @@ void LoopNestGenerator::handle(const Expr* expr) {
     // map, which also maps non-CA axes.
     auto concrete_id =
         gpu_lower->caParallelMap().getConcreteMappedID(out_tv->axis(out_i));
+    if (gpu_lower->isDerivedFromTrivialReduction(concrete_id)) {
+      continue;
+    }
     loop_structure.push_back(concrete_id);
   }
 

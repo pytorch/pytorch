@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_insert_syncs.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
@@ -108,6 +109,12 @@ void GpuLower::lower() {
   // prepare for lowering
   validateIr(fusion_);
   replaceSymbolicSizes();
+
+  trivial_reductions_ = detectTrivialReductionDerivedDomains(fusion_);
+  for (auto id : trivial_reductions_) {
+    auto kir_trivial_id = lowerValue(id)->as<kir::IterDomain>();
+    kir_trivial_reductions_.insert(kir_trivial_id);
+  }
 
   // In the future we may directly use this map, but for now it will propagate
   // and validate (to some extent) the parallelization strategy.
@@ -299,9 +306,20 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
   }
 
   void handle(const ReductionOp* node) final {
+    auto out_tv = node->out()->as<TensorView>();
     // If trivial reduction operation lower to set operation.
-    if (!node->out()->as<TensorView>()->hasReduction() &&
-        node->out()->as<TensorView>()->hasAnyReduction()) {
+    if (std::all_of(
+            out_tv->domain()->domain().begin(),
+            out_tv->domain()->domain().end(),
+            [&](IterDomain* id) {
+              // If id is a reduction axis, is it a trivial reduction?
+              if (id->isReduction()) {
+                return gpu_lower_->trivial_reductions_.find(id) !=
+                    gpu_lower_->trivial_reductions_.end();
+              } else {
+                return true;
+              }
+            })) {
       const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
           UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
       TORCH_CHECK(

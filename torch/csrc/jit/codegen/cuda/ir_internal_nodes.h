@@ -425,6 +425,12 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 
   //! Check if IterDomain is a reduction axis with size of 1, i.e.
   //! a "squeeze" operator.
+  //!
+  //! NOTE: Detection of trivial reduction here is not
+  //! comprehensive. See detectTrivialReductionDerivedDomains for more
+  //! comprehensive analysis. We typically use this for root domain trivial
+  //! reduction checks. So we ship to the correct scheduler. It may
+  //! not be incredibly robust, but it makes sense to keep it for now.
   bool isTrivialReduction() const {
     return isReduction() && rawExtent()->isOneInt();
   }

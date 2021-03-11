@@ -20,12 +20,13 @@ class ConcreteInputCounter : public IterVisitor {
   // Returns number of non-braodcast non-reduction iteration domains used to
   // generate the iteration domains in provided target domain.
   static std::unordered_map<IterDomain*, int> produceCounts(
-      const std::vector<IterDomain*>& domain) {
+      const std::vector<IterDomain*>& domain,
+      GpuLower* gpu_lower) {
     std::unordered_map<IterDomain*, int> count_map;
     if (domain.empty()) {
       return count_map;
     }
-    ConcreteInputCounter counter(domain);
+    ConcreteInputCounter counter(domain, gpu_lower);
     std::transform(
         counter.concrete_domain_set_.begin(),
         counter.concrete_domain_set_.end(),
@@ -38,14 +39,20 @@ class ConcreteInputCounter : public IterVisitor {
     // were traversed, so manually insert their count
     for (auto id : domain) {
       if (count_map.find(id) == count_map.end()) {
-        count_map[id] = id->isBroadcast() ? 0 : 1;
+        count_map[id] =
+            (id->isBroadcast() || gpu_lower->isDerivedFromTrivialReduction(id))
+            ? 0
+            : 1;
       }
     }
     return count_map;
   }
 
  private:
-  ConcreteInputCounter(const std::vector<IterDomain*>& domain_) {
+  ConcreteInputCounter(
+      const std::vector<IterDomain*>& domain_,
+      GpuLower* gpu_lower)
+      : gpu_lower_(gpu_lower) {
     traverseFrom(
         domain_[0]->fusion(),
         std::vector<Val*>(domain_.begin(), domain_.end()));
@@ -58,7 +65,8 @@ class ConcreteInputCounter : public IterVisitor {
           concrete_domain_set_
               .emplace(std::make_pair(id, std::unordered_set<IterDomain*>()))
               .first;
-      if (!id->isBroadcast()) {
+      if (!id->isBroadcast() &&
+          !gpu_lower_->isDerivedFromTrivialReduction(id)) {
         concrete_set_it->second.emplace(id);
       }
     }
@@ -91,6 +99,7 @@ class ConcreteInputCounter : public IterVisitor {
 
   std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
       concrete_domain_set_;
+  GpuLower* gpu_lower_ = nullptr;
 };
 
 // Only used once, consider removing.
@@ -301,13 +310,14 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
   std::unordered_map<IterDomain*, int> n_concrete_ids_;
 
   for (auto c_tv : consumer_tvs) {
-    auto counts = ConcreteInputCounter::produceCounts(c_tv->domain()->domain());
+    auto counts = ConcreteInputCounter::produceCounts(
+        c_tv->domain()->domain(), gpu_lower);
     n_concrete_ids_.insert(counts.begin(), counts.end());
   }
 
   for (auto inp_tv : ir_utils::filterByType<TensorView>(fusion->inputs())) {
-    auto counts =
-        ConcreteInputCounter::produceCounts(inp_tv->domain()->domain());
+    auto counts = ConcreteInputCounter::produceCounts(
+        inp_tv->domain()->domain(), gpu_lower);
     n_concrete_ids_.insert(counts.begin(), counts.end());
   }
 

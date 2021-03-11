@@ -417,6 +417,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_insert_syncs.cpp",
     "torch/csrc/jit/codegen/cuda/lower_loops.cpp",
     "torch/csrc/jit/codegen/cuda/lower_thread_predicate.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_trivial_reductions.cpp",
     "torch/csrc/jit/codegen/cuda/lower_unroll.cpp",
     "torch/csrc/jit/codegen/cuda/lower_utils.cpp",
     "torch/csrc/jit/codegen/cuda/lower_validation.cpp",
