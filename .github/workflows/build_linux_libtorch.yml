@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Generating build matrix
         id: set-matrix
         run: |
