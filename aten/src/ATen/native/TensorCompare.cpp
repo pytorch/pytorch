@@ -302,12 +302,18 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
               "mode only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "mode only supports strided layout, got: ", self.layout());
+  TORCH_CHECK(self.device() == values.device(),
+              "expected device '", self.device(), "' but got '",
+              values.device(), "' for values output");
+  TORCH_CHECK(self.device() == indices.device(),
+              "expected device '", self.device(), "' but got '",
+              indices.device(), "' for indices output");
   TORCH_CHECK(self.scalar_type() == values.scalar_type(),
-              "output 'values' scalar type ", values.scalar_type(),
-              " should be ", self.scalar_type());
+              "expected scalar type '", self.scalar_type(), "' but got '",
+              values.scalar_type(), "' for values output");
   TORCH_CHECK(indices.scalar_type() == ScalarType::Long,
-              "output 'indices' scalar type ", indices.scalar_type(),
-              " should be ", ScalarType::Long);
+              "expected scalar type '", ScalarType::Long, "' but got '",
+              indices.scalar_type(), "' for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
     AT_ASSERT(values.dim() == 0);
