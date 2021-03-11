@@ -4269,6 +4269,8 @@ class TestNN(NNTestCase):
         self.assertEqual(out, ref_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     def test_broadcast_double_backwards_gpu(self):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True),
                    torch.randn(4, 4, device='cuda', requires_grad=True),
