@@ -1,6 +1,6 @@
 import torch
 import torch.distributed as dist
-from typing import Callable
+from typing import Any, Callable
 
 
 def _allreduce_fut(
@@ -66,11 +66,13 @@ def fp16_compress_hook(
 
     return fut.then(decompress)
 
-def fp16_compress_wrapper(hook: Callable[..., torch.futures.Future]) -> Callable[..., torch.futures.Future]:
+def fp16_compress_wrapper(
+    hook: Callable[[Any, dist.GradBucket], torch.futures.Future]
+) -> Callable[[Any, dist.GradBucket], torch.futures.Future]:
     """
     This wrapper casts the input gradient tensors of a given DDP communication hook to half-precision
-    floating point format (torch.float16), and casts the resulting tensors of the given hook back to
-    the input data type, such as float32.
+    floating point format (``torch.float16``), and casts the resulting tensors of the given hook back to
+    the input data type, such as ``float32``.
 
     Example::
     >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1, start_powerSGD_iter=10)

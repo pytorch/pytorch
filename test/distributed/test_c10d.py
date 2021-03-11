@@ -3846,9 +3846,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         """
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        power_sgd_state = powerSGD.PowerSGDState(process_group=process_group)
+        powerSGD_state = powerSGD.PowerSGDState(process_group=process_group)
 
-        hook_args = [(powerSGD.powerSGD_hook, power_sgd_state), (default.allreduce_hook, process_group)]
+        hook_args = [(powerSGD.powerSGD_hook, powerSGD_state), (default.allreduce_hook, process_group)]
 
         for hook, state in hook_args:
             gpu_model = self._gpu_model_with_ddp_comm_hook(
