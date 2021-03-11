@@ -684,12 +684,11 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         output_desc_.data(),
         &output_fence,
         traces_.get());
-    const string statusString = mapOnnxStatusToString(status);
     CAFFE_ENFORCE_EQ(
         status,
         ONNXIFI_STATUS_SUCCESS,
         "Reason: onnxSetIOAndRunGraph returned status code ",
-        statusString);
+        mapOnnxStatusToString(status));
 
     current_batch_size = extractOutputBatchSizes();
     onnxEventState eventState;

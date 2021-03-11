@@ -577,6 +577,10 @@ def slowTest(fn):
     return wrapper
 
 
+# noarch tests are tests that should be only run on one CI configuration,
+# because they don't exercise any interesting platform specific code
+# and so if run once, indicate the test should pass everywhere.
+# See https://github.com/pytorch/pytorch/issues/53743
 def noarchTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
