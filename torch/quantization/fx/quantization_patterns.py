@@ -236,16 +236,20 @@ class Cat(QuantizeHandler):
 @register_quant_pattern(torch.nn.functional.conv1d)
 @register_quant_pattern(torch.nn.functional.conv2d)
 @register_quant_pattern(torch.nn.functional.conv3d)
-# TODO: add qat.Conv1d and qat.Conv3d
+# TODO: add qat.Conv1d
 @register_quant_pattern(torch.nn.qat.Conv2d)
+@register_quant_pattern(torch.nn.qat.Conv3d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU1d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU2d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU3d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBn1d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBn2d)
+@register_quant_pattern(torch.nn.intrinsic.qat.ConvBn3d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU1d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU2d)
+@register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU3d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvReLU2d)
+@register_quant_pattern(torch.nn.intrinsic.qat.ConvReLU3d)
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv1d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv3d))
@@ -254,7 +258,9 @@ class Cat(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv3d))
 # just for error checks
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv2d))
+@register_quant_pattern((torch.nn.ReLU, torch.nn.Conv3d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
+@register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
 class ConvRelu(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
@@ -300,7 +306,7 @@ class ConvRelu(QuantizeHandler):
             else:
                 return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
-        activation_statically_quantized = activation_is_statically_quantized(qconfig)
+        activation_int8_quantized = activation_is_int8_quantized(qconfig)
 
         if self.conv_node.op == 'call_module':
             # note that relu should already be fused into conv module in the fusion step
@@ -337,7 +343,7 @@ class ConvRelu(QuantizeHandler):
                     op_out = quantizer.quantized_graph.create_node(
                         "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
 
-                if activation_statically_quantized:
+                if activation_int8_quantized:
                     root_module = quantizer.modules['']
                     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
                     act_post_process_node = self.relu_node if self.relu_node else self.conv_node
@@ -358,10 +364,10 @@ class ConvRelu(QuantizeHandler):
                 prepack_op = get_qconv_prepack_op(self.conv)
                 packed_weight = quantizer.quantized_graph.create_node(
                     "call_function", prepack_op, prepack_args, {})
-                assert activation_statically_quantized, \
+                assert activation_int8_quantized, \
                     "currently only static quantization is supported for conv"
                 # construct conv input
-                if activation_statically_quantized:
+                if activation_int8_quantized:
                     qconv_op = get_qconv_op(self.conv, self.relu_node is not None)
                     conv_input = load_arg(quantized=True)(self.conv_node.args[0])
                     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
@@ -929,12 +935,7 @@ class CopyNode(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        qconfig = quantizer.qconfig_map[node.name]
-        if activation_is_int8_quantized(qconfig):
-            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
-        else:
-            # fp16 static quantization
-            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
 # Default quantization handler, used for quantization of input and output
 # of quantizable objects (e.g. modules and functionals)

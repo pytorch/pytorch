@@ -31,6 +31,7 @@ from ..utils import (
     get_swapped_custom_module_class,
     weight_is_quantized,
     activation_is_statically_quantized,
+    activation_is_int8_quantized,
     activation_dtype,
     weight_dtype,
 )
@@ -210,7 +211,8 @@ def insert_observer_for_output_of_the_node(
 
             # insert observers for fixedqparams ops like sigmoid, since
             # it supports fp16 static quantization
-            if activation_dtype(qconfig) == torch.float16:
+            if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) and \
+               activation_dtype(qconfig) == torch.float16:
                 insert_observer(
                     node, qconfig.activation(),
                     model, activation_post_process_map, env, observed_graph,
@@ -326,6 +328,7 @@ WEIGHT_PREPACK_OPS = {
     torch._ops.ops.quantized.linear_prepack,
     torch._ops.ops.quantized.linear_prepack_fp16,
     torch._ops.ops.quantized.conv2d_prepack,
+    torch._ops.ops.quantized.conv3d_prepack,
 }
 
 class Quantizer:
@@ -806,7 +809,7 @@ class Quantizer:
                     'CopyNode of type ' + node.op + ' is not handled'
                 quantized = node_arg_is_quantized(node.args[0])
 
-            if not activation_is_int8_quantized(qconfig) or \
+            if not isinstance(obj, CopyNode) and not activation_is_int8_quantized(qconfig) or \
                not input_output_observed(obj):
                 quantized = False
 
@@ -1114,6 +1117,12 @@ class Quantizer:
         Outputs a map of
          node_name -> list of (QuantizeHandler instance (always DefaultQuantizeHandler),
          activation_post_process (observer/fake_quantize module) constructor)
+         the reason why the value is a list is because each node can be configured with multiple
+         qconfigs, for example in a subgraph of functional linear
+         op followed by a sigmoid op, linear is configured with int8 static quantization
+         and sigmoid is configured with float16 static quantization,
+         then the output of linear (and input of sigmoid) needs first to be quantized to
+         int8 and then float16
         """
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]] = defaultdict(list)
 
@@ -1155,8 +1164,7 @@ class Quantizer:
                 root_node, matched_nodes, matched_pattern, quantize_handler, \
                     qconfig = matches[node.name]
                 # don't attach observer/fake_quant for CopyNode
-                if isinstance(quantize_handler, CopyNode) and \
-                   activation_is_int8_quantized(qconfig):
+                if isinstance(quantize_handler, CopyNode):
                     qconfig = None
                 if root_node is node and \
                         input_output_observed(quantize_handler):
