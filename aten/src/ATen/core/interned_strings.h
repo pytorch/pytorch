@@ -76,7 +76,7 @@ namespace c10 {
   _(prim, ListConstruct)             \
   _(prim, ListUnpack)                \
   _(prim, DictConstruct)             \
-  _(prim, ModuleDictIndex)           \
+  _(prim, ModuleContainerIndex)      \
   _(prim, EnumName)                  \
   _(prim, EnumValue)                 \
   _(prim, StringIndex)               \
@@ -92,6 +92,7 @@ namespace c10 {
   _(aten, ScalarImplicit)            \
   _(aten, Float)                     \
   _(aten, str)                       \
+  _(aten, is_pinned)                 \
   _(aten, Delete)                    \
   _(aten, relu_)                     \
   _(aten, dropout_)                  \
