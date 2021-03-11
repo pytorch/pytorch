@@ -235,16 +235,20 @@ class Cat(QuantizeHandler):
 @register_quant_pattern(torch.nn.functional.conv1d)
 @register_quant_pattern(torch.nn.functional.conv2d)
 @register_quant_pattern(torch.nn.functional.conv3d)
-# TODO: add qat.Conv1d and qat.Conv3d
+# TODO: add qat.Conv1d
 @register_quant_pattern(torch.nn.qat.Conv2d)
+@register_quant_pattern(torch.nn.qat.Conv3d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU1d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU2d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU3d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBn1d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBn2d)
+@register_quant_pattern(torch.nn.intrinsic.qat.ConvBn3d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU1d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU2d)
+@register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU3d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvReLU2d)
+@register_quant_pattern(torch.nn.intrinsic.qat.ConvReLU3d)
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv1d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv3d))
@@ -253,7 +257,9 @@ class Cat(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv3d))
 # just for error checks
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv2d))
+@register_quant_pattern((torch.nn.ReLU, torch.nn.Conv3d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
+@register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
 class ConvRelu(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)

@@ -54,7 +54,8 @@ def consume_prefix_in_state_dict_if_present(state_dict: Dict[str, Any], prefix: 
 
     # also strip the prefix in metadata if any.
     try:
-        metadata = state_dict._metadata  # pyre-ignore
+        # pyre-ignore[16]: `Dict[str, Any]`` has no attribute `_metadata`.
+        metadata = state_dict._metadata
     except AttributeError:
         pass
     else:
