@@ -36,9 +36,11 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size)
     caffe2::TypeMeta dtype = self->dtype();
 #endif
     THTensor_stealAndSetStoragePtr(self, THStorage_new());
+#ifndef NDEBUG
     // THTensor_stealAndSetStoragePtr guarantees this. Leave debug
     // assert in case of code changes.
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dtype == self->dtype());
+#endif
   }
   uint64_t new_size_bytes =
       (new_size + self->storage_offset()) * self->dtype().itemsize();
