@@ -177,7 +177,7 @@ void apply_lapack_eigh(Tensor& values, Tensor& vectors, Tensor& infos, bool uppe
 #ifndef USE_LAPACK
   TORCH_CHECK(
       false,
-      "Calling torch.linalg.eigh/eigvalsh on a CPU tensor requires compiling ",
+      "Calling torch.linalg.eigh or eigvalsh on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
