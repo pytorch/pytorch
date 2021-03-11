@@ -1,7 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/grad_mode.h>
 
 #include <c10/util/irange.h>
 
@@ -13,8 +14,58 @@
 
 namespace at { namespace native {
 
-Tensor embedding(const Tensor & weight, const Tensor & indices,
-                 int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+inline void _no_grad_embedding_renorm_(
+    Tensor weight,
+    const Tensor& input,
+    float max_norm,
+    float norm_type) {
+  at::NoGradGuard no_grad;
+  at::embedding_renorm_(weight, input, max_norm, norm_type);
+}
+
+Tensor embedding(
+    const Tensor& weight,
+    const Tensor& indices,
+    c10::optional<int64_t> padding_idx,
+    bool scale_grad_by_freq,
+    bool sparse,
+    c10::optional<double> max_norm,
+    double norm_type) {
+  auto input_ = indices;
+
+  if (padding_idx != c10::nullopt) {
+    if (*padding_idx > 0) {
+      TORCH_CHECK(
+          *padding_idx < weight.size(0),
+          "Padding_idx must be within num_embeddings");
+    } else if (*padding_idx < 0) {
+      TORCH_CHECK(
+          *padding_idx >= -weight.size(0),
+          "Padding_idx must be within num_embedding");
+      padding_idx = weight.size(0) + *padding_idx;
+    }
+  } else {
+    padding_idx = -1;
+  }
+
+  if (max_norm != c10::nullopt) {
+    // Note [embedding_renorm contiguous]
+    // `embedding_renorm_` will call .contiguous() on input anyways, so we
+    // call it here and take advantage of the improved locality in the
+    // `embedding` call below too.
+    input_ = input_.contiguous();
+    _no_grad_embedding_renorm_(weight, input_, *max_norm, norm_type);
+  }
+  return at::_embedding(
+      weight, input_, *padding_idx, scale_grad_by_freq, sparse);
+}
+
+Tensor _embedding(
+    const Tensor& weight,
+    const Tensor& indices,
+    int64_t padding_idx,
+    bool scale_grad_by_freq,
+    bool sparse) {
   TORCH_CHECK(weight.dim() >= 1, "'weight' must be at least 1-D");
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding", indices_arg, {kLong, kInt});

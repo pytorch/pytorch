@@ -1701,7 +1701,7 @@ class ShapePropagator {
       }
     } else if (
         node->matches(
-            "aten::embedding(Tensor weight, Tensor indices, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor")) {
+            "aten::embedding(Tensor weight, Tensor indices, int? padding_idx=None, bool scale_grad_by_freq=False, bool sparse=False, float? max_norm=None, float norm_type=2) -> Tensor")) {
       auto weight_type = input_type(0);
       auto indices_type = input_type(1);
       if (weight_type && indices_type && indices_type->dim()) {

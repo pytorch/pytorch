@@ -2000,34 +2000,13 @@ def embedding(
                  [ 0.0000,  0.0000,  0.0000],
                  [ 0.6262,  0.2438,  0.7471]]])
     """
-
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
             embedding, (input, weight),
             input, weight, padding_idx, max_norm, norm_type,
             scale_grad_by_freq, sparse
         )
-    if padding_idx is not None:
-        if padding_idx > 0:
-            assert padding_idx < weight.size(0), "Padding_idx must be within num_embeddings"
-        elif padding_idx < 0:
-            assert padding_idx >= -weight.size(0), "Padding_idx must be within num_embeddings"
-            padding_idx = weight.size(0) + padding_idx
-    else:
-        padding_idx = -1
-    if max_norm is not None:
-        # Note [embedding_renorm contiguous]
-        # `embedding_renorm_` will call .contiguous() on input anyways, so we
-        # call it here and take advantage of the improved locality in the
-        # `embedding` call below too.
-        input = input.contiguous()
-        # Note [embedding_renorm set_grad_enabled]
-        # XXX: equivalent to
-        # with torch.no_grad():
-        #   torch.embedding_renorm_
-        # remove once script supports set_grad_enabled
-        _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
-    return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
+    return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse, max_norm, norm_type)
 
 
 def embedding_bag(

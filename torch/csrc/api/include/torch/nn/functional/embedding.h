@@ -24,25 +24,14 @@ inline Tensor embedding(const Tensor& input,
                         double norm_type,
                         bool scale_grad_by_freq,
                         bool sparse) {
-  auto input_ = input;
-
-  if (padding_idx != c10::nullopt) {
-    if (*padding_idx > 0) {
-      TORCH_CHECK(*padding_idx < weight.size(0), "Padding_idx must be within num_embeddings");
-    }
-    else if (*padding_idx < 0) {
-      TORCH_CHECK(*padding_idx >= -weight.size(0), "Padding_idx must be within num_embedding");
-      padding_idx = weight.size(0) + *padding_idx;
-    }
-  } else {
-    padding_idx = -1;
-  }
-
-  if (max_norm != c10::nullopt) {
-    input_ = input_.contiguous();
-    _no_grad_embedding_renorm_(weight, input_, *max_norm, norm_type);
-  }
-  return torch::embedding(weight, input_, *padding_idx, scale_grad_by_freq, sparse);
+  return torch::embedding(
+      weight,
+      input,
+      padding_idx,
+      scale_grad_by_freq,
+      sparse,
+      max_norm,
+      norm_type);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
