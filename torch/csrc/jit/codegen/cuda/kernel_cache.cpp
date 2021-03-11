@@ -291,7 +291,7 @@ FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion>&& fusion)
   //  wants segmented fusion in the debug print. Will
   //  print math of the composite fusion as placeholder
   if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
-    fusion->printMath();
+    fusion_->printMath();
   }
 
   // avoid putting `has_nontrivial_reduction_` in the initializer list
