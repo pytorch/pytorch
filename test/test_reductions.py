@@ -1909,7 +1909,7 @@ class TestReductions(TestCase):
         check([1.], [1], [], {}, r'q tensor must be same dtype as the input tensor')
         check([1.], -1., [], {}, r'q must be in the range \[0, 1\] but got -1')
         check([1.], 1.1, [], {}, r'q must be in the range \[0, 1\] but got 1.1')
-        check([1.], 0.5, [], {'out': torch.empty([], dtype=torch.float64, device=device)},
+        check([1.], 0.5, [], {'out': torch.empty([], dtype=torch.int32, device=device)},
               r'out tensor must be same dtype as the input tensor')
         check([1.], [1.], [None, False], {'interpolation': 'random_mode'},
               r"interpolation must be one of linear, lower, higher, midpoint or nearest, but got random_mode")

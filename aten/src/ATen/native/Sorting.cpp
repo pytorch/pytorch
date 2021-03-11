@@ -456,76 +456,6 @@ Tensor& quantile_out(
     const Tensor& q,
     optional<int64_t> dim,
     bool keepdim,
-    Tensor& out) {
-  return at::quantile_out(out, self, q, dim, keepdim, "linear");
-}
-
-Tensor& quantile_out(
-    const Tensor& self,
-    double q,
-    optional<int64_t> dim,
-    bool keepdim,
-    Tensor& out) {
-  return at::quantile_out(out, self, q, dim, keepdim, "linear");
-}
-
-Tensor quantile(
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> dim,
-    bool keepdim) {
-  return at::quantile(self, q, dim, keepdim, "linear");
-}
-
-Tensor quantile(
-    const Tensor& self,
-    double q,
-    optional<int64_t> dim,
-    bool keepdim) {
-  return at::quantile(self, q, dim, keepdim, "linear");
-}
-
-Tensor& nanquantile_out(
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> dim,
-    bool keepdim,
-    Tensor& out) {
-  return at::nanquantile_out(out, self, q, dim, keepdim, "linear");
-}
-
-Tensor& nanquantile_out(
-    const Tensor& self,
-    double q,
-    optional<int64_t> dim,
-    bool keepdim,
-    Tensor& out) {
-  return at::nanquantile_out(out, self, q, dim, keepdim, "linear");
-}
-
-Tensor nanquantile(
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> dim,
-    bool keepdim) {
-  return at::nanquantile(self, q, dim, keepdim, "linear");
-}
-
-Tensor nanquantile(
-    const Tensor& self,
-    double q,
-    optional<int64_t> dim,
-    bool keepdim) {
-  return at::nanquantile(self, q, dim, keepdim, "linear");
-}
-
-// NEW
-
-Tensor& quantile_out(
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> dim,
-    bool keepdim,
     const std::string interpolation,
     Tensor& out) {
   quantile_impl(
@@ -548,13 +478,13 @@ Tensor& quantile_out(
     Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
-  return at::quantile_out(
-      out,
+  return at::native::quantile_out(
       self,
       at::scalar_tensor(q, self.options()),
       dim,
       keepdim,
-      interpolation);
+      interpolation,
+      out);
 }
 
 Tensor quantile(
@@ -583,7 +513,7 @@ Tensor quantile(
     const std::string interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
-  return at::quantile(
+  return at::native::quantile(
       self, at::scalar_tensor(q, self.options()), dim, keepdim, interpolation);
 }
 
@@ -614,13 +544,13 @@ Tensor& nanquantile_out(
     Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
-  return at::nanquantile_out(
-      out,
+  return at::native::nanquantile_out(
       self,
       at::scalar_tensor(q, self.options()),
       dim,
       keepdim,
-      interpolation);
+      interpolation,
+      out);
 }
 
 Tensor nanquantile(
@@ -649,8 +579,76 @@ Tensor nanquantile(
     const std::string interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
-  return at::nanquantile(
+  return at::native::nanquantile(
       self, at::scalar_tensor(q, self.options()), dim, keepdim, interpolation);
+}
+
+Tensor& quantile_out(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> dim,
+    bool keepdim,
+    Tensor& out) {
+  return at::native::quantile_out(self, q, dim, keepdim, "linear", out);
+}
+
+Tensor& quantile_out(
+    const Tensor& self,
+    double q,
+    optional<int64_t> dim,
+    bool keepdim,
+    Tensor& out) {
+  return at::native::quantile_out(self, q, dim, keepdim, "linear", out);
+}
+
+Tensor quantile(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> dim,
+    bool keepdim) {
+  return at::native::quantile(self, q, dim, keepdim, "linear");
+}
+
+Tensor quantile(
+    const Tensor& self,
+    double q,
+    optional<int64_t> dim,
+    bool keepdim) {
+  return at::native::quantile(self, q, dim, keepdim, "linear");
+}
+
+Tensor& nanquantile_out(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> dim,
+    bool keepdim,
+    Tensor& out) {
+  return at::native::nanquantile_out(self, q, dim, keepdim, "linear", out);
+}
+
+Tensor& nanquantile_out(
+    const Tensor& self,
+    double q,
+    optional<int64_t> dim,
+    bool keepdim,
+    Tensor& out) {
+  return at::native::nanquantile_out(self, q, dim, keepdim, "linear", out);
+}
+
+Tensor nanquantile(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> dim,
+    bool keepdim) {
+  return at::native::nanquantile(self, q, dim, keepdim, "linear");
+}
+
+Tensor nanquantile(
+    const Tensor& self,
+    double q,
+    optional<int64_t> dim,
+    bool keepdim) {
+  return at::native::nanquantile(self, q, dim, keepdim, "linear");
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
