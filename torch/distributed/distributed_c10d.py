@@ -2429,6 +2429,49 @@ def barrier(group=GroupMember.WORLD,
     else:
         work.wait()
 
+def monitored_barrier(group=GroupMember.WORLD, timeout=None):
+
+    """
+    Synchronizes all processes similar to torch.distributed.barrier, but takes
+    a configurable timeout and is able to report ranks that did not pass this
+    barrier within that timeout.
+
+    This collective always blocks processes until the whole group exits this
+    function successfully. Therefore, it can have a performance penalty and
+    should only be used for debugging or scenarios that require full
+    synchronization points on the host-side.
+
+    .. note:: Note that this collective is only supported with the GLOO backend.
+
+    Args:
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        timeout ([float, optional): Timeout in seconds for monitored_barrier.
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group
+    """
+    # Need to call rank not in group before using the group, otherwise
+    # "Invalid process group" error is raised.
+    if _rank_not_in_group(group):
+        return
+
+    if get_backend(group) != Backend.GLOO:
+        raise RuntimeError("monitored_barrier is only implemented for GLOO backend.")
+
+
+    if timeout is None:
+        timeout = default_pg_timeout
+
+    if group is None:
+        default_pg = _get_default_group()
+        assert isinstance(default_pg, ProcessGroupGloo)
+        return default_pg.monitored_barrier(timeout)
+    else:
+        assert isinstance(group, ProcessGroupGloo)
+        return group.monitored_barrier(timeout)
+
 
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     """
