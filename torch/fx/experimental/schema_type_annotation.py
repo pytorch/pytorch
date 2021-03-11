@@ -102,6 +102,9 @@ class AnnotateTypesWithSchema(Transformer):
                 supported
         """
         assert not isinstance(target, str)
-        sig = inspect.signature(inspect.unwrap(target))
+        try:
+            sig = inspect.signature(inspect.unwrap(target))
+        except (ValueError, TypeError):
+            return None
 
         return sig.return_annotation if sig.return_annotation is not inspect.Signature.empty else None
