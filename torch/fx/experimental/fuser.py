@@ -107,7 +107,11 @@ def extract_subgraph(orig_module: nn.Module, nodes: List[fx.Node], inputs: List[
     new_graph.lint()
     return fx.GraphModule(orig_module, new_graph)
 
-mkldnn_supported = [nn.Conv2d, nn.Linear, nn.BatchNorm2d, nn.ReLU, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d, torch.relu, torch.transpose, F.relu, F.avg_pool2d, F.adaptive_avg_pool2d]
+mkldnn_supported = [
+    nn.Conv2d, nn.Linear, nn.BatchNorm2d, nn.ReLU, nn.MaxPool2d, nn.AvgPool2d, nn.AdaptiveAvgPool2d,
+    torch.relu, torch.transpose,
+    F.relu, F.avg_pool2d, F.adaptive_avg_pool2d
+]
 mkldnn_supported_unknown = [operator.add, operator.mul]
 mkldnn_map = {
     nn.Conv2d: th_mkldnn.MkldnnConv2d,
