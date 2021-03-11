@@ -4,13 +4,9 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
-from torch.quantization import get_default_qconfig, default_dynamic_qconfig
+from torch.quantization import default_dynamic_qconfig
 import torch.nn.quantized as nnq
 toq = torch.ops.quantized
-from torch.quantization._numeric_suite_fx import (
-    compare_model_stub_fx,
-)
 from torch.quantization.quantize_fx import (
     convert_fx,
     prepare_fx,
@@ -27,7 +23,6 @@ from torch.testing._internal.common_quantization import (
     LSTMwithHiddenDynamicModel,
     SparseNNModel,
     skip_if_no_torchvision,
-    test_only_eval_fn,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import override_qengines
@@ -43,61 +38,6 @@ from torch.quantization.ns.numeric_suite_core_apis_fx import (
     extract_logger_info,
     extract_shadow_logger_info,
 )
-
-
-class TestGraphModeNumericSuite(QuantizationTestCase):
-
-    # TODO: Add submodule and functional test cases for compare_model_stub_fx
-    def compare_and_validate_model_stub_results_fx(
-        self,
-        prepared_float_model,
-        q_model,
-        module_swap_list,
-        expected_ob_dict_keys,
-        *data,
-    ):
-        ob_dict = compare_model_stub_fx(
-            prepared_float_model, q_model, module_swap_list, *data
-        )
-
-        self.assertTrue(expected_ob_dict_keys == ob_dict.keys())
-        self.assertEqual(len(ob_dict), 1)
-
-        for k, v in ob_dict.items():
-            self.assertTrue(len(v["float"]) == len(v["quantized"]))
-            for i, val in enumerate(v["quantized"]):
-                self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
-
-    @override_qengines
-    def test_compare_model_stub_lstm_dynamic_fx(self):
-        r"""Compare the output of dynamic quantized linear layer and its float shadow module"""
-
-        qconfig_dict = {"object_type": [(nn.LSTM, default_dynamic_qconfig)]}
-
-        float_model = LSTMwithHiddenDynamicModel()
-        float_model.eval()
-
-        prepared_model = prepare_fx(float_model, qconfig_dict)
-
-        prepared_float_model = copy.deepcopy(prepared_model)
-        prepared_float_model.eval()
-
-        q_model = convert_fx(prepared_model)
-
-        module_swap_list = [nn.LSTM]
-
-        lstm_input = torch.rand((1, 1, 2))
-        lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
-
-        expected_ob_dict_keys = {"lstm.stats"}
-        self.compare_and_validate_model_stub_results_fx(
-            prepared_float_model,
-            q_model,
-            module_swap_list,
-            expected_ob_dict_keys,
-            lstm_input,
-            lstm_hidden,
-        )
 
 
 class TestFXGraphMatcher(QuantizationTestCase):
@@ -418,7 +358,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
 
     def _test_match_shadow_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
-        should_log_inputs=False, qconfig_dict=None,
+        should_log_inputs=False, qconfig_dict=None, skip_scripting=False,
     ):
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
@@ -437,8 +377,8 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
             self.checkGraphModuleNodes(
                 mp_shadows_mq, expected_node_occurrence=prepared_expected_node_occurrence)
 
-        # TODO(before land): test both scripted and non-scripted
-        mp_shadows_mq = torch.jit.script(mp_shadows_mq)
+        if not skip_scripting:
+            mp_shadows_mq = torch.jit.script(mp_shadows_mq)
 
         # calibrate
         mp_shadows_mq(*data)
@@ -699,6 +639,17 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             m.eval()
             res = self._test_match_shadow_activations(
                 m, (torch.randn(5, 5),), results_len=1, qconfig_dict=qconfig_dict)
+
+    @skipIfNoFBGEMM
+    def test_compare_shadow_activations_lstm_dynamic(self):
+        qconfig_dict = {"object_type": [(nn.LSTM, default_dynamic_qconfig)]}
+        m = LSTMwithHiddenDynamicModel().eval()
+        lstm_input = torch.rand((1, 1, 2))
+        lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
+        # TODO(future PR): enable scripting (quant prepared LSTM not scriptable)
+        res = self._test_match_shadow_activations(
+            m, (lstm_input, lstm_hidden), results_len=1, qconfig_dict=qconfig_dict,
+            skip_scripting=True)
 
     @skipIfNoFBGEMM
     def test_sparsenn_compare_activations(self):
