@@ -17,7 +17,7 @@ from torch.testing import \
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex)
 from torch.testing._internal.common_device_type import \
-    (onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
+    (onlyCPU, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
@@ -1988,8 +1988,9 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_householder_product,
-           # TODO: remove onlyCPU once https://github.com/pytorch/pytorch/pull/51348 is merged
-           decorators=[onlyCPU, skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack,
+               # gradgrad checks are slow
+               DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'),]),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
