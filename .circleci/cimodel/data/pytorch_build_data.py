@@ -62,11 +62,9 @@ CONFIG_TREE_DATA = [
     ("bionic", [
         ("clang", [
             ("9", [
-                # WARNING: If you rename/delete this node, you MUST update
-                # PYTORCH_TEST_SKIP_NOARCH condition in .jenkins/pytorch/test.sh
-                # and HAND VERIFY that the tests are running on the intended new CI
-                # configuration (you WILL NOT get an error if you do this wrong,
-                # tests will just silently stop running)
+                ("3.6", [
+                    ("noarch", [XImportant(True)]),
+                ]),
                 XImportant("3.6"),
             ]),
             ("9", [
@@ -165,6 +163,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "mlc": MLCConfigNode,
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
+            "noarch": NoarchConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "onnx": ONNXConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -249,6 +248,14 @@ class ParallelTBBConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["parallel_backend"] = "paralleltbb"
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class NoarchConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_noarch"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode
