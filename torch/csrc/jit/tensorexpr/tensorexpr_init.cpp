@@ -110,19 +110,23 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<BufHandle, ExprHandle>( // NOLINT
       te,
       "BufHandle")
-      .def(py::init<
-           const std::string&,
-           const std::vector<ExprHandle>&,
-           Dtype>());
+      .def(
+          py::init<const std::string&, const std::vector<ExprHandle>&, Dtype>())
+      .def("load", [](BufHandle& self, const std::vector<ExprHandle>& v) {
+        return Load::make(self, v);
+      });
 
   py::class_<Placeholder>(te, "Placeholder")
       .def(py::init<
            const std::string&,
            const Dtype&,
            std::vector<ExprHandle>&>())
-      .def("load", [](Placeholder& self, const std::vector<ExprHandle>& v) {
-        return self.load(v);
-      });
+      .def(
+          "load",
+          [](Placeholder& self, const std::vector<ExprHandle>& v) {
+            return self.load(v);
+          })
+      .def("buf", [](Placeholder& self) { return BufHandle(self.data()); });
   py::class_<Tensor, std::unique_ptr<Tensor, py::nodelete>>(te, "Tensor")
       .def(py::init(
           [](BufHandle& b, Stmt* s) { return new Tensor(b.node(), s); }))
@@ -131,10 +135,7 @@ void initTensorExprBindings(PyObject* module) {
           [](Tensor& self, const std::vector<ExprHandle>& v) {
             return self.call(v);
           })
-      .def(
-          "buf",
-          [](Tensor& self) { return BufHandle(self.buf()); },
-          py::return_value_policy::reference)
+      .def("buf", [](Tensor& self) { return BufHandle(self.buf()); })
       .def("stmt", &Tensor::stmt, py::return_value_policy::reference);
   py::class_<Cast>(te, "Cast").def_static("make", &Cast::make);
 
@@ -210,7 +211,21 @@ void initTensorExprBindings(PyObject* module) {
       },
       py::return_value_policy::reference);
 
+  te.def(
+      "Reduce",
+      [](const std::string& func_name,
+         const std::vector<DimArg>& dim_args,
+         const Reducer& reducer,
+         const BufHandle& buffer,
+         const std::vector<DimArg>& reduce_args) {
+        return Reduce(func_name, dim_args, reducer, buffer, reduce_args);
+      },
+      py::return_value_policy::reference);
+
   py::class_<Stmt, std::unique_ptr<Stmt, py::nodelete>>(te, "Stmt")
+      .def(py::init([](const std::vector<Stmt*>& stmts) {
+        return tensorexpr::Block::make(stmts);
+      }))
       .def("__str__", [](const Stmt& self) {
         std::stringstream ss;
         ss << self;
@@ -248,7 +263,9 @@ void initTensorExprBindings(PyObject* module) {
       .def("prepare_for_codegen", &LoopNest::prepareForCodegen)
       .def(
           "get_loop_body_for",
-          &LoopNest::getLoopBodyFor,
+          [](const LoopNest& self, Tensor* t) {
+            return self.getLoopBodyFor(t);
+          },
           py::return_value_policy::reference)
       .def(
           "get_loops_for",

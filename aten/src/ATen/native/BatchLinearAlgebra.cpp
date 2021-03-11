@@ -521,10 +521,10 @@ Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& info
 // Solves a system of linear equations matmul(input, x) = other in-place
 // LAPACK/MAGMA error codes are saved in 'infos' tensor, they are not checked here
 static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor& input, const Tensor& other) {
-  TORCH_CHECK(infos.scalar_type() == kInt,
-    "infos dtype ", infos.scalar_type(), " does not match the expected dtype ", kInt);
-  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
+  checkSameDevice("linalg_solve", result, input);
+  checkSameDevice("linalg_solve", other, input, "other");
+  checkLinalgCompatibleDtype("linalg_solve", result, input);
+
   TORCH_CHECK(input.scalar_type() == other.scalar_type(),
     "input dtype ", input.scalar_type(), " does not match other dtype ", other.scalar_type());
 
@@ -533,41 +533,101 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   TORCH_CHECK(other.dim() >= 1,
            "other should have at least 1 dimension, but has ", other.dim(), " dimensions instead");
 
-  // NumPy works for 1-dimensional 'other' or batch of 1-dimensional tensors, we need to unsqueeze it
-  // because 2-dimensional tensors are expected in the implementation
-  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // A.shape[:-1]
-  bool is_rhs_broadcasted = other.dim() == 1 || (input.dim()-1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
-  Tensor other_ = is_rhs_broadcasted ? other.unsqueeze(-1) : other;
+  // Two types of 'other' tensors are supported:
+  // - 1-dimensional (1D) tensor or batch of 1D tensors (vector case)
+  // - 2-dimensional (2D) tensor or batch of 2D tensors (matrix case)
+  // original torch.solve supported only the matrix case, while NumPy works for both cases
+  // for the batched input we need to be able to distinguish them
+  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // input.shape[:-1]
+  bool vector_case = other.dim() == 1 || (input.dim()-1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
+
+  bool is_batched_column_major = false;
+  if (vector_case) {
+    is_batched_column_major = result.is_contiguous();
+  } else if (!vector_case && result.dim() >= 2) {
+    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+  }
+
+  // if 'other' is a batch of 2D tensors, then 'input' can be non-batched and will be broadcasted
+  auto expected_shape = expected_batched_rhs_shape;
+  if (!vector_case && other.dim() > 2) {
+    expected_shape = other.sizes();
+  }
+
+  bool result_equal_expected_shape = result.sizes().equals(expected_shape);
+  bool result_input_same_type = (result.scalar_type() == input.scalar_type());
+
+  // if result is not empty and not in batched column major format
+  bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
+  copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
+  copy_needed |= (result.numel() != 0 && !result_equal_expected_shape); // or result does not have the expected shape
+  // we have to allocate a temporary tensor
+  if (copy_needed) {
+    Tensor result_tmp = at::empty({0}, input.options());
+    result_tmp = linalg_solve_out_info(result_tmp, infos, input, other);
+    at::native::resize_output(result, result_tmp.sizes());
+    result.copy_(result_tmp);
+    return result;
+  }
+  // else use result's storage directly
+
+  // we need to unsqueeze 'other' because 2-dimensional tensors are expected in the implementation
+  Tensor other_ = vector_case ? other.unsqueeze(-1) : other;
 
   // _linalg_broadcast_batch_dims also includes linearSolveCheckInputs
   // it checks for squareness of 'input' and 'shape' compatibility of 'other' and 'input'
   Tensor other_broadcasted, input_broadcasted;
   std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other_, input, "linalg_solve");
 
+  auto squeezed_other_broadcasted = at::squeeze(other_broadcasted, -1);
+  auto squeezed_result_shape = squeezed_other_broadcasted.sizes();
+
   // if result has no elements we can modify it
   if (result.numel() == 0) {
-    at::native::resize_as_(result, other_broadcasted.transpose(-2, -1), MemoryFormat::Contiguous);
-    result.transpose_(-2, -1);
-  } else {
-    // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
-    TORCH_CHECK(result.sizes().equals(other_broadcasted.sizes()),
-      "result shape ", result.sizes(), " does not match broadcasted other shape ", other_broadcasted.sizes());
+    if (vector_case) {
+      result.resize_(squeezed_result_shape);
+    } else {
+      at::native::resize_as_(result, other_broadcasted.transpose(-2, -1), MemoryFormat::Contiguous);
+      result.transpose_(-2, -1);
+    }
   }
 
-  TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
+  auto expected_result_shape = vector_case ? squeezed_result_shape : other_broadcasted.sizes();
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(expected_result_shape));
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT(result.device() == input.device());
+
+  // result tensor must be in batched column major order (Fortran contiguous) for 2D inputs
+  // or C contiguous for 1D input
+  if (vector_case) {
+    TORCH_INTERNAL_ASSERT(result.is_contiguous());
+  } else {
+    TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+  }
+
+  // for 1-dimensional 'other', we need to unsqueeze the result before passing to "apply_solve"
+  if (vector_case) {
+    result = result.unsqueeze_(-1);
+  }
+
+  // _linalg_solve_out_helper_ (apply_solve) performs calculations in-place and result must be a copy of other_broadcasted
   result.copy_(other_broadcasted);
 
   auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
-  at::native::resize_output(infos, {std::max<int64_t>(1, batchCount(input_broadcasted))});
+
+  TORCH_INTERNAL_ASSERT(infos.scalar_type() == kInt);
+  TORCH_INTERNAL_ASSERT(infos.device() == input.device());
+  infos.resize_({std::max<int64_t>(1, batchCount(input_broadcasted))});
   // if input is empty infos might not get filled; make sure infos doesn't contain garbage then
   if (input.numel() == 0) {
     infos.fill_(0);
   }
+
   result = at::_linalg_solve_out_helper_(result, input_working_copy, infos);
 
-  // NumPy works for 1-dimensional 'other', we need to squeeze the result in this case
-  if (is_rhs_broadcasted) {
-    result.squeeze_(-1);
+  // for 1-dimensional 'other', we need to squeeze the result after "apply_solve"
+  if (vector_case) {
+    result = result.squeeze_(-1);
   }
 
   return result;
@@ -580,9 +640,9 @@ Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& othe
 
   // Now check LAPACK/MAGMA error codes
   // batchCheckErrors(Tensor, char*) calls 'infos = infos.to(kCPU)'
-  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // A.shape[:-1]
-  bool is_rhs_broadcasted = other.dim() == 1 || (input.dim()-1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
-  if (is_rhs_broadcasted ? result.dim() > 1 : result.dim() > 2) {
+  auto expected_batched_rhs_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // input.shape[:-1]
+  bool vector_case = other.dim() == 1 || (input.dim()-1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
+  if (vector_case ? result.dim() > 1 : result.dim() > 2) {
     batchCheckErrors(infos, "linalg_solve");
   } else {
     singleCheckErrors(infos.item().toInt(), "linalg_solve");
@@ -697,39 +757,58 @@ Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& inf
 // LAPACK/MAGMA/cuSOLVER error codes are saved in 'infos' tensors, they are not checked here
 static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
   squareCheckInputs(input);
+  checkSameDevice("linalg_inv", result, input);
+  checkLinalgCompatibleDtype("linalg_inv", result, input);
+
   TORCH_INTERNAL_ASSERT(infos_lu.scalar_type() == kInt);
   TORCH_INTERNAL_ASSERT(infos_getri.scalar_type() == kInt);
-  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
-  TORCH_CHECK(result.device() == input.device(),
-    "result device ", result.device(), " does not match input device ", input.device());
+
+  bool result_input_same_type = (result.scalar_type() == input.scalar_type());
+  bool result_equal_expected_shape = result.sizes().equals(input.sizes());
+  bool is_batched_column_major = false;
+  if (result.dim() >= 2) {
+    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+  }
+
+  // if result is not empty and not in batched column major format
+  bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
+  copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
+  copy_needed |= (result.numel() != 0 && !result_equal_expected_shape); // or result does not have the expected shape
+  // we have to allocate a temporary tensor
+  if (copy_needed) {
+    Tensor result_tmp = at::empty({0}, input.options());
+    result_tmp = linalg_inv_out_info(result_tmp, infos_lu, infos_getri, input);
+    at::native::resize_output(result, result_tmp.sizes());
+    result.copy_(result_tmp);
+    return result;
+  }
+  // else  use result's storage directly
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
     at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);
-  } else {
-    // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
-    TORCH_CHECK(result.sizes().equals(input.sizes()),
-    "result shape ", result.sizes(), " does not match input shape ", input.sizes());
   }
 
-  TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT(result.device() == input.device());
+
+  // result tensor must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+
+  // _linalg_inv_out_helper_ (apply_inverse) performs calculations in-place and result must be a copy of input
   result.copy_(input);
 
-  at::native::resize_output(infos_lu, {std::max<int64_t>(1, batchCount(input))});
-  at::native::resize_output(infos_getri, {std::max<int64_t>(1, batchCount(input))});
-  infos_lu.fill_(0);
-  infos_getri.fill_(0);
-
+  // TODO: Replace this helper with DECLARE/DEFINE_DISPATCH
   result = at::_linalg_inv_out_helper_(result, infos_lu, infos_getri);
   return result;
 }
 
 // Computes the inverse matrix of 'input', it is is saved to 'result' in-place
 Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
-  auto infos_lu = at::empty({0}, input.options().dtype(kInt));
-  auto infos_getri = at::empty({0}, input.options().dtype(kInt));
+  auto infos_lu = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+  auto infos_getri = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
   result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
 
   // Now check LAPACK/MAGMA/cuSOLVER error codes
@@ -1268,7 +1347,7 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   TORCH_INTERNAL_ASSERT(result.device() == input.device());
 
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
-  TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT(infos.device() == input.device());
   TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
 
   // if result has no elements we can modify it
@@ -1314,10 +1393,9 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   //   "result shape ", result.sizes(), " does not match input shape ", input.sizes());
   // }
 
-  // Single matrix MAGMA routine requires 'infos' to reside in CPU memory,
-  // therefore we create 'infos' only on CPU for now.
-  // This should be changed if cuSOLVER would be used
-  auto infos = at::empty({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
+  // cuSOLVER and MAGMA are used for CUDA inputs and cuSOLVER requires 'infos' to reside in GPU memory
+  // MAGMA path doesn't use it
+  auto infos = at::empty({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
 
   bool result_input_same_type = (result.scalar_type() == input.scalar_type());
   bool result_equal_expected_shape = result.sizes().equals(input.sizes());

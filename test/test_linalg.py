@@ -208,9 +208,9 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should be compatible
+        # dtypes should be safely castable
         out = torch.empty(*A.shape, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
             torch.linalg.cholesky(A, out=out)
 
         # device should match
@@ -605,15 +605,15 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should be compatible
+        # dtypes should be safely castable
         out_w = torch.empty(0, dtype=real_dtype, device=device)
         out_v = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected eigenvectors to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got eigenvectors with dtype Int"):
             torch.linalg.eigh(a, out=(out_w, out_v))
 
         out_w = torch.empty(0, dtype=torch.int, device=device)
         out_v = torch.empty(0, dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected eigenvalues to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got eigenvalues with dtype Int"):
             torch.linalg.eigh(a, out=(out_w, out_v))
 
         # device should match
@@ -748,9 +748,9 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should be compatible
+        # dtypes should be safely castable
         out = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
             torch.linalg.eigvalsh(t, out=out)
 
         # device should match
@@ -1156,10 +1156,10 @@ class TestLinalg(TestCase):
                 self.assertEqual(len(w), 1)
                 self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should be compatible
+        # dtypes should be safely castable
         out = torch.empty(0, dtype=torch.int, device=device)
         for p in ['fro', 2]:
-            with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+            with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
                 torch.linalg.cond(a, p, out=out)
 
         # device should match
@@ -1456,17 +1456,6 @@ class TestLinalg(TestCase):
             self.assertEqual(ee[:, 0], np_e)  # real part
             self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))  # imaginary part
         self.assertEqual(vv, np_v)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.complex64, torch.complex128)
-    def test_eig_backward_complex(self, device, dtype):
-        # torch.eig's backward is not supported yet for complex types. We
-        # should kill this test once it's implemented.
-        a = torch.tensor([[1., 2], [3, 4]], device=device, dtype=dtype, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "eig does not support automatic differentiation for outputs with complex dtype"):
-            e, v = torch.eig(a, True)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -1992,23 +1981,23 @@ class TestLinalg(TestCase):
                 self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
                 self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-            # dtypes should be compatible
+            # dtypes should be safely castable
             out_u = torch.empty(0, dtype=torch.int, device=device)
             out_s = torch.empty(0, dtype=torch.int, device=device)
             out_v = torch.empty(0, dtype=torch.int, device=device)
-            with self.assertRaisesRegex(RuntimeError, "Expected U to be compatible with"):
+            with self.assertRaisesRegex(RuntimeError, "but got U with dtype Int"):
                 svd(a, out=(out_u, out_s, out_v))
 
             out_u = torch.empty(0, dtype=dtype, device=device)
             if svd == torch.linalg.svd:
-                msg = "Expected VT to be compatible with"
+                msg = "but got VT with dtype Int"
             else:
-                msg = "Expected V to be compatible with"
+                msg = "but got V with dtype Int"
             with self.assertRaisesRegex(RuntimeError, msg):
                 svd(a, out=(out_u, out_s, out_v))
 
             out_v = torch.empty(0, dtype=dtype, device=device)
-            with self.assertRaisesRegex(RuntimeError, "Expected S to be compatible with"):
+            with self.assertRaisesRegex(RuntimeError, "but got S with dtype Int"):
                 svd(a, out=(out_u, out_s, out_v))
 
             # device should match
@@ -2253,11 +2242,11 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky_solve_out_errors_and_warnings(self, device, dtype):
-        # dtypes should be compatible
+        # dtypes should be safely castable
         a = torch.eye(2, dtype=dtype, device=device)
         b = torch.randn(2, 1, dtype=dtype, device=device)
         out = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
             torch.cholesky_solve(b, a, out=out)
 
         # device should match
@@ -2382,6 +2371,19 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_inverse_errors_large(self, device, dtype):
+        # Test batched inverse of singular matrices reports errors without crashing (gh-51930)
+        x = torch.empty((8, 10, 616, 616), dtype=dtype, device=device)
+        x[:] = torch.eye(616, dtype=dtype, device=device)
+        x[..., 10, 10] = 0
+        with self.assertRaisesRegex(RuntimeError, r'For batch 0: U\(11,11\) is zero'):
+            torch.inverse(x)
+
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-7, torch.complex128: 1e-7})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -2460,9 +2462,9 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes of out and input should be compatible
+        # dtypes of out and input should be safely castable
         out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
             torch.linalg.pinv(a, out=out)
 
         if torch.cuda.is_available():
@@ -2486,7 +2488,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_inv_errors(self, device, dtype):
+    def test_inv_errors_and_warnings(self, device, dtype):
         # inv expects batches of square matrices as input
         a = torch.randn(2, 3, 4, 3, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
@@ -2507,23 +2509,41 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
-        # if non-empty out tensor with wrong shape is passed an error is thrown
-        a = torch.randn(2, 3, 3, device=device, dtype=dtype)
-        out = torch.empty(1, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "does not match input shape"):
-            torch.linalg.inv(a, out=out)
-
         # dtypes should match
-        out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match input dtype"):
+        a = torch.eye(2, dtype=dtype, device=device)
+        out = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "got result with dtype Int"):
             torch.linalg.inv(a, out=out)
 
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty(0, device=wrong_device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "does not match input device"):
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.inv(a, out=out)
+
+        # if out tensor with wrong shape is passed a warning is given
+        with warnings.catch_warnings(record=True) as w:
+            a = torch.eye(2, dtype=dtype, device=device)
+            out = torch.empty(1, dtype=dtype, device=device)
+            # Trigger warning
+            torch.linalg.inv(a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # if out tensor in batched column major format but with wrong a warning is given
+        with warnings.catch_warnings(record=True) as w:
+            a = torch.eye(2, dtype=dtype, device=device)
+            out = torch.empty(3, 3, dtype=dtype, device=device)
+            out = out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
+            out = out.transpose(-2, -1)
+            self.assertTrue(out.transpose(-2, -1).is_contiguous())
+            # Trigger warning
+            torch.linalg.inv(a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
     def solve_test_helper(self, A_dims, b_dims, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
@@ -2557,13 +2577,16 @@ class TestLinalg(TestCase):
             self.assertEqual(x, expected)
 
             # Check out= variant
-            if rhs == ():
-                out = torch.empty_like(x.unsqueeze(-1))
-            else:
-                out = torch.empty_like(x)
+            out = torch.empty_like(x)
             ans = torch.linalg.solve(A, b, out=out)
             self.assertEqual(ans, out)
             self.assertEqual(x, out)
+
+            # Check out= variant with complex128 out tensor
+            out = torch.empty_like(x).to(torch.complex128)
+            ans = torch.linalg.solve(A, b, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(x.to(torch.complex128), out)
 
             # Check empty out
             out = torch.empty(0, dtype=dtype, device=device)
@@ -2595,7 +2618,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_solve_errors(self, device, dtype):
+    def test_solve_errors_and_warnings(self, device, dtype):
         # solve expects batches of square matrices as input
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             a = torch.randn(2, 3, 4, 3, dtype=dtype, device=device)
@@ -2619,20 +2642,44 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
-        # if out is non-empty then it should have correct sizes
-        with self.assertRaisesRegex(RuntimeError, r'does not match broadcasted other shape'):
-            out = torch.empty(1, dtype=dtype, device=device)
-            A = torch.eye(3, dtype=dtype, device=device)
-            b = torch.randn(3, 1, dtype=dtype, device=device)
-            torch.linalg.solve(A, b, out=out)
-
-        # if out is non-empty then it should also be Fortran contiguous
-        with self.assertRaisesRegex(RuntimeError, r'tensor must be in batched column major'):
-            out = torch.zeros(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
-            self.assertFalse(out.is_contiguous())
+        # if out tensor with wrong shape is passed a warning is given
+        # matrix 'b' case
+        with warnings.catch_warnings(record=True) as w:
             A = torch.eye(2, dtype=dtype, device=device).reshape((1, 2, 2)).repeat(2, 1, 1)
             b = torch.randn(2, 2, 2, dtype=dtype, device=device)
+            out = torch.zeros(1, dtype=dtype, device=device)
+            # Trigger warning
             torch.linalg.solve(A, b, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # if out tensor with wrong shape is passed a warning is given
+        # vector 'b' case
+        with warnings.catch_warnings(record=True) as w:
+            A = torch.eye(2, dtype=dtype, device=device)
+            b = torch.randn(2, dtype=dtype, device=device)
+            out = torch.zeros(1, dtype=dtype, device=device)
+            # Trigger warning
+            torch.linalg.solve(A, b, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should be safely castable
+        a = torch.eye(2, dtype=dtype, device=device)
+        b = torch.randn(2, 1, dtype=dtype, device=device)
+        out = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
+            torch.linalg.solve(a, b, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            clone_a = torch.empty_like(a)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.solve(a, b, out=out)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -2711,17 +2758,17 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_old_solve_errors_and_warnings(self, device, dtype):
-        # dtypes should be compatible
+        # dtypes should be safely castable
         a = torch.eye(2, dtype=dtype, device=device)
         b = torch.randn(2, 1, dtype=dtype, device=device)
         out = torch.empty(0, dtype=torch.int, device=device)
         lu = torch.empty(0, dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected solution to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got solution with dtype Int"):
             torch.solve(b, a, out=(out, lu))
 
         out = torch.empty(0, dtype=dtype, device=device)
         lu = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected lu to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got lu with dtype Int"):
             torch.solve(b, a, out=(out, lu))
 
         # device should match
@@ -2836,9 +2883,9 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should be compatible
+        # dtypes should be safely castable
         out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
             torch.linalg.tensorsolve(a, b, out=out)
 
         # device should match
@@ -2965,9 +3012,9 @@ class TestLinalg(TestCase):
                 self.assertEqual(len(w), 1)
                 self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-            # dtypes should be compatible
+            # dtypes should be safely castable
             out = torch.empty(0, dtype=torch.int, device=device)
-            with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+            with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
                 torch.linalg.tensorinv(a, ind=ind, out=out)
 
             # device should match
@@ -3159,10 +3206,10 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_matrix_rank_out_errors_and_warnings(self, device, dtype):
-        # dtypes should be compatible
+        # dtypes should be safely castable
         a = torch.eye(2, dtype=dtype, device=device)
         out = torch.empty(0, dtype=torch.bool, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Bool"):
             torch.linalg.matrix_rank(a, out=out)
 
         # device should match
@@ -3762,17 +3809,17 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_triangular_solve_out_errors_and_warnings(self, device, dtype):
-        # dtypes should be compatible
+        # dtypes should be safely castable
         a = torch.eye(2, dtype=dtype, device=device)
         b = torch.randn(2, 1, dtype=dtype, device=device)
         out = torch.empty_like(b).to(torch.int)
         clone_a = torch.empty_like(a)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
             torch.triangular_solve(b, a, out=(out, clone_a))
 
         out = torch.empty_like(b)
         clone_a = clone_a.to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "Expected clone_A to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got clone_A with dtype Int"):
             torch.triangular_solve(b, a, out=(out, clone_a))
 
         # device should match
@@ -4178,8 +4225,9 @@ class TestLinalg(TestCase):
             expected = x / x.norm(p, 0, keepdim=True).clamp(min=1)
             self.assertEqual(res, expected, msg="renorm failed for {}-norm".format(p))
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_orgqr(self, device, dtype):
         def generate_reflectors_and_tau(A):
@@ -4230,8 +4278,9 @@ class TestLinalg(TestCase):
         for shape in shapes:
             run_test(shape)
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfRocm
     def test_orgqr_errors_and_warnings(self, device):
         test_cases = [
             # input1 size, input2 size, error regex
@@ -4256,27 +4305,25 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should be compatible
+        # dtypes should be safely castable
         out = torch.empty_like(reflectors).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
             torch.orgqr(reflectors, tau, out=out)
 
         with self.assertRaisesRegex(RuntimeError, "tau dtype Int does not match input dtype"):
             torch.orgqr(reflectors, tau.to(torch.int))
 
-        # TODO: enable the following tests when orgqr is implemented for CUDA
         if torch.cuda.is_available():
-            with self.assertRaisesRegex(RuntimeError, "the operator doesn't exist for this backend"):
-                # device of out and input should match
-                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-                out = torch.empty_like(reflectors).to(wrong_device)
-                # with self.assertRaisesRegex(RuntimeError, "Expected result and input to be on the same device"):
+            # device of out and input should match
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty_like(reflectors).to(wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
                 torch.orgqr(reflectors, tau, out=out)
 
-                # device of tau and input should match
-                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-                tau = tau.to(wrong_device)
-                # with self.assertRaisesRegex(RuntimeError, "Expected input and tau to be on the same device"):
+            # device of tau and input should match
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            tau = tau.to(wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "Expected input and tau to be on the same device"):
                 torch.orgqr(reflectors, tau)
 
     @precisionOverride({torch.complex64: 5e-6})
@@ -4820,8 +4867,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(*([torch.float, torch.double] +
-                    ([] if TEST_WITH_ROCM else torch.testing.get_all_complex_dtypes())))
+    @dtypesIfCUDA(*([torch.float, torch.double] + torch.testing.get_all_complex_dtypes()))
     @tf32_on_and_off(0.005)
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
@@ -5103,21 +5149,21 @@ else:
         self.assertEqual(out_tensor, ref)
         res3 = out_tensor.clone()
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(out_tensor, func + "_")(1, b1, b2)
         self.assertEqual(out_tensor, ref * 2),
         getattr(res3, func + "_")(b1, b2, beta=1)
         self.assertEqual(out_tensor, res3)
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(out_tensor, func + "_")(1., .5, b1, b2)
         self.assertEqual(out_tensor, ref * 2.5)
         getattr(res3, func + "_")(b1, b2, beta=1., alpha=.5)
         self.assertEqual(out_tensor, res3)
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func} is deprecated"):
             self.assertEqual(out_tensor, getattr(torch, func)(1, out_tensor, 0, b1, b2))
 
@@ -5791,14 +5837,14 @@ else:
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should be compatible
+        # dtypes should be safely castable
         sign_out = torch.empty_like(a).to(torch.int)
         logabsdet_out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "Expected sign to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got sign with dtype Int"):
             torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
         sign_out = torch.empty(0, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "Expected logabsdet to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got logabsdet with dtype Int"):
             torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
         # device should match
@@ -6106,9 +6152,9 @@ else:
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should be compatible
+        # dtypes should be safely castable
         out = torch.empty(*a.shape, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
             torch.cholesky_inverse(a, out=out)
 
         # device should match
@@ -6384,12 +6430,12 @@ else:
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_lu_solve_out_errors_and_warnings(self, device, dtype):
-        # dtypes should be compatible
+        # dtypes should be safely castable
         a = torch.eye(2, dtype=dtype, device=device)
         LU_data, LU_pivots = torch.lu(a, pivot=True)
         b = torch.randn(2, 1, dtype=dtype, device=device)
         out = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected result to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
             torch.lu_solve(b, LU_data, LU_pivots, out=out)
 
         # device should match
@@ -6479,15 +6525,15 @@ else:
             self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-        # dtypes should be compatible
+        # dtypes should be safely castable
         out_w = torch.empty(0, dtype=real_dtype, device=device)
         out_v = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected eigenvectors to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got eigenvectors with dtype Int"):
             torch.symeig(a, out=(out_w, out_v))
 
         out_w = torch.empty(0, dtype=torch.int, device=device)
         out_v = torch.empty(0, dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Expected eigenvalues to be compatible with"):
+        with self.assertRaisesRegex(RuntimeError, "but got eigenvalues with dtype Int"):
             torch.symeig(a, out=(out_w, out_v))
 
         # device should match

@@ -1,6 +1,6 @@
 import random
 
-from torch.utils.data import IterDataPipe, Sampler, SequentialSampler
+from torch.utils.data import IterDataPipe, Sampler, SequentialSampler, functional_datapipe
 from typing import TypeVar, Type, Iterator, Sized, Optional, Tuple, Dict, List
 
 T_co = TypeVar('T_co', covariant=True)
@@ -43,6 +43,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
         raise NotImplementedError
 
 
+@functional_datapipe('shuffle')
 class ShuffleIterDataPipe(IterDataPipe[T_co]):
     r""" :class:`ShuffleIterDataPipe`
 
