@@ -32,7 +32,7 @@ static inline std::ostream& operator<<(std::ostream & out, Scalar s) {
   if (s.isBoolean()) {
     return out << (s.toBool() ? "true" : "false");
   }
-  if (s.isIntegral()) {
+  if (s.isIntegral(false)) {
     return out << s.toLong();
   }
   throw std::logic_error("Unknown type in Scalar");
