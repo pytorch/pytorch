@@ -1413,6 +1413,22 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
 
     return samples
 
+
+def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        SampleInput((_make_tensor_helper((S, S, S)), 0)),
+        SampleInput((_make_tensor_helper((S, S, S)), 1)),
+        # NOTE: if `dtype` is not same as input, then inplace variants fail with
+        # `provided dtype must match the dtype of self tensor in cumsum`
+        SampleInput((_make_tensor_helper((S, S, S)), 1), kwargs={'dtype': dtype}),
+        SampleInput((_make_tensor_helper(()), 0)),
+    )
+
+    return samples
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -1756,6 +1772,37 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('cumsum',
+           dtypesIfCPU=all_types_and_complex_and(torch.bool),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53360
+               # For integer inputs,
+               # inplace variant preserves dtype of `self` while method variant
+               # always promotes it to torch.long.
+               # >>> t = torch.randint(2, 10, (3, 2), dtype=torch.int8)
+               # >>> t.cumsum(0).dtype
+               # torch.int64
+               # >>> t.cumsum_(0).dtype
+               # torch.int8
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32]),
+               # Reference: https://github.com/pytorch/pytorch/issues/53358
+               # >>> t = torch.tensor([False])
+               # >>> t.cumsum_(0) # Error "cumsum_out_cpu" not implemented for 'Bool'
+               # >>> t.cuda().cumsum_(0) # Error "cumsum_cuda" not implemented for 'Bool'
+               # >>> t = torch.tensor(False)
+               # >>> t.cumsum_(0) # Error "cumsum_out_cpu" not implemented for 'Bool'
+               # >>> t.cuda().cumsum_(0) # Does not fail!
+               # tensor(False, device='cuda:0')
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=[torch.bool]),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.bool]),
+               # cumsum does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           ),
+           sample_inputs_func=sample_inputs_cumsum),
     UnaryUfuncInfo('deg2rad',
                    ref=np.radians,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -3231,10 +3278,7 @@ def method_tests():
         ('cummin', (S, S, S), (0,), 'dim0', (), [0]),
         ('cummin', (S, S, S), (1,), 'dim1', (), [0]),
         ('cummin', (), (0,), 'dim0_scalar', (), [0]),
-        ('cumsum', (S, S, S), (0,), 'dim0', (), [0]),
-        ('cumsum', (S, S, S), (1,), 'dim1', (), [0]),
         ('cumsum', (S, S, S), (1,), 'dim1_cast', (), [0], (), ident, {'dtype': torch.float64}),
-        ('cumsum', (), (0,), 'dim0_scalar', (), [0]),
         ('cumprod', (S, S, S), (0,)),
         ('cumprod', (S, S, S), (1,), 'dim1', (), [0]),
         ('cumprod', (), (0,), 'scalar'),
