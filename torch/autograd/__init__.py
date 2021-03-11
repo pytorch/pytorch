@@ -71,7 +71,7 @@ def backward(
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
     grad_variables: Optional[_TensorOrTensors] = None,
-    inputs: Optional[Sequence[torch.Tensor]] = None,
+    inputs: Optional[_TensorOrTensors] = None,
 ) -> None:
     r"""Computes the sum of gradients of given tensors w.r.t. graph leaves.
 
@@ -135,7 +135,8 @@ def backward(
         raise RuntimeError("'inputs' argument to backward() cannot be empty.")
 
     tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
-    inputs = tuple(inputs) if inputs is not None else tuple()
+    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else \
+        tuple(inputs) if inputs is not None else tuple()
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_)
