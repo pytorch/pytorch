@@ -2,15 +2,16 @@
 
 #include <torch/library.h>
 
-#include "torch/csrc/autograd/function.h"
 
 #include <ATen/RedispatchFunctions.h>
-#include "ATen/quantized/Quantizer.h"
 
 // ${generated_comment}
 
 
 using namespace at;
+using torch::autograd::CreationMeta;
+using torch::autograd::as_view;
+using torch::autograd::increment_version;
 
 namespace torch {
 

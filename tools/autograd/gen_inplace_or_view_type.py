@@ -1,9 +1,15 @@
 from tools.codegen.api import cpp
-from tools.codegen.api.autograd import *
-from tools.codegen.api.types import *
+from tools.codegen.api.autograd import (
+    NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
+    dispatch_strategy,
+)
+from tools.codegen.api.types import Binding, DispatcherSignature, CppSignatureGroup
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
-from tools.codegen.model import *
+from tools.codegen.model import (
+    Type, NativeFunction, SelfArgument, TensorOptionsArguments, Variant,
+    SchemaKind, is_foreach_op,
+)
 from typing import List, Optional, Sequence, Tuple
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
@@ -55,7 +61,7 @@ VIEW_FUNCTIONS = {
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
     VIEW_FUNCTIONS[key] = 'self'
 
-# Functions for which we use torch::autograd::CreationMeta::MULTI_OUTPUT_SAFE. I.e., the ones for
+# Functions for which we use CreationMeta::MULTI_OUTPUT_SAFE. I.e., the ones for
 # which inplace modification of outputs is being gradually deprecated.
 MULTI_OUTPUT_SAFE_FUNCTIONS = {
     'split',
@@ -130,7 +136,7 @@ ${assign_return_values} ([&]() {
 })();
 """)
 
-TMP_VAR = 'tmp'
+TMP_VAR = '_tmp'
 
 # FIXME: Ideally these functions should be methods on Type class, but we have a
 #        comment in codegen/model.py there saying these concepts are not well defined.
@@ -272,7 +278,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         raise TypeError(f'The view info should be a string for {base_name}, but it is: {view_info}')
     if len(differentiable_output_vars) == 0:
         # no output is differentiable (.indices() for SparseTensors for example)
-        rhs_value = (f'torch::autograd::as_view({view_info}, {var}, '
+        rhs_value = (f'as_view({view_info}, {var}, '
                      f'/* is_bw_differentiable */ false, /* is_fw_differentiable */ false)')
     elif len(differentiable_output_vars) == 1:
         # Single differentiable output (Tensor or Tensor[])
@@ -285,10 +291,10 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         # See NOTE [ View + Inplace detection ] for more details about this logic
         if is_tensor_list_type(return_info.type):
             if base_name in MULTI_OUTPUT_SAFE_FUNCTIONS:
-                creation_meta = 'torch::autograd::CreationMeta::MULTI_OUTPUT_SAFE'
+                creation_meta = 'CreationMeta::MULTI_OUTPUT_SAFE'
             else:
-                creation_meta = 'torch::autograd::CreationMeta::MULTI_OUTPUT_NODE'
-            call += (f'torch::autograd::as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
+                creation_meta = 'CreationMeta::MULTI_OUTPUT_NODE'
+            call += (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                      '/* is_fw_differentiable */ true, '
                      f'/* creation_meta */ {creation_meta});')
             rhs_value = f'std::move({var})'
@@ -296,9 +302,9 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
             _, unpacked_bindings = unpack_args(f)
             call += emit_view_lambda(f, unpacked_bindings)
             creation_meta = ('at::GradMode::is_enabled() ? '
-                             'torch::autograd::CreationMeta::DEFAULT : '
-                             'torch::autograd::CreationMeta::NO_GRAD_MODE')
-            rhs_value = (f'torch::autograd::as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
+                             'CreationMeta::DEFAULT : '
+                             'CreationMeta::NO_GRAD_MODE')
+            rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                          '/* is_fw_differentiable */ true, '
                          f'/* view_func */ func, /* creation_meta */ {creation_meta})')
     else:
@@ -307,6 +313,9 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
                            'when at least one of them is view is not supported.')
     return call, rhs_value
 
+def modifies_arguments(f: NativeFunction) -> bool:
+    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
+
 def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     f = fn.func
     inplace_view_body: List[str] = []
@@ -314,10 +323,9 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    ret_and_arg_types = ', '.join([dispatcher_sig.returns_type()] + [a.type.cpp_type() for a in dispatcher_exprs])
     # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
     # See Note [Plumbing Keys Through The Dispatcher] for details.
-    dispatch_key_set = 'ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::InplaceOrView)'
+    dispatch_key_set = 'ks & c10::after_InplaceOrView_keyset'
     redispatch_args = ', '.join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
@@ -327,15 +335,15 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         api_name = sig_group.faithful_signature.name()
     else:
         api_name = sig_group.signature.name()
-    # inplace_view_body.append(THROW_IF_VARIABLETYPE_ON)
     if modifies_arguments(f):  # inplace op
         inplace_view_body.append(INPLACE_REDISPATCH.substitute(
             api_name=api_name,
             unpacked_args=redispatch_args,
         ))
         for r in cpp.return_names(f):
-            inplace_view_body.append(f'torch::autograd::increment_version({r});')
-    else:  # view op
+            inplace_view_body.append(f'increment_version({r});')
+    else:
+        assert(get_view_info(fn) is not None)
         inplace_view_body.append(VIEW_REDISPATCH.substitute(
             assign_return_values='auto ' + TMP_VAR + ' = ',
             api_name=api_name,
@@ -362,7 +370,7 @@ def gen_formals(f: NativeFunction) -> str:
 
 def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and not modifies_arguments(f):
+    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     return METHOD_DEFINITION.substitute(
         return_type=cpp.returns_type(f.func.returns),
@@ -371,12 +379,9 @@ def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInf
         type_definition_body=emit_inplace_or_view_body(fn),
     )
 
-def modifies_arguments(f: NativeFunction) -> bool:
-    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
-
 def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and not modifies_arguments(f):
+    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,

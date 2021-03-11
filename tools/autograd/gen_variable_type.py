@@ -90,7 +90,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'reflection_pad1d_backward', 'reflection_pad2d_backward',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
-    'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar'
+    'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar',
+    'eig',
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -224,7 +225,7 @@ at::redispatch::${api_name}(${unpacked_args})""")
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate("""\
-auto tmp = ([&]() {
+auto ${tmp_var} = ([&]() {
   ${guard}
   return ${base_type_call};
 })();
@@ -258,7 +259,7 @@ ${statements}
 def gen_variable_type(
     out: str,
     native_yaml_path: str,
-    fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo],
+    fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
 ) -> None:
 
@@ -269,7 +270,7 @@ def gen_variable_type(
     compute the output. The grad_fn is attached to differentiable functions.
     """
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    gen_variable_type_shard(fm, fns_with_infos, 'VariableType.h', 'VariableType.h')
+    gen_variable_type_shard(fm, fns_with_diff_infos, 'VariableType.h', 'VariableType.h')
 
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
@@ -277,14 +278,14 @@ def gen_variable_type(
     shards: List[List[NativeFunctionWithDifferentiabilityInfo]] = [[] for _ in range(num_shards)]
 
     # functions are assigned arbitrarily but stably to a file based on hash
-    for fn in fns_with_infos:
+    for fn in fns_with_diff_infos:
         x = sum(ord(c) for c in cpp.name(fn.func.func)) % num_shards
         shards[x].append(fn)
 
     for i, shard in enumerate(shards):
         gen_variable_type_shard(fm, shard, 'VariableType.cpp', f'VariableType_{i}.cpp')
 
-    gen_variable_type_shard(fm, fns_with_infos, 'VariableType.cpp', 'VariableTypeEverything.cpp')
+    gen_variable_type_shard(fm, fns_with_diff_infos, 'VariableType.cpp', 'VariableTypeEverything.cpp')
 
 @with_native_function
 def gen_wrapper_registration(f: NativeFunction) -> str:
@@ -296,15 +297,15 @@ def gen_wrapper_registration(f: NativeFunction) -> str:
 
 def gen_variable_type_shard(
     fm: FileManager,
-    fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo],
+    fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_name: str,
     output_name: str,
 ) -> None:
     type_definitions: List[str] = []
     wrapper_registrations: List[str] = []
 
-    filtered_fns_with_infos = list(filter(use_derived, fns_with_infos))
-    for fn in filtered_fns_with_infos:
+    filtered_fns_with_diff_infos = list(filter(use_derived, fns_with_diff_infos))
+    for fn in filtered_fns_with_diff_infos:
         f = fn.func
         name = cpp.name(f.func)
         formals = gen_formals(f)
@@ -626,7 +627,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
         if not modifies_arguments(f) and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
-                base_type_call=base_type_call, guard=guard)
+                base_type_call=base_type_call, tmp_var=TMP_VAR, guard=guard)
 
             call += wrap_output(f, unpacked_bindings, TMP_VAR)
         else:

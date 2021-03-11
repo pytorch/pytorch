@@ -159,7 +159,7 @@ enum class DispatchKey : uint8_t {
   // 2. For view ops this kernel does `as_view` setup where we properly setup
   //    DifferentiableViewMeta on the view tensors.
   //
-  // For functional ops it's fallthrough kernel since there's no extra
+  // For other ops it's fallthrough kernel since there's no extra
   // work to do.
   //
   // Note [Dream: skip VariableType kernel when requires_grad=false]
