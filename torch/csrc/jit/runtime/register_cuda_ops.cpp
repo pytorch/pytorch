@@ -19,32 +19,38 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 
 RegisterOperators const reg({
     Operator(
-        "_cuda::current_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
+        "cuda::current_stream(optional device) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
-          auto idx = uint16_t(pop(stack).toInt());
-          auto s = c10::cuda::getCurrentCUDAStream(idx);
+          auto device = pop(stack).toOptional<c10::Device>();
+          c10::DeviceIndex device_index = device.has_value()
+              ? device->index()
+              : c10::cuda::current_device();
+          auto s = c10::cuda::getCurrentCUDAStream(device_index);
           auto st = make_custom_class<torch::jit::CUDAStream>(s);
           push(stack, IValue(st));
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "_cuda::default_stream(int64_t val) -> __torch__.torch.classes.cuda.Stream",
+        "cuda::default_stream(optional device) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
-          auto idx = uint16_t(pop(stack).toInt());
-          auto s = c10::cuda::getDefaultCUDAStream(idx);
+          auto device = pop(stack).toOptional<c10::Device>();
+          c10::DeviceIndex device_index = device.has_value()
+              ? device->index()
+              : c10::cuda::current_device();
+          auto s = c10::cuda::getDefaultCUDAStream(device_index);
           auto st = make_custom_class<torch::jit::CUDAStream>(s);
           push(stack, IValue(st));
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "_cuda::current_device() -> int",
+        "cuda::_current_device() -> int",
         [](Stack* stack) {
           auto v = c10::cuda::current_device();
           push(stack, static_cast<int>(v));
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "_cuda::set_device(int64_t val) -> ()",
+        "cuda::_set_device(int64_t val) -> ()",
         [](Stack* stack) {
           int64_t idx = -1;
           pop(stack, idx);
@@ -52,7 +58,7 @@ RegisterOperators const reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "_cuda::device_index(Device device) -> int",
+        "cuda::device_index(Device device) -> int",
         [](Stack* stack) {
           auto device = pop(stack);
           auto idx = device.toDevice().index();
@@ -60,11 +66,11 @@ RegisterOperators const reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "_cuda::device_count() -> int",
+        "cuda::device_count() -> int",
         [](Stack* stack) { push(stack, at::cuda::device_count()); },
         aliasAnalysisFromSchema()),
     Operator(
-        "_cuda::set_stream(__torch__.torch.classes.cuda.Stream stream) -> ()",
+        "cuda::set_stream(__torch__.torch.classes.cuda.Stream stream) -> ()",
         [](Stack* stack) {
           auto v = pop(stack);
           auto s = v.toCustomClass<torch::jit::CUDAStream>();

@@ -341,9 +341,8 @@ class StreamContext(object):
         self.idx = -1
         self.stream = stream
         # Initialize the below streams to default stream on the current device
-        self.device_index = _get_device_index(device=None, optional=True)
-        self.src_prev_stream = torch.cuda.default_stream(self.device_index)
-        self.dst_prev_stream = torch.cuda.default_stream(self.device_index)
+        self.src_prev_stream = torch.cuda.default_stream(None)
+        self.dst_prev_stream = torch.cuda.default_stream(None)
 
     def __enter__(self):
         self.idx = _get_device_index(device=None, optional=True)
@@ -356,14 +355,13 @@ class StreamContext(object):
         # Return if stream is None
         if cur_stream is None:
             return
-        self.src_prev_stream = torch.cuda.current_stream(self.idx)
+        self.src_prev_stream = torch.cuda.current_stream(None)
 
         # If the stream is not on the current device, then
         # set the current stream on the device
         if self.src_prev_stream.device != cur_stream.device:
             with device(cur_stream.device):
-                cur_stream_device_index = _get_device_index(cur_stream.device)
-                self.dst_prev_stream = torch.cuda.current_stream(cur_stream_device_index)
+                self.dst_prev_stream = torch.cuda.current_stream(cur_stream.device)
         torch.cuda.set_stream(cur_stream)  # type: ignore
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
