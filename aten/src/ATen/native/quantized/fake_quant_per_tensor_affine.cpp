@@ -60,7 +60,6 @@ std::tuple<Tensor, Tensor> fake_quantize_per_tensor_affine_cachemask(
     int64_t zero_point,
     int64_t quant_min,
     int64_t quant_max) {
-  TORCH_CHECK(self.scalar_type() == ScalarType::Float);
   TORCH_CHECK(
       quant_min <= quant_max,
       "`quant_min` should be less than or \
@@ -90,7 +89,6 @@ Returns:
 Tensor fake_quantize_per_tensor_affine_cachemask_backward(
     const Tensor& dY,
     const Tensor& mask) {
-  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
   TORCH_CHECK(mask.scalar_type() == ScalarType::Bool);
   TORCH_CHECK(mask.numel() == dY.numel(),
       "`mask` and `dY` are not the same size: ",

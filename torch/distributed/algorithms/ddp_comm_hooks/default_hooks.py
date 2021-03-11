@@ -17,7 +17,7 @@ def _allreduce_fut(
 
 
 def allreduce_hook(
-    process_group: dist.ProcessGroup, bucket: dist._GradBucket
+    process_group: dist.ProcessGroup, bucket: dist.GradBucket
 ) -> torch.futures.Future:
     """
     This DDP communication hook just calls ``allreduce`` using ``GradBucket``
@@ -35,7 +35,7 @@ def allreduce_hook(
 
 
 def fp16_compress_hook(
-    process_group: dist.ProcessGroup, bucket: dist._GradBucket
+    process_group: dist.ProcessGroup, bucket: dist.GradBucket
 ) -> torch.futures.Future:
     """
     This DDP communication hook implements a simple gradient compression
@@ -65,59 +65,3 @@ def fp16_compress_hook(
         return [decompressed_tensor]
 
     return fut.then(decompress)
-
-
-def _get_allgather_out_list(all_gather_in_list, world_size):
-    out_list = [
-        torch.zeros_like(
-            all_gather_in_list,
-            device=all_gather_in_list.device,
-            dtype=all_gather_in_list.dtype,
-        )
-        for _ in range(world_size)
-    ]
-    return out_list
-
-
-def _allgather_then_aggregate_hook(
-    process_group: dist.ProcessGroup, bucket: dist._GradBucket
-) -> torch.futures.Future:
-    """
-    Similar to ``allreduce_hook``, this hook first gathers ``GradBucket`` tensors
-    and its ``then`` callback aggregates the gathered gradient tensors and takes
-    mean. Instead of ``allreduce`` this hook uses ``allgather``. Note that with
-    W workers, both the computation and communication time scale as O(W) for
-    allgather compared to O(logW) for allreduce. Therefore, this hook is expected
-    to be much slower than ``allreduce_hook`` although both essentially do the
-    same thing with the gradients.
-
-    .. warning ::
-        This is for test and experiments. User is suggested to use a faster
-        alternative called ``allreduce_hook``  that uses ``allreduce`` protocol
-        instead of ``allgather`` protocol.
-
-    Example::
-        >>> ddp_model.register_comm_hook(process_group, allreduce_hook)
-    """
-    group_to_use = process_group if process_group is not None else dist.group.WORLD
-    rank = process_group.rank() if process_group is not None else dist.get_rank()
-    world_size = group_to_use.size()
-
-    tensor = bucket.get_tensors()[0]
-    fut = dist.all_gather(
-        _get_allgather_out_list(tensor, world_size),
-        tensor,
-        group=group_to_use,
-        async_op=True,
-    ).get_future()
-
-    def aggregate(fut):
-        all_ranks_tensor = fut.value()[0]
-        tensor = bucket.get_tensors()[0]
-        for r, gathered_tensor in enumerate(all_ranks_tensor):
-            if r != rank:
-                tensor += gathered_tensor
-
-        return [tensor.div_(world_size)]
-
-    return fut.then(aggregate)

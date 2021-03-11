@@ -91,7 +91,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'reflection_pad1d_backward', 'reflection_pad2d_backward',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
-    'diag', 'masked_scatter', 'masked_select', 'masked_fill', 'index_fill', 'trace'
+    'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar',
+    'eig',
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -240,6 +241,8 @@ at::${api_name}(${unpacked_args})""")
 CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
 ${var}.${api_name}(${unpacked_method_args})""")
 
+CALL_REDISPATCH = CodeTemplate("""\
+at::redispatch::${api_name}(${unpacked_args})""")
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
@@ -345,8 +348,11 @@ def gen_variable_type(
 @with_native_function
 def gen_formals(f: NativeFunction) -> str:
     return ', '.join(
-        f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
-        for a in f.func.schema_order_arguments()
+        # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
+        # See Note [Plumbing Keys Through The Dispatcher] for details.
+        ['c10::DispatchKeySet ks'] +
+        [f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+         for a in f.func.schema_order_arguments()]
     )
 
 @with_native_function
@@ -646,20 +652,43 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 stmts.append('}')
         return stmts
 
-    def emit_dispatch_call(f: NativeFunction, input_base: str, unpacked_args: Sequence[str]) -> str:
+    # Generates a Dispatcher::redispatch() call into the dispatcher. We do this mainly for performance reasons:
+    #  - Pre-compute the full DispatchKeySet. This saves the dispatcher from having to read from TLS.
+    #  - redispatch() avoids a redundant call to RecordFunction, which was already called right before
+    #    we entered this autograd kernel.
+    # For view replay calls, we generate an ordinary Dispatcher::call() instead, because:
+    #  - We want to replay the entire call into the op, including any previously-set dispatch keys (including autograd!).
+    #  - The view replay call also is not part of the hot path.
+    def emit_dispatch_call(f: NativeFunction, input_base: str, unpacked_args: Sequence[str], *, is_view_call: bool) -> str:
         """ Dispatch call via function in a namespace or method on Tensor."""
-        if Variant.function in f.variants:
-            call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
+        dispatcher_sig = DispatcherSignature.from_schema(f.func)
+        dispatcher_exprs = dispatcher_sig.exprs()
+
+        if is_view_call:
+            # View replay functions use the standard Dispatcher::call API.
+            if Variant.function in f.variants:
+                call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
+                    api_name=cpp.name(
+                        f.func,
+                        faithful_name_for_out_overloads=True,
+                    ),
+                    unpacked_args=unpacked_args)
+            else:
+                call = CALL_DISPATCH_VIA_METHOD.substitute(
+                    api_name=cpp.name(f.func),
+                    var=input_base,
+                    unpacked_method_args=unpacked_args[1:])
+        else:
+            # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
+            # Ops also always have a function variant of the redispatch API.
+            # See Note [Plumbing Keys Through The Dispatcher] for details.
+            dispatch_key_set = 'ks & c10::after_autograd_keyset'
+            call = CALL_REDISPATCH.substitute(
                 api_name=cpp.name(
                     f.func,
                     faithful_name_for_out_overloads=True,
                 ),
-                unpacked_args=unpacked_args)
-        else:
-            call = CALL_DISPATCH_VIA_METHOD.substitute(
-                api_name=cpp.name(f.func),
-                var=input_base,
-                unpacked_method_args=unpacked_args[1:])
+                unpacked_args=[dispatch_key_set] + list(unpacked_args))
         return call
 
     def emit_view_lambda(unpacked_bindings: List[Binding]) -> str:
@@ -695,7 +724,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             else:
                 updated_unpacked_args.append(arg)
 
-        replay_view_call = emit_dispatch_call(f, input_base, updated_unpacked_args)
+        replay_view_call = emit_dispatch_call(f, input_base, updated_unpacked_args, is_view_call=True)
         replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
             input_base=input_base,
             replay_view_call=replay_view_call)
@@ -792,7 +821,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # in are now Variables.
         # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
         unpacked_args = [b.name for b in unpacked_bindings]
-        base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
+        base_type_call = emit_dispatch_call(f, 'self_', unpacked_args, is_view_call=False)
+
         if not modifies_arguments(f) and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
                 base_type_call=base_type_call)

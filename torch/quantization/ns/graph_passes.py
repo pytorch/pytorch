@@ -12,7 +12,7 @@ from .utils import (
     return_first_non_observer_node,
 )
 
-from typing import Dict, Tuple, Callable, List, Any, Optional, Union
+from typing import Dict, Tuple, Callable, List, Any, Union
 
 def _insert_logger_after_node(
     node: Node,
@@ -20,7 +20,7 @@ def _insert_logger_after_node(
     logger_cls: Callable,
     logger_node_name_suffix: str,
     model_name: str,
-    other_node_name: Optional[str] = None,
+    ref_name: str,
 ) -> Node:
     """
     Given a starting graph of
@@ -35,8 +35,16 @@ def _insert_logger_after_node(
     # create new name
     logger_node_name = \
         get_new_attr_name_with_prefix(node.name + logger_node_name_suffix)(gm)
+    # create a string representation of the node's target type
+    target_type = ''
+    if node.op == 'call_function':
+        target_type = str(node.target)
+    elif node.op == 'call_module':
+        assert isinstance(node.target, str)
+        target_mod = getattr_from_fqn(gm, node.target)
+        target_type = str(type(target_mod))
     # create the logger object
-    logger_obj = logger_cls(node.name, model_name, other_node_name)
+    logger_obj = logger_cls(node.name, model_name, ref_name, target_type)
     # attach the logger object to the parent module
     setattr(gm, logger_node_name, logger_obj)
     logger_node = node.graph.create_node(
@@ -45,7 +53,7 @@ def _insert_logger_after_node(
 
 def remove_observers_add_loggers(
     gm: GraphModule,
-    node_to_instrument_to_ref_node_name: Dict[Node, Optional[str]],
+    node_to_instrument_to_ref_node_name: Dict[Node, str],
     logger_cls: Callable,
     model_name: str,
 ) -> GraphModule:
@@ -72,13 +80,13 @@ def remove_observers_add_loggers(
             env[node.name] = env[node.args[0].name]
 
         elif node in node_to_instrument_to_ref_node_name:
-            other_node_name = node_to_instrument_to_ref_node_name[node]
+            ref_name = node_to_instrument_to_ref_node_name[node]
             # ensure env is populated with base node
             env[node.name] = new_graph.node_copy(node, load_arg)
             # add the logger after the base node
             env[node.name] = _insert_logger_after_node(
                 env[node.name], gm, logger_cls, '_ns_logger_', model_name,
-                other_node_name)
+                ref_name)
 
         else:
             env[node.name] = new_graph.node_copy(node, load_arg)
@@ -311,12 +319,13 @@ def create_a_shadows_b(
     def load_arg(a):
         return map_arg(a, lambda node: env_c[node.name])
 
-    node_b_to_matched_subgraph_a = {}
+    node_b_to_matched_subgraph_a_and_name = {}
     for match_name, match in matched_subgraph_pairs.items():
         (node_start_a, node_end_a), (node_start_b, node_end_b) = match
         assert node_start_b is node_end_b, \
             "Shadowing subgraphs of B with multiple nodes is not yet handled."
-        node_b_to_matched_subgraph_a[node_end_b] = (node_start_a, node_end_a)
+        node_b_to_matched_subgraph_a_and_name[node_end_b] = \
+            ((node_start_a, node_end_a), match_name)
 
     for node_b in gm_b.graph.nodes:
         if node_b.op == 'output':
@@ -327,8 +336,9 @@ def create_a_shadows_b(
             # remove activation post process node
             env_c[node_b.name] = env_c[node_b.args[0].name]  # type: ignore
 
-        elif node_b in node_b_to_matched_subgraph_a:
-            node_start_a, node_end_a = node_b_to_matched_subgraph_a[node_b]
+        elif node_b in node_b_to_matched_subgraph_a_and_name:
+            (node_start_a, node_end_a), ref_name = \
+                node_b_to_matched_subgraph_a_and_name[node_b]
             if False:
                 print('b')
                 print_node(node_b)
@@ -376,7 +386,7 @@ def create_a_shadows_b(
 
             # hook up a logger to the mod_b copy
             env_c[node_b.name] = _insert_logger_after_node(
-                env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_', name_b)
+                env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_', name_b, ref_name)
             # subgraph so far:
             #
             #       dtype_cast_node --> subgraph_a_copy
@@ -387,7 +397,7 @@ def create_a_shadows_b(
             # Note: we pass node_b.name to this logger, for easy matching later
             env_c[node_a_shadows_c.name] = _insert_logger_after_node(
                 env_c[node_a_shadows_c.name], gm_b, logger_cls, '_ns_logger_a_', name_a,
-                node_b.name)
+                ref_name)
             # subgraph so far:
             #
             #       dtype_cast_node --> subgraph_a_copy --> logger_a
