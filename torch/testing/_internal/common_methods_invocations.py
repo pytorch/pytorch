@@ -1382,11 +1382,10 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
-    alpha = 2  # type: ignore
-    if dtype.is_complex:
-        alpha = 1 + 2j  # type: ignore
-    elif dtype.is_floating_point:
-        alpha = 0.1  # type: ignore
+    def _samples_with_alpha_helper(args, alphas):
+        return (SampleInput(arg, kwargs=dict(alpha=alpha))for arg, alpha in product(args, alphas))
+
+    int_alpha, float_alpha, complex_alpha = 2, 0.1, 1 + 0.6j
 
     if variant == 'tensor':
         samples = (
@@ -1396,21 +1395,35 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
             SampleInput((_make_tensor_helper(()), _make_tensor_helper(()))),
             SampleInput((_make_tensor_helper(()), _make_tensor_helper((S,)))),
             SampleInput((_make_tensor_helper((S,)), _make_tensor_helper(()))),
+        )
 
-            # with `alpha`
-            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S))), kwargs=dict(alpha=alpha)),
-            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,))), kwargs=dict(alpha=alpha)),
-            SampleInput((_make_tensor_helper(()), _make_tensor_helper(())), kwargs=dict(alpha=alpha)),
-        )  # type: ignore
+        if dtype.is_complex:
+            alphas = [int_alpha, float_alpha, complex_alpha]
+        elif dtype.is_floating_point:
+            alphas = [int_alpha, float_alpha]
+        else:
+            alphas = [int_alpha]
+
+        args = ((_make_tensor_helper((S, S)), _make_tensor_helper((S, S))),
+                (_make_tensor_helper((S, S)), _make_tensor_helper((S,))),
+                (_make_tensor_helper(()), _make_tensor_helper(())))
+        samples += tuple(_samples_with_alpha_helper(args, alphas))  # type: ignore
     elif variant == 'scalar':
         # Scalar Other
         samples = (  # type: ignore
             SampleInput((_make_tensor_helper((S, S)), 0.5)),
             SampleInput((_make_tensor_helper(()), 0.5)),
-
-            SampleInput((_make_tensor_helper((S, S)), 0.5), kwargs=dict(alpha=alpha)),
-            SampleInput((_make_tensor_helper(()), 0.5), kwargs=dict(alpha=alpha)),
+            SampleInput((_make_tensor_helper((S, S)), 1.5j)),
+            SampleInput((_make_tensor_helper(()), 1.5j)),
         )
+
+        scalar_args = [(_make_tensor_helper((S, S)), 0.5), (_make_tensor_helper(()), 0.5),
+                       (_make_tensor_helper((S, S)), 2.7j), (_make_tensor_helper(()), 2.7j)]  # type: ignore
+
+        alphas = [int_alpha, float_alpha]
+        if dtype.is_complex:
+            alphas += [complex_alpha]
+        samples += tuple(_samples_with_alpha_helper(scalar_args, alphas))  # type: ignore
     else:
         raise Exception("Invalid variant!")
 
@@ -2256,7 +2269,7 @@ op_db: List[OpInfo] = [
                # E       def the_method(i0):
                # E           return torch.rsub(i0, 0.5, alpha=(1+2j))
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=[torch.cfloat, torch.cdouble]),),
+                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
            assert_autodiffed=True,),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
