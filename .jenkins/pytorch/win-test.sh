@@ -45,7 +45,6 @@ if [[ "${CIRCLE_JOB}" == *11* ]]; then
 fi
 
 run_tests() {
-     /c/"Program Files"/"NVIDIA Corporation"/NVSMI/nvidia-smi.exe
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
         $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"
         $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM"
