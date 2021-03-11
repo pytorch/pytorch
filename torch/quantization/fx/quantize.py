@@ -207,10 +207,7 @@ def insert_observer_for_output_of_the_node(
                 elif isinstance(input_arg, list):
                     return all(map(is_observed, input_arg))
 
-            # insert observers for fixedqparams ops like sigmoid, since
-            # it supports fp16 static quantization
-            if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) and \
-               activation_dtype(qconfig) == torch.float16:
+            if activation_dtype(qconfig) == torch.float16:
                 insert_observer(
                     node, qconfig.activation(),
                     model, activation_post_process_map, env, observed_graph,
@@ -326,7 +323,6 @@ WEIGHT_PREPACK_OPS = {
     torch._ops.ops.quantized.linear_prepack,
     torch._ops.ops.quantized.linear_prepack_fp16,
     torch._ops.ops.quantized.conv2d_prepack,
-    torch._ops.ops.quantized.conv3d_prepack,
 }
 
 class Quantizer:

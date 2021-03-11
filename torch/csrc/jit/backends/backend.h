@@ -29,10 +29,6 @@ class backend {
         torch::class_<TBackendInterface>(detail::kBackendsNamespace, name)
             .def(torch::init<>())
             ._def_unboxed(
-                "is_available",
-                detail::getIsAvailableFunc<TBackendInterface>(),
-                detail::getIsAvailableSchema())
-            ._def_unboxed(
                 "compile",
                 detail::getCompileFunc<TBackendInterface>(),
                 detail::getCompileSchema())

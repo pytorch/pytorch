@@ -121,16 +121,35 @@ namespace torch {
 namespace jit {
 
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
+// View ops with out variants are registered separately
+C10_DEFINE_REGISTRY(SRViewOperatorRegistry, SROperatorFunctor);
 
 bool canRunOutOfPlace(Node* n) {
+  auto op_name = std::string(n->kind().toQualString());
+  return SROperatorRegistry()->Has(op_name) ||
+      SRViewOperatorRegistry()->Has(op_name);
+}
+
+// Same as "canRunOutOfPlace" but excluds view operations
+bool canReuseInputsOutputs(Node* n) {
   auto op_name = std::string(n->kind().toQualString());
   return SROperatorRegistry()->Has(op_name);
 }
 
-// Keep function canReuseInputsOutputs because the name canReuseInputsOutputs is
-// more informative where it's used
-bool canReuseInputsOutputs(Node* n) {
-  return canRunOutOfPlace(n);
+bool canReuseInputs(Node* n) {
+  auto op_name = std::string(n->kind().toQualString());
+  if (SROperatorRegistry()->Has(op_name)) {
+    return SROperatorRegistry()->Create(op_name)->CanReuseInput();
+  }
+  return false;
+}
+
+bool canReuseOutputs(Node* n) {
+  auto op_name = std::string(n->kind().toQualString());
+  if (SROperatorRegistry()->Has(op_name)) {
+    return SROperatorRegistry()->Create(op_name)->CanReuseOutput();
+  }
+  return false;
 }
 
 // TODO: expand to include all view producing ops, mostly in
@@ -765,39 +784,36 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
   };
 });
 // out variant takes precedence over native
-REGISTER_OPERATOR_FUNCTOR(
-    static_runtime::to_copy,
-    aten_to_copy,
-    [](Node* n) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        // support 4- or 5-arg for adindexer/adfinder models
-        DCHECK(p_node->inputs().size() >= 4);
-        const auto& in0_t = p_node->Input(0).toTensor();
-        auto in2_i = p_node->Input(2).toBool(); // non_blocking
-        // ignore input 3 (copy)
-        if (p_node->Output(0).isNone()) {
-          auto in1_i = p_node->Input(1).toScalarType();
-          c10::optional<c10::MemoryFormat> in4_o = c10::nullopt;
-          if (p_node->inputs().size() > 4 && p_node->Input(4).isInt()) {
-            in4_o = p_node->Input(4).toOptional<c10::MemoryFormat>();
-          }
-          if (in4_o.value_or(c10::MemoryFormat::Preserve) ==
-              c10::MemoryFormat::Preserve) {
-            if (in0_t.is_non_overlapping_and_dense()) {
-              in4_o = c10::nullopt;
-            } else {
-              in4_o = in0_t.suggest_memory_format();
-            }
-          }
-          // See Note [Explicit nullopt MemoryFormat argument]
-          p_node->Output(0) = at::detail::empty_cpu(
-              {0}, in1_i, in0_t.layout(), in0_t.device(), c10::nullopt, in4_o);
+REGISTER_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    // support 4- or 5-arg for adindexer/adfinder models
+    DCHECK(p_node->inputs().size() >= 4);
+    const auto& in0_t = p_node->Input(0).toTensor();
+    auto in2_i = p_node->Input(2).toBool(); // non_blocking
+    // ignore input 3 (copy)
+    if (p_node->Output(0).isNone()) {
+      auto in1_i = p_node->Input(1).toScalarType();
+      c10::optional<c10::MemoryFormat> in4_o = c10::nullopt;
+      if (p_node->inputs().size() > 4 && p_node->Input(4).isInt()) {
+        in4_o = p_node->Input(4).toOptional<c10::MemoryFormat>();
+      }
+      if (in4_o.value_or(c10::MemoryFormat::Preserve) ==
+          c10::MemoryFormat::Preserve) {
+        if (in0_t.is_non_overlapping_and_dense()) {
+          in4_o = c10::nullopt;
+        } else {
+          in4_o = in0_t.suggest_memory_format();
         }
-        auto& out_t = p_node->Output(0).toTensor();
-        fastResizeToZero(out_t);
-        at::native::to_copy_out(out_t, in0_t, in2_i);
-      };
-    });
+      }
+      // See Note [Explicit nullopt MemoryFormat argument]
+      p_node->Output(0) = at::detail::empty_cpu(
+          {0}, in1_i, in0_t.layout(), in0_t.device(), c10::nullopt, in4_o);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::to_copy_out(out_t, in0_t, in2_i);
+  };
+});
 
 // Out variants for view ops are registered to a separate registry because
 // their outputs (views) can't participate in memory reuse.
@@ -864,6 +880,9 @@ std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
   auto op_name = n->kind().toQualString();
   if (SROperatorRegistry()->Has(op_name)) {
     return SROperatorRegistry()->Create(op_name)->Generate(n);
+  }
+  if (SRViewOperatorRegistry()->Has(op_name)) {
+    return SRViewOperatorRegistry()->Create(op_name)->Generate(n);
   }
 
   return [](ProcessedNode*) { TORCH_CHECK(0); };

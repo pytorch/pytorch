@@ -2397,7 +2397,7 @@ class TestTensorCreation(TestCase):
             self.assertEqual(t[steps - 1], a[steps - 1])
 
     def _linspace_logspace_warning_helper(self, op, device, dtype):
-        with self.assertWarnsOnceRegex(UserWarning, "Not providing a value for .+"):
+        with self.maybeWarnsRegex(UserWarning, "Not providing a value for .+"):
             op(0, 10, device=device, dtype=dtype)
 
     @dtypes(torch.float)

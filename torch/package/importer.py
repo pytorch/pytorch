@@ -19,6 +19,7 @@ class ObjMismatchError(Exception):
 
     pass
 
+
 class Importer(ABC):
     """Represents an environment to import modules from.
 
@@ -183,3 +184,14 @@ class OrderedImporter(Importer):
             raise last_err
         else:
             raise ModuleNotFoundError(module_name)
+
+    def get_name(self, obj: Any, name: Optional[str] = None) -> Tuple[str, str]:
+        last_err = None
+        for importer in self._importers:
+            try:
+                return importer.get_name(obj, name)
+            except ObjNotFoundError as err:
+                last_err = err
+
+        assert last_err is not None
+        raise last_err

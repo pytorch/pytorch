@@ -34,8 +34,7 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame  = (blockIdx.z + offsetZ) % output.size(1); // output frame/time
-  int64_t slice   = (blockIdx.z + offsetZ) / output.size(1); // output slice/feature
-  // For int64_t data type, see https://github.com/pytorch/pytorch/issues/52822
+  int slice   = (blockIdx.z + offsetZ) / output.size(1); // output slice/feature
 
   if (oRow < output.size(2) && oColumn < output.size(3))
   {

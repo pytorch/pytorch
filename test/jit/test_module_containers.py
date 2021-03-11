@@ -491,6 +491,7 @@ class TestModuleContainers(JitTestCase):
                 return torch.max(inp, dim=0)
 
         # Test annotation of submodule.
+
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -527,64 +528,4 @@ class TestModuleContainers(JitTestCase):
                 return submodule.forward(x)
 
         with self.assertRaisesRegex(RuntimeError, r"Attribute module is not of annotated type"):
-            torch.jit.script(ModWithWrongAnnotation())
-
-    def test_typed_module_list(self):
-        """
-        Test that a type annotation can be provided for a ModuleList that allows
-        non-static indexing.
-        """
-        @torch.jit.interface
-        class ModuleInterface(torch.nn.Module):
-            def forward(self, inp: Any) -> Any:
-                pass
-
-        class ImplementsInterface(torch.nn.Module):
-            def forward(self, inp: Any) -> Any:
-                if isinstance(inp, torch.Tensor):
-                    return torch.max(inp, dim=0)
-
-                return inp
-
-        class DoesNotImplementInterface(torch.nn.Module):
-            def forward(self, inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-                return torch.max(inp, dim=0)
-
-        # Test annotation of submodule.
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.l = torch.nn.ModuleList([ImplementsInterface()])
-
-            def forward(self, x: torch.Tensor, idx: int) -> Any:
-                value: ModuleInterface = self.l[idx]
-                return value.forward(x)
-
-        m = Mod()
-        self.checkModule(m, (torch.randn(2, 2), 0))
-
-        # Test annotation of self.
-        class ModList(torch.nn.ModuleList):
-            def __init__(self):
-                super().__init__([ImplementsInterface()])
-
-            def forward(self, x: torch.Tensor, idx: int) -> Any:
-                submodule: ModuleInterface = self[idx]
-                return submodule.forward(x)
-
-        m = ModList()
-        self.checkModule(m, (torch.randn(2, 2), 0))
-
-        # Test error message thrown when annotated attribute does not comply with the
-        # annotation.
-        class ModWithWrongAnnotation(torch.nn.ModuleList):
-            def __init__(self):
-                super().__init__()
-                self.l = torch.nn.ModuleList([DoesNotImplementInterface()])
-
-            def forward(self, x: torch.Tensor, idx: int) -> Any:
-                submodule: ModuleInterface = self.l[idx]
-                return submodule.forward(x)
-
-        with self.assertRaisesRegex(RuntimeError, r"Attribute 0 is not of annotated type"):
             torch.jit.script(ModWithWrongAnnotation())

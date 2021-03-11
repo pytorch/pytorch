@@ -4,11 +4,11 @@
 #
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
-import tempfile
 import pytest
-
+import tempfile
 import torch
-import torch.distributed as dist
+from torch.distributed import rpc
+
 
 @pytest.fixture(autouse=True)
 def manual_seed_zero():
@@ -41,17 +41,13 @@ def pytest_report_header():
 @pytest.fixture
 def setup_rpc(scope="session"):
     file = tempfile.NamedTemporaryFile()
-    dist.rpc.init_rpc(
+    rpc.init_rpc(
         name="worker0",
         rank=0,
         world_size=1,
-        rpc_backend_options=dist.rpc.TensorPipeRpcBackendOptions(
+        rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
             init_method="file://{}".format(file.name),
         )
     )
     yield
-    dist.rpc.shutdown()
-
-def pytest_ignore_collect(path, config):
-    "Skip this directory if distributed modules are not enabled."
-    return not dist.is_available()
+    rpc.shutdown()

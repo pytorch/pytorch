@@ -8,7 +8,7 @@ from torch import _VF
 from torch._C import _infer_size, _add_docstr
 from torch._torch_docs import reproducibility_notes, tf32_notes
 
-from .._jit_internal import boolean_dispatch, _overload, BroadcastingList1, BroadcastingList2, BroadcastingList3
+from .._jit_internal import boolean_dispatch, _overload
 from ..overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function)
@@ -380,13 +380,9 @@ Args:
 
 
 def fractional_max_pool2d_with_indices(
-    input: Tensor, kernel_size: BroadcastingList2[int],
-    output_size: Optional[BroadcastingList2[int]] = None,
-    output_ratio: Optional[BroadcastingList2[float]] = None,
-    return_indices: bool = False,
-    _random_samples: Optional[Tensor] = None
-) -> Tuple[Tensor, Tensor]:
-    # noqa
+    input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None
+):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], Optional[BroadcastingList2[float]], bool, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -440,13 +436,9 @@ def fractional_max_pool2d_with_indices(
 
 
 def _fractional_max_pool2d(
-    input: Tensor, kernel_size: BroadcastingList2[int],
-    output_size: Optional[BroadcastingList2[int]] = None,
-    output_ratio: Optional[BroadcastingList2[float]] = None,
-    return_indices: bool = False,
-    _random_samples: Optional[Tensor] = None
-) -> Tensor:
-    # noqa
+    input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None
+):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], Optional[BroadcastingList2[float]], bool, Optional[Tensor]) -> Tensor  # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             fractional_max_pool2d,
@@ -475,13 +467,9 @@ fractional_max_pool2d = boolean_dispatch(
 
 
 def fractional_max_pool3d_with_indices(
-    input: Tensor, kernel_size: BroadcastingList3[int],
-    output_size: Optional[BroadcastingList3[int]] = None,
-    output_ratio: Optional[BroadcastingList3[float]] = None,
-    return_indices: bool = False,
-    _random_samples: Optional[Tensor] = None
-) -> Tuple[Tensor, Tensor]:
-    # noqa
+    input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None
+):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], Optional[BroadcastingList3[float]], bool, Optional[Tensor]) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies 3D fractional max pooling over an input signal composed of several input planes.
 
     Fractional MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
@@ -540,13 +528,9 @@ def fractional_max_pool3d_with_indices(
 
 
 def _fractional_max_pool3d(
-    input: Tensor, kernel_size: BroadcastingList3[int],
-    output_size: Optional[BroadcastingList3[int]] = None,
-    output_ratio: Optional[BroadcastingList3[float]] = None,
-    return_indices: bool = False,
-    _random_samples: Optional[Tensor] = None
-) -> Tensor:
-    # noqa
+    input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None
+):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], Optional[BroadcastingList3[float]], bool, Optional[Tensor]) -> Tensor  # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             fractional_max_pool3d,
@@ -575,14 +559,9 @@ fractional_max_pool3d = boolean_dispatch(
 
 
 def max_pool1d_with_indices(
-    input: Tensor, kernel_size: BroadcastingList1[int],
-    stride: Optional[BroadcastingList1[int]] = None,
-    padding: BroadcastingList1[int] = 0,
-    dilation: BroadcastingList1[int] = 1,
-    ceil_mode: bool = False,
-    return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
-    # noqa
+    input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False
+):
+    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
@@ -605,15 +584,8 @@ def max_pool1d_with_indices(
     return torch.max_pool1d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-def _max_pool1d(
-    input: Tensor, kernel_size: BroadcastingList1[int],
-    stride: Optional[BroadcastingList1[int]] = None,
-    padding: BroadcastingList1[int] = 0,
-    dilation: BroadcastingList1[int] = 1,
-    ceil_mode: bool = False,
-    return_indices: bool = False
-) -> Tensor:
-    # noqa
+def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tensor  # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d,
@@ -643,14 +615,9 @@ max_pool1d = boolean_dispatch(
 
 
 def max_pool2d_with_indices(
-    input: Tensor, kernel_size: BroadcastingList2[int],
-    stride: Optional[BroadcastingList2[int]] = None,
-    padding: BroadcastingList2[int] = 0,
-    dilation: BroadcastingList2[int] = 1,
-    ceil_mode: bool = False,
-    return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
-    # noqa
+    input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False
+):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies a 2D max pooling over an input signal composed of several input
     planes.
 
@@ -673,15 +640,8 @@ def max_pool2d_with_indices(
     return torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-def _max_pool2d(
-    input: Tensor, kernel_size: BroadcastingList2[int],
-    stride: Optional[BroadcastingList2[int]] = None,
-    padding: BroadcastingList2[int] = 0,
-    dilation: BroadcastingList2[int] = 1,
-    ceil_mode: bool = False,
-    return_indices: bool = False
-) -> Tensor:
-    # noqa
+def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tensor  # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d,
@@ -711,14 +671,9 @@ max_pool2d = boolean_dispatch(
 
 
 def max_pool3d_with_indices(
-    input: Tensor, kernel_size: BroadcastingList3[int],
-    stride: Optional[BroadcastingList3[int]] = None,
-    padding: BroadcastingList3[int] = 0,
-    dilation: BroadcastingList3[int] = 1,
-    ceil_mode: bool = False,
-    return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
-    # noqa
+    input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False
+):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tuple[Tensor, Tensor]  # noqa
     r"""Applies a 3D max pooling over an input signal composed of several input
     planes.
 
@@ -741,15 +696,8 @@ def max_pool3d_with_indices(
     return torch._C._nn.max_pool3d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 
-def _max_pool3d(
-    input: Tensor, kernel_size: BroadcastingList3[int],
-    stride: Optional[BroadcastingList3[int]] = None,
-    padding: BroadcastingList3[int] = 0,
-    dilation: BroadcastingList3[int] = 1,
-    ceil_mode: bool = False,
-    return_indices: bool = False
-) -> Tensor:
-    # noqa
+def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tensor  # noqa
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d,
@@ -811,14 +759,8 @@ def _unpool_output_size(
     return ret
 
 
-def max_unpool1d(
-    input: Tensor, indices: Tensor,
-    kernel_size: BroadcastingList1[int],
-    stride: Optional[BroadcastingList1[int]] = None,
-    padding: BroadcastingList1[int] = 0,
-    output_size: Optional[BroadcastingList1[int]] = None
-) -> Tensor:
-    # noqa
+def max_unpool1d(input, indices, kernel_size, stride=None, padding=0, output_size=None):
+    # type: (Tensor, Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], Optional[BroadcastingList1[int]]) -> Tensor  # noqa
     r"""Computes a partial inverse of :class:`MaxPool1d`.
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
@@ -848,14 +790,8 @@ def max_unpool1d(
     return torch._C._nn.max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3), output_size).squeeze(3)
 
 
-def max_unpool2d(
-    input: Tensor, indices: Tensor,
-    kernel_size: BroadcastingList2[int],
-    stride: Optional[BroadcastingList2[int]] = None,
-    padding: BroadcastingList2[int] = 0,
-    output_size: Optional[BroadcastingList2[int]] = None
-) -> Tensor:
-    # noqa
+def max_unpool2d(input, indices, kernel_size, stride=None, padding=0, output_size=None):
+    # type: (Tensor, Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], Optional[BroadcastingList2[int]]) -> Tensor  # noqa
     r"""Computes a partial inverse of :class:`MaxPool2d`.
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
@@ -881,14 +817,8 @@ def max_unpool2d(
     return torch._C._nn.max_unpool2d(input, indices, output_size)
 
 
-def max_unpool3d(
-    input: Tensor, indices: Tensor,
-    kernel_size: BroadcastingList3[int],
-    stride: Optional[BroadcastingList3[int]] = None,
-    padding: BroadcastingList3[int] = 0,
-    output_size: Optional[BroadcastingList3[int]] = None
-) -> Tensor:
-    # noqa
+def max_unpool3d(input, indices, kernel_size, stride=None, padding=0, output_size=None):
+    # type: (Tensor, Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], Optional[BroadcastingList3[int]]) -> Tensor  # noqa
     r"""Computes a partial inverse of :class:`MaxPool3d`.
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
@@ -914,12 +844,8 @@ def max_unpool3d(
     return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
 
 
-def lp_pool2d(
-    input: Tensor, norm_type: float,
-    kernel_size: int,
-    stride: Optional[BroadcastingList2[int]] = None,
-    ceil_mode: bool = False
-) -> Tensor:
+def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+    # type: (Tensor, float, int, Optional[BroadcastingList2[int]], bool) -> Tensor
     r"""Applies a 2D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -939,12 +865,8 @@ def lp_pool2d(
     return (torch.sign(out) * relu(torch.abs(out))).mul(kw * kh).pow(1.0 / norm_type)
 
 
-def lp_pool1d(
-    input: Tensor, norm_type: float,
-    kernel_size: int,
-    stride: Optional[BroadcastingList1[int]] = None,
-    ceil_mode: bool = False
-) -> Tensor:
+def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+    # type: (Tensor, float, int, Optional[BroadcastingList1[int]], bool) -> Tensor
     r"""Applies a 1D power-average pooling over an input signal composed of
     several input planes. If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -963,9 +885,8 @@ def lp_pool1d(
     return (torch.sign(out) * relu(torch.abs(out))).mul(kernel_size).pow(1.0 / norm_type)
 
 
-def adaptive_max_pool1d_with_indices(
-    input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
+def adaptive_max_pool1d_with_indices(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 1D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -982,7 +903,8 @@ def adaptive_max_pool1d_with_indices(
     return torch.adaptive_max_pool1d(input, output_size)
 
 
-def _adaptive_max_pool1d(input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False) -> Tensor:
+def _adaptive_max_pool1d(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
     if has_torch_function_unary(input):
         return handle_torch_function(
             adaptive_max_pool1d, (input,), input, output_size, return_indices=return_indices
@@ -1001,10 +923,8 @@ adaptive_max_pool1d = boolean_dispatch(
 )
 
 
-def adaptive_max_pool2d_with_indices(
-    input: Tensor, output_size: BroadcastingList2[int],
-    return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
+def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList2[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -1023,7 +943,8 @@ def adaptive_max_pool2d_with_indices(
     return torch._C._nn.adaptive_max_pool2d(input, output_size)
 
 
-def _adaptive_max_pool2d(input: Tensor, output_size: BroadcastingList2[int], return_indices: bool = False) -> Tensor:
+def _adaptive_max_pool2d(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList2[int], bool) -> Tensor
     if has_torch_function_unary(input):
         return handle_torch_function(
             adaptive_max_pool2d, (input,), input, output_size, return_indices=return_indices
@@ -1042,10 +963,8 @@ adaptive_max_pool2d = boolean_dispatch(
 )
 
 
-def adaptive_max_pool3d_with_indices(
-    input: Tensor, output_size: BroadcastingList3[int],
-    return_indices: bool = False
-) -> Tuple[Tensor, Tensor]:
+def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList3[int], bool) -> Tuple[Tensor, Tensor]
     r"""Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
 
@@ -1064,7 +983,8 @@ def adaptive_max_pool3d_with_indices(
     return torch._C._nn.adaptive_max_pool3d(input, output_size)
 
 
-def _adaptive_max_pool3d(input: Tensor, output_size: BroadcastingList3[int], return_indices: bool = False) -> Tensor:
+def _adaptive_max_pool3d(input, output_size, return_indices=False):
+    # type: (Tensor, BroadcastingList3[int], bool) -> Tensor
     if has_torch_function_unary(input):
         return handle_torch_function(
             adaptive_max_pool3d, (input,), input, output_size, return_indices=return_indices
@@ -1099,7 +1019,8 @@ Args:
 )
 
 
-def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
+def adaptive_avg_pool2d(input, output_size):
+    # type: (Tensor, BroadcastingList2[int]) -> Tensor
     r"""
     Applies a 2D adaptive average pooling over an input signal composed of
     several input planes.
@@ -1116,7 +1037,8 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
 
-def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> Tensor:
+def adaptive_avg_pool3d(input, output_size):
+    # type: (Tensor, BroadcastingList3[int]) -> Tensor
     r"""
     Applies a 3D adaptive average pooling over an input signal composed of
     several input planes.
@@ -1928,8 +1850,7 @@ def embedding(
         weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
             and number of columns equal to the embedding size
         padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
-                                    whenever it encounters the index.
-                                    Note: Vector at :attr:`padding_idx` will not receive gradient update.
+                                         (initialized to zeros) whenever it encounters the index.
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
                                     Note: this will modify :attr:`weight` in-place.
@@ -1983,15 +1904,13 @@ def embedding(
     else:
         padding_idx = -1
     if max_norm is not None:
-        # Note [embedding_renorm contiguous]
         # `embedding_renorm_` will call .contiguous() on input anyways, so we
         # call it here and take advantage of the improved locality in the
         # `embedding` call below too.
         input = input.contiguous()
-        # Note [embedding_renorm set_grad_enabled]
         # XXX: equivalent to
         # with torch.no_grad():
-        #   torch.embedding_renorm_
+        #   torch.nembedding_renorm_
         # remove once script supports set_grad_enabled
         _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
@@ -3368,12 +3287,14 @@ Examples::
 
 
 @_overload  # noqa: F811
-def upsample(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
+def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[float], str, Optional[bool]) -> Tensor
     pass
 
 
 @_overload  # noqa: F811
-def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
+def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=None):  # noqa: F811
+    # type: (Tensor, Optional[List[int]], Optional[float], str, Optional[bool]) -> Tensor
     pass
 
 
@@ -3442,17 +3363,20 @@ upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[List[int]], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[float], str, Optional[bool], Optional[bool]) -> Tensor
     pass
 
 
@@ -3467,7 +3391,8 @@ def interpolate(  # noqa: F811
 ) -> Tensor:  # noqa: F811
     pass
 
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[List[float]], str, Optional[bool], Optional[bool]) -> Tensor
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -3688,12 +3613,14 @@ interpolate.__doc__ = interpolate.__doc__.format(**reproducibility_notes)
 
 
 @_overload  # noqa: F811
-def upsample_nearest(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None) -> Tensor:  # noqa: F811
+def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[int], Optional[float]) -> Tensor
     pass
 
 
 @_overload  # noqa: F811
-def upsample_nearest(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None) -> Tensor:  # noqa: F811
+def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
+    # type: (Tensor, Optional[List[int]], Optional[float]) -> Tensor
     pass
 
 
@@ -4384,13 +4311,8 @@ def assert_int_or_pair(arg: List[int], arg_name: str, message: str) -> None:
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
-def unfold(
-    input: Tensor, kernel_size: BroadcastingList2[int],
-    dilation: BroadcastingList2[int] = 1,
-    padding: BroadcastingList2[int] = 0,
-    stride: BroadcastingList2[int] = 1
-) -> Tensor:
-    # noqa
+def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
+    # type: (Tensor, BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int]) -> Tensor  # noqa
     r"""Extracts sliding local blocks from a batched input tensor.
 
     .. warning::
@@ -4423,14 +4345,8 @@ def unfold(
         raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
 
 
-def fold(
-    input: Tensor, output_size: BroadcastingList2[int],
-    kernel_size: BroadcastingList2[int],
-    dilation: BroadcastingList2[int] = 1,
-    padding: BroadcastingList2[int] = 0,
-    stride: BroadcastingList2[int] = 1
-) -> Tensor:
-    # noqa
+def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
+    # type: (Tensor, BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int], BroadcastingList2[int]) -> Tensor  # noqa
     r"""Combines an array of sliding local blocks into a large containing
     tensor.
 

@@ -11,7 +11,6 @@ namespace at { namespace native {
 
 using unary_fn = void(*)(TensorIterator&);
 using unary_fn_with_scalar = void(*)(TensorIterator&, Scalar a);
-using structured_unary_fn = void(*)(TensorIteratorBase&);
 
 DECLARE_DISPATCH(unary_fn, abs_stub);
 DECLARE_DISPATCH(unary_fn, angle_stub);
@@ -55,7 +54,7 @@ DECLARE_DISPATCH(unary_fn_with_scalar, logit_stub);
 DECLARE_DISPATCH(unary_fn, sign_stub);
 DECLARE_DISPATCH(unary_fn, signbit_stub);
 DECLARE_DISPATCH(unary_fn, sgn_stub);
-DECLARE_DISPATCH(structured_unary_fn, sin_stub);
+DECLARE_DISPATCH(unary_fn, sin_stub);
 DECLARE_DISPATCH(unary_fn, sinc_stub);
 DECLARE_DISPATCH(unary_fn, sinh_stub);
 DECLARE_DISPATCH(unary_fn, sqrt_stub);

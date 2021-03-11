@@ -46,7 +46,6 @@ android {
               }
             }
             jniLibs.srcDirs = ['src/main/jniLibs']
-            manifest.srcFile 'src/main/AndroidManifest.xml'
         }
         androidTest {
             java {
@@ -118,13 +117,12 @@ afterEvaluate {
 
 tasks.whenTaskAdded { task ->
   if (task.name.startsWith("bundle") && task.name.endsWith("Aar")) {
-    task.configure {
-      finalizedBy
+    task.doLast {
       addFolderToAarTask(
         "addHeadersTo" + task.name,
         task.archivePath,
         getLibtorchHeadersDir(),
-        "headers")
+        "headers").execute()
     }
   }
 }

@@ -510,66 +510,6 @@ TEST_F(Kernel, CatInputTypesPromotion) {
   }
 }
 
-TEST_F(Kernel, CatWoConditionals) {
-  getCatWoConditionals() = true;
-  const auto graph_string = R"IR(
-      graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
-            %b : Float(5, 7, 2, strides=[14, 2, 1], device=cpu),
-            %c : Float(5, 9, 2, strides=[18, 2, 1], device=cpu)):
-        %dim : int = prim::Constant[value=1]()
-        %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
-        %r : Float(5, 19, 2, strides=[38, 2, 1]) = aten::cat(%inputs, %dim)
-        return (%r))IR";
-
-  auto graph = std::make_shared<Graph>();
-  parseIR(graph_string, &*graph);
-
-  TensorExprKernel k(graph);
-  Stmt* s = k.getCodeGenStmt();
-  std::ostringstream oss;
-  oss << *s;
-
-  const std::string& verification_pattern =
-      R"IR(
-# CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
-# CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat
-# CHECK: for
-# CHECK-NEXT: for
-# CHECK-NEXT: for
-# CHECK-NEXT: aten_cat)IR";
-  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
-
-  auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto b = at::rand({5, 7, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto c = at::rand({5, 9, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto ref = at::cat({a, b, c}, 1);
-
-  std::vector<at::Tensor> inputs = {a, b, c};
-  std::vector<IValue> stack = fmap<IValue>(inputs);
-  k.run(stack);
-  auto o = stack[0].toTensor();
-
-  // Check sizes
-  CHECK_EQ(o.sizes().size(), ref.sizes().size());
-  CHECK_EQ(o.dtype(), ref.dtype());
-  size_t num_el = 1;
-  for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
-    CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
-    num_el *= ref.sizes()[idx];
-  }
-
-  // Check the contents
-  for (size_t i = 0; i < num_el; i++) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
-  }
-}
-
 namespace {
 
 std::string dtypeConstant(ScalarType scalar_type) {

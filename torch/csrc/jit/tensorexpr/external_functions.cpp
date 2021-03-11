@@ -111,101 +111,12 @@ void nnc_aten_matmul(
   }
 }
 
-void nnc_aten_mv(
-    int64_t bufs_num,
-    void** buf_data,
-    int64_t* buf_ranks,
-    int64_t* buf_dims,
-    int8_t* buf_dtypes,
-    int64_t args_num,
-    int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
-
-  at::Tensor& r = tensors[0];
-  const at::Tensor& x = tensors[1];
-  const at::Tensor& w = tensors[2];
-  try {
-    at::mv_out(r, x, w);
-  } catch (...) {
-  }
-}
-
-void nnc_aten_mm(
-    int64_t bufs_num,
-    void** buf_data,
-    int64_t* buf_ranks,
-    int64_t* buf_dims,
-    int8_t* buf_dtypes,
-    int64_t args_num,
-    int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
-
-  at::Tensor& r = tensors[0];
-  const at::Tensor& x = tensors[1];
-  const at::Tensor& w = tensors[2];
-  try {
-    at::mm_out(r, x, w);
-  } catch (...) {
-  }
-}
-
-void nnc_aten_adaptive_avg_pool2d(
-    int64_t bufs_num,
-    void** buf_data,
-    int64_t* buf_ranks,
-    int64_t* buf_dims,
-    int8_t* buf_dtypes,
-    int64_t args_num,
-    int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
-
-  at::Tensor& r = tensors[0];
-  const at::Tensor& x = tensors[1];
-  int64_t H = extra_args[0];
-  int64_t W = extra_args[1];
-  try {
-    at::adaptive_avg_pool2d_out(r, x, {H, W});
-  } catch (...) {
-  }
-}
-
-void nnc_aten_mean(
-    int64_t bufs_num,
-    void** buf_data,
-    int64_t* buf_ranks,
-    int64_t* buf_dims,
-    int8_t* buf_dtypes,
-    int64_t args_num,
-    int64_t* extra_args) {
-  std::vector<at::Tensor> tensors =
-      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
-
-  at::Tensor& r = tensors[0];
-  const at::Tensor& x = tensors[1];
-  int64_t dim = extra_args[0];
-  try {
-    at::mean_out(r, x, {dim});
-  } catch (...) {
-  }
-}
-
-const static RegisterNNCExternalFunction nnc_conv2d(
+static RegisterNNCExternalFunction nnc_conv2d(
     "nnc_aten_conv2d",
     nnc_aten_conv2d);
-const static RegisterNNCExternalFunction nnc_matmul(
+static RegisterNNCExternalFunction nnc_matmul(
     "nnc_aten_matmul",
     nnc_aten_matmul);
-const static RegisterNNCExternalFunction nnc_mv("nnc_aten_mv", nnc_aten_mv);
-const static RegisterNNCExternalFunction nnc_mm("nnc_aten_mm", nnc_aten_mm);
-const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
-    "nnc_aten_adaptive_avg_pool2d",
-    nnc_aten_adaptive_avg_pool2d);
-const static RegisterNNCExternalFunction nnc_mean(
-    "nnc_aten_mean",
-    nnc_aten_mean);
 
 } // namespace tensorexpr
 } // namespace jit

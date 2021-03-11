@@ -210,6 +210,7 @@
     DefaultBackend: abs_
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: abs_out
 
@@ -247,6 +248,7 @@
   variants: method
 
 - func: absolute.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: angle(Tensor self) -> Tensor
   variants: function, method
@@ -254,6 +256,7 @@
     DefaultBackend: angle
 
 - func: angle.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: angle_out
 
@@ -273,11 +276,13 @@
     DefaultBackend: sgn
 
 - func: sgn_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     DefaultBackend: sgn_
 
 - func: sgn.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sgn_out
 
@@ -311,6 +316,7 @@
     DefaultBackend: acos_
 
 - func: acos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: acos_out
 
@@ -322,6 +328,7 @@
   variants: function, method
 
 - func: arccos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: avg_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
 
@@ -516,6 +523,7 @@
     DefaultBackend: acosh_
 
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: acosh_out
 
@@ -527,6 +535,7 @@
   variants: function, method
 
 - func: arccosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: asinh(Tensor self) -> Tensor
   variants: function, method
@@ -539,6 +548,7 @@
     DefaultBackend: asinh_
 
 - func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: asinh_out
 
@@ -550,6 +560,7 @@
   variants: function, method
 
 - func: arcsinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: atanh(Tensor self) -> Tensor
   variants: function, method
@@ -562,6 +573,7 @@
     DefaultBackend: atanh_
 
 - func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: atanh_out
 
@@ -573,6 +585,7 @@
   variants: function, method
 
 - func: arctanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   variants: function, method
@@ -601,6 +614,7 @@
     SparseCPU, SparseCUDA: asin_sparse_
 
 - func: asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: asin_out
     SparseCPU, SparseCUDA: asin_out_sparse
@@ -613,6 +627,7 @@
   variants: function, method
 
 - func: arcsin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: atan(Tensor self) -> Tensor
   variants: function, method
@@ -625,6 +640,7 @@
     DefaultBackend: atan_
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: atan_out
 
@@ -636,6 +652,7 @@
   variants: function, method
 
 - func: arctan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: atleast_1d(Tensor self) -> Tensor
   variants: function
@@ -1107,6 +1124,7 @@
     DefaultBackend: cos_
 
 - func: cos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: cos_out
 
@@ -1121,6 +1139,7 @@
     DefaultBackend: cosh_
 
 - func: cosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: cosh_out
 
@@ -1628,7 +1647,6 @@
   dispatch:
     CPU: empty_strided_cpu
     CUDA: empty_strided_cuda
-    Meta: empty_strided_meta
 
 - func: erf(Tensor self) -> Tensor
   variants: function, method
@@ -1754,12 +1772,12 @@
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   variants: function, method
   dispatch:
-    CPU, CUDA, QuantizedCPU, QuantizedCUDA: fill_
+    DefaultBackend: fill_
 
 - func: fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)
   variants: function, method
   dispatch:
-    CPU, CUDA, QuantizedCPU, QuantizedCUDA: fill_
+    DefaultBackend: fill_
 
 - func: floor(Tensor self) -> Tensor
   variants: function, method
@@ -3399,16 +3417,17 @@
     CPU, CUDA: logit_out
 
 - func: sin(Tensor self) -> Tensor
-  structured_delegate: sin.out
   variants: function, method
+  dispatch:
+    DefaultBackend: sin
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
-  structured_delegate: sin.out
   variants: function, method
+  dispatch:
+    DefaultBackend: sin_
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  structured: True
-  structured_inherits: TensorIteratorBase
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sin_out
 
@@ -3423,6 +3442,7 @@
     DefaultBackend: sinc_
 
 - func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sinc_out
 
@@ -3437,6 +3457,7 @@
     DefaultBackend: sinh_
 
 - func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sinh_out
 
@@ -6003,12 +6024,12 @@
 
 - func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: orgqr_out
+    CPU: orgqr_out
 
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
   variants: method, function
   dispatch:
-    CPU, CUDA: orgqr
+    CPU: orgqr
 
 - func: ormqr.out(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -6129,6 +6150,7 @@
     DefaultBackend: sign_
 
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sign_out
 
@@ -6136,6 +6158,7 @@
   variants: function, method
 
 - func: signbit.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: signbit_out
     CUDA: signbit_out

@@ -3,18 +3,6 @@
 
 @implementation MPSCNNNeuronOp
 
-+ (MPSCNNNeuronHardSigmoid*)hardSigmoid API_AVAILABLE(ios(11.0), macos(10.13)) {
-  static dispatch_once_t onceToken;
-  static MPSCNNNeuronHardSigmoid* neuron = nil;
-  dispatch_once(&onceToken, ^{
-    neuron = [[MPSCNNNeuronHardSigmoid alloc]
-        initWithDevice:[MPSCNNContext sharedInstance].device
-                     a:1.0 / 6.0
-                     b:0.5];
-  });
-  return neuron;
-}
-
 + (MPSCNNNeuronReLU*)relu {
   static MPSCNNNeuronReLU* relu = nil;
   static dispatch_once_t onceToken;

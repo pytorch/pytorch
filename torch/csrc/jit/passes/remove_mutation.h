@@ -25,9 +25,7 @@ struct MutationRemover {
   bool isSpecialMappedOp(Node* n) {
     return n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)") ||
         n->matches(
-            "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)") ||
-        n->matches(
-            "aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)");
+            "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)");
   }
 
   bool inplaceOpVariant(Node* n) {

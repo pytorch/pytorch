@@ -380,15 +380,14 @@ void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   checkInvariants();
 
   if (dispatchKey == DispatchKey::Undefined) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false,
+    TORCH_CHECK(false,
           "There were no tensor arguments to this function (e.g., you passed an "
           "empty list of Tensors), but no fallback function is registered for schema ", name_,
-          ".  This usually means that this function requires a non-empty list of Tensors, "
-          "or that you (the operator writer) forgot to register a fallback function.  "
+          ".  This usually means that this function requires a non-empty list of Tensors.  "
           "Available functions are ", listAllDispatchKeys(), ".\n\n", dumpComputedTable())
   }
 
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "Could not run '", name_, "' with arguments",
+  TORCH_CHECK(false, "Could not run '", name_, "' with arguments",
           " from the '", toString(dispatchKey), "' backend. This could be because "
           "the operator doesn't exist for this backend, or was omitted during ",
           "the selective/custom build process (if using custom build). If you are a ",

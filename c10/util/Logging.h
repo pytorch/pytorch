@@ -345,16 +345,14 @@ struct DDPLoggingData {
   std::vector<int> device_ids = std::vector<int>();
   int output_device = -1;
   std::string backend_name = "";
-  // Parameters' data types, there may be multiple data
-  // types for mixed precision training.
-  std::vector<std::string> dtypes = std::vector<std::string>();
+  // Parameter's data type
+  std::string dtype = "";
   // Total parameters size (Bytes)
   int64_t total_parameter_size_bytes = -1;
   // The number of parameter tensors
   int num_parameter_tensors = -1;
   // A list of bucket sizes (Bytes) calculated during construction time
   std::vector<int> bucket_sizes = std::vector<int>();
-  bool is_multi_device_module = false;
 
   // Environment variables
   std::string master_port = "";
@@ -408,12 +406,6 @@ struct DDPLoggingData {
   int64_t avg_backward_comm_time = 0;
   int64_t avg_backward_compute_comm_overlap_time = 0;
 
-  // Performance stats for the current iteration.
-  int64_t forward_compute_time = 0;
-  int64_t backward_compute_time = 0;
-  int64_t backward_comm_time = 0;
-  int64_t backward_compute_comm_overlap_time = 0;
-
   // Stream insertion operator for logging i.e. to standard output/error.
   friend std::ostream& operator<<(
     std::ostream& output,
@@ -432,17 +424,12 @@ struct DDPLoggingData {
 
     std::string devicesStr = toString(deviceIdsStream, ddp_logging_data.device_ids);
     std::string bucketSizesStr = toString(bucketSizesStream, ddp_logging_data.bucket_sizes);
-    std::string dtypesStr;
-    for (const auto & dtype : ddp_logging_data.dtypes) {
-      dtypesStr += dtype;
-      dtypesStr += " ";
-    }
 
     std::string ddpLoggingDataInfo = c10::str(
       "world_size: ", ddp_logging_data.world_size, ", module_name: ",
       ddp_logging_data.module_name, ", device_ids: ", devicesStr, ", output_device: ",
       ddp_logging_data.output_device, ", backend_name: ", ddp_logging_data.backend_name,
-      ", parameter_dtype: ", dtypesStr, ", total_parameter_size_in_bytes: ",
+      ", parameter_dtype: ", ddp_logging_data.dtype, ", total_parameter_size_in_bytes: ",
       ddp_logging_data.total_parameter_size_bytes, ", num_parameter_tensors: ",
       ddp_logging_data.num_parameter_tensors, " bucket_sizes: ", bucketSizesStr,
       ", CUDA_VISIBLE_DEVICES: ", ddp_logging_data.cuda_visible_devices, ", broadcast_buffers: ",
@@ -480,6 +467,7 @@ struct DDPLoggingData {
     ddpLoggingDataInfo += commHookInfo;
     return output << ddpLoggingDataInfo;
   }
+
 };
 
 C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);

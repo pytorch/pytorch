@@ -612,14 +612,6 @@ class DistributedDataParallel(Module):
                 for replica in self._module_copies
             ]
 
-        # Deduplicate any parameters that might be shared across child modules.
-        memo = set()
-        modules_and_parameters = [
-            # "p not in memo" is the deduplication check.
-            # "not memo.add(p)" is always True, and it's only there to cause "add(p)" if needed.
-            [(m, p) for m, p in replica_mps if p not in memo and not memo.add(p)]
-            for replica_mps in modules_and_parameters]
-
         # Build list of parameters.
         parameters = [
             list(parameter for _, parameter in replica)
@@ -1313,27 +1305,3 @@ class DistributedDataParallel(Module):
         # during synchronization. It will be removed when the API is finalized
         # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
         module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
-
-
-    def get_ddp_logging_data(self):
-        r"""
-        This interface can be called after DistributedDataParallel() is
-        constructed. It returns DDPLoggingData for debugging and analysis.
-        More detailed explanation of the fields in DDPLoggingData are in
-        ``torch/c10/util/Logging.h``.
-        """
-        return self.logger._get_ddp_logging_data()
-
-    def set_ddp_runtime_logging_sample_rate(self, sample_rate):
-        r"""
-        This interface allows users to set sample_rate of collecting
-        runtime stats. The runtime stats will be recorded for the
-        first 10 iterations, after 10 iteratons runtime stats will be
-        recorded once every "sample_rate" training iterations. In
-        default, runtime stats are recorded for the first 10 iterations,
-        after 10 iterations runtime stats are recorded once every
-        "kDDPRuntimeLoggingSampleRate=100" training iterations.
-        """
-        if sample_rate < 1:
-            raise ValueError("DDP runtime logging sample rate should be equal or greater than 1")
-        self.reducer._set_ddp_runtime_logging_sample_rate(sample_rate)

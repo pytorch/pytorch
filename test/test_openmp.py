@@ -29,6 +29,7 @@ class TestOpenMP_ParallelFor(TestCase):
     side_dim = 80
     x = torch.randn([batch, channels, side_dim, side_dim], device=device)
     model = Network()
+    ncores = min(5, psutil.cpu_count(logical=False))
 
     def func(self, runs):
         p = psutil.Process()
@@ -60,8 +61,7 @@ class TestOpenMP_ParallelFor(TestCase):
     def test_n_threads(self):
         """Make sure there is no memory leak with many threads
         """
-        ncores = min(5, psutil.cpu_count(logical=False))
-        torch.set_num_threads(ncores)
+        torch.set_num_threads(self.ncores)
         self.func_rss(300)
 
 if __name__ == '__main__':

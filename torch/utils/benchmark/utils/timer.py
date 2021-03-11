@@ -32,7 +32,6 @@ class CPPTimer:
         self,
         stmt: str,
         setup: str,
-        global_setup: str,
         timer: Callable[[], float],
         globals: Dict[str, Any],
     ) -> None:
@@ -51,15 +50,13 @@ class CPPTimer:
 
         self._stmt: str = textwrap.dedent(stmt)
         self._setup: str = textwrap.dedent(setup)
-        self._global_setup: str = textwrap.dedent(global_setup)
         self._timeit_module: Optional[TimeitModuleType] = None
 
     def timeit(self, number: int) -> float:
         if self._timeit_module is None:
             self._timeit_module = cpp_jit.compile_timeit_template(
-                stmt=self._stmt,
-                setup=self._setup,
-                global_setup=self._global_setup,
+                self._stmt,
+                self._setup,
             )
 
         return self._timeit_module.timeit(number)
@@ -113,10 +110,6 @@ class Timer(object):
         stmt: Code snippet to be run in a loop and timed.
 
         setup: Optional setup code. Used to define variables used in `stmt`
-
-        global_setup: (C++ only)
-            Code which is placed at the top level of the file for things like
-            `#include` statements.
 
         timer:
             Callable which returns the current time. If PyTorch was built
@@ -179,7 +172,6 @@ class Timer(object):
         self,
         stmt: str = "pass",
         setup: str = "pass",
-        global_setup: str = "",
         timer: Callable[[], float] = timer,
         globals: Optional[Dict[str, Any]] = None,
         label: Optional[str] = None,
@@ -195,24 +187,16 @@ class Timer(object):
         # We copy `globals` to prevent mutations from leaking.
         # (For instance, `eval` adds the `__builtins__` key)
         self._globals = dict(globals or {})
-
-        timer_kwargs = {}
         if language in (Language.PYTHON, "py", "python"):
             # Include `torch` if not specified as a convenience feature.
             self._globals.setdefault("torch", torch)
             self._language: Language = Language.PYTHON
-            if global_setup:
-                raise ValueError(
-                    f"global_setup is C++ only, got `{global_setup}`. Most "
-                    "likely this code can simply be moved to `setup`."
-                )
 
         elif language in (Language.CPP, "cpp", "c++"):
             assert self._timer_cls is timeit.Timer, "_timer_cls has already been swapped."
             self._timer_cls = CPPTimer
             setup = ("" if setup == "pass" else setup)
             self._language = Language.CPP
-            timer_kwargs["global_setup"] = global_setup
 
         else:
             raise ValueError(f"Invalid language `{language}`.")
@@ -238,12 +222,10 @@ class Timer(object):
             setup=setup,
             timer=timer,
             globals=valgrind_timer_interface.CopyIfCallgrind.unwrap_all(self._globals),
-            **timer_kwargs,
         )
         self._task_spec = common.TaskSpec(
             stmt=stmt,
             setup=setup,
-            global_setup=global_setup,
             label=label,
             sub_label=sub_label,
             description=description,
@@ -406,9 +388,7 @@ class Timer(object):
     def collect_callgrind(
         self,
         number: int = 100,
-        *,
-        collect_baseline: bool = True,
-        retain_out_file: bool = False,
+        collect_baseline: bool = True
     ) -> valgrind_timer_interface.CallgrindStats:
         """Collect instruction counts using Callgrind.
 
@@ -455,6 +435,4 @@ class Timer(object):
             globals=self._globals,
             number=number,
             collect_baseline=collect_baseline and is_python,
-            is_python=is_python,
-            retain_out_file=retain_out_file,
-        )
+            is_python=is_python)

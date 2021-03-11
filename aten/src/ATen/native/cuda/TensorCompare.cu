@@ -78,7 +78,6 @@ void _assert_async_cuda(const Tensor& self) {
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "_assert_async_cuda", [&] {
     _assert_async_cuda_kernel<<<1, 1, 0, stream>>>(self.data_ptr<scalar_t>());
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 

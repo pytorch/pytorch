@@ -5,7 +5,7 @@
 
 
 #if (C10_IOS || TARGET_OS_MAC)
-#import <ATen/native/metal/ops/MetalConvolution.h>
+#import <ATen/native/metal/mpscnn/MPSCNNOps.h>
 #endif
 
 namespace at {
@@ -96,9 +96,18 @@ Tensor conv2d_prepack_run(
     const Tensor& input,
     const c10::intrusive_ptr<Conv2dOpContext>& op_context) {
 #if (C10_IOS || TARGET_OS_MAC)
-  return prepack::conv2d(input, *op_context);
+  return mpscnn::conv2d(input, *op_context);
 #else
   TORCH_CHECK(false, "conv2d_prepack_run can only be invoked on iOS and MacOS");
+  return input;
+#endif
+}
+
+Tensor copy_to_host(const Tensor& input) {
+#if (C10_IOS || TARGET_OS_MAC)
+  return mpscnn::copy_to_host(input);
+#else
+  TORCH_CHECK(false, "copy_to_host can only be invoked on iOS and MacOS");
   return input;
 #endif
 }
@@ -109,6 +118,10 @@ TORCH_LIBRARY_IMPL(metal_prepack, CPU, m) {
 
 TORCH_LIBRARY_IMPL(metal_prepack, Metal, m) {
   m.impl("conv2d_run", conv2d_prepack_run);
+}
+
+TORCH_LIBRARY_IMPL(metal, Metal, m) {
+  m.impl("copy_to_host", copy_to_host);
 }
 
 } // namespace metal

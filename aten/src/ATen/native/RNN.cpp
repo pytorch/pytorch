@@ -689,22 +689,6 @@ tpair_of<Tensor> hidden_slice(const tpair_of<Tensor>& t, int64_t start, int64_t 
 // It's a struct only because functional programming in C++ is a pain, and it's easier
 // to pass around "vtable pointers" than actual function pointers.
 
-void check_rnn_cell_forward_input(const Tensor& input, int64_t input_size) {
-  TORCH_CHECK(
-    input.size(1) == input_size,
-    "input has inconsistent input_size: got ", input.size(1), " expected ", input_size);
-}
-
-void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, int64_t hidden_size, int64_t hidden_label) {
-  TORCH_CHECK(
-    input.size(0) == hx.size(0),
-    "Input batch size ", input.size(0), " doesn't match hidden", hidden_label, " batch size ", hx.size(0));
-
-  TORCH_CHECK(
-    hx.size(1) == hidden_size,
-    "hidden", hidden_label, " has inconsistent hidden_size: got ", hx.size(1), ", expected ", hidden_size);
-}
-
 template<typename hidden_type_tmpl, typename cell_params_tmpl>
 struct Cell {
   using hidden_type = hidden_type_tmpl;
@@ -1512,10 +1496,6 @@ std::tuple<Tensor, Tensor> lstm_cell(
     const Tensor& input, TensorList hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
-  check_rnn_cell_forward_input(input, w_ih.size(1));
-  auto hidden_size = w_hh.size(1);
-  check_rnn_cell_forward_hidden(input, hx[0], hidden_size, 0);
-  check_rnn_cell_forward_hidden(input, hx[1], hidden_size, 0);
   static at::Tensor undefined;
   return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
@@ -1614,8 +1594,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
 Tensor gru_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
-  check_rnn_cell_forward_input(input, w_ih.size(1));
-  check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
   static at::Tensor undefined;
   return GRUCell<CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
@@ -1624,8 +1602,6 @@ Tensor rnn_tanh_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
   static at::Tensor undefined;
-  check_rnn_cell_forward_input(input, w_ih.size(1));
-  check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
   return SimpleCell<tanh_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
 
@@ -1633,8 +1609,6 @@ Tensor rnn_relu_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
   static at::Tensor undefined;
-  check_rnn_cell_forward_input(input, w_ih.size(1));
-  check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
   return SimpleCell<relu_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
 

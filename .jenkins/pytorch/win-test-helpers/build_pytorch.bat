@@ -24,6 +24,9 @@ call %INSTALLER_DIR%\install_miniconda3.bat
 :: Install ninja and other deps
 if "%REBUILD%"=="" ( pip install -q "ninja==1.9.0" dataclasses typing_extensions )
 
+git submodule sync --recursive
+git submodule update --init --recursive
+
 :: Override VS env here
 pushd .
 if "%VC_VERSION%" == "" (

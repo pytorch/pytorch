@@ -1,1 +1,0 @@
-result = "module_a"

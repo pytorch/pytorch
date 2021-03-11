@@ -396,7 +396,8 @@ void Module::apply(const std::function<void(Module&)>& fn) {
 std::string Module::dump_to_str(
     bool print_method_bodies,
     bool print_attr_values,
-    bool print_param_values) const {
+    bool print_param_values,
+    int level = 0) const {
   std::stringstream ss;
   std::stringstream parameters_ss;
   std::stringstream attributes_ss;
@@ -443,18 +444,16 @@ std::string Module::dump_to_str(
   ss << "  }" << std::endl;
   ss << "  submodules {" << std::endl;
   for (const NameModule& s : named_children()) {
-    // We do 4 spaces here, because one level of indentation comes from
-    // 'submodules' scope and the other one goes from a specific submodule we're
-    // printing.
-    ss << torch::jit::jit_log_prefix(
-        "    ",
-        s.value.dump_to_str(
-            print_method_bodies, print_attr_values, print_param_values));
+    // We do level + 2, because one level of indentation comes from 'submodules'
+    // scope and the other one goes from a specific submodule we're printing.
+    ss << s.value.dump_to_str(
+        print_method_bodies, print_attr_values, print_param_values, level + 2);
   }
   ss << "  }" << std::endl;
   ss << "}" << std::endl;
 
-  return ss.str();
+  std::string indent(2 * level, ' ');
+  return torch::jit::jit_log_prefix(indent, ss.str());
 }
 
 void Module::dump(

@@ -35,29 +35,6 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
         graph_->insert(aten::full_like, {inputs.at(0), inputs.at(1)})->node();
   } else if (n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)")) {
     new_node = graph_->insert(aten::zeros_like, {n->inputs().at(0)})->node();
-  } else if (
-      n->matches(
-          "aten::normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)")) {
-    // TODO: we should have normal_like operator
-    // normal(float mean, float std, int[] size, *, Generator? generator=None,
-    // ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool?
-    // pin_memory=None) -> Tensor
-    auto size = graph_->insert(aten::size, {n->inputs().at(0)});
-    auto dtype = graph_->insert(prim::dtype, {n->inputs().at(0)});
-    auto layout = graph_->insert(prim::layout, {n->inputs().at(0)});
-    auto device = graph_->insert(prim::device, {n->inputs().at(0)});
-    auto pin_memory = graph_->insert(aten::is_pinned, {n->inputs().at(0)});
-    auto generator = graph_->insertConstant(IValue());
-    new_node = graph_->insertNode(graph_->create(
-        aten::normal,
-        {n->inputs().at(1),
-         n->inputs().at(2),
-         size,
-         generator,
-         dtype,
-         layout,
-         device,
-         pin_memory}));
   } else {
     TORCH_INTERNAL_ASSERT(false);
   }
@@ -196,13 +173,6 @@ void MutationRemover::RemoveTensorMutation(Block* block) {
         new_node->addInput(input);
       }
       new_node->output()->setType(node->output()->type());
-
-      // weird case where there is an inplace op and an equivalent functional op
-      // of the same symbol, but they have different schemas
-      if (!new_node->maybeOperator()) {
-        new_node->destroy();
-        continue;
-      }
     }
 
     mutated_value->replaceAllUsesAfterNodeWith(node, new_node->output());

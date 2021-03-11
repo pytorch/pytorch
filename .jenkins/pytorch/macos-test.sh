@@ -13,6 +13,8 @@ if [ -z "${IN_CI}" ]; then
   rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 fi
 
+git submodule sync --recursive
+git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Test PyTorch

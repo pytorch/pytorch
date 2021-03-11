@@ -36,7 +36,7 @@ def replace_node_module(node: fx.Node, modules: Dict[str, Any], new_module: torc
     parent_name, name = _parent_name(node.target)
     setattr(modules[parent_name], name, new_module)
 
-def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
+def fuse(model: torch.nn.Module, inplace=True) -> torch.nn.Module:
     """
     Fuses convolution/BN layers for inference purposes. Will deepcopy your
     model by default, but can modify the model inplace as well.

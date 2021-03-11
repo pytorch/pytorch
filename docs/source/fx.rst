@@ -725,7 +725,8 @@ For example, let’s examine the following program:
 ::
 
     def func_to_trace(x):
-        if x.sum() > 0:
+        dim0 = x.size[0]
+        if dim0 == 3:
             return torch.relu(x)
         else:
             return torch.neg(x)
@@ -734,7 +735,7 @@ For example, let’s examine the following program:
     """
       <...>
       File "dyn.py", line 6, in func_to_trace
-        if x.sum() > 0:
+        if dim0 == 3:
       File "pytorch/torch/fx/proxy.py", line 155, in __bool__
         return self.tracer.to_bool(self)
       File "pytorch/torch/fx/proxy.py", line 85, in to_bool
@@ -742,8 +743,8 @@ For example, let’s examine the following program:
     torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
     """
 
-The condition to the ``if`` statement relies on the value of ``x.sum()``,
-which relies on the value of ``x``, a function input. Since
+The condition to the ``if`` statement relies on the value of ``dim0``,
+which eventually relies on the value of ``x``, a function input. Since
 ``x`` can change (i.e. if you pass a new input tensor to the traced
 function), this is *dynamic control flow*. The traceback walks back up
 through your code to show you where this situation happens.
@@ -1010,7 +1011,6 @@ API Reference
 
 .. autoclass:: torch.fx.Tracer
   :members:
-  :inherited-members:
 
 .. autoclass:: torch.fx.Proxy
 

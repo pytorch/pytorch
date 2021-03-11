@@ -1350,7 +1350,7 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   TORCH_INTERNAL_ASSERT(result.device() == input.device());
 
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
-  TORCH_INTERNAL_ASSERT(infos.device() == input.device());
+  TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
   TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
 
   // if result has no elements we can modify it
@@ -1396,9 +1396,10 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   //   "result shape ", result.sizes(), " does not match input shape ", input.sizes());
   // }
 
-  // cuSOLVER and MAGMA are used for CUDA inputs and cuSOLVER requires 'infos' to reside in GPU memory
-  // MAGMA path doesn't use it
-  auto infos = at::empty({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+  // Single matrix MAGMA routine requires 'infos' to reside in CPU memory,
+  // therefore we create 'infos' only on CPU for now.
+  // This should be changed if cuSOLVER would be used
+  auto infos = at::empty({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
 
   bool result_input_same_type = (result.scalar_type() == input.scalar_type());
   bool result_equal_expected_shape = result.sizes().equals(input.sizes());

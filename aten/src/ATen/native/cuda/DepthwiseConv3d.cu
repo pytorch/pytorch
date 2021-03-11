@@ -359,7 +359,6 @@ void conv_depthwise_shape_check(
         stride[0], stride[1], stride[2],                                    \
         padding[0], padding[1], padding[2],                                 \
         dilation[0], dilation[1], dilation[2]);                             \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                         \
   } else
 
 #define DWCONV3D_FORWARD_DISPATCH_OTHERS \
@@ -375,7 +374,6 @@ void conv_depthwise_shape_check(
         stride[0], stride[1], stride[2],                                    \
         padding[0], padding[1], padding[2],                                 \
         dilation[0], dilation[1], dilation[2]);                             \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                         \
   }
 
 Tensor conv_depthwise3d_cuda(
@@ -462,7 +460,6 @@ Tensor conv_depthwise3d_cuda(
         stride[0], stride[1], stride[2],                                    \
         padding[0], padding[1], padding[2],                                 \
         dilation[0], dilation[1], dilation[2]);                             \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                         \
   } else
 
 #define DWCONV3D_BACKWARD_INPUT_DISPATCH_OTHERS                             \
@@ -477,7 +474,6 @@ Tensor conv_depthwise3d_cuda(
         stride[0], stride[1], stride[2],                                    \
         padding[0], padding[1], padding[2],                                 \
         dilation[0], dilation[1], dilation[2]);                             \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                         \
   }
 
 #define DWCONV3D_BACKWARD_WEIGHT_DISPATCH_SPECIALIZATION(dh, dw)            \
@@ -492,7 +488,6 @@ Tensor conv_depthwise3d_cuda(
         stride[0], stride[1], stride[2],                                    \
         padding[0], padding[1], padding[2],                                 \
         dilation[0], dilation[1], dilation[2]);                             \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                         \
   } else
 
 #define DWCONV3D_BACKWARD_WEIGHT_DISPATCH_OTHERS                            \
@@ -507,7 +502,6 @@ Tensor conv_depthwise3d_cuda(
         stride[0], stride[1], stride[2],                                    \
         padding[0], padding[1], padding[2],                                 \
         dilation[0], dilation[1], dilation[2]);                             \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                                         \
   }
 
 std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(

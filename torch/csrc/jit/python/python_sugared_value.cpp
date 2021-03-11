@@ -258,55 +258,14 @@ SugaredValuePtr ModuleValue::asTupleValue(const SourceRange& loc, Function& m) {
       << "Only ModuleList or Sequential modules can be used as tuple";
 }
 
-bool ModuleValue::areAllSubmodulesSubtypeOf(
-    const TypePtr& ty,
-    std::ostream* why_not) const {
-  const auto& self_type = concreteType_->getJitType()->expect<ClassType>();
-  for (size_t i = 0; i < self_type->numAttributes(); ++i) {
-    const auto& attr_type = self_type->getAttribute(i);
-    if (attr_type->is_module()) {
-      std::stringstream ss;
-      if (!attr_type->isSubtypeOfExt(ty, &ss)) {
-        if (why_not) {
-          *why_not << "Attribute " << self_type->getAttributeName(i)
-                   << " is not of annotated type " << ty->annotation_str()
-                   << ": " << ss.str();
-        }
-
-        return false;
-      }
-    }
-  }
-
-  return true;
-}
-
 SugaredValuePtr ModuleValue::getitem(
     const SourceRange& loc,
     Function& m,
     Value* idx,
     TypePtr type_hint) {
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
-    if (type_hint) {
-      // Check that all submodules comply with the type hint.
-      std::stringstream ss;
-      if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
-        throw ErrorReport(loc) << ss.str();
-      }
-
-      // Emit a prim::ModuleContainerIndex operator. This is needed because
-      // it's difficult to construct a list in the graph representing the
-      // ModuleList and use aten::__getitem__ ops to index into it because
-      // any call to ModuleList.setitem would invalidate that emitted list.
-      auto graph = m.graph();
-      auto* getitem_node = graph->insertNode(
-          graph->create(prim::ModuleContainerIndex, {self_, idx}));
-      getitem_node->output(0)->setType(type_hint);
-      return std::make_shared<SimpleValue>(getitem_node->output(0));
-    } else {
-      return getSugaredDict(loc, m)->getModules()->getitem(
-          loc, m, idx, type_hint);
-    }
+    return getSugaredDict(loc, m)->getModules()->getitem(
+        loc, m, idx, type_hint);
   } else if (
       concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (auto ivalue = toIValue(idx)) {
@@ -324,18 +283,28 @@ SugaredValuePtr ModuleValue::getitem(
       throw ErrorReport(loc) << "Key Error, " << idx_str;
     } else if (type_hint) {
       // Check that all submodules comply with the type hint.
-      std::stringstream ss;
-      if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
-        throw ErrorReport(loc) << ss.str();
+      const auto& self_type = concreteType_->getJitType()->expect<ClassType>();
+      for (size_t i = 0; i < self_type->numAttributes(); ++i) {
+        const auto& attr_type = self_type->getAttribute(i);
+        if (attr_type->is_module()) {
+          std::stringstream ss;
+          if (!attr_type->isSubtypeOfExt(type_hint, &ss)) {
+            auto loc = self_->node()->sourceRange();
+            throw ErrorReport(loc)
+                << "Attribute " << self_type->getAttributeName(i)
+                << " is not of annotated type " << type_hint->annotation_str()
+                << ": " << ss.str();
+          }
+        }
       }
 
-      // Emit a prim::ModuleContainerIndex operator. This is needed because
-      // it's difficult to construct a dict in the graph representing the
-      // ModuleDict and use aten::__getitem__ ops to index into it because
-      // any call to ModuleDict.setAttr would invalidate that emitted dict.
+      // Emit a prim::ModuleDictIndex operator. This is needed because it's
+      // difficult to construct a dict in the graph representing the ModuleDict
+      // and use aten::__getitem__ ops to index into it because any call to
+      // ModuleDict.setAttr would invalidate that emitted dict.
       auto graph = m.graph();
-      auto* getitem_node = graph->insertNode(
-          graph->create(prim::ModuleContainerIndex, {self_, idx}));
+      auto* getitem_node =
+          graph->insertNode(graph->create(prim::ModuleDictIndex, {self_, idx}));
       getitem_node->output(0)->setType(type_hint);
       return std::make_shared<SimpleValue>(getitem_node->output(0));
     }

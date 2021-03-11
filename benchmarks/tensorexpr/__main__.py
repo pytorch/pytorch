@@ -123,12 +123,6 @@ Works only with Python3.\n A few examples:
         action='store_true',
         help="Enable CPU fusion.",
     )
-    parser.add_argument(
-        "--cat_wo_conditionals",
-        default=False,
-        action='store_true',
-        help="Enable CAT wo conditionals.",
-    )
 
     args = parser.parse_args()
 
@@ -158,13 +152,6 @@ Works only with Python3.\n A few examples:
     else:
         import torch
         torch._C._jit_override_can_fuse_on_cpu(False)
-
-    if args.cat_wo_conditionals:
-        import torch
-        torch._C._jit_cat_wo_conditionals(True)
-    else:
-        import torch
-        torch._C._jit_cat_wo_conditionals(False)
 
     def set_global_threads(num_threads):
         os.environ["OMP_NUM_THREADS"] = str(num_threads)

@@ -1290,6 +1290,28 @@ class TestCase(expecttest.TestCase):
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
+    def maybeWarnsRegex(self, category, regex=''):
+        """Context manager for code that *may* warn, e.g. ``TORCH_WARN_ONCE``.
+
+        This filters expected warnings from the test log and fails the test if
+        any unexpected warnings are caught.
+        """
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            # Ignore expected warnings
+            warnings.filterwarnings("ignore", message=regex, category=category)
+            try:
+                yield
+            finally:
+                if len(ws) != 0:
+                    msg = 'Caught unexpected warnings:\n'
+                    for w in ws:
+                        msg += warnings.formatwarning(
+                            str(w.message), w.category, w.filename, w.lineno, w.line)
+                        msg += '\n'
+                    self.fail(msg)
+
+    @contextmanager
     def assertWarnsOnceRegex(self, category, regex=''):
         """Context manager for code that *must always* warn
 
@@ -1306,12 +1328,13 @@ class TestCase(expecttest.TestCase):
                 yield
             finally:
                 torch.set_warn_always(prev)
-            if len(ws) == 0:
-                self.fail('no warning caught')
-            for w in ws:
-                self.assertTrue(type(w.message) is category)
-                self.assertTrue(re.match(pattern, str(w.message)),
-                                f'{pattern}, {w.message}')
+                if len(ws) == 0:
+                    self.fail('no warning caught')
+                if len(ws) > 1:
+                    self.fail('too many warnings caught: %s' % '\n    '.join([str(w) for w in ws]))
+                self.assertTrue(type(ws[0].message) is category)
+                self.assertTrue(re.match(pattern, str(ws[0].message)),
+                                f'{pattern}, {ws[0].message}')
 
     def assertExpected(self, s, subname=None):
         r"""
@@ -1981,10 +2004,10 @@ dtype2prec_DONTUSE = {torch.float: 1e-5,
                       torch.bfloat16: 1e-1}
 
 
-def _wrap_warn_once(regex):
+def _wrap_maybe_warns(regex):
     def decorator(fn):
         def inner(self, *args, **kwargs):
-            with self.assertWarnsOnceRegex(UserWarning, regex):
+            with self.maybeWarnsRegex(UserWarning, regex):
                 fn(self, *args, **kwargs)
         return inner
     return decorator

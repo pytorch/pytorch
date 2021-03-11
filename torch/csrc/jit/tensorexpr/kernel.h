@@ -140,8 +140,6 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeSoftmax(const torch::jit::Value* v, bool log_softmax);
 
-  Tensor* computeCatWoConditionals(const torch::jit::Value* v);
-
   Tensor* computeValue(const torch::jit::Value* v);
 
   Stmt* transformLoops(BackendType backendType, Stmt* st);
@@ -216,7 +214,6 @@ TORCH_API bool& getTEGenerateBlockCode();
 TORCH_API bool& getTEMustUseLLVMOnCPU();
 TORCH_API bool fallbackAllowed();
 TORCH_API bool setFallbackAllowed(bool value);
-TORCH_API bool& getCatWoConditionals();
 
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);

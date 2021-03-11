@@ -455,8 +455,6 @@ class Conv3d(_ConvNd):
 
     """
     _FLOAT_MODULE = nn.Conv3d
-    _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn3d
-    _NNI_CONV_RELU_MODULE = nni.ConvReLU3d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
@@ -512,7 +510,15 @@ class Conv3d(_ConvNd):
             mod (Module): a float module, either produced by torch.quantization
               utilities or provided by the user
         """
-        return _ConvNd.from_float(cls, mod)
+        assert type(mod) == cls._FLOAT_MODULE, \
+            ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+            cls._FLOAT_MODULE.__name__
+        assert hasattr(mod, 'qconfig'), \
+            'Input float module must have qconfig defined.'
+        activation_post_process = mod.activation_post_process
+        if type(mod) == nni.ConvReLU3d:
+            mod = mod[0]
+        return cls.get_qconv(mod, activation_post_process)
 
 # === Transposed Convolutions ===
 MOD = TypeVar('MOD', bound=nn.modules.conv._ConvNd)

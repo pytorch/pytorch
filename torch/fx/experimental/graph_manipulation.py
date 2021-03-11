@@ -1,4 +1,4 @@
-from typing import Dict, List, NamedTuple, Any, Optional
+from typing import Dict, List, NamedTuple, Any
 
 import torch
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
@@ -182,19 +182,14 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
     serialized_dict["modules"] = {}
     serialized_dict["weights"] = {}
     serialized_dict["nodes"] = []
-    submodules = dict(fx_module.named_modules())
+    parameters = fx_module.named_parameters()
     prefix = f"{name_prefix}." if name_prefix else ""
-
-    def add_weight_tensors(named_tensors):
-        for name, p in named_tensors:
-            if name.startswith("parent.") or not isinstance(p, torch.Tensor):
-                continue
+    submodules = dict(fx_module.named_modules())
+    for name, p in parameters:
+        if isinstance(p, torch.Tensor):
             weight = serialize_weight(p)
             serialized_dict["weights"][prefix + name] = weight
             weights[prefix + name] = p
-    add_weight_tensors(fx_module.named_parameters())
-    add_weight_tensors(fx_module.named_buffers())
-
     # Note: lift_lowering_attrs_to_nodes is only used to support leaf modules
     # that cannot currently be symbolically traced into, e.g. batch norm.
     lift_lowering_attrs_to_nodes(fx_module)
@@ -238,14 +233,13 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 weight = serialize_weight(weights[node.target[len("parent."):]])
                 serialized_dict["weights"][node.target[len("parent."):]] = weight
             else:
-                # Find the actual target parameter/buffer from the fx_module.
-                submod_path, _, target_name = node.target.rpartition(".")
-                submod: Optional[torch.nn.Module] = (
-                    fx_module.get_submodule(submod_path) if submod_path else fx_module
-                )
-                assert submod is not None, f"submod {submod_path} not found"
-                target = getattr(submod, target_name, None)
-                assert target is not None, f"{target_name} not an attr of {submod_path}"
+                # Iterate through the module hierarchy to find the attr.
+                target = fx_module
+                split = node.target.split(".")
+                assert len(split)
+                while len(split):
+                    target = getattr(target, split.pop(0))
+
                 qualname = prefix + node.target
                 # Check that the target is a tensor, and that we haven't added it already from a leaf module.
                 if isinstance(target, torch.Tensor) and qualname not in weights:

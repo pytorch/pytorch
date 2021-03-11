@@ -256,9 +256,6 @@ class LazyBatchNorm1d(_LazyBatchNorm):
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 
-    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
-    on lazy modules and their limitations.
-
     Args:
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
@@ -362,9 +359,6 @@ class LazyBatchNorm2d(_LazyBatchNorm):
     from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
-
-    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
-    on lazy modules and their limitations.
 
     Args:
         eps: a value added to the denominator for numerical stability.
@@ -470,9 +464,6 @@ class LazyBatchNorm3d(_LazyBatchNorm):
     from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
-
-    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
-    on lazy modules and their limitations.
 
     Args:
         eps: a value added to the denominator for numerical stability.

@@ -94,7 +94,7 @@ static inline void checkInBoundsForStorage(
       ", and itemsize ",
       data_type.itemsize(),
       " requiring a storage size of ",
-      storage_size_bytes + storage_offset_bytes,
+      storage_size_bytes,
       " are out of bounds for storage of size ",
       new_storage_size_bytes);
 }

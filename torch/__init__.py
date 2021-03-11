@@ -476,7 +476,7 @@ def is_warn_always_enabled():
 # Define Storage and Tensor classes
 ################################################################################
 
-from ._tensor import Tensor
+from .tensor import Tensor
 from .storage import _StorageBase
 
 

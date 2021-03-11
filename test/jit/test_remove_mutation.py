@@ -7,7 +7,7 @@ from torch.testing import FileCheck
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, freeze_rng_state
+from torch.testing._internal.jit_utils import JitTestCase
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -153,19 +153,6 @@ class TestRemoveMutation(JitTestCase):
         graph = fn.graph
         self.run_pass('remove_mutation', graph)
         FileCheck().check('aten::fill_').run(graph)
-
-        def normal():
-            return torch.rand(2, 1, 3, 4).normal_()
-
-        fn = torch.jit.script(normal)
-        graph = fn.graph
-        self.run_pass('remove_mutation', graph)
-        FileCheck().check_not("normal_").run(graph)
-        with freeze_rng_state():
-            out_eager = normal()
-        with freeze_rng_state():
-            out_script = fn()
-        self.assertEqual(out_eager, out_script)
 
     def test_lists_append(self):
         def successful_remove():

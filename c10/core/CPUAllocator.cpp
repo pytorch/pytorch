@@ -72,7 +72,7 @@ void* alloc_cpu(size_t nbytes) {
       data,
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
       nbytes,
-      " bytes.");
+      " bytes. Buy new RAM!");
 
   // move data to a thread's NUMA node
   NUMAMove(data, nbytes, GetCurrentNUMANode());

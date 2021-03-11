@@ -1002,7 +1002,8 @@ void initJitScriptBindings(PyObject* module) {
           &Module::dump_to_str,
           py::arg("code") = true,
           py::arg("attrs") = true,
-          py::arg("params") = true)
+          py::arg("params") = true,
+          py::arg("indent") = 0)
       .def(
           "_replicate_for_data_parallel",
           [](Module& module) {

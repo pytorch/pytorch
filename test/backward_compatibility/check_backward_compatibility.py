@@ -29,7 +29,6 @@ allow_list = [
     ("c10_experimental", datetime.date(2222, 1, 1)),
     # Internal
     ("static", datetime.date(9999, 1, 1)),
-    ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),

@@ -13,14 +13,17 @@ class Logger {
       int output_device,
       bool broadcast_buffers);
 
-  // An interface for users to get DDPLoggingData and log them
+  // An Interface for users to get DDPLoggingData and log them
   // in the applications. Explanation of logging fields are in
   // "struct DDPLoggingData" of "torch/c10/util/Logging.h".
   c10::DDPLoggingData get_ddp_logging_data();
 
   // Stream insertion operator for logging data to stream under
   // TORCH_DISTRIBUTED_DEBUG.
-  friend std::ostream& operator<<(std::ostream& output, const Logger& logger);
+  friend std::ostream& operator<<(
+    std::ostream& output,
+    const Logger& logger
+  );
 
   // Set environment variables.
   void set_env_variables();
@@ -35,13 +38,11 @@ class Logger {
   // that has been recorded in reducer.
   void calculate_avg_cpu_time(
       int64_t& avg_time,
-      int64_t& time_duration,
       int64_t cpu_start_time,
       int64_t cpu_end_time);
 #ifdef USE_CUDA
   void calculate_avg_gpu_time(
       int64_t& avg_time,
-      int64_t& time_duration,
       at::cuda::CUDAEvent& gpu_start,
       at::cuda::CUDAEvent& gpu_end);
 #endif

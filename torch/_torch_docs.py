@@ -9579,10 +9579,11 @@ Keyword args:
 
 Example::
 
-    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
-    >>> torch.empty_like(a)
-    tensor([[0, 0, 0],
-            [0, 0, 0]], device='cuda:0', dtype=torch.int32)
+    >>> torch.empty(2, 3)
+    tensor(1.00000e-08 *
+           [[ 6.3984,  0.0000,  0.0000],
+            [ 0.0000,  0.0000,  0.0000]])
+
 """.format(**factory_common_args))
 
 add_docstr(torch.empty_like,

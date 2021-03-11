@@ -341,19 +341,12 @@ size_t computeStorageNbytes(
 //    `oldshape` was separated into, where each chunk of newshape has matching
 //    ``numel'', i.e., number of subspaces, as the corresponding chunk of
 //    `oldshape`.
-//
-// templatized for DimVector and IntArrayRef use cases,
-// see overloads of computeStride() below.
-//
-template <typename ResultVec, typename NewShapeVec>
-inline c10::optional<ResultVec> computeStride_impl(
+c10::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
-    const NewShapeVec& newshape,
-    ResultVec toResult(const IntArrayRef&)
-) {
+    IntArrayRef newshape) {
   if (oldshape.empty()) {
-    return ResultVec(newshape.size(), 1);
+    return std::vector<int64_t>(newshape.size(), 1);
   }
 
   // NOTE: stride is arbitrary in the numel() == 0 case;
@@ -363,10 +356,10 @@ inline c10::optional<ResultVec> computeStride_impl(
   // didn't seem worth it.
   const int64_t numel = c10::multiply_integers(oldshape);
   if (numel == 0 && oldshape.equals(newshape)) {
-    return toResult(oldstride);
+    return oldstride.vec();
   }
 
-  ResultVec newstride(newshape.size());
+  std::vector<int64_t> newstride(newshape.size());
   if (numel == 0) {
     for (int64_t view_d = newshape.size() - 1; view_d >= 0; view_d--) {
       if (view_d == (int64_t)(newshape.size() - 1)) {
@@ -411,22 +404,6 @@ inline c10::optional<ResultVec> computeStride_impl(
     return c10::nullopt;
   }
   return newstride;
-}
-
-c10::optional<std::vector<int64_t>> computeStride(
-    IntArrayRef oldshape,
-    IntArrayRef oldstride,
-    IntArrayRef newshape) {
-  auto toResult = [](const IntArrayRef& a) { return a.vec(); };
-  return computeStride_impl<std::vector<int64_t>, IntArrayRef>(oldshape, oldstride, newshape, toResult);
-}
-
-c10::optional<DimVector> computeStride(
-    IntArrayRef oldshape,
-    IntArrayRef oldstride,
-    const DimVector& newshape) {
-  auto toResult = [](const IntArrayRef& a) { return DimVector(a); };
-  return computeStride_impl<DimVector, DimVector>(oldshape, oldstride, newshape, toResult);
 }
 
 }  // namespace detail

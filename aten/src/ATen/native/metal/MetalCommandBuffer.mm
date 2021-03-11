@@ -4,7 +4,7 @@
 
 #include <mutex>
 
-NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
+NSString* cb_key = @"PTCommandBuffer";
 @implementation MetalCommandBuffer {
   NSMutableArray* _images;
   std::mutex _mutex;
@@ -20,21 +20,20 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
 
 + (MetalCommandBuffer*)currentBuffer {
   NSThread* thd = [NSThread currentThread];
-  thd.name = thread_local_storage_key;
   NSMutableDictionary* dict = [thd threadDictionary];
-  MetalCommandBuffer* cb = dict[thread_local_storage_key];
+  MetalCommandBuffer* cb = dict[cb_key];
   if (!cb) {
     cb = [MetalCommandBuffer new];
     cb->_buffer = [[MPSCNNContext sharedInstance].commandQueue commandBuffer];
     cb->_thread = thd;
     cb->_images = [NSMutableArray new];
-    dict[thread_local_storage_key] = cb;
+    dict[cb_key] = cb;
   }
   return cb;
 }
 
 - (void)flush {
-  [[_thread threadDictionary] removeObjectForKey:thread_local_storage_key];
+  [[_thread threadDictionary] removeObjectForKey:cb_key];
 }
 
 - (void)add:(MPSTemporaryImage*)image {
@@ -59,7 +58,7 @@ NSString* thread_local_storage_key = @"PTMetalCommandBuffer";
     [self recycle];
     [_buffer commit];
     [_buffer waitUntilCompleted];
-    [[_thread threadDictionary] removeObjectForKey:thread_local_storage_key];
+    [[_thread threadDictionary] removeObjectForKey:cb_key];
   }
 }
 

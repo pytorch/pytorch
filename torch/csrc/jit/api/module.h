@@ -173,7 +173,8 @@ struct TORCH_API Module : public Object {
   std::string dump_to_str(
       bool print_method_bodies,
       bool print_attr_values,
-      bool print_param_values) const;
+      bool print_param_values,
+      int level) const;
 
   /// Enables "training" mode.
   void train(bool on = true);

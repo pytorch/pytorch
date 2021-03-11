@@ -37,7 +37,7 @@ Python
 
 For custom operators, you might need to set python seed as well::
 
-    import random
+    inport random
     random.seed(0)
 
 Random number generators in other libraries

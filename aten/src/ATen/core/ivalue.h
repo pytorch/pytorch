@@ -359,12 +359,6 @@ struct TORCH_API IValue final {
   bool isTensor() const {
     return Tag::Tensor == tag;
   }
-
- private:
-  // Outlined error path so that toTensor() can be inlined.
-  [[noreturn]] void reportToTensorTypeError() const;
-
- public:
   at::Tensor toTensor() &&;
   at::Tensor& toTensor() &;
   const at::Tensor& toTensor() const&;

@@ -5,9 +5,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API void fuseStaticSubgraphs(
-    std::shared_ptr<Graph> graph,
-    size_t min_size);
+TORCH_API void fuseStaticSubgraphs(std::shared_ptr<Graph> graph);
 
 } // namespace jit
 } // namespace torch

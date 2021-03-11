@@ -26,7 +26,6 @@ class TestE2EProcessGroup : public TestE2EBase {
         store, 0, numWorkers, options);
 
     rpcAgent = std::make_shared<ProcessGroupAgent>(
-        store,
         "worker",
         pg,
         std::max(16U, std::thread::hardware_concurrency()),

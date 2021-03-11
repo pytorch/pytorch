@@ -1,14 +1,18 @@
-#import <ATen/ATen.h>
+#import <ATen/native/metal/MetalConvolution.h>
 #import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/mpscnn/MPSCNNOps.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
-#import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 #import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
-#import <ATen/native/metal/ops/MetalConvolution.h>
-#import <ATen/native/metal/ops/MetalTranspose.h>
-
 #import <Foundation/Foundation.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
+#include <ATen/ATen.h>
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
+#import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
+
+#include <stdlib.h>
+#include <torch/script.h>
 #include <sstream>
 
 #define ITER_COUNT 5
@@ -67,7 +71,6 @@ bool TEST(const std::vector<int64_t>& sizes, std::string name, Func block) {
   std::stringstream ss;
   std::copy(sizes.begin(), sizes.end(), std::ostream_iterator<int>(ss, " "));
   __block std::string str1 = ss.str();
-  at::AutoNonVariableTypeMode guard(true);
   bool b = block();
   void (^print)(NSString*) = ^(NSString* result) {
     NSLog(@"[%s],[%s],[%@]", name.c_str(), str1.c_str(), result);
@@ -78,7 +81,7 @@ bool TEST(const std::vector<int64_t>& sizes, std::string name, Func block) {
 
 }
 
- using namespace at::native::metal;
+using namespace at::native::metal;
 
 bool test_synchronization() {
   __block std::vector<int64_t> size{1, 3, 2, 2};
@@ -105,8 +108,8 @@ bool test_nchw_to_nc4_cpu() {
       const auto len = c10::multiply_integers(std::begin(size), std::end(size));
       auto buf =
           std::vector<float>{t.data_ptr<float>(), t.data_ptr<float>() + len};
-      auto c4 = NCHWToNC4((float*)t.data_ptr<float>(), t.sizes().vec());
-      auto n4 = NC4ToNCHW((float*)c4.data(), t.sizes().vec());
+      auto c4 = NCHW_to_NC4((float*)t.data_ptr<float>(), t.sizes().vec());
+      auto n4 = NC4_to_NCHW((float*)c4.data(), t.sizes().vec());
       return n4 == buf;
     });
     if (!b) {
@@ -122,10 +125,14 @@ bool test_copy_nchw_to_metal() {
     auto t1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     MetalCommandBuffer* cb = [MetalCommandBuffer newBuffer];
     MPSTemporaryImage* img1 =
-        createTemporaryImage(cb, t1.sizes().vec(), t1.data_ptr<float>());
-    MPSImage* img2 = createStaticImage(img1, cb, true);
+        [MPSImage temporaryImageFromHost:t1.data_ptr<float>()
+                                   Sizes:t1.sizes().vec()
+                           CommandBuffer:cb];
+    MPSImage* img2 = [MPSImage imageFromTemporaryImage:img1
+                                         CommandBuffer:cb
+                                    waitUntilCompleted:YES];
     auto t2 = at::zeros(size);
-    copyToHost(t2.data_ptr<float>(), img2);
+    [MPSImage copyToHost:t2.data_ptr<float>() FromImage:img2];
     return almostEqual(t1, t2);
   });
 }
@@ -151,14 +158,15 @@ bool test_conv2d() {
       auto W = at::rand(
           {OC, IC, KH, KW}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
       auto B = at::rand({OC}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      auto S = std::vector<int64_t>({SH, SW});
-      auto P = std::vector<int64_t>({PH, PW});
-      // Dilated convolution is not supported yet
-      auto D = std::vector<int64_t>({1, 1});
+      auto S = c10::IntArrayRef({SH, SW});
+      auto P = c10::IntArrayRef({PH, PW});
+      auto D =
+          c10::IntArrayRef({1, 1}); // Dilated convolution is not supported yet
       int64_t groups = 1;
-      auto Y1 = at::conv2d(X, W, B, S, P, D, groups);
+      auto Y1 = at::native::conv2d(X, W, B, S, P, D, groups);
       auto X2 = X.metal();
-      auto Y2 = at::conv2d(X2, W, B, S, P, D, groups).cpu();
+      Conv2DParams params{X.sizes(), W.sizes(), P, S, D, groups};
+      auto Y2 = mpscnn::conv2d(X2, W, B, params).cpu();
       return almostEqual(Y1, Y2);
     });
     if (!b) {
@@ -181,14 +189,14 @@ bool test_depthwiseConv() {
     auto X = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto W = at::rand(w, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto B = at::rand(b, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::_convolution(
+    auto Y1 = at::native::_convolution(
         X, W, B, {1, 1}, p, {1, 1}, false, {0, 0}, g, false, false, true, true);
     auto X2 = X.metal();
     Conv2DParams params{X.sizes(), W.sizes(), p, S, D, g};
     if (!params.isDepthwise()) {
       return false;
     }
-    auto Y2 = at::conv2d(X2, W, B, S, p, D, g).cpu();
+    auto Y2 = mpscnn::conv2d(X2, W, B, params).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -197,31 +205,34 @@ bool test_max_pool2d() {
   __block std::vector<int64_t> size{1, 3, 4, 4};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::max_pool2d(X, {2, 2}, {2, 2}, {0, 0}, {1, 1}, false);
+    auto Y1 = at::native::max_pool2d(X, {2, 2}, {2, 2}, {0, 0}, {1, 1}, false);
     auto X2 = X.metal();
-    auto Y2 = at::max_pool2d(X2, {2, 2}, {2, 2}, {0, 0}, {1, 1}, false).cpu();
+    auto Y2 =
+        mpscnn::max_pool2d(X2, {2, 2}, {2, 2}, {0, 0}, {1, 1}, false).cpu();
     return almostEqual(Y1, Y2);
   });
 }
 
 bool test_max_pool2d_padding() {
-  __block std::vector<int64_t> size{1, 3, 4, 4};
-  return TEST(size, __PRETTY_FUNCTION__, ^bool {
-    auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::max_pool2d(X, {2, 2}, {2, 2}, {1, 1}, {1, 1}, false);
-    auto X2 = X.metal();
-    auto Y2 = at::max_pool2d(X2, {2, 2}, {2, 2}, {1, 1}, {1, 1}, false).cpu();
-    return almostEqual(Y1, Y2);
-  });
+    __block std::vector<int64_t> size{1, 3, 4, 4};
+    return TEST(size, __PRETTY_FUNCTION__, ^bool {
+      auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto Y1 = at::native::max_pool2d(X, {2, 2}, {2, 2}, {1, 1}, {1, 1}, false);
+      auto X2 = X.metal();
+      auto Y2 =
+          mpscnn::max_pool2d(X2, {2, 2}, {2, 2}, {1, 1}, {1, 1}, false).cpu();
+      return almostEqual(Y1, Y2);
+    });
 }
 
 bool test_max_pool2d_ceil() {
   __block std::vector<int64_t> size{1, 96, 55, 55};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::max_pool2d(X, {3, 3}, {2, 2}, {0, 0}, {1, 1}, true);
+    auto Y1 = at::native::max_pool2d(X, {3, 3}, {2, 2}, {0, 0}, {1, 1}, true);
     auto X2 = X.metal();
-    auto Y2 = at::max_pool2d(X2, {3, 3}, {2, 2}, {0, 0}, {1, 1}, true).cpu();
+    auto Y2 =
+        mpscnn::max_pool2d(X2, {3, 3}, {2, 2}, {0, 0}, {1, 1}, true).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -230,9 +241,9 @@ bool test_relu() {
   __block std::vector<int64_t> size{1, 3, 4, 4};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::relu(X);
+    auto Y1 = torch::native::relu(X);
     auto X2 = X.metal();
-    auto Y2 = at::relu(X2).cpu();
+    auto Y2 = mpscnn::relu(X2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -241,9 +252,9 @@ bool test_sigmoid() {
   __block std::vector<int64_t> size{1, 3, 4, 4};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::sigmoid(X);
+    auto Y1 = at::native::sigmoid(X);
     auto X2 = X.metal();
-    auto Y2 = at::sigmoid(X2).cpu();
+    auto Y2 = mpscnn::sigmoid(X2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -251,11 +262,10 @@ bool test_sigmoid() {
 bool test_hardsigmoid() {
   __block std::vector<int64_t> size{3, 3, 44, 44};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
-    auto X =
-        at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 12 - 6;
+    auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat))*12 - 6;
     auto X2 = X.metal();
-    auto Y1 = at::hardsigmoid_(X);
-    auto Y2 = at::hardsigmoid_(X2).cpu();
+    auto Y1 = at::native::hardsigmoid_(X);
+    auto Y2 = mpscnn::hardsigmoid_(X2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -263,11 +273,10 @@ bool test_hardsigmoid() {
 bool test_hardswish() {
   __block std::vector<int64_t> size{3, 3, 44, 44};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
-    auto X =
-        at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 12 - 6;
+    auto X = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat))*12 - 6;
     auto X2 = X.metal();
-    auto Y1 = at::hardswish_(X);
-    auto Y2 = at::hardswish_(X2).cpu();
+    auto Y1 = at::native::hardswish_(X);
+    auto Y2 = mpscnn::hardswish_(X2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -285,9 +294,10 @@ bool test_addmm() {
           at::rand({IC, OC}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
       auto B1 =
           at::rand({1, OC}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      auto Y1 = at::addmm(B1, X1, W1);
+      auto Y1 = at::native::addmm_cpu(B1, X1, W1);
       auto X2 = X1.view({N, IC, 1, 1}).contiguous().metal();
-      auto Y2 = at::addmm(B1, X2, W1).cpu();
+      auto W2 = W1.t().view({W1.sizes()[1], W1.sizes()[0], 1, 1}).contiguous();
+      auto Y2 = mpscnn::addmm(B1, X2, W2).cpu();
       return almostEqual(Y1, Y2);
     });
     if (!b) {
@@ -305,7 +315,7 @@ bool test_add() {
     auto Y1 = at::add(X1, X2);
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
-    auto Y2 = at::add(MX1, MX2).cpu();
+    auto Y2 = mpscnn::add(MX1, MX2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -319,7 +329,7 @@ bool test_add_broadcast() {
     auto Y1 = at::add(X1, X2);
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
-    auto Y2 = at::add(MX1, MX2).cpu();
+    auto Y2 = mpscnn::add(MX1, MX2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -329,10 +339,10 @@ bool test_sub() {
   return TEST(x, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::sub(X1, X2);
+    auto Y1 = at::native::sub(X1, X2);
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
-    auto Y2 = at::sub(MX1, MX2).cpu();
+    auto Y2 = mpscnn::sub(MX1, MX2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -343,10 +353,10 @@ bool test_sub_broadcast() {
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::sub(X1, X2);
+    auto Y1 = at::native::sub(X1, X2);
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
-    auto Y2 = at::sub(MX1, MX2).cpu();
+    auto Y2 = mpscnn::sub(MX1, MX2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -357,10 +367,10 @@ bool test_sub_broadcast2() {
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::sub(X1, X2);
+    auto Y1 = at::native::sub(X1, X2);
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
-    auto Y2 = at::sub(MX1, MX2).cpu();
+    auto Y2 = mpscnn::sub(MX1, MX2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -370,10 +380,10 @@ bool test_mul() {
   return TEST(x, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::mul(X1, X2);
+    auto Y1 = at::native::mul(X1, X2);
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
-    auto Y2 = at::mul(MX1, MX2).cpu();
+    auto Y2 = mpscnn::mul(MX1, MX2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -384,10 +394,10 @@ bool test_mul_broadcast() {
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::mul(X1, X2);
+    auto Y1 = at::native::mul(X1, X2);
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
-    auto Y2 = at::mul(MX1, MX2).cpu();
+    auto Y2 = mpscnn::mul(MX1, MX2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -398,10 +408,10 @@ bool test_mul_broadcast2() {
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::mul(X1, X2);
+    auto Y1 = at::native::mul(X1, X2);
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
-    auto Y2 = at::mul(MX1, MX2).cpu();
+    auto Y2 = mpscnn::mul(MX1, MX2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -412,10 +422,11 @@ bool test_t() {
     int64_t H = rand(1, 256);
     int64_t W = rand(1, 256);
     bool b = TEST({H, W}, __PRETTY_FUNCTION__, ^bool {
-      auto X1 = at::rand({H, W}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      auto Y1 = at::t(X1).contiguous();
+      auto X1 =
+          torch::rand({H, W}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto Y1 = at::native::t(X1).contiguous();
       auto X2 = X1.metal();
-      auto Y2 = at::native::metal::t(X2).cpu();
+      auto Y2 = mpscnn::t(X2).cpu();
       return almostEqual(Y1, Y2);
     });
     if (!b) {
@@ -431,7 +442,7 @@ bool test_view() {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto Y1 = X1.view({3, 4}).contiguous();
     auto X2 = X1.metal();
-    auto Y2 = X2.view({3, 4}).cpu();
+    auto Y2 = mpscnn::view(X2, {3, 4}).cpu();
     bool b1 = (Y1.sizes() == Y2.sizes());
     bool b2 = (Y1.strides() == Y2.strides());
     return b1 && b2;
@@ -443,15 +454,15 @@ bool test_cat_dim0() {
   __block std::vector<int64_t> x2{5, 9, 221, 193};
   __block std::vector<int64_t> x3{7, 9, 221, 193};
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
-    auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 100;
-    auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 100;
-    auto X3 = at::rand(x3, at::TensorOptions(at::kCPU).dtype(at::kFloat)) * 100;
+    auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat))*100;
+    auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat))*100;
+    auto X3 = at::rand(x3, at::TensorOptions(at::kCPU).dtype(at::kFloat))*100;
     auto Y = at::cat({X1, X2, X3}, 0);
 
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
     auto MX3 = X3.metal();
-    auto MY = at::cat({MX1, MX2, MX3}, 0).cpu();
+    auto MY = mpscnn::cat({MX1, MX2, MX3}, 0).cpu();
 
     return almostEqual(Y, MY);
   });
@@ -470,7 +481,7 @@ bool test_cat_dim0_nonarray() {
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
     auto MX3 = X3.metal();
-    auto MY = at::cat({MX1, MX2, MX3}, 0).cpu();
+    auto MY = mpscnn::cat({MX1, MX2, MX3}, 0).cpu();
 
     return almostEqual(Y, MY);
   });
@@ -490,7 +501,7 @@ bool test_cat_dim1_0() {
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
     auto MX3 = X3.metal();
-    auto MY = at::cat({MX1, MX2, MX3}, 1).cpu();
+    auto MY = mpscnn::cat({MX1, MX2, MX3}, 1).cpu();
 
     return almostEqual(Y, MY);
   });
@@ -515,7 +526,7 @@ bool test_cat_dim1_1() {
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
     auto MX3 = X3.metal();
-    auto MY = at::cat({MX1, MX2, MX3}, 1).cpu();
+    auto MY = mpscnn::cat({MX1, MX2, MX3}, 1).cpu();
 
     return almostEqual(Y, MY);
   });
@@ -540,7 +551,7 @@ bool test_cat_dim1_nonarray_0() {
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
     auto MX3 = X3.metal();
-    auto MY = at::cat({MX1, MX2, MX3}, 1).cpu();
+    auto MY = mpscnn::cat({MX1, MX2, MX3}, 1).cpu();
 
     return almostEqual(Y, MY);
   });
@@ -565,7 +576,7 @@ bool test_cat_dim1_nonarray_1() {
     auto MX1 = X1.metal();
     auto MX2 = X2.metal();
     auto MX3 = X3.metal();
-    auto MY = at::cat({MX1, MX2, MX3}, 1).cpu();
+    auto MY = mpscnn::cat({MX1, MX2, MX3}, 1).cpu();
 
     return almostEqual(Y, MY);
   });
@@ -580,9 +591,9 @@ bool test_softmax() {
   __block std::vector<int64_t> size{2, 3, 1, 1};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::log_softmax(X1, 1);
+    auto Y1 = at::native::log_softmax(X1, 1);
     auto X2 = X1.metal();
-    auto Y2 = at::log_softmax(X2, 1).cpu();
+    auto Y2 = mpscnn::log_softmax_int(X2).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -590,13 +601,13 @@ bool test_softmax() {
 bool test_upsampling_nearest2d_vec() {
   __block std::vector<int64_t> size{1, 48, 24, 24};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
-    auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::upsample_nearest2d(
+    auto X1 = torch::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::native::upsample_nearest2d(
         X1,
         c10::optional<at::IntArrayRef>({}),
         c10::optional<at::ArrayRef<double>>({2, 2}));
     auto X2 = X1.metal();
-    auto Y2 = at::upsample_nearest2d(
+    auto Y2 = mpscnn::upsample_nearest2d_vec(
                   X2,
                   c10::optional<at::IntArrayRef>({}),
                   c10::optional<at::ArrayRef<double>>({2, 2}))
@@ -609,9 +620,9 @@ bool test_adaptive_avg_pool2d() {
   __block std::vector<int64_t> size{1, 48, 24, 24};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::adaptive_avg_pool2d(X1, {1, 1});
+    auto Y1 = at::native::adaptive_avg_pool2d(X1, {1, 1});
     auto X2 = X1.metal();
-    auto Y2 = at::adaptive_avg_pool2d(X2, {1, 1}).cpu();
+    auto Y2 = mpscnn::global_avg_pool2d(X2, {1, 1}).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -620,9 +631,9 @@ bool test_reshape() {
   __block std::vector<int64_t> size{1, 1280, 1, 1};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::reshape(X1, {1, -1});
+    auto Y1 = at::native::reshape(X1, {1, -1});
     auto X2 = X1.metal();
-    auto Y2 = at::reshape(X2, {1, -1}).cpu();
+    auto Y2 = torch::native::metal::mpscnn::reshape(X2, {1, -1}).cpu();
     return almostEqual(Y1, Y2);
   });
 }
@@ -631,15 +642,15 @@ bool test_hardtanh_() {
 #if TARGET_OS_IPHONE
   __block std::vector<int64_t> size{1, 32, 112, 112};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
-    auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = at::hardtanh_(X1, 0, 6.0);
+    auto X1 = torch::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::native::hardtanh_(X1, 0, 6.0);
     auto X2 = X1.metal();
-    auto Y2 = at::hardtanh_(X2, 0, 6.0).cpu();
+    auto Y2 = at::native::metal::mpscnn::hardtanh_(X2, 0, 6.0).cpu();
     return almostEqual(Y1, Y2);
   });
 #else
-  // Skip this test on MacOS as the shader function doesn't work well
-  // Will get back and fix it - T82700462
-  return true;
+    // Skip this test on MacOS as the shader function doesn't work well
+    // Will get back and fix it - T82700462
+    return true;
 #endif
 }

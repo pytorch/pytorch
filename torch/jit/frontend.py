@@ -617,8 +617,6 @@ class ExprBuilder(Builder):
             return FalseLiteral(r)
         elif expr.id == "None":
             return NoneLiteral(r)
-        elif expr.id == "Ellipsis":
-            return Dots(r)
         return Var(Ident(r, expr.id))
 
     @staticmethod
@@ -630,8 +628,6 @@ class ExprBuilder(Builder):
             return FalseLiteral(r)
         elif expr.value is None:
             return NoneLiteral(r)
-        elif expr.value == Ellipsis:
-            return Dots(r)
         else:
             raise ValueError("Name constant value unsupported: " + str(expr.value))
 

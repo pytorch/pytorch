@@ -227,11 +227,6 @@ class TORCH_API Tensor final {
     impl_.get()->Resize(dim_source...);
   }
 
-  template <typename T>
-  void Resize(const std::vector<T>& dim_source) const {
-    impl_.get()->Resize(ArrayRef<T>(dim_source));
-  }
-
   /**
    * Resize the tensor like the source tensor. Note that this is just a
    * sugar wrapper that essentially calls Resize(src_tensor.dims()).
