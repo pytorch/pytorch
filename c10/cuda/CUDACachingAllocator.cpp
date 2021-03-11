@@ -17,6 +17,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <cstring>
+#include <iostream>
 
 namespace c10 {
 
@@ -24,6 +26,28 @@ C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 
 namespace cuda {
 namespace CUDACachingAllocator {
+
+static bool compute_print_allocs_enabled() {
+  auto envar = std::getenv("TORCH_PRINT_ALLOCS");
+  if (envar) {
+    if (strcmp(envar, "0") == 0) {
+      return false;
+    }
+    if (strcmp(envar, "1") == 0) {
+      return true;
+    }
+    TORCH_WARN("ignoring invalid value for TORCH_PRINT_ALLOCS: ", envar,
+               " valid values are 0 or 1.");
+  }
+  return false;
+}
+
+static bool get_print_allocs_enabled() {
+  static bool enabled = compute_print_allocs_enabled();
+  return enabled;
+}
+
+
 
 //
 // Yet another caching allocator for CUDA device allocations.
@@ -989,6 +1013,9 @@ struct CudaCachingAllocator : public Allocator {
     if (size != 0) {
       caching_allocator.malloc(&r, device, size, cuda::getCurrentCUDAStream(device));
     }
+    if (get_print_allocs_enabled()) {
+      std::cout << "[cuda alloc] " << r << " " << size << std::endl;
+    }
     return {r, r, &raw_delete, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
@@ -1135,6 +1162,9 @@ void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
 }
 
 void raw_delete(void* ptr) {
+  if (get_print_allocs_enabled()) {
+    std::cout << "[cuda delete] " << ptr << std::endl;
+  }
   caching_allocator.free(ptr);
 }
 

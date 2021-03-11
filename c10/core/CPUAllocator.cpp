@@ -2,6 +2,8 @@
 #include <c10/core/DeviceType.h>
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
+#include <cstring>
+#include <iostream>
 
 // TODO: rename flags to C10
 C10_DEFINE_bool(
@@ -20,6 +22,27 @@ C10_DEFINE_bool(
     "If set, fill memory with deterministic junk when allocating on CPU");
 
 namespace c10 {
+
+static bool compute_print_allocs_enabled() {
+  auto envar = std::getenv("TORCH_PRINT_ALLOCS");
+  if (envar) {
+    if (strcmp(envar, "0") == 0) {
+      return false;
+    }
+    if (strcmp(envar, "1") == 0) {
+      return true;
+    }
+    TORCH_WARN("ignoring invalid value for TORCH_PRINT_ALLOCS: ", envar,
+               " valid values are 0 or 1.");
+  }
+  return false;
+}
+
+static bool get_print_allocs_enabled() {
+  static bool enabled = compute_print_allocs_enabled();
+  return enabled;
+}
+
 
 void memset_junk(void* data, size_t num) {
   // This garbage pattern is NaN when interpreted as floating point values,
@@ -102,6 +125,9 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
   ~DefaultCPUAllocator() override {}
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = alloc_cpu(nbytes);
+    if (get_print_allocs_enabled()) {
+      std::cout << "[cpu alloc] " << data << " " << nbytes << std::endl;
+    }
     profiledCPUMemoryReporter().New(data, nbytes);
     return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
   }
@@ -109,6 +135,9 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
   static void ReportAndDelete(void* ptr) {
     if (!ptr) {
       return;
+    }
+    if (get_print_allocs_enabled()) {
+      std::cout << "[cpu delete] " << ptr << std::endl;
     }
     profiledCPUMemoryReporter().Delete(ptr);
     free_cpu(ptr);
