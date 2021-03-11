@@ -180,7 +180,7 @@ void syevd<c10::complex<double>, double>(
 
 template <class scalar_t, class value_t = scalar_t>
 void syevj_bufferSize(CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       false,
       "at::cuda::solver::syevj_bufferSize: not implemented for ",
       typeid(scalar_t).name());
@@ -206,7 +206,7 @@ void syevj_bufferSize<c10::complex<double>, double>(
 
 template <class scalar_t, class value_t = scalar_t>
 void syevj(CUDASOLVER_SYEVJ_ARGTYPES(scalar_t, value_t)) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       false,
       "at::cuda::solver::syevj: not implemented for ",
       typeid(scalar_t).name());
@@ -231,7 +231,7 @@ void syevj<c10::complex<double>, double>(
 template <class scalar_t, class value_t = scalar_t>
 void syevjBatched_bufferSize(
     CUDASOLVER_SYEVJ_BATCHED_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       false,
       "at::cuda::solver::syevjBatched_bufferSize: not implemented for ",
       typeid(scalar_t).name());
@@ -257,7 +257,7 @@ void syevjBatched_bufferSize<c10::complex<double>, double>(
 
 template <class scalar_t, class value_t = scalar_t>
 void syevjBatched(CUDASOLVER_SYEVJ_BATCHED_ARGTYPES(scalar_t, value_t)) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       false,
       "at::cuda::solver::syevjBatched: not implemented for ",
       typeid(scalar_t).name());
@@ -285,7 +285,7 @@ void syevjBatched<c10::complex<double>, double>(
 template <class scalar_t, class value_t = scalar_t>
 void xsyevd_bufferSize(
     CUDASOLVER_XSYEVD_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       false,
       "at::cuda::solver::xsyevd_bufferSize: not implemented for ",
       typeid(scalar_t).name());
@@ -313,7 +313,7 @@ void xsyevd_bufferSize<c10::complex<double>, double>(
 
 template <class scalar_t, class value_t = scalar_t>
 void xsyevd(CUDASOLVER_XSYEVD_ARGTYPES(scalar_t, value_t)) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       false,
       "at::cuda::solver::xsyevd: not implemented for ",
       typeid(scalar_t).name());
