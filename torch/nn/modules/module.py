@@ -1324,10 +1324,7 @@ class Module:
 
         Args:
             state_dict (dict): a dict containing parameters and
-                persistent buffers. To load a dict from a DataParallel or
-                DistributedDataParallel module, need to first apply
-                :meth:`~torch.nn.modules.utils.consume_prefix_in_state_dict_if_present`
-                to strip the prefix "module.".
+                persistent buffers.
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
