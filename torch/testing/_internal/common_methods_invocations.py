@@ -1799,6 +1799,8 @@ op_db: List[OpInfo] = [
                         dtypes=[torch.bool]),
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.bool]),
+               # cumsum does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
            ),
            sample_inputs_func=sample_inputs_cumsum),
     UnaryUfuncInfo('deg2rad',
