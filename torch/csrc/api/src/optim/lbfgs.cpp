@@ -47,6 +47,14 @@ void LBFGSOptions::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG_OPTIONAL(std::string, line_search_fn);
 }
 
+double LBFGSOptions::get_lr() const {
+  return lr();
+}
+
+void LBFGSOptions::set_lr(const double lr) {
+  this->lr(lr);
+}
+
 template <typename T>
 bool if_container_equal(T lhs, T rhs) {
   if (!(lhs.size() == rhs.size())) return false;
