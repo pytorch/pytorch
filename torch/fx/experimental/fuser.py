@@ -206,14 +206,19 @@ class UnionFind:
         self.parent[b] = a
         self.size[a] += self.size[b]
 
-def prepare_for_inference(model: torch.nn.Module, use_mkl_heuristic: Callable[[MklSubgraph], bool] = use_mkl_length) -> torch.nn.Module:
+def prepare_for_inference(
+    model: torch.nn.Module,
+    use_mkl_heuristic: Callable[[MklSubgraph], bool] = use_mkl_length
+) -> torch.nn.Module:
     """
-    Performs a set of optimization passes to optimize a model for the purposes of inference. Specifically, the passes that are run are:
+    Performs a set of optimization passes to optimize a model for the
+    purposes of inference. Specifically, the passes that are run are:
     1. Conv/BN fusion
     2. Dropout removal
     3. MKL layout optimizations
 
-    The third optimization takes a function `use_mkl_heuristic` that's used to determine whether a subgraph should be explicity run in MKL layout.
+    The third optimization takes a function `use_mkl_heuristic` that's used
+    to determine whether a subgraph should be explicity run in MKL layout.
     """
     model = fuse(model)
     model = remove_dropout(model)
@@ -241,7 +246,7 @@ def prepare_for_inference(model: torch.nn.Module, use_mkl_heuristic: Callable[[M
                 if not any([arg.target == 'to_dense' for arg in node.args]):
                     continue
             with fx_model.graph.inserting_before(node):
-                mkldnn_args = [fx_model.graph.create_node('call_method', 'to_mkldnn', (arg, )) if isinstance(arg, fx.Node) else arg for arg in node.args]
+                mkldnn_args = fx.map_arg(node.args, lambda n: fx_model.graph.create('call_method', 'to_mkldnn', (arg, )))
 
             node.args = tuple(mkldnn_args)
 
