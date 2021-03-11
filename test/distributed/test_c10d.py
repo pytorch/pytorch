@@ -1706,7 +1706,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_barrier_implies_wait(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         # Kick off allreduce operations
         size = (100, 100)
@@ -1729,7 +1729,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         pg = c10d._round_robin_process_groups(
             [
                 c10d.ProcessGroupGloo(
-                    c10d.PrefixStore(str(i), store), self.rank, self.world_size
+                    c10d.PrefixStore(str(i), store), self.rank, self.world_size, self.opts()
                 )
                 for i in range(num_process_groups)
             ]
@@ -1752,6 +1752,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         c10d.PrefixStore("%s/%d" % (prefix, i), store),
                         self.rank,
                         self.world_size,
+                        self.opts()
                     )
                     for i in range(num)
                 ]
@@ -4590,6 +4591,48 @@ class CommTest(MultiProcessTestCase):
         ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
+
+    @requires_gloo()
+    def test_pass_gloo_options(self):
+        pg_opts = c10d.ProcessGroupGloo.Options()
+        pg_opts.devices = [create_device(interface=LOOPBACK)]
+        pg_opts.timeout = timedelta(seconds=1)
+        pg_opts.threads = 2
+
+        dist.init_process_group(
+            "gloo",
+            init_method=f"file://{self.file_name}",
+            world_size=self.world_size,
+            rank=self.rank,
+            pg_options=pg_opts
+        )
+
+        default_pg = c10d.distributed_c10d._get_default_group()
+        dist.destroy_process_group(default_pg)
+        self.assertFalse(dist.is_initialized())
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_pass_nccl_options_high_priority_stream(self):
+        pg_opts = ProcessGroupNCCL.Options()
+        pg_opts.is_high_priority_stream = True
+
+        dist.init_process_group(
+            "nccl",
+            init_method=f"file://{self.file_name}",
+            world_size=self.world_size,
+            rank=self.rank,
+            pg_options=pg
+        )
+
+        default_pg = c10d.distributed_c10d._get_default_group()
+
+        # Test with new_group
+        pg = c10d.new_group([0, 1], pg_options=pg_opts)
+        t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
+        pg.allreduce(t).wait()
+        expected_tensor = torch.tensor([3] * 10).cuda(2 * self.rank)
+        self.assertEqual(expected_tensor, t)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)

@@ -184,16 +184,14 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   struct Options : ProcessGroup::Options {
     explicit Options(
-        std::chrono::milliseconds timeout =
-            std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis),
-        bool is_high_stream = false);
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
+        bool is_high_priority_stream = false);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
-        std::chrono::milliseconds timeout =
-            std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis),
-        bool is_high_stream = false) {
-      return c10::make_intrusive<Options>(timeout, is_high_stream);
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
+        bool is_high_priority_stream = false) {
+      return c10::make_intrusive<Options>(timeout, is_high_priority_stream);
     }
 
     bool is_high_priority_stream;
@@ -316,8 +314,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
-
-  static const int64_t kProcessGroupNCCLOpTimeoutMillis;
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
