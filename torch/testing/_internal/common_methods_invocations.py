@@ -24,7 +24,7 @@ from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
-     random_fullrank_matrix_distinct_singular_value, set_rng_seed,
+     random_fullrank_matrix_distinct_singular_value, set_rng_seed, SEED,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
      torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_warn_once)
 
@@ -2907,7 +2907,7 @@ def ident(x):
 #       When writing tests, only scalar(float/int) input triggers the Scalar schema.
 #       uniform_scalar produces a scalar **Tensor** which won't match Scalar input.
 def method_tests():
-    set_rng_seed(0)
+    set_rng_seed(SEED)
     return [
         ('add', (S, S, S), ((S, S, S),), '', (True,)),
         ('add', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
@@ -3079,14 +3079,6 @@ def method_tests():
         ('sign', (), NO_ARGS, 'scalar'),
         ('sgn', (S, S, S), NO_ARGS),
         ('sgn', (), NO_ARGS, 'scalar'),
-        # Removing the 'rsqrt' entries leads to failure in
-        # test_index_fill_variable_dim_*
-        # TODO: Remove when fixed.
-        # Reference: https://github.com/pytorch/pytorch/issues/48230
-        ('rsqrt', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
-        ('rsqrt', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
-        ('rsqrt', torch.rand(S, S, S, dtype=torch.cfloat) + 1e-2, NO_ARGS, 'complex', (True,)),
-        ('rsqrt', uniform_scalar(1e-2 * (1 + 1j), requires_grad=True), NO_ARGS, 'complex_scalar', (True,)),
         ('fmod', (S, S, S), (1.5,), '', (True,)),
         ('fmod', (), (1.5,), 'scalar', (True,)),
         ('fmod', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
