@@ -237,7 +237,7 @@ constexpr DispatchKeySet after_autograd_keyset = DispatchKeySet(
         c10::DispatchKey::AutogradOther
 );
 
-// The set of dispatch keys that com after InplaceOrView
+// The set of dispatch keys that come after InplaceOrView
 constexpr DispatchKeySet after_InplaceOrView_keyset = DispatchKeySet(
         DispatchKeySet::FULL_AFTER,
         c10::DispatchKey::InplaceOrView

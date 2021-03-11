@@ -56,10 +56,12 @@ struct TORCH_API InferenceMode {
   }
 
   static bool is_enabled();
-  static void set_enabled(bool enabled);
 
-  bool prev_mode;
-  c10::impl::LocalDispatchKeySet prev_keyset;
+  private:
+    static void set_enabled(bool enabled);
+
+    bool prev_mode;
+    c10::impl::LocalDispatchKeySet prev_keyset;
 };
 } // namespace c10
 
