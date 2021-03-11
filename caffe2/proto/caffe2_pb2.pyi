@@ -40,40 +40,6 @@ PROTO_MSNPU = DeviceTypeProto.V(8)
 PROTO_XLA = DeviceTypeProto.V(9)
 PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = DeviceTypeProto.V(10)
 
-class ExternalDataProto(google.protobuf.message.Message):
-    DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
-    class _SourceType(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[SourceType.V], builtins.type):
-        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
-        INLINE_CONTAINER = ExternalDataProto.SourceType.V(0)
-        SIMPLE_FILE = ExternalDataProto.SourceType.V(1)
-    class SourceType(metaclass=_SourceType):
-        V = typing.NewType('V', builtins.int)
-    INLINE_CONTAINER = ExternalDataProto.SourceType.V(0)
-    SIMPLE_FILE = ExternalDataProto.SourceType.V(1)
-
-    SOURCE_TYPE_FIELD_NUMBER: builtins.int
-    RECORD_ID_FIELD_NUMBER: builtins.int
-    RECORD_SIZE_FIELD_NUMBER: builtins.int
-    OFFSET_FIELD_NUMBER: builtins.int
-    STRIDES_FIELD_NUMBER: builtins.int
-    source_type: global___ExternalDataProto.SourceType.V = ...
-    record_id: typing.Text = ...
-    record_size: builtins.int = ...
-    offset: builtins.int = ...
-    strides: google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.int] = ...
-
-    def __init__(self,
-        *,
-        source_type : typing.Optional[global___ExternalDataProto.SourceType.V] = ...,
-        record_id : typing.Optional[typing.Text] = ...,
-        record_size : typing.Optional[builtins.int] = ...,
-        offset : typing.Optional[builtins.int] = ...,
-        strides : typing.Optional[typing.Iterable[builtins.int]] = ...,
-        ) -> None: ...
-    def HasField(self, field_name: typing_extensions.Literal[u"offset",b"offset",u"record_id",b"record_id",u"record_size",b"record_size",u"source_type",b"source_type"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing_extensions.Literal[u"offset",b"offset",u"record_id",b"record_id",u"record_size",b"record_size",u"source_type",b"source_type",u"strides",b"strides"]) -> None: ...
-global___ExternalDataProto = ExternalDataProto
-
 class TensorProto(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
     class _DataType(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[DataType.V], builtins.type):
@@ -92,6 +58,7 @@ class TensorProto(google.protobuf.message.Message):
         FLOAT16 = TensorProto.DataType.V(12)
         DOUBLE = TensorProto.DataType.V(13)
         ZERO_COLLISION_HASH = TensorProto.DataType.V(14)
+        REBATCHING_BUFFER = TensorProto.DataType.V(15)
     class DataType(metaclass=_DataType):
         V = typing.NewType('V', builtins.int)
     UNDEFINED = TensorProto.DataType.V(0)
@@ -108,19 +75,7 @@ class TensorProto(google.protobuf.message.Message):
     FLOAT16 = TensorProto.DataType.V(12)
     DOUBLE = TensorProto.DataType.V(13)
     ZERO_COLLISION_HASH = TensorProto.DataType.V(14)
-
-    class _StorageType(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[StorageType.V], builtins.type):
-        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
-        TYPED = TensorProto.StorageType.V(1)
-        RAW = TensorProto.StorageType.V(2)
-        EXTERNAL = TensorProto.StorageType.V(3)
-        NO_CONTENT = TensorProto.StorageType.V(4)
-    class StorageType(metaclass=_StorageType):
-        V = typing.NewType('V', builtins.int)
-    TYPED = TensorProto.StorageType.V(1)
-    RAW = TensorProto.StorageType.V(2)
-    EXTERNAL = TensorProto.StorageType.V(3)
-    NO_CONTENT = TensorProto.StorageType.V(4)
+    REBATCHING_BUFFER = TensorProto.DataType.V(15)
 
     class Segment(google.protobuf.message.Message):
         DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
@@ -139,7 +94,6 @@ class TensorProto(google.protobuf.message.Message):
 
     DIMS_FIELD_NUMBER: builtins.int
     DATA_TYPE_FIELD_NUMBER: builtins.int
-    STORAGE_TYPE_FIELD_NUMBER: builtins.int
     FLOAT_DATA_FIELD_NUMBER: builtins.int
     INT32_DATA_FIELD_NUMBER: builtins.int
     BYTE_DATA_FIELD_NUMBER: builtins.int
@@ -147,13 +101,11 @@ class TensorProto(google.protobuf.message.Message):
     DOUBLE_DATA_FIELD_NUMBER: builtins.int
     INT64_DATA_FIELD_NUMBER: builtins.int
     RAW_DATA_FIELD_NUMBER: builtins.int
-    EXTERNAL_DATA_FIELD_NUMBER: builtins.int
     NAME_FIELD_NUMBER: builtins.int
     DEVICE_DETAIL_FIELD_NUMBER: builtins.int
     SEGMENT_FIELD_NUMBER: builtins.int
     dims: google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.int] = ...
     data_type: global___TensorProto.DataType.V = ...
-    storage_type: global___TensorProto.StorageType.V = ...
     float_data: google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.float] = ...
     int32_data: google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.int] = ...
     byte_data: builtins.bytes = ...
@@ -162,9 +114,6 @@ class TensorProto(google.protobuf.message.Message):
     int64_data: google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.int] = ...
     raw_data: builtins.bytes = ...
     name: typing.Text = ...
-
-    @property
-    def external_data(self) -> global___ExternalDataProto: ...
 
     @property
     def device_detail(self) -> global___DeviceOption: ...
@@ -176,7 +125,6 @@ class TensorProto(google.protobuf.message.Message):
         *,
         dims : typing.Optional[typing.Iterable[builtins.int]] = ...,
         data_type : typing.Optional[global___TensorProto.DataType.V] = ...,
-        storage_type : typing.Optional[global___TensorProto.StorageType.V] = ...,
         float_data : typing.Optional[typing.Iterable[builtins.float]] = ...,
         int32_data : typing.Optional[typing.Iterable[builtins.int]] = ...,
         byte_data : typing.Optional[builtins.bytes] = ...,
@@ -184,13 +132,12 @@ class TensorProto(google.protobuf.message.Message):
         double_data : typing.Optional[typing.Iterable[builtins.float]] = ...,
         int64_data : typing.Optional[typing.Iterable[builtins.int]] = ...,
         raw_data : typing.Optional[builtins.bytes] = ...,
-        external_data : typing.Optional[global___ExternalDataProto] = ...,
         name : typing.Optional[typing.Text] = ...,
         device_detail : typing.Optional[global___DeviceOption] = ...,
         segment : typing.Optional[global___TensorProto.Segment] = ...,
         ) -> None: ...
-    def HasField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_type",b"data_type",u"device_detail",b"device_detail",u"external_data",b"external_data",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment",u"storage_type",b"storage_type"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_type",b"data_type",u"device_detail",b"device_detail",u"dims",b"dims",u"double_data",b"double_data",u"external_data",b"external_data",u"float_data",b"float_data",u"int32_data",b"int32_data",u"int64_data",b"int64_data",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment",u"storage_type",b"storage_type",u"string_data",b"string_data"]) -> None: ...
+    def HasField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_type",b"data_type",u"device_detail",b"device_detail",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_type",b"data_type",u"device_detail",b"device_detail",u"dims",b"dims",u"double_data",b"double_data",u"float_data",b"float_data",u"int32_data",b"int32_data",u"int64_data",b"int64_data",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment",u"string_data",b"string_data"]) -> None: ...
 global___TensorProto = TensorProto
 
 class QTensorProto(google.protobuf.message.Message):
@@ -361,18 +308,24 @@ class AOTConfig(google.protobuf.message.Message):
     MAX_BATCH_SIZE_FIELD_NUMBER: builtins.int
     MAX_SEQ_SIZE_FIELD_NUMBER: builtins.int
     IN_BATCH_BROADCAST_FIELD_NUMBER: builtins.int
+    ONNXIFI_BLACKLIST_OPS_FIELD_NUMBER: builtins.int
+    ONNXIFI_MIN_OPS_FIELD_NUMBER: builtins.int
     max_batch_size: builtins.int = ...
     max_seq_size: builtins.int = ...
     in_batch_broadcast: builtins.bool = ...
+    onnxifi_blacklist_ops: typing.Text = ...
+    onnxifi_min_ops: builtins.int = ...
 
     def __init__(self,
         *,
         max_batch_size : typing.Optional[builtins.int] = ...,
         max_seq_size : typing.Optional[builtins.int] = ...,
         in_batch_broadcast : typing.Optional[builtins.bool] = ...,
+        onnxifi_blacklist_ops : typing.Optional[typing.Text] = ...,
+        onnxifi_min_ops : typing.Optional[builtins.int] = ...,
         ) -> None: ...
-    def HasField(self, field_name: typing_extensions.Literal[u"in_batch_broadcast",b"in_batch_broadcast",u"max_batch_size",b"max_batch_size",u"max_seq_size",b"max_seq_size"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing_extensions.Literal[u"in_batch_broadcast",b"in_batch_broadcast",u"max_batch_size",b"max_batch_size",u"max_seq_size",b"max_seq_size"]) -> None: ...
+    def HasField(self, field_name: typing_extensions.Literal[u"in_batch_broadcast",b"in_batch_broadcast",u"max_batch_size",b"max_batch_size",u"max_seq_size",b"max_seq_size",u"onnxifi_blacklist_ops",b"onnxifi_blacklist_ops",u"onnxifi_min_ops",b"onnxifi_min_ops"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing_extensions.Literal[u"in_batch_broadcast",b"in_batch_broadcast",u"max_batch_size",b"max_batch_size",u"max_seq_size",b"max_seq_size",u"onnxifi_blacklist_ops",b"onnxifi_blacklist_ops",u"onnxifi_min_ops",b"onnxifi_min_ops"]) -> None: ...
 global___AOTConfig = AOTConfig
 
 class Argument(google.protobuf.message.Message):

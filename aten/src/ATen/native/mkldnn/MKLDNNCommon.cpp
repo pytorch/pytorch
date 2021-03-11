@@ -81,7 +81,7 @@ ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
 
 ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   TORCH_CHECK(
-      tensor.device().type() == DeviceType::CPU,
+      tensor.device().is_cpu(),
       "itensor_view_from_dense expects CPU tensor input");
   TORCH_CHECK(
       tensor.layout() == Layout::Strided,

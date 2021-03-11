@@ -140,7 +140,7 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
     }
 
     check_nnapi->Execution_compute(execution);
-    
+
     // TODO: Maybe skip this for fixed-size outputs?
     for (size_t i = 0; i < outputs.size(); i++) {
       auto& t = outputs[i];
