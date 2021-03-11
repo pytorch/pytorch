@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
@@ -36,6 +35,8 @@ struct TORCH_API RMSpropOptions : public OptimizerCloneableOptions<RMSpropOption
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const RMSpropOptions& lhs, const RMSpropOptions& rhs);
   ~RMSpropOptions() = default;
+  double get_lr() const override;
+  void set_lr(const double lr) override;
 };
 
 struct TORCH_API RMSpropParamState : public OptimizerCloneableParamState<RMSpropParamState> {

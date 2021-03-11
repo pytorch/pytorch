@@ -648,6 +648,12 @@ void initJITBindings(PyObject* module) {
             getTEMustUseLLVMOnCPU() = use_llvm;
           })
       .def(
+          "_jit_cat_wo_conditionals",
+          [](bool optimize_cat) {
+            using namespace torch::jit::tensorexpr;
+            getCatWoConditionals() = optimize_cat;
+          })
+      .def(
           "_llvm_enabled",
           []() {
 #ifdef TORCH_ENABLE_LLVM
@@ -984,6 +990,11 @@ void initJITBindings(PyObject* module) {
             size_t size = 0;
             std::tie(data, size) = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+          })
+      .def(
+          "has_record",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.hasRecord(key);
           })
       .def(
           "get_storage_from_record",
