@@ -525,7 +525,7 @@ def sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad=False)
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
     batches = [(), (0, ), (2, ), (1, 1)]
-    ns = [0, 5]
+    ns = [5, 0]
     out = []
     for batch, n in product(batches, ns):
         a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype, device=device)
@@ -1109,7 +1109,7 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vect
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
     batches = [(), (0, ), (2, )]
-    ns = [0, 5]
+    ns = [5, 0]
     if vector_rhs_allowed:
         nrhs = [(), (1,), (3,)]
     else:
@@ -2049,6 +2049,7 @@ op_db: List[OpInfo] = [
            op=torch.linalg.qr,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
+           supports_out=False,
            sample_inputs_func=sample_inputs_linalg_qr,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -2248,6 +2249,7 @@ op_db: List[OpInfo] = [
            op=torch.qr,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
+           supports_out=False,
            sample_inputs_func=sample_inputs_linalg_qr,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -2338,7 +2340,6 @@ op_db: List[OpInfo] = [
            op=torch.solve,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           # TODO: TypeError: empty_like(): argument 'input' (position 1) must be Tensor, not torch.return_types.solve
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
