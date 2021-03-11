@@ -1095,6 +1095,8 @@ class TestCuda(TestCase):
         return e_tik.elapsed_time(e_tok)
 
     @staticmethod
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     def _test_stream_event_nogil(self, sync_func, p2c, c2p):
         with torch.cuda.device('cuda:1'):
             c2p.put(0)
@@ -1691,6 +1693,8 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 2)
         self.assertEqual(torch.cuda.current_stream(), default_stream)
 
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     def test_streaming_backwards_multiple_streams(self):
 
         class StreamModel(torch.nn.Module):
@@ -1726,6 +1730,8 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 5)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     def test_streaming_backwards_device_transfer(self):
         # This function must run with non-default current streams on all devices, otherwise it's meaningless.
         # The intention is to test that to()'s backward (CopyBackward) interacts properly with the
@@ -2330,6 +2336,8 @@ torch.cuda.synchronize()
                 self.assertTrue(torch.allclose(c, s, atol=1e-7))
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     def test_grad_scaling_multigpu(self):
         # Same as above, but runs some of the models on device 1.
         # GradScaler should transparently handle losses and gradients on multiple devices.
