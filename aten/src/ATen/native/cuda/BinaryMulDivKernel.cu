@@ -135,7 +135,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   } else if (isIntegralType(dtype, /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
-        if ((a < 0) != (b < 0)) {
+        if (!std::is_unsigned<scalar_t>::value && (a < 0) != (b < 0)) {
           // Subtracts one from the results of truncation division if the
           // divisor and dividend have different sign(bit)s and the remainder of
           // the division is nonzero
