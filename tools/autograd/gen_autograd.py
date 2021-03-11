@@ -110,13 +110,13 @@ def gen_autograd(
     fns = list(sorted(filter(
         operator_selector.is_native_function_selected_for_training,
         parse_native_yaml(native_functions_path)), key=lambda f: cpp.name(f.func)))
-    fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo] = match_differentiability_info(fns, differentiability_infos)
+    fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo] = match_differentiability_info(fns, differentiability_infos)
 
     # Generate VariableType.h/cpp
     from .gen_trace_type import gen_trace_type
     from .gen_variable_type import gen_variable_type
     if not disable_autograd:
-        gen_variable_type(out, native_functions_path, fns_with_infos, template_path)
+        gen_variable_type(out, native_functions_path, fns_with_diff_infos, template_path)
 
         # operator filter not applied as tracing sources are excluded in selective build
         gen_trace_type(out, native_functions_path, template_path)

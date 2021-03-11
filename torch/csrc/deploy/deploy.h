@@ -8,8 +8,9 @@
 #include <vector>
 
 namespace torch {
+namespace deploy {
 
-struct MovableObject;
+struct ReplicatedObj;
 struct InterpreterManager;
 
 struct TORCH_API InterpreterSession {
@@ -18,24 +19,24 @@ struct TORCH_API InterpreterSession {
       InterpreterManager* manager) noexcept
       : impl_(impl), manager_(manager) {}
 
-  PythonObject self; // when retreived from a PythonMovable this will be set.
+  Obj self; // when retreived from a PythonMovable this will be set.
   InterpreterSession(InterpreterSession&&) noexcept = default;
   ~InterpreterSession();
-  PythonObject global(const char* module, const char* name) {
+  Obj global(const char* module, const char* name) {
     return impl_->global(module, name);
   }
-  PythonObject from_ivalue(at::IValue ivalue) {
+  Obj from_ivalue(at::IValue ivalue) {
     return impl_->from_ivalue(std::move(ivalue));
   }
 
-  MovableObject create_movable(PythonObject obj);
-  PythonObject from_movable(const MovableObject& obj);
+  ReplicatedObj create_movable(Obj obj);
+  Obj from_movable(const ReplicatedObj& obj);
 
  private:
-  friend struct MovableObject;
+  friend struct ReplicatedObj;
   friend struct Package;
   friend struct InterpreterManager;
-  friend struct MovableObjectImpl;
+  friend struct ReplicatedObjImpl;
   std::unique_ptr<InterpreterSessionImpl> impl_;
   InterpreterManager* manager_; // if created from one
   int64_t notify_idx_ = -1;
@@ -132,21 +133,21 @@ struct TORCH_API InterpreterManager {
   LoadBalancer resources_;
 };
 
-struct TORCH_API MovableObjectImpl {
-  MovableObjectImpl(
+struct TORCH_API ReplicatedObjImpl {
+  ReplicatedObjImpl(
       size_t object_id,
       PickledObject data,
       InterpreterManager* manager)
       : object_id_(object_id), data_(data), manager_(manager) {}
-  ~MovableObjectImpl();
+  ~ReplicatedObjImpl();
   void unload(const Interpreter* on_this_interpreter);
   int64_t object_id_;
   PickledObject data_;
   InterpreterManager* manager_;
 };
 
-struct TORCH_API MovableObject {
-  MovableObject() : pImpl_(nullptr) {}
+struct TORCH_API ReplicatedObj {
+  ReplicatedObj() : pImpl_(nullptr) {}
   InterpreterSession acquire_session(
       const Interpreter* on_this_interpreter = nullptr);
   at::IValue operator()(at::ArrayRef<at::IValue> args) {
@@ -156,16 +157,16 @@ struct TORCH_API MovableObject {
   void unload(const Interpreter* on_this_interpreter = nullptr);
 
  private:
-  MovableObject(std::shared_ptr<MovableObjectImpl> pImpl)
+  ReplicatedObj(std::shared_ptr<ReplicatedObjImpl> pImpl)
       : pImpl_(std::move(pImpl)) {}
-  std::shared_ptr<MovableObjectImpl> pImpl_;
+  std::shared_ptr<ReplicatedObjImpl> pImpl_;
   friend struct Package;
   friend struct InterpreterSession;
 };
 
 struct TORCH_API Package {
   // shorthand for getting the object as a pickle resource in the package
-  MovableObject load_pickle(
+  ReplicatedObj load_pickle(
       const std::string& module,
       const std::string& file) {
     auto I = acquire_session();
@@ -188,10 +189,11 @@ struct TORCH_API Package {
       : manager_(pm),
         container_file_(
             std::make_shared<caffe2::serialize::PyTorchStreamReader>(uri)) {}
-  friend struct MovableObject;
+  friend struct ReplicatedObj;
   friend struct InterpreterManager;
   InterpreterManager* manager_;
   std::shared_ptr<caffe2::serialize::PyTorchStreamReader> container_file_;
 };
 
+} // namespace deploy
 } // namespace torch
