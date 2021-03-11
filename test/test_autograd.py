@@ -2771,39 +2771,6 @@ class TestAutograd(TestCase):
         self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
 
     @skipIfNoLapack
-    def test_eig(self):
-        def func(B):
-            return torch.eig(B, eigenvectors=True)
-
-        def func_eigvals(B):
-            return torch.eig(B, eigenvectors=True)[0]
-
-        def func_eigvecs(B):
-            return torch.eig(B, eigenvectors=True)[1]
-
-        def run_test(dims):
-            # The backward operation for eig only works for real eigenvalues,
-            # so the matrix should be B = U^{-1}*A*U where A is a random
-            # symmetric matrix and U is a random full-rank matrix.
-            # Slight change to the matrix should not make the eigenvalues
-            # complex, so we apply requires_grad_ to B, not A and U
-
-            A = random_symmetric_matrix(dims[-1], *dims[:-2])
-            U = torch.rand(*dims)
-            Uinv = torch.inverse(U)
-            B = torch.matmul(Uinv, torch.matmul(A, U)).requires_grad_()
-
-            gradcheck(func, [B])
-            gradgradcheck(func, [B])
-            gradcheck(func_eigvals, [B])
-            gradgradcheck(func_eigvals, [B])
-            gradcheck(func_eigvecs, [B])
-            gradgradcheck(func_eigvecs, [B])
-
-        for dims in [(3, 3), (5, 5)]:
-            run_test(dims)
-
-    @skipIfNoLapack
     def test_symeig(self):
         def func(root, upper):
             x = 0.5 * (root + root.transpose(-2, -1))
@@ -5525,6 +5492,25 @@ class TestAutogradFunctional(TestCase):
         self._assert_same_struct(res[1], inp)
         self.assertEqual(res[1], v)
 
+    def test_vjp_no_grad(self):
+        def reducer(x):
+            return x.sum(dim=1)
+        inputs = torch.rand(4, 4)
+        v = torch.ones(4)
+        with torch.no_grad():
+            res = autogradF.vjp(reducer, inputs, v)
+        self.assertIsNone(res[0].grad_fn)
+        self.assertIsNone(res[1].grad_fn)
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
+
+        inputs.requires_grad_()
+        v.requires_grad_()
+        with torch.no_grad():
+            res = autogradF.vjp(reducer, inputs, v, create_graph=True)
+        self.assertIsNotNone(res[0].grad_fn)
+        self.assertIsNotNone(res[1].grad_fn)
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
+
     def test_vjp_output(self):
         def reducer(x):
             return x.sum(dim=1)
@@ -5675,6 +5661,25 @@ class TestAutogradFunctional(TestCase):
         res = autogradF.jvp(foo, inp, v, create_graph=True, strict=False)
         self._assert_same_struct(res[1], inp)
         self.assertEqual(res[1], v)
+
+    def test_jvp_no_grad(self):
+        def reducer(x):
+            return x.sum(dim=1)
+        inputs = torch.rand(4, 4)
+        v = torch.ones(4, 4)
+        with torch.no_grad():
+            res = autogradF.jvp(reducer, inputs, v)
+        self.assertIsNone(res[0].grad_fn)
+        self.assertIsNone(res[1].grad_fn)
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
+
+        inputs.requires_grad_()
+        v.requires_grad_()
+        with torch.no_grad():
+            res = autogradF.jvp(reducer, inputs, v, create_graph=True)
+        self.assertIsNotNone(res[0].grad_fn)
+        self.assertIsNotNone(res[1].grad_fn)
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
 
     def test_jvp_output(self):
         def reducer(x):
@@ -5893,6 +5898,21 @@ class TestAutogradFunctional(TestCase):
         inp = torch.rand(4)
         with self.assertRaisesRegex(RuntimeError, "not supported together"):
             res = autogradF.jacobian(foo, inp, strict=True, vectorize=True)
+
+    def test_jacobian_no_grad(self):
+        def exp_reducer(x):
+            return x.exp().sum(dim=1)
+
+        inputs = torch.rand(4, 4)
+        with torch.no_grad():
+            res = autogradF.jacobian(exp_reducer, inputs)
+        self.assertIsNone(res.grad_fn)
+        self.assertNotEqual(res, torch.zeros(4, 4))
+
+        with torch.no_grad():
+            res = autogradF.jacobian(exp_reducer, inputs, create_graph=True)
+        self.assertIsNotNone(res.grad_fn)
+        self.assertNotEqual(res, torch.zeros(4, 4))
 
     def _test_jacobian_output(self, vectorize):
         def exp_reducer(x):
@@ -6185,6 +6205,28 @@ class TestAutogradFunctional(TestCase):
         with self.assertRaisesRegex(RuntimeError, "not supported together"):
             res = autogradF.hessian(foo, inp, strict=True, vectorize=True)
 
+    def test_hessian_no_grad(self):
+        def pow_reducer(x):
+            return x.pow(3).sum()
+
+        inputs = torch.rand(2, 2)
+        with torch.no_grad():
+            res = autogradF.hessian(pow_reducer, inputs)
+        self.assertIsNone(res[0][0].grad_fn)
+        self.assertIsNone(res[0][1].grad_fn)
+        self.assertIsNone(res[1][0].grad_fn)
+        self.assertIsNone(res[1][1].grad_fn)
+        self.assertNotEqual(res, torch.zeros(2, 2, 2))
+
+        with torch.no_grad():
+            res = autogradF.hessian(pow_reducer, inputs, create_graph=True)
+        self.assertIsNotNone(res[0][0].grad_fn)
+        self.assertIsNotNone(res[0][1].grad_fn)
+        self.assertIsNotNone(res[1][0].grad_fn)
+        self.assertIsNotNone(res[1][1].grad_fn)
+        self.assertNotEqual(res, torch.zeros(2, 2, 2))
+
+
     def _test_hessian_output(self, vectorize):
         def pow_reducer(x):
             return x.pow(3).sum()
@@ -6352,6 +6394,23 @@ class TestAutogradFunctional(TestCase):
         self._assert_same_struct(res[1], inp)
         self.assertEqual(res[1].abs().sum(), 0.)
 
+    def test_vhp_no_grad(self):
+        def reducer(x):
+            return x.exp().sum()
+        inputs = torch.rand(4, 4)
+        v = torch.ones(4, 4)
+        with torch.no_grad():
+            res = autogradF.vhp(reducer, inputs, v)
+        self.assertIsNone(res[0].grad_fn)
+        self.assertIsNone(res[1].grad_fn)
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
+
+        with torch.no_grad():
+            res = autogradF.vhp(reducer, inputs, v, create_graph=True)
+        self.assertIsNotNone(res[0].grad_fn)
+        self.assertIsNotNone(res[1].grad_fn)
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
+
     def test_vhp_output(self):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
@@ -6509,6 +6568,23 @@ class TestAutogradFunctional(TestCase):
         res = autogradF.hvp(bar2, inp, v, strict=False)
         self._assert_same_struct(res[1], inp)
         self.assertEqual(res[1].abs().sum(), 0.)
+
+    def test_hvp_no_grad(self):
+        def reducer(x):
+            return x.exp().sum()
+        inputs = torch.rand(4, 4)
+        v = torch.ones(4, 4)
+        with torch.no_grad():
+            res = autogradF.hvp(reducer, inputs, v)
+        self.assertIsNone(res[0].grad_fn)
+        self.assertIsNone(res[1].grad_fn)
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
+
+        with torch.no_grad():
+            res = autogradF.hvp(reducer, inputs, v, create_graph=True)
+        self.assertIsNotNone(res[0].grad_fn)
+        self.assertIsNotNone(res[1].grad_fn)
+        self.assertNotEqual(res[1], torch.zeros(4, 4))
 
     def test_hvp_output(self):
         def foo(a):
