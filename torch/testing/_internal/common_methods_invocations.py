@@ -2247,11 +2247,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            test_inplace_grad=False,
            skips=(
-               # RuntimeError: expected ) but found 'ident' here:
-               # E         File "<string>", line 3
-               # E
-               # E       def the_method(i0):
-               # E           return torch.rsub(i0, 0.5, alpha=(1+2j))
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.cfloat, torch.cdouble]),
            ),
@@ -2263,11 +2260,8 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=partial(sample_inputs_rsub, variant='scalar'),
            skips=(
-               # RuntimeError: expected ) but found 'ident' here:
-               # E         File "<string>", line 3
-               # E
-               # E       def the_method(i0):
-               # E           return torch.rsub(i0, 0.5, alpha=(1+2j))
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
            assert_autodiffed=True,),
