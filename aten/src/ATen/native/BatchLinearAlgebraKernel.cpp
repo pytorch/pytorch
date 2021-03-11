@@ -182,8 +182,6 @@ void apply_lapack_eigh(Tensor& values, Tensor& vectors, Tensor& infos, bool uppe
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
 
-  // NumPy allows lowercase input for UPLO argument
-  // It is assumed that uplo_str is either "U" or "L"
   char uplo = upper ? 'U' : 'L';
   char jobz = compute_eigenvectors ? 'V' : 'N';
 

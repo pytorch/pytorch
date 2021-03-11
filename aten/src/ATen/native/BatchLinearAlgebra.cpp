@@ -1448,6 +1448,7 @@ DEFINE_DISPATCH(linalg_eigh_stub);
   * 'infos' - Tensor to store LAPACK/MAGMA/cuSOLVER error codes
   * 'compute_eigenvectors' - controls whether eigenvectors should be computed
   * 'uplo_str' - controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
+    "u", "U" - upper triangular portion of the input matrix is used in computations; "l", "L" - lower.
 */
 std::tuple<Tensor&, Tensor&> linalg_eigh_out_info(
     const Tensor& input,
