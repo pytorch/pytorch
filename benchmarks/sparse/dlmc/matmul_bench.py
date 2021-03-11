@@ -3,7 +3,7 @@
 # This benchmark is for  sparse matmul performance test.
 # They exist for comparing the performance of sparse matrix routines
 # `sparse @ vector`, `sparse @ sparse` and `sparse @ dense` with different backends (CPU/CUDA)
-# and with other frameworks such as scipy. 
+# and with other frameworks such as scipy.
 
 import sys
 import argparse
