@@ -65,7 +65,7 @@ struct TORCH_API AutoNonVariableTypeMode {
 //   you finish the current op.
 struct TORCH_API AutoDispatchBelowInplaceOrView {
   AutoDispatchBelowInplaceOrView(bool enabled = true) :
-    dispatch_key_guard_(c10::autograd_inplace_dispatch_keyset) {
+    dispatch_key_guard_(c10::autograd_dispatch_keyset_with_inplace_view) {
     TORCH_INTERNAL_ASSERT(enabled);
   }
   // disable Autograd & InplaceOrView dispatch keys

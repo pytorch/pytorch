@@ -1457,17 +1457,6 @@ class TestLinalg(TestCase):
             self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))  # imaginary part
         self.assertEqual(vv, np_v)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.complex64, torch.complex128)
-    def test_eig_backward_complex(self, device, dtype):
-        # torch.eig's backward is not supported yet for complex types. We
-        # should kill this test once it's implemented.
-        a = torch.tensor([[1., 2], [3, 4]], device=device, dtype=dtype, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "eig does not support automatic differentiation for outputs with complex dtype"):
-            e, v = torch.eig(a, True)
-
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.double, torch.float)
@@ -2381,6 +2370,19 @@ class TestLinalg(TestCase):
 
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
+
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_inverse_errors_large(self, device, dtype):
+        # Test batched inverse of singular matrices reports errors without crashing (gh-51930)
+        x = torch.empty((8, 10, 616, 616), dtype=dtype, device=device)
+        x[:] = torch.eye(616, dtype=dtype, device=device)
+        x[..., 10, 10] = 0
+        with self.assertRaisesRegex(RuntimeError, r'For batch 0: U\(11,11\) is zero'):
+            torch.inverse(x)
 
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-7, torch.complex128: 1e-7})
     @skipCUDAIfNoMagma
@@ -4223,8 +4225,9 @@ class TestLinalg(TestCase):
             expected = x / x.norm(p, 0, keepdim=True).clamp(min=1)
             self.assertEqual(res, expected, msg="renorm failed for {}-norm".format(p))
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_orgqr(self, device, dtype):
         def generate_reflectors_and_tau(A):
@@ -4275,8 +4278,9 @@ class TestLinalg(TestCase):
         for shape in shapes:
             run_test(shape)
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfRocm
     def test_orgqr_errors_and_warnings(self, device):
         test_cases = [
             # input1 size, input2 size, error regex
@@ -4309,19 +4313,17 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "tau dtype Int does not match input dtype"):
             torch.orgqr(reflectors, tau.to(torch.int))
 
-        # TODO: enable the following tests when orgqr is implemented for CUDA
         if torch.cuda.is_available():
-            with self.assertRaisesRegex(RuntimeError, "the operator doesn't exist for this backend"):
-                # device of out and input should match
-                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-                out = torch.empty_like(reflectors).to(wrong_device)
-                # with self.assertRaisesRegex(RuntimeError, "Expected result and input to be on the same device"):
+            # device of out and input should match
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty_like(reflectors).to(wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
                 torch.orgqr(reflectors, tau, out=out)
 
-                # device of tau and input should match
-                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-                tau = tau.to(wrong_device)
-                # with self.assertRaisesRegex(RuntimeError, "Expected input and tau to be on the same device"):
+            # device of tau and input should match
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            tau = tau.to(wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "Expected input and tau to be on the same device"):
                 torch.orgqr(reflectors, tau)
 
     @precisionOverride({torch.complex64: 5e-6})
@@ -5147,21 +5149,21 @@ else:
         self.assertEqual(out_tensor, ref)
         res3 = out_tensor.clone()
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(out_tensor, func + "_")(1, b1, b2)
         self.assertEqual(out_tensor, ref * 2),
         getattr(res3, func + "_")(b1, b2, beta=1)
         self.assertEqual(out_tensor, res3)
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(out_tensor, func + "_")(1., .5, b1, b2)
         self.assertEqual(out_tensor, ref * 2.5)
         getattr(res3, func + "_")(b1, b2, beta=1., alpha=.5)
         self.assertEqual(out_tensor, res3)
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func} is deprecated"):
             self.assertEqual(out_tensor, getattr(torch, func)(1, out_tensor, 0, b1, b2))
 

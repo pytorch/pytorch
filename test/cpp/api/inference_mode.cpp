@@ -40,10 +40,10 @@ void assert_TLS_states(bool inference_mode) {
 TEST(InferenceModeTest, TestTLSState) {
   assert_TLS_states(false);
   {
-    AutoInferenceMode guard(true);
+    InferenceMode guard(true);
     assert_TLS_states(true);
     {
-      AutoInferenceMode guard(false);
+      InferenceMode guard(false);
       assert_TLS_states(false);
     }
     assert_TLS_states(true);
@@ -53,10 +53,10 @@ TEST(InferenceModeTest, TestTLSState) {
 
 TEST(InferenceModeTest, TestInferenceTensorCreation) {
   {
-    AutoInferenceMode guard(true);
+    InferenceMode guard(true);
     // New tensor created in InferenceMode (inference tensor) doesn't have Autograd & InplaceOrView keys.
     // Even if you ask it to requires_grad (which doesn't make sense in InferenceMode),
-    // it'll be silently ignored. This is not an error to make adding AutoInferenceMode
+    // it'll be silently ignored. This is not an error to make adding InferenceMode
     // guard to existing code a smooth user experience.
     torch::Tensor c = torch::ones({1, 2, 3});
     assert_tensor_dispatch_keys(c, false, false);
@@ -78,7 +78,7 @@ TEST(InferenceModeTest, TestTensorAssignment) {
   torch::Tensor tmp, c;
   // assignment operator preserves original keyset.
   {
-    c10::AutoInferenceMode guard(true);
+    c10::InferenceMode guard(true);
     c = torch::ones({1, 2, 3});
     tmp = c;
     assert_tensor_dispatch_keys(tmp, false, false);
@@ -104,7 +104,7 @@ TEST(InferenceModeTest, TestExistingAutogradSession) {
   // Save `a` in an existing autograd session
   torch::Tensor out = a * a;
   {
-    AutoInferenceMode guard(true);
+    InferenceMode guard(true);
     inplace_op(a);
   }
   // perform backward on `a` should trigger error since `a`'s version has been bumped.
@@ -113,7 +113,7 @@ TEST(InferenceModeTest, TestExistingAutogradSession) {
 }
 
 TEST(InferenceModeTest, TestInferenceTensorInInferenceMode) {
-  c10::AutoInferenceMode guard(true);
+  c10::InferenceMode guard(true);
   torch::Tensor c = torch::ones({1, 2, 3});
 
   torch::Tensor func_out = functional_op(c);  // go through kernels: CPU
@@ -129,7 +129,7 @@ TEST(InferenceModeTest, TestInferenceTensorInInferenceMode) {
 TEST(InferenceModeTest, TestInferenceTensorInNormalMode) {
   torch::Tensor inference_tensor;
   {
-    AutoInferenceMode guard(true);
+    InferenceMode guard(true);
     inference_tensor = torch::ones({1, 2, 3});
   }
   // We cannot add c10::autograd_dispatch_keyset to gloablly enabled, because that will
@@ -159,7 +159,7 @@ TEST(InferenceModeTest, TestRequiresGradTrueTensorFunctionalOp) {
   torch::Tensor func_out;
 
   {
-    c10::AutoInferenceMode guard(true);
+    c10::InferenceMode guard(true);
     // Functional op on normal tensor in InferenceMode produces
     // inference tensor as output.
     func_out = functional_op(a);  // go through kernels: InplaceOrView, CPU
@@ -183,7 +183,7 @@ TEST(InferenceModeTest, TestRequiresGradTrueTensorInplaceOp) {
   torch::Tensor a = s + 2;
 
   {
-    c10::AutoInferenceMode guard(true);
+    c10::InferenceMode guard(true);
 
     // Inplace ops on normal tensor produce normal tensors as output.
     // In other words they have Autograd=true, InplaceOrView=true.
@@ -222,7 +222,7 @@ TEST(InferenceModeTest, TestRequiresGradTrueTensorViewOp) {
   torch::Tensor view_out, tmp;
 
   {
-    c10::AutoInferenceMode guard(true);
+    c10::InferenceMode guard(true);
     // View ops on normal tensor produce normal tensors as output.
     // - For view ops it has both dispatch keys since due to the way we create
     //   view Tensors in alias_with_sizes_and_strides:
@@ -273,7 +273,7 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensor) {
   torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(true);
   torch::Tensor c;
   {
-    AutoInferenceMode guard(true);
+    InferenceMode guard(true);
     c = torch::ones({1, 2, 3});
 
     torch::Tensor d = s + c; // go through kernels: VariableType, InplaceOrView (fallthrough), CPU

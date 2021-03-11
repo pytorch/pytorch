@@ -144,6 +144,7 @@ class NativeFunctionWithDifferentiabilityInfo:
     func: NativeFunction
     info: Optional[DifferentiabilityInfo]
 
+# TODO: Update comment below since it is out of date.
 def dispatch_strategy(fn: NativeFunctionWithDifferentiabilityInfo) -> str:
     """How are we going to call the underlying implementation of a
     declaration?  There are two strategies:

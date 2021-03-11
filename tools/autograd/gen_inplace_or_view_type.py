@@ -1,9 +1,15 @@
 from tools.codegen.api import cpp
-from tools.codegen.api.autograd import *
-from tools.codegen.api.types import *
+from tools.codegen.api.autograd import (
+    NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
+    dispatch_strategy,
+)
+from tools.codegen.api.types import Binding, DispatcherSignature, CppSignatureGroup
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
-from tools.codegen.model import *
+from tools.codegen.model import (
+    Type, NativeFunction, SelfArgument, TensorOptionsArguments, Variant,
+    SchemaKind, is_foreach_op,
+)
 from typing import List, Optional, Sequence, Tuple
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
@@ -137,7 +143,7 @@ TORCH_CHECK(c10::impl::tls_is_dispatch_keyset_excluded(c10::autograd_dispatch_ke
   "If you have a valid use case, please make a feature request to PyTorch.");
 """
 
-TMP_VAR = 'tmp'
+TMP_VAR = '_tmp'
 
 # FIXME: Ideally these functions should be methods on Type class, but we have a
 #        comment in codegen/model.py there saying these concepts are not well defined.
@@ -314,6 +320,9 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
                            'when at least one of them is view is not supported.')
     return call, rhs_value
 
+def modifies_arguments(f: NativeFunction) -> bool:
+    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
+
 def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     f = fn.func
     inplace_view_body: List[str] = []
@@ -321,10 +330,9 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    ret_and_arg_types = ', '.join([dispatcher_sig.returns_type()] + [a.type.cpp_type() for a in dispatcher_exprs])
     # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
     # See Note [Plumbing Keys Through The Dispatcher] for details.
-    dispatch_key_set = 'ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::InplaceOrView)'
+    dispatch_key_set = 'ks & c10::after_InplaceOrView_keyset'
     redispatch_args = ', '.join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
@@ -354,7 +362,8 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         ))
         for r in cpp.return_names(f):
             inplace_view_body.append(f'increment_version({r});')
-    else:  # view op
+    else:
+        assert(get_view_info(fn) is not None)
         inplace_view_body.append(VIEW_REDISPATCH.substitute(
             assign_return_values='auto ' + TMP_VAR + ' = ',
             api_name=api_name,
@@ -381,7 +390,7 @@ def gen_formals(f: NativeFunction) -> str:
 
 def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and not modifies_arguments(f):
+    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     return METHOD_DEFINITION.substitute(
         return_type=cpp.returns_type(f.func.returns),
@@ -390,12 +399,9 @@ def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInf
         type_definition_body=emit_inplace_or_view_body(fn),
     )
 
-def modifies_arguments(f: NativeFunction) -> bool:
-    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
-
 def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and not modifies_arguments(f):
+    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,

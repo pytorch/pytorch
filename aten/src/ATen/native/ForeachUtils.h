@@ -4,7 +4,7 @@
 namespace at {
 namespace native {
 namespace {
-// Check foreach API restrictions 
+// Check foreach API restrictions
 // - Tensor lists must be non-empty.
 // - All tensors in all lists must have the same dtype.
 // - All TensorLists and ScalarLists must have the same number of elements.

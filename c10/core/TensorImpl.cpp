@@ -4,7 +4,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
-#include <c10/core/inference_mode.h>
+#include <c10/core/InferenceMode.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -91,9 +91,8 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
     // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]
     DispatchKey k = key_set.highestPriorityBackendTypeId();
-    key_set_ = key_set.add(getAutogradKeyFromBackend(k)).add(c10::DispatchKey::InplaceOrView);
+    key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
   }
-
 
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
   // Storages with default devices.
@@ -107,6 +106,29 @@ IntArrayRef TensorImpl::sizes() const {
 
 IntArrayRef TensorImpl::strides() const {
   return sizes_and_strides_.strides_arrayref();
+}
+
+void TensorImpl::HandleResize() {
+  // If needed, we will free the data. the next mutable_data() call
+  // will create the data storage.
+  bool reset_tensor = false;
+  if (reserved_) {
+    // If tensor is reserved then don't claim its memeory unless nbytes()
+    // is smaller than new size
+    reset_tensor = storage_.nbytes() <
+      (storage_offset_ + numel_) * data_type_.itemsize();
+  } else {
+    reset_tensor = storage_.nbytes() <
+      (storage_offset_ + numel_) * data_type_.itemsize() ||
+      !FLAGS_caffe2_keep_on_shrink ||
+      storage_.nbytes() -
+      (storage_offset_ + numel_) * data_type_.itemsize() >
+      static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
+  }
+
+  if (reset_tensor && storage_initialized()) {
+    FreeMemory();
+  }
 }
 
 bool TensorImpl::compute_contiguous() const {
@@ -285,6 +307,8 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
 void TensorImpl::set_requires_grad(bool requires_grad) {
+  // Cannot set requires_grad=true in InferenceMode
+  requires_grad = !c10::InferenceMode::is_enabled() && requires_grad;
   if (!requires_grad && !autograd_meta_) return;
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
   // NB: In principle, setting requires_grad to false could result in
