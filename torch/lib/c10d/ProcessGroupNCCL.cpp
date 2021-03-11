@@ -172,7 +172,6 @@ const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
 const int64_t ProcessGroupNCCL::kWorkCleanupThreadSleepMillis = 1000;
 constexpr int64_t kWaitForAbortCommStoreKey = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
-const int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis = 10 * 1000;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
 std::ostream& operator<<(
@@ -985,9 +984,9 @@ void ProcessGroupNCCL::workEnqueue(
 
 ProcessGroupNCCL::Options::Options(
     std::chrono::milliseconds timeout,
-    bool is_high_stream)
+    bool is_high_priority_stream)
     : ProcessGroup::Options(timeout, "nccl"),
-      is_high_priority_stream(is_high_stream) {}
+      is_high_priority_stream(is_high_priority_stream) {}
 
 template <typename Fn, typename PreProcess, typename PostProcess>
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(

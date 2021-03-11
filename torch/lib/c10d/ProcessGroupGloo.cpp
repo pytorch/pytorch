@@ -457,9 +457,8 @@ void ProcessGroupGloo::RecvWork::abort() {
   buffer_->abortWaitRecv();
 }
 
-ProcessGroupGloo::Options::Options()
-    : ProcessGroup::Options(std::chrono::milliseconds(10 * 1000), "gloo"),
-      threads(2) {}
+ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
+    : ProcessGroup::Options(timeout, "gloo"), threads(2) {}
 
 namespace {
 

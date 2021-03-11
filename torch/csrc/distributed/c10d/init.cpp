@@ -1053,7 +1053,8 @@ Arguments:
   auto processGroupOptions =
       intrusive_ptr_class_<::c10d::ProcessGroup::Options>(
           module, "ProcessGroupOptions")
-          .def_readwrite("backend", &::c10d::ProcessGroup::Options::backend);
+          .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
+          .def_readwrite("timeout", &::c10d::ProcessGroup::Options::timeout);
 
 #ifndef _WIN32
   module.def(
@@ -1167,8 +1168,7 @@ Arguments:
               py::arg("store"),
               py::arg("rank"),
               py::arg("size"),
-              py::arg("timeout") = std::chrono::milliseconds(
-                  ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis),
+              py::arg("timeout") = kProcessGroupDefaultTimeout,
               py::call_guard<py::gil_scoped_release>());
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
