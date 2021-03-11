@@ -23,7 +23,7 @@ bool is_floating_point(const Tensor& self) {
 }
 
 bool is_signed(const Tensor &self) {
-  return at::isSignedType(self.scalar_type());
+  return self.is_signed();
 }
 
 bool is_sparse(const Tensor& self) {

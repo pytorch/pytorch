@@ -146,4 +146,8 @@ inline bool is_complex(const Tensor& tensor) {
   return tensor.is_complex();
 }
 
+inline bool is_signed(const Tensor& tensor) {
+  return tensor.is_signed();
+}
+
 }
