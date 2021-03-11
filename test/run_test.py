@@ -172,6 +172,7 @@ USE_PYTEST_LIST = [
     'distributions/test_constraints',
     'distributions/test_transforms',
     'distributions/test_utils',
+    'test_typing',
 ]
 
 WINDOWS_BLOCKLIST = [

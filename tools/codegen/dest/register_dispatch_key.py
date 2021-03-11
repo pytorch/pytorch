@@ -277,9 +277,16 @@ if (strides.empty()) {{
         elif k is SchemaKind.inplace:
             return maybe_set_guard
         elif k is SchemaKind.out:
+            if self.dispatch_key == DispatchKey.CPU:
+                resize_impl = "resize_output_cpu"
+            else:
+                # Only bothering to include a resize_output fastpath for CPU for now.
+                # We can add one in if for the perf if we need to. But it'll be easier when external backends
+                # have access to meta functions, and we can write one for resize_.
+                resize_impl = "resize_output"
             return f"""
 {maybe_set_guard}
-at::native::resize_output(outputs_[output_idx], sizes);
+at::native::{resize_impl}(outputs_[output_idx], sizes);
 if (!strides.empty()) {{
     TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
     at::native::as_strided_(outputs_[output_idx], sizes, strides);
