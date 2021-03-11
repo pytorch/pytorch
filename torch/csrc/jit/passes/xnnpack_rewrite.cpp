@@ -421,9 +421,12 @@ script::Module optimizeForMobile(
   // will have to explicitly call Inlining pass.
   runCanonicalOptimizations(cloned_module, methods_to_optimize);
 
-  if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT) &&
-      optimize_forward) {
-    removeDropout(cloned_module);
+  if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
+    for (const std::string& method : methods_to_optimize) {
+      auto graph = cloned_module.get_method(method).graph();
+      // Module must be not be in training mode but optimize calls eval()
+      removeDropout(graph);
+    }
   }
 
   if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU) &&
