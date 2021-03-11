@@ -56,11 +56,11 @@ TEST_F(ModulesTest, Conv1d) {
 }
 
 TEST_F(ModulesTest, Conv1dSameStrided) {
-	auto options = Conv1dOptions(3, 2, 3).stride(1).padding(torch::kSame);
+  auto options = Conv1dOptions(3, 2, 3).stride(1).padding(torch::kSame);
   Conv1d model_valid(options);
-	ASSERT_THROWS_WITH(
-		[&]{ Conv1d model_invalid(options.stride(2)); }(),
-		"padding='same' is not supported for strided convolutions");
+  ASSERT_THROWS_WITH(
+    [&]{ Conv1d model_invalid(options.stride(2)); }(),
+    "padding='same' is not supported for strided convolutions");
 }
 
 TEST_F(ModulesTest, Conv2dEven) {
@@ -104,14 +104,14 @@ TEST_F(ModulesTest, Conv2dUneven) {
 }
 
 TEST_F(ModulesTest, Conv2dSameStrided) {
-	auto options = Conv2dOptions(3, 2, {3, 4}).stride(1).padding(torch::kSame);
+  auto options = Conv2dOptions(3, 2, {3, 4}).stride(1).padding(torch::kSame);
   Conv2d model_valid(options);
-	ASSERT_THROWS_WITH(
-		[&]{ Conv2d model_invalid(options.stride(2)); }(),
-		"padding='same' is not supported for strided convolutions");
-	ASSERT_THROWS_WITH(
-		[&]{ Conv2d model_invalid(options.stride({1, 2})); }(),
-		"padding='same' is not supported for strided convolutions");
+  ASSERT_THROWS_WITH(
+    [&]{ Conv2d model_invalid(options.stride(2)); }(),
+    "padding='same' is not supported for strided convolutions");
+  ASSERT_THROWS_WITH(
+    [&]{ Conv2d model_invalid(options.stride({1, 2})); }(),
+    "padding='same' is not supported for strided convolutions");
 }
 
 TEST_F(ModulesTest, Conv3d) {
@@ -151,14 +151,14 @@ TEST_F(ModulesTest, Conv3d) {
 }
 
 TEST_F(ModulesTest, Conv3dSameStrided) {
-	auto options = Conv3dOptions(3, 2, {3, 4, 5}).stride(1).padding(torch::kSame);
+  auto options = Conv3dOptions(3, 2, {3, 4, 5}).stride(1).padding(torch::kSame);
   Conv3d model_valid(options);
-	ASSERT_THROWS_WITH(
-		[&]{ Conv3d model_invalid(options.stride(2)); }(),
-		"padding='same' is not supported for strided convolutions");
-	ASSERT_THROWS_WITH(
-		[&]{ Conv3d model_invalid(options.stride({1, 2, 1})); }(),
-		"padding='same' is not supported for strided convolutions");
+  ASSERT_THROWS_WITH(
+    [&]{ Conv3d model_invalid(options.stride(2)); }(),
+    "padding='same' is not supported for strided convolutions");
+  ASSERT_THROWS_WITH(
+    [&]{ Conv3d model_invalid(options.stride({1, 2, 1})); }(),
+    "padding='same' is not supported for strided convolutions");
 }
 
 TEST_F(ModulesTest, ConvTranspose1d) {
