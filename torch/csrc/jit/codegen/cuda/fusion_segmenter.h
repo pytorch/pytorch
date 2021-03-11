@@ -199,7 +199,7 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   explicit SegmentedFusion(const Fusion* fusion);
 
   //! Is the fusion segmented?
-  bool isSegmented() {
+  bool isSegmented() const {
     return !groups_.empty();
   }
 
@@ -258,8 +258,8 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! original full fusion
   Fusion fusion_;
 
-  //! Count total exprs
-  size_t total_expr_count_ = 0;
+  //! Count total tensorview exprs
+  size_t total_tv_expr_count_ = 0;
 
   //! States representing segmentation
   std::vector<SegmentedEdge*> edges_;
@@ -334,7 +334,7 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
 
   void resetLevels();
 
-  void mergeNodes();
+  SegmentedGroup* mergeNodes();
 
   bool codeGenSupportedMerge(SegmentedEdge* edge);
 
@@ -360,6 +360,26 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
     return segmented_fusion_->completeFusion();
   }
 
+  //! Additional merging iteration, clean up the rest of
+  //!  the merging opportunities
+  //!  Herrmann et al. is a fast and safe algorithm for finding merge candidates
+  //!  but can become too conservative in our use cases because we place
+  //!  additional qualifiers on valid merges other than having to generate DAGs,
+  //!  i.e. canSchedule. So we need a bruteforce final merging iteration as a
+  //!  clean up pass. Cost isn't expected to be high since the graph at this
+  //!  stage is already quite merged. Example cf. test_gpu.cpp:
+  //!  FusionDAGMerging_CUDA
+  //!
+  //!  This merging algorithm is based on Theorem 4.1 of Herrmann et al.,
+  //!   to check if a producer-consumer pair can be merged into one group,
+  //!   it's enough to check if any other consumer of the producer also
+  //!   produces the consumer.
+  void finalMerge();
+
+  //! Duplicate and add all exprs producing the used
+  //!  scalar values in group
+  void resolveScalarsInGroup(SegmentedGroup* group);
+
   void finalize();
 
   // Return the resulting heuristic corresponding to the merged
@@ -373,7 +393,7 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   std::unordered_set<SegmentedGroup*> clean_up_groups_;
   std::unordered_set<SegmentedEdge*> clean_up_edges_;
 
-  std::unordered_set<SegmentedGroup*> to_merge_;
+  std::vector<SegmentedGroup*> to_merge_;
 
   std::unique_ptr<SegmentedFusion> segmented_fusion_;
 };
