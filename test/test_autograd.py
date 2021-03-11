@@ -2771,39 +2771,6 @@ class TestAutograd(TestCase):
         self.assertTrue(torch.allclose(input1.grad, input2.grad, rtol=0.01, atol=0.0))
 
     @skipIfNoLapack
-    def test_eig(self):
-        def func(B):
-            return torch.eig(B, eigenvectors=True)
-
-        def func_eigvals(B):
-            return torch.eig(B, eigenvectors=True)[0]
-
-        def func_eigvecs(B):
-            return torch.eig(B, eigenvectors=True)[1]
-
-        def run_test(dims):
-            # The backward operation for eig only works for real eigenvalues,
-            # so the matrix should be B = U^{-1}*A*U where A is a random
-            # symmetric matrix and U is a random full-rank matrix.
-            # Slight change to the matrix should not make the eigenvalues
-            # complex, so we apply requires_grad_ to B, not A and U
-
-            A = random_symmetric_matrix(dims[-1], *dims[:-2])
-            U = torch.rand(*dims)
-            Uinv = torch.inverse(U)
-            B = torch.matmul(Uinv, torch.matmul(A, U)).requires_grad_()
-
-            gradcheck(func, [B])
-            gradgradcheck(func, [B])
-            gradcheck(func_eigvals, [B])
-            gradgradcheck(func_eigvals, [B])
-            gradcheck(func_eigvecs, [B])
-            gradgradcheck(func_eigvecs, [B])
-
-        for dims in [(3, 3), (5, 5)]:
-            run_test(dims)
-
-    @skipIfNoLapack
     def test_symeig(self):
         def func(root, upper):
             x = 0.5 * (root + root.transpose(-2, -1))
