@@ -5559,27 +5559,6 @@ class TestTorchDeviceType(TestCase):
         y = ndhwc.permute(0, 1, 4, 3, 2).permute(0, 1, 4, 3, 2)
         self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
 
-    def test_memory_format_preserved_after_upsample(self, device):
-        x = torch.randn(4, 3, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last)
-        y = torch._C._nn.upsample_nearest2d(nhwc, (2, 2))
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
-
-        x = torch.randn(4, 3, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last)
-        y = torch._C._nn.upsample_bilinear2d(nhwc, (2, 2), True)
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
-
-        x = torch.randn(4, 3, 8, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last_3d)
-        y = torch._C._nn.upsample_nearest3d(nhwc, (2, 2, 2))
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
-
-        x = torch.randn(4, 3, 8, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last_3d)
-        y = torch._C._nn.upsample_trilinear3d(nhwc, (2, 2, 2), True)
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
-
     def test_memory_format_propagation_rules(self, device):
 
         contiguous = torch.rand(10, 3, 5, 5, device=device)

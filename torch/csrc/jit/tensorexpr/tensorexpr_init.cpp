@@ -263,7 +263,9 @@ void initTensorExprBindings(PyObject* module) {
       .def("prepare_for_codegen", &LoopNest::prepareForCodegen)
       .def(
           "get_loop_body_for",
-          &LoopNest::getLoopBodyFor,
+          [](const LoopNest& self, Tensor* t) {
+            return self.getLoopBodyFor(t);
+          },
           py::return_value_policy::reference)
       .def(
           "get_loops_for",
