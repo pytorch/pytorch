@@ -275,6 +275,36 @@ class TestViewOps(TestCase):
             self.assertTrue(self.is_view_of(a, a_split_dim1_tensor))
 
     @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_view_tensor_hsplit(self, device, dtype):
+        a = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        a_hsplit = a.hsplit(2)
+        for a_hsplit_tensor in a_hsplit:
+            self.assertTrue(self.is_view_of(a, a_hsplit_tensor))
+        a[2, 2, 2] = 7
+        self.assertEqual(a_hsplit[1][2, 0, 2], a[2, 2, 2])
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_view_tensor_vsplit(self, device, dtype):
+        a = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        a_vsplit = a.vsplit(2)
+        for a_vsplit_tensor in a_vsplit:
+            self.assertTrue(self.is_view_of(a, a_vsplit_tensor))
+        a[2, 2, 2] = 7
+        self.assertEqual(a_hsplit[1][0, 2, 2], a[2, 2, 2])
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_view_tensor_dsplit(self, device, dtype):
+        a = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        a_dsplit = a.dsplit(2)
+        for a_dsplit_tensor in a_dsplit:
+            self.assertTrue(self.is_view_of(a, a_dsplit_tensor))
+        a[2, 2, 2] = 7
+        self.assertEqual(a_hsplit[1][2, 2, 0], a[2, 2, 2])
+
+    @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_real_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)

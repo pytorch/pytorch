@@ -1500,7 +1500,7 @@ This function is based on NumPy's :func:`numpy.hsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (int or list(ints)): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list(ints) or tensor of integers): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> x = torch.arange(16.0).reshape(4,4)
@@ -1544,7 +1544,7 @@ This function is based on NumPy's :func:`numpy.vsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (int or list(ints)): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list(ints) or tensor of integers): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> x = torch.arange(16.0).reshape(4,4)
@@ -1580,7 +1580,7 @@ This function is based on NumPy's :func:`numpy.dsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (int or list(ints)): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list(ints) or tensor of integers): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> x = torch.arange(16.0).reshape(2, 2, 4)

@@ -10,7 +10,7 @@ import random
 
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
-    torch_to_numpy_dtype_dict, slowTest, TEST_SCIPY, IS_MACOS, IS_PPC,
+    torch_to_numpy_dtype_dict, slowTest, make_tensor, TEST_SCIPY, IS_MACOS, IS_PPC,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, deviceCountAtLeast, onlyOnCPUAndCUDA,
@@ -841,7 +841,7 @@ class TestTensorCreation(TestCase):
                 curr = ind_list[-1]
             return ind_list
 
-        input_sizes = [
+        input_sizes = (
             (0,),
             (10,),
             (10, 0),
@@ -857,10 +857,10 @@ class TestTensorCreation(TestCase):
             (3, 0, 1, 2),
             (6, 0, 0, 6),
             (0, 5, 1, 0)
-        ]
+        )
         for input_size in input_sizes:
-            a_base = self._generate_input(input_size, dtype, device, with_extremal=False)
-            if dim_range[0] <= len(input_size) <= dim_range[1]:
+            if dim_range[0] <= len(input_size) and len(input_size) <= dim_range[1]:
+                a_base = make_tensor(input_size, dtype, device)
                 for a in [a_base, a_base.t()] if a_base.dim() < 2 else [a_base]:
                     a_n = a.cpu().numpy()
                     for sections in range(1, a.size(dim) + 1):
@@ -880,6 +880,7 @@ class TestTensorCreation(TestCase):
                         result_n = np_fn(a_n, index_list)
                         self.assertEqual(result, result_n)
             elif torch_fn is not torch.hsplit:
+                a_base = make_tensor(input_size, dtype, device)
                 with self.assertRaises(RuntimeError):
                     torch_fn(a_base, random.randint(1, 10))
                 with self.assertRaises(ValueError):
