@@ -1,6 +1,7 @@
 from torch.package.importer import ObjMismatchError
 from unittest import skipIf
 import inspect
+from textwrap import dedent
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import (
@@ -181,13 +182,15 @@ the_math = math
         self.assertIsInstance(obj_loaded.obj, sp.PackageASubpackageObject)
         self.assertIsNot(package_a.subpackage.PackageASubpackageObject, sp.PackageASubpackageObject)
 
-    def test_resources(self):
+    def test_importer_access(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
             he.save_text('main', 'main', "my string")
             he.save_binary('main', 'main_binary', "my string".encode('utf-8'))
             src = """\
-import resources
+import importlib
+import torch_package_importer as resources
+
 t = resources.load_text('main', 'main')
 b = resources.load_binary('main', 'main_binary')
 """
@@ -520,7 +523,8 @@ import module_a
             # so it can be made part of an API that just takes the model and
             # packages it with this source.
             src = """\
-import resources # gives you access to the importer from within the package
+import importlib
+import torch_package_importer as resources
 
 # server knows to call model.load() to get the model,
 # maybe in the future it passes options as arguments by convension
@@ -536,7 +540,9 @@ def load():
         with PackageExporter(f2, verbose=False) as e:
             e.save_pickle('model', 'state_dict', resnet.state_dict())
             src = """\
-import resources # gives you access to the importer from within the package
+import importlib
+import torch_package_importer as resources
+
 from torchvision.models.resnet import resnet18
 def load():
     # if you want, you can later edit how resnet is constructed here
@@ -720,6 +726,82 @@ def load():
         # not the same as in the outer env.
         packaged_dependency = pi.import_module('package_a.subpackage')
         self.assertTrue(packaged_dependency is not package_a.subpackage)
+
+
+@skipIf(version_info < (3, 7), 'ResourceReader API introduced in Python 3.7')
+class TestPackageResources(TestCase):
+    def test_resource_reader(self):
+        """Test compliance with the get_resource_reader importlib API."""
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as pe:
+            # Layout looks like:
+            #    package
+            #    ├── one/
+            #    │   ├── a.txt
+            #    │   ├── b.txt
+            #    │   ├── c.txt
+            #    │   └── three/
+            #    │       ├── d.txt
+            #    │       └── e.txt
+            #    └── two/
+            #       ├── f.txt
+            #       └── g.txt
+            pe.save_text('one', 'a.txt', 'hello, a!')
+            pe.save_text('one', 'b.txt', 'hello, b!')
+            pe.save_text('one', 'c.txt', 'hello, c!')
+
+            pe.save_text('one.three', 'd.txt', 'hello, d!')
+            pe.save_text('one.three', 'e.txt', 'hello, e!')
+
+            pe.save_text('two', 'f.txt', 'hello, f!')
+            pe.save_text('two', 'g.txt', 'hello, g!')
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+
+        reader_one = importer.get_resource_reader('one')
+        with self.assertRaises(FileNotFoundError):
+            reader_one.resource_path('a.txt')
+
+        self.assertTrue(reader_one.is_resource('a.txt'))
+        self.assertEqual(reader_one.open_resource('a.txt').getbuffer(), b'hello, a!')
+        self.assertFalse(reader_one.is_resource('three'))
+        reader_one_contents = list(reader_one.contents())
+        self.assertSequenceEqual(reader_one_contents, ['a.txt', 'b.txt', 'c.txt', 'three'])
+
+        reader_two = importer.get_resource_reader('two')
+        self.assertTrue(reader_two.is_resource('f.txt'))
+        self.assertEqual(reader_two.open_resource('f.txt').getbuffer(), b'hello, f!')
+        reader_two_contents = list(reader_two.contents())
+        self.assertSequenceEqual(reader_two_contents, ['f.txt', 'g.txt'])
+
+        reader_one_three = importer.get_resource_reader('one.three')
+        self.assertTrue(reader_one_three.is_resource('d.txt'))
+        self.assertEqual(reader_one_three.open_resource('d.txt').getbuffer(), b'hello, d!')
+        reader_one_three_contenst = list(reader_one_three.contents())
+        self.assertSequenceEqual(reader_one_three_contenst, ['d.txt', 'e.txt'])
+
+        self.assertIsNone(importer.get_resource_reader('nonexistent_package'))
+
+    def test_package_resource_access(self):
+        """Packaged modules should be able to use the importlib.resources API to access
+        resources saved in the package.
+        """
+        mod_src = """\
+        import importlib.resources
+        import my_cool_resources
+
+        def secret_message():
+            return importlib.resources.read_text(my_cool_resources, 'sekrit.txt')
+        """
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as pe:
+            pe.save_source_string("foo.bar", dedent(mod_src))
+            pe.save_text('my_cool_resources', 'sekrit.txt', 'my sekrit plays')
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+        self.assertEqual(importer.import_module('foo.bar').secret_message(), 'my sekrit plays')
 
 
 class ManglingTest(TestCase):
