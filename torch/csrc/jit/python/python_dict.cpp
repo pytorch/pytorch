@@ -80,7 +80,8 @@ void initScriptDictBindings(PyObject* module) {
 
           type = inferred_type.type();
         } else {
-          // If is empty, assume the type is Dict[str, Tensor] as is done in TorchScript code.
+          // If is empty, assume the type is Dict[str, Tensor] as is done in
+          // TorchScript code.
           type = DictType::create(StringType::get(), TensorType::getInferred());
         }
 
@@ -123,9 +124,9 @@ void initScriptDictBindings(PyObject* module) {
               auto value = self->getItem(
                   toIValue(std::move(key), self->type()->getKeyType()));
               return toPyObject(value);
-            } catch (const std::out_of_range& e) {  // Key doesn't exist.
+            } catch (const std::out_of_range& e) { // Key doesn't exist.
               throw py::key_error();
-            } catch (const py::cast_error& e) {     // Key isn't the right type.
+            } catch (const py::cast_error& e) { // Key isn't the right type.
               throw py::key_error();
             }
           },
@@ -168,7 +169,8 @@ void initScriptDictBindings(PyObject* module) {
               throw py::key_error();
             }
 
-            // If removed = false, that means the key didn't exist in the dictionary.
+            // If removed = false, that means the key didn't exist in the
+            // dictionary.
             bool removed = self->delItem(key_ivalue);
 
             if (!removed) {
