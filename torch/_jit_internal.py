@@ -21,12 +21,15 @@ import builtins
 import torch.distributed.rpc
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
-from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
+from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, Union, TypeVar  # noqa: F401
 
 if sys.version_info[:2] > (3, 7):
     from typing import Final
 else:
     from typing_extensions import Final
+
+T = TypeVar("T")
+AnyCallable = Callable[..., Any]
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
@@ -142,7 +145,7 @@ def createResolutionCallbackFromFrame(frames_up=0):
     return createResolutionCallbackFromEnv(env())
 
 
-def get_closure(fn):
+def get_closure(fn) -> Dict[str, Any]:
     """
     Get a dictionary of closed over variables from a function
     """
@@ -220,7 +223,7 @@ def createResolutionCallbackFromClosure(fn):
     return createResolutionCallbackFromEnv(closure_lookup())
 
 
-def can_compile_class(cls):
+def can_compile_class(cls) -> bool:
     # If any of the functions on a type don't have a code object, this type can't
     # be compiled and is probably a builtin / bound from C
     if is_ignored_fn(cls):
@@ -231,7 +234,7 @@ def can_compile_class(cls):
     return all(has_code)
 
 
-def get_callable_argument_names(fn):
+def get_callable_argument_names(fn) -> List[str]:
     """
     Gets names of all POSITIONAL_OR_KEYWORD arguments for callable `fn`.
     Returns an empty list when other types of arguments are present.
@@ -262,7 +265,7 @@ def get_callable_argument_names(fn):
     return argument_names
 
 
-def get_annotation_str(annotation):
+def get_annotation_str(annotation) -> Optional[str]:
     """
     Convert an AST node containing a type annotation to the string present in the source
     that represents the same annotation.
@@ -270,13 +273,15 @@ def get_annotation_str(annotation):
     if isinstance(annotation, ast.Name):
         return annotation.id
     elif isinstance(annotation, ast.Attribute):
-        return '.'.join([get_annotation_str(annotation.value), annotation.attr])
+        temp = [get_annotation_str(annotation.value), annotation.attr]
+        return '.'.join([x for x in temp if x is not None])
     elif isinstance(annotation, ast.Subscript):
         # In Python3.9+ subscript indicies are not wrapped in ast.Index
         subscript_slice = annotation.slice if sys.version_info >= (3, 9) else annotation.slice.value  # type: ignore
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
-        return ','.join([get_annotation_str(elt) for elt in annotation.elts])
+        temp = [get_annotation_str(elt) for elt in annotation.elts]
+        return ','.join([x for x in temp if x is not None])
     elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
         return f"{annotation.value}"
 
@@ -349,6 +354,7 @@ def get_type_hint_captures(fn):
     return_annotation = signature.return_annotation
     valid_return_annotation_type = return_annotation is not inspect.Parameter.empty and not isinstance(return_annotation, str)
     if valid_literal_annotation and valid_return_annotation_type:
+        assert literal_return_annotation is not None  # Shim so Pyre typing system recognizes this is not none
         annotation_to_type[literal_return_annotation] = return_annotation
 
     return annotation_to_type
@@ -436,7 +442,7 @@ class FunctionModifiers(object):
         "if this method is not scripted, copy the python method onto the scripted model"
 
 
-def export(fn):
+def export(fn: AnyCallable) -> AnyCallable:
     """
     This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
     :class:`ScriptModule` and should be compiled.
@@ -482,7 +488,7 @@ def export(fn):
     return fn
 
 
-def unused(fn):
+def unused(fn: AnyCallable) -> Union[property, AnyCallable]:
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and replaced with the raising of an exception. This allows you
@@ -531,7 +537,8 @@ def unused(fn):
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
 
-def ignore(drop=False, **kwargs):
+
+def ignore(drop: Union[bool, AnyCallable] = False, **kwargs) -> AnyCallable:
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and left as a Python function. This allows you to leave code in
@@ -616,20 +623,21 @@ def ignore(drop=False, **kwargs):
         warnings.warn("ignore(True) has been deprecated. TorchScript will now drop the function "
                       "call on compilation. Use torch.jit.unused now. {}", category=FutureWarning)
 
-    def decorator(fn):
+    def decorator(fn: AnyCallable) -> AnyCallable:
         if drop:
             fn._torchscript_modifier = FunctionModifiers.UNUSED
         else:
             fn._torchscript_modifier = FunctionModifiers.IGNORE
         return fn
+
     return decorator
 
 
-def _copy_to_script_wrapper(fn):
+def _copy_to_script_wrapper(fn: AnyCallable) -> AnyCallable:
     fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
     return fn
 
-def module_has_exports(mod):
+def module_has_exports(mod) -> bool:
     for name in dir(mod):
         if hasattr(mod, name):
             item = getattr(mod, name)
@@ -638,19 +646,20 @@ def module_has_exports(mod):
                     return True
     return False
 
-def should_drop(fn):
+
+def should_drop(fn: T) -> bool:
     attr = get_torchscript_modifier(fn)
     if attr is None:
         return False
     return attr is FunctionModifiers.UNUSED
 
 
-def is_ignored_fn(fn):
+def is_ignored_fn(fn: T) -> bool:
     mod = get_torchscript_modifier(fn)
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
 
-def is_static_fn(cls, fn):
+def is_static_fn(cls, fn) -> bool:
     return isinstance(inspect.getattr_static(cls, fn, default=None), staticmethod)
 
 def get_static_fn(cls, fn):
@@ -675,9 +684,9 @@ def copy_torchscript_modifier(orig, new):
 # so that they can be imported in nn/functional.py without an import cycle
 
 # qualified_name => list[overload_functions]
-_overloaded_fns : Dict[str, List[Callable]] = {}  # noqa: T484
+_overloaded_fns : Dict[str, List[AnyCallable]] = {}  # noqa: T484
 
-def _overload(func):
+def _overload(func: AnyCallable) -> AnyCallable:
     qual_name = _qualified_name(func)
     global _overloaded_fns
     fn_overload_list = _overloaded_fns.get(qual_name)
@@ -687,13 +696,13 @@ def _overload(func):
     fn_overload_list.append(func)
     return func
 
-def _get_fn_overloads(qual_name):
+def _get_fn_overloads(qual_name: str):
     return _overloaded_fns.get(qual_name)
 
-def _clear_fn_overloads(qual_name):
+def _clear_fn_overloads(qual_name: str) -> None:
     del _overloaded_fns[qual_name]
 
-def get_class_name_lineno(method):
+def get_class_name_lineno(method) -> Tuple[str, int]:
     current_frame = inspect.currentframe()
 
     # one for the get_class_name call, one for _overload_method call
@@ -722,7 +731,7 @@ _overloaded_methods : Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 # (qualified_name, class name) => class_fileno
 _overloaded_method_class_fileno = {}
 
-def _overload_method(func):
+def _overload_method(func: T) -> T:
     qual_name = _qualified_name(func)
     global _overloaded_methods
     class_name_map = _overloaded_methods.get(qual_name, None)
@@ -765,7 +774,7 @@ def _get_overloaded_methods(method, mod_class):
     return overloads
 
 
-def is_tuple(ann):
+def is_tuple(ann) -> bool:
     if ann is Tuple:
         raise_error_container_parameter_missing("Tuple")
 
@@ -776,7 +785,7 @@ def is_tuple(ann):
         (getattr(ann, '__origin__', None) is Tuple or
             getattr(ann, '__origin__', None) is tuple)
 
-def is_list(ann):
+def is_list(ann) -> bool:
     if ann is List:
         raise_error_container_parameter_missing("List")
 
@@ -786,7 +795,7 @@ def is_list(ann):
         (getattr(ann, '__origin__', None) is List or
             getattr(ann, '__origin__', None) is list)
 
-def is_dict(ann):
+def is_dict(ann) -> bool:
     if ann is Dict:
         raise_error_container_parameter_missing("Dict")
 
@@ -796,7 +805,7 @@ def is_dict(ann):
         (getattr(ann, '__origin__', None) is Dict or
             getattr(ann, '__origin__', None) is dict)
 
-def is_optional(ann):
+def is_optional(ann) -> bool:
     if ann is Optional:
         raise_error_container_parameter_missing("Optional")
 
@@ -824,7 +833,7 @@ def is_optional(ann):
 
     return optional or union_optional
 
-def is_future(ann):
+def is_future(ann) -> bool:
     if ann is Future:
         raise RuntimeError(
             "Attempted to use Future without a "
@@ -845,7 +854,7 @@ if torch.distributed.rpc.is_available():
             )
         return getattr(ann, "__origin__", None) is RRef
 
-def is_final(ann):
+def is_final(ann) -> bool:
     return ann.__module__ in {'typing', 'typing_extensions'} and \
         (getattr(ann, '__origin__', None) is Final or isinstance(ann, type(Final)))
 
@@ -861,7 +870,7 @@ for i in range(2, 7):
     globals()[f"BroadcastingList{i}"] = BroadcastingList1
 
 
-def is_scripting():
+def is_scripting() -> bool:
     r"""
     Function that returns True when in compilation and False otherwise. This
     is useful especially with the @unused decorator to leave code in your
@@ -884,7 +893,7 @@ def is_scripting():
 
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
-def _qualified_name(obj):
+def _qualified_name(obj) -> str:
     # This special case allows us to override the qualified name on a type.
     # It's currently used in conjunction with tracing, where we create a
     # fake module to filter only supported attributes. However, since this
@@ -944,7 +953,7 @@ def _qualified_name(obj):
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
-    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
+    def __init__(self, source: str, filename: Optional[str], file_lineno: int, leading_whitespace_len: int, uses_true_division: bool = True) -> None:
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
 
@@ -987,20 +996,20 @@ def _disable_emit_hooks():
     torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
 
 
-def _disable_emit_hooks_decorator(_DecoratorContextManager):  # noqa: F811
-    def __enter__(self):
+def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F811
+    def __enter__(self) -> None:
         self.hooks = torch._C._jit_get_emit_hooks()
         torch._C._jit_set_emit_hooks(None, None)
 
-    def __exit__(self, *args):
+    def __exit__(self, *args) -> None:
         torch._C._jit_set_emit_hooks(self.hooks[0], self.hooks[1])
 
-def _is_exception(obj):
+def _is_exception(obj) -> bool:
     if not inspect.isclass(obj):
         return False
     return issubclass(obj, Exception)
 
-def raise_error_container_parameter_missing(target_type):
+def raise_error_container_parameter_missing(target_type) -> None:
     if target_type == 'Dict':
         raise RuntimeError(
             "Attempted to use Dict without "
@@ -1022,7 +1031,7 @@ def get_args(target_type):
     return getattr(target_type, "__args__", None)
 
 
-def check_args_exist(target_type):
+def check_args_exist(target_type) -> None:
     if target_type is List or target_type is list:
         raise_error_container_parameter_missing("List")
     elif target_type is Tuple or target_type is tuple:
@@ -1035,7 +1044,7 @@ def check_args_exist(target_type):
 
 # supports List/Dict/Tuple and Optional types
 # TODO support future
-def container_checker(obj, target_type):
+def container_checker(obj, target_type) -> bool:
     origin_type = get_origin(target_type)
     check_args_exist(target_type)
     if origin_type is list or origin_type is List:
