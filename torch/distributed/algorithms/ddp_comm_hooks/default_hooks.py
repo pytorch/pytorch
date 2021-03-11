@@ -41,8 +41,8 @@ def fp16_compress_hook(
     This DDP communication hook implements a simple gradient compression
     approach that casts ``GradBucket`` tensors to half-precision floating-point format (``torch.float16``).
     It allreduces those ``float16`` gradient tensors. Once compressed gradient
-    tensors are allreduced, its then callback called ``decompress`` casts the
-    aggregated result back to the input data type (such as ``float32``) and takes the mean.
+    tensors are allreduced, the chained callback ``decompress`` computes the average
+    and then casts it back to the input data type (such as ``float32``).
 
     Example::
         >>> ddp_model.register_comm_hook(process_group, fp16_compress_hook)
