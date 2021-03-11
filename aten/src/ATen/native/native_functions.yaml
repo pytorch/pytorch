@@ -4699,7 +4699,7 @@
 - func: _make_per_tensor_tensor_quantized_cpu(Tensor self, float scale, int zero_point) -> Tensor
   dispatch:
     CPU: make_per_tensor_tensor_cpu_quantized_cpu
-    CUDA: make_per_tensor_tensor_cuda_quantized_cpu
+    CUDA: make_per_tensor_tensor_cuda_quantized_cuda
 
 - func: _make_per_channel_tensor_quantized_cpu(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor
   dispatch:
