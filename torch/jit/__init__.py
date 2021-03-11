@@ -43,11 +43,12 @@ from torch.jit._trace import (
     _script_if_tracing,
     _get_trace_graph,
 )
+
+from torch import jit
 from torch.jit._async import fork, wait
 from torch.jit._serialization import save, load
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
 
-from torch.jit.cuda import Stream, Event
 from torch.jit._freeze import freeze, optimize_frozen_module
 
 # For backwards compatibility

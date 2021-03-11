@@ -5,7 +5,16 @@ from collections import defaultdict
 import sys
 import traceback
 
+def get_current_device_index() -> int:
+    r"""Checks if there are CUDA devices available and
+    returns the device index of the current default CUDA device.
+    Returns -1 in case there are no CUDA devices available.
 
+    Arguments: ``None``
+    """
+    if torch.cuda.device_count() > 0:
+        return torch.cuda.current_device()
+    return -1
 
 def _type(self, dtype=None, non_blocking=False, **kwargs):
     """Returns the type if `dtype` is not provided, else casts this object to
@@ -494,11 +503,11 @@ def _get_device_index(device: Any, optional: bool = False, allow_cpu: bool = Fal
         if optional:
             # The eager API _get_current_device_index uses `lambda` functions which are
             # not supported in JIT and hence not scriptable. The JIT equivalent API to get
-            # the current device index is `torch.jit.cuda.get_current_device_index()` which can
+            # the current device index is `get_current_device_index()` which can
             # be scripted. We use is_scripting to check the mode we are in and call the
             # appropriate API.
             if torch.jit.is_scripting():
-                device_idx = torch.jit.cuda.get_current_device_index()
+                device_idx = get_current_device_index()
             else:
                 device_idx = _get_current_device_index()
         else:

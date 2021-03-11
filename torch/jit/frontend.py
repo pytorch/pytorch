@@ -221,6 +221,18 @@ def normalize_source_lines(sourcelines: List[str]) -> List[str]:
     aligned_prefix.append(fn_def)
     return aligned_prefix + aligned_suffix
 
+def _replace_events_and_streams(sourcelines):
+    """
+    This helper function searches for ``torch.cuda.Stream`` and ``torch.cuda.Event``
+    and replaces it with the custom classes ``torch.classes.cuda.Stream`` and
+    ``torch.classes.cuda.Event`` respectively. This is done since CUDA streams and events
+    are implemented as custom classes in JIT.
+    """
+    for i in range(len(sourcelines)):
+        sourcelines[i] = sourcelines[i].replace("torch.cuda.Stream", "torch.classes.cuda.Stream")
+        sourcelines[i] = sourcelines[i].replace("torch.cuda.Event", "torch.classes.cuda.Event")
+
+    return sourcelines
 
 def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     """
@@ -238,6 +250,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
         self_name: If this function is a method, what the type name of `self` is.
     """
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
+    sourcelines = _replace_events_and_streams(sourcelines)
     sourcelines = normalize_source_lines(sourcelines)
     source = ''.join(sourcelines)
     dedent_src = dedent(source)

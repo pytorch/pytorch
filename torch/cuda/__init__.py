@@ -335,9 +335,9 @@ class StreamContext(object):
 
     .. note:: Streams are per-device.
     """
-    cur_stream : Optional['torch.classes.cuda.Stream']
+    cur_stream : Optional['torch.cuda.Stream']
 
-    def __init__(self, stream: Optional['torch.classes.cuda.Stream']):  # type: ignore
+    def __init__(self, stream: Optional['torch.cuda.Stream']):  # type: ignore
         self.idx = -1
         self.stream = stream
         # Initialize the below streams to default stream on the current device
@@ -377,8 +377,8 @@ class StreamContext(object):
             torch.cuda.set_stream(self.dst_prev_stream)  # type: ignore
         torch.cuda.set_stream(self.src_prev_stream)  # type: ignore
 
-def stream(stream: Optional['torch.classes.cuda.Stream']) -> StreamContext:  # type: ignore
-    r"""Wrapper around the Context-manager StreamContextthat
+def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ignore
+    r"""Wrapper around the Context-manager StreamContext that
         selects a given stream.
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
@@ -392,9 +392,9 @@ def set_stream(stream: Stream):
     r"""Sets the current stream.
     This is a wrapper API to set the stream.
 
-    Usage of this function is discouraged.It's better to use
-    ``torch._C._cuda_setStream`` API instead of this. This
-    API is only used for internal usage.
+    Usage of this function is discouraged. It is recommended to
+    use ``torch._C._cuda_setStream`` API instead of this. This
+    API is only for internal usage.
 
     Args:
         stream (Stream): selected stream. This function is a no-op
