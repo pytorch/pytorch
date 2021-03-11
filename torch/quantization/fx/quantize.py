@@ -31,6 +31,7 @@ from ..utils import (
     get_swapped_custom_module_class,
     weight_is_quantized,
     activation_is_statically_quantized,
+    activation_is_int8_quantized,
     activation_dtype,
     weight_dtype,
 )
@@ -325,6 +326,7 @@ WEIGHT_PREPACK_OPS = {
     torch._ops.ops.quantized.linear_prepack,
     torch._ops.ops.quantized.linear_prepack_fp16,
     torch._ops.ops.quantized.conv2d_prepack,
+    torch._ops.ops.quantized.conv3d_prepack,
 }
 
 class Quantizer:
@@ -798,7 +800,7 @@ class Quantizer:
                     'CopyNode of type ' + node.op + ' is not handled'
                 quantized = node_arg_is_quantized(node.args[0])
 
-            if not activation_is_statically_quantized(qconfig) or \
+            if not activation_is_int8_quantized(qconfig) or \
                not input_output_observed(obj):
                 quantized = False
 
