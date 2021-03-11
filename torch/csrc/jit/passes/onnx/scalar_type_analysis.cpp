@@ -147,7 +147,8 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
         auto scalar_type_out = get_scalar_type(input);
         // StandardOps do not support Byte/Char/Short in ORT, cast input to Long type, and cast output back again
         if (standardOps.find(n->kind()) != standardOps.end() && scalar_type_out.has_value() &&
-            (scalar_type_out.value() == c10::ScalarType::Byte or scalar_type_out.value() == c10::ScalarType::Char or scalar_type_out.value() == c10::ScalarType::Short)) {
+            (scalar_type_out.value() == c10::ScalarType::Byte || scalar_type_out.value() == c10::ScalarType::Char
+            || scalar_type_out.value() == c10::ScalarType::Short)) {
             typesFromScalars.emplace_back(c10::kLong);
             opUnsupportedType[n->kind()] = scalar_type_out.value();
         } else if (nkind == onnx::Gather &&
