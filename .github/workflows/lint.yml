@@ -201,7 +201,7 @@ jobs:
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
       - name: Add annotations
-        uses: suo/add-annotations-github-action@master
+        uses: pytorch/add-annotations-github-action@master
         with:
           check_name: 'clang-tidy'
           linter_output_path: 'clang-tidy-output.txt'
