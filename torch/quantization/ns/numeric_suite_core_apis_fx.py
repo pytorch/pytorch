@@ -35,9 +35,11 @@ from .ns_types import (
 
 from typing import Dict, Tuple, Callable, List, Any
 
+RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 
 class OutputLogger(nn.Module):
     stats: List[torch.Tensor]
+    stats_rnn: List[RNNReturnType]
 
     def __init__(
         self,
@@ -51,6 +53,7 @@ class OutputLogger(nn.Module):
     ):
         super().__init__()
         self.stats: List[torch.Tensor] = []
+        self.stats_rnn: List[RNNReturnType] = []
 
         # name of the node which was responsible for adding this logger
         # Note:
@@ -83,8 +86,14 @@ class OutputLogger(nn.Module):
         # for example, in cat([x1, x2, x3], dim=0), x2 would have index_within_arg == 1
         self.index_within_arg = index_within_arg
 
-    def forward(self, x: torch.Tensor):
-        self.stats.append(x.detach())
+    # Note: cannot annotate the type of x because TorchScript does not support
+    #   the Union type.
+    def forward(self, x):
+        if isinstance(x, torch.Tensor):
+            self.stats.append(x.detach())
+        elif isinstance(x, tuple) and len(x) == 2 and len(x[1]) == 2:
+            new_res = (x[0].detach(), (x[1][0].detach(), x[1][1].detach()))
+            self.stats_rnn.append(new_res)
         return x
 
     def __repr__(self):
@@ -341,9 +350,12 @@ def _extract_logger_info_one_model(
                 results[key][mod.results_type] = {}
             if mod.model_name not in results[key][mod.results_type]:
                 results[key][mod.results_type][mod.model_name] = []
+            stats_to_use = mod.stats
+            if len(mod.stats_rnn) > 0:
+                stats_to_use = mod.stats_rnn
             results[key][mod.results_type][mod.model_name].append({
                 'type': mod.results_type,
-                'values': mod.stats,
+                'values': stats_to_use,
                 'ref_node_name': mod.ref_node_name,
                 'prev_node_name': mod.prev_node_name,
                 'prev_node_target_type': mod.prev_node_target_type,

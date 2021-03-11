@@ -9,7 +9,6 @@ from torch.quantization import get_default_qconfig, default_dynamic_qconfig
 import torch.nn.quantized as nnq
 toq = torch.ops.quantized
 from torch.quantization._numeric_suite_fx import (
-    compare_model_outputs_fx,
     compare_model_stub_fx,
 )
 from torch.quantization.quantize_fx import (
@@ -192,57 +191,6 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             lstm_hidden,
         )
 
-    def compare_and_validate_model_outputs_results_fx(
-        self, prepared_float_model, q_model, expected_act_compare_dict_keys, *data
-    ):
-        act_compare_dict = compare_model_outputs_fx(
-            prepared_float_model, q_model, *data
-        )
-
-        self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
-        for k, v in act_compare_dict.items():
-            self.assertTrue(len(v["float"]) == 1)
-            self.assertTrue(len(v["float"]) == len(v["quantized"]))
-
-            for i, val in enumerate(v["quantized"]):
-                if "lstm.stats" not in act_compare_dict:
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
-                else:
-                    self.assertTrue(
-                        v["float"][i][0].shape == v["quantized"][i][0].shape
-                    )
-                    if i == 1:
-                        self.assertTrue(
-                            v["float"][i][1].shape == v["quantized"][i][1].shape
-                        )
-
-    @override_qengines
-    def test_compare_model_outputs_lstm_dynamic_fx(self):
-        r"""Compare the output of LSTM layer in dynamic quantized model and corresponding
-        output of linear layer in float model
-        """
-
-        qconfig_dict = {"object_type": [(nn.LSTM, default_dynamic_qconfig)]}
-
-        float_model = LSTMwithHiddenDynamicModel()
-        float_model.eval()
-
-        prepared_model = prepare_fx(float_model, qconfig_dict)
-        prepared_float_model = copy.deepcopy(prepared_model)
-
-        q_model = convert_fx(prepared_model)
-
-        lstm_input = torch.rand((1, 1, 2))
-        lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
-
-        expected_act_compare_dict_keys = {"x.stats", "hid.stats", "lstm.stats"}
-        self.compare_and_validate_model_outputs_results_fx(
-            prepared_float_model,
-            q_model,
-            expected_act_compare_dict_keys,
-            lstm_input,
-            lstm_hidden,
-        )
 
 class TestFXGraphMatcher(QuantizationTestCase):
 
@@ -523,6 +471,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
         should_log_inputs=False,
         qconfig_dict=None,
+        skip_scripting=False,
     ):
         if qconfig_dict is None:
             qconfig_dict = {'': torch.quantization.default_qconfig}
@@ -543,8 +492,9 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
             self.checkGraphModuleNodes(
                 mq_ns, expected_node_occurrence=prepared_expected_node_occurrence)
 
-        mp_ns = torch.jit.script(mp_ns)
-        mq_ns = torch.jit.script(mq_ns)
+        if not skip_scripting:
+            mp_ns = torch.jit.script(mp_ns)
+            mq_ns = torch.jit.script(mq_ns)
 
         # calibrate
         mp_ns(*data)
@@ -801,6 +751,18 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             m.eval()
             res = self._test_match_activations(
                 m, (torch.randn(5, 5),), results_len=1, qconfig_dict=qconfig_dict)
+
+    @skipIfNoFBGEMM
+    def test_compare_activations_lstm_dynamic(self):
+        qconfig_dict = {"object_type": [(nn.LSTM, default_dynamic_qconfig)]}
+        m = LSTMwithHiddenDynamicModel().eval()
+        lstm_input = torch.rand((1, 1, 2))
+        lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
+        # TODO(future PR): enable scripting (quant prepared LSTM not scriptable)
+        res = self._test_match_activations(
+            m, (lstm_input, lstm_hidden), results_len=1, qconfig_dict=qconfig_dict,
+            skip_scripting=True)
+        print(res)
 
     @skipIfNoFBGEMM
     def test_sparsenn_compare_activations(self):
