@@ -145,6 +145,15 @@ bool is_mkldnn(Tensor self) {
   return self.is_mkldnn();
 }
 
+bool Tensor::is_mlc() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_mlc();
+}
+
+bool is_mlc(Tensor self) {
+  return self.is_mlc();
+}
+
 bool Tensor::is_vulkan() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_vulkan();

@@ -80,7 +80,7 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
     case ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16:
       return at::kBFloat16;
     default:
-      TORCH_CHECK("unexpected tensor scalar type");
+      TORCH_CHECK(false, "unexpected tensor scalar type");
   }
   return c10::optional<at::ScalarType>{};
 }
