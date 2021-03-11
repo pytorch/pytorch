@@ -225,7 +225,7 @@ def _replace_events_and_streams(sourcelines):
     """
     This helper function searches for ``torch.cuda.Stream`` and ``torch.cuda.Event``
     and replaces it with the custom classes ``torch.classes.cuda.Stream`` and
-    ``torch.classes.cuda.Event`` respectively. This is done since CUDA streams and events
+    ``torch.classes.cuda.Event`` respectively. This is done because CUDA streams and events
     are implemented as custom classes in JIT.
     """
     for i in range(len(sourcelines)):
