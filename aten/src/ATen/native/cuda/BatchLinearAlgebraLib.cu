@@ -328,6 +328,14 @@ inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos,
   TORCH_INTERNAL_ASSERT(m >= n);
   TORCH_INTERNAL_ASSERT(n >= k);
 
+  // cuSOLVER doesn't compute anything for this case, which is wrong
+  // the result should be a matrix with 1 on the diagonal
+  if (k == 0) {
+    self.fill_(0);
+    self.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+    return;
+  }
+
   // get the optimal work size and allocate workspace tensor
   int lwork;
   at::cuda::solver::orgqr_buffersize<scalar_t>(

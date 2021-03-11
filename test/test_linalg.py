@@ -4264,6 +4264,14 @@ class TestLinalg(TestCase):
             else:
                 self.assertTrue(actual.shape == shape)
 
+            # if tau is empty and A is not the result should be a matrix with ones on the diagonal
+            if (A.numel() > 0):
+                tau_empty = torch.empty(*shape[:-2], 0, dtype=dtype, device=device)
+                identity_mat = torch.zeros_like(reflectors)
+                identity_mat.diagonal(dim1=-1, dim2=-2)[:] = 1
+                actual = torch.linalg.householder_product(reflectors, tau_empty)
+                self.assertEqual(actual, identity_mat)
+
             out = torch.empty_like(A)
             ans = torch.linalg.householder_product(reflectors, tau, out=out)
             self.assertEqual(ans, out)
