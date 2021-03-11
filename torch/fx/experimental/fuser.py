@@ -155,7 +155,7 @@ class MklSubgraph:
         self.start_nodes: List[fx.Node] = []
         self.end_nodes: List[fx.Node] = []
 
-def gen_mkl_autotuner(example_inputs, iters=10):
+def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
     fx_model = None
 
     def use_mkl_heuristic(graph: MklSubgraph) -> bool:
@@ -169,6 +169,8 @@ def gen_mkl_autotuner(example_inputs, iters=10):
         submodule = extract_subgraph(fx_model, graph.nodes, input_nodes, [arg.name for arg in output_args])
 
         def benchmark(f):
+            for _ in range(warmup):
+                f()
             begin = time.time()
             for _ in range(iters):
                 out = f()
@@ -337,9 +339,9 @@ def prepare_for_inference(
 
     mkldnn_conversions = 0
     for node in fx_model.graph.nodes:
-        if node.target == 'to_mkldnn':
+        if node.target == 'to_mkldnn' or node.target == 'to_dense':
             mkldnn_conversions += 1
-    # print("mkldnn conversions", mkldnn_conversions)
+    print("mkldnn conversions", mkldnn_conversions)
     fx_model.graph.lint()
     result = fx.GraphModule(fx_model, fx_model.graph)
     return result
