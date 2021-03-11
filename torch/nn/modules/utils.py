@@ -53,12 +53,8 @@ def consume_prefix_in_state_dict_if_present(state_dict: Dict[str, Any], prefix: 
             state_dict[newkey] = state_dict.pop(key)
 
     # also strip the prefix in metadata if any.
-    try:
-        # pyre-ignore[16]: `Dict[str, Any]`` has no attribute `_metadata`.
-        metadata = state_dict._metadata
-    except AttributeError:
-        pass
-    else:
+    if "_metadata" in state_dict:
+        metadata = state_dict["_metadata"]
         for key in list(metadata.keys()):
             # for the metadata dict, the key can be:
             # '': for the DDP module, which we want to remove.
