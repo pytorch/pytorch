@@ -246,7 +246,7 @@ def prepare_for_inference(
                 if not any([arg.target == 'to_dense' for arg in node.args]):
                     continue
             with fx_model.graph.inserting_before(node):
-                mkldnn_args = fx.map_arg(node.args, lambda n: fx_model.graph.create('call_method', 'to_mkldnn', (arg, )))
+                mkldnn_args = fx.map_arg(node.args, lambda n: fx_model.graph.call_method('to_mkldnn', (n, )))
 
             node.args = tuple(mkldnn_args)
 
