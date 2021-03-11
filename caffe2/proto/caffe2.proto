@@ -11,33 +11,6 @@ package caffe2;
 //     is mainly for backward compatibility purposes but we may consider using
 //     those in the future.
 
-// ExternalDataProto stores the pointer to the content of TensorProto
-// the content are stored in the raw format as little endian
-message ExternalDataProto {
-  // type of the external storage type, can be the following:
-  enum SourceType {
-    // the container defined in torch/csrc/jit/serialization.h is used,
-    // and record_id is the tag to help the runtime identify the data
-    // this type of storage is set as DEFAULT and recommended for external
-    // data storage
-    INLINE_CONTAINER = 0;
-    // use external file to store the data, and record_id is the POSIX relative path
-    // to the file. this (simple) file is only for the data, and the data is stored
-    // as little endian in the file
-    SIMPLE_FILE = 1;
-  }
-  optional SourceType source_type = 1 [default = INLINE_CONTAINER];
-  // used together with type
-  optional string record_id = 2;
-  // the size of the entire record (in bytes)
-  optional uint64 record_size = 5;
-  // the offset of the starting point, the content may be shared between
-  // multiple tensors
-  optional int64 offset = 3 [default = 0];
-  // the strides of the content
-  repeated int64 strides = 4;
-}
-
 // TensorProto stores serialized Tensor objects.
 message TensorProto {
   // The dimensions in the tensor.
@@ -68,22 +41,6 @@ message TensorProto {
   }
   optional DataType data_type = 2 [default = FLOAT];
 
-  // data storage
-  enum StorageType {
-    // the content is stored in typed field, for example, if the data_type is
-    // FLOAT, float_data is used to store the content.
-    TYPED = 1;
-    // the content is serialized in field raw_data as little-endian
-    RAW = 2;
-    // the pointer to the content is stored in field external_data
-    // the content is serialized as little-endian
-    EXTERNAL = 3;
-    // When StorageType is NO_CONTENT, we use TensorProto to store only type
-    // and shape information. Reuse TensorProto to store type and shape
-    // because we can just have one proto, not having another ValueInfoProto
-    NO_CONTENT = 4;
-  }
-  optional StorageType storage_type = 12 [default = TYPED];
   // For float
   repeated float float_data = 3 [packed = true];
   // For int32, uint8, int8, uint16, int16, bool, and float16
@@ -100,8 +57,6 @@ message TensorProto {
   repeated int64 int64_data = 10 [packed = true];
   // store the raw data, contents are serialized as little-endian
   optional bytes raw_data = 13;
-  // store the pointer to the data
-  optional ExternalDataProto external_data = 14;
 
   // Optionally, a name for the tensor.
   optional string name = 7;
@@ -118,6 +73,9 @@ message TensorProto {
     required int64 end = 2;
   }
   optional Segment segment = 11;
+
+  // Field numbers 12 and 14 were previously used for now-deprecated fields.
+  // reserved 12, 14;
 }
 
 message QTensorProto {
@@ -240,8 +198,9 @@ enum DeviceTypeProto {
   PROTO_FPGA = 7;                   // FPGA
   PROTO_MSNPU = 8;                  // MSNPU
   PROTO_XLA = 9;                    // XLA / TPU
+  PROTO_MLC = 10;                   // ML Compute
   // Change the following number if you add more devices in the code.
-  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 10;
+  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 11;
 }
 
 // Device-specific options. We do not distinguish DeviceOption protos for

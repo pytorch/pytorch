@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
-from .linear import _LinearWithBias
+from .linear import Linear
 from torch.nn.init import xavier_uniform_
 from torch.nn.init import constant_
 from torch.nn.init import xavier_normal_
@@ -359,7 +359,8 @@ class Tanh(Module):
         return torch.tanh(input)
 
 class SiLU(Module):
-    r"""Applies the silu function, element-wise.
+    r"""Applies the Sigmoid Linear Unit (SiLU) function, element-wise.
+    The SiLU function is also known as the swish function.
 
     .. math::
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
@@ -888,7 +889,7 @@ class MultiheadAttention(Module):
             self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
         else:
             self.register_parameter('in_proj_bias', None)
-        self.out_proj = _LinearWithBias(embed_dim, embed_dim)
+        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
 
         if add_bias_kv:
             self.bias_k = Parameter(torch.empty(1, 1, embed_dim))

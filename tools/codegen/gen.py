@@ -78,7 +78,22 @@ def parse_native_yaml(path: str) -> List[NativeFunction]:
         funcs = e.get('func')
         with context(f'in {loc}:\n  {funcs}'):
             rs.append(NativeFunction.from_yaml(e, loc))
+    error_check_native_functions(rs)
     return rs
+
+# Some assertions are already performed during parsing, but those are only within a single NativeFunction.
+# Assertions here are meant to be performed across NativeFunctions.
+def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
+    func_map: Dict[OperatorName, NativeFunction] = {}
+    for f in funcs:
+        func_map[f.func.name] = f
+    for f in funcs:
+        if f.structured_delegate is not None:
+            delegate_func = func_map[f.structured_delegate]
+            assert delegate_func.structured, \
+                f"{f.func.name} is marked as a structured_delegate pointing to " \
+                f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. " \
+                f"Consider adding 'structured=True' to the delegated operator"
 
 def cpp_string(s: str) -> str:
     """Convert a python string into a c++ string literal """
@@ -162,10 +177,13 @@ class ComputeFunction:
         Literal[Target.DEFINITION]
     ]
     static_dispatch_backend: Optional[DispatchKey]
+    is_redispatching_fn: bool
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        if Variant.function not in f.variants:
+        # We unconditionally generate function variants of the redispatch API.
+        # This is mainly because we can namespace functions separately, but not methods,
+        if Variant.function not in f.variants and not self.is_redispatching_fn:
             return None
 
         name = cpp.name(f.func)
@@ -173,9 +191,11 @@ class ComputeFunction:
         sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
-            result = f"TORCH_API {sig_group.signature.decl()};\n"
+            sig_str = sig_group.signature.decl(is_redispatching_fn=self.is_redispatching_fn)
+            result = f"TORCH_API {sig_str};\n"
             if sig_group.faithful_signature is not None:
-                result += f"TORCH_API {sig_group.faithful_signature.decl()};\n"
+                sig_str = sig_group.faithful_signature.decl(is_redispatching_fn=self.is_redispatching_fn)
+                result += f"TORCH_API {sig_str};\n"
             return result
 
         if self.target is not Target.DEFINITION:
@@ -190,17 +210,22 @@ class ComputeFunction:
                 sig = sig_group.signature
 
             dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments())
-            dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
+            if self.is_redispatching_fn:
+                dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.expr for a in dispatcher_exprs])
+                dispatcher_call = 'redispatch'
+            else:
+                dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
+                dispatcher_call = 'call'
 
             static_dispatch_block = static_dispatch(f, sig, method=False, backend=self.static_dispatch_backend)
             if static_dispatch_block is None:
                 return f"""
 // aten::{f.func}
-{sig.defn()} {{
+{sig.defn(is_redispatching_fn=self.is_redispatching_fn)} {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
         .typed<{dispatcher_sig.type()}>();
-    return op.call({dispatcher_exprs_str});
+    return op.{dispatcher_call}({dispatcher_exprs_str});
 }}
 """
             else:
@@ -972,13 +997,22 @@ def main() -> None:
     })
 
     cpu_fm.write('Functions.h', lambda: {
-        'function_declarations': list(mapMaybe(
-            ComputeFunction(Target.DECLARATION, static_dispatch_backend=static_dispatch_backend), native_functions)),
+        'function_declarations': list(mapMaybe(ComputeFunction(
+            Target.DECLARATION, static_dispatch_backend=static_dispatch_backend, is_redispatching_fn=False), native_functions)),
     })
     cpu_fm.write('Functions.cpp', lambda: {
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_backend),
-        'function_definitions': list(mapMaybe(
-            ComputeFunction(Target.DEFINITION, static_dispatch_backend=static_dispatch_backend), native_functions)),
+        'function_definitions': list(mapMaybe(ComputeFunction(
+            Target.DEFINITION, static_dispatch_backend=static_dispatch_backend, is_redispatching_fn=False), native_functions)),
+    })
+    cpu_fm.write('RedispatchFunctions.h', lambda: {
+        'function_redispatch_declarations': list(mapMaybe(ComputeFunction(
+            Target.DECLARATION, static_dispatch_backend=static_dispatch_backend, is_redispatching_fn=True), native_functions)),
+    })
+    cpu_fm.write('RedispatchFunctions.cpp', lambda: {
+        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_backend),
+        'function_redispatch_definitions': list(mapMaybe(ComputeFunction(
+            Target.DEFINITION, static_dispatch_backend=static_dispatch_backend, is_redispatching_fn=True), native_functions)),
     })
     core_fm.write('TensorBody.h', lambda: {
         'tensor_method_declarations': list(mapMaybe(

@@ -237,6 +237,7 @@ caffe2/version.py
 # setup.py intermediates
 .eggs
 caffe2.egg-info
+MANIFEST
 
 # Atom/Watchman required file
 .watchmanconfig

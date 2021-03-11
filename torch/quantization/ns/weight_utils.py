@@ -32,7 +32,7 @@ def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
         return weight.detach()
 
     else:
-        assert node.target in (toq.linear,)
+        assert node.target in (toq.linear, toq.linear_relu)
         # packed weight is arg 1
         packed_weight_node = node.args[1]
         assert isinstance(packed_weight_node, Node)

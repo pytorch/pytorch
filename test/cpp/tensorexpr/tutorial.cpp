@@ -111,7 +111,7 @@ int main(int argc, char* argv[]) {
     // Let's construct a simple load:
     BufHandle A("A", {ExprHandle(64), ExprHandle(32)}, kInt);
     ExprHandle i = Var::make("i", kInt), j = Var::make("j", kInt);
-    ExprHandle load = Load::make(A.dtype(), A, {i, j}, /* mask= */ 1);
+    ExprHandle load = Load::make(A.dtype(), A, {i, j});
     std::cout << "Tensor expression: " << *load.node() << std::endl;
     // Prints: Tensor expression: A[i, j]
   }
