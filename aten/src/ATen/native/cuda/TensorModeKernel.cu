@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
 #include <c10/util/Exception.h>
 #include <thrust/device_ptr.h>
@@ -225,8 +226,8 @@ void mode_kernel_impl(
     }
   }
 
-  values.resize_(self_sizes);
-  indices.resize_(self_sizes);
+  at::native::resize_output(values, self_sizes);
+  at::native::resize_output(indices, self_sizes);
 
   // If sliceSize is 1, copy input to values and set indices
   if (slice_size == 1) {

@@ -12,6 +12,7 @@
 #include <c10/util/Optional.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/cpu/Loops.h>
 
 namespace at { namespace native { namespace {
@@ -37,8 +38,9 @@ static inline void compare_base_kernel_core(
       result2.unsqueeze_(dim);
     }
   }
-  result1.resize_(self_sizes);
-  result2.resize_(self_sizes);
+
+  at::native::resize_output(result1, self_sizes);
+  at::native::resize_output(result2, self_sizes);
 
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
