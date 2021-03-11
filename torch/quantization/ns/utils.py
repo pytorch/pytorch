@@ -53,7 +53,11 @@ def get_node_input_type(node: Node, gm: GraphModule) -> NodeInputType:
         mod = getattr_from_fqn(gm, node.target)
         # For now, hacky check to see which mod is in which namespace
         # TODO(future PR): use a real mapping
-        if mod.__module__.startswith('torch.nn.modules'):
+        is_known_fp32_input_module = (
+            mod.__module__.startswith('torch.nn.modules') or
+            mod.__module__.startswith('torch.nn.quantized.dynamic')
+        )
+        if is_known_fp32_input_module:
             return NodeInputType.FP32
         else:
             is_known_int8_module = (
