@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 
 import argparse
+import bz2
 import copy
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
 import modulefinder
 import os
 import shutil
@@ -15,7 +17,15 @@ import torch
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
 import torch.distributed as dist
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, List, Any
+
+try:
+    import boto3  # type: ignore[import]
+    import botocore  # type: ignore[import]
+    import botocore.exceptions  # type: ignore[import]
+    HAVE_BOTO3 = True
+except ImportError:
+    HAVE_BOTO3 = False
 
 TESTS = [
     'test_public_bindings',
@@ -162,6 +172,7 @@ USE_PYTEST_LIST = [
     'distributions/test_constraints',
     'distributions/test_transforms',
     'distributions/test_utils',
+    'test_typing',
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -226,8 +237,10 @@ WINDOWS_COVERAGE_BLOCKLIST = [
 
 
 # These tests are slow enough that it's worth calculating whether the patch
-# touched any related files first.
-SLOW_TESTS = [
+# touched any related files first. This list was manually generated, but for every
+# run with --determine-from, we use another generated list based on this one and the
+# previous test stats.
+TARGET_DET_LIST = [
     'distributions/test_distributions',
     'test_nn',
     'test_autograd',
@@ -291,6 +304,10 @@ SLOW_TESTS = [
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
 ]
+
+# if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
+SLOW_TEST_THRESHOLD = 300
+
 _DEP_MODULES_CACHE: Dict[str, set] = {}
 
 DISTRIBUTED_TESTS_CONFIG = {}
@@ -338,6 +355,134 @@ JIT_EXECUTOR_TESTS = [
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
+
+
+# This function returns a list of S3 test time reports. This function can run into errors if HAVE_BOTO3 = False
+# or the S3 bucket is somehow unavailable. Even though this function goes through ten nightly commits' reports
+# to find a non-empty report, it is still conceivable (though highly unlikely) for this function to return no reports.
+def get_test_time_reports_from_S3() -> List[Dict[str, Any]]:
+    commit_date_ts = subprocess.check_output(
+        ['git', 'show', '-s', '--format=%ct', 'HEAD'],
+        encoding="ascii").strip()
+    commit_date = datetime.fromtimestamp(int(commit_date_ts))
+    day_before_commit = str(commit_date - timedelta(days=1)).split(' ')[0]
+    # something like git rev-list --before="2021-03-04" --max-count=10 --remotes="*origin/nightly"
+    nightly_commits = subprocess.check_output(
+        ["git", "rev-list", f"--before={day_before_commit}", "--max-count=10", "--remotes=*origin/nightly"],
+        encoding="ascii").splitlines()
+
+    job = os.environ.get("CIRCLE_JOB", "")
+    job_minus_shard_number = job.rstrip('0123456789')
+
+    try:
+        s3 = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
+        bucket = s3.Bucket(name="ossci-metrics")
+
+        reports = []
+        commit_index = 0
+        while len(reports) == 0 and commit_index < len(nightly_commits):
+            nightly_commit = nightly_commits[commit_index]
+            print(f'Grabbing reports from nightly commit: {nightly_commit}')
+            summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{job_minus_shard_number}")
+            for summary in summaries:
+                binary = summary.get()["Body"].read()
+                string = bz2.decompress(binary).decode("utf-8")
+                reports.append(json.loads(string))
+            commit_index += 1
+        return reports
+    except botocore.exceptions.ClientError as err:
+        print('Error Message: {}'.format(err.response['Error']['Message']))
+        return []
+
+
+def calculate_job_times(reports: List[Dict[str, Any]]) -> Dict[str, Tuple[float, int]]:
+    # an entry will be like ("test_file_name" -> (current_avg, # values))
+    jobs_to_times: Dict[str, Tuple[float, int]] = dict()
+    for report in reports:
+        assert report.get('format_version') == 2, "S3 format currently handled is version 2 only"
+        files: Dict[str, Any] = report['files']
+        for name, test_file in files.items():
+            if name not in jobs_to_times:
+                jobs_to_times[name] = (test_file['total_seconds'], 1)
+            else:
+                curr_avg, curr_count = jobs_to_times[name]
+                new_count = curr_count + 1
+                new_avg = (curr_avg * curr_count + test_file['total_seconds']) / new_count
+                jobs_to_times[name] = (new_avg, new_count)
+
+    # if there's 'test_cpp_extensions_aot' entry in jobs_to_times, add 'test_cpp_extensions_aot_ninja'
+    # and 'test_cpp_extensions_aot_no_ninja' duplicate entries to ease future computation since
+    # test_cpp_extensions_aot_no_ninja and test_cpp_extensions_aot_ninja are Python test jobs that
+    # both use the test_cpp_extensions_aot.py file.
+    if 'test_cpp_extensions_aot' in jobs_to_times:
+        jobs_to_times['test_cpp_extensions_aot_ninja'] = jobs_to_times['test_cpp_extensions_aot']
+        jobs_to_times['test_cpp_extensions_aot_no_ninja'] = jobs_to_times['test_cpp_extensions_aot']
+    return jobs_to_times
+
+
+def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, Tuple[float, int]]) -> List[Tuple[float, List[str]]]:
+    filtered_job_times: Dict[str, float] = dict()
+    for test in tests:
+        if test in job_times:
+            avg_time, _ = job_times[test]
+            filtered_job_times[test] = avg_time
+        else:
+            filtered_job_times[test] = 0.0
+
+    # The following attempts to implement a partition approximation greedy algorithm
+    # See more at https://en.wikipedia.org/wiki/Greedy_number_partitioning
+    sorted_jobs = sorted(filtered_job_times, key=lambda j: filtered_job_times[j], reverse=True)
+    sharded_jobs: List[Tuple[float, List[str]]] = [(0.0, []) for _ in range(num_shards)]
+    for job in sorted_jobs:
+        min_shard_index = sorted(range(num_shards), key=lambda i: sharded_jobs[i][0])[0]
+        curr_shard_time, curr_shard_jobs = sharded_jobs[min_shard_index]
+        curr_shard_jobs.append(job)
+        sharded_jobs[min_shard_index] = (curr_shard_time + filtered_job_times[job], curr_shard_jobs)
+    return sharded_jobs
+
+
+def pull_job_times_from_S3() -> Dict[str, Tuple[float, int]]:
+    if HAVE_BOTO3:
+        s3_reports = get_test_time_reports_from_S3()
+    else:
+        print('Please install boto3 to enable using S3 test times for automatic sharding and test categorization.')
+        s3_reports = []
+
+    if len(s3_reports) == 0:
+        print('Gathered no reports from S3. Please proceed without them.')
+        return dict()
+
+    return calculate_job_times(s3_reports)
+
+
+def get_shard(which_shard: int, num_shards: int, tests: List[str]) -> List[str]:
+    jobs_to_times = pull_job_times_from_S3()
+
+    # Got no stats from S3, returning early to save runtime
+    if len(jobs_to_times) == 0:
+        print('Gathered no stats from S3. Proceeding with default sharding plan.')
+        return tests[which_shard - 1 :: num_shards]
+
+    shards = calculate_shards(num_shards, tests, jobs_to_times)
+    _, tests_from_shard = shards[which_shard - 1]
+    return tests_from_shard
+
+
+def get_slow_tests_based_on_S3() -> List[str]:
+    jobs_to_times = pull_job_times_from_S3()
+
+    # Got no stats from S3, returning early to save runtime
+    if len(jobs_to_times) == 0:
+        print('Gathered no stats from S3. No new slow tests calculated.')
+        return []
+
+    slow_tests: List[str] = []
+    for test in TESTS:
+        if test in jobs_to_times and test not in TARGET_DET_LIST:
+            test_time, _ = jobs_to_times[test]
+            if test_time > SLOW_TEST_THRESHOLD:
+                slow_tests.append(test)
+    return slow_tests
 
 
 def get_executable_command(options, allow_pytest, disable_coverage=False):
@@ -686,7 +831,7 @@ def get_selected_tests(options):
         which_shard, num_shards = options.shard
         assert which_shard <= num_shards, "Selected shard must be less or equal that total number of shards"
         assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
-        selected_tests = selected_tests[which_shard - 1 :: num_shards]
+        selected_tests = get_shard(which_shard, num_shards, selected_tests)
 
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
@@ -793,10 +938,10 @@ def get_dep_modules(test):
     return dep_modules
 
 
-def determine_target(test, touched_files, options):
+def determine_target(target_det_list, test, touched_files, options):
     test = parse_test_module(test)
     # Some tests are faster to execute than to determine.
-    if test not in SLOW_TESTS:
+    if test not in target_det_list:
         if options.verbose:
             print_to_stderr(f'Running {test} without determination')
         return True
@@ -876,6 +1021,9 @@ def main():
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     if options.determine_from is not None and os.path.exists(options.determine_from):
+        slow_tests = get_slow_tests_based_on_S3()
+        print('Added the following tests to target_det tests as calculated based on S3:')
+        print(slow_tests)
         with open(options.determine_from, 'r') as fh:
             touched_files = [
                 os.path.normpath(name.strip()) for name in fh.read().split('\n')
@@ -885,7 +1033,7 @@ def main():
         sys.path.append('test')
         selected_tests = [
             test for test in selected_tests
-            if determine_target(test, touched_files, options)
+            if determine_target(TARGET_DET_LIST + slow_tests, test, touched_files, options)
         ]
         sys.path.remove('test')
 

@@ -142,14 +142,14 @@ scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, int twice_high
   }
 }
 
-template<typename scalar_t> 
-static __forceinline__ __device__ 
+template<typename scalar_t>
+static __forceinline__ __device__
 scalar_t safe_downgrade_to_int_range(scalar_t x){
-  // -100.0 does not have special meaning. This is just to make sure 
-  // it's not within_bounds_2d or within_bounds_3d, and does not cause 
-  // undefined behavior. See #35506.  
-  if (x > INT_MAX-1 || x < INT_MIN || !::isfinite(static_cast<double>(x))) 
-    return static_cast<scalar_t>(-100.0); 
+  // -100.0 does not have special meaning. This is just to make sure
+  // it's not within_bounds_2d or within_bounds_3d, and does not cause
+  // undefined behavior. See #35506.
+  if (x > INT_MAX-1 || x < INT_MIN || !::isfinite(static_cast<double>(x)))
+    return static_cast<scalar_t>(-100.0);
   return x;
 }
 
@@ -219,7 +219,7 @@ scalar_t grid_sampler_compute_source_index_set_grad(
     *grad_in = (*grad_in) * grad_refl * grad_clip;
   }
 
-  coord = safe_downgrade_to_int_range(coord); 
+  coord = safe_downgrade_to_int_range(coord);
   return coord;
 }
 
@@ -244,7 +244,7 @@ scalar_t get_value_bounded(
   y = compute_coordinates(y, H, padding_mode, align_corners);
 
   int ix = static_cast<int>(x);
-  int iy = static_cast<int>(y); 
+  int iy = static_cast<int>(y);
 
   if (within_bounds_2d(iy, ix, H, W)) {
     return data[iy * sH + ix * sW];
@@ -284,7 +284,7 @@ void add_value_bounded(
   y = compute_coordinates(y, H, padding_mode, align_corners);
 
   int ix = static_cast<int>(x);
-  int iy = static_cast<int>(y); 
+  int iy = static_cast<int>(y);
 
   safe_add_2d(data, iy, ix, sH, sW, H, W, delta);
 }
