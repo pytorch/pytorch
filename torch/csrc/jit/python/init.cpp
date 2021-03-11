@@ -1157,10 +1157,12 @@ void initJITBindings(PyObject* module) {
             IValue v = *self.default_value();
             return toPyObject(std::move(v));
           })
-      .def("has_default_value", [](Argument& self) -> py::bool_ {
-        return self.default_value().has_value();
-      })
-      .def_property_readonly("kwarg_only", [](Argument& self) -> bool{
+      .def(
+          "has_default_value",
+          [](Argument& self) -> py::bool_ {
+            return self.default_value().has_value();
+          })
+      .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
       });
   m.def("_jit_get_all_schemas", []() {

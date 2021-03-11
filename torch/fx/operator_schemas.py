@@ -9,9 +9,11 @@ _manual_overrides : Dict[Callable, Callable[[], inspect.Signature]] = {}
 
 def nonzero_schemas():
     signatures = []
+
     def nonzero(self):
         pass
     signatures.append(inspect.signature(nonzero))
+
     def nonzero(self, *, as_tuple : bool):
         pass
     signatures.append(inspect.signature(nonzero))
@@ -44,7 +46,7 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
         # TODO: HACK!!!!
         name = arg.name if arg.name != 'self' else 'input'
         kind = inspect.Parameter.KEYWORD_ONLY if arg.kwarg_only else inspect.Parameter.POSITIONAL_OR_KEYWORD
-        parameters.append(inspect.Parameter(name=name, kind=kind, default=default, annotation = arg_type))
+        parameters.append(inspect.Parameter(name=name, kind=kind, default=default, annotation=arg_type))
     return_types = [_torchscript_type_to_python_type(ret.type) for ret in ts_schema.returns]
     if len(return_types) == 0:
         return_type = None
