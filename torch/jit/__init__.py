@@ -44,7 +44,6 @@ from torch.jit._trace import (
     _get_trace_graph,
 )
 
-from torch import jit
 from torch.jit._async import fork, wait
 from torch.jit._serialization import save, load
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
