@@ -9,7 +9,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
-#include <TH/THBlasUtils.h>
+#include <ATen/native/CPUBlas.h>
 
 #include <algorithm>
 
@@ -139,7 +139,7 @@ SparseTensor& neg_sparse_(SparseTensor& t) {
 // Values of uncoalesced tensor corresponding to the same indices are summed
 // and asin(summed_value) != asin(v1) + asin(v2)
 
-SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
+SparseTensor& asin_out_sparse(const SparseTensor& t, SparseTensor& r) {
   TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(
@@ -159,7 +159,7 @@ SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
 
 SparseTensor asin_sparse(const SparseTensor& t) {
   auto result = get_result_tensor_for_unary_op(t);
-  return asin_out_sparse(result, t);
+  return asin_out_sparse(t, result);
 }
 
 SparseTensor& asin_sparse_(SparseTensor& t) {
@@ -508,7 +508,7 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
                 r_indices_accessor[d][r_i] = t_indices_accessor[d][t_i];
               }
               if (t_values.numel() > 0) {  // We add all elements from t_values to r_values only if t_values is not an empty tensor
-                THBlas_axpy<scalar_t>(blockSize, 1,
+                at::native::cpublas::axpy<scalar_t>(blockSize, 1,
                   t_values_ptr + t_i * blockSize, 1,
                   r_values_ptr + r_i * blockSize, 1);
               }
@@ -519,7 +519,7 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
                 r_indices_accessor[d][r_i] = src_indices_accessor[d][s_i];
               }
               if (s_values.numel() > 0) {  // We add all elements from s_values to r_values only if s_values is not an empty tensor
-                THBlas_axpy<scalar_t>(blockSize, cast_value,
+                at::native::cpublas::axpy<scalar_t>(blockSize, cast_value,
                   s_values_ptr + s_i * blockSize, 1,
                   r_values_ptr + r_i * blockSize, 1);
               }
@@ -547,7 +547,7 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
     Tensor t_values = t._values().to(commonDtype);
     Tensor s_values = src._values().to(commonDtype);
 
-    // If `t` or `src` contains non-contiguous `values`, `THBlas_axpy` doesn't work
+    // If `t` or `src` contains non-contiguous `values`, `at::native::cpublas::axpy` doesn't work
     // and we concat the indices and values tensors instead.
     AT_DISPATCH_ALL_TYPES(
       commonDtype, "add_out_sparse_cpu", [&] {
@@ -844,7 +844,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
     int64_t row = indices_accessor[0][i];
     int64_t col = indices_accessor[1][i];
     if (col >= 0 && col < dim_j && row >= 0 && row < dim_i) {
-      THBlas_axpy<scalar_t>(dim_k,
+      at::native::cpublas::axpy<scalar_t>(dim_k,
             cast_alpha * val,
             dense_ptr + col * dense_stride0, dense_stride1,
             r_ptr + row * r_stride0, r_stride1);
@@ -1116,7 +1116,7 @@ SparseTensor& _sspaddmm_out_cpu(
       "sspaddmm: Argument #1: Expected dim 1 size ", dim_k, ", got ", t.size(1));
 
   int64_t nnz        = sparse._nnz();
-  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage  
+  // We have to make indices contiguous as we use indices.data_ptr in _to_csr which assumes row-contiguous storage
   Tensor indices = sparse._indices().contiguous();
   Tensor values      = sparse._values();
 
@@ -1161,7 +1161,7 @@ SparseTensor& _sspaddmm_out_cpu(
             scalar_t val = values_accessor[i];
             int64_t col = indices_accessor[1][i];
             if (col >= 0 && col < dim_j) {
-              THBlas_axpy<scalar_t>(dim_k,
+              at::native::cpublas::axpy<scalar_t>(dim_k,
                   cast_alpha * val,
                   dense_ptr + col * dense_stride0, dense_stride1,
                   newv_ptr + p * newv_stride0, 1);

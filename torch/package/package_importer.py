@@ -5,10 +5,8 @@ import inspect
 import io
 import linecache
 from weakref import WeakValueDictionary
-import pickle
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
-import _compat_pickle  # type: ignore
 import types
 import os.path
 from pathlib import Path
@@ -18,6 +16,7 @@ from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _
 from ._file_structure_representation import _create_folder_from_file_list, Folder
 from ._glob_group import GlobPattern
 from ._mock_zipreader import MockZipReader
+from ._package_unpickler import PackageUnpickler
 from ._mangling import PackageMangler, demangle
 from .importer import Importer
 
@@ -85,13 +84,14 @@ class PackageImporter(Importer):
 
         self.patched_builtins = builtins.__dict__.copy()
         self.patched_builtins['__import__'] = self.__import__
-        # allow pickles from archive using `import resources`
-        self.modules['resources'] = self  # type: ignore
+        # Allow packaged modules to reference their PackageImporter
+        self.modules['torch_package_importer'] = self  # type: ignore
+
 
         self._mangler = PackageMangler()
 
         # used for torch.serialization._load
-        self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self.import_module, *args, **kwargs)
+        self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
 
     def import_module(self, name: str, package=None):
         """Load a module from the package if it hasn't already been loaded, and then return
@@ -164,13 +164,17 @@ class PackageImporter(Importer):
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
 
-            assert typename == 'storage', \
+            if typename == 'storage':
+                data_type, key, location, size = data
+                if key not in loaded_storages:
+                    load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
+                storage = loaded_storages[key]
+                return storage
+            elif typename == 'reduce_package':
+                func, args = data
+                return func(self, *args)
+            else:
                 f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
-            data_type, key, location, size = data
-            if key not in loaded_storages:
-                load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
-            storage = loaded_storages[key]
-            return storage
 
         # Load the data (which may in turn use `persistent_load` to load tensors)
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
@@ -195,11 +199,11 @@ class PackageImporter(Importer):
         return self._mangler.parent_name()
 
     def file_structure(self, *, include: 'GlobPattern' = "**", exclude: 'GlobPattern' = ()) -> Folder:
-        """Returns a file structure representation of package's zipfile. 
+        """Returns a file structure representation of package's zipfile.
 
         Args:
             include (Union[List[str], str]): An optional string e.g. "my_package.my_subpackage", or optional list of strings
-                for the names of the files to be inluded in the zipfile representation. This can also be 
+                for the names of the files to be inluded in the zipfile representation. This can also be
                 a glob-style pattern, as described in exporter's :meth:`mock`
 
             exclude (Union[List[str], str]): An optional pattern that excludes files whose name match the pattern.
@@ -266,6 +270,17 @@ class PackageImporter(Importer):
         # linecache calls `get_source` with the `module.__name__` as the argument, so we must demangle it here.
         module = self.import_module(demangle(module_name))
         return self.zip_reader.get_record(demangle(module.__file__)).decode('utf-8')
+
+    # note: named `get_resource_reader` so that importlib.resources can find it.
+    # This is otherwise considered an internal method.
+    def get_resource_reader(self, fullname):
+        try:
+            package = self._get_package(fullname)
+        except ImportError:
+            return None
+        if package.__loader__ is not self:
+            return None
+        return _PackageResourceReader(self, fullname)
 
     def _install_on_parent(self, parent: str, name: str, module: types.ModuleType):
         if not parent:
@@ -410,12 +425,15 @@ class PackageImporter(Importer):
             else:
                 return module
 
-    def _zipfile_path(self, package, resource):
+    def _zipfile_path(self, package, resource=None):
         package = self._get_package(package)
-        resource = _normalize_path(resource)
         assert package.__loader__ is self
         name = demangle(package.__name__)
-        return f"{name.replace('.', '/')}/{resource}"
+        if resource is not None:
+            resource = _normalize_path(resource)
+            return f"{name.replace('.', '/')}/{resource}"
+        else:
+            return f"{name.replace('.', '/')}"
 
     def _get_or_create_package(self, atoms: List[str]) -> 'Union[_PackageNode, _ExternNode]':
         cur = self.root
@@ -456,21 +474,6 @@ _NEEDS_LOADING = object()
 _ERR_MSG_PREFIX = 'No module named '
 _ERR_MSG = _ERR_MSG_PREFIX + '{!r}'
 
-class _UnpicklerWrapper(pickle._Unpickler):  # type: ignore
-    def __init__(self, importer, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._importer = importer
-
-    def find_class(self, module, name):
-        # Subclasses may override this.
-        if self.proto < 3 and self.fix_imports:
-            if (module, name) in _compat_pickle.NAME_MAPPING:
-                module, name = _compat_pickle.NAME_MAPPING[(module, name)]
-            elif module in _compat_pickle.IMPORT_MAPPING:
-                module = _compat_pickle.IMPORT_MAPPING[module]
-        mod = self._importer(module)
-        return getattr(mod, name)
-
 class _PathNode:
     pass
 
@@ -500,3 +503,50 @@ def patched_getfile(object):
             return _package_imported_modules[object.__module__].__file__
     return _orig_getfile(object)
 inspect.getfile = patched_getfile
+
+
+class _PackageResourceReader:
+    """Private class used to support PackageImporter.get_resource_reader().
+
+    Confirms to the importlib.abc.ResourceReader interface. Allowed to access
+    the innards of PackageImporter.
+    """
+    def __init__(self, importer, fullname):
+        self.importer = importer
+        self.fullname = fullname
+
+    def open_resource(self, resource):
+        from io import BytesIO
+        return BytesIO(self.importer.load_binary(self.fullname, resource))
+
+    def resource_path(self, resource):
+        # The contract for resource_path is that it either returns a concrete
+        # file system path or raises FileNotFoundError.
+        raise FileNotFoundError
+
+    def is_resource(self, name):
+        path = self.importer._zipfile_path(self.fullname, name)
+        return self.importer.zip_reader.has_record(path)
+
+    def contents(self):
+        from pathlib import Path
+        filename = self.fullname.replace('.', '/')
+
+        fullname_path = Path(self.importer._zipfile_path(self.fullname))
+        files = self.importer.zip_reader.get_all_records()
+        subdirs_seen = set()
+        for filename in files:
+            try:
+                relative = Path(filename).relative_to(fullname_path)
+            except ValueError:
+                continue
+            # If the path of the file (which is relative to the top of the zip
+            # namespace), relative to the package given when the resource
+            # reader was created, has a parent, then it's a name in a
+            # subdirectory and thus we skip it.
+            parent_name = relative.parent.name
+            if len(parent_name) == 0:
+                yield relative.name
+            elif parent_name not in subdirs_seen:
+                subdirs_seen.add(parent_name)
+                yield parent_name

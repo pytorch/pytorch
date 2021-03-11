@@ -30,63 +30,6 @@ TensorIteratorConfig& TensorIteratorConfig::add_input(const Tensor& input) {
   return *this;
 }
 
-TensorIteratorConfig& TensorIteratorConfig::set_check_mem_overlap(bool check_mem_overlap) {
-  check_mem_overlap_ = check_mem_overlap;
-  return *this;
-}
-
-TensorIteratorConfig& TensorIteratorConfig::check_all_same_dtype(const bool _check_all_same_dtype) {
-  check_all_same_dtype_ = _check_all_same_dtype;
-  return *this;
-}
-
-TensorIteratorConfig& TensorIteratorConfig::check_all_same_device(const bool _check_all_same_device) {
-  check_all_same_device_ = _check_all_same_device;
-  return *this;
-}
-
-TensorIteratorConfig& TensorIteratorConfig::enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
-  enforce_safe_casting_to_output_ = _enforce_safe_casting_to_output;
-  return *this;
-}
-
-TensorIteratorConfig& TensorIteratorConfig::promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
-  promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
-  if (_promote_inputs_to_common_dtype) {
-    check_all_same_dtype_ = false;
-  }
-  return *this;
-}
-
-TensorIteratorConfig& TensorIteratorConfig::promote_integer_inputs_to_float(const bool _promote_integer_inputs_to_float) {
-  promote_integer_inputs_to_float_ = _promote_integer_inputs_to_float;
-  TORCH_INTERNAL_ASSERT(!promote_integer_inputs_to_float_ || promote_inputs_to_common_dtype_);
-  return *this;
-}
-
-TensorIteratorConfig& TensorIteratorConfig::is_reduction(const bool _is_reduction) {
-  is_reduction_ = _is_reduction;
-  return *this;
-}
-
-TensorIteratorConfig& TensorIteratorConfig::allow_cpu_scalars(const bool _allow_cpu_scalars) {
-  allow_cpu_scalars_ = _allow_cpu_scalars;
-  return *this;
-}
-
-TensorIteratorConfig& TensorIteratorConfig::cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
-  cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
-  if (_cast_common_dtype_to_outputs) {
-    check_all_same_dtype_ = false;
-  }
-  return *this;
-}
-
-TensorIteratorConfig& TensorIteratorConfig::resize_outputs(bool resize_outputs) {
-  resize_outputs_ = resize_outputs;
-  return *this;
-}
-
 TensorIteratorConfig& TensorIteratorConfig::declare_static_dtype_and_device(ScalarType dtype, Device device) {
   TORCH_CHECK(!check_all_same_dtype_, "check_all_same_dtype(false) must be called before declare_static_dtype(...)");
   static_dtype_and_device_ = c10::make_optional(std::make_pair(dtype, device));
@@ -297,19 +240,25 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
       common_device = op.tensor.device();
     }
 
-    // Determines if there are varying input dtypes
-    // NOTE: the common dtype is set to the first defined input dtype observed
-    if (!op.is_output && op.target_dtype != common_dtype_) {
-      if (common_dtype_ == ScalarType::Undefined) {
-        common_dtype_ = op.target_dtype;
-      } else {
-        has_different_input_dtypes = true;
+    if (!op.is_output) {
+      // Determines if there are varying input dtypes
+      // NOTE: the common dtype is set to the first defined input dtype observed
+      if (op.target_dtype != common_dtype_) {
+        if (common_dtype_ == ScalarType::Undefined) {
+          common_dtype_ = op.target_dtype;
+        } else {
+          has_different_input_dtypes = true;
+        }
       }
-    } else if (op.is_output && op.target_dtype != common_dtype_) {
-      if (output_dtype == ScalarType::Undefined) {
-        output_dtype = op.target_dtype;
-      } else {
-        has_different_output_dtypes = true;
+    } else {  // op.is_output
+      // Determines if there are varying output dtypes
+      // NOTE: the output dtype is set to the first defined output dtype observed
+      if (op.target_dtype != output_dtype) {
+        if (output_dtype == ScalarType::Undefined) {
+          output_dtype = op.target_dtype;
+        } else {
+          has_different_output_dtypes = true;
+        }
       }
     }
   }
@@ -422,9 +371,9 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
         }
         op.current_dtype = common_dtype_;
         op.target_dtype = common_dtype_;
-    }
+      }
 
-    // Promotes inputs by creating temporaries of the correct dtype
+      // Promotes inputs by creating temporaries of the correct dtype
       if (config.promote_inputs_to_common_dtype_ && !op.is_output && op.current_dtype != common_dtype_) {
         op.original_tensor = op.tensor;
         op.tensor = op.tensor.to(common_dtype_);
@@ -682,7 +631,7 @@ void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
   int64_t numel = this->numel();
   if (numel == 0) {
     return;
-  } else if (numel < internal::GRAIN_SIZE || at::get_num_threads() == 1) {
+  } else if (numel < grain_size || at::get_num_threads() == 1) {
     return serial_for_each(loop, {0, numel});
   } else {
     at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
@@ -820,6 +769,27 @@ void TensorIteratorBase::build_binary_op(const Tensor& out, const Tensor& a, con
     .enforce_safe_casting_to_output(true));
 }
 
+void TensorIteratorBase::build_unary_float_op(const Tensor& out, const Tensor& a) {
+  build(TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(out)
+      .add_input(a)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .promote_integer_inputs_to_float(true));
+}
+
+void TensorIteratorBase::build_unary_op(const Tensor& out, const Tensor& a) {
+  build(TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(out)
+      .add_input(a)
+      .cast_common_dtype_to_outputs(false)
+      .enforce_safe_casting_to_output(false)
+      .check_all_same_dtype(true));
+}
+
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   TensorIterator iter;
   iter.build_binary_op(out, a, b);
@@ -874,26 +844,15 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
 }
 
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
-  return TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .add_output(out)
-    .add_input(a)
-    .cast_common_dtype_to_outputs(false)
-    .enforce_safe_casting_to_output(false)
-    .check_all_same_dtype(true)
-    .build();
+  TensorIterator iter;
+  iter.build_unary_op(out, a);
+  return iter;
 }
 
 TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a) {
-  return TensorIteratorConfig()
-      .set_check_mem_overlap(true)
-      .add_output(out)
-      .add_input(a)
-      .promote_inputs_to_common_dtype(true)
-      .cast_common_dtype_to_outputs(true)
-      .enforce_safe_casting_to_output(true)
-      .promote_integer_inputs_to_float(true)
-      .build();
+  TensorIterator iter;
+  iter.build_unary_float_op(out, a);
+  return iter;
 }
 
 TensorIterator TensorIterator::nullary_op(Tensor& out) {
@@ -1373,17 +1332,9 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
   if (!op.tensor.defined()) {
       if (strides.empty()) {
-          if (is_meta_) {
-            op.tensor = at::empty_meta(sizes, options);
-          } else {
-            op.tensor = at::empty(sizes, options);
-          }
+        op.tensor = at::empty(sizes, options);
       } else {
-          if (is_meta_) {
-            TORCH_INTERNAL_ASSERT(0, "meta strided not yet implemented");
-          } else {
-            op.tensor = at::empty_strided(sizes, strides, options);
-          }
+        op.tensor = at::empty_strided(sizes, strides, options);
       }
       op.current_dtype = op.target_dtype;
   } else if (op.will_resize) {

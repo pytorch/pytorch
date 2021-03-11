@@ -7,7 +7,7 @@
 #  ZMQ_FOUND
 #  ZMQ_INCLUDE_DIR
 #  ZMQ_LIBRARIES
-#  ZMQ_VERSION_MAJOR 
+#  ZMQ_VERSION_MAJOR
 
 find_path(ZMQ_INCLUDE_DIR NAMES zmq.h
                              PATHS ${ZMQ_ROOT_DIR} ${ZMQ_ROOT_DIR}/include)

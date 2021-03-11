@@ -198,8 +198,9 @@ enum DeviceTypeProto {
   PROTO_FPGA = 7;                   // FPGA
   PROTO_MSNPU = 8;                  // MSNPU
   PROTO_XLA = 9;                    // XLA / TPU
+  PROTO_MLC = 10;                   // ML Compute
   // Change the following number if you add more devices in the code.
-  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 10;
+  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 11;
 }
 
 // Device-specific options. We do not distinguish DeviceOption protos for
