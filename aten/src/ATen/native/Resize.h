@@ -18,6 +18,8 @@ namespace at { namespace native {
 // NOTE: In the future the warning will become an error
 TORCH_API void resize_output(Tensor& output, IntArrayRef shape);
 
+TORCH_API void resize_output_cpu(Tensor& output, IntArrayRef shape);
+
 // These functions are called by native::resize_ as well as (legacy) TH resize.
 // They are not in TH/THTensor.cpp because the at namespace is easier
 // to benchmark than TH; I can't get gbenchmark to call fns from THTensor.cpp
