@@ -21,8 +21,8 @@ namespace distributed {
 namespace rpc {
 
 #ifdef USE_CUDA_NOT_ROCM
-using at::cuda::CUDAStream;
 using at::cuda::CUDAEvent;
+using at::cuda::CUDAStream;
 #endif
 
 // A general device context class for both CPU and CUDA. If CUDA is not
