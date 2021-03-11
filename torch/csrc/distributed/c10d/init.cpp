@@ -1,9 +1,9 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10d/Utils.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/TCPStore.hpp>
+#include <c10d/Utils.hpp>
 #ifndef _WIN32
 #include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroupRoundRobin.hpp>
@@ -184,7 +184,21 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           py::arg("reducer"),
           py::arg("comm_hook_type"));
 
-  shared_ptr_class_<::c10d::GradBucket>(module, "GradBucket")
+  shared_ptr_class_<::c10d::GradBucket>(
+      module,
+      "GradBucket",
+      R"(
+This class mainly passes a list of gradient tensors
+(returned by :meth:`~torch.distributed.GradBucket.get_tensors`)
+to DDP communication hook,
+where each tensor in the list refers to the replica on each device.
+Since DDP communication hook only supports single process single device mode at this time,
+only exactly one tensor is stored in this bucket.
+This tensor is actually a flattened 1D tensor,
+which can be further decomposed into a list of per-parameter tensors within this bucket
+(returned by :meth:`~torch.distributed.GradBucket.get_per_parameter_tensors`)
+to apply layer-wise operations.
+)")
       .def(
           py::init<
               size_t,
@@ -300,6 +314,11 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "save_thread_local_state",
           &::c10d::Reducer::save_thread_local_state,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_ddp_runtime_logging_sample_rate",
+          &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
+          py::arg("sample_rate"),
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -320,14 +339,14 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_runtime_stats_and_log,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "get_ddp_logging_data",
+          "_get_ddp_logging_data",
           &::c10d::Logger::get_ddp_logging_data,
           py::call_guard<py::gil_scoped_release>())
-        .def(
-            "_set_comm_hook_name",
-            &::c10d::Logger::set_comm_hook,
-            py::arg("comm_hook"),
-            py::call_guard<py::gil_scoped_release>());
+      .def(
+          "_set_comm_hook_name",
+          &::c10d::Logger::set_comm_hook,
+          py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
       An enum whose values correspond to different debug settings of the
@@ -335,9 +354,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       and DETAIL, which can be set via the TORCH_DISTRIBUTED_DEBUG environment
       variable.
   )")
-  .value("OFF", ::c10d::DistributedDebugLevel::OFF)
-  .value("INFO", ::c10d::DistributedDebugLevel::INFO)
-  .value("DETAIL", ::c10d::DistributedDebugLevel::DETAIL);
+      .value("OFF", ::c10d::DistributedDebugLevel::OFF)
+      .value("INFO", ::c10d::DistributedDebugLevel::INFO)
+      .value("DETAIL", ::c10d::DistributedDebugLevel::DETAIL);
 
   module.def(
       "_get_debug_mode",
@@ -1279,7 +1298,7 @@ Arguments:
                 Note that ``fut.done()`` returns only whether the operation has been enqueued on the GPU.
            )");
 
-py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
+  py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
       .def_readwrite("world_size", &c10::DDPLoggingData::world_size)
       .def_readwrite("rank", &c10::DDPLoggingData::rank)
@@ -1297,12 +1316,12 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
           &c10::DDPLoggingData::gradient_as_bucket_view)
       .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name)
       .def_readwrite("iteration", &c10::DDPLoggingData::iteration)
-      .def_readwrite("dtype", &c10::DDPLoggingData::dtype)
       .def_readwrite(
           "total_parameter_size_bytes",
           &c10::DDPLoggingData::total_parameter_size_bytes)
       .def_readwrite(
           "num_parameter_tensors", &c10::DDPLoggingData::num_parameter_tensors)
+      .def_readwrite("dtypes", &c10::DDPLoggingData::dtypes)
       .def_readwrite("bucket_sizes", &c10::DDPLoggingData::bucket_sizes)
       .def_readwrite("master_port", &c10::DDPLoggingData::master_port)
       .def_readwrite("master_addr", &c10::DDPLoggingData::master_addr)
@@ -1316,7 +1335,9 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
           "nccl_socket_ifname", &c10::DDPLoggingData::nccl_socket_ifname)
       .def_readwrite(
           "nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
-      .def_readwrite("nccl_async_error_handling", &c10::DDPLoggingData::nccl_async_error_handling)
+      .def_readwrite(
+          "nccl_async_error_handling",
+          &c10::DDPLoggingData::nccl_async_error_handling)
       .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
       .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
       .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout)
@@ -1338,7 +1359,17 @@ py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def_readwrite(
           "avg_backward_compute_comm_overlap_time",
           &c10::DDPLoggingData::avg_backward_compute_comm_overlap_time)
-      .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook);
+      .def_readwrite("comm_hook", &c10::DDPLoggingData::comm_hook)
+      .def_readwrite(
+          "forward_compute_time", &c10::DDPLoggingData::forward_compute_time)
+      .def_readwrite(
+          "backward_compute_time", &c10::DDPLoggingData::backward_compute_time)
+      .def_readwrite(
+          "backward_comm_time", &c10::DDPLoggingData::backward_comm_time)
+      .def_readwrite(
+          "backward_compute_comm_overlap_time",
+          &c10::DDPLoggingData::backward_compute_comm_overlap_time)
+      .def_readwrite("is_multi_device_module", &c10::DDPLoggingData::is_multi_device_module);
 
   module.def(
       "_compute_bucket_assignment_by_size",

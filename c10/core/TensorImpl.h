@@ -711,13 +711,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T * data() const {
-    TORCH_CHECK(has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
-    TORCH_CHECK(
-        storage_initialized(),
-        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
-        "mutable_data() or raw_mutable_data() to actually allocate memory.");
     TORCH_CHECK(
         data_type_.Match<T>(),
         "Tensor type mismatch, caller expects elements to be ",
@@ -725,7 +718,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         ", while tensor contains ",
         data_type_.name(),
         ". ");
-    // We managed the type check ourselves
+    return data_ptr_impl<T>();
+  }
+
+  /**
+   * More efficient helper for Tensor::data_ptr(). Like data<T>(), but
+   * does not do a type check. Unlike the untemplated data(), does
+   * check has_storage() and storage_initialized().
+   */
+  template <typename T>
+  inline T * data_ptr_impl() const {
+    TORCH_CHECK(has_storage(),
+        "Cannot access data pointer of Tensor that doesn't have storage");
+    TORCH_CHECK(
+        storage_initialized(),
+        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
+        "Caffe2 uses a lazy allocation, so you will need to call "
+        "mutable_data() or raw_mutable_data() to actually allocate memory.");
+    // Caller does the type check.
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
