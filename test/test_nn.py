@@ -4378,10 +4378,9 @@ class TestNN(NNTestCase):
             self.assertEqual(len(incompatible_keys.missing_keys), 0)
             self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
             self.assertNotIn('Incompatible', str(incompatible_keys))
-            self.assertNotIn('Incompatible', repr(incompatible_keys))
-            self.assertEqual(net.linear1.weight.data, sd['linear1.weight'])
+            self.assertEqual(net.linear1.weight, sd['linear1.weight'])
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(net.block.conv1.bias.data, sd['block.conv1.bias'])
+            self.assertEqualIgnoreType(net.block.conv1.bias, sd['block.conv1.bias'])
             self.assertEqual(net.bn.running_mean, sd['bn.running_mean'])
 
         state_dict = net.state_dict()
@@ -4392,7 +4391,6 @@ class TestNN(NNTestCase):
         self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
         self.assertIn('extra', incompatible_keys.unexpected_keys)
         self.assertIn('Incompatible', str(incompatible_keys))
-        self.assertIn('Incompatible', repr(incompatible_keys))
 
         state_dict = net.state_dict()
         state_dict.update({'extra.param': torch.ones(5)})
@@ -4431,9 +4429,9 @@ class TestNN(NNTestCase):
             'nonexistent_key': torch.rand(3)
         }
         net.load_state_dict(state_dict, strict=False)
-        self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
+        self.assertEqual(net.linear1.weight, state_dict['linear1.weight'])
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
+        self.assertEqualIgnoreType(net.block.conv1.bias, state_dict['block.conv1.bias'])
         self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
         new_state_dict = net.state_dict()
         del old_state_dict['linear1.weight']

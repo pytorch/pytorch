@@ -35,7 +35,7 @@ def _list_with_default(out_size: List[int], defaults: List[int]) -> List[int]:
 
 
 def consume_prefix_in_state_dict_if_present(state_dict: Dict[str, Any], prefix: str):
-    r"""Strip the prefix in state_dict metadata, if any.
+    r"""Strip the prefix in state_dict, if any.
 
     ..note::
         Given a `state_dict` from a DP/DDP model, a local model can load it by applying

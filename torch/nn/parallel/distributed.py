@@ -231,8 +231,8 @@ class DistributedDataParallel(Module):
 
     .. note::
         To let a non-DDP model load a state dict from a DDP model,
-        need to first apply :meth:`~torch.nn.modules.utils.consume_prefix_in_state_dict_if_present`
-        to strip the prefix "module." in the DDP state dict before loading.
+        :meth:`~torch.nn.modules.utils.consume_prefix_in_state_dict_if_present`
+        needs to be applied to strip the prefix "module." in the DDP state dict before loading.
 
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
