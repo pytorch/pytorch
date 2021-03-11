@@ -5041,7 +5041,7 @@ class DistributedTest:
         @require_backend({"gloo",})
         @require_backends_available({"gloo",})
         def test_monitored_barrier_gloo(self):
-            process_group = dist.new_group(ranks=[i for i in range(int(self.world_size))])
+            process_group = dist.new_group(ranks=list(i for i in range(int(self.world_size))))
             tensors = [torch.ones(10) * self.rank]
             # Kick off some allreduce work on all ranks
             for _ in range(10):
