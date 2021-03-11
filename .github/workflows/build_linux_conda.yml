@@ -33,6 +33,7 @@ jobs:
     strategy:
       matrix:
         ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
+      fail-fast: false
     container:
       image: ${{ matrix.container_image }}
     env:
