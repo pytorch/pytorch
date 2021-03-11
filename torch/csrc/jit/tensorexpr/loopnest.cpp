@@ -532,8 +532,7 @@ class FunctionInliner : public IRMutator {
         producer_(producer),
         outputs_(std::move(outputs)) {
     for (auto* i : producer->indices()) {
-      const Var* index_var = dynamic_cast<const Var*>(i);
-      if (dynamic_cast<const Var*>(i) != nullptr) {
+      if (auto index_var = dynamic_cast<const Var*>(i)) {
         index_vars_.insert(index_var);
         producer_index_vars_.push_back(index_var);
       } else if (dynamic_cast<const IntImm*>(i) != nullptr) {
@@ -541,7 +540,7 @@ class FunctionInliner : public IRMutator {
         // (since we don't support in-place writes). Resolves issue 52581.
         TORCH_INTERNAL_ASSERT(
             dynamic_cast<const IntImm*>(i)->value() == 0,
-            "It shouldn't be possbile for this to ever be non-zero");
+            "Constant index impression should always be zero");
         producer_index_vars_.push_back(nullptr);
       } else {
         throw std::logic_error("cannot inline Buf with compound indices");
