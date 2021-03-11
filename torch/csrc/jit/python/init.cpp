@@ -44,6 +44,8 @@
 #include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
@@ -493,6 +495,11 @@ void initJITBindings(PyObject* module) {
                 python::unflatten(vars, desc));
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
+      .def(
+          "_jit_pass_onnx_encapsulate_pattern_into_subblock",
+          EncapsulatePatternIntoSubblock)
+      .def(
+          "_jit_onnx_convert_pattern_from_subblock", ConvertPatternFromSubblock)
       .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)

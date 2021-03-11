@@ -191,7 +191,7 @@ class TORCH_API TensorExprKernel {
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
-  std::vector<Tensor*> tensorOutputs_;
+  std::unordered_set<const Buf*> bufOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;
   std::unordered_map<const torch::jit::Value*, std::string> input_name_map_;
