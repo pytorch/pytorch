@@ -2212,16 +2212,12 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // This is a type dispatch function for 'apply_magma_eigh'
+// For small inputs result is computed on CPU
 void linalg_eigh_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, bool upper, bool compute_eigenvectors) {
-  // MAGMA just calls LAPACK for n <= 128
+  // MAGMA just calls LAPACK for eigenvectors.size(-1) <= 128
   // See https://bitbucket.org/icl/magma/src/e6fdca447bd402693e8b0b950a898b6879bbcc41/src/zheevd_gpu.cpp?at=master#lines-258
-  // in addition it does bad stuff ignoring lda breaking 0x0 inputs
-  bool use_magma = true;
-  if (eigenvectors.size(-1) <= 128) {
-    use_magma = false;
-  }
-
-  if (use_magma) {
+  // in addition lda is ignored breaking 0x0 inputs
+  if (eigenvectors.size(-1) > 128) {
     // MAGMA requires eigenvalues and infos tensors to reside on CPU
     Tensor eigenvalues_cpu = eigenvalues.to(kCPU);
     infos = infos.to(kCPU);
@@ -2234,7 +2230,7 @@ void linalg_eigh_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
 
     // Transfer computed by MAGMA results from CPU to GPU
     eigenvalues.copy_(eigenvalues_cpu);
-  } else {
+  } else { // eigenvectors.size(-1) <= 128
     // transfer to CPU, compute the result and copy back to GPU
     // this is faster than going through MAGMA that does the same
     Tensor eigenvalues_cpu = at::empty_like(eigenvalues, eigenvalues.options().device(kCPU));
