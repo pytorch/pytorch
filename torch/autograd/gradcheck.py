@@ -10,6 +10,7 @@ from torch._vmap_internals import vmap
 import functools
 
 def zero_gradients(x):
+    # tests
     if isinstance(x, torch.Tensor):
         if x.grad is not None:
             x.grad.detach_()
