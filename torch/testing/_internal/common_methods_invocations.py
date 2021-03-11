@@ -1305,6 +1305,36 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad):
     output += [SampleInput(empty_tensor, args=(0.0, 1.0)), ]
     return output
 
+def sample_inputs_cumprod(op_info, device, dtype, requires_grad):
+    def make_arg(shape):
+        return make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
+
+    def prod_zeros(dim_select):
+        assert len(dim_select) == 2
+        result = make_arg(3 * (S,))
+        with torch.no_grad():
+            result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
+            result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
+            result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
+        return result
+
+    # will not be needed once OpInfo tests suport Iterables
+    def sample_generator():
+        for dim in range(3):
+            yield SampleInput((make_arg((S, S, S)), dim))
+        # Scalar tensors and empty tensor
+        for size in [(), (1,), (0,)]:
+            yield SampleInput((make_arg(size), 0))
+
+        yield SampleInput((prod_zeros([0, 1]), 1))
+        yield SampleInput((prod_zeros([0, 2]), 1))
+        yield SampleInput((prod_zeros([1, 2]), 1))
+
+        # test dtype kwarg
+        yield SampleInput((prod_zeros([1, 2]), 1), kwargs={'dtype': dtype})
+
+    return list(sample_generator())
+
 def sample_inputs_diag(op_info, device, dtype, requires_grad):
     vec_sample = SampleInput(make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad))
 
@@ -1756,6 +1786,28 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('cumprod',
+           dtypes=all_types_and_complex_and(torch.bool),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16),
+           test_inplace_grad=False,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53360
+               # For integer inputs,
+               # inplace variant preserves dtype of `self` while method variant
+               # always promotes it to torch.long.
+               # >>> t = torch.randint(2, 10, (3, 2), dtype=torch.int8)
+               # >>> t.cumprod(0).dtype
+               # torch.int64
+               # >>> t.cumprod_(0).dtype
+               # torch.int8
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=[torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32]),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.bool, torch.float16]),
+               SkipInfo('TestCommon', 'test_out',
+                        dtypes=[torch.float32]),
+           ),
+           sample_inputs_func=sample_inputs_cumprod),
     UnaryUfuncInfo('deg2rad',
                    ref=np.radians,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -2856,9 +2908,9 @@ def normal_scalar_clamp(amin, amax, requires_grad=False):
     return v
 
 
-def prod_zeros(dim_size, dim_select, device=torch.device('cpu'), dtype=torch.float):
+def prod_zeros(dim_size, dim_select):
     assert len(dim_select) == 2
-    result = torch.randn(dim_size, dim_size, dim_size, dtype=dtype, device=device)
+    result = torch.randn(dim_size, dim_size, dim_size)
     result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
     result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
     result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
@@ -3181,19 +3233,19 @@ def method_tests():
         ('prod', (), NO_ARGS, 'scalar'),
         ('prod', (), (0,), 'scalar_dim', (), [0]),
         ('prod', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('prod', lambda dtype, device: prod_zeros(S, [0, 1], device=device, dtype=dtype), NO_ARGS, 'zerodims2'),
-        ('prod', lambda dtype, device: prod_zeros(S, [0, 2], device=device, dtype=dtype), NO_ARGS, 'zerodims1'),
-        ('prod', lambda dtype, device: prod_zeros(S, [1, 2], device=device, dtype=dtype), NO_ARGS, 'zerodims0'),
-        ('prod', lambda dtype, device: prod_zeros(S, [0, 1], device=device, dtype=dtype), (1,), 'zeros_dims2', (), [0]),
-        ('prod', lambda dtype, device: prod_zeros(S, [0, 2], device=device, dtype=dtype), (1,), 'zeros_dims1', (), [0]),
-        ('prod', lambda dtype, device: prod_zeros(S, [1, 2], device=device, dtype=dtype), (1,), 'zeros_dims0', (), [0]),
-        ('prod', lambda dtype, device: prod_zeros(S, [0, 1], device=device, dtype=dtype), (1, True), 'keepdim_zeros_dims2', (), [0]),
-        ('prod', lambda dtype, device: prod_zeros(S, [0, 2], device=device, dtype=dtype), (1, True), 'keepdim_zeros_dims1', (), [0]),
-        ('prod', lambda dtype, device: prod_zeros(S, [1, 2], device=device, dtype=dtype), (1, True), 'keepdim_zeros_dims0', (), [0]),
-        ('prod', lambda dtype, device: prod_single_zero(S, device=device, dtype=dtype), NO_ARGS, 'single_zero'),
-        ('prod', lambda dtype, device: (torch.tensor(0., requires_grad=True, device=device, dtype=dtype)), NO_ARGS, 'scalar_zero'),
-        ('prod', lambda dtype, device: (torch.tensor(0., requires_grad=True, device=device, dtype=dtype)), (0,), 'scalar_dim_zero', (), [0]),
-        ('prod', lambda dtype, device: (torch.tensor(0., requires_grad=True, device=device, dtype=dtype)), (0, True,), 'scalar_keepdim_dim_zero', (), [0]),
+        ('prod', prod_zeros(S, [0, 1]), NO_ARGS, 'zerodims2'),
+        ('prod', prod_zeros(S, [0, 2]), NO_ARGS, 'zerodims1'),
+        ('prod', prod_zeros(S, [1, 2]), NO_ARGS, 'zerodims0'),
+        ('prod', prod_zeros(S, [0, 1]), (1,), 'zeros_dims2', (), [0]),
+        ('prod', prod_zeros(S, [0, 2]), (1,), 'zeros_dims1', (), [0]),
+        ('prod', prod_zeros(S, [1, 2]), (1,), 'zeros_dims0', (), [0]),
+        ('prod', prod_zeros(S, [0, 1]), (1, True), 'keepdim_zeros_dims2', (), [0]),
+        ('prod', prod_zeros(S, [0, 2]), (1, True), 'keepdim_zeros_dims1', (), [0]),
+        ('prod', prod_zeros(S, [1, 2]), (1, True), 'keepdim_zeros_dims0', (), [0]),
+        ('prod', prod_single_zero(S), NO_ARGS, 'single_zero'),
+        ('prod', (torch.tensor(0., requires_grad=True)), NO_ARGS, 'scalar_zero'),
+        ('prod', (torch.tensor(0., requires_grad=True)), (0,), 'scalar_dim_zero', (), [0]),
+        ('prod', (torch.tensor(0., requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', (), [0]),
         ('var_mean', (S, S, S), NO_ARGS, ''),
         ('var_mean', (S, S, S), (1,), 'dim', [0]),
         ('var_mean', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
@@ -3217,17 +3269,9 @@ def method_tests():
         ('cummin', (S, S, S), (1,), 'dim1', (), [0]),
         ('cummin', (), (0,), 'dim0_scalar', (), [0]),
         ('cumsum', (S, S, S), (0,), 'dim0', (), [0]),
-        ('cumsum', lambda dtype, device: make_tensor((S, S, S), low=None, high=None, dtype=dtype, device=device), (1,), 'dim1', (), [0]),
-        #  ('cumsum', (S, S, S), (1,), 'dim1_cast', (), [0], (), ident, {'dtype': torch.float64}),
+        ('cumsum', (S, S, S), (1,), 'dim1', (), [0]),
+        ('cumsum', (S, S, S), (1,), 'dim1_cast', (), [0], (), ident, {'dtype': torch.float64}),
         ('cumsum', (), (0,), 'dim0_scalar', (), [0]),
-        ('cumprod', (S, S, S), (0,)),
-        ('cumprod', (S, S, S), (1,), 'dim1', (), [0]),
-        ('cumprod', (), (0,), 'scalar'),
-        ('cumprod', lambda dtype, device: (torch.tensor(0., requires_grad=True, dtype=dtype, device=device)), (0,), 'scalar_zeros'),
-        ('cumprod', lambda dtype, device: prod_zeros(S, [0, 1], device, dtype), (1,), 'zeros_dim2', (), [0]),
-        ('cumprod', lambda dtype, device: prod_zeros(S, [0, 2], device, dtype), (1,), 'zeros_dim1', (), [0]),
-        ('cumprod', lambda dtype, device: prod_zeros(S, [1, 2], device, dtype), (1,), 'zeros_dim0', (), [0]),
-        # ('cumprod', lambda dtype, device: prod_zeros(S, [1, 2]).to(dtype), (1,), 'zeros_dim0_cast', (), [0], (), ident, {'dtype': torch.double}),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
         ('unfold', (), (0, 1, 1), 'scalar', (), [0]),
         ('unfold', (S, S, S, S), (0, 3, 1), '4d_dim0_step1', (), [0]),
