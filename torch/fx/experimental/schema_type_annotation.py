@@ -4,6 +4,7 @@ import inspect
 from typing import Any, Dict, Optional, Tuple
 from torch.fx.node import Argument, Target
 from torch._jit_internal import boolean_dispatched
+from torch.fx.operator_schemas import _torchscript_type_to_python_type
 
 from torch.fx import Transformer
 
@@ -80,7 +81,10 @@ class AnnotateTypesWithSchema(Transformer):
                     raise RuntimeError(f'Node referenced nonextent target {".".join(atoms[:i])}!')
                 module_itr = getattr(module_itr, atom)
 
-            attr_proxy.node.type = type(module_itr)
+            maybe_inferred_ts_type = torch._C._jit_try_infer_type(module_itr)
+            if maybe_inferred_ts_type.success():
+                python_type = _torchscript_type_to_python_type(maybe_inferred_ts_type.type())
+                attr_proxy.node.type = python_type if not attr_proxy.node.type else attr_proxy.node.type
 
         return attr_proxy
 
