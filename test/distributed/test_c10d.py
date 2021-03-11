@@ -273,6 +273,7 @@ class FileStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+@skip_if_win32()
 class HashStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super(HashStoreTest, self).setUp()
