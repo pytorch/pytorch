@@ -278,9 +278,16 @@ if (strides.empty()) {{
         elif k is SchemaKind.inplace:
             return maybe_set_guard
         elif k is SchemaKind.out:
+            if self.dispatch_key == DispatchKey.CPU:
+                resize_impl = "resize_output_cpu"
+            else:
+                # Only bothering to include a resize_output fastpath for CPU for now.
+                # We can add one in if for the perf if we need to. But it'll be easier when external backends
+                # have access to meta functions, and we can write one for resize_.
+                resize_impl = "resize_output"
             return f"""
 {maybe_set_guard}
-bool resized = at::native::resize_output(outputs_[output_idx], sizes);
+bool resized = at::native::{resize_impl}(outputs_[output_idx], sizes);
 // Only restride if a resize occurred; otherwise we ignore the (advisory)
 // strides from the meta function and directly use the output tensor's
 // preexisting strides
