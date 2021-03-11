@@ -1518,9 +1518,9 @@ std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& input, std::string uplo) {
   std::tie(values, vectors) = linalg_eigh_out_info(input, values, vectors, infos, true, uplo);
 
   if (input.dim() > 2) {
-    batchCheckErrors(infos, "linalg_eigh");
+    batchCheckErrors(infos, "torch.linalg.eigh");
   } else {
-    singleCheckErrors(infos.item().toInt(), "linalg_eigh");
+    singleCheckErrors(infos.item().toInt(), "torch.linalg.eigh");
   }
 
   return std::tuple<Tensor, Tensor>(values, vectors);
@@ -1529,13 +1529,13 @@ std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& input, std::string uplo) {
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 std::tuple<Tensor&, Tensor&> linalg_eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& input, std::string uplo) {
-  checkSameDevice("linalg_eigh", eigvecs, input, "eigenvectors");
-  checkSameDevice("linalg_eigh", eigvals, input, "eigenvalues");
-  checkLinalgCompatibleDtype("linalg_eigh", eigvecs, input, "eigenvectors");
+  checkSameDevice("torch.linalg.eigh", eigvecs, input, "eigenvectors");
+  checkSameDevice("torch.linalg.eigh", eigvals, input, "eigenvalues");
+  checkLinalgCompatibleDtype("torch.linalg.eigh", eigvecs, input, "eigenvectors");
 
   // eigenvalues are always real-valued here
   ScalarType real_dtype = toValueType(input.scalar_type());
-  checkLinalgCompatibleDtype("linalg_eigh", eigvals.scalar_type(), real_dtype, "eigenvalues");
+  checkLinalgCompatibleDtype("torch.linalg.eigh", eigvals.scalar_type(), real_dtype, "eigenvalues");
 
   Tensor eigvals_tmp, eigvecs_tmp;
   std::tie(eigvals_tmp, eigvecs_tmp) = at::linalg_eigh(input, uplo);
@@ -1559,9 +1559,9 @@ Tensor linalg_eigvalsh(const Tensor& input, std::string uplo) {
   std::tie(values, vectors) = linalg_eigh_out_info(input, values, vectors, infos, false, uplo);
 
   if (input.dim() > 2) {
-    batchCheckErrors(infos, "linalg_eigh");
+    batchCheckErrors(infos, "torch.linalg.eigvalsh");
   } else {
-    singleCheckErrors(infos.item().toInt(), "linalg_eigh");
+    singleCheckErrors(infos.item().toInt(), "torch.linalg.eigvalsh");
   }
 
   return values;
@@ -1570,9 +1570,9 @@ Tensor linalg_eigvalsh(const Tensor& input, std::string uplo) {
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigvalsh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_eigvalsh_out(Tensor& result, const Tensor& input, std::string uplo) {
-  checkSameDevice("linalg_eigvalsh", result, input);
+  checkSameDevice("torch.linalg.eigvalsh", result, input);
   ScalarType real_dtype = toValueType(input.scalar_type());
-  checkLinalgCompatibleDtype("linalg_eigvalsh", result.scalar_type(), real_dtype);
+  checkLinalgCompatibleDtype("torch.linalg.eigvalsh", result.scalar_type(), real_dtype);
 
   Tensor result_tmp = at::linalg_eigvalsh(input, uplo);
 
