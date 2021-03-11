@@ -182,7 +182,10 @@ class BinaryOp(QuantizeHandler):
                     'call_function', self.quantized_binary_op,
                     load_arg(quantized=[quantized_index])(self.binary_op_node.args), self.binary_op_node.kwargs)
             else:
-                activation_post_process = quantizer.activation_post_process_map[node.name].pop(0)
+                cur_idx = quantizer.activation_post_process_indexes[node.name]
+                activation_post_process = \
+                    quantizer.activation_post_process_map[node.name][cur_idx]
+                quantizer.activation_post_process_indexes[node.name] += 1
                 scale, zero_point = activation_post_process.calculate_qparams()
                 scale = float(scale)
                 zero_point = int(zero_point)
@@ -217,7 +220,10 @@ class Cat(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not self.all_node_args:
             return NotImplemented
-        activation_post_process = quantizer.activation_post_process_map[node.name].pop(0)
+        cur_idx = quantizer.activation_post_process_indexes[node.name]
+        activation_post_process = \
+            quantizer.activation_post_process_map[node.name][cur_idx]
+        quantizer.activation_post_process_indexes[node.name] += 1
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
@@ -316,7 +322,10 @@ class ConvRelu(QuantizeHandler):
                 convert_custom_config_dict = {}
             additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
             # 1. attach activation post process to module
-            self.conv.activation_post_process = quantizer.activation_post_process_map[node.name].pop(0)
+            cur_idx = quantizer.activation_post_process_indexes[node.name]
+            self.conv.activation_post_process = \
+                quantizer.activation_post_process_map[node.name][cur_idx]
+            quantizer.activation_post_process_indexes[node.name] += 1
             # 2. select quantized class
             qconv_cls = get_static_quant_module_class(
                 type(self.conv), additional_static_quant_mapping)
@@ -347,8 +356,12 @@ class ConvRelu(QuantizeHandler):
                     root_module = quantizer.modules['']
                     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
                     act_post_process_node = self.relu_node if self.relu_node else self.conv_node
+                    cur_idx = quantizer.activation_post_process_indexes[node.name]
+                    activation_post_process = \
+                        quantizer.activation_post_process_map[node.name][cur_idx]
+                    quantizer.activation_post_process_indexes[node.name] += 1
                     return quantize_node(
-                        quantizer, op_out, quantizer.activation_post_process_map[act_post_process_name].pop(0),
+                        quantizer, op_out, activation_post_process,
                         act_post_process_node, is_input=False)
                 else:
                     # output for dynamically quantized conv op is not quantized
@@ -371,7 +384,10 @@ class ConvRelu(QuantizeHandler):
                     qconv_op = get_qconv_op(self.conv, self.relu_node is not None)
                     conv_input = load_arg(quantized=True)(self.conv_node.args[0])
                     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
-                    activation_post_process = quantizer.activation_post_process_map[act_post_process_name].pop(0)
+                    cur_idx = quantizer.activation_post_process_indexes[act_post_process_name]
+                    activation_post_process = \
+                        quantizer.activation_post_process_map[act_post_process_name][cur_idx]
+                    quantizer.activation_post_process_indexes[act_post_process_name] += 1
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
                     scale_node, zero_point_node = create_qparam_nodes(quantizer, self.conv_node.name, scale, zero_point)
                     qconv_args = (conv_input, packed_weight, scale_node, zero_point_node)
@@ -455,7 +471,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             # 1. attach output activation post process to linear module
             if node.name in quantizer.activation_post_process_map:
                 # this is the static quantization case
-                output_activation_post_process = quantizer.activation_post_process_map[node.name].pop(0)
+                cur_idx = quantizer.activation_post_process_indexes[node.name]
+                output_activation_post_process = \
+                    quantizer.activation_post_process_map[node.name][cur_idx]
+                quantizer.activation_post_process_indexes[node.name] += 1
             else:
                 output_activation_post_process = None
 
@@ -504,10 +523,14 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     root_module = quantizer.modules['']
                     act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
                     act_post_process_node = self.relu_node if self.relu_node else self.linear_node
+                    cur_idx = quantizer.activation_post_process_indexes[act_post_process_name]
+                    activation_post_process = \
+                        quantizer.activation_post_process_map[act_post_process_name][cur_idx]
+                    quantizer.activation_post_process_indexes[act_post_process_name] += 1
                     return quantize_node(
                         quantizer,
                         op_out,
-                        quantizer.activation_post_process_map[act_post_process_name].pop(),
+                        activation_post_process,
                         act_post_process_node,
                         is_input=False)
                 else:
@@ -544,8 +567,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     qlinear_op = torch.ops.quantized.linear_relu if self.relu_node else torch.ops.quantized.linear
                     linear_input = load_arg(quantized=True)(self.linear_node.args[0])
                     act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
+                    cur_idx = quantizer.activation_post_process_indexes[act_post_process_name]
                     activation_post_process = \
-                        quantizer.activation_post_process_map[act_post_process_name].pop(0)
+                        quantizer.activation_post_process_map[act_post_process_name][cur_idx]
+                    quantizer.activation_post_process_indexes[act_post_process_name] += 1
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
 
                     scale_node, zero_point_node = create_qparam_nodes(quantizer, self.linear_node.name, scale, zero_point)
@@ -606,7 +631,10 @@ class BatchNorm(QuantizeHandler):
             convert_custom_config_dict = {}
         additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
         # 1. attach activation post process to module
-        self.bn.activation_post_process = quantizer.activation_post_process_map[node.name].pop(0)
+        cur_idx = quantizer.activation_post_process_indexes[node.name]
+        self.bn.activation_post_process = \
+            quantizer.activation_post_process_map[node.name][cur_idx]
+        quantizer.activation_post_process_indexes[node.name] += 1
         qbn_cls = get_static_quant_module_class(type(self.bn), additional_static_quant_mapping)
         quantized = qbn_cls.from_float(self.bn)
         parent_name, name = _parent_name(self.bn_node.target)
@@ -782,8 +810,10 @@ class DefaultNode(QuantizeHandler):
 
         # TODO: make helper functions for (torch.quint8, torch.qint8, None)
         if dtypes in [(torch.quint8, torch.qint8, None)]:
-            # TODO: think about better ways to handle this, should we mutate the map?
-            activation_post_process = quantizer.activation_post_process_map[node.name].pop(0)
+            cur_idx = quantizer.activation_post_process_indexes[node.name]
+            activation_post_process = \
+                quantizer.activation_post_process_map[node.name][cur_idx]
+            quantizer.activation_post_process_indexes[node.name] += 1
             if node.op == 'call_module':
                 module = quantizer.modules[node.target]
                 module.activation_post_process = activation_post_process
@@ -828,7 +858,10 @@ class ELU(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        activation_post_process = quantizer.activation_post_process_map[node.name].pop(0)
+        cur_idx = quantizer.activation_post_process_indexes[node.name]
+        activation_post_process = \
+            quantizer.activation_post_process_map[node.name][cur_idx]
+        quantizer.activation_post_process_indexes[node.name] += 1
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
@@ -945,9 +978,13 @@ class DefaultQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         assert self.all_node_args
         root_module = quantizer.modules['']
+        cur_idx = quantizer.activation_post_process_indexes[node.name]
+        activation_post_process = \
+            quantizer.activation_post_process_map[node.name][cur_idx]
+        quantizer.activation_post_process_indexes[node.name] += 1
         return quantize_node(
             quantizer,
-            node, quantizer.activation_post_process_map[node.name].pop(0), node, is_input=False)
+            node, activation_post_process, node, is_input=False)
 
 class CustomModuleQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
@@ -963,8 +1000,10 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         observed_custom_module = quantizer.modules[node.target]
         if activation_is_statically_quantized(qconfig):
             assert node.name in quantizer.activation_post_process_map
+            cur_idx = quantizer.activation_post_process_indexes[node.name]
             observed_custom_module.activation_post_process = \
-                quantizer.activation_post_process_map[node.name].pop(0)
+                quantizer.activation_post_process_map[node.name][cur_idx]
+            quantizer.activation_post_process_indexes[node.name] += 1
         quantized_custom_module_class = get_swapped_custom_module_class(
             observed_custom_module, custom_module_class_mapping, qconfig)
         quantized_custom_module = \

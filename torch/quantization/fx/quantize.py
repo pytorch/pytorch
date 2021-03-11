@@ -82,6 +82,7 @@ def insert_observer(
         node: Node, observer: torch.quantization.ObserverBase,
         model: torch.nn.Module,
         activation_post_process_map: Dict[str, List[torch.quantization.ObserverBase]],
+        activation_post_process_indexes: Dict[str, int],
         env: Dict[Any, Any], observed_graph: Graph, load_arg: Callable,
         observed_node_names_set: Set[str]):
     """Insert observer for node by modifying the observed_graph and
@@ -102,6 +103,9 @@ def insert_observer(
     # put observer instance activation_post_process map
     assert activation_post_process_map is not None
     activation_post_process_map[node.name].append(observer)
+    # initialize index map for activation_post_process
+    if node.name not in activation_post_process_indexes:
+        activation_post_process_indexes[node.name] = 0
     # insert observer call
     env[node.name] = observed_graph.create_node(
         'call_module', observer_name, (load_arg(node),), {})
@@ -160,6 +164,7 @@ def insert_observer_for_output_of_the_node(
         model: torch.nn.Module,
         pattern: Any,
         activation_post_process_map: Dict[str, List[torch.quantization.ObserverBase]],
+        activation_post_process_indexes: Dict[str, int],
         env: Dict[Any, Any],
         observed_graph: Graph,
         load_arg: Callable,
@@ -189,7 +194,9 @@ def insert_observer_for_output_of_the_node(
                 "for pattern:" + str(pattern)
             insert_observer(
                 node, activation_post_process_ctr(),
-                model, activation_post_process_map, env, observed_graph,
+                model, activation_post_process_map,
+                activation_post_process_indexes,
+                env, observed_graph,
                 load_arg, observed_node_names_set)
         elif (isinstance(quantize_handler,
                          FixedQParamsOpQuantizeHandler) and
@@ -215,7 +222,9 @@ def insert_observer_for_output_of_the_node(
                activation_dtype(qconfig) == torch.float16:
                 insert_observer(
                     node, qconfig.activation(),
-                    model, activation_post_process_map, env, observed_graph,
+                    model, activation_post_process_map,
+                    activation_post_process_indexes,
+                    env, observed_graph,
                     load_arg, observed_node_names_set)
             else:
                 # propagate observed property from input
@@ -242,7 +251,9 @@ def insert_observer_for_output_of_the_node(
                 new_observer = qconfig.activation()
                 insert_observer(
                     node, new_observer, model,
-                    activation_post_process_map, env, observed_graph,
+                    activation_post_process_map,
+                    activation_post_process_indexes,
+                    env, observed_graph,
                     load_arg, observed_node_names_set)
         elif isinstance(quantize_handler,
                         StandaloneModuleQuantizeHandler):
@@ -259,7 +270,9 @@ def insert_observer_for_output_of_the_node(
             new_observer = qconfig.activation()
             insert_observer(
                 node, new_observer, model,
-                activation_post_process_map, env, observed_graph,
+                activation_post_process_map,
+                activation_post_process_indexes,
+                env, observed_graph,
                 load_arg, observed_node_names_set)
 
         # insert observer for input of standalone module
@@ -269,7 +282,9 @@ def insert_observer_for_output_of_the_node(
                     new_observer = qconfig.activation()
                     insert_observer(
                         node, new_observer, model,
-                        activation_post_process_map, env, observed_graph,
+                        activation_post_process_map,
+                        activation_post_process_indexes,
+                        env, observed_graph,
                         load_arg, observed_node_names_set)
 
 def insert_observer_for_input_arg_of_observed_node(
@@ -277,6 +292,7 @@ def insert_observer_for_input_arg_of_observed_node(
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
         model: torch.nn.Module,
         activation_post_process_map: Dict[str, List[torch.quantization.ObserverBase]],
+        activation_post_process_indexes: Dict[str, int],
         env: Dict[str, str], observed_graph: Graph,
         load_arg: Callable):
     if node.name in quants:
@@ -285,6 +301,7 @@ def insert_observer_for_input_arg_of_observed_node(
                 insert_observer(
                     node, activation_post_process_ctr(),
                     model, activation_post_process_map,
+                    activation_post_process_indexes,
                     env, observed_graph, load_arg, observed_node_names_set)
 
 # A dictionary for querying the weight index for a given op
@@ -337,6 +354,11 @@ class Quantizer:
         # must be filled before convert
         self.activation_post_process_map: Optional[
             Dict[str, List[torch.quantization.observer.ObserverBase]]] = None
+
+        # mapping from matched node to the index of activation_post_process that we are
+        # using currently
+        self.activation_post_process_indexes: Dict[str, int] = {}
+
         # mapping from node name to qconfig that should be used for that node
         # filled out for a model during _generate_qconfig_map
         self.qconfig_map: Optional[Dict[str, QConfigAny]] = None
@@ -482,6 +504,8 @@ class Quantizer:
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]] = \
             self._find_quants(model.graph, matches)
 
+        print("matches in prepare:", matches, " quants:", quants)
+
         self.activation_post_process_map = defaultdict(list)
         env: Dict[Any, Any] = {}
         observed_graph = Graph()
@@ -525,7 +549,9 @@ class Quantizer:
                             'qconfig of a node before a quantized output must exist'
                         insert_observer(
                             prev_node, local_qconfig.activation(),
-                            model, self.activation_post_process_map,
+                            model,
+                            self.activation_post_process_map,
+                            self.activation_post_process_indexes,
                             env, observed_graph, load_arg, observed_node_names_set)
 
                 observed_graph.output(load_arg(node.args[0]))
@@ -551,7 +577,9 @@ class Quantizer:
                             node)
                     insert_observer_for_output_of_the_node(
                         node, obj, qconfig, self.modules, model, pattern,
-                        self.activation_post_process_map, env,
+                        self.activation_post_process_map,
+                        self.activation_post_process_indexes,
+                        env,
                         observed_graph, load_arg, observed_node_names_set,
                         matched_nodes, standalone_module_input_idxs)
                     # remove one activation_post_process in quants map
@@ -572,7 +600,9 @@ class Quantizer:
 
             insert_observer_for_input_arg_of_observed_node(
                 node, observed_node_names_set, quants,
-                model, self.activation_post_process_map, env,
+                model, self.activation_post_process_map,
+                self.activation_post_process_indexes,
+                env,
                 observed_graph, load_arg)
 
 
@@ -598,6 +628,8 @@ class Quantizer:
     def save_state(self, observed: GraphModule) -> None:
         observed._activation_post_process_map = \
             self.activation_post_process_map  # type: ignore
+        observed._activation_post_process_indexes = \
+            self.activation_post_process_indexes  # type: ignore
         observed._patterns = self.patterns  # type: ignore
         observed._qconfig_map = self.qconfig_map  # type: ignore
         observed._prepare_custom_config_dict = \
@@ -609,6 +641,8 @@ class Quantizer:
             'incoming model must be produced by prepare_fx'
         self.activation_post_process_map = \
             observed._activation_post_process_map  # type: ignore
+        self.activation_post_process_indexes = \
+            observed._activation_post_process_indexes  # type: ignore
         self.patterns = observed._patterns  # type: ignore
         self.qconfig_map = observed._qconfig_map  # type: ignore
         self.prepare_custom_config_dict = \
@@ -807,12 +841,15 @@ class Quantizer:
                     'call_function',
                     'call_method'], \
                     'CopyNode of type ' + node.op + ' is not handled'
+                # TODO: need to extend this to consider all relevant args instead of just arg[0]
                 quantized = node_arg_is_quantized(node.args[0])
+                print("copy node quantized:", quantized)
 
-            if not isinstance(obj, CopyNode) and not activation_is_int8_quantized(qconfig) or \
+            if isinstance(obj, FixedQParamsOpQuantizeHandler) and activation_dtype(qconfig) == torch.float16 or \
                not input_output_observed(obj):
                 quantized = False
 
+            print("node:", node, "quantized:", quantized)
             return quantized
 
         def insert_quantize_node(node: Node) -> None:

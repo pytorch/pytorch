@@ -1093,6 +1093,7 @@ class TestQuantizeFx(QuantizationTestCase):
         ]:
             m = M().eval()
             m = prepare_fx(m, qconfig_dict)
+            print("prepared:", m)
             m(torch.randn(2, 1, 3, 3))
             m = convert_fx(m)
             self.checkGraphModuleNodes(m, expected_node_list=node_list)

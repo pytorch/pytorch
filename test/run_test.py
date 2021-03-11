@@ -173,6 +173,7 @@ USE_PYTEST_LIST = [
     'distributions/test_transforms',
     'distributions/test_utils',
     'test_typing',
+    "distributed/elastic/events/lib_test",
 ]
 
 WINDOWS_BLOCKLIST = [
