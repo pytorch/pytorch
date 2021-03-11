@@ -1702,10 +1702,12 @@ protected:
   // See NOTE [ Metadata Change for a Detached Tensor ] for details.
   static const char * const err_msg_tensor_metadata_change_not_allowed;
 
+public:
   void set_storage_access_should_throw() {
     storage_access_should_throw_ = true;
   }
 
+protected:
   Storage storage_;
 
 private:

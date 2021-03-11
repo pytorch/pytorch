@@ -888,8 +888,6 @@ class {test_classname}(torch.nn.Module):
 
         traced = symbolic_trace_with_rewrite(foo)
 
-    # TODO: Add support and coverage for pickling non-parameter/buffer Tensor
-    # attributes.
     def test_to_folder(self):
         class Test(torch.nn.Module):
             def __init__(self):
@@ -897,10 +895,11 @@ class {test_classname}(torch.nn.Module):
                 self.W = torch.nn.Parameter(torch.randn(2))
                 self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
-                self.register_buffer('attr', torch.randn(2))
+                self.attr = torch.randn(2)
+                self.register_buffer('attr2', torch.randn(2))
 
             def forward(self, x):
-                return self.linear(self.seq(self.W + self.attr + x))
+                return self.linear(self.seq(self.W + self.attr + self.attr2 + x))
 
         mod = symbolic_trace(Test())
         module_name = 'Foo'

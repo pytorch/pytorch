@@ -964,6 +964,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/api/include/torch/nn/parallel/*.h',
                 'include/torch/csrc/api/include/torch/nn/utils/*.h',
                 'include/torch/csrc/api/include/torch/optim/*.h',
+                'include/torch/csrc/api/include/torch/optim/schedulers/*.h',
                 'include/torch/csrc/api/include/torch/serialize/*.h',
                 'include/torch/csrc/autograd/*.h',
                 'include/torch/csrc/autograd/functions/*.h',
