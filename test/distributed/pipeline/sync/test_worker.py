@@ -5,7 +5,6 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 import threading
-import time
 
 import pytest
 import torch
@@ -13,7 +12,6 @@ import torch
 from torch.distributed.pipeline.sync.microbatch import Batch
 from torch.distributed.pipeline.sync.stream import CPUStream
 from torch.distributed.pipeline.sync.worker import Task, spawn_workers
-from torch.testing._internal.common_utils import TEST_WITH_TSAN
 
 
 class fake_device:
