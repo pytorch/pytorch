@@ -1708,7 +1708,7 @@ public:
   const std::unique_ptr<c10::AutogradMetaInterface>& autograd_meta_accessor() const;
   std::unique_ptr<c10::AutogradMetaInterface>& autograd_meta_accessor();
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
-  std::unordered_map<int64_t, std::unique_ptr<c10::AutogradMetaInterface>> dynlayer_autograd_meta_;
+  std::unordered_map<int64_t, std::shared_ptr<std::unique_ptr<c10::AutogradMetaInterface>>> dynlayer_autograd_meta_;
 
 
 protected:

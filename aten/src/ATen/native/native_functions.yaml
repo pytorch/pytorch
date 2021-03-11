@@ -121,6 +121,8 @@
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
 
+- func: print_dynmeta(Tensor self) -> bool
+
 - func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
   dispatch:
     CUDA: _use_cudnn_ctc_loss

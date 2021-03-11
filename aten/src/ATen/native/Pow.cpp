@@ -156,6 +156,19 @@ Tensor& float_power_(Tensor& base, Scalar exp) {
   return base.pow_(exp);
 }
 
+bool print_dynmeta(const Tensor& self) {
+  const auto& dynmeta = self.unsafeGetTensorImpl()->dynlayer_autograd_meta_;
+  std::cout << "Dynmeta: ";
+  for (auto it = dynmeta.begin(); it != dynmeta.end(); it++) {
+    if (!(*it->second.get())) {
+      continue;
+    }
+    std::cout << "{" << it->first << ", <>}";
+  }
+  std::cout << std::endl;
+  return true;
+}
+
 } // namespace native
 
 } // namespace at

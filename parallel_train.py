@@ -49,7 +49,7 @@ loss_fn = nn.NLLLoss()
 # Step 3: Make the model functional(!!) and define a training function.
 # NB: this mechanism doesn't exist in PyTorch today, but we want it to:
 # https://github.com/pytorch/pytorch/issues/49171
-weights, func_model = make_functional(MLPClassifier().to(DEVICE))
+weights, func_model, _ = make_functional(MLPClassifier().to(DEVICE))
 
 def train_step_fn(weights, batch, targets, lr=0.2):
     def compute_loss(weights, batch, targets):

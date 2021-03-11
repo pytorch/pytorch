@@ -4,6 +4,7 @@ from functools import partial
 import torch.nn as nn
 import torch.nn.functional as F
 from make_functional import make_functional
+import gc
 
 # x = torch.ones(2, 3)
 # y = torch.ones(2, 3)
@@ -69,8 +70,7 @@ def grad_with_value(f, diff_argnums=(0,), has_aux=False):
             # graph = torchviz.make_dot(output)
             # graph.save("inner.dot")
             grad_input = torch.autograd.grad(
-                output, diff_args,
-                create_graph=True, retain_graph=True)
+                output, diff_args, create_graph=True)
             if single_diff_arg:
                 grad_input = grad_input[0]
         finally:
@@ -89,8 +89,54 @@ def grad(f, diff_argnums=(0,), has_aux=False):
         return results[0]
     return wrapper
 
+class CudaMemoryLeakCheck():
+    def __init__(self, name):
+        self.name = name
+
+        # initialize context & RNG to prevenikkt false positive detections
+        # when the test is the first to initialize those
+        from torch.testing._internal.common_cuda import initialize_cuda_context_rng
+        initialize_cuda_context_rng()
+
+    @staticmethod
+    def get_cuda_memory_usage():
+        # we don't need CUDA synchronize because the statistics are not tracked at
+        # actual freeing, but at when marking the block as free.
+        num_devices = torch.cuda.device_count()
+        import gc
+        gc.collect()
+        return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+
+    def __enter__(self):
+        self.befores = self.get_cuda_memory_usage()
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        # Don't check for leaks if an exception was thrown
+        if exec_type is not None:
+            return
+
+        afters = self.get_cuda_memory_usage()
+
+        for i, (before, after) in enumerate(zip(self.befores, afters)):
+            if after - before == 0:
+                continue
+            raise RuntimeError(f'{self.name} leaked {after-before} bytes')
 
 if __name__ == '__main__':
+    def f():
+        device = 'cuda'
+        x = torch.randn(3, 7, device=device)
+        weight = torch.randn(7, 5, device=device, requires_grad=True)
+
+        def g(weight, x):
+            return torch.log_softmax(x.mm(weight), -1).sum()
+        grad_weight = grad(g)(weight, x)
+        weight.grad = grad_weight.detach()
+    # f()
+    with CudaMemoryLeakCheck('simple_check'):
+        print("start")
+        f()
+
     def f(x):
         y = x.sin()
         return y.sum()

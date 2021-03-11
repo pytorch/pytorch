@@ -301,7 +301,7 @@ const std::unique_ptr<c10::AutogradMetaInterface>& TensorImpl::autograd_meta_acc
   }
   auto layer_id = maybe_current_dynamic_layer->layerId();
   if (dynlayer_autograd_meta_.find(layer_id) != dynlayer_autograd_meta_.end()) {
-    const auto& result = dynlayer_autograd_meta_.at(layer_id);
+    const auto& result = *dynlayer_autograd_meta_.at(layer_id).get();
     return result;
   }
   // Not sure how to get const correctness to work here
@@ -315,10 +315,15 @@ std::unique_ptr<c10::AutogradMetaInterface>& TensorImpl::autograd_meta_accessor(
   }
   auto layer_id = maybe_current_dynamic_layer->layerId();
   if (dynlayer_autograd_meta_.find(layer_id) != dynlayer_autograd_meta_.end()) {
-    return dynlayer_autograd_meta_[layer_id];
+    return *dynlayer_autograd_meta_[layer_id].get();
   }
-  dynlayer_autograd_meta_[layer_id] = {};
-  return dynlayer_autograd_meta_[layer_id];
+  dynlayer_autograd_meta_[layer_id] = std::make_shared<std::unique_ptr<c10::AutogradMetaInterface>>();
+  
+  std::lock_guard<std::mutex> guard(at::getGlobalDynmetaDataMutex());
+  std::weak_ptr<std::unique_ptr<c10::AutogradMetaInterface>> bar = dynlayer_autograd_meta_[layer_id];
+  at::getGlobalDynmetaData()[layer_id].push_back(bar);
+
+  return *dynlayer_autograd_meta_[layer_id].get();
 }
 
 bool TensorImpl::requires_grad() const {
@@ -352,8 +357,15 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
   // "detach" = don't copy meta for the current dyn layer
   const auto dynlayer = at::maybeCurrentDynamicLayer();
   for (auto it = dynlayer_autograd_meta_.begin(); it != dynlayer_autograd_meta_.end(); it++) {
-    if (dynlayer && (dynlayer->layerId() > it->first) && it->second) {
-      impl.get()->dynlayer_autograd_meta_[it->first] = it->second->shallow_copy();
+    if (dynlayer && (dynlayer->layerId() > it->first) && *it->second.get()) {
+      impl.get()->dynlayer_autograd_meta_[it->first] = 
+        std::make_shared<std::unique_ptr<c10::AutogradMetaInterface>>(
+          (*it->second.get())->shallow_copy());
+
+      std::lock_guard<std::mutex> guard(at::getGlobalDynmetaDataMutex());
+      std::weak_ptr<std::unique_ptr<c10::AutogradMetaInterface>> bar = impl.get()->dynlayer_autograd_meta_[it->first];
+      at::getGlobalDynmetaData()[it->first].push_back(bar);
+
     }
   }
   if (dynlayer && autograd_meta_) {
@@ -380,8 +392,13 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
   // "detach" = don't copy meta for the current dyn layer
   const auto dynlayer = at::maybeCurrentDynamicLayer();
   for (auto it = dynlayer_autograd_meta_.begin(); it != dynlayer_autograd_meta_.end(); it++) {
-    if (dynlayer && (dynlayer->layerId() > it->first) && it->second) {
-      impl.get()->dynlayer_autograd_meta_[it->first] = it->second->shallow_copy();
+    if (dynlayer && (dynlayer->layerId() > it->first) && *it->second.get()) {
+      impl.get()->dynlayer_autograd_meta_[it->first] = 
+        std::make_shared<std::unique_ptr<c10::AutogradMetaInterface>>(
+          (*it->second.get())->shallow_copy());
+      std::lock_guard<std::mutex> guard(at::getGlobalDynmetaDataMutex());
+      std::weak_ptr<std::unique_ptr<c10::AutogradMetaInterface>> bar = impl.get()->dynlayer_autograd_meta_[it->first];
+      at::getGlobalDynmetaData()[it->first].push_back(bar);
     }
   }
   if (dynlayer && autograd_meta_) {

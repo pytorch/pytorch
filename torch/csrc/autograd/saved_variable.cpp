@@ -15,9 +15,6 @@
 namespace torch { namespace autograd {
 
 SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_inplace_view) {
-  data_ = variable;
-  return;
-
   if (variable.defined()) {
     was_default_constructed_ = false;
     output_nr_ = variable.output_nr();
@@ -49,8 +46,6 @@ SavedVariable::SavedVariable(const c10::optional<Variable>& variable, bool is_ou
   : SavedVariable(variable.has_value() ? *variable : Variable(), is_output, is_inplace_view) {}
 
 Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
-  return data_;
-
   if (!data_.defined()) {
     if (!was_default_constructed_) {
       throw std::runtime_error(ERR_BACKWARD_TWICE);

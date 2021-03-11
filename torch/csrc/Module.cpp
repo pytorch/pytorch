@@ -588,7 +588,7 @@ static PyObject * THPModule_grad_increment_nesting(PyObject* _unused, PyObject *
 
 static PyObject * THPModule_grad_decrement_nesting(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  return THPUtils_packInt64(at::popDynamicLayer().layerId());
+  return THPUtils_packInt64(at::popDynamicLayerAndDeleteMetadata().layerId());
   END_HANDLE_TH_ERRORS
 }
 

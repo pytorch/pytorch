@@ -2,11 +2,24 @@
 #include <ATen/DynamicLayer.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <torch/csrc/autograd/variable.h>
 
 namespace at {
 
 // Initial autograd layer, because autograd is always "on"
 std::vector<DynamicLayer> dynamicLayerStack = { DynamicLayer(DispatchKey::Autograd, 1) };
+
+DynmetaData kDynMetaDataSingleton;
+std::mutex kDynMetaDataSingletonMutex;
+
+DynmetaData& getGlobalDynmetaData() {
+  return kDynMetaDataSingleton;
+}
+
+std::mutex& getGlobalDynmetaDataMutex() {
+  return kDynMetaDataSingletonMutex;
+}
+
 
 bool gradLayerAtTop() {
   return dynamicLayerStack.back().key() == DispatchKey::Autograd;
@@ -49,6 +62,29 @@ DynamicLayer popDynamicLayer() {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerFront, false);
     c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerBack, false);
   }
+
+  return result;
+}
+
+DynamicLayer popDynamicLayerAndDeleteMetadata() {
+  auto result = popDynamicLayer();
+  auto level = result.layerId();
+
+  // There is unfortunately a deadlock somewhere :/
+  // std::lock_guard<std::mutex> guard(getGlobalDynmetaDataMutex());
+  auto& data = getGlobalDynmetaData();
+  auto it = data.find(level);
+  if (it == data.end()) {
+    return result;
+  }
+  for (auto& ptr : it->second) {
+    auto val = ptr.lock();
+    if (!val) continue;
+    // Clear the unique_ptr inside the shared_ptr.
+    (*val).reset();
+  }
+  // Clear the queue of weak_ptrs
+  data[level].clear();
 
   return result;
 }
@@ -104,11 +140,18 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
 }
 
 struct WithoutTop {
-  WithoutTop(): layer_(popDynamicLayer()) {}
+  WithoutTop(): layer_(popDynamicLayer()) {
+    // prev_grad_enabled_ = GradMode::is_enabled();
+    // if (!prev_grad_enabled_) {
+    //   GradMode::set_enabled(true);
+    // }
+  }
   ~WithoutTop() {
     pushDynamicLayer(layer_.key()); 
+    // GradMode::set_enabled(prev_grad_enabled_);
   }
 
+  bool prev_grad_enabled_;
   DynamicLayer layer_;
 };
 
