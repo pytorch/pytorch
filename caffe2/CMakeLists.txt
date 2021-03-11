@@ -698,6 +698,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/serialize.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/lr_scheduler.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
     )
@@ -923,15 +925,16 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
   endif()
 
-
-  set(TH_CPU_INCLUDE
-    # dense
-    aten/src/TH
-    ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
-    ${TORCH_ROOT}/aten/src
-    ${CMAKE_CURRENT_BINARY_DIR}/aten/src
-    ${CMAKE_BINARY_DIR}/aten/src)
-  target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
+  if(NOT BUILD_LITE_INTERPRETER)
+    set(TH_CPU_INCLUDE
+      # dense
+      aten/src/TH
+      ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
+      ${TORCH_ROOT}/aten/src
+      ${CMAKE_CURRENT_BINARY_DIR}/aten/src
+      ${CMAKE_BINARY_DIR}/aten/src)
+    target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
+  endif()
 
   set(ATen_CPU_INCLUDE
     ${TORCH_ROOT}/aten/src

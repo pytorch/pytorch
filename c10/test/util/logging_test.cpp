@@ -124,7 +124,7 @@ TEST(LoggingTest, EnforceShowcase) {
   WRAP_AND_PRINT(CAFFE_ENFORCE_EQ(
       one * two + three, three * two, "It's a pretty complicated expression"));
 
-  WRAP_AND_PRINT(CAFFE_ENFORCE_THAT(std::equal_to(), ==, one * two + three, three * two));
+  WRAP_AND_PRINT(CAFFE_ENFORCE_THAT(std::equal_to<void>(), ==, one * two + three, three * two));
 }
 
 TEST(LoggingTest, Join) {

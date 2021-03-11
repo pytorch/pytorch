@@ -3,8 +3,6 @@
 # shellcheck disable=SC2034
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
-git submodule sync --recursive
-git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Build PyTorch
