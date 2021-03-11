@@ -334,14 +334,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::layout(Tensor a) -> int",
-         [](Stack* stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.layout());
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::index(Device self) -> int?",
          [](Stack* stack) {
            auto d = pop(stack).toDevice();

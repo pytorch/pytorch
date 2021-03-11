@@ -493,6 +493,8 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/rmsprop.cpp",
     "torch/csrc/api/src/optim/serialize.cpp",
     "torch/csrc/api/src/optim/sgd.cpp",
+    "torch/csrc/api/src/optim/schedulers/lr_scheduler.cpp",
+    "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
 ]
