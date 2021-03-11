@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 namespace at {
 namespace native {
@@ -103,6 +104,9 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
   // Generate random values for the keys array
   AT_DISPATCH_ALL_TYPES(
     result.scalar_type(), "randperm_out_cuda", [&] {
+      TORCH_CHECK(n <= std::numeric_limits<int>::max(),
+        "randperm of tensors larger than INT_MAX is not supported yet in pytorch");
+
       auto keys = at::empty(result.sizes(), result.options()).random_(generator);
       auto range = at::arange(n, result.options());
       auto keys_tmp = at::empty_like(keys);
@@ -121,6 +125,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
       // Use the sorted order of keys to rearrange the result array
       void *d_temp_storage = nullptr;
       size_t temp_storage_bytes = 0;
+
       cub::DeviceRadixSort::SortPairs(
         nullptr, temp_storage_bytes,
         keys.data_ptr<scalar_t>(), keys_tmp.data_ptr<scalar_t>(),
