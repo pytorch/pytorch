@@ -812,9 +812,11 @@ class TestGradCheckOverride(TestCase):
             'layout',
             'nelement',
             'new_zeros',
+            'numel',
             'requires_grad',
             'retain_grad',
             'size',
+            'shape',
             'stride',
         })
 
@@ -828,6 +830,7 @@ class TestGradCheckOverride(TestCase):
             torch.Tensor.stride,
             torch.autograd.grad,
             torch.add,
+            torch.Tensor.numel
         })
 
 class TestNamedTuple(TestCase):

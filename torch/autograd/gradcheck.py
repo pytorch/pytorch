@@ -687,6 +687,8 @@ def check_no_differentiable_outputs(func, func_out, inputs, all_u, config):
         if not is_tensor_like(inp) or not inp.requires_grad:
             continue
         numerical = get_fast_numerical_jacobian(func, func_out, inputs, inp, u, eps=config.eps)
+        if numerical is None:
+            continue
         for n in numerical:
             # TODO: Why do get small non-zero values here
             if not torch.allclose(n, torch.zeros_like(n), atol=1e-12):
@@ -742,24 +744,25 @@ def fast_gradcheck(
     # print("Inputs:")
     # for i, inp in enumerate(tupled_inputs):
     #     if is_tensor_like(inp):
-    #         print(f"input[{i}]: {inp.shape}, requires_grad: {'YES' if inp.requires_grad else 'NO'}, \
-    #               complex: {'YES' if inp.is_complex() else 'NO'}")
+    #         print(f"input[{i}]: {inp.shape}, requires_grad: {'YES' if inp.requires_grad else 'NO'}, "
+    #               f"complex: {'YES' if inp.is_complex() else 'NO'}")
     #     else:
     #         print(f"input[{i}]: {inp}")
-    # print("Outputs:")
+    # print("Outputs:", len(_as_tuple(func_out)))
     # for i, out in enumerate(_as_tuple(func_out)):
     #     if is_tensor_like(out):
-    #         print(f"output[{i}]: {out.shape}, requires_grad: {'YES' if out.requires_grad else 'NO'}, \
-    #               complex: {'YES' if out.is_complex() else 'NO'}")
+    #         print(f"output[{i}]: {out.shape}, requires_grad: {'YES' if out.requires_grad else 'NO'}, "
+    #               f"complex: {'YES' if out.is_complex() else 'NO'}")
     #     else:
     #         print(f"output[{i}]: {out}")
 
     # Initialize random unit tensors
     def normalize(x):
         return x / x.norm()
-    all_u = [normalize(torch.rand(input.nelement())).to(dtype=input.dtype)
+    all_u = [normalize(torch.rand(input.nelement())).to(dtype=input.dtype, device=input.device)
              for input in tupled_inputs if is_tensor_like(input) and input.requires_grad]
-    all_v = [normalize(torch.rand(output.nelement())).to(dtype=output.dtype) for output in outputs if is_tensor_like(output)]
+    all_v = [normalize(torch.rand(output.nelement())).to(dtype=output.dtype, device=output.device)
+             for output in outputs if is_tensor_like(output)]
 
     any_complex = any(o.is_complex() for o in outputs)
     complex_output_indices = [i for i, o in enumerate(outputs) if o.is_complex()]
