@@ -102,7 +102,7 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
 
 template <typename Dtype>
 inline void trsm(CUDABLAS_TRSM_ARGTYPES(Dtype)) {
-  TORCH_CHECK(false, "at::cuda::blas::trsm: not implemented for ", typeid(Dtype).name());
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::blas::trsm: not implemented for ", typeid(Dtype).name());
 }
 
 template <>
@@ -122,7 +122,7 @@ void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>));
 
 template <typename Dtype>
 inline void trsmBatched(CUDABLAS_TRSM_BATCHED_ARGTYPES(Dtype)) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       false,
       "at::cuda::blas::trsmBatched: not implemented for ",
       typeid(Dtype).name());
