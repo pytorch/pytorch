@@ -124,9 +124,8 @@ def _copy_attr(from_module: torch.nn.Module, to_module: torch.nn.Module, target:
         from_module, to_module = f, t
 
     orig = getattr(from_module, field)
-    # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
-    # So, we register it as a named buffer in the target module.
-    if isinstance(orig, torch.Tensor) and not isinstance(orig, torch.nn.Parameter):
+    # Register it as a named buffer in to_module if it was a buffer in from_module.
+    if field in from_module._buffers.keys():
         to_module.register_buffer(field, orig)
     else:
         setattr(to_module, field, orig)
@@ -143,7 +142,12 @@ def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
             setattr(to_module, item, t)
         to_module = t
 
-    setattr(to_module, field, from_obj)
+    # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
+    # So, we register it as a named buffer in the target module.
+    if isinstance(from_obj, torch.Tensor) and not isinstance(from_obj, torch.nn.Parameter):
+        to_module.register_buffer(field, from_obj)
+    else:
+        setattr(to_module, field, from_obj)
 
 class GraphModule(torch.nn.Module):
     """
