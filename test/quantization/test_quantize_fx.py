@@ -289,11 +289,12 @@ class TestQuantizeFx(QuantizationTestCase):
                 self.assertTrue(is_match(modules, n, pattern))
 
     def _get_conv_linear_test_cases(self):
-        ''' Returns a list of test cases, with format:
+        """ Returns a list of test cases, with format:
         is_dynamic, ModuleClass, module_constructor_inputs,
         inputs, quantized_node, weight_prepack_op
-        '''
-        class Conv(torch.nn.Module):
+        """
+
+        class Conv2d(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()
                 self.weight = torch.nn.Parameter(weight)
@@ -305,8 +306,31 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return F.conv2d(x, self.weight, None, self.stride, self.padding, self.dilation, self.groups)
 
-        conv_input = torch.rand(1, 3, 224, 224)
-        conv_weight = torch.rand(3, 3, 3, 3)
+        conv2d_input = torch.rand(1, 3, 224, 224)
+        conv2d_weight = torch.rand(3, 3, 3, 3)
+
+        class Conv3d(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+                self.stride = (1, 1, 1)
+                self.padding = (0, 0, 0)
+                self.dilation = (1, 1, 1)
+                self.groups = 1
+
+            def forward(self, x):
+                return F.conv3d(
+                    x,
+                    self.weight,
+                    None,
+                    self.stride,
+                    self.padding,
+                    self.dilation,
+                    self.groups,
+                )
+
+        conv3d_input = torch.rand(1, 3, 32, 224, 224)
+        conv3d_weight = torch.rand(3, 3, 3, 3, 3)
 
         class Linear(torch.nn.Module):
             def __init__(self, weight):
@@ -330,21 +354,54 @@ class TestQuantizeFx(QuantizationTestCase):
         linear_module_input = torch.rand(8, 5)
 
         tests = [
-            (False, Conv, (conv_weight,), (conv_input,),
-             ns.call_function(torch.ops.quantized.conv2d),
-             ns.call_function(torch.ops.quantized.conv2d_prepack)),
-            (True, Linear, (linear_weight,), (linear_input,),
-             ns.call_function(torch.ops.quantized.linear_dynamic),
-             ns.call_function(torch.ops.quantized.linear_prepack)),
-            (False, Linear, (linear_weight,), (linear_input,),
-             ns.call_function(torch.ops.quantized.linear),
-             ns.call_function(torch.ops.quantized.linear_prepack)),
-            (True, LinearModule, (), (linear_module_input,),
-             ns.call_module(nnqd.Linear),
-             None),
-            (False, LinearModule, (), (linear_module_input,),
-             ns.call_module(nnq.Linear),
-             None),
+            (
+                False,
+                Conv2d,
+                (conv2d_weight,),
+                (conv2d_input,),
+                ns.call_function(torch.ops.quantized.conv2d),
+                ns.call_function(torch.ops.quantized.conv2d_prepack),
+            ),
+            (
+                False,
+                Conv3d,
+                (conv3d_weight,),
+                (conv3d_input,),
+                ns.call_function(torch.ops.quantized.conv3d),
+                ns.call_function(torch.ops.quantized.conv3d_prepack),
+            ),
+            (
+                True,
+                Linear,
+                (linear_weight,),
+                (linear_input,),
+                ns.call_function(torch.ops.quantized.linear_dynamic),
+                ns.call_function(torch.ops.quantized.linear_prepack),
+            ),
+            (
+                False,
+                Linear,
+                (linear_weight,),
+                (linear_input,),
+                ns.call_function(torch.ops.quantized.linear),
+                ns.call_function(torch.ops.quantized.linear_prepack),
+            ),
+            (
+                True,
+                LinearModule,
+                (),
+                (linear_module_input,),
+                ns.call_module(nnqd.Linear),
+                None,
+            ),
+            (
+                False,
+                LinearModule,
+                (),
+                (linear_module_input,),
+                ns.call_module(nnq.Linear),
+                None,
+            ),
         ]
         return tests
 
@@ -453,7 +510,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.dequant(x)
                 return x
 
-        options = itertools.product([1, 2], [True, False], self.static_quant_types)
+        options = itertools.product([1, 2, 3], [True, False], self.static_quant_types)
         for dim, has_relu, quant_type in options:
             expected_node = ns.call_module(
                 quantized_conv_relus[dim] if has_relu
@@ -1801,6 +1858,24 @@ class TestQuantizeFx(QuantizationTestCase):
         m = convert_fx(m, _remove_qconfig=False)
 
         self.assertTrue(hasattr(m.mods2, 'qconfig'))
+
+    def test_not_used(self):
+        """ Test quantizing a not used value"""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = x + x
+                x.sigmoid_()
+                return x
+
+        m = M().eval()
+        qconfig_dict = {"": float16_static_qconfig}
+        # make sure quantization runs
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
