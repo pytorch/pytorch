@@ -335,7 +335,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   IterDomain* clone() const {
     return new IterDomain(
         start(),
-        extent(),
+        rawExtent(),
         getParallelType(),
         getIterType(),
         isRFactorProduct());
