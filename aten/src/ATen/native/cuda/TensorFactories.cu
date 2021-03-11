@@ -14,6 +14,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#include <cub/cub.cuh>
 
 #include <algorithm>
 #include <cmath>
@@ -131,11 +132,10 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
         keys.data_ptr<scalar_t>(), keys_tmp.data_ptr<scalar_t>(),
         range.data_ptr<scalar_t>(), shuffled_data, n,
         0, sizeof(scalar_t) * 8, at::cuda::getCurrentCUDAStream());
-      auto temp_storage = at::empty(
-        {static_cast<int64_t>(temp_storage_bytes)},
-        result.options().dtype(kByte));
+      auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+      auto dataPtr = allocator.allocate(temp_storage_bytes);
       cub::DeviceRadixSort::SortPairs(
-        temp_storage.data_ptr(), temp_storage_bytes,
+        dataPtr.get(), temp_storage_bytes,
         keys.data_ptr<scalar_t>(), keys_tmp.data_ptr<scalar_t>(),
         range.data_ptr<scalar_t>(), shuffled_data, n,
         0, sizeof(scalar_t) * 8, at::cuda::getCurrentCUDAStream());
