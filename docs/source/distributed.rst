@@ -263,7 +263,7 @@ This is the default method, meaning that ``init_method`` does not have to be spe
 can be ``env://``).
 
 Post-Initialization
---------------
+-------------------
 
 Once :func:`torch.distributed.init_process_group` was run, the following functions can be used. To
 check whether the process group has already been initialized use :func:`torch.distributed.is_initialized`.
