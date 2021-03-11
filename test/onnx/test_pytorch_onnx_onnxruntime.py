@@ -2518,6 +2518,74 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.rand(100)
         self.run_test(PowModule3(), (x, y))
 
+    # the standardOps(Add\Sub\Mul\Div\Gemm\Pow\Mod) with low precision include unit8 will be failed in ORT
+    # add to(dtype=torch.long) to avoid ORT output type does not match expected type 
+    def test_standardOps_with_low_precision(self):
+        class AddModule(torch.nn.Module):
+            def forward(self, x, y):
+                return (x + y).to(dtype=torch.long)
+
+        class SubModule(torch.nn.Module):
+            def forward(self, x, y):
+                return (x - y).to(dtype=torch.long)
+
+        class MulModule(torch.nn.Module):
+            def forward(self, x, y):
+                return (x * y).to(dtype=torch.long)
+
+        class DivModule(torch.nn.Module):
+            def forward(self, x, y):
+                return (x / y).to(dtype=torch.long)
+
+        class GemmModule(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.mm(x, y).to(dtype=torch.long)
+
+        class PowModule(torch.nn.Module):
+            def forward(self, x, y):
+                return x.pow(y).to(dtype=torch.long)
+
+        class ModModule(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.fmod(x, y).to(dtype=torch.long)
+
+        x = torch.tensor([2, 3, 5], dtype=torch.uint8)
+        y = torch.tensor([2, 3, 5], dtype=torch.uint8)
+        z = torch.tensor([1], dtype=torch.uint8)
+        mat1 = torch.randn(2, 3).to(dtype=torch.uint8)
+        mat2 = torch.randn(3, 2).to(dtype=torch.uint8)
+        self.run_test(AddModule(), (x, y))
+        self.run_test(SubModule(), (x, y))
+        self.run_test(MulModule(), (x, y))
+        self.run_test(DivModule(), (x, y))
+        self.run_test(PowModule(), (x, z))
+        self.run_test(ModModule(), (x, y))
+
+        x = torch.tensor([2, 3, 5], dtype=torch.int8)
+        y = torch.tensor([2, 3, 5], dtype=torch.int8)
+        z = torch.tensor([1], dtype=torch.uint8)
+        mat1 = torch.randn(2, 3).to(dtype=torch.int8)
+        mat2 = torch.randn(3, 2).to(dtype=torch.int8)
+        self.run_test(AddModule(), (x, y))
+        self.run_test(SubModule(), (x, y))
+        self.run_test(MulModule(), (x, y))
+        self.run_test(DivModule(), (x, y))
+        self.run_test(GemmModule(), (mat1, mat2))
+        self.run_test(PowModule(), (x, z))
+        self.run_test(ModModule(), (x, y))
+
+        x = torch.tensor([2, 3, 5], dtype=torch.int16)
+        y = torch.tensor([2, 3, 5], dtype=torch.int16)
+        mat1 = torch.randn(2, 3).to(dtype=torch.int16)
+        mat2 = torch.randn(3, 2).to(dtype=torch.int16)
+        self.run_test(AddModule(), (x, y))
+        self.run_test(SubModule(), (x, y))
+        self.run_test(MulModule(), (x, y))
+        self.run_test(DivModule(), (x, y))
+        self.run_test(GemmModule(), (mat1, mat2))
+        self.run_test(PowModule(), (x, z))
+        self.run_test(ModModule(), (x, y))
+
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
