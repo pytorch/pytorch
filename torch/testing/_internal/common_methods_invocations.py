@@ -1408,12 +1408,16 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
         samples = samples + (  # type: ignore
             # no broadcast
             SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 1.2 + 0.1j)),
             # broadcast rhs
             SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 5.4 + 9j)),
             # scalar tensor
             SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 0.4j)),
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 6.1 + 0.004j)),
             # broadcast rhs scalar-tensor
             SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 1 + 2j)),
         )
 
     return samples
@@ -2410,12 +2414,8 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_types_and(torch.half),
            sample_inputs_func=sample_inputs_lerp,
            skips=(
-               # E       RuntimeError: expected ) but found 'ident' here:
-               # E         File "<string>", line 3
-               # E
-               # E       def the_method(i0, i1):
-               # E           return torch.lerp(i0, i1, 0.4j)
-               # E                                        ~ <--- HERE
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.cfloat, torch.cdouble]),
            ),
