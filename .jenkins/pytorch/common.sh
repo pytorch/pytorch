@@ -23,6 +23,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|
   export HSAKMT_DEBUG_LEVEL=4
 fi
 
+export PYTHONPATH="$(dirname "${BASH_SOURCE[0]}")/../../:$PYTHONPATH"
+
 # This token is used by a parser on Jenkins logs for determining
 # if a failure is a legitimate problem, or a problem with the build
 # system; to find out more, grep for this string in ossci-job-dsl.

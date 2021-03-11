@@ -8,6 +8,7 @@ sysctl -a | grep machdep.cpu
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+export PYTHONPATH="$(dirname "${BASH_SOURCE[0]}")/../../:$PYTHONPATH"
 export PATH="/usr/local/bin:$PATH"
 export WORKSPACE_DIR="${HOME}/workspace"
 mkdir -p ${WORKSPACE_DIR}
