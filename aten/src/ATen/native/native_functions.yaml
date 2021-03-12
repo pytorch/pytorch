@@ -9019,6 +9019,18 @@
   dispatch:
     DefaultBackend: det
 
+- func: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+  python_module: linalg
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_lstsq
+
+- func: _lstsq_helper(Tensor a, Tensor b, float cond, str? driver_name) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: _lstsq_helper_cpu
+    CUDA: _lstsq_helper_cuda
+
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
   variants: function
