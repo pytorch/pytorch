@@ -1,7 +1,8 @@
-result = 'package_a'
+result = "package_a"
+
 
 class PackageAObject:
-    __slots__ = ['obj']
+    __slots__ = ["obj"]
 
     def __init__(self, obj):
         self.obj = obj

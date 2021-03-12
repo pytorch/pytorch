@@ -27,7 +27,8 @@ TORCH_META_FUNC2(pow, Scalar) (const Scalar base, const Tensor& exp) {
     // This overload doesn't directly use TensorIterator. It attempts to short-circuit,
     // but otherwise redispatches to the Tensor_Tensor overload.
     auto dtype = at::result_type(base, exp);
-    set_output(exp.sizes(), exp.options().dtype(dtype));
+    // Need to call the set_output() overload of set_output to forward named tensor information.
+    set_output(0, exp.sizes(), {}, exp.options().dtype(dtype), exp.names());
 }
 
 } // namespace meta
