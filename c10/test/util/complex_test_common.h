@@ -53,7 +53,7 @@ TEST(TestMemory, ReinterpretCast) {
   ASSERT_EQ(zz.real(), double(1));
   ASSERT_EQ(zz.imag(), double(2));
   }
-  
+
   {
   c10::complex<double> z(3, 4);
   std::complex<double> zz = *reinterpret_cast<std::complex<double>*>(&z);
@@ -84,7 +84,7 @@ TEST(TestMemory, ThrustReinterpretCast) {
   ASSERT_EQ(zz.real(), double(1));
   ASSERT_EQ(zz.imag(), double(2));
   }
-  
+
   {
   c10::complex<double> z(3, 4);
   thrust::complex<double> zz = *reinterpret_cast<thrust::complex<double>*>(&z);
