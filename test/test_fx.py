@@ -1435,10 +1435,10 @@ class TestFX(JitTestCase):
         # These tests fail for various reasons (LAPACK mostly)
         # Just skip them
         known_failing_tests = {'cholesky_inverse', 'clamp', 'div', 'div', 'div', 'div', 'fft.fft', 'fft.fftn',
-            'fft.hfft', 'fft.rfft', 'fft.rfftn', 'fft.ifft', 'fft.ifftn', 'fft.ihfft', 'fft.irfft',
-            'fft.irfftn', 'floor_divide', 'linalg.slogdet', 'masked_scatter', 'masked_select', 'tensor_split',
-            'triangular_solve', 'linalg.inv', 'linalg.solve', 'linalg.pinv', 'linalg.pinv', 'svd', 'linalg.svd',
-            'pinverse'}
+                               'fft.hfft', 'fft.rfft', 'fft.rfftn', 'fft.ifft', 'fft.ifftn', 'fft.ihfft', 'fft.irfft',
+                               'fft.irfftn', 'floor_divide', 'linalg.slogdet', 'masked_scatter', 'masked_select',
+                               'tensor_split', 'triangular_solve', 'linalg.inv', 'linalg.solve', 'linalg.pinv',
+                               'linalg.pinv', 'svd', 'linalg.svd', 'pinverse'}
 
         known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat'}
 
@@ -1450,11 +1450,13 @@ class TestFX(JitTestCase):
                     assert op.name in known_no_schema
                     continue
                 for sample_input in sample_inputs_itr:
+                    # Iterate through overloads until we hit a match. If we exit this
+                    # loop via `else`, we haven't found a match
                     for schema in schemas:
                         try:
                             schema.bind(*sample_input.input, **sample_input.kwargs)
                             break
-                        except:
+                        except TypeError as e:
                             pass
                     else:
                         raise RuntimeError(f'Did not match any schemas for op {op.name}!')
