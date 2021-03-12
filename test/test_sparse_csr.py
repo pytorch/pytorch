@@ -137,7 +137,7 @@ class TestSparseCSR(TestCase):
         sparse_coo = dense.to_sparse()
         sparse_csr = sparse_coo.to_sparse_csr()
 
-        self.assert(sparse_csr.is_sparse_csr())
+        self.assertTrue(sparse_csr.is_sparse_csr)
         self.assertEqual(sparse_csr.to_dense(), dense)
 
 
