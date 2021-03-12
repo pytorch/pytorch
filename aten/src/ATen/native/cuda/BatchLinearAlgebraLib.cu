@@ -27,11 +27,11 @@ static Tensor get_device_pointers(const Tensor& input) {
   // cublas/cusolver interface requires 'int'
   int batch_size = cuda_int_cast(batchCount(input), "batch_size");
 
-  // if batch_size==0, then start=0 and end=1
+  // if batch_size==0, then start=0 and end=0
   // if input_mat_stride==0, then step=sizeof(scalar_t)
   return at::arange(
       /*start=*/reinterpret_cast<int64_t>(input_data),
-      /*end=*/reinterpret_cast<int64_t>(&input_data[(std::max<int>(batch_size, 1) - 1) * input_mat_stride]) + 1,
+      /*end=*/reinterpret_cast<int64_t>(input_data + batch_size * input_mat_stride),
       /*step=*/static_cast<int64_t>(std::max<int64_t>(input_mat_stride, 1) * sizeof(scalar_t)),
       input.options().dtype(at::kLong));
 }
