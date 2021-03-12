@@ -229,6 +229,11 @@ class DistributedDataParallel(Module):
             >>>     dist_autograd.backward(context_id, loss)
             >>>     dist_optim.step()
 
+    .. note::
+        To let a non-DDP model load a state dict from a DDP model,
+        :meth:`~torch.nn.modules.utils.consume_prefix_in_state_dict_if_present`
+        needs to be applied to strip the prefix "module." in the DDP state dict before loading.
+
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
         function of the output of this module) are distributed synchronization
