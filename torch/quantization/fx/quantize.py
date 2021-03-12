@@ -856,7 +856,7 @@ class Quantizer:
             # and activation is fp16 (since we will output fp32 currently for fp16
             # converter
             if (not isinstance(obj, CopyNode) and not activation_is_int8_quantized(qconfig)) or \
-            not input_output_observed(obj):
+               not input_output_observed(obj):
                 quantized = False
 
             return quantized
