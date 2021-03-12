@@ -5,22 +5,22 @@ import typing
 import enum
 from typing import Any, Callable, Dict, List, Optional
 
-_manual_overrides : Dict[Callable, Callable[[], inspect.Signature]] = {}
+_manual_overrides : Dict[Callable, List[inspect.Signature]] = {}
 
-def nonzero_schemas():
+def _nonzero_schemas():
     signatures = []
 
     def nonzero(self):
         pass
     signatures.append(inspect.signature(nonzero))
 
-    def nonzero(self, *, as_tuple : bool):
+    def nonzero(self, *, as_tuple : bool):  # type: ignore
         pass
     signatures.append(inspect.signature(nonzero))
 
     return signatures
 
-_manual_overrides[torch.nonzero] = nonzero_schemas()
+_manual_overrides[torch.nonzero] = _nonzero_schemas()
 
 class _FakeGlobalNamespace:
     def __getattr__(self, name):
@@ -28,11 +28,12 @@ class _FakeGlobalNamespace:
             return torch
         raise RuntimeError('Expected a torch namespace lookup lookup')
 
-def _torchscript_type_to_python_type(ts_type : torch._C.Type) -> Any:
+def _torchscript_type_to_python_type(ts_type : 'torch._C.JitType') -> Any:
     g = {'Tensor' : torch.Tensor, 'Device' : torch.device, 'Layout' : torch.layout,
          'number' : numbers.Number, 'Future' : torch.jit.Future,
          'AnyEnumType' : enum.Enum, 'QScheme' : torch.qscheme,
-         '__torch__': _FakeGlobalNamespace(), 't': typing.TypeVar('t')}
+         '__torch__': _FakeGlobalNamespace(),
+         't': typing.TypeVar('t')}  # type: ignore
     for k in dir(typing):
         g[k] = getattr(typing, k)
 
@@ -57,6 +58,18 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
     return inspect.Signature(parameters, return_annotation=return_type)
 
 def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature]]:
+    """
+    Given an operator on the `torch` namespace, return a list of `inspect.Signature`
+    objects corresponding to the overloads of that op.. May return `None` if a signature
+    could not be retrieved.
+
+    Args:
+        op (Callable): An operator on the `torch` namespace to look up a signature for
+
+    Returns:
+        Optional[List[inspect.Signature]]: A list of signatures for the overloads of this
+            operator, or None if the operator signatures could not be retrieved.
+    """
     override = _manual_overrides.get(op)
     if override:
         return override

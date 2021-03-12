@@ -389,6 +389,7 @@ class Argument:
     type: JitType
     default_value: Optional[Any]
     def has_default_value(self) -> _bool: ...
+    kwarg_only : _bool
     ...
 class FunctionSchema:
     arguments: List[Argument]
@@ -828,7 +829,7 @@ class IValue:
 Stack = List[IValue]
 
 class JitType:
-    ...
+    annotation_str : str
 
 class InferredType:
     def __init__(self, arg: Union[JitType, str]): ...
