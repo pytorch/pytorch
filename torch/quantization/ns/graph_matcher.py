@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
@@ -37,6 +38,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
             nn.Linear,
             nnq.Linear,
             nnqat.Linear,
+            nnqd.Linear,
         ]),
         # linear functionals
         'torch.nn.functional.linear': set([
