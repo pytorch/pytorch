@@ -101,19 +101,21 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
         auto crow_indices_accessor = crow_indices.accessor<index_t, 1>();
         auto values_accessor = values.accessor<scalar_t, 1>();
 
-        for (int irow = 0; irow < crow_indices.size(0)-1; ++irow) {
-          int start_index = crow_indices_accessor[irow];
-          int end_index = crow_indices_accessor[irow+1];
+        at::parallel_for(0, crow_indices.size(0)-1, internal::GRAIN_SIZE, [&](int64_t irow_start, int64_t irow_end) {
+          for (int irow = irow_start; irow < irow_end; ++irow) {
+            int start_index = crow_indices_accessor[irow];
+            int end_index = crow_indices_accessor[irow+1];
 
-          for (int i = start_index; i < end_index; ++i) {
-            auto val = values_accessor[i];
-            auto icol = col_indices_accessor[i];
+            for (int i = start_index; i < end_index; ++i) {
+              auto val = values_accessor[i];
+              auto icol = col_indices_accessor[i];
 
-            at::native::cpublas::axpy<scalar_t>(dim_k,
-              cast_alpha * val, dense_ptr + icol * dense_stride0, dense_stride1,
-              out_ptr + irow * out_stride0, out_stride1);
+              at::native::cpublas::axpy<scalar_t>(dim_k,
+                cast_alpha * val, dense_ptr + icol * dense_stride0, dense_stride1,
+                out_ptr + irow * out_stride0, out_stride1);
+            }
           }
-        }
+        });
       });
     });
   }
