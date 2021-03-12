@@ -1301,7 +1301,7 @@ Tensor& nonzero_out_cpu(Tensor& out, const Tensor& self) {
 }
 
 Tensor nonzero_cpu(const Tensor& self) {
-  Tensor out = at::empty({0}, self.options());
+  Tensor out = at::empty({0}, self.options().dtype(kLong));
   return nonzero_out_cpu(out, self);
 }
 
