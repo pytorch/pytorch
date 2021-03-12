@@ -69,7 +69,7 @@ EXPECTED_REMOTE_EVENTS = [
     "aten::add",
     "aten::mul",
     "aten::relu",
-    "aten::threshold",
+    "aten::clamp_min",
     "aten::sigmoid",
 ]
 
@@ -788,6 +788,17 @@ class RpcTest(RpcAgentTestFixture):
             )
 
     @dist_init(setup_rpc=False)
+    def test_duplicate_name_2(self):
+        with self.assertRaisesRegex(RuntimeError, "is not unique"):
+            rpc.init_rpc(
+                name=worker_name(self.rank % (self.world_size - 1)),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+    @dist_init(setup_rpc=False)
     def test_reinit(self):
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -884,6 +895,16 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
         self.assertEqual(ret, torch.ones(n, n) * 2)
+
+    @staticmethod
+    def return_callee_id():
+        return rpc.get_worker_info().id
+
+    @dist_init
+    def test_int_callee(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        ret = rpc.rpc_sync(dst_rank, RpcTest.return_callee_id)
+        self.assertEqual(ret, dst_rank)
 
     @dist_init
     def test_add_with_id(self):
@@ -5300,6 +5321,42 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             self._test_stream_nested_multi_async,
             {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
         )
+
+    @staticmethod
+    def _gpu_add_wrong_gpus(x, y):
+        if x.is_cuda and y.is_cuda:
+            return x.cpu() + y.cuda()
+        else:
+            raise ValueError("Wrong device affinity")
+
+    @skip_if_lt_x_gpu(1)
+    def test_device_mismatch(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {0: 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        x = torch.zeros(2).to(0)
+        y = torch.ones(2).to(0)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected all tensors to be on the same device, but found at least two devices"
+        ):
+            rets = rpc.rpc_sync(
+                dst,
+                TensorPipeAgentRpcTest._gpu_add_wrong_gpus,
+                args=(x, y)
+            )
+
+        rpc.shutdown()
 
     @dist_init
     def _test_rref_get_type_timeout(self, blocking):

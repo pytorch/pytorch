@@ -1,7 +1,7 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn. torch._C._fft, or torch._C._linalg objects.
+# torch._C._nn. torch._C._fft, torch._C._linalg or torch._C._special objects.
 #
 
 # Code tries to stick to the following rules:
@@ -38,6 +38,7 @@ import yaml
 from .gen_trace_type import should_trace
 
 from tools.codegen.code_template import CodeTemplate
+from tools.codegen.api import cpp
 from tools.codegen.api.types import *
 from tools.codegen.api.python import *
 from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
@@ -82,7 +83,8 @@ SKIP_PYTHON_BINDINGS = [
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
     'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad', 'set_',
-    '_fw_primal'
+    '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
+    'fake_quantize_per_channel_affine_cachemask',
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -131,6 +133,9 @@ def is_py_fft_function(f: NativeFunction) -> bool:
 def is_py_linalg_function(f: NativeFunction) -> bool:
     return f.python_module == 'linalg'
 
+def is_py_special_function(f: NativeFunction) -> bool:
+    return f.python_module == 'special'
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                            Main Function
@@ -156,6 +161,9 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
 
     create_python_bindings(
         fm, functions, is_py_linalg_function, 'torch.linalg', 'python_linalg_functions.cpp', method=False)
+
+    create_python_bindings(
+        fm, functions, is_py_special_function, 'torch.special', 'python_special_functions.cpp', method=False)
 
 def create_python_bindings(
     fm: FileManager,
@@ -527,6 +535,7 @@ if(check_has_torch_function(self_)) {{
         "torch.nn": "THPNNVariableFunctionsModule",
         "torch.fft": "THPFFTVariableFunctionsModule",
         "torch.linalg": "THPLinalgVariableFunctionsModule",
+        "torch.special": "THPSpecialVariableFunctionsModule",
     }[module] if module else "THPVariableClass"
 
     return f"""\
@@ -737,7 +746,8 @@ def sort_overloads(
 ) -> Sequence[PythonSignatureGroup]:
 
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
-        return str(t1) == 'Scalar' and str(t2) == 'Tensor'
+        return (str(t1) == 'Scalar' and str(t2) == 'Tensor' or
+                'Dimname' in str(t1) and 'Dimname' not in str(t2))
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:
         """Returns True if s1 < s2 in the partial order."""

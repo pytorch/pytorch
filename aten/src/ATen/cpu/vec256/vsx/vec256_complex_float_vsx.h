@@ -328,12 +328,12 @@ class Vec256<ComplexFlt> {
 
   Vec256<ComplexFlt> el_mergee() const {
     // as mergee phased in , we can use vec_perm with mask
-    return {vec_mergee(_vec0, _vec0), vec_mergee(_vec1, _vec1)};
+    return {vec_mergee(_vecb0, _vecb0), vec_mergee(_vecb1, _vecb1)};
   }
 
   Vec256<ComplexFlt> el_mergeo() const {
     // as mergeo phased in , we can use vec_perm with mask
-    return {vec_mergeo(_vec0, _vec0), vec_mergeo(_vec1, _vec1)};
+    return {vec_mergeo(_vecb0, _vecb0), vec_mergeo(_vecb1, _vecb1)};
   }
 
   Vec256<ComplexFlt> el_madd(
@@ -349,8 +349,8 @@ class Vec256<ComplexFlt> {
       Vec256<ComplexFlt>& second) {
     // as mergee phased in , we can use vec_perm with mask
     return {
-        vec_mergee(first._vec0, second._vec0),
-        vec_mergee(first._vec1, second._vec1)};
+        vec_mergee(first._vecb0, second._vecb0),
+        vec_mergee(first._vecb1, second._vecb1)};
   }
 
   Vec256<ComplexFlt> angle_() const {
@@ -417,7 +417,7 @@ class Vec256<ComplexFlt> {
   }
 
   Vec256<ComplexFlt> sqrt() const {
-    return map(std::sqrt);  
+    return map(std::sqrt);
   }
 
   Vec256<ComplexFlt> reciprocal() const {

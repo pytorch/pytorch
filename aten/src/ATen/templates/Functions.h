@@ -142,4 +142,12 @@ inline int64_t stride(const Tensor& tensor, int64_t dim) {
   return tensor.stride(dim);
 }
 
+inline bool is_complex(const Tensor& tensor) {
+  return tensor.is_complex();
+}
+
+inline bool is_floating_point(const Tensor& tensor) {
+    return tensor.is_floating_point();
+}
+
 }

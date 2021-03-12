@@ -6,7 +6,7 @@ import re
 from typing import Optional, List
 
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 import tools.codegen.api.python as python
 from tools.codegen.gen import parse_native_yaml, FileManager
 from tools.codegen.context import with_native_function

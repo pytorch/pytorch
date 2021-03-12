@@ -5,6 +5,7 @@ import datetime
 import json
 import math
 import os
+import re
 import statistics
 import subprocess
 import time
@@ -12,11 +13,11 @@ from collections import defaultdict
 from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
-                    Tuple)
+                    Set, Tuple, Union, cast)
 from xml.dom import minidom  # type: ignore[import]
 
 import requests
-from typing_extensions import TypedDict
+from typing_extensions import Literal, TypedDict
 
 try:
     import boto3  # type: ignore[import]
@@ -24,29 +25,30 @@ try:
 except ImportError:
     HAVE_BOTO3 = False
 
+# TODO: consolidate these typedefs with the identical ones in
+# tools/test_history.py
+
 Commit = str  # 40-digit SHA-1 hex string
-Status = Optional[str]  # errored, failed, skipped, or None
-
-# represent suite as dict because indexing is useful
-SimplerCase = Tuple[float, Status]
-SimplerSuite = Dict[str, SimplerCase]
-SimplerReport = Dict[str, SimplerSuite]
+Status = Optional[Literal['errored', 'failed', 'skipped']]
 
 
-class Case(TypedDict):
-    name: str
+class CaseMeta(TypedDict):
     seconds: float
+
+
+class Version1Case(CaseMeta):
+    name: str
     errored: bool
     failed: bool
     skipped: bool
 
 
-class Suite(TypedDict):
+class Version1Suite(TypedDict):
     total_seconds: float
-    cases: List[Case]
+    cases: List[Version1Case]
 
 
-class ReportMeta(TypedDict, total=False):
+class ReportMetaMeta(TypedDict):
     build_pr: str
     build_tag: str
     build_sha1: Commit
@@ -55,9 +57,42 @@ class ReportMeta(TypedDict, total=False):
     build_workflow_id: str
 
 
-class Report(ReportMeta):
+class ReportMeta(ReportMetaMeta):
     total_seconds: float
-    suites: Dict[str, Suite]
+
+
+class Version1Report(ReportMeta):
+    suites: Dict[str, Version1Suite]
+
+
+class Version2Case(CaseMeta):
+    status: Status
+
+
+class Version2Suite(TypedDict):
+    total_seconds: float
+    cases: Dict[str, Version2Case]
+
+
+class Version2File(TypedDict):
+    total_seconds: float
+    suites: Dict[str, Version2Suite]
+
+
+class VersionedReport(ReportMeta):
+    format_version: int
+
+
+# report: Version2Report implies report['format_version'] == 2
+class Version2Report(VersionedReport):
+    files: Dict[str, Version2File]
+
+
+Report = Union[Version1Report, VersionedReport]
+
+SimplerSuite = Dict[str, Version2Case]
+SimplerFile = Dict[str, SimplerSuite]
+SimplerReport = Dict[str, SimplerFile]
 
 
 class Stat(TypedDict):
@@ -69,7 +104,7 @@ class CaseDiff(TypedDict):
     margin: str
     name: str
     was: Optional[Tuple[Stat, Status]]
-    now: Optional[SimplerCase]
+    now: Optional[Version2Case]
 
 
 class SuiteDiff(TypedDict):
@@ -80,21 +115,76 @@ class SuiteDiff(TypedDict):
     cases: List[CaseDiff]
 
 
-def case_status(case: Case) -> Status:
+# TODO: consolidate this with the case_status function from
+# tools/test_history.py
+def case_status(case: Version1Case) -> Status:
     for k in {'errored', 'failed', 'skipped'}:
         if case[k]:  # type: ignore[misc]
-            return k
+            return cast(Status, k)
     return None
 
 
-def simplify(report: Report) -> SimplerReport:
+# TODO: consolidate this with the newify_case function from
+# tools/test_history.py
+def newify_case(case: Version1Case) -> Version2Case:
     return {
-        suite_name: {
-            case['name']: (case['seconds'], case_status(case))
-            for case in suite['cases']
-        }
-        for suite_name, suite in report['suites'].items()
+        'seconds': case['seconds'],
+        'status': case_status(case),
     }
+
+
+# TODO: consolidate this with the get_cases function from
+# tools/test_history.py
+
+# Here we translate to a three-layer format (file -> suite -> case)
+# rather than a two-layer format (suite -> case) because as mentioned in
+# a comment in the body of this function, if we consolidate suites that
+# share a name, there will be test case name collisions, and once we
+# have those, there's no clean way to deal with it in the diffing logic.
+# It's not great to have to add a dummy empty string for the filename
+# for version 1 reports, but it's better than either losing cases that
+# share a name (for version 2 reports) or using a list of cases rather
+# than a dict.
+def simplify(report: Report) -> SimplerReport:
+    if 'format_version' not in report:  # version 1 implicitly
+        v1report = cast(Version1Report, report)
+        return {
+            # we just don't have test filename information sadly, so we
+            # just make one fake filename that is the empty string
+            '': {
+                suite_name: {
+                    # This clobbers some cases that have duplicate names
+                    # because in version 1, we would merge together all
+                    # the suites with a given name (even if they came
+                    # from different files), so there were actually
+                    # situations in which two cases in the same suite
+                    # shared a name (because they actually originally
+                    # came from two suites that were then merged). It
+                    # would probably be better to warn about the cases
+                    # that we're silently discarding here, but since
+                    # we're only uploading in the new format (where
+                    # everything is also keyed by filename) going
+                    # forward, it shouldn't matter too much.
+                    case['name']: newify_case(case)
+                    for case in suite['cases']
+                }
+                for suite_name, suite in v1report['suites'].items()
+            }
+        }
+    else:
+        v_report = cast(VersionedReport, report)
+        version = v_report['format_version']
+        if version == 2:
+            v2report = cast(Version2Report, v_report)
+            return {
+                filename: {
+                    suite_name: suite['cases']
+                    for suite_name, suite in file_data['suites'].items()
+                }
+                for filename, file_data in v2report['files'].items()
+            }
+        else:
+            raise RuntimeError(f'Unknown format version: {version}')
 
 
 def plural(n: int) -> str:
@@ -165,7 +255,9 @@ def unlines(lines: List[str]) -> str:
 
 
 def matching_test_times(
+    *,
     base_reports: Dict[Commit, List[SimplerReport]],
+    filename: str,
     suite_name: str,
     case_name: str,
     status: Status,
@@ -173,13 +265,16 @@ def matching_test_times(
     times: List[float] = []
     for reports in base_reports.values():
         for report in reports:
-            suite = report.get(suite_name)
-            if suite:
-                case = suite.get(case_name)
-                if case:
-                    t, s = case
-                    if s == status:
-                        times.append(t)
+            file_data = report.get(filename)
+            if file_data:
+                suite = file_data.get(suite_name)
+                if suite:
+                    case = suite.get(case_name)
+                    if case:
+                        t = case['seconds']
+                        s = case['status']
+                        if s == status:
+                            times.append(t)
     return times
 
 
@@ -188,35 +283,50 @@ def analyze(
     head_report: SimplerReport,
     base_reports: Dict[Commit, List[SimplerReport]],
 ) -> List[SuiteDiff]:
-    # most recent master ancestor with at least one S3 report
-    base_sha = next(sha for sha, reports in base_reports.items() if reports)
+    nonempty_shas = [sha for sha, reports in base_reports.items() if reports]
+    # most recent master ancestor with at least one S3 report,
+    # or empty list if there are none (will show all tests as added)
+    base_report = base_reports[nonempty_shas[0]] if nonempty_shas else []
 
     # find all relevant suites (those in either base or head or both)
-    all_reports = [head_report] + base_reports[base_sha]
-    all_suites = {k for r in all_reports for k in r.keys()}
+    all_reports = [head_report] + base_report
+    all_suites: Set[Tuple[str, str]] = {
+        (filename, suite_name)
+        for r in all_reports
+        for filename, file_data in r.items()
+        for suite_name in file_data.keys()
+    }
 
     removed_suites: List[SuiteDiff] = []
     modified_suites: List[SuiteDiff] = []
     added_suites: List[SuiteDiff] = []
 
-    for suite_name in sorted(all_suites):
+    for filename, suite_name in sorted(all_suites):
         case_diffs: List[CaseDiff] = []
-        head_suite = head_report.get(suite_name)
+        head_suite = head_report.get(filename, {}).get(suite_name)
         base_cases: Dict[str, Status] = dict(sorted(set.intersection(*[
-            {(n, s) for n, (_, s) in report.get(suite_name, {}).items()}
-            for report in base_reports[base_sha]
+            {
+                (n, case['status'])
+                for n, case
+                in report.get(filename, {}).get(suite_name, {}).items()
+            }
+            for report in base_report
         ] or [set()])))
         case_stats: Dict[str, Stat] = {}
         if head_suite:
-            now = sum(case[0] for case in head_suite.values())
-            if any(suite_name in report for report in base_reports[base_sha]):
+            now = sum(case['seconds'] for case in head_suite.values())
+            if any(
+                filename in report and suite_name in report[filename]
+                for report in base_report
+            ):
                 removed_cases: List[CaseDiff] = []
                 for case_name, case_status in base_cases.items():
                     case_stats[case_name] = list_stat(matching_test_times(
-                        base_reports,
-                        suite_name,
-                        case_name,
-                        case_status,
+                        base_reports=base_reports,
+                        filename=filename,
+                        suite_name=suite_name,
+                        case_name=case_name,
+                        status=case_status,
                     ))
                     if case_name not in head_suite:
                         removed_cases.append({
@@ -232,7 +342,7 @@ def analyze(
                     if head_case_name in base_cases:
                         stat = case_stats[head_case_name]
                         base_status = base_cases[head_case_name]
-                        if head_case[1] != base_status:
+                        if head_case['status'] != base_status:
                             modified_cases.append({
                                 'margin': '!',
                                 'name': head_case_name,
@@ -276,10 +386,11 @@ def analyze(
         else:
             for case_name, case_status in base_cases.items():
                 case_stats[case_name] = list_stat(matching_test_times(
-                    base_reports,
-                    suite_name,
-                    case_name,
-                    case_status,
+                    base_reports=base_reports,
+                    filename=filename,
+                    suite_name=suite_name,
+                    case_name=case_name,
+                    status=case_status,
                 ))
                 case_diffs.append({
                     'margin': ' ',
@@ -314,9 +425,9 @@ def case_diff_lines(diff: CaseDiff) -> List[str]:
 
     now = diff['now']
     if now:
-        now_stat: Stat = {'center': now[0], 'spread': None}
+        now_stat: Stat = {'center': now['seconds'], 'spread': None}
         now_line = f'    # now {display_stat(now_stat, case_fmt)}'
-        now_status = now[1]
+        now_status = now['status']
         if now_status:
             now_line += f' ({now_status})'
         lines.append(now_line)
@@ -408,7 +519,7 @@ def case_delta(case: CaseDiff) -> Stat:
     now = case['now']
     return recenter(
         was[0] if was else zero_stat(),
-        now[0] if now else 0,
+        now['seconds'] if now else 0,
     )
 
 
@@ -540,7 +651,7 @@ class TestCase:
 class TestSuite:
     def __init__(self, name: str) -> None:
         self.name = name
-        self.test_cases: List[TestCase] = []
+        self.test_cases: Dict[str, TestCase] = dict()
         self.failed_count = 0
         self.skipped_count = 0
         self.errored_count = 0
@@ -553,14 +664,25 @@ class TestSuite:
         return f'TestSuite({rc})'
 
     def append(self, test_case: TestCase) -> None:
-        self.test_cases.append(test_case)
+        self.test_cases[test_case.name] = test_case
         self.total_time += test_case.time
         self.failed_count += 1 if test_case.failed else 0
         self.skipped_count += 1 if test_case.skipped else 0
         self.errored_count += 1 if test_case.errored else 0
 
+    def replace(self, test_case: TestCase) -> float:
+        name = test_case.name
+        assert name in self.test_cases, f'Error: attempting to replace nonexistent test case {name}'
+        old_time = self.test_cases[name].time
+        # We don't replace anything if the old test case was not shorter.
+        if old_time >= test_case.time:
+            return 0.0
+        self.total_time = self.total_time + test_case.time - old_time
+        self.test_cases[name] = test_case
+        return test_case.time - old_time
+
     def print_report(self, num_longest: int = 3) -> None:
-        sorted_tests = sorted(self.test_cases, key=lambda x: x.time)
+        sorted_tests = sorted(self.test_cases.values(), key=lambda x: x.time)
         test_count = len(sorted_tests)
         print(f"class {self.name}:")
         print(f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} errored: {self.errored_count}")
@@ -575,25 +697,52 @@ class TestSuite:
         print("")
 
 
+class TestFile:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.total_time = 0.0
+        self.test_suites: Dict[str, TestSuite] = dict()
+
+    def append(self, test_case: TestCase) -> None:
+        suite_name = test_case.class_name
+        if suite_name not in self.test_suites:
+            self.test_suites[suite_name] = TestSuite(suite_name)
+        if test_case.name in self.test_suites[suite_name].test_cases:
+            # We expect duplicate tests for test_cpp_extensions_aot, distributed/test_distributed_fork,
+            # and distributed/test_distributed_spawn. In these cases, we store the test case that took the longest,
+            # as in these jobs, the duplicate tests are run in parallel.
+            # For other unexpected cases, we should raise a warning.
+            if self.name == 'test_cpp_extensions_aot' or \
+               self.name == 'distributed/test_distributed_fork' or \
+               self.name == 'distributed/test_distributed_spawn' or \
+               self.name == 'cpp':  # The caffe2 cpp tests spawn duplicate test cases as well.
+                time_difference = self.test_suites[suite_name].replace(test_case)
+                self.total_time += time_difference
+            else:
+                raise RuntimeWarning(f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
+        else:
+            self.test_suites[suite_name].append(test_case)
+            self.total_time += test_case.time
+
+
 def parse_report(path: str) -> Iterator[TestCase]:
     dom = minidom.parse(path)
     for test_case in dom.getElementsByTagName('testcase'):
         yield TestCase(test_case)
 
 
-def parse_reports(folder: str) -> Dict[str, TestSuite]:
+def parse_reports(folder: str) -> Dict[str, TestFile]:
     reports = glob(os.path.join(folder, '**', '*.xml'), recursive=True)
-    tests_by_class = dict()
+    tests_by_file = dict()
     for report in reports:
+        test_filename = re.sub(r'\.', '/', os.path.basename(os.path.dirname(report)))
+        if test_filename not in tests_by_file:
+            tests_by_file[test_filename] = TestFile(test_filename)
         for test_case in parse_report(report):
-            class_name = test_case.class_name
-            if class_name not in tests_by_class:
-                tests_by_class[class_name] = TestSuite(class_name)
-            tests_by_class[class_name].append(test_case)
-    return tests_by_class
+            tests_by_file[test_filename].append(test_case)
+    return tests_by_file
 
-
-def build_info() -> ReportMeta:
+def build_info() -> ReportMetaMeta:
     return {
         "build_pr": os.environ.get("CIRCLE_PR_NUMBER", ""),
         "build_tag": os.environ.get("CIRCLE_TAG", ""),
@@ -622,7 +771,7 @@ def build_message(test_case: TestCase) -> Dict[str, Dict[str, Any]]:
     }
 
 
-def send_report_to_scribe(reports: Dict[str, TestSuite]) -> None:
+def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
     access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
 
     if not access_token:
@@ -641,8 +790,9 @@ def send_report_to_scribe(reports: Dict[str, TestSuite]) -> None:
                         "message": json.dumps(build_message(test_case)),
                         "line_escape": False,
                     }
-                    for name in sorted(reports.keys())
-                    for test_case in reports[name].test_cases
+                    for test_file in reports.values()
+                    for test_suite in test_file.test_suites.values()
+                    for test_case in test_suite.test_cases.values()
                 ]
             ),
         },
@@ -651,33 +801,39 @@ def send_report_to_scribe(reports: Dict[str, TestSuite]) -> None:
 
 
 def assemble_s3_object(
-    reports: Dict[str, TestSuite],
+    reports: Dict[str, TestFile],
     *,
     total_seconds: float,
-) -> Report:
+) -> Version2Report:
     return {
         **build_info(),  # type: ignore[misc]
         'total_seconds': total_seconds,
-        'suites': {
+        'format_version': 2,
+        'files' : {
             name: {
-                'total_seconds': suite.total_time,
-                'cases': [
-                    {
-                        'name': case.name,
-                        'seconds': case.time,
-                        'errored': case.errored,
-                        'failed': case.failed,
-                        'skipped': case.skipped,
+                'total_seconds': test_file.total_time,
+                'suites': {
+                    name: {
+                        'total_seconds': suite.total_time,
+                        'cases': {
+                            name: {
+                                'seconds': case.time,
+                                'status': 'skipped' if case.skipped else
+                                          'errored' if case.errored else
+                                          'failed' if case.failed else None
+                            }
+                            for name, case in suite.test_cases.items()
+                        },
                     }
-                    for case in suite.test_cases
-                ],
+                    for name, suite in test_file.test_suites.items()
+                }
             }
-            for name, suite in reports.items()
+            for name, test_file in reports.items()
         }
     }
 
 
-def send_report_to_s3(head_report: Report) -> None:
+def send_report_to_s3(head_report: Version2Report) -> None:
     job = os.environ.get('CIRCLE_JOB')
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
@@ -771,6 +927,13 @@ def positive_float(value: str) -> float:
     return parsed
 
 
+def reports_has_no_tests(reports: Dict[str, TestFile]) -> bool:
+    for test_file in reports.values():
+        for test_suite in test_file.test_suites.values():
+            if len(test_suite.test_cases) > 0:
+                return False
+    return True
+
 if __name__ == '__main__':
     import argparse
     import sys
@@ -828,24 +991,25 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    reports = parse_reports(args.folder)
-    if len(reports) == 0:
-        print(f"No test reports found in {args.folder}")
+    reports_by_file = parse_reports(args.folder)
+    if reports_has_no_tests(reports_by_file):
+        print(f"No tests in reports found in {args.folder}")
         sys.exit(0)
 
-    send_report_to_scribe(reports)
+    send_report_to_scribe(reports_by_file)
 
-    longest_tests = []
+    # longest_tests can contain duplicates as the same tests can be spawned from different files
+    longest_tests : List[TestCase] = []
     total_time = 0.0
-    for name in sorted(reports.keys()):
-        test_suite = reports[name]
-        if test_suite.total_time >= args.class_print_threshold:
-            test_suite.print_report(args.longest_of_class)
-        total_time += test_suite.total_time
-        longest_tests.extend(test_suite.test_cases)
+    for filename, test_filename in reports_by_file.items():
+        for suite_name, test_suite in test_filename.test_suites.items():
+            if test_suite.total_time >= args.class_print_threshold:
+                test_suite.print_report(args.longest_of_class)
+                total_time += test_suite.total_time
+                longest_tests.extend(test_suite.test_cases.values())
     longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
 
-    obj = assemble_s3_object(reports, total_seconds=total_time)
+    obj = assemble_s3_object(reports_by_file, total_seconds=total_time)
 
     if args.upload_to_s3:
         send_report_to_s3(obj)

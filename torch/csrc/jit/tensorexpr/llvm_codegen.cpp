@@ -12,6 +12,7 @@
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/MDBuilder.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/MCSubtargetInfo.h>
 #include <llvm/Support/Host.h>
@@ -83,6 +84,27 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
   }
 }
 
+llvm::CmpInst::Predicate llvm_fp_comparison_predicate(
+    CompareSelectOperation compare_op) {
+  switch (compare_op) {
+    case CompareSelectOperation::kEQ:
+      return llvm::FCmpInst::FCMP_OEQ;
+    case CompareSelectOperation::kNE:
+      return llvm::FCmpInst::FCMP_ONE;
+    case CompareSelectOperation::kGT:
+      return llvm::FCmpInst::FCMP_OGT;
+    case CompareSelectOperation::kGE:
+      return llvm::FCmpInst::FCMP_OGE;
+    case CompareSelectOperation::kLT:
+      return llvm::FCmpInst::FCMP_OLT;
+    case CompareSelectOperation::kLE:
+      return llvm::FCmpInst::FCMP_OLE;
+    default:
+      // TODO: change to a proper error report
+      throw std::runtime_error("invalid operator type");
+  }
+}
+
 #if LLVM_VERSION_MAJOR <= 9
 int ElementCount(int lanes) {
   return lanes;
@@ -122,6 +144,9 @@ class LLVMCodeGenImpl : public IRVisitor {
   std::unordered_map<const Var*, llvm::Value*> varToVal_;
   std::unordered_map<const Block*, std::vector<const Var*>> scopeToVar_;
   const Block* scope_;
+
+  std::string llvmCode;
+  std::string asmCode;
 
  private:
   llvm::LLVMContext& getContext();
@@ -206,6 +231,12 @@ class LLVMCodeGenImpl : public IRVisitor {
       llvm::Value* val);
 
   void optimize(llvm::Module& M);
+  std::string getLLVMCodeText() {
+    return llvmCode;
+  }
+  std::string getASMCodeText() {
+    return asmCode;
+  }
 };
 } // namespace tensorexpr
 } // namespace jit
@@ -276,6 +307,14 @@ at::Tensor LLVMCodeGen::empty_strided(
 
 void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
   return (void*)impl->getKernelAddress();
+}
+
+std::string LLVMCodeGen::getCodeText(const std::string& attr /*=""*/) {
+  if (attr == "asm") {
+    return impl_->getASMCodeText();
+  } else {
+    return impl_->getLLVMCodeText();
+  }
 }
 
 llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
@@ -466,22 +505,24 @@ void LLVMCodeGenImpl::emitKernel(
 
   // print graph debug info after optimization
   asmBuffer.set_size(0);
-  if (GRAPH_DEBUG_ENABLED) {
-    module_->print(asmStream, nullptr);
-    llvm::legacy::PassManager PM;
-    jit_->getTargetMachine().addPassesToEmitFile(
-        PM,
-        asmStream,
-        nullptr,
+  module_->print(asmStream, nullptr);
+  llvmCode = asmStream.str().str();
+  asmBuffer.set_size(0);
+  llvm::legacy::PassManager PM;
+  jit_->getTargetMachine().addPassesToEmitFile(
+      PM,
+      asmStream,
+      nullptr,
 #if LLVM_VERSION_MAJOR >= 10
-        llvm::CodeGenFileType::CGFT_AssemblyFile);
+      llvm::CodeGenFileType::CGFT_AssemblyFile);
 #else
-        llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
+      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
 #endif
-    PM.run(*module_);
-  }
+  PM.run(*module_);
+  asmCode = asmStream.str().str();
+
   GRAPH_DEBUG(
-      "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
+      "\nLLVM module after optimizations\n\n", llvmCode, "\n", asmCode, "\n");
 }
 
 // TODO: The binary ops are copypasta.
@@ -627,7 +668,11 @@ void LLVMCodeGenImpl::visit(const Rshift* v) {
   bool rfp = rhs->getType()->isFPOrFPVectorTy();
 
   if (!lfp && !rfp) {
-    value_ = irb_.CreateLShr(lhs, rhs);
+    if (v->lhs()->dtype().is_signed()) {
+      value_ = irb_.CreateAShr(lhs, rhs);
+    } else {
+      value_ = irb_.CreateLShr(lhs, rhs);
+    }
   } else {
     throw malformed_input("llvm_codgen: bad type in Rshift", v);
   }
@@ -694,53 +739,93 @@ void LLVMCodeGenImpl::visit(const Min* v) {
 }
 
 void LLVMCodeGenImpl::visit(const CompareSelect* v) {
-  v->lhs()->accept(this);
-  auto lhs = this->value_;
-  v->rhs()->accept(this);
-  auto rhs = this->value_;
-  v->ret_val1()->accept(this);
-  auto retval1 = this->value_;
-  v->ret_val2()->accept(this);
-  auto retval2 = this->value_;
+  auto genUnbiased = [this, v]() -> llvm::Value* {
+    v->lhs()->accept(this);
+    auto lhs = this->value_;
+    v->rhs()->accept(this);
+    auto rhs = this->value_;
+    v->ret_val1()->accept(this);
+    auto retval1 = this->value_;
+    v->ret_val2()->accept(this);
+    auto retval2 = this->value_;
 
-  auto type_used = v->lhs()->dtype().scalar_type();
+    auto type_used = v->lhs()->dtype().scalar_type();
 
-  llvm::Value* cmp_;
-  CompareSelectOperation cmp_op_ = v->compare_select_op();
+    llvm::Value* cmp_;
+    CompareSelectOperation cmp_op_ = v->compare_select_op();
 
-  if (is_integral(type_used)) {
-    cmp_ = irb_.CreateICmp(
-        llvm_comparison_predicate(cmp_op_, type_used), lhs, rhs);
-  } else if (is_floating_point(type_used)) { // FP32
-    switch (cmp_op_) {
-      case CompareSelectOperation::kEQ:
-        cmp_ = irb_.CreateFCmpOEQ(lhs, rhs);
-        break;
-      case CompareSelectOperation::kNE:
-        cmp_ = irb_.CreateFCmpONE(lhs, rhs);
-        break;
-      case CompareSelectOperation::kGT:
-        cmp_ = irb_.CreateFCmpOGT(lhs, rhs);
-        break;
-      case CompareSelectOperation::kGE:
-        cmp_ = irb_.CreateFCmpOGE(lhs, rhs);
-        break;
-      case CompareSelectOperation::kLT:
-        cmp_ = irb_.CreateFCmpOLT(lhs, rhs);
-        break;
-      case CompareSelectOperation::kLE:
-        cmp_ = irb_.CreateFCmpOLE(lhs, rhs);
-        break;
-      default:
-        // TODO: change to a proper error report
-        throw std::runtime_error("invalid operator type");
+    if (is_integral(type_used)) {
+      cmp_ = irb_.CreateICmp(
+          llvm_comparison_predicate(cmp_op_, type_used), lhs, rhs);
+    } else if (is_floating_point(type_used)) {
+      cmp_ = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op_), lhs, rhs);
+    } else {
+      throw std::runtime_error("invalid type for CompareSelect");
     }
-  } else {
-    throw std::runtime_error("invalid type for CompareSelect");
-  }
 
-  value_ = irb_.CreateSelect(cmp_, retval1, retval2);
-  return;
+    return irb_.CreateSelect(cmp_, retval1, retval2);
+  };
+
+  auto genBiased = [this, v]() -> llvm::Value* {
+    v->lhs()->accept(this);
+    auto lhs = this->value_;
+    v->rhs()->accept(this);
+    auto rhs = this->value_;
+
+    auto cmp_type = v->lhs()->dtype().scalar_type();
+    auto cmp_op = v->compare_select_op();
+    llvm::Value* cmp;
+
+    if (is_integral(cmp_type)) {
+      cmp = irb_.CreateICmp(
+          llvm_comparison_predicate(cmp_op, cmp_type), lhs, rhs);
+    } else if (is_floating_point(cmp_type)) {
+      cmp = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op), lhs, rhs);
+    } else {
+      throw std::runtime_error("invalid type for CompareSelect");
+    }
+
+    auto lanes = v->lhs()->dtype().lanes();
+    if (lanes > 1) {
+      auto maskType = llvm::Type::getIntNTy(getContext(), lanes);
+      auto zero = llvm::ConstantInt::get(maskType, 0);
+      auto mask = irb_.CreateBitOrPointerCast(cmp, maskType);
+      cmp = irb_.CreateICmpNE(mask, zero);
+    }
+
+    auto then_block = llvm::BasicBlock::Create(getContext(), "then", fn_);
+    auto else_block = llvm::BasicBlock::Create(getContext(), "else", fn_);
+    auto end_block = llvm::BasicBlock::Create(getContext(), "block", fn_);
+    constexpr int32_t total_weight = 100000;
+    auto true_weight = v->bias() == kLikely ? total_weight : 0;
+    auto false_weight = total_weight - true_weight;
+    irb_.CreateCondBr(
+        cmp,
+        then_block,
+        else_block,
+        llvm::MDBuilder(getContext())
+            .createBranchWeights(true_weight, false_weight));
+
+    irb_.SetInsertPoint(then_block);
+    v->ret_val1()->accept(this);
+    llvm::Value* then_val = value_;
+    then_block = irb_.GetInsertBlock();
+    irb_.CreateBr(end_block);
+
+    irb_.SetInsertPoint(else_block);
+    v->ret_val2()->accept(this);
+    llvm::Value* else_val = value_;
+    else_block = irb_.GetInsertBlock();
+    irb_.CreateBr(end_block);
+
+    irb_.SetInsertPoint(end_block);
+    llvm::PHINode* phi = irb_.CreatePHI(then_val->getType(), 2);
+    phi->addIncoming(then_val, then_block);
+    phi->addIncoming(else_val, else_block);
+    return phi;
+  };
+
+  value_ = v->bias() == kUnbiased ? genUnbiased() : genBiased();
 }
 
 template <typename T>
@@ -1010,7 +1095,11 @@ void LLVMCodeGenImpl::visit(const Load* v) {
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(loadType, 0));
+#if LLVM_VERSION_MAJOR >= 13
+      value_ = irb_.CreateAlignedLoad(vaddr, llvm::MaybeAlign(4));
+#else
       value_ = irb_.CreateAlignedLoad(vaddr, 4);
+#endif
       return;
     }
   }
@@ -1189,8 +1278,12 @@ void LLVMCodeGenImpl::visit(const Store* v) {
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(val->getType(), 0));
-      irb_.CreateAlignedStore(val, vaddr, 4);
 
+#if LLVM_VERSION_MAJOR >= 13
+      irb_.CreateAlignedStore(val, vaddr, llvm::MaybeAlign(4));
+#else
+      irb_.CreateAlignedStore(val, vaddr, 4);
+#endif
       value_ = llvm::ConstantInt::get(IntTy_, 0);
       return;
     }

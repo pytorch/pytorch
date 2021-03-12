@@ -2,6 +2,7 @@
 
 #include <mutex>
 #include <sstream>
+#include <utility>
 
 #include "caffe2/core/blob.h"
 #include "caffe2/utils/proto_utils.h"
@@ -35,8 +36,8 @@ namespace caffe2 {
  */
 class StringSerializer : public BlobSerializerBase {
  public:
-  StringSerializer() {}
-  ~StringSerializer() override {}
+  StringSerializer() = default;
+  ~StringSerializer() override = default;
   /**
    * Serializes a Blob. Note that this blob has to contain Tensor,
    * otherwise this function produces a fatal error.
@@ -73,12 +74,11 @@ void SerializeBlob(
     TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
-    int chunk_size) {
+    const BlobSerializationOptions& options) {
   std::unique_ptr<BlobSerializerBase> serializer(
       CreateSerializer(typeMeta.id()));
   CAFFE_ENFORCE(serializer, "No known serializer for ", typeMeta.name());
-  serializer->SerializeWithChunkSize(
-      pointer, typeMeta, name, acceptor, chunk_size);
+  serializer->SerializeWithOptions(pointer, typeMeta, name, std::move(acceptor), options);
 }
 
 std::string
@@ -89,7 +89,9 @@ SerializeBlob(const void* pointer, TypeMeta typeMeta, const string& name) {
         DCHECK(data.empty()); // should be called once with kNoChunking
         data = blob_str;
       };
-  SerializeBlob(pointer, typeMeta, name, acceptor, kNoChunking);
+  BlobSerializationOptions options;
+  options.set_chunk_size(kNoChunking);
+  SerializeBlob(pointer, typeMeta, name, acceptor, options);
   return data;
 }
 } // namespace
@@ -98,8 +100,16 @@ void SerializeBlob(
     const Blob& blob,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
-    int chunk_size) {
-  SerializeBlob(blob.GetRaw(), blob.meta(), name, acceptor, chunk_size);
+    const BlobSerializationOptions& options) {
+  SerializeBlob(blob.GetRaw(), blob.meta(), name, std::move(acceptor), options);
+}
+
+void SerializeBlob(
+    const Blob& blob,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor) {
+  BlobSerializationOptions options;
+  SerializeBlob(blob.GetRaw(), blob.meta(), name, std::move(acceptor), options);
 }
 
 std::string SerializeBlob(const Blob& blob, const string& name) {
@@ -111,18 +121,19 @@ void TensorSerializer::Serialize(
     TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
-  this->SerializeWithChunkSize(
-      pointer, typeMeta, name, acceptor, kDefaultChunkSize);
+  BlobSerializationOptions options;
+  this->SerializeWithOptions(pointer, typeMeta, name, acceptor, options);
 }
 
-void TensorSerializer::SerializeWithChunkSize(
+void TensorSerializer::SerializeWithOptions(
     const void* pointer,
     TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
-    int chunk_size) {
+    const BlobSerializationOptions& options) {
   CAFFE_ENFORCE(typeMeta.Match<Tensor>());
   const auto& tensor = *static_cast<const Tensor*>(pointer);
+  auto chunk_size = options.chunk_size();
   if (chunk_size == kNoChunking) {
     chunk_size = tensor.numel() + 1; // to account for empty tensors
   } else if (chunk_size == kDefaultChunkSize) {
@@ -136,7 +147,12 @@ void TensorSerializer::SerializeWithChunkSize(
     TensorProto& proto = *blob_proto.mutable_tensor();
     proto.set_name(name);
     this->Serialize(
-        tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
+        tensor,
+        name,
+        blob_proto.mutable_tensor(),
+        options,
+        chunkStart,
+        chunk_size);
     acceptor(
         c10::str(name, kChunkIdSeparator, chunkStart / chunk_size),
         SerializeBlobProtoAsString_EnforceCheck(blob_proto));
@@ -237,6 +253,7 @@ void TensorSerializer::Serialize(
     const Tensor& input,
     const string& name,
     TensorProto* proto_ptr,
+    const BlobSerializationOptions& /*options*/,
     size_t chunkBegin,
     int32_t chunkSize) {
   CAFFE_ENFORCE(
@@ -354,9 +371,17 @@ void TensorSerializer::Serialize(
     } break;
     case TensorProto_DataType_ZERO_COLLISION_HASH: {
       CAFFE_ENFORCE(
-          false,
-          "Serialization for zero collision hash type is supported by specialized serializer ZeroCollisionIdHashSerializer");
+        false,
+        "Serialization for zero collision hash type is supported by "
+        "specialized serializer ZeroCollisionIdHashSerializer");
     } break;
+    case TensorProto_DataType_REBATCHING_BUFFER: {
+      CAFFE_ENFORCE(
+        false,
+        "Serialization for REBATCHING_BUFFER type is supported by "
+        "specialized serializer RebatchingBufferSerialier");
+    } break;
+
       // Note: we intentially do not provide "default:" so if any new data types
       // are added, the compiler should warn the user to add the case here.
   }
@@ -562,6 +587,16 @@ void TensorDeserializer::DeserializeToTensor(
       tensor->numel());
   auto chunkSize = chunkEnd - chunkBegin;
 
+  if (!tensor_proto.has_data_type()) {
+    // If the data_type field is not set, this either means it was not present
+    // in the serialized data, or it was set to an enum value that we don't know
+    // about.  This likely means that the serialized data was written by a
+    // different version of the software using a new data type value that we
+    // don't understand.
+    throw std::runtime_error(
+        "Cannot deserialize tensor: unrecognized data type");
+  }
+
   switch (tensor_proto.data_type()) {
     case TensorProto_DataType_FLOAT:
       detail::CopyFromProtoAsIs(
@@ -653,8 +688,15 @@ void TensorDeserializer::DeserializeToTensor(
     } break;
     case TensorProto_DataType_ZERO_COLLISION_HASH: {
       CAFFE_ENFORCE(
-          false,
-          "Deserialization for zero collision hash type is supported by specialized deserializer ZeroCollisionIdHashDeserializer");
+        false,
+        "Deserialization for zero collision hash type is supported by "
+        "specialized deserializer ZeroCollisionIdHashDeserializer");
+    } break;
+    case TensorProto_DataType_REBATCHING_BUFFER: {
+      CAFFE_ENFORCE(
+        false,
+        "Deserialization for REBATCHING_BUFFER type is supported by "
+        "specialized serializer RebatchingBufferDeserialier");
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
   }
