@@ -82,7 +82,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau, Tensor& infos, int64_t 
   int lwork = -1;
   scalar_t wkopt;
   lapackOrgqr<scalar_t>(m, n_columns, k, self_data, lda, tau_data, &wkopt, lwork, &infos_data[0]);
-  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
   for (int64_t i = 0; i < batch_size; i++) {

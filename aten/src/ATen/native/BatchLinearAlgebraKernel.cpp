@@ -115,7 +115,7 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
     int info;
     lapackEig<scalar_t, value_t>('N', jobvr, n, self_data, n, wr,
       nullptr, 1, vecs_data, ldvr, &wkopt, -1, rwork_data, &info);
-    int lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
+    int lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
 
     // call again to do the actual work
     Tensor work = at::empty({lwork}, self.dtype());
