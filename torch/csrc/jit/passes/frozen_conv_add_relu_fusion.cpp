@@ -1,22 +1,25 @@
+#include <ATen/Utils.h>
+#include <ATen/cuda/CUDAConfig.h>
+
+#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
-#include <torch/csrc/jit/passes/frozen_conv_relu_fusion.h>
+#include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-
-#include <torch/csrc/jit/frontend/code_template.h>
 
 namespace torch {
 namespace jit {
 
 namespace {
-void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
-#ifdef USE_CUDNN
+void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
+#if AT_CUDNN_ENABLED()
   SubgraphRewriter rewriter;
 
-  std::string conv_operators[] = {"conv1d", "conv2d", "conv3d"};
+  // TODO: fix CUDNN conv1d failure
+  std::string conv_operators[] = {"conv2d", "conv3d"};
 
   auto conv_relu_rstring = CodeTemplate(R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
@@ -26,7 +29,7 @@ void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
 
   std::string conv_relu_fused = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
-        %res = prim::cudnn_convolution_add_relu(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+        %res = aten::cudnn_convolution_relu(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
         return (%res))";
 
   auto conv_add_relu_rstring = CodeTemplate(R"(
@@ -38,7 +41,7 @@ void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
 
   std::string conv_add_relu_fused = R"(
     graph(%input, %weight, %bias, %z, %alpha, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
-        %res = prim::cudnn_convolution_add_relu(%input, %weight, %bias, %z, %alpha, %stride, %padding, %dilation, %groups)
+        %res = aten::cudnn_convolution_add_relu(%input, %weight, %z, %alpha, %bias, %stride, %padding, %dilation, %groups)
         return (%res))";
 
   for (auto conv : conv_operators) {
@@ -67,8 +70,7 @@ void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
       if (bias.has_value() && bias.value().isTensor()) {
         const at::Tensor& bias_t = bias.value().toTensor();
         if (bias_t.dtype() != weight_t.dtype() || bias_t.ndimension() != 1 ||
-            bias_t.size(0) != weight_t.size(0) ||
-            !bias_t.device().is_cuda()) {
+            bias_t.size(0) != weight_t.size(0) || !bias_t.device().is_cuda()) {
           return false;
         }
       }
@@ -76,13 +78,11 @@ void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
 
     // z is optional
     if (vmap.find("z") != vmap.end()) {
-      auto zz = match.values_map.at(vmap.at("z"));
       auto z = toIValue(match.values_map.at(vmap.at("z")));
       if (z.has_value() && z.value().isTensor()) {
         const at::Tensor& z_t = z.value().toTensor();
         if (z_t.dtype() != weight_t.dtype() ||
-            z_t.size(0) != weight_t.size(0) ||
-            !z_t.is_contiguous() ||
+            z_t.size(0) != weight_t.size(0) || !z_t.is_contiguous() ||
             !z_t.device().is_cuda()) {
           return false;
         }
@@ -101,10 +101,11 @@ void fuseFrozenConvReluImpl(std::shared_ptr<Graph>& graph) {
   rewriter.runOnGraph(graph, filter);
 #endif
 }
+
 } // namespace
 
-void FuseFrozenConvRelu(std::shared_ptr<Graph>& graph) {
-  fuseFrozenConvReluImpl(graph);
+void FuseFrozenConvAddRelu(std::shared_ptr<Graph>& graph) {
+  fuseFrozenConvAddReluImpl(graph);
 }
 
 } // namespace jit

@@ -252,7 +252,6 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::TypeCheck, // used in interpreter only
       prim::RequiresGradCheck, // used in interpreter only
       prim::FallbackGraph, // converted into prim::CallFunction
-      prim::cudnn_convolution_add_relu, // optimization pass adds it
   };
 
   // These namespaces are required to have Python printers unless
@@ -327,7 +326,6 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::Enter,
       prim::Exit,
       prim::FallbackGraph,
-      prim::cudnn_convolution_add_relu,
   };
 
   // Operators that should not be used by alias analysis

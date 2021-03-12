@@ -92,6 +92,7 @@ namespace c10 {
   _(aten, ScalarImplicit)            \
   _(aten, Float)                     \
   _(aten, str)                       \
+  _(aten, is_pinned)                 \
   _(aten, Delete)                    \
   _(aten, relu_)                     \
   _(aten, dropout_)                  \
@@ -306,7 +307,6 @@ namespace c10 {
   _(aten, lgamma)                    \
   _(aten, special_gammaln)           \
   _(aten, has_torch_function)        \
-  _(prim, cudnn_convolution_add_relu)\
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \

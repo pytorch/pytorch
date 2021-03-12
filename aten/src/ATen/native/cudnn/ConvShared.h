@@ -75,11 +75,14 @@ void raw_cudnn_convolution_add_relu_out(
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,
-    const Tensor& bias,
     const Tensor& z,
     float alpha,
-    IntArrayRef padding,
+    const Tensor& bias,
     IntArrayRef stride,
+    IntArrayRef padding,
     IntArrayRef dilation,
-    int64_t groups);
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32);
 }}

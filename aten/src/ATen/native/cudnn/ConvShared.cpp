@@ -491,16 +491,15 @@ Tensor cudnn_convolution_transpose_backward_weight(
       padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 }
 
-Tensor cudnn_convolution_add_relu(
+Tensor cudnn_convolution_relu(
     const Tensor& input_t,
     const Tensor& weight_t,
     const optional<Tensor>& bias_t,
-    const optional<Tensor>& z_t,
-    optional<Scalar> alpha_t,
-    IntArrayRef padding,
     IntArrayRef stride,
+    IntArrayRef padding,
     IntArrayRef dilation,
     int64_t groups) {
+  // FuseFrozenConvAddRelu performs some tensor shape checking
   auto output_t = at::native::empty_cuda(
       conv_output_size(
           input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
@@ -512,25 +511,68 @@ Tensor cudnn_convolution_add_relu(
   if (output_t.numel() == 0) {
     return output_t;
   }
-  TensorArg output{output_t, "result", 0};
-
-  float alpha = z_t.has_value()
-      ? (alpha_t.has_value() ? alpha_t.value().to<float>() : 1)
-      : 0;
 
   raw_cudnn_convolution_add_relu_out(
-      *output,
+      output_t,
       input_t,
       weight_t,
-      bias_t.has_value() ? bias_t.value() : zeros({output_t.size(1)}, output_t.options()),
-      z_t.has_value() ? z_t.value() : output_t,
-      alpha,
-      padding,
+      output_t, // use output_t as z to satisfy CUDNN API
+      0, // alpha
+      bias_t.has_value() ? bias_t.value()
+                         : zeros({output_t.size(1)}, output_t.options()),
       stride,
+      padding,
       dilation,
-      groups);
+      groups,
+      false, // benchmark
+      false, // deterministic
+      true // allow_tf32
+  );
 
-  return *output;
+  return output_t;
+}
+
+Tensor cudnn_convolution_add_relu(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const Tensor& z_t,
+    optional<Scalar> alpha,
+    const optional<Tensor>& bias_t,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups) {
+  // FuseFrozenConvAddRelu performs some tensor shape checking
+  auto output_t = at::native::empty_cuda(
+      conv_output_size(
+          input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
+      /*dtype=*/input_t.scalar_type(),
+      /*layout=*/c10::nullopt,
+      /*device=*/kCUDA,
+      /*pin_memory=*/c10::nullopt,
+      /*memory_format=*/at::MemoryFormat::Contiguous);
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+
+  raw_cudnn_convolution_add_relu_out(
+      output_t,
+      input_t,
+      weight_t,
+      z_t,
+      alpha.has_value() ? alpha.value().to<float>() : 1.0,
+      bias_t.has_value() ? bias_t.value()
+                         : zeros({output_t.size(1)}, output_t.options()),
+      stride,
+      padding,
+      dilation,
+      groups,
+      false, // benchmark
+      false, // deterministic
+      true // allow_tf32
+  );
+
+  return output_t;
 }
 }}
 

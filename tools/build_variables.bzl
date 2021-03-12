@@ -206,7 +206,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
     "torch/csrc/jit/passes/frozen_conv_folding.cpp",
     "torch/csrc/jit/passes/frozen_ops_to_mkldnn.cpp",
-    "torch/csrc/jit/passes/frozen_conv_relu_fusion.cpp",
+    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/passes/frozen_graph_optimizations.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
     "torch/csrc/jit/passes/remove_dropout.cpp",
@@ -494,6 +494,8 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/rmsprop.cpp",
     "torch/csrc/api/src/optim/serialize.cpp",
     "torch/csrc/api/src/optim/sgd.cpp",
+    "torch/csrc/api/src/optim/schedulers/lr_scheduler.cpp",
+    "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
 ]

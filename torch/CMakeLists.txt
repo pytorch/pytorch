@@ -146,7 +146,7 @@ endif()
 if(USE_CUDNN OR USE_ROCM)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_relu_fusion.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp
       )
     if(USE_STATIC_CUDNN)
         set_source_files_properties(

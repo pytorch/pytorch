@@ -576,7 +576,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Closure:
     case prim::CreateObject:
     case prim::tolist:
-    case prim::cudnn_convolution_add_relu:
       return analyzeCreator(node);
     case prim::TupleConstruct:
     case prim::DictConstruct:

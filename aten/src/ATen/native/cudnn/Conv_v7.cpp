@@ -825,25 +825,17 @@ void raw_cudnn_convolution_add_relu_out(
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,
-    const Tensor& bias,
     const Tensor& z,
     float alpha,
-    IntArrayRef padding,
+    const Tensor& bias,
     IntArrayRef stride,
+    IntArrayRef padding,
     IntArrayRef dilation,
-    int64_t groups) {
-  // This function is currently only called if frozen-model opt is turned on.
-  // The benchmarking and caching mechanism is not ready, so let's set benchmark
-  // to false.
-  bool benchmark = false;
-  // (!benchmark && !deterministic) means later try_all will call
-  // cudnnGetConvolutionForwardAlgorithm_v7 to pick the best convolution
-  // algorithm.
-  bool deterministic = false;
-  bool allow_tf32 = true;
-
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
   auto dataType = getCudnnDataType(input);
-
   ConvolutionArgs args{input, output, weight};
   args.handle = getCudnnHandle();
   setConvolutionParams(
@@ -857,10 +849,7 @@ void raw_cudnn_convolution_add_relu_out(
       deterministic,
       allow_tf32);
   args.idesc.set(input);
-  args.wdesc.set(
-      weight,
-      0,
-      false);
+  args.wdesc.set(weight, 0, false);
   args.odesc.set(output);
   args.cdesc.set(
       dataType,
@@ -874,10 +863,9 @@ void raw_cudnn_convolution_add_relu_out(
   TensorDescriptor zdesc;
   zdesc.set(z);
 
-  // See Note [CuDNN broadcast padding].  Handle the left padding
-  // ourselves, but use TensorDescriptor's padding argument to do the rest.
   TensorDescriptor bdesc;
-  bdesc.set(bias.expand({1, bias.size(0)}), output.dim());
+  Tensor bias_data = bias.expand({1, bias.size(0)});
+  bdesc.set(bias_data, output.dim());
 
   ActivationDescriptor adesc;
   adesc.set(CUDNN_ACTIVATION_RELU);
@@ -914,7 +902,7 @@ void raw_cudnn_convolution_add_relu_out(
                 zdesc.desc(),
                 z.data_ptr(),
                 bdesc.desc(),
-                bias.data_ptr(),
+                bias_data.data_ptr(),
                 adesc.desc(),
                 args.odesc.desc(),
                 output.data_ptr()),

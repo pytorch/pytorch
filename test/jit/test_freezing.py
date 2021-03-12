@@ -1765,10 +1765,9 @@ class TestFrozenOptimizations(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_freeze_conv_relu_fusion(self):
         conv_bias = [True, False]
-        conv_ops = [nn.Conv1d, nn.Conv2d, nn.Conv3d]
+        conv_ops = [nn.Conv2d, nn.Conv3d]
         add_z = [True, False]
         use_tracing = [True, False]
-
         for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, add_z, use_tracing):
             class Net(nn.Module):
                 def __init__(self, in_channels, out_channels, **kwargs):
@@ -1785,7 +1784,7 @@ class TestFrozenOptimizations(JitTestCase):
                     out = self.relu(out)
                     return out
 
-            mod_eager = Net(3, 6, kernel_size=2, stride=1).eval().cuda()
+            mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
 
             inps = [5, 3, 4]
             if conv == nn.Conv2d:
@@ -1800,11 +1799,13 @@ class TestFrozenOptimizations(JitTestCase):
             else:
                 scripted_mod = torch.jit.script(mod_eager)
 
-            self.run_pass("inline", scripted_mod.graph)
-            FileCheck().check("aten::relu").run(scripted_mod.graph)
             frozen_mod = torch.jit.freeze(scripted_mod)
-            self.run_pass("fuse_frozen_conv_relu", frozen_mod.graph)
-            FileCheck().check("prim::cudnn_convolution_add_relu").run(frozen_mod.graph)
+            FileCheck().check("aten::relu").run(frozen_mod.graph)
+            self.run_pass("fuse_frozen_conv_add_relu", frozen_mod.graph)
 
-            self.assertEqual(mod_eager(inp), scripted_mod(inp))
-            self.assertEqual(mod_eager(inp), scripted_mod(inp))
+            if add_z:
+                FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
+            else:
+                FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
+
+            self.assertEqual(mod_eager(inp), frozen_mod(inp))
