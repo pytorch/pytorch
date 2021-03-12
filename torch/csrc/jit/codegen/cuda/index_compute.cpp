@@ -1493,26 +1493,28 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
   // Indices should now be mapped onto IterDomains in consumer, so just grab
   // and use them.
 
-  // If we are generating a predicate for initialization check if we should use
-  // rfactor instead of root_dom
-  bool use_rfactor = true;
-  if (kir_consumer_tv->domain()->hasRFactor()) {
-    auto rfactor_dom = kir_consumer_tv->domain()->rfactorDomain();
-    for (auto rfactor_id : rfactor_dom) {
-      if (rfactor_id->isReduction()) {
-        if (consumer_indexing.indexMap().find(rfactor_id) !=
-            consumer_indexing.indexMap().end()) {
-          if (!consumer_indexing.indexMap().at(rfactor_id)->isZeroInt()) {
-            use_rfactor = false;
-            break;
-          }
+  // If we are generating a predicate for initialization, we should use
+  // rfactor instead of root_dom. If we are generating a predicate for
+  // actual reduction expr, reduction axes should have their indices
+  // mapped to non-zero symbolic vals.
+  bool buffer_init = false;
+  for (auto consumer_id : kir_consumer_tv->domain()->domain()) {
+    if (consumer_id->isReduction()) {
+      if (consumer_indexing.indexMap().find(consumer_id) !=
+          consumer_indexing.indexMap().end()) {
+        if (!consumer_indexing.indexMap().at(consumer_id)->isZeroInt()) {
+          buffer_init = false;
+          break;
         }
       }
+      buffer_init = true;
     }
   }
 
+  // If we are initializing a reduction buffer and the tensor has a
+  // rfactor root, the predicate should be based on the rfactor root.
   const auto root_domain =
-      (use_rfactor && kir_consumer_tv->domain()->hasRFactor())
+      (buffer_init && kir_consumer_tv->domain()->hasRFactor())
       ? kir_consumer_tv->domain()->rfactorDomain()
       : kir_consumer_tv->domain()->rootDomain();
 
@@ -1530,7 +1532,7 @@ std::pair<std::vector<kir::Val*>, bool> Index::getConsumerRootPredIndices(
     }
   }
 
-  return {root_inds, use_rfactor};
+  return {root_inds, buffer_init};
 }
 
 } // namespace cuda

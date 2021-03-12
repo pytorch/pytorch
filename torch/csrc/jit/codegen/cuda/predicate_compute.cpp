@@ -48,11 +48,11 @@ kir::IterDomain* getTermIterDomainInMap(
 std::vector<kir::Bool*> PredicateCompute::computePredicates(
     const kir::TensorView* tv,
     const std::vector<kir::Val*>& indices,
-    bool use_rfactor) {
+    bool buffer_init) {
   FUSER_PERF_SCOPE("computePredicates");
 
   const auto domain = tv->domain();
-  const auto& root = (use_rfactor && domain->hasRFactor())
+  const auto& root = (buffer_init && domain->hasRFactor())
       ? domain->rfactorDomain()
       : domain->rootDomain();
 
@@ -82,7 +82,7 @@ std::vector<kir::Bool*> PredicateCompute::computePredicates(
     const bool zero_ind = indices[i]->isZeroInt();
     const bool simple_ind = indices[i]->definition() == nullptr;
 
-    if (root[i]->isBroadcast() ||
+    if (root[i]->isBroadcast() || (buffer_init && root[i]->isReduction()) ||
         gpu_lower->isDerivedFromTrivialReduction(root[i])) {
       continue;
     } else if (simple_ind && !zero_ind) {
@@ -228,21 +228,12 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   auto pred_inds =
       Index::getConsumerRootPredIndices(out_tv, loops, pred_contiguity);
   auto root_indices = pred_inds.first;
-  bool use_maybe_rfactor = pred_inds.second;
+  const bool buffer_init = pred_inds.second;
 
-  if (out_tv->memoryType() == MemoryType::Local &&
-      out_tv->domain()->hasReduction() && !use_maybe_rfactor) {
-    const auto tv_filter_inp_view =
-        ir_utils::filterByType<kir::TensorView>(expr->inputs());
-    const auto has_tv_inputs =
-        tv_filter_inp_view.begin() != tv_filter_inp_view.end();
-    // If predicates doesn't need maybe_rfactor, but it has reduction axes, and
-    // expr has no inputs, we're pretty confident we're intializing a reduction
-    // buffer. If we're initing a reduction buffer don't generate an inline
-    // predicate.
-    if (!has_tv_inputs) {
-      return ir_builder.create<kir::Bool>(true);
-    }
+  // If we are indexing a buffer init expr, and the buffer is local
+  // memory, predicate is not needed as we allocate enough local memory.
+  if (out_tv->memoryType() == MemoryType::Local && buffer_init) {
+    return ir_builder.create<kir::Bool>(true);
   }
 
   // Don't generate predicates unless needed. This is just for
@@ -251,8 +242,8 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     return thread_pred;
   }
 
-  auto all_preds = PredicateCompute::computePredicates(
-      out_tv, root_indices, use_maybe_rfactor);
+  auto all_preds =
+      PredicateCompute::computePredicates(out_tv, root_indices, buffer_init);
   // If we have thread predicates, add those
   if (thread_pred != nullptr) {
     all_preds.push_back(thread_pred);

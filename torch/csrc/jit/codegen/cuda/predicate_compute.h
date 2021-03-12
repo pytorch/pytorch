@@ -40,7 +40,7 @@ class PredicateCompute {
   static std::vector<kir::Bool*> computePredicates(
       const kir::TensorView* tv,
       const std::vector<kir::Val*>& indices,
-      bool use_rfactor);
+      bool buffer_init);
 
   static kir::Bool* getInlinePredicate(
       const kir::Expr* expr,

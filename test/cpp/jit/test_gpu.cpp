@@ -13671,6 +13671,46 @@ TEST(NVFuserTest, FusionIOTensorTrivialReductionRepro_CUDA) {
   TORCH_CHECK(outputs[0].allclose(t0_ref.add(1)));
 }
 
+TEST(NVFuserTest, FusionReductionPredicate_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {0});
+  fusion.addOutput(tv1);
+
+  auto tv2 = tv0->cache_after();
+
+  const int bdimx = 128;
+  tv1->split(1, bdimx);
+  tv1->split(1, 4);
+  tv1->split(1, 1);
+
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(2)->parallelize(ParallelType::Unroll);
+  tv1->split(0, 10);
+  tv0->computeAt(tv1, 4);
+
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  int numel_x = 650;
+  int numel_y = 102;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({numel_x, numel_y}, options);
+  at::Tensor cg_output = at::empty({numel_y}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({input}, {cg_output});
+
+  auto aten_output = input.to(at::kDouble).sum({0});
+
+  testValidate(
+      &fusion, {cg_output}, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
