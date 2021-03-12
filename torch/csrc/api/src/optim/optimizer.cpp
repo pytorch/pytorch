@@ -129,7 +129,6 @@ std::vector<Tensor>& Optimizer::parameters() noexcept {
 }
 
 size_t Optimizer::size() const noexcept {
-  TORCH_WARN("Optimizer::size() will be removed in PyTorch 1.6");
   size_t count = 0;
   for (const auto& group : param_groups_) {
     count += group.params().size();
