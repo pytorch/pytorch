@@ -1380,14 +1380,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
       devices.emplace_back(at::DeviceType::CUDA, device);
     }
   } else if (usedDeviceIdxs_.empty()) {
-    // This means there is not yet a NCCL collective being called
-    // Here we have to use the best guesses and will use a single GPU to call
-    // allreduce to achieve barrier.
-    // In case the multiple processes fall into the same node, we use rank to
-    // ensure that each process is on a different GPU
-    auto numGPUs = at::cuda::getNumGPUs();
-    int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
-    devices.emplace_back(at::DeviceType::CUDA, deviceIdx);
+    // This process has not yet issued any NCCL calls, so we're not sure
+    // yet what device(s) its NCCL calls will use. Falls back to best guess:
+    // the current device.
+    devices.emplace_back(at::DeviceType::CUDA, c10::cuda::current_device());
   } else {
     for (auto usedDeviceIdx : usedDeviceIdxs_) {
       devices.emplace_back(at::DeviceType::CUDA, usedDeviceIdx);
