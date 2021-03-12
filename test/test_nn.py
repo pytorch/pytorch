@@ -3703,12 +3703,9 @@ class TestNN(NNTestCase):
 
     def test_embedding_from_pretrained_padding_idx(self):
         padding_idx = 2
-        padding_vec = torch.ones(3) * 7
         embeddings = torch.rand(4, 3, requires_grad=True)
-        with torch.no_grad():
-            embeddings[padding_idx] = padding_vec
         embedding_nn = nn.Embedding.from_pretrained(embeddings, padding_idx=padding_idx)
-        self.assertEqual(embedding_nn.weight[padding_idx], padding_vec)
+        self.assertEqual(embedding_nn.weight[padding_idx].sum(), 0)
 
     def test_embedding_from_pretrained_options(self):
         a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
@@ -12358,6 +12355,15 @@ class TestNNDeviceType(NNTestCase):
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))
 
+        def fn_wrapper(device):
+            def padding_fn(weight):
+                inp = torch.tensor([[0, 1, 1, 2], [1, 1, 0, 2]], dtype=torch.long).to(device)
+                return torch.nn.functional.embedding(inp, weight, padding_idx=1)
+            return padding_fn
+
+        fn = fn_wrapper(device)
+        _assertGradAndGradgradChecks(self, fn, (weight, ))
+
     def test_embedding_scalar_weight_error(self, device):
         indices = torch.rand(2, 2, device=device).long()
         weight = torch.tensor(1.0, device=device)
@@ -12429,15 +12435,6 @@ class TestNNDeviceType(NNTestCase):
         output = embedding(input)
         self.assertEqual(output[0][2].sum(), 0)
         self.assertEqual(output[1][1].sum(), 0)
-
-        # change padding vector
-        padding_vector = torch.ones(20, dtype=dtype, device=device)
-        embedding = nn.Embedding(10, 20, padding_idx=2, sparse=True).to(device, dtype)
-        with torch.no_grad():
-            embedding.weight[2] = padding_vector
-        input = torch.tensor([0, 2], dtype=torch.long).to(device)
-        output = embedding(input)
-        self.assertEqual(output[1], padding_vector)
 
         # out of bounds check for padding_idx
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=25)
