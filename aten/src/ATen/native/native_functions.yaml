@@ -2072,6 +2072,7 @@
 - func: is_floating_point(Tensor self) -> bool
   variants: function, method
   device_guard: False
+  manual_cpp_binding: True
 
 - func: is_complex(Tensor self) -> bool
   variants: function, method
