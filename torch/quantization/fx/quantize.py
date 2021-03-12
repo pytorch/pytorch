@@ -1056,11 +1056,15 @@ class Quantizer:
                         if value is BinaryOp:
                             use_copy_node = all_node_args_have_no_tensors(node)
                             if use_copy_node:
+                                # TODO(future PR): update the pattern to quantize
+                                # handler logic to take this into account.
                                 value = CopyNode  # type: ignore
 
                             this_node_qconfig = self.qconfig_map[node.name]
                             if this_node_qconfig:
                                 dtypes = get_qconfig_dtypes(this_node_qconfig)
+                                # TODO(future PR): update the pattern to quantize
+                                # handler logic to take this into account.
                                 skip_this_match = (
                                     (node.target in binary_op_supported_dtypes) and
                                     (dtypes not in binary_op_supported_dtypes[node.target])
