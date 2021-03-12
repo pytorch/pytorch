@@ -3136,10 +3136,10 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   square_shape.back() = input.size(-2);
 
   auto input_ = at::zeros(square_shape, input.options());
-  ArrayRef<at::indexing::TensorIndex> rectangular_view_indices = {
-    "...", at::indexing::Slice(), at::indexing::Slice(at::indexing::None, input.size(-1))
-  };  // [..., :, :input.shape[-1]]
-  input_.index_put_({rectangular_view_indices}, input);
+
+  using at::indexing::Slice;
+  using at::indexing::None;
+  input_.index_put_({"...", Slice(), Slice(None, input.size(-1))}, input); // input_[..., :, :input.shape[-1]] = input
 
   // make sure that all elements of Householder vectors including 0's and 1's are stored explicitly
   // LAPACK assumes implicitly that the diagonal is filled with ones and the upper triangle is zero
@@ -3150,11 +3150,11 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
   auto d_tau = at::zeros_like(tau);
 
   auto d_result = at::zeros(square_shape, grad.options());
-  d_result.index_put_({rectangular_view_indices}, grad);
+  d_result.index_put_({"...", Slice(), Slice(None, input.size(-1))}, grad); // d_result[..., :, :input.shape[-1]] = grad
 
   auto start_j = tau.size(-1) - 1;
   for (int64_t j = start_j; j >= 0; j--) {
-    auto v = input_.index({"...", at::indexing::Slice(), j});
+    auto v = input_.index({"...", Slice(), j});
     auto v1 = v, v2 = v;
 
     // we need to recompute input[j] * at::outer(v, v)
@@ -3165,7 +3165,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 
     // we don't have an access to the intermediate results of the product of Householder matrices
     // so we need to recompute orgqr(input, tau[..., :j])
-    auto result_prev = at::orgqr(input_, tau.index({"...", at::indexing::Slice(at::indexing::None, j)}));
+    auto result_prev = at::orgqr(input_, tau.index({"...", Slice(None, j)}));
 
     // now the actual derivative computation
     auto d_result2 = d_result, d_v5 = -d_result;
@@ -3185,7 +3185,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     d_result = d_result1 + d_result2;
     auto d_v = d_v1.squeeze(-1) + d_v2.conj().squeeze(-2);
 
-    d_input.index({"...", at::indexing::Slice(), j}).add_(d_v);
+    d_input.index({"...", Slice(), j}).add_(d_v);
     d_tau.index({"...", j}).add_(d_tauj.sum(-1).sum(-1));
   }
 
