@@ -194,14 +194,14 @@ def insert_observer_for_output_of_the_node(
         elif (isinstance(quantize_handler,
                          FixedQParamsOpQuantizeHandler) and
               not model.training) or \
-                isinstance(quantize_handler, CopyNode):
+                isinstance(quantize_handler, CopyNodeQuantizeHandler):
             # inserting observers for output of observed module, or
             # mark the output as observed
             assert node.op in [
                 'call_module',
                 'call_function',
                 'call_method'], \
-                'CopyNode of type ' + node.op + ' is not handled'
+                'CopyNodeQuantizeHandler of type ' + node.op + ' is not handled'
 
             def is_observed(input_arg):
                 if isinstance(input_arg, Node):
@@ -221,7 +221,7 @@ def insert_observer_for_output_of_the_node(
                 # propagate observed property from input
                 if is_observed(node.args[0]):
                     observed_node_names_set.add(node.name)
-        elif (isinstance(quantize_handler, BinaryOp) and
+        elif (isinstance(quantize_handler, BinaryOpQuantizeHandler) and
               quantize_handler.num_tensor_args == 1):
             assert matched_nodes is not None
             input_node = matched_nodes[-1]  # first node in the sequence
@@ -792,16 +792,16 @@ class Quantizer:
             quantized = True
 
             # Need to get correct quantized/non-quantized state forn the output
-            # of CopyNode
+            # of CopyNodeQuantizeHandler
             if type(obj) in [
-                    CopyNode,
+                    CopyNodeQuantizeHandler,
                     FixedQParamsOpQuantizeHandler
             ]:
                 assert node.op in [
                     'call_module',
                     'call_function',
                     'call_method'], \
-                    'CopyNode of type ' + node.op + ' is not handled'
+                    'CopyNodeQuantizeHandler of type ' + node.op + ' is not handled'
                 quantized = node_arg_is_quantized(node.args[0])
 
             if not activation_is_int8_quantized(qconfig) or \
@@ -1021,7 +1021,7 @@ class Quantizer:
 
         For example, {
           'relu_1': (relu_1, [relu_1], torch.nn.functional.relu,
-                     <CopyNode instance>, QConfig(...)),
+                     <CopyNodeQuantizeHandler instance>, QConfig(...)),
           ...
         }
         """
@@ -1053,12 +1053,12 @@ class Quantizer:
                 for pattern, value in patterns.items():
                     if is_match(modules, node, pattern):
                         skip_this_match = False
-                        if value is BinaryOp:
+                        if value is BinaryOpQuantizeHandler:
                             use_copy_node = all_node_args_have_no_tensors(node)
                             if use_copy_node:
                                 # TODO(future PR): update the pattern to quantize
                                 # handler logic to take this into account.
-                                value = CopyNode  # type: ignore
+                                value = CopyNodeQuantizeHandler  # type: ignore
 
                             this_node_qconfig = self.qconfig_map[node.name]
                             if this_node_qconfig:
@@ -1160,8 +1160,8 @@ class Quantizer:
             if node.name in matches:
                 root_node, matched_nodes, matched_pattern, quantize_handler, \
                     qconfig = matches[node.name]
-                # don't attach observer/fake_quant for CopyNode
-                if isinstance(quantize_handler, CopyNode):
+                # don't attach observer/fake_quant for CopyNodeQuantizeHandler
+                if isinstance(quantize_handler, CopyNodeQuantizeHandler):
                     qconfig = None
                 if root_node is node and \
                         input_output_observed(quantize_handler):
