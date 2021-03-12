@@ -23,7 +23,13 @@ torch/csrc/autograd/generated/
 
 import argparse
 import os
+from tools.codegen.api import cpp
+from tools.codegen.api.autograd import (
+    match_differentiability_info, NativeFunctionWithDifferentiabilityInfo,
+)
+from tools.codegen.gen import parse_native_yaml
 from tools.codegen.selective_build.selector import SelectiveBuilder
+from typing import List
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
@@ -101,11 +107,16 @@ def gen_autograd(
 
     template_path = os.path.join(autograd_dir, 'templates')
 
+    fns = list(sorted(filter(
+        operator_selector.is_native_function_selected_for_training,
+        parse_native_yaml(native_functions_path)), key=lambda f: cpp.name(f.func)))
+    fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo] = match_differentiability_info(fns, differentiability_infos)
+
     # Generate VariableType.h/cpp
     from .gen_trace_type import gen_trace_type
     from .gen_variable_type import gen_variable_type
     if not disable_autograd:
-        gen_variable_type(out, native_functions_path, differentiability_infos, template_path, operator_selector)
+        gen_variable_type(out, native_functions_path, fns_with_diff_infos, template_path)
 
         # operator filter not applied as tracing sources are excluded in selective build
         gen_trace_type(out, native_functions_path, template_path)
