@@ -26,6 +26,7 @@ from torch.testing._internal.common_quantization import (
     ConvBnReLUModel,
     ConvModel,
     QuantizationTestCase,
+    skipIfNoFBGEMM,
     SingleLayerLinearDynamicModel,
     SingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
@@ -910,6 +911,40 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
             mp_shadows_mq, OutputLogger)
         self.assertTrue(len(act_compare_dict) == 2)
         self.assert_ns_compare_dict_valid(act_compare_dict)
+
+    @skipIfNoFBGEMM
+    def test_prepare_model_with_stubs_multiple_dtype_casts(self):
+        """
+        Verifies that for nodes where the first input arg is a list,
+        such as `cat`, we insert an individual dtype cast for each
+        arg of the list.
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = torch.cat([x, x, x], dim=0)
+                return x
+
+        m = M().eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        mp(torch.randn(4, 4))
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+
+        mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+
+        expected_occurrence = {
+            # 3 dequantize function calls from the 3 dtype casts for [x, x, x]
+            ns.call_function(torch.dequantize): 3,
+            # 1 dequantize method call for module output
+            ns.call_method("dequantize"): 1,
+        }
+        self.checkGraphModuleNodes(
+            mp_shadows_mq, expected_node_occurrence=expected_occurrence)
 
 class TestFXNumericSuiteCoreAPIsModels(QuantizationTestCase):
     """
