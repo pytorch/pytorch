@@ -43,6 +43,7 @@ if is_available():
         _invoke_remote_torchscript,
         _set_rpc_timeout,
         _get_current_rpc_agent,
+        _get_request_device_indices,
         get_rpc_timeout,
         enable_gil_profiling,
         RpcBackendOptions,

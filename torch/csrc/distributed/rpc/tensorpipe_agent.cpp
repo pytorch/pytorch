@@ -27,6 +27,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+thread_local std::shared_ptr<LazyStreamContext> TensorPipeAgent::ctx_ = nullptr;
+
 namespace {
 
 // An environment variable along the lines of GLOO_ and NCCL_SOCKET_IFNAME that
@@ -769,6 +771,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
+            CurrentLazyStreamContextGuard guard(ctx);
             futureResponseMessage = cb_->operator()(requestMessage);
             // FIXME: The user function might use a different device than the
             // ones used in request Tensors. The agent is not aware of which

@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
+#include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -682,6 +683,14 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "_set_reverse_device_maps",
           // intentionally not releasing GIL to avoid unnecessary context switch
           &TensorPipeAgent::setReverseDeviceMaps);
+
+  module.def("_get_request_device_indices", [](){
+    auto tpAgent = std::static_pointer_cast<TensorPipeAgent>(
+        RpcAgent::getCurrentRpcAgent());
+
+    return tpAgent->getThreadLocalLazyStreamContext()->deviceIndices();
+  });
+
 
 #endif // USE_TENSORPIPE
 

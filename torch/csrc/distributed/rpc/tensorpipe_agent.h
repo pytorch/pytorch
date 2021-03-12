@@ -210,6 +210,10 @@ class TensorPipeAgent : public RpcAgent {
 
   tensorpipe::DeviceMap getDeviceMap(const WorkerInfo& dest) override;
 
+  inline std::shared_ptr<LazyStreamContext> getThreadLocalLazyStreamContext() const {
+    return ctx_;
+  }
+
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
 
@@ -304,6 +308,19 @@ class TensorPipeAgent : public RpcAgent {
     }
   };
 #endif
+
+  struct CurrentLazyStreamContextGuard {
+    CurrentLazyStreamContextGuard(
+        const std::shared_ptr<LazyStreamContext>& ctx) {
+      TensorPipeAgent::ctx_ = ctx;
+    }
+
+    ~CurrentLazyStreamContextGuard() {
+      TensorPipeAgent::ctx_ = nullptr;
+    }
+  };
+
+  static thread_local std::shared_ptr<LazyStreamContext> ctx_;
 
   // When a request+response completes, we need to mark the future message as
   // complete. However, if its timeout has already expired, it already has an

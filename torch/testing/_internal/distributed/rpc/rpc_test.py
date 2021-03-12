@@ -15,7 +15,12 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
-from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
+from torch.distributed.rpc import (
+    RRef,
+    _get_debug_info,
+    _get_request_device_indices,
+    _rref_context_get_debug_info,
+)
 from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all
 from torch.distributed.rpc.internal import (
     PythonUDF,
@@ -5445,3 +5450,33 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def test_rref_proxy_timeout(self):
         for rpc_api in ["rpc_sync", "rpc_async", "remote"]:
             self._test_rref_proxy_timeout(rpc_api)
+
+    @staticmethod
+    def _verify_request_devices(x):
+        return _get_request_device_indices()
+
+    @skip_if_lt_x_gpu(1)
+    def test_thread_local_request_devices(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {0: 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        x = torch.zeros(2).to(0)
+
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._verify_request_devices,
+            args=(x,)
+        )
+
+        self.assertEqual(ret, [0])
+
+        rpc.shutdown()

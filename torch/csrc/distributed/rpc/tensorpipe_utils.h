@@ -37,6 +37,7 @@ struct TORCH_API LazyStreamContext {
   virtual ~LazyStreamContext() = default;
   virtual void waitForCurrentStreams(const std::vector<torch::Tensor>& = {}) {}
   virtual void recordBarrierEvents() {}
+  virtual std::vector<c10::DeviceIndex> deviceIndices() const {return {};}
 
 #ifdef USE_CUDA_NOT_ROCM
   virtual std::vector<CUDAStream> getReservedStreams() const {
@@ -90,6 +91,15 @@ struct TORCH_CUDA_CPP_API CudaLazyStreamContext : public LazyStreamContext {
       reservedStreams.push_back(entry.second);
     }
     return reservedStreams;
+  }
+
+  std::vector<c10::DeviceIndex> deviceIndices() const override {
+    std::vector<c10::DeviceIndex> indices;
+    indices.reserve(streams_.size());
+    for (const auto& entry : streams_) {
+      indices.push_back(entry.first);
+    }
+    return indices;
   }
 
   // get a stream for the given device. If it is the first time using that
