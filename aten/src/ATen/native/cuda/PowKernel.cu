@@ -104,19 +104,19 @@ static inline __host__ __device__ B complex_pow_(B base, E exp) {
 void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+      gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return complex_pow_(base, exp);
       });
     });
   } else if (isFloatingType(iter.dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "pow_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return pow_(base, exp);
       });
     });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
         return native::powi(base, exp);
       });
     });
