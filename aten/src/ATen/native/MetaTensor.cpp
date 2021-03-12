@@ -34,6 +34,8 @@ Tensor empty_meta(
   auto memory_format_ = memory_format.value_or(MemoryFormat::Contiguous);
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format_);
 
+  tensor.unsafeGetTensorImpl()->set_storage_access_should_throw();
+
   return tensor;
 }
 
@@ -70,6 +72,8 @@ Tensor empty_strided_meta(
   );
 
   tensor.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride);
+
+  tensor.unsafeGetTensorImpl()->set_storage_access_should_throw();
 
   return tensor;
 }

@@ -84,8 +84,9 @@ class PackageImporter(Importer):
 
         self.patched_builtins = builtins.__dict__.copy()
         self.patched_builtins['__import__'] = self.__import__
-        # allow pickles from archive using `import resources`
-        self.modules['resources'] = self  # type: ignore
+        # Allow packaged modules to reference their PackageImporter
+        self.modules['torch_package_importer'] = self  # type: ignore
+
 
         self._mangler = PackageMangler()
 
@@ -270,6 +271,17 @@ class PackageImporter(Importer):
         module = self.import_module(demangle(module_name))
         return self.zip_reader.get_record(demangle(module.__file__)).decode('utf-8')
 
+    # note: named `get_resource_reader` so that importlib.resources can find it.
+    # This is otherwise considered an internal method.
+    def get_resource_reader(self, fullname):
+        try:
+            package = self._get_package(fullname)
+        except ImportError:
+            return None
+        if package.__loader__ is not self:
+            return None
+        return _PackageResourceReader(self, fullname)
+
     def _install_on_parent(self, parent: str, name: str, module: types.ModuleType):
         if not parent:
             return
@@ -413,12 +425,15 @@ class PackageImporter(Importer):
             else:
                 return module
 
-    def _zipfile_path(self, package, resource):
+    def _zipfile_path(self, package, resource=None):
         package = self._get_package(package)
-        resource = _normalize_path(resource)
         assert package.__loader__ is self
         name = demangle(package.__name__)
-        return f"{name.replace('.', '/')}/{resource}"
+        if resource is not None:
+            resource = _normalize_path(resource)
+            return f"{name.replace('.', '/')}/{resource}"
+        else:
+            return f"{name.replace('.', '/')}"
 
     def _get_or_create_package(self, atoms: List[str]) -> 'Union[_PackageNode, _ExternNode]':
         cur = self.root
@@ -488,3 +503,50 @@ def patched_getfile(object):
             return _package_imported_modules[object.__module__].__file__
     return _orig_getfile(object)
 inspect.getfile = patched_getfile
+
+
+class _PackageResourceReader:
+    """Private class used to support PackageImporter.get_resource_reader().
+
+    Confirms to the importlib.abc.ResourceReader interface. Allowed to access
+    the innards of PackageImporter.
+    """
+    def __init__(self, importer, fullname):
+        self.importer = importer
+        self.fullname = fullname
+
+    def open_resource(self, resource):
+        from io import BytesIO
+        return BytesIO(self.importer.load_binary(self.fullname, resource))
+
+    def resource_path(self, resource):
+        # The contract for resource_path is that it either returns a concrete
+        # file system path or raises FileNotFoundError.
+        raise FileNotFoundError
+
+    def is_resource(self, name):
+        path = self.importer._zipfile_path(self.fullname, name)
+        return self.importer.zip_reader.has_record(path)
+
+    def contents(self):
+        from pathlib import Path
+        filename = self.fullname.replace('.', '/')
+
+        fullname_path = Path(self.importer._zipfile_path(self.fullname))
+        files = self.importer.zip_reader.get_all_records()
+        subdirs_seen = set()
+        for filename in files:
+            try:
+                relative = Path(filename).relative_to(fullname_path)
+            except ValueError:
+                continue
+            # If the path of the file (which is relative to the top of the zip
+            # namespace), relative to the package given when the resource
+            # reader was created, has a parent, then it's a name in a
+            # subdirectory and thus we skip it.
+            parent_name = relative.parent.name
+            if len(parent_name) == 0:
+                yield relative.name
+            elif parent_name not in subdirs_seen:
+                subdirs_seen.add(parent_name)
+                yield parent_name

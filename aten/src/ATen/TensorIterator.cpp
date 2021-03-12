@@ -12,7 +12,6 @@ namespace at {
 
 using DimMask = TensorIteratorBase::DimMask;
 using PtrVector = TensorIteratorBase::PtrVector;
-using loop_t = TensorIteratorBase::loop_t;
 using loop2d_t = TensorIteratorBase::loop2d_t;
 using StrideVector = TensorIteratorBase::StrideVector;
 
@@ -608,25 +607,6 @@ int TensorIteratorBase::num_reduce_dims() const {
   return count;
 }
 
-#define LOOP_WRAPPER(ntensor, loop) \
-  [=](char** base, const int64_t* strides, int64_t size0, int64_t size1) { \
-    auto data = PtrVector(base, base + ntensor);                          \
-    const int64_t* outer_strides = &strides[ntensor];                     \
-                                                                          \
-    for (int64_t i = 0; i < size1; i++) {                                 \
-      if (i > 0) {                                                        \
-        for (int arg = 0; arg < ntensor; arg++) {                         \
-          data[arg] += outer_strides[arg];                                \
-        }                                                                 \
-      }                                                                   \
-      loop(data.data(), strides, size0);                               \
-    }                                                                     \
-  }
-
-void TensorIteratorBase::for_each(loop_t loop, int64_t grain_size) {
-  for_each(LOOP_WRAPPER(ntensors(), loop), grain_size);
-}
-
 void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
   int64_t numel = this->numel();
   if (numel == 0) {
@@ -648,10 +628,6 @@ StrideVector TensorIteratorBase::get_strides() const {
     }
   }
   return strides;
-}
-
-void TensorIteratorBase::serial_for_each(loop_t loop, Range range) const {
-  serial_for_each(LOOP_WRAPPER(ntensors(), loop), range);
 }
 
 void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
@@ -1316,7 +1292,12 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
       // for the is_meta_ test.
       TORCH_INTERNAL_ASSERT(op.original_tensor.is_same(t));
       TORCH_INTERNAL_ASSERT(!op.tensor.is_same(t));
-      at::native::resize_output(op.tensor, sizes);
+      // fastpath CPU to skip a dispatcher trip
+      if (op.tensor.device().is_cpu()) {
+        at::native::resize_output_cpu(op.tensor, sizes);
+      } else {
+        at::native::resize_output(op.tensor, sizes);
+      }
       if (!strides.empty()) {
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
         op.tensor.as_strided_(sizes, strides);
@@ -1342,7 +1323,12 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
       }
       op.current_dtype = op.target_dtype;
   } else if (op.will_resize) {
-      at::native::resize_output(op.tensor, sizes);
+      // fastpath CPU to skip a dispatcher trip
+      if (op.tensor.device().is_cpu()) {
+        at::native::resize_output_cpu(op.tensor, sizes);
+      } else {
+        at::native::resize_output(op.tensor, sizes);
+      }
       if (!strides.empty()) {
         TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
         op.tensor.as_strided_(sizes, strides);
