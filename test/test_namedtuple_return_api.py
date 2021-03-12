@@ -25,7 +25,7 @@ class TestNamedTupleAPI(TestCase):
         operators_found = set()
         regex = re.compile(r"^(\w*)(\(|\.)")
         file = open(aten_native_yaml, 'r')
-        for f in yaml.load(file.read()):
+        for f in yaml.safe_load(file.read()):
             f = f['func']
             ret = f.split('->')[1].strip()
             name = regex.findall(f)[0][0]
