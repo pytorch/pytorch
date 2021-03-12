@@ -3755,6 +3755,28 @@ TEST(LoopNest, CompoundTensorSimple) {
   assertAllEqual(a_data, a_ref);
 }
 
+TEST(LoopNest, InlineConstantIndex) {
+  KernelScope kernel_scope;
+  const int N = 10;
+  Placeholder x_buf("a", kFloat, {1, N, 1});
+  Tensor* y = Compute(
+      "f",
+      {{1, "m"}, {N, "n"}, {1, "o"}},
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
+        return x_buf.load(m, n, o);
+      });
+  Tensor* z = Compute(
+      "f",
+      {{1, "m"}, {N, "n"}, {1, "o"}},
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
+        return y->call(m, n, o);
+      });
+
+  LoopNest l({z});
+  l.simplify();
+  ASSERT_TRUE(l.computeInline(y->buf()));
+}
+
 TEST(LoopNest, CompoundTensorUsed) {
   KernelScope kernel_scope;
 
@@ -3919,6 +3941,30 @@ TEST(LoopNest, DISABLED_ColReduceSplitMaskUnevenReorder) {
   auto p = colReduce(M, N);
   Stmt* s = splitMaskReorder(p.second);
   checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, DISABLED_VectorizeUse) {
+  KernelScope kernel_scope;
+  constexpr int N = 8;
+  Placeholder a("a", kFloat, {N});
+  Tensor* b = Compute(
+      "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
+  Tensor* c = Compute(
+      "c", {{N, "n"}}, [&](const VarHandle& n) { return b->call(n) + 2.0f; });
+  LoopNest nest({c});
+  auto loops = nest.getLoopStmtsFor(b);
+  nest.vectorize(loops[0]);
+  loops = nest.getLoopStmtsFor(c);
+  nest.vectorize(loops[0]);
+  nest.prepareForCodegen();
+  Stmt* s = nest.root_stmt();
+  std::ostringstream oss;
+  oss << *nest.root_stmt();
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: c[Ramp
+)IR",
+      oss.str());
 }
 
 } // namespace jit
