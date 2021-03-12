@@ -1093,7 +1093,6 @@ class TestQuantizeFx(QuantizationTestCase):
         ]:
             m = M().eval()
             m = prepare_fx(m, qconfig_dict)
-            print("prepared:", m)
             m(torch.randn(2, 1, 3, 3))
             m = convert_fx(m)
             self.checkGraphModuleNodes(m, expected_node_list=node_list)
@@ -2374,7 +2373,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = torch.sum(x, [1])
                 return x
 
-
         data = torch.randn(1, 2, 3, 4, dtype=torch.float)
         quant_type = QuantType.STATIC
         # testing for fp16 static quant
@@ -2389,7 +2387,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self.checkGraphModeFxOp(
             Sum(), data, quant_type,
             expected_node_occurrence=node_occurrence,
-            custom_qconfig_dict=custom_qconfig_dict)
+            custom_qconfig_dict=custom_qconfig_dict, print_debug_info=True)
 
     def test_bmm(self):
         class BMMMethod(torch.nn.Module):
@@ -2443,7 +2441,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def _test_quantized_add_mul_qat(self, model, expected_node_occurrence):
         qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
         mp = torch.quantization.quantize_fx.prepare_qat_fx(model, qconfig_dict)
-        print(mp)
         self.checkGraphModuleNodes(
             mp, expected_node_occurrence=expected_node_occurrence)
 
@@ -3418,8 +3415,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         }
         m = prepare_fx(m, qconfig_dict)
         expected_occurrence = {
-            # input for first linear, weight of first and second linear, output of first and second linear
-            ns.call_module(torch.quantization.MinMaxObserver): 5,
+            # input and weight of first and second linear, output of first and second linear
+            ns.call_module(torch.quantization.MinMaxObserver): 6,
         }
         self.checkGraphModuleNodes(
             m,
@@ -3428,8 +3425,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # make sure it runs
         m = convert_fx(m)
         expected_occurrence = {
-            ns.call_function(torch.quantize_per_tensor): 1,
-            ns.call_method("dequantize"): 1,
+            # we have extra quant/dequant after reshape since currently we do not
+            # propagate the information about the dtype of the output
+            # of CopyNode, we may improve this later and remove the
+            # extra quant/dequant
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 2,
             ns.call_method("to"): 0,
             ns.call_function(torch.ops.quantized.linear): 2
         }

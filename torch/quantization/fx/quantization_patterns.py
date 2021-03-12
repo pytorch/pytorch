@@ -356,10 +356,10 @@ class ConvRelu(QuantizeHandler):
                     root_module = quantizer.modules['']
                     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
                     act_post_process_node = self.relu_node if self.relu_node else self.conv_node
-                    cur_idx = quantizer.activation_post_process_indexes[node.name]
+                    cur_idx = quantizer.activation_post_process_indexes[act_post_process_name]
                     activation_post_process = \
-                        quantizer.activation_post_process_map[node.name][cur_idx]
-                    quantizer.activation_post_process_indexes[node.name] += 1
+                        quantizer.activation_post_process_map[act_post_process_name][cur_idx]
+                    quantizer.activation_post_process_indexes[act_post_process_name] += 1
                     return quantize_node(
                         quantizer, op_out, activation_post_process,
                         act_post_process_node, is_input=False)
