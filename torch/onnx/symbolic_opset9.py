@@ -471,8 +471,21 @@ def expand_as(g, self, other):
     return g.op("Expand", self, shape)
 
 
+@parse_args('v', 'v', 'i', 'b', 'v')
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
-    return g.op("Gather", weight, indices)
+    if scale_grad_by_freq and sym_help._training_mode:
+        raise RuntimeError('Unsupported: ONNX export of embedding with scale_grad_by_freq=True '
+                           'for training mode. ONNX does not support scaling the gradients.')
+    # To match the torch operator behavior for padding_idx: 
+    # if (padding_idx >= 0) {
+    #   embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
+    # }
+    weight = g.op("Gather", weight, indices)
+    if (padding_idx >= 0):
+        mask = eq(g, indices, g.op("Constant", value_t=torch.tensor(padding_idx)))
+        mask = reshape(g, mask, g.op("Constant", value_t=torch.tensor([-1, 1], dtype=torch.int64)))
+        weight = masked_fill(g, weight, mask, torch.tensor(0.))
+    return weight
 
 
 @parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
@@ -2003,8 +2016,8 @@ def repeat_interleave(g, self, repeats, dim=None):
     input_sizes[dim], input_sizes_temp[dim] = -1, 1
     for idx, r_split in enumerate(r_splits):
         i_split = unsqueeze(g, i_splits[idx], dim + 1)
-        r_concat = [g.op("Constant", value_t=torch.LongTensor(input_sizes_temp[:dim + 1])), 
-                    r_split, 
+        r_concat = [g.op("Constant", value_t=torch.LongTensor(input_sizes_temp[:dim + 1])),
+                    r_split,
                     g.op("Constant", value_t=torch.LongTensor(input_sizes_temp[dim + 1:]))]
         r_concat = g.op("Concat", *r_concat, axis_i=0)
         i_split = expand(g, i_split, r_concat, None)
@@ -2376,6 +2389,14 @@ def nonzero_numpy(g, input, _outputs=None):
 def isnan(g, input):
     output = g.op('IsNaN', input)
     return output
+
+def _any(g, input):
+    input = _cast_Long(g, input, False)  # type: ignore
+    input_sum = sym_help._reducesum_helper(g, input, keepdims_i=0)
+    return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
+
+def _all(g, input):
+    return g.op("Not", _any(g, g.op("Not", input)))
 
 
 @parse_args('v', 'i', 'i', 'i')
