@@ -164,8 +164,8 @@ def get_numerical_jacobian(func, input, output_idx, target=None, eps=1e-3, grad_
     return jacobian
 
 
-def check_analytical_jacobian_output(inputs, output, nondet_tol, grad_out, check_batched_grad,
-                                     check_grad_dtypes, raise_exception):
+def check_analytical_jacobian(inputs, output, nondet_tol, grad_out, check_batched_grad,
+                              check_grad_dtypes, raise_exception):
     jacobian, reentrant, correct_grad_sizes, correct_grad_types = \
         get_analytical_jacobian(inputs, output, nondet_tol, grad_out)
 
@@ -274,7 +274,7 @@ def check_outputs(outputs) -> None:
                          'Please call to_dense() on the output of fn for gradcheck.')
 
 
-def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps):
+def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> bool:
     # When there are no differentiable outputs, numerical gradient for a function is
     # expected to be zero.
     for i, o in enumerate(func_out):
@@ -325,7 +325,7 @@ Expected:
 """.strip()
 
 
-def test_batched_grad(fail_test, input, output, output_idx):
+def test_batched_grad(fail_test, input, output, output_idx) -> bool:
     # NB: test_batched_grad compares two autograd.grad invocations with a single
     # vmap(autograd.grad) invocation. It's not exactly a "gradcheck" in the
     # sense that we're not comparing an analytical jacobian with a numeric one,
@@ -555,16 +555,16 @@ def gradcheck(
         return check_no_differentiable_outputs(fail_test, func, tupled_inputs, func_out, eps)
 
     for i, o in enumerate(outputs):
-        analytical, failed = check_analytical_jacobian_output(tupled_inputs, o, nondet_tol, 1.0, check_batched_grad,
-                                                              check_grad_dtypes, raise_exception)
+        analytical, failed = check_analytical_jacobian(tupled_inputs, o, nondet_tol, 1.0, check_batched_grad,
+                                                       check_grad_dtypes, raise_exception)
         if failed:
             return False
         numerical = get_numerical_jacobian(func, tupled_inputs, i, eps=eps)
 
         if o.is_complex():
-            analytical_imag_grad_out, failed = check_analytical_jacobian_output(tupled_inputs, o, nondet_tol, 1j,
-                                                                                check_batched_grad, check_grad_dtypes,
-                                                                                raise_exception)
+            analytical_imag_grad_out, failed = check_analytical_jacobian(tupled_inputs, o, nondet_tol, 1j,
+                                                                         check_batched_grad, check_grad_dtypes,
+                                                                         raise_exception)
             if failed:
                 return False
             numerical_imag_grad_out = get_numerical_jacobian(func, tupled_inputs, i, eps=eps, grad_out=1j)
