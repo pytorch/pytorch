@@ -2196,11 +2196,15 @@ class TestReductions(TestCase):
 
         for name, fn, dtype in test_functions:
             # Check if reduction happens along the specified dim with and without keepdim.
-            self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=2))
-            self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=2, keepdim=True))
+            error_msg = f"test function: {name}"
+            self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=2), msg=error_msg)
+            self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=-1), msg=error_msg)
+
+            self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=2, keepdim=True), msg=error_msg)
+            self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=-1, keepdim=True), msg=error_msg)
 
             # Check if function raises error on specified zero'd dimension as reduction dim.
-            self.assertRaisesRegex(RuntimeError, "Expected reduction dim", lambda: fn(master_input, dim=1))
+            self.assertRaisesRegex(RuntimeError, "Expected reduction dim", lambda: fn(master_input, dim=1), msg=error_msg)
 
     def test_tensor_reduce_ops_empty(self, device):
         shape = (2, 0, 4)
@@ -2217,16 +2221,24 @@ class TestReductions(TestCase):
 
         for name, fn, return_value in test_functions:
             # Check if reduction happens along the specified dimension.
-            self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2))
-            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True))
+            error_msg = f"test function: {name}"
+            self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2), msg=error_msg)
+            self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=-1), msg=error_msg)
+
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True), msg=error_msg)
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=-1, keepdim=True), msg=error_msg)
 
             # Check if returned data is correct.
             check_func = (torch.testing.assert_allclose if math.isnan(return_value) or math.isinf(return_value) else
                           self.assertEqual)
-            check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=1))
-            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=1, keepdim=True))
+            check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=1), msg=error_msg)
+            check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=-2), msg=error_msg)
+
+            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=1, keepdim=True), msg=error_msg)
+            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=-2, keepdim=True), msg=error_msg)
+
             try:
-                check_func(torch.full((), return_value, device=device), fn(master_input))
+                check_func(torch.full((), return_value, device=device), fn(master_input), msg=error_msg)
             except TypeError as err:
                 # ignore if there is no allreduce.
                 self.assertTrue('dim' in str(err))
