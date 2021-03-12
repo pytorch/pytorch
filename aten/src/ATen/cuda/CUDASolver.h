@@ -77,6 +77,48 @@ void gesvdjBatched<c10::complex<float>>(CUDASOLVER_GESVDJ_BATCHED_ARGTYPES(c10::
 template<>
 void gesvdjBatched<c10::complex<double>>(CUDASOLVER_GESVDJ_BATCHED_ARGTYPES(c10::complex<double>, double));
 
+
+#define CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES(Dtype)                        \
+  cusolverDnHandle_t handle, int m, int n, int k, const Dtype *A, int lda, \
+      const Dtype *tau, int *lwork
+
+template <class Dtype>
+void orgqr_buffersize(CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES(Dtype)) {
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::orgqr_buffersize: not implemented for ",
+      typeid(Dtype).name());
+}
+template <>
+void orgqr_buffersize<float>(CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES(float));
+template <>
+void orgqr_buffersize<double>(CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES(double));
+template <>
+void orgqr_buffersize<c10::complex<float>>(CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES(c10::complex<float>));
+template <>
+void orgqr_buffersize<c10::complex<double>>(CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES(c10::complex<double>));
+
+
+#define CUDASOLVER_ORGQR_ARGTYPES(Dtype)                             \
+  cusolverDnHandle_t handle, int m, int n, int k, Dtype *A, int lda, \
+      const Dtype *tau, Dtype *work, int lwork, int *devInfo
+
+template <class Dtype>
+void orgqr(CUDASOLVER_ORGQR_ARGTYPES(Dtype)) {
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::orgqr: not implemented for ",
+      typeid(Dtype).name());
+}
+template <>
+void orgqr<float>(CUDASOLVER_ORGQR_ARGTYPES(float));
+template <>
+void orgqr<double>(CUDASOLVER_ORGQR_ARGTYPES(double));
+template <>
+void orgqr<c10::complex<float>>(CUDASOLVER_ORGQR_ARGTYPES(c10::complex<float>));
+template <>
+void orgqr<c10::complex<double>>(CUDASOLVER_ORGQR_ARGTYPES(c10::complex<double>));
+
 } // namespace solver
 } // namespace cuda
 } // namespace at
