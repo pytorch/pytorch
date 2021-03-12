@@ -44,13 +44,17 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 using ValueSet = std::unordered_set<Value*>;
 using ValueSetPtr = std::shared_ptr<std::unordered_set<Value*>>;
 
-void InplaceMKLDNNSubgraph(std::shared_ptr<Graph>& graph) {
+void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   // This function first calculates aliasing sets,
   // then calculates the last node each aliasing set is alive for.
-  // Then we go through each node, if it's a node which can be inplaced
-  // and its the aliasing set for its input is dead after this node,
-  // we inplace it. Then we merge the aliasing sets for the input and output
-  // and output of the node and extend the liveness of the set.
+  // Then we go through each node, if it's a node which has an equivalent
+  // inplace node and the aliasing set for its input is dead afer this node, we
+  // inplace it. Then we merge the aliasing sets for the input and output of the
+  // node and extend the liveness of the set. To inplace a node you need to
+  // prove device and dtype of the input and output are the same, which we've
+  // already done, and prove that the output size is the same as the input size,
+  // which is achieved by explicit Broadcast nodes (which we inserted for other
+  // reasons).
 
   auto aliasDb = torch::make_unique<AliasDb>(graph);
   std::unordered_map<Value*, ValueSetPtr> alias_mapping;
