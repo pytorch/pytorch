@@ -72,6 +72,9 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     from torch.onnx.symbolic_opset9 import add, expand
     accumulate = sym_help._parse_arg(accumulate, 'b')
 
+    if len(indices_list) == 0:
+        return values
+
     index = indices_list[0]
 
     if len(indices_list) > 1:

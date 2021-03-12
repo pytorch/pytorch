@@ -1903,6 +1903,16 @@ class TestONNXRuntime(unittest.TestCase):
         data = torch.randn(4)
         self.run_test(CopyModel4(), (x, ind, data))
 
+        class CopyModel5(torch.nn.Module):
+            def forward(self, x, mask):
+                if mask is not None:
+                    x.copy_(mask)
+                    return x
+
+        x = torch.randn(3, 4)
+        mask = torch.randn(3, 1)
+        self.run_test(CopyModel5(), (x, mask))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()  # Model not scriptable (output with shape doesn't match the broadcast shape)
     def test_copy_tracing(self):
