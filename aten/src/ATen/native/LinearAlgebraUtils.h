@@ -191,6 +191,10 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
               "Expected b and A to be on the same device, but found b on ",
               self.device(), " and A on ", A.device(), " instead.");
 
+  TORCH_CHECK(self.scalar_type() == A.scalar_type(),
+              "Expected b and A to have the same dtype, but found b of type ",
+              self.scalar_type(), " and A of type ", A.scalar_type(), " instead.");
+
   TORCH_CHECK(A.size(-1) == A.size(-2),
               "A must be batches of square matrices, "
               "but they are ", A.size(-1), " by ", A.size(-2), " matrices");

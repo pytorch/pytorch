@@ -218,9 +218,6 @@ template<class scalar_t>
 void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info);
 
 template<class scalar_t>
-void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info);
-
-template<class scalar_t>
 void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
 template<class scalar_t, class value_t=scalar_t>
@@ -1499,70 +1496,106 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template<typename scalar_t>
-static void apply_triangular_solve(Tensor& b, Tensor& A, Tensor& infos, bool upper, bool transpose, bool unitriangular) {
-#ifndef USE_LAPACK
-  AT_ERROR("triangular_solve: LAPACK library not found in compilation");
-#else
-  char uplo = upper ? 'U' : 'L';
-  char trans = transpose ? 'T' : 'N';
-  char diag = unitriangular ? 'U' : 'N';
+DEFINE_DISPATCH(triangular_solve_stub);
 
-  auto A_data = A.data_ptr<scalar_t>();
-  auto b_data = b.data_ptr<scalar_t>();
-  auto A_mat_stride = matrixStride(A);
-  auto b_mat_stride = matrixStride(b);
-  auto batch_size = batchCount(A);
-  auto n = A.size(-2);
-  auto nrhs = b.size(-1);
-  auto lda = std::max<int64_t>(1, n);
-  auto infos_data = infos.data_ptr<int>();
+/*
+Solves the matrix equation 'input' @ 'result' = 'other' for the 'result'.
+The result of the computation is saved in-place in 'result' tensor,
+'clone_input' will be a copy of 'input',
+'infos' is used to store information for possible checks for error,
+'upper' controls the portion of input matrix to consider in computations,
+'transpose' if true then 'input.transpose(-2, -1)' @ 'result' = 'other' is solved,
+'unitriangular' if true then the diagonal elements of 'input' are assumed to be 1
+and the actual diagonal values are not used.
+*/
+static std::tuple<Tensor&, Tensor&> triangular_solve_out_info(
+    Tensor& result,
+    Tensor& clone_input,
+    Tensor& infos,
+    const Tensor& input,
+    const Tensor& other,
+    bool upper, bool transpose, bool unitriangular) {
+  // These internal asserts make explicit the assumptions in the implementation
+  // Error check with the actual error messages are done on the higher level of
+  // the hierarchy of calls
+  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT(input.size(-2) == input.size(-1));
 
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
-    scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
-    int* infos_working_ptr = &infos_data[i];
-    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, lda, b_working_ptr, lda, infos_working_ptr);
+  TORCH_INTERNAL_ASSERT(input.device() == other.device());
+  TORCH_INTERNAL_ASSERT(input.device() == result.device());
+  TORCH_INTERNAL_ASSERT(input.device() == clone_input.device());
+  TORCH_INTERNAL_ASSERT(input.device() == infos.device());
+
+  TORCH_INTERNAL_ASSERT(input.scalar_type() == other.scalar_type());
+  TORCH_INTERNAL_ASSERT(input.scalar_type() == result.scalar_type());
+  TORCH_INTERNAL_ASSERT(input.scalar_type() == clone_input.scalar_type());
+
+  TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
+  TORCH_INTERNAL_ASSERT(infos.is_contiguous());
+
+  // if 'result' has no elements we can modify it
+  if (result.numel() == 0) {
+    result.resize_(other.transpose(-2, -1).sizes(), MemoryFormat::Contiguous);
+    result.transpose_(-2, -1);  // make 'result' to have Fortran contiguous memory layout
   }
-#endif
-}
 
-std::tuple<Tensor, Tensor> _triangular_solve_helper_cpu(const Tensor& self, const Tensor& A,
-                                                        bool upper, bool transpose, bool unitriangular) {
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  auto A_working_copy = cloneBatchedColumnMajor(A);
-  auto infos_tensor = at::empty(batchCount(self), self.options().dtype(kInt));
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "triangular_solve_cpu", [&]{
-    apply_triangular_solve<scalar_t>(self_working_copy, A_working_copy, infos_tensor, upper, transpose, unitriangular);
-  });
-  if (self.dim() > 2) {
-    batchCheckErrors(infos_tensor, "triangular_solve_cpu");
-  } else {
-    singleCheckErrors(infos_tensor.item<int64_t>(), "triangular_solve_cpu");
+  // if 'clone_input' has no elements we can modify it
+  if (clone_input.numel() == 0) {
+    clone_input.resize_(input.transpose(-2, -1).sizes(), MemoryFormat::Contiguous);
+    clone_input.transpose_(-2, -1);  // make 'clone_input' to have Fortran contiguous memory layout
   }
-  return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
+
+  // 'result' and 'clone_input' must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT(clone_input.transpose(-2, -1).is_contiguous());
+
+  // triangular_solve_stub performs calculations in-place
+  // 'result' must be a copy of 'other'
+  // 'clone_input' must be a copy of 'input'
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(other.sizes()));
+  TORCH_INTERNAL_ASSERT(clone_input.sizes().equals(input.sizes()));
+  result.copy_(other);
+  clone_input.copy_(input);
+
+  triangular_solve_stub(input.device().type(), clone_input, result, infos, upper, transpose, /*conjugate_transpose=*/false, unitriangular);
+
+  return std::tuple<Tensor&, Tensor&>(result, clone_input);
 }
 
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor, Tensor> triangular_solve(const Tensor& self, const Tensor& A,
                                             bool upper, bool transpose, bool unitriangular) {
   TORCH_CHECK(self.dim() >= 2,
-           "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+           "torch.triangular_solve: Expected b to have at least 2 dimensions, but it has ", self.dim(), " dimensions instead");
   TORCH_CHECK(A.dim() >= 2,
-           "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
+           "torch.triangular_solve: Expected A to have at least 2 dimensions, but it has ", A.dim(), " dimensions instead");
+
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "triangular_solve");
-  return at::_triangular_solve_helper(self_broadcasted, A_broadcasted, upper, transpose, unitriangular);
+
+  Tensor result = at::empty({0}, self.options());
+  Tensor clone_A = at::empty({0}, self.options());
+  Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self_broadcasted))}, self.options().dtype(kInt));
+
+  triangular_solve_out_info(result, clone_A, infos, A_broadcasted, self_broadcasted, upper, transpose, unitriangular);
+
+  if (self_broadcasted.dim() > 2) {
+    batchCheckErrors(infos, "triangular_solve");
+  } else {
+    singleCheckErrors(infos.item().toInt(), "triangular_solve");
+  }
+
+  return std::tuple<Tensor, Tensor>(result, clone_A);
 }
 
-std::tuple<Tensor&, Tensor&> triangular_solve_out(Tensor& result, Tensor& clone_A, const Tensor& self, const Tensor& A,
-                                                  bool upper, bool transpose, bool unitriangular) {
+std::tuple<Tensor&, Tensor&> triangular_solve_out(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular, Tensor& result, Tensor& clone_A) {
   checkSameDevice("triangular_solve", result, self);
   checkLinalgCompatibleDtype("triangular_solve", result, self);
   checkSameDevice("triangular_solve", clone_A, self, "clone_A");
   checkLinalgCompatibleDtype("triangular_solve", clone_A, self, "clone_A");
   Tensor result_tmp, clone_A_tmp;
-  std::tie(result_tmp, clone_A_tmp) = at::_triangular_solve_helper(self, A, upper, transpose, unitriangular);
+  std::tie(result_tmp, clone_A_tmp) = at::native::triangular_solve(self, A, upper, transpose, unitriangular);
   at::native::resize_output(result, result_tmp.sizes());
   at::native::resize_output(clone_A, clone_A_tmp.sizes());
   result.copy_(result_tmp);
