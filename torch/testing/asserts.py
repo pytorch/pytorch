@@ -101,7 +101,12 @@ def _tensors_equal_asserter(a: torch.Tensor, b: torch.Tensor):
 
 @_hide_internal_traceback
 def assert_tensors_equal(
-    a: torch.Tensor, b: torch.Tensor, *, warn_floating_point: bool = True, **strict_attributes: bool
+    a: torch.Tensor,
+    b: torch.Tensor,
+    /,
+    *,
+    warn_floating_point: bool = True,
+    **strict_attributes: bool,
 ) -> None:
     """Assert that two tensors are equal.
 
@@ -149,6 +154,7 @@ def _tensors_allclose_asserter(a: torch.Tensor, b: torch.Tensor, rtol: Optional[
 def assert_tensors_allclose(
     a: torch.Tensor,
     b: torch.Tensor,
+    /,
     *,
     rtol: Optional[float] = None,
     atol: Optional[float] = None,
