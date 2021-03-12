@@ -506,7 +506,7 @@ int64_t TCPStore::add(const std::string& key, int64_t value) {
 bool TCPStore::deleteKey(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::DELETE_KEY);
-  tcputil::sendString(storeSocket_, regKey, true);
+  tcputil::sendString(storeSocket_, regKey);
   auto numDeleted = tcputil::recvValue<int64_t>(storeSocket_);
   return (numDeleted == 1);
 }
