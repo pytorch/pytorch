@@ -279,28 +279,26 @@ LaunchParams FusionExecutor::computeLaunchParams(
   // If any dimension was set in launch constraints we need to run through
   // IterDomains that have been parallelized, and bind those values. Or make
   // sure if they could be inferred the inference matches what was set.
-  if (launch_constraints.nBlocks() * launch_constraints.nThreads() != -1) {
-    for (auto& entry : parallel_iter_extents) {
-      auto p_type = entry.first;
-      if (launch_constraints.hasDim(p_type)) {
-        auto parallel_extents = entry.second;
-        for (auto extent : parallel_extents) {
-          auto inferred_val = expr_eval.evaluate(extent);
-          if (inferred_val.has_value()) {
-            // This value could have been inferred, make sure it was set right.
-            bool valid =
-                inferred_val.value() == launch_constraints.getDim(p_type) ||
-                launch_constraints.getRawVal(p_type) == -1;
-            if (!useFallback() && !valid) {
-              TORCH_WARN_ONCE(
-                  "Cannot validate parallelization scheme, "
-                  "this may be due to mixed broadcast axes that are parallelized.");
-            }
-          } else {
-            // Bind the launch constraint into our evaluation context
-            expr_eval.bind(extent, launch_constraints.getDim(p_type));
-            launch_params.bind(launch_constraints.getDim(p_type), p_type);
+  for (auto& entry : parallel_iter_extents) {
+    auto p_type = entry.first;
+    if (launch_constraints.hasDim(p_type)) {
+      auto parallel_extents = entry.second;
+      for (auto extent : parallel_extents) {
+        auto inferred_val = expr_eval.evaluate(extent);
+        if (inferred_val.has_value()) {
+          // This value could have been inferred, make sure it was set right.
+          bool valid =
+              inferred_val.value() == launch_constraints.getDim(p_type) ||
+              launch_constraints.getRawVal(p_type) == -1;
+          if (!useFallback() && !valid) {
+            TORCH_WARN_ONCE(
+                "Cannot validate parallelization scheme, "
+                "this may be due to mixed broadcast axes that are parallelized.");
           }
+        } else {
+          // Bind the launch constraint into our evaluation context
+          expr_eval.bind(extent, launch_constraints.getDim(p_type));
+          launch_params.bind(launch_constraints.getDim(p_type), p_type);
         }
       }
     }

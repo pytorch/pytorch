@@ -22,7 +22,11 @@ class TORCH_CUDA_CU_API LaunchParams {
         gdimz_(gdimz),
         bdimx_(bdimx),
         bdimy_(bdimy),
-        bdimz_(bdimz) {}
+        bdimz_(bdimz) {
+    assertValid();
+  }
+
+  void assertValid();
 
   void setSmem(int64_t smem) {
     smem_ = smem;
@@ -88,6 +92,7 @@ class TORCH_CUDA_CU_API LaunchParams {
     if (class_val == UNINITIALIZED_VAL) {
       class_val = incoming_val;
     }
+    assertValid();
   }
 
   // Binds dim assocaited with p_type to val
@@ -105,6 +110,8 @@ class TORCH_CUDA_CU_API LaunchParams {
   bool operator==(const LaunchParams& other) const;
 
   void print() const;
+
+  std::string toString() const;
 
  private:
   // Spell them out because I want signed ints to know if they were initialized
