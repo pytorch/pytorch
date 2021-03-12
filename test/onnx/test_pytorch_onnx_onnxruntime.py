@@ -7,6 +7,7 @@ import io
 import itertools
 import copy
 import os
+import random
 
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
@@ -163,12 +164,14 @@ def _init_test_rpn():
     rpn_pre_nms_top_n = dict(training=2000, testing=1000)
     rpn_post_nms_top_n = dict(training=2000, testing=1000)
     rpn_nms_thresh = 0.7
+    rpn_score_thresh = 0.0
 
     rpn = RegionProposalNetwork(
         rpn_anchor_generator, rpn_head,
         rpn_fg_iou_thresh, rpn_bg_iou_thresh,
         rpn_batch_size_per_image, rpn_positive_fraction,
-        rpn_pre_nms_top_n, rpn_post_nms_top_n, rpn_nms_thresh)
+        rpn_pre_nms_top_n, rpn_post_nms_top_n, rpn_nms_thresh,
+        score_thresh=rpn_score_thresh)
     return rpn
 
 def _init_test_roi_heads_faster_rcnn():
@@ -207,6 +210,11 @@ def _init_test_roi_heads_faster_rcnn():
         bbox_reg_weights,
         box_score_thresh, box_nms_thresh, box_detections_per_img)
     return roi_heads
+
+def set_rng_seed(seed):
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
 
 class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
@@ -6494,6 +6502,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_rpn(self):
+        set_rng_seed(0)
 
         class RPNModule(torch.nn.Module):
             def __init__(self):
@@ -7049,6 +7058,213 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 18)
         self.run_test(model, x, input_names=['x'])
 
+    def test_symbolic_shape_inference(self):
+        # ConstantOfShape is tested in test_embedding_bag
+        # Tile is tested in test_repeat
+        # test Shape, Reshape, Transpose, Gather
+        class ShapeModel(torch.nn.Module):
+            def forward(self, x, y):
+                shape = x.size()[:3] + (-1,)  # shape [4], ('batch', 3, 4, -1)
+                y = y.reshape(shape)  # batch, 3, 4, 10/batch
+                return y.transpose(1, 2)
+
+        model = ShapeModel()
+        model.eval()
+        x = torch.ones(2, 3, 4, 5)
+        y = torch.ones(3, 4, 5, 2)
+        self.run_test(model, (x, y))
+
+        class ViewModel(torch.nn.Module):
+            def forward(self, x):
+                return x.view(-1)
+
+        model = ViewModel()
+        model.eval()
+        x = torch.tensor(2.)
+        self.run_test(model, (x,))
+
+        # test prim::ListConstruct for Reshape input 1
+        class ViewModel_2(torch.nn.Module):
+            def forward(self, x):
+                N, C, H, W = x.shape[0], x.shape[2], x.shape[3], x.shape[4]
+                x1 = x.view(N, -1, C, H, W)
+                x2 = x1.permute(0, 3, 4, 1, 2)
+                return x2.reshape(N, -1, C)
+
+        model = ViewModel_2()
+        model.eval()
+        x = torch.ones(2, 3, 4, 5, 6)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_symbolic_shape_inference_arange(self):
+        # test Range
+        class ArangeModel(torch.nn.Module):
+            def forward(self, signal):
+                frame_step = 2
+                outer_dimensions = signal.size()[:-2]
+                frames, frame_length = signal.size()[-2:]
+
+                subframe_length = signal.size()[0]
+                subframe_step = frame_step // subframe_length
+                subframes_per_frame = frame_length // subframe_length
+                output_size = frame_step * (frames - 1) + frame_length
+                output_subframes = output_size // subframe_length
+
+                frame = torch.arange(0, output_subframes)
+                return frame
+
+        model = ArangeModel()
+        model.eval()
+        M, C, K, N = 1, 2, 3, 4
+        x = torch.randint(5, (M, C, K, N))
+        y = torch.randint(5, (M, C + 1, K + 1, N + 1))
+        self.run_test(model, x)
+        self.run_test(model, x, input_names=['x'],
+                      dynamic_axes={'x' : [0, 1, 2, 3]}, test_with_inputs=[(x,), (y,)])
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_symbolic_shape_inference_box(self):
+        # test NonZero
+        class BoxModel(torch.nn.Module):
+            def forward(self, boxes):
+                min_size = 1e-2
+                ws, hs = boxes[:, 2] - boxes[:, 0], boxes[:, 3] - boxes[:, 1]
+                keep = (ws >= min_size) & (hs >= min_size)
+                keep = torch.where(keep)[0]
+                return keep
+
+        model = BoxModel()
+        model.eval()
+        x = torch.ones(2, 4)
+        y = torch.ones(3, 5)
+        self.run_test(model, x)
+        self.run_test(model, x, input_names=['x'],
+                      dynamic_axes={'x' : [0, 1]}, test_with_inputs=[(x,), (y,)])
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_symbolic_shape_inference_box_if(self):
+        # test If
+        class BoxIfModel(torch.nn.Module):
+            def forward(self, boxes, scores):
+                score_thresh = 0.0
+                inds = torch.where(scores > score_thresh)[0]
+                boxes_1 = boxes[inds]
+                if boxes_1.numel() > 3:
+                    return boxes_1
+                else:
+                    return boxes_1 * 2
+
+        model = BoxIfModel()
+        model.eval()
+        boxes = torch.ones(2, 4)
+        scores = torch.ones(1, 4)
+        self.run_test(model, (boxes, scores))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_symbolic_shape_inference_arange_2(self):
+        # test Range
+        class ArangeModel(torch.nn.Module):
+            def forward(self, start):
+                return torch.arange(start.size(0), 8.5, 1.5, dtype=torch.int64)
+        x = torch.randn(2, 3, 4)
+        self.run_test(ArangeModel(), (x,))
+
+        class ArangeModel2(torch.nn.Module):
+            def forward(self, start):
+                return torch.arange(start.size(0), 8.5, 1.5, dtype=torch.double)
+        x = torch.randn(2, 3, 4)
+        self.run_test(ArangeModel2(), (x,))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_symbolic_shape_inference_nonzero(self):
+        class OneLikeModel(torch.nn.Module):
+            def forward(self, x):
+                ones = torch.ones_like(x, dtype=torch.float, layout=torch.strided, device=torch.device('cpu'))
+                return torch.nonzero(ones)
+
+        x = torch.randn(2)
+        self.run_test(OneLikeModel(), x)
+        x = torch.randn(2, 3, 4)
+        self.run_test(OneLikeModel(), x)
+
+        class ZeroLikeModel(torch.nn.Module):
+            def forward(self, x):
+                zeros = torch.zeros_like(x, dtype=torch.float, layout=torch.strided, device=torch.device('cpu'))
+                return torch.nonzero(zeros)
+
+        x = torch.randn(2)
+        self.run_test(ZeroLikeModel(), x)
+        x = torch.randn(2, 3, 4)
+        self.run_test(ZeroLikeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_symbolic_shape_inference_expand_1(self):
+        class ExpandModel(torch.nn.Module):
+            def forward(self, x):
+                return x.expand(4, 6, 2)
+        x = torch.randn(6, 1, requires_grad=True)
+        self.run_test(ExpandModel(), (x,))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()  # Test code not scriptable
+    def test_symbolic_shape_inference_expand_2(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                input_shape = x.size()
+                batch_size, seq_length = input_shape
+                seq_ids = torch.arange(seq_length)
+                causal_mask = seq_ids[None, None, :].repeat(batch_size, seq_length, 1) <= seq_ids[None, :, None]
+                return causal_mask.transpose(0, 1)
+        x = torch.randn(3, 16)
+        self.run_test(M(), (x,))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    @disableScriptTest()  # Test code not scriptable
+    def test_symbolic_shape_inference_slice(self):
+        class M(torch.nn.Module):
+            def forward(self, x, position_bias):
+                input_shape = x.size()
+                batch_size, seq_length = input_shape
+                position_bias = position_bias[:, :, -seq_length:, :]
+                return position_bias.transpose(0, 1)
+        x = torch.randn(3, 16)
+        position_bias = torch.randn(1, 3, 20, 8)
+        self.run_test(M(), (x, position_bias))
+
+    def test_symbolic_shape_inference_slice_2(self):
+        class M(torch.nn.Module):
+            def forward(self, position_bias):
+                position_bias = position_bias[:, :, -2:, :]
+                return position_bias.transpose(0, 1)
+        position_bias = torch.randn(1, 3, 20, 8)
+        self.run_test(M(), (position_bias,))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()
+    def test_symbolic_shape_inference_time(self):
+        input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
+        h0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
+        c0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
+        model_lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
+        self.run_test(model_lstm, (input, (h0, c0)), input_names=['x', 'y'],
+                      dynamic_axes={'x' : [0, 1]})
+        model_gru = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False, bias=False)
+        self.run_test(model_gru, (input, h0), input_names=['x', 'y'],
+                      dynamic_axes={'x' : [0, 1]})
+        model_rnn = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False, bias=False)
+        self.run_test(model_rnn, (input, h0), input_names=['x', 'y'],
+                      dynamic_axes={'x' : [0, 1]})
+
+    def test_symbolic_shape_inference_dynamic_axes(self):
+        class M(torch.nn.Module):
+            def forward(self, input_ids):
+                input_shape = input_ids.size()
+                input_ids = input_ids.view(-1, input_shape[-1])
+                return input_ids.transpose(0, 1)
+        x = torch.randn(3, 16)
+        self.run_test(M(), (x,), input_names=['input_ids'],
+                      dynamic_axes={'input_ids': {0: 'batch', 1: 'sequence'}})
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
