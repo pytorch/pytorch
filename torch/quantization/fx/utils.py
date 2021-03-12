@@ -119,7 +119,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Opti
         qparams = {"_dtype_": dtype}
     return node_type, quantize_op, qparams
 
-def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
+def quantize_node(quantizer: QuantizerCls, in_node: Node, obs_module: torch.nn.Module, obs_node: Node, is_input: bool) -> Node:
     ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
     with the qparams calculated from activation_post_process (obs_module).
     The observer node (obs_node) is used to find the FQN of the user of act_post_process.

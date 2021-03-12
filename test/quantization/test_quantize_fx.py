@@ -2387,7 +2387,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self.checkGraphModeFxOp(
             Sum(), data, quant_type,
             expected_node_occurrence=node_occurrence,
-            custom_qconfig_dict=custom_qconfig_dict, print_debug_info=True)
+            custom_qconfig_dict=custom_qconfig_dict)
 
     def test_bmm(self):
         class BMMMethod(torch.nn.Module):
