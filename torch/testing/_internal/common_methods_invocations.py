@@ -2952,14 +2952,7 @@ op_db: List[OpInfo] = [
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/49707
-               SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                        dtypes=[torch.float16, torch.bfloat16]),
-               SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=[torch.float16, torch.bfloat16]),
-               # index_select does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out')
-           ),
+           supports_out=False,
            sample_inputs_func=sample_inputs_index_select),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16),

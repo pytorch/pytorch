@@ -4554,38 +4554,60 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(0, x.index_fill(0, index, -1).dim())
         self.assertEqual(0, x.index_fill_(0, index, -1).dim())
 
-    def test_index_select(self, device):
-        for dtype in [torch.int, torch.long]:
-            src = torch.randn(3, 4, 5, device=device)
-            # Index can be duplicated.
-            idx = torch.tensor([2, 1, 0, 1, 2], dtype=dtype, device=device)
-            dest = torch.index_select(src, 0, idx)
-            self.assertEqual(dest.shape, (5, 4, 5))
-            for i in range(idx.size(0)):
-                self.assertEqual(dest[i], src[idx[i]])
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_index_select(self, device, dtype):
+        num_src, num_dest = 3, 5
 
-            # Check that 'out' is used correctly.
-            out = torch.randn(5 * 4 * 5, device=device)
-            dest = torch.index_select(src, 0, idx, out=out.view(5, 4, 5))
-            self.assertEqual(dest.shape, (5, 4, 5))
-            for i in range(idx.size(0)):
-                self.assertEqual(dest[i], src[idx[i]])
-            out.fill_(0.123)
-            self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
+        def make_arg(batch_sizes, n, dim, contig):
+            size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
+            return make_tensor(size_arg, device, dtype, low=None, high=None, discontiguous=not contig)
 
-            # Bool tensor
-            src = torch.tensor([False, True, False, False], device=device, dtype=torch.bool)
-            idx = torch.tensor([1], dtype=dtype, device=device)
-            dest = torch.index_select(src, 0, idx)
-            self.assertEqual(torch.tensor([True]), dest)
+        def ref_index_select(src, dim, idx):
+            dest_size = list(src.size())
+            dest_size[dim] = len(idx)
+            dest = torch.empty(*dest_size, dtype=src.dtype, device=src.device)
+            for i in range(len(idx)):
+                idx_dest = dim * (slice(None),) + (i,)
+                idx_src = dim * (slice(None),) + (idx[i],)
+                dest[idx_dest] = src[idx_src]
+            return dest
 
-            # Complex Tensor
-            src = torch.randn(3, 4, 5, dtype=torch.complex64, device=device)
-            idx = torch.tensor([2, 1, 0, 1, 2], dtype=dtype, device=device)
-            dest = torch.index_select(src, 0, idx)
-            self.assertEqual(dest.shape, (5, 4, 5))
-            for i in range(idx.size(0)):
-                self.assertEqual(dest[i], src[idx[i]])
+        # More thorough testing as in index_add
+        for src_contig, idx_contig, out_contig in product([True, False], repeat=3):
+            for other_sizes in ((), (4, 5)):
+                for dim in range(len(other_sizes)):
+                    src = make_arg(other_sizes, num_src, dim, src_contig)
+                    idx = make_tensor((num_dest,), device, dtype=torch.int64, low=0, high=num_src, discontiguous=not idx_contig)
+                    dest = torch.index_select(src, dim, idx)
+                    dest2 = ref_index_select(src, dim, idx)
+                    self.assertEqual(dest, dest2)
+
+                    # Out version
+                    out_size = list(src.size())
+                    out_size[dim] = len(idx)
+                    out = make_arg(tuple(out_size), num_src, dim, out_contig)
+                    dest = torch.index_select(src, dim, idx, out=out)
+                    dest2 = ref_index_select(src, dim, idx)
+                    self.assertEqual(dest, dest2)
+                    self.assertEqual(out.storage().data_ptr(), dest.storage().data_ptr())
+
+        for idx_type in (torch.int32, torch.int64):
+            other_sizes = (3, 2)
+            dim = 1
+            src = make_arg(other_sizes, num_src, dim, True)
+            idx = make_tensor((num_dest,), device, dtype=idx_type, low=0, high=num_src, discontiguous=False)
+            dest = torch.index_select(src, dim, idx)
+            dest2 = ref_index_select(src, dim, idx)
+            self.assertEqual(dest, dest2)
+
+        # Create the 4 possible combinations of scalar sizes for index / source
+        scalars = ((make_tensor(size_s, device, dtype),
+                    torch.zeros(size_i, dtype=torch.int64, device=device))
+                   for size_s, size_i in product([(), (1,)], repeat=2))
+        for source, idx in scalars:
+            out = source.index_select(0, idx)
+            self.assertEqual(out.item(), source.item())
+
 
     def test_take_empty(self, device):
         for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
