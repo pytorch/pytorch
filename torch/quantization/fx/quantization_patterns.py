@@ -75,6 +75,36 @@ class QuantizeHandler(ABC):
         """
         return NotImplemented
 
+
+# Binary op configs
+
+# Supported combinations are:
+# quant_type | activation (compute_type) | weight
+#  static       quint8                      qint8
+
+# tuple (activation_dtype, weight_dtype, compute_dtype)
+# these are supported types for common binary ops like add/mul etc.
+binary_op_all_dtypes = [
+    (torch.quint8, torch.qint8, None),
+    (torch.float16, torch.float16, None),
+]
+binary_op_float16_dtypes = [
+    (torch.float16, torch.float16, None)
+]
+binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
+    operator.add: binary_op_all_dtypes,
+    torch.add: binary_op_all_dtypes,
+    operator.mul: binary_op_all_dtypes,
+    torch.mul: binary_op_all_dtypes,
+    torch.bmm: binary_op_float16_dtypes,
+    torch.sub: binary_op_float16_dtypes,
+    operator.sub: binary_op_float16_dtypes,
+    torch.div: binary_op_float16_dtypes,
+    operator.truediv: binary_op_float16_dtypes,
+    torch.sum: binary_op_float16_dtypes
+}
+
+
 @register_quant_pattern(operator.add)
 @register_quant_pattern(operator.sub)
 @register_quant_pattern(operator.mul)
@@ -136,40 +166,15 @@ class BinaryOp(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        # Supported combinations are:
-        # quant_type | activation (compute_type) | weight
-        #  static       quint8                      qint8
-
-        # tuple (activation_dtype, weight_dtype, compute_dtype)
-        # these are supported types for common binary ops like add/mul etc.
-        all_bop_dtypes = [
-            (torch.quint8, torch.qint8, None),
-            (torch.float16, torch.float16, None),
-        ]
-        float16_dtypes = [
-            (torch.float16, torch.float16, None)
-        ]
-        supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
-            operator.add: all_bop_dtypes,
-            torch.add: all_bop_dtypes,
-            operator.mul: all_bop_dtypes,
-            torch.mul: all_bop_dtypes,
-            torch.bmm: float16_dtypes,
-            torch.sub: float16_dtypes,
-            operator.sub: float16_dtypes,
-            torch.div: float16_dtypes,
-            operator.truediv: float16_dtypes,
-            torch.sum: float16_dtypes
-        }
 
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         # leave the op unquantized if the dtype combination is not supported
-        if dtypes not in supported_dtypes[self.binary_op]:
+        if dtypes not in binary_op_supported_dtypes[self.binary_op]:
             warnings.warn(
                 "dtype combination: {} is not "
                 "supported by {} "
-                "supported dtype combinations are: {}".format(dtypes, self.binary_op, supported_dtypes[self.binary_op]))
+                "supported dtype combinations are: {}".format(dtypes, self.binary_op, binary_op_supported_dtypes[self.binary_op]))
             if self.relu_node:
                 op_out = quantizer.quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=False))
                 relu_args = [op_out]

@@ -1801,6 +1801,44 @@ class TestQuantizeFx(QuantizationTestCase):
         mc = convert_fx(mp)
         mc(torch.rand(4, 1, 4, 4))
 
+    def test_fp32_sum(self):
+        """
+        Verifies that fp32 sum works correctly if it's before or after
+        quantized layers.
+        """
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = torch.stack([x])
+                x = torch.sum(x)
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.conv2 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x1 = torch.stack([x])
+                x1 = torch.sum(x1, dim=0)
+                x2 = self.conv2(x1)
+                return x2
+
+        for cls in (M1, M2):
+            m = cls().eval()
+            m(torch.rand(4, 1, 4, 4))
+            qconfig_dict = {'': torch.quantization.default_qconfig}
+            mp = prepare_fx(m, qconfig_dict)
+            mp(torch.rand(4, 1, 4, 4))
+            mc = convert_fx(mp)
+            mc(torch.rand(4, 1, 4, 4))
+
     def test_state_dict(self):
         """ Make sure packed params appear in state_dict
         """

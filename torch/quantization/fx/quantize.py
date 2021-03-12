@@ -1052,19 +1052,34 @@ class Quantizer:
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
                     if is_match(modules, node, pattern):
+                        skip_this_match = False
                         if value is BinaryOp:
                             use_copy_node = all_node_args_have_no_tensors(node)
                             if use_copy_node:
+                                # TODO(future PR): update the pattern to quantize
+                                # handler logic to take this into account.
                                 value = CopyNode  # type: ignore
-                        matched: List[Any] = []
-                        record_match(pattern, node, matched)
-                        for n in matched:
-                            match_map[n.name] = (
-                                node, matched, pattern, value(self, node),  # type: ignore
-                                self.qconfig_map[n.name])
-                            all_matched.add(n.name)
-                        # break after finding the first match
-                        break
+
+                            this_node_qconfig = self.qconfig_map[node.name]
+                            if this_node_qconfig:
+                                dtypes = get_qconfig_dtypes(this_node_qconfig)
+                                # TODO(future PR): update the pattern to quantize
+                                # handler logic to take this into account.
+                                skip_this_match = (
+                                    (node.target in binary_op_supported_dtypes) and
+                                    (dtypes not in binary_op_supported_dtypes[node.target])
+                                )
+
+                        if not skip_this_match:
+                            matched: List[Any] = []
+                            record_match(pattern, node, matched)
+                            for n in matched:
+                                match_map[n.name] = (
+                                    node, matched, pattern, value(self, node),  # type: ignore
+                                    self.qconfig_map[n.name])
+                                all_matched.add(n.name)
+                            # break after finding the first match
+                            break
 
         # add custom module instances to the match result
         assert self.modules is not None
