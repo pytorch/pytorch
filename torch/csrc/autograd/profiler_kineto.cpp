@@ -270,7 +270,8 @@ void prepareProfiler(
   }
 
   if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init(!torch::cuda::is_available());
+    libkineto_init(
+        !torch::cuda::is_available() /*cpuOnly*/, true /*logOnError*/);
     libkineto::api().suppressLogMessages();
   }
 
