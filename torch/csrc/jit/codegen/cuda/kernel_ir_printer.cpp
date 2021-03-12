@@ -352,7 +352,7 @@ void IrPrinter::visit(const kir::BroadcastOp* node) {
 
 void IrPrinter::visit(const kir::ForLoop* node) {
   indent() << "FOR " << gen(node->index()) << " in " << gen(node->iter_domain())
-           << ":\n";
+           << (node->unroll() ? " UNROLL" : "") << ":\n";
   handleBlock(node->body());
 }
 

@@ -434,8 +434,16 @@ void Scope::clear() {
   exprs_.clear();
 }
 
-ForLoop::ForLoop(Passkey passkey, Val* index, IterDomain* iter_domain)
-    : Expr(passkey), index_{index}, iter_domain_{iter_domain}, body_(this) {
+ForLoop::ForLoop(
+    Passkey passkey,
+    Val* index,
+    IterDomain* iter_domain,
+    bool unroll)
+    : Expr(passkey),
+      index_{index},
+      iter_domain_{iter_domain},
+      body_(this),
+      unroll_(unroll) {
   TORCH_INTERNAL_ASSERT(index->dtype() == DataType::Int);
   addInput(index);
   addInput(iter_domain);

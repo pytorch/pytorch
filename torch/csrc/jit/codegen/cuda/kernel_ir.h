@@ -1208,7 +1208,11 @@ class TORCH_CUDA_CU_API Scope {
 //!
 class TORCH_CUDA_CU_API ForLoop final : public Expr {
  public:
-  ForLoop(Passkey passkey, Val* index, IterDomain* iter_domain);
+  ForLoop(
+      Passkey passkey,
+      Val* index,
+      IterDomain* iter_domain,
+      bool unroll = false);
 
   void accept(IrVisitor* visitor) const override {
     visitor->visit(this);
@@ -1234,10 +1238,15 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
     return body_;
   }
 
+  bool unroll() const {
+    return unroll_;
+  }
+
  private:
   Val* const index_ = nullptr;
   IterDomain* const iter_domain_;
   Scope body_;
+  bool unroll_ = false;
 };
 
 //! IfThenElse provides scoping for an boolean operator. Exprs placed in its

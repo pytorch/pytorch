@@ -869,9 +869,19 @@ class CudaKernelGenerator : private kir::IrVisitor {
       return;
     }
 
+    if (node->iter_domain()->rawExtent()->isOneInt()) {
+      indent() << "constexpr " << node->index()->dtype() << " "
+               << gen(node->index()) << " = 0;\n";
+      handleScope(node->body());
+      return;
+    }
+
     const auto gen_index = gen(node->index());
     const auto gen_start = genInline(node->iter_domain()->start());
     const auto gen_extent = genInline(node->iter_domain()->extent());
+    if (!node->unroll()) {
+      indent() << "#pragma unroll 1\n";
+    }
     indent() << "for(size_t " << gen_index << " = " << gen_start << "; "
              << gen_index << " < " << gen_extent << "; ++" << gen_index << ") ";
 
