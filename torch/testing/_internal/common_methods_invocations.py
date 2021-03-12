@@ -26,7 +26,8 @@ from torch.testing._internal.common_utils import \
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_warn_once)
+     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN, _wrap_warn_once,
+     is_iterable_of_tensors)
 
 from distutils.version import LooseVersion
 
@@ -72,6 +73,7 @@ class SkipInfo(DecorateInfo):
                          test_name=test_name, device_type=device_type, dtypes=dtypes,
                          active_if=active_if)
 
+
 class SampleInput(object):
     """Represents sample inputs to a function."""
 
@@ -85,29 +87,27 @@ class SampleInput(object):
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
 
-    def _is_tensorlist(self, arg):
-        return isinstance(arg, (tuple, list)) and len(arg) > 0 and isinstance(arg[0], torch.Tensor)
-
-    # Unpacks TensorList inputs (tuple or list of tensors) into a single
-    # tuple of tensors. This is useful for functions like gradcheck that do
-    # not work well for TensorList inputs.
     def unpack_inputs(self):
-        result: List[any] = []
+        """ Returns the list of arguments (sample.input + sample.args) where TensorList
+            (iterable of tensors) inputs are unpacked into multiple Tensor arguments.
+
+            This is useful for functions that don't support TensorList inputs (e.g. gradcheck)
+        """
+        result: List[Any] = []
         for arg in self.input:
-            if self._is_tensorlist(arg):
+            if is_iterable_of_tensors(arg):
                 result.extend(arg)
             else:
                 result.append(arg)
         result.extend(self.args)
         return result
 
-    # Reverse of #unpack_inputs
-    # pack_inputs(unpack_inputs(inputs)) == inputs
     def pack_inputs(self, inputs):
-        result: List[any] = []
+        """ Inverse of :func:`unpack_inputs` """
+        result: List[Any] = []
         i = 0
         for arg in self.input:
-            if self._is_tensorlist(arg):
+            if is_iterable_of_tensors(arg):
                 result.append(inputs[i:i + len(arg)])
                 i += len(arg)
             else:
@@ -1386,6 +1386,22 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
 
     return samples
 
+
+def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        SampleInput((_make_tensor_helper((S, S, S)), 0)),
+        SampleInput((_make_tensor_helper((S, S, S)), 1)),
+        # NOTE: if `dtype` is not same as input, then inplace variants fail with
+        # `provided dtype must match the dtype of self tensor in cumsum`
+        SampleInput((_make_tensor_helper((S, S, S)), 1), kwargs={'dtype': dtype}),
+        SampleInput((_make_tensor_helper(()), 0)),
+    )
+
+    return samples
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -1726,6 +1742,37 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('cumsum',
+           dtypesIfCPU=all_types_and_complex_and(torch.bool),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53360
+               # For integer inputs,
+               # inplace variant preserves dtype of `self` while method variant
+               # always promotes it to torch.long.
+               # >>> t = torch.randint(2, 10, (3, 2), dtype=torch.int8)
+               # >>> t.cumsum(0).dtype
+               # torch.int64
+               # >>> t.cumsum_(0).dtype
+               # torch.int8
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32]),
+               # Reference: https://github.com/pytorch/pytorch/issues/53358
+               # >>> t = torch.tensor([False])
+               # >>> t.cumsum_(0) # Error "cumsum_out_cpu" not implemented for 'Bool'
+               # >>> t.cuda().cumsum_(0) # Error "cumsum_cuda" not implemented for 'Bool'
+               # >>> t = torch.tensor(False)
+               # >>> t.cumsum_(0) # Error "cumsum_out_cpu" not implemented for 'Bool'
+               # >>> t.cuda().cumsum_(0) # Does not fail!
+               # tensor(False, device='cuda:0')
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=[torch.bool]),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.bool]),
+               # cumsum does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           ),
+           sample_inputs_func=sample_inputs_cumsum),
     UnaryUfuncInfo('deg2rad',
                    ref=np.radians,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -2509,7 +2556,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_stack,
            skips=(
-               # This test is not working properly for TensorList inputs
+               # This test does not work with TensorList inputs (https://github.com/pytorch/pytorch/issues/53906)
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # stack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),)),
@@ -2518,7 +2565,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
-               # This test is not working properly for TensorList inputs
+               # This test does not work with TensorList inputs (https://github.com/pytorch/pytorch/issues/53906)
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # hstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),)),
@@ -2527,7 +2574,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
-               # This test is not working properly for TensorList inputs
+               # This test does not work with TensorList inputs (https://github.com/pytorch/pytorch/issues/53906)
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # vstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),)),
@@ -2536,7 +2583,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
-               # This test is not working properly for TensorList inputs
+               # This test does not work with TensorList inputs (https://github.com/pytorch/pytorch/issues/53906)
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # dstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),)),
@@ -3172,10 +3219,7 @@ def method_tests():
         ('cummin', (S, S, S), (0,), 'dim0', (), [0]),
         ('cummin', (S, S, S), (1,), 'dim1', (), [0]),
         ('cummin', (), (0,), 'dim0_scalar', (), [0]),
-        ('cumsum', (S, S, S), (0,), 'dim0', (), [0]),
-        ('cumsum', (S, S, S), (1,), 'dim1', (), [0]),
         ('cumsum', (S, S, S), (1,), 'dim1_cast', (), [0], (), ident, {'dtype': torch.float64}),
-        ('cumsum', (), (0,), 'dim0_scalar', (), [0]),
         ('cumprod', (S, S, S), (0,)),
         ('cumprod', (S, S, S), (1,), 'dim1', (), [0]),
         ('cumprod', (), (0,), 'scalar'),
