@@ -1005,14 +1005,15 @@ def main() -> None:
         'function_definitions': list(mapMaybe(ComputeFunction(
             Target.DEFINITION, static_dispatch_backend=static_dispatch_backend, is_redispatching_fn=False), native_functions)),
     })
+    # NB: no static dispatch support for RedispatchFunctions.
     cpu_fm.write('RedispatchFunctions.h', lambda: {
         'function_redispatch_declarations': list(mapMaybe(ComputeFunction(
-            Target.DECLARATION, static_dispatch_backend=static_dispatch_backend, is_redispatching_fn=True), native_functions)),
+            Target.DECLARATION, static_dispatch_backend=None, is_redispatching_fn=True), native_functions)),
     })
     cpu_fm.write('RedispatchFunctions.cpp', lambda: {
-        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_backend),
+        'static_dispatch_extra_headers': '',
         'function_redispatch_definitions': list(mapMaybe(ComputeFunction(
-            Target.DEFINITION, static_dispatch_backend=static_dispatch_backend, is_redispatching_fn=True), native_functions)),
+            Target.DEFINITION, static_dispatch_backend=None, is_redispatching_fn=True), native_functions)),
     })
     core_fm.write('TensorBody.h', lambda: {
         'tensor_method_declarations': list(mapMaybe(
