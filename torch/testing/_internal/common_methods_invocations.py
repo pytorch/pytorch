@@ -1884,6 +1884,7 @@ op_db: List[OpInfo] = [
                         dtypes=[torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32]),
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.bool, torch.float16]),
+               # cumprod does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out',
                         dtypes=[torch.float32]),
            ),
@@ -2294,6 +2295,7 @@ op_db: List[OpInfo] = [
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.float16, torch.bfloat16]),
+               # prod does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out',
                         dtypes=[torch.float32]),
            ),
