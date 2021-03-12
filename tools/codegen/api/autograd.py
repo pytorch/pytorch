@@ -1,8 +1,11 @@
 from dataclasses import dataclass
+import re
 from typing import Optional, Sequence, List, Tuple
 
+from tools.codegen.api import cpp
 from tools.codegen.api.types import *
 from tools.codegen.model import *
+from tools.codegen.utils import IDENT_REGEX
 
 # Represents a saved attribute involved in backward calculation.
 # Note that it can be a derived property of an input argument, e.g.:
@@ -91,6 +94,21 @@ class DifferentiabilityInfo:
     @property
     def has_derivatives(self) -> bool:
         return len(self.args_with_derivatives) > 0
+
+def uses_ident(info: Optional[DifferentiabilityInfo], ident: str) -> bool:
+    if info is None:
+        return False
+    for derivative in info.derivatives:
+        formula = derivative.formula
+        if re.search(IDENT_REGEX.format(ident), formula):
+            return True
+    return False
+
+def uses_retain_variables(info: Optional[DifferentiabilityInfo]) -> bool:
+    return uses_ident(info, 'retain_variables')
+
+def uses_single_grad(info: Optional[DifferentiabilityInfo]) -> bool:
+    return uses_ident(info, 'grad')
 
 # Represents a differentiable `Argument`.
 # How is it different from the `Argument` type?
@@ -212,3 +230,27 @@ def match_differentiability_info(
         ))
 
     return result
+
+def is_differentiable(name: str, type: Type, info: Optional[DifferentiabilityInfo]) -> bool:
+    return type.is_tensor_like() and (info is None or name not in info.non_differentiable_arg_names)
+
+def gen_differentiable_outputs(fn: NativeFunctionWithDifferentiabilityInfo) -> List[DifferentiableOutput]:
+    f = fn.func
+    info = fn.info
+    outputs: List[DifferentiableOutput] = [
+        DifferentiableOutput(name=name, type=ret.type, cpp_type=cpp.return_type(ret))
+        for name, ret in zip(cpp.return_names(f), f.func.returns)]
+    output_differentiability = info.output_differentiability if info else None
+    if output_differentiability is not None:
+        differentiable_outputs: List[DifferentiableOutput] = []
+        if False in output_differentiability and f.func.kind() == SchemaKind.inplace:
+            raise RuntimeError("output_differentiability=False for inplace operation (version_counter won't get updated)")
+        for differentiable, output in zip(output_differentiability, outputs):
+            if differentiable:
+                differentiable_outputs.append(output)
+        return differentiable_outputs
+    candidate_differentiable_outputs = list(filter(lambda r: is_differentiable(r.name, r.type, info), outputs))
+    if uses_single_grad(info):
+        return candidate_differentiable_outputs[:1]
+    else:
+        return candidate_differentiable_outputs
