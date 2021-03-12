@@ -44,6 +44,16 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 using ValueSet = std::unordered_set<Value*>;
 using ValueSetPtr = std::shared_ptr<std::unordered_set<Value*>>;
 
+Node* getLastUse(Value* v) {
+  auto last_use_node = v->node();
+  for (const auto& use : v->uses()) {
+    if (use.user->isAfter(last_use_node)) {
+      last_use_node = use.user;
+    }
+  }
+  return last_use_node;
+}
+
 void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   // This function first calculates aliasing sets,
   // then calculates the last node each aliasing set is alive for.
@@ -86,8 +96,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
       }
 
       std::unordered_set<Value*> new_set = {output};
-      alias_mapping[output] =
-          std::make_shared<std::unordered_set<Value*>>(new_set);
+      alias_mapping[output] = std::make_shared<ValueSet>(new_set);
       for (Value* input : n->inputs()) {
         if (aliasDb->mayAlias(input, output)) {
           merge_sets(input, output);
@@ -95,16 +104,6 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
       }
     }
   }
-
-  auto get_last_use = [](Value* v) -> Node* {
-    auto last_use_node = v->node();
-    for (const auto& use : v->uses()) {
-      if (use.user->isAfter(last_use_node)) {
-        last_use_node = use.user;
-      }
-    }
-    return last_use_node;
-  };
 
   std::unordered_map<ValueSetPtr, Node*> set_liveness;
   for (auto& set : alias_mapping) {
@@ -114,14 +113,14 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     Node* last = nullptr;
     for (auto it = set.second->begin(); it != set.second->end(); it++) {
       Value* v = *it;
-      if (v->node()->kind() == prim::Constant ||
-          v->node()->kind() == prim::ConstantMKLDNNTensor ||
-          v->node()->kind() == prim::Param) {
+      auto k = v->node()->kind();
+      if (k == prim::Constant || k == prim::ConstantMKLDNNTensor ||
+          k == prim::Param) {
         last = graph->return_node();
         continue;
       }
 
-      auto last_use = get_last_use(v);
+      auto last_use = getLastUse(v);
       if (!last || last_use->isAfter(last)) {
         last = last_use;
       }
