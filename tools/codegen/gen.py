@@ -172,6 +172,7 @@ class RegisterSchema:
 # the dispatcher from these functions.  See also compute_tensor_method.
 @dataclass(frozen=True)
 class ComputeFunction:
+    next_op_id = 0
     target: Union[
         Literal[Target.DECLARATION],
         Literal[Target.DEFINITION]
@@ -219,13 +220,17 @@ class ComputeFunction:
 
             static_dispatch_block = static_dispatch(f, sig, method=False, backend=self.static_dispatch_backend)
             if static_dispatch_block is None:
+                op_id = ComputeFunction.next_op_id
+                ComputeFunction.next_op_id += 1
                 return f"""
 // aten::{f.func}
+static c10::optional<TypedOperatorHandle<{dispatcher_sig.type()}>> op_{op_id};
 {sig.defn(is_redispatching_fn=self.is_redispatching_fn)} {{
-    static auto op = c10::Dispatcher::singleton()
+    if (!op_{op_id})
+      op_{op_id} = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
         .typed<{dispatcher_sig.type()}>();
-    return op.{dispatcher_call}({dispatcher_exprs_str});
+    return op_{op_id}->{dispatcher_call}({dispatcher_exprs_str});
 }}
 """
             else:
@@ -246,6 +251,7 @@ class ComputeFunction:
 # the dispatcher from these functions.  See also compute_function.
 @dataclass(frozen=True)
 class ComputeTensorMethod:
+    next_op_id = 0
     target: Union[
         Literal[Target.DECLARATION],
         Literal[Target.DEFINITION]
@@ -287,13 +293,17 @@ class ComputeTensorMethod:
 
             static_dispatch_block = static_dispatch(f, sig, method=True, backend=self.static_dispatch_backend)
             if static_dispatch_block is None:
+                op_id = ComputeTensorMethod.next_op_id
+                ComputeTensorMethod.next_op_id += 1
                 return f"""
 // aten::{f.func}
+static c10::optional<TypedOperatorHandle<{dispatcher_sig.type()}>> op_{op_id};
 {sig.defn(prefix="Tensor::")} const {{
-    static auto op = c10::Dispatcher::singleton()
+    if (!op_{op_id})
+      op_{op_id} = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
         .typed<{dispatcher_sig.type()}>();
-    return op.call({dispatcher_exprs_str});
+    return op_{op_id}->call({dispatcher_exprs_str});
 }}
 """
             else:
@@ -396,6 +406,7 @@ struct TORCH_API {name} : public {parent_class} {{
 # be easily done automatically using templating.
 @dataclass(frozen=True)
 class ComputeBackendSelect:
+    next_op_id = 0
     target: Union[
         Literal[Target.DEFINITION],
         Literal[Target.REGISTRATION]
@@ -437,15 +448,19 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
   DispatchKeySet _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask);"""
             else:
                 compute_dk = f"DispatchKeySet _dk = c10::DispatchKeySet({dispatch_key});"
+            op_id = ComputeBackendSelect.next_op_id
+            ComputeBackendSelect.next_op_id += 1
             return f"""\
 // aten::{f.func}
+static c10::optional<TypedOperatorHandle<{dispatcher_sig.type()}>> op_{op_id};
 C10_ALWAYS_INLINE
 {sig.defn(name)} {{
-  static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-    .typed<{dispatcher_sig.type()}>();
+  if (!op_{op_id})
+    op_{op_id} = c10::Dispatcher::singleton()
+      .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
+      .typed<{dispatcher_sig.type()}>();
   {compute_dk}
-  return op.redispatch(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
+  return op_{op_id}->redispatch(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif self.target is Target.REGISTRATION:
