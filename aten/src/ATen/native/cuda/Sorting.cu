@@ -14,6 +14,7 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -254,7 +255,9 @@ void kthvalue_cuda_template(
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   int64_t slicesize = self.dim() == 0 ? 1 : self.size(dim);
-  TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
+  if (self.sizes().size() != 0) {
+    TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
+  }
 
   TORCH_CHECK(k >= 1 && k <= slicesize, "selected number k out of range");
 
@@ -262,7 +265,7 @@ void kthvalue_cuda_template(
 
   _reduction_with_indices_allocate_or_resize_output(
       values, indices, self, dim, keepdim);
-  if (self.dim() == 0 && self.numel() <= 1) {
+  if (self.dim() == 0 && self.numel() == 1) {
     values.copy_(self);
     indices.zero_();
     return;
@@ -276,14 +279,16 @@ void kthvalue_cuda_template(
 
   // Based on required index size, run the algorithm with the
   // appropriate index type
-  if (cuda::detail::canUse32BitIndexMath(self) &&
-      cuda::detail::canUse32BitIndexMath(values) &&
-      cuda::detail::canUse32BitIndexMath(indices)) {
-    run_launcher<scalar_t, uint32_t>(
+  if (self.numel() != 0) {
+    if (cuda::detail::canUse32BitIndexMath(self) &&
+        cuda::detail::canUse32BitIndexMath(values) &&
+        cuda::detail::canUse32BitIndexMath(indices)) {
+      run_launcher<scalar_t, uint32_t>(
         values, indices, self, dim, KthValueLauncher(k));
-  } else {
-    run_launcher<scalar_t, uint64_t>(
+    } else {
+      run_launcher<scalar_t, uint64_t>(
         values, indices, self, dim, KthValueLauncher(k));
+    }
   }
 
   if (!keepdim) {
@@ -332,10 +337,10 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
       "median() cannot operate on more than ",
       MAX_TENSORINFO_DIMS,
       " dimensions");
-  TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
 
   std::vector<int64_t> out_shape = self.sizes().vec();
   if (self.dim() > 0) {
+    TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
     if (keepdim) {
       out_shape[dim] = 1;
     } else {
