@@ -7,6 +7,7 @@ import torch.nn.functional as F
 toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
+from torch.fx.symbolic_trace import Tracer
 from torch.quantization.ns.graph_matcher import (
     get_matching_subgraph_pairs,
     get_base_name_to_sets_of_related_ops,
@@ -60,7 +61,21 @@ NSSingleResultType = Dict[str, Any]
 #
 NSResultsType = Dict[str, Dict[str, NSSingleResultType]]
 
-def add_weight_info_to_dict(
+
+class NSTracer(Tracer):
+    """
+    Just like a regular tracer, but treats observers and fake_quantize
+    modules as leaf modules.
+    """
+    def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+        if isinstance(m, torch.quantization.ObserverBase):
+            return True
+        elif isinstance(m, torch.quantization.FakeQuantizeBase):
+            return True
+        return super().is_leaf_module(m, module_qualified_name)
+
+
+def _add_weight_info_to_dict(
     model_name: str,
     model: GraphModule,
     nodes_and_names_to_instrument: List[Tuple[Node, str]],
@@ -111,18 +126,13 @@ def add_weight_info_to_dict(
                     'node_target_type': str(type(mod)),
                 }
 
-# Note: this is not a user facing API
-# TODO(future PR): wrap this in a user facing API which does not
-#   expose FX types.
-def compare_weights(
+
+def _compare_weights_impl(
     model_name_a: str,
     gm_a: GraphModule,
     model_name_b: str,
     gm_b: GraphModule,
 ) -> NSResultsType:
-    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
-    type_a_related_to_b = \
-        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
 
     # split the subgraph pairs into one data structure for each model
@@ -135,12 +145,28 @@ def compare_weights(
 
     # populate the results, one model at a time
     results: NSResultsType = {}
-    add_weight_info_to_dict(
+    _add_weight_info_to_dict(
         model_name_a, gm_a, nodes_and_names_to_instrument_a, results)
-    add_weight_info_to_dict(
+    _add_weight_info_to_dict(
         model_name_b, gm_b, nodes_and_names_to_instrument_b, results)
 
     return results
+
+
+def compare_weights(
+    model_name_a: str,
+    model_a: nn.Module,
+    model_name_b: str,
+    model_b: nn.Module,
+) -> NSResultsType:
+    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    type_a_related_to_b = \
+        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
+
+    tracer_a, tracer_b = NSTracer(), NSTracer()
+    gm_a = GraphModule(model_a, tracer_a.trace(model_a))
+    gm_b = GraphModule(model_b, tracer_b.trace(model_b))
+    return _compare_weights_impl(model_name_a, gm_a, model_name_b, gm_b)
 
 
 class OutputLogger(nn.Module):
@@ -172,12 +198,13 @@ class OutputLogger(nn.Module):
     def __repr__(self):
         return f"OutputLogger(ref_name={self.ref_name}, model_name={self.model_name}, node_name={self.node_name})"
 
-def prepare_single_model_output(
+
+def _prepare_single_model_output(
     model_name: str,
     model: GraphModule,
     nodes_and_names_to_instrument: List[Tuple[Node, str]],
     logger_cls: Callable,
-) -> GraphModule:
+) -> nn.Module:
 
     # TODO(future PR): do not observe nodes we do not care
     #   about (both fp32, denylist, etc)
@@ -189,16 +216,14 @@ def prepare_single_model_output(
         model, node_to_instrument_to_ref_name, logger_cls, model_name)
     return model
 
-# Note: this is not a user facing API
-# TODO(future PR): wrap this in a user facing API which does not
-#   expose FX types.
-def prepare_model_outputs(
+
+def _prepare_model_outputs_impl(
     name_a: str,
     gm_a: GraphModule,
     name_b: str,
     gm_b: GraphModule,
     logger_cls: Callable,
-) -> Tuple[GraphModule, GraphModule]:
+) -> Tuple[nn.Module, nn.Module]:
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
     nodes_and_names_to_instrument_a = []
     nodes_and_names_to_instrument_b = []
@@ -210,14 +235,28 @@ def prepare_model_outputs(
         nodes_and_names_to_instrument_a.append((node_end_a, match_name))
         nodes_and_names_to_instrument_b.append((node_end_b, match_name))
 
-    gm_a = prepare_single_model_output(
+    new_model_a = _prepare_single_model_output(
         name_a, gm_a, nodes_and_names_to_instrument_a, logger_cls)
-    gm_b = prepare_single_model_output(
+    new_model_b = _prepare_single_model_output(
         name_b, gm_b, nodes_and_names_to_instrument_b, logger_cls)
-    return (gm_a, gm_b)
+    return (new_model_a, new_model_b)
+
+
+def prepare_model_outputs(
+    name_a: str,
+    model_a: nn.Module,
+    name_b: str,
+    model_b: nn.Module,
+    logger_cls: Callable,
+) -> Tuple[nn.Module, nn.Module]:
+    tracer_a, tracer_b = NSTracer(), NSTracer()
+    gm_a = GraphModule(model_a, tracer_a.trace(model_a))
+    gm_b = GraphModule(model_b, tracer_b.trace(model_b))
+    return _prepare_model_outputs_impl(name_a, gm_a, name_b, gm_b, logger_cls)
+
 
 def add_activation_info_to_dict(
-    model: GraphModule,
+    model: nn.Module,
     results: NSResultsType,
     logger_cls: Callable,
 ) -> None:
@@ -241,18 +280,16 @@ def add_activation_info_to_dict(
                 'node_target_type': mod.node_target_type,
             }
 
-# Note: this is not a user facing API
-# TODO(future PR): wrap this in a user facing API which does not
-#   expose FX types.
+
 # TODO(future PR): align on naming
 # this is equivalent of just the comparison extraction part of `ns.compare_model_outputs`
 def get_matching_activations(
-    gm_a: GraphModule,
-    gm_b: GraphModule,
+    model_a: nn.Module,
+    model_b: nn.Module,
     logger_cls: Callable,
 ) -> NSResultsType:
     """
-    Same thing as ns.get_matching_activations, but for FX models prepared with
+    Same thing as ns.get_matching_activations, but for models prepared with
     this module.
 
     TODO(future PR): real docblock
@@ -260,37 +297,45 @@ def get_matching_activations(
     Output format: NSResultsType
     """
     results: NSResultsType = {}
-    for gm in (gm_a, gm_b):
-        add_activation_info_to_dict(gm_a, results, logger_cls)
-        add_activation_info_to_dict(gm_b, results, logger_cls)
+    for model in (model_a, model_b):
+        add_activation_info_to_dict(model, results, logger_cls)
     return results
 
-# Note: this is not a user facing API
-# TODO(future PR): wrap this in a user facing API which does not
-#   expose FX types.
-def prepare_model_with_stubs(
+
+def _prepare_model_with_stubs_impl(
     name_a: str,
     gm_a: GraphModule,
     name_b: str,
     gm_b: GraphModule,
     logger_cls: Callable,
-) -> GraphModule:
-    """
-    Same thing as prepare_model_outputs, but for an `a_shadows_b` model.
-    TODO(future PR): real docblock
-    """
+) -> nn.Module:
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
     gm_a_shadows_b = create_a_shadows_b(
         name_a, gm_a, name_b, gm_b, matched_subgraph_pairs, logger_cls)
     return gm_a_shadows_b
 
-# Note: this is not a user facing API
-# TODO(future PR): wrap this in a user facing API which does not
-#   expose FX types.
+
+def prepare_model_with_stubs(
+    name_a: str,
+    model_a: nn.Module,
+    name_b: str,
+    model_b: nn.Module,
+    logger_cls: Callable,
+) -> nn.Module:
+    """
+    Same thing as prepare_model_outputs, but for an `a_shadows_b` model.
+    TODO(future PR): real docblock
+    """
+    tracer_a, tracer_b = NSTracer(), NSTracer()
+    gm_a = GraphModule(model_a, tracer_a.trace(model_a))
+    gm_b = GraphModule(model_b, tracer_b.trace(model_b))
+    return _prepare_model_with_stubs_impl(name_a, gm_a, name_b, gm_b, logger_cls)
+
+
 # TODO(future PR): align on naming
 # this is equivalent of just the comparison extraction part of `ns.compare_model_stub`
 def get_matching_activations_a_shadows_b(
-    gm_a_shadows_b: GraphModule,
+    model_a_shadows_b: nn.Module,
     logger_cls: Callable,
 ) -> NSResultsType:
     """
@@ -298,5 +343,5 @@ def get_matching_activations_a_shadows_b(
     TODO(future PR): real docblock
     """
     results: NSResultsType = collections.defaultdict(dict)
-    add_activation_info_to_dict(gm_a_shadows_b, results, logger_cls)
+    add_activation_info_to_dict(model_a_shadows_b, results, logger_cls)
     return dict(results)
