@@ -793,9 +793,44 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
   // and use them.
   auto root_dom = producer_tv->getMaybeRFactorDomain();
 
-  bool inner_most_dim_contig =
-      root_dom[root_dom.size() - 1]->getIterType() == IterType::Iteration &&
-      producer_tv->domain()->contiguity()[root_dom.size() - 1];
+  // TODO: Abstract stride logic to reuse with consumer indexing
+  std::vector<kir::Val*> strides(root_dom.size(), nullptr);
+  {
+    auto zero = ir_builder.create<kir::Int>(0);
+    int stride_i = 0;
+    for (size_t i = 0; i < root_dom.size(); i++) {
+      if (root_dom[i]->isReduction() ||
+          root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
+        strides[i] = zero;
+        continue;
+      } else if (root_dom[i]->getIterType() == IterType::BroadcastWithStride) {
+        strides[i] = zero;
+        stride_i++;
+        continue;
+      }
+      std::stringstream ss;
+      ss << "T" << producer_tv->name() << ".stride[" << stride_i++ << "]";
+      strides[i] = ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int);
+    }
+  }
+
+  kir::Val* cur_stride = ir_builder.create<kir::Int>(1);
+  for (size_t i = 0; i < root_dom.size(); i++) {
+    auto dim = root_dom.size() - i - 1;
+    if (root_dom[dim]->isReduction()) {
+      continue;
+    }
+    if (root_dom[dim]->isBroadcast()) {
+      continue;
+    }
+    if (producer_tv->domain()->contiguity()[dim]) {
+      strides[dim] = cur_stride;
+      cur_stride = ir_builder.mulExpr(
+          cur_stride, gpu_lower->lowerValue(root_dom[dim]->extent()));
+    } else {
+      cur_stride = strides[dim];
+    }
+  }
 
   // Global striding
   int64_t stride_i = 0;
@@ -828,16 +863,10 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
         kir::toString(kir_root_dom_i));
 
     auto root_ind = producer_indexing.indexMap().at(kir_root_dom_i);
-    if (i == root_dom.size() - 1 && inner_most_dim_contig) {
-      strided_inds.push_back(root_ind);
-    } else if (root_ind->isZeroInt()) {
-      stride_i++;
+    if (root_ind->isZeroInt()) {
+      continue;
     } else {
-      std::stringstream ss;
-      ss << "T" << producer_tv->name() << ".stride[" << stride_i++ << "]";
-      strided_inds.push_back(ir_builder.mulExpr(
-          root_ind,
-          ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int)));
+      strided_inds.push_back(ir_builder.mulExpr(root_ind, strides[i]));
     }
   }
 
@@ -1161,9 +1190,44 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
   // and use them.
   auto root_dom = consumer_tv->getMaybeRFactorDomain();
 
-  bool inner_most_dim_contig =
-      root_dom[root_dom.size() - 1]->getIterType() == IterType::Iteration &&
-      consumer_tv->domain()->contiguity()[root_dom.size() - 1];
+  // TODO: Abstract stride logic to reuse with producer indexing
+  std::vector<kir::Val*> strides(root_dom.size(), nullptr);
+  {
+    auto zero = ir_builder.create<kir::Int>(0);
+    int stride_i = 0;
+    for (size_t i = 0; i < root_dom.size(); i++) {
+      if (root_dom[i]->isReduction() ||
+          root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
+        strides[i] = zero;
+        continue;
+      } else if (root_dom[i]->getIterType() == IterType::BroadcastWithStride) {
+        strides[i] = zero;
+        stride_i++;
+        continue;
+      }
+      std::stringstream ss;
+      ss << "T" << consumer_tv->name() << ".stride[" << stride_i++ << "]";
+      strides[i] = ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int);
+    }
+  }
+
+  kir::Val* cur_stride = ir_builder.create<kir::Int>(1);
+  for (size_t i = 0; i < root_dom.size(); i++) {
+    auto dim = root_dom.size() - i - 1;
+    if (root_dom[dim]->isReduction()) {
+      continue;
+    }
+    if (root_dom[dim]->isBroadcast()) {
+      continue;
+    }
+    if (consumer_tv->domain()->contiguity()[dim]) {
+      strides[dim] = cur_stride;
+      cur_stride = ir_builder.mulExpr(
+          cur_stride, gpu_lower->lowerValue(root_dom[dim]->extent()));
+    } else {
+      cur_stride = strides[dim];
+    }
+  }
 
   int64_t stride_i = 0;
   std::vector<kir::Val*> strided_inds;
@@ -1191,17 +1255,13 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
         i,
         " id: ",
         kir::toString(kir_root_dom_i));
-    auto ind = consumer_indexing.indexMap().at(kir_root_dom_i);
 
-    if (i == root_dom.size() - 1 && inner_most_dim_contig) {
-      strided_inds.push_back(ind);
-    } else if (ind->isZeroInt()) {
-      stride_i++;
+    auto root_ind = consumer_indexing.indexMap().at(kir_root_dom_i);
+
+    if (root_ind->isZeroInt()) {
+      continue;
     } else {
-      std::stringstream ss;
-      ss << "T" << consumer_tv->name() << ".stride[" << stride_i++ << "]";
-      strided_inds.push_back(ir_builder.mulExpr(
-          ind, ir_builder.create<kir::NamedScalar>(ss.str(), DataType::Int)));
+      strided_inds.push_back(ir_builder.mulExpr(root_ind, strides[i]));
     }
   }
 
