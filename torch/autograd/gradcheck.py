@@ -365,6 +365,7 @@ def test_batched_grad(fail_test, input, output, output_idx):
         if torch.allclose(res, exp):
             continue
         return fail_test(get_failed_batched_grad_test_msg(output_idx, input_idx, res, exp))
+    return True
 
 
 def test_backward_mul_by_grad_output(fail_test, func, inputs, check_sparse_nnz) -> bool:
@@ -591,7 +592,7 @@ def gradcheck(
                         return fail_test(get_notallclose_msg(a, n, i, j))
 
         if check_batched_grad:
-            test_batched_grad(fail_test, tupled_inputs, o, i)
+            return test_batched_grad(fail_test, tupled_inputs, o, i)
 
     if not test_backward_mul_by_grad_output(fail_test, func, tupled_inputs, check_sparse_nnz):
         return False
