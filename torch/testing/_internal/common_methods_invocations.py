@@ -1429,6 +1429,22 @@ def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
 
     return samples
 
+
+def reference_sgn(x):
+    if x.dtype not in [np.complex64, np.complex128]:
+        return np.sign(x)
+
+    out = (x / np.abs(x))
+    if out.ndim == 0:
+        if (x == 0):
+            return np.array(complex(0, 0), dtype=x.dtype)
+        return out
+
+    mask = (x == 0)
+    out[mask] = complex(0, 0)
+    return out
+
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -2271,6 +2287,32 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.int8]),
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
+                   )),
+    UnaryUfuncInfo('sign',
+                   ref=np.sign,
+                   dtypes=all_types_and(torch.bfloat16, torch.half),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16, torch.half),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                dtypes=[torch.bfloat16, torch.float16, torch.float32, torch.float64]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                dtypes=[torch.bool]),
+                   )),
+    UnaryUfuncInfo('sgn',
+                   ref=reference_sgn,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                dtypes=[torch.bfloat16, torch.float16, torch.float32, torch.float64]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                dtypes=[torch.bool]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                dtypes=[torch.complex64, torch.complex128]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                dtypes=[torch.complex64])
                    )),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
