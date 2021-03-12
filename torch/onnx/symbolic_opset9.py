@@ -2379,6 +2379,14 @@ def isnan(g, input):
     output = g.op('IsNaN', input)
     return output
 
+def _any(g, input):
+    input = _cast_Long(g, input, False)  # type: ignore
+    input_sum = sym_help._reducesum_helper(g, input, keepdims_i=0)
+    return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
+
+def _all(g, input):
+    return g.op("Not", _any(g, g.op("Not", input)))
+
 
 @parse_args('v', 'i', 'i', 'i')
 def narrow(g, input, dim, start, length):

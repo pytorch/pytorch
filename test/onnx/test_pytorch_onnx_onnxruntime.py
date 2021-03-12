@@ -5782,6 +5782,42 @@ class TestONNXRuntime(unittest.TestCase):
         mat2 = torch.ones(2, 3)
         self.run_test(M(), input=(cond, mat1, mat2))
 
+    @skipIfUnsupportedMinOpsetVersion(10)  # ONNX IsInf op is added in opset 10.
+    def test_isinf(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.isinf()
+
+        x = torch.tensor([[1, 2, float('inf')], [2, float('nan'), float('inf')]])
+        self.run_test(M(), (x, ))
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # ONNX IsNaN op is added in opset 9.
+    def test_isnan(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.isnan()
+
+        x = torch.tensor([[1, 2, float('inf')], [2, float('nan'), float('inf')]])
+        self.run_test(M(), (x, ))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_any(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.any()
+
+        x = torch.tensor([[True, False], [False, False]])
+        self.run_test(M(), (x, ))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_all(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.all()
+
+        x = torch.tensor([[True, False], [False, False]])
+        self.run_test(M(), (x, ))
+
     def test_dropout(self):
         class M(torch.nn.Module):
             def __init__(self):
