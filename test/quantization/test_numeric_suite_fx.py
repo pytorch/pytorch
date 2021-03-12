@@ -88,31 +88,6 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             self.assertTrue(v["float"].shape == v["quantized"].shape)
 
     @override_qengines
-    def test_compare_weights_linear_static_fx(self):
-        r"""Compare the weights of float and static quantized linear layer"""
-
-        qengine = torch.backends.quantized.engine
-        qconfig = get_default_qconfig(qengine)
-        qconfig_dict = {"": qconfig}
-
-        float_model = SingleLayerLinearModel()
-        float_model.eval()
-
-        prepared_model = prepare_fx(float_model, qconfig_dict)
-
-        prepared_float_model = copy.deepcopy(prepared_model)
-        prepared_float_model.eval()
-
-        # Run calibration
-        test_only_eval_fn(prepared_model, self.calib_data)
-        q_model = convert_fx(prepared_model)
-
-        expected_weight_dict_keys = {"fc1._packed_params._packed_params"}
-        self.compare_and_validate_model_weights_results_fx(
-            prepared_float_model, q_model, expected_weight_dict_keys
-        )
-
-    @override_qengines
     def test_compare_weights_linear_dynamic_fx(self):
         r"""Compare the weights of float and dynamic quantized linear layer"""
 
@@ -929,6 +904,15 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             (ConvModel(),),
             (ConvBnModel(),),
             (ConvBnReLUModel(),),
+        )
+        for m, in test_cases:
+            m.eval()
+            self._test_extract_weights(m, results_len=1)
+
+    @skipIfNoFBGEMM
+    def test_compare_weights_linear(self):
+        test_cases = (
+            (SingleLayerLinearModel(), ),
         )
         for m, in test_cases:
             m.eval()
