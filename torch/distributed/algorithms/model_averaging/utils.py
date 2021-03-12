@@ -6,19 +6,21 @@ import torch.distributed as dist
 
 def _init_per_machine_process_groups(
     num_gpus_per_machine: int,
-    process_group: dist.ProcessGroup = dist.group.WORLD,
+    process_group: dist.ProcessGroup,
     backend: str = "nccl",
-):
+) -> dist.ProcessGroup:
     """
     Initalizes all the per-machine process groups, even if only one group will be eventually used.
     This is a requirement of :meth:`torch.distributed.new_group` API.
     Returns the per-machine process group that contains the current rank.
     """
+    group_to_use = process_group if process_group is not None else dist.group.WORLD
+
     ret_group = None
     for machine_rank in range(
-        dist.get_world_size(group=process_group) // num_gpus_per_machine
+        dist.get_world_size(group=group_to_use) // num_gpus_per_machine
     ):
-        global_rank = dist.get_rank(group=process_group)
+        global_rank = dist.get_rank(group=group_to_use)
         start_rank = machine_rank * num_gpus_per_machine
         end_rank = start_rank + num_gpus_per_machine
         per_machine_ranks = list(range(start_rank, end_rank))
