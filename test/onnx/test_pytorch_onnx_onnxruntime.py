@@ -674,6 +674,49 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), (x, {}))
 
     @disableScriptTest()
+    def test_dict_output(self):
+        class DictModelOutput(OrderedDict):
+            tensor_out: torch.Tensor
+            tuple_out: Optional[Tuple[torch.Tensor]] = None
+            list_out: Optional[List[torch.Tensor]] = None
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                return DictModelOutput(
+                    tensor_out=a,
+                    tuple_out=(b, c),
+                    list_out=[d],
+                )
+
+        a = torch.randn(2, 3)
+        b = torch.randn(2, 3)
+        c = torch.randn(2, 3)
+        d = torch.randn(2, 3)
+        self.run_test(MyModel(), (a, b, c, d))
+
+    def test_tuple_output(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                return a, (b, c), d
+
+        a = torch.randn(2, 3)
+        b = torch.randn(2, 3)
+        c = torch.randn(2, 3)
+        d = torch.randn(2, 3)
+        self.run_test(MyModel(), (a, b, c, d))
+
+    def test_nested_tuple_output(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                return a, ((b,), (c, d))
+
+        a = torch.randn(2, 3)
+        b = torch.randn(2, 3)
+        c = torch.randn(2, 3)
+        d = torch.randn(2, 3)
+        self.run_test(MyModel(), (a, b, c, d))
+
+    @disableScriptTest()
     def test_optional_inputs_with_no_optionals(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
