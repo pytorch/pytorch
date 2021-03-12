@@ -4,6 +4,7 @@ repository, run:
 
 python -m tools.autograd.gen_autograd \
        build/aten/src/ATen/Declarations.yaml \
+       aten/src/ATen/native/native_functions.yaml \
        $OUTPUT_DIR \
        tools/autograd
 
@@ -30,67 +31,6 @@ from tools.codegen.api.autograd import (
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import List
-
-# See NOTE [ Autograd View Variables ] in variable.h for details.
-# If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
-# you **MUST** also update the public list of view ops accordingly in
-# docs/source/tensor_view.rst. Note not all ATen functions are exposed to public,
-# e.g alias & sparse_coo_tensor_with_dims_and_tensors.
-#
-# A map: function name => name of the argument that all outputs are view of
-
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_real', 'view_as_complex']
-
-VIEW_FUNCTIONS = {
-    'numpy_T': 'self',
-    'alias': 'self',
-    'as_strided': 'self',
-    'diagonal': 'self',
-    'expand': 'self',
-    'permute': 'self',
-    'select': 'self',
-    'slice': 'self',
-    'split': 'self',
-    'split_with_sizes': 'self',
-    'squeeze': 'self',
-    't': 'self',
-    'transpose': 'self',
-    'unfold': 'self',
-    'unsqueeze': 'self',
-    'flatten': 'self',
-    'view': 'self',
-    'unbind': 'self',
-    '_indices': 'self',
-    '_values': 'self',
-    'indices': 'self',
-    'values': 'self',
-    # sparse_coo ctor output should really be views of both indices and values,
-    # but we only supports making as view of a single variable, and indices is
-    # discrete anyways.
-    # FIXME: clone indices on construction.
-    'sparse_coo_tensor_with_dims_and_tensors': 'values',
-}
-
-for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
-    VIEW_FUNCTIONS[key] = 'self'
-
-# Functions for which we use CreationMeta::MULTI_OUTPUT_SAFE. I.e., the ones for
-# which inplace modification of outputs is being gradually deprecated.
-MULTI_OUTPUT_SAFE_FUNCTIONS = {
-    'split',
-    'split_with_sizes',
-}
-
-# note: some VIEW_FUNCTIONS are just compositions of the view functions above
-# this list contains both the root view functions and any that are purely composed
-# of viewing functions, and is used by the JIT to determine when an operator
-# may return a view of its inputs; however they may sometimes return a copy.
-# (e.g. `contiguous`)
-RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
-    'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
-    'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
-    'tensor_split', 'swapdims', 'swapaxes'
-})
 
 def gen_autograd(
     aten_path: str,
