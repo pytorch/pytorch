@@ -172,6 +172,8 @@ USE_PYTEST_LIST = [
     'distributions/test_constraints',
     'distributions/test_transforms',
     'distributions/test_utils',
+    'test_typing',
+    "distributed/elastic/events/lib_test",
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -990,7 +992,7 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 
     # Printing the date here can help diagnose which tests are slow
     print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
-    handler = CUSTOM_HANDLERS.get(test, run_test)
+    handler = CUSTOM_HANDLERS.get(test_module, run_test)
     return_code = handler(test_module, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool), 'Return code should be an integer'
