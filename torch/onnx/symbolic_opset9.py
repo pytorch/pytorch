@@ -1524,8 +1524,6 @@ def pow(g, self, exponent):
     if not sym_help._is_fp(exponent):
         exponent = g.op("Cast", exponent, to_i=sym_help.cast_pytorch_to_onnx[f_dtype])
     pow = g.op("Pow", self, exponent)
-    if self_dtype and self_dtype != f_dtype:
-        pow = g.op("Cast", pow, to_i=sym_help.cast_pytorch_to_onnx[self_dtype])
     return pow
 
 
