@@ -10,8 +10,11 @@ import os
 import random
 
 from torch.nn.utils import rnn as rnn_utils
-from model_defs.lstm_flattening_result import LstmFlatteningResult
-from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
+from model_defs.lstm_flattening_result import (LstmFlatteningResultWithSeqLength,
+                                               LstmFlatteningResultWithoutSeqLength)
+from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequence,
+                                                       RnnModelWithPackedSequenceWithState,
+                                                       RnnModelWithPackedSequenceWithoutState)
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
                                  skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
                                  skipIfUnsupportedMaxOpsetVersion)
@@ -30,6 +33,8 @@ from torchvision.models.detection.rpn import AnchorGenerator, RPNHead, RegionPro
 from torchvision.models.detection.roi_heads import RoIHeads
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHead
 from collections import OrderedDict
+
+from torch.nn.utils.rnn import PackedSequence
 
 def to_numpy(tensor):
     if tensor.requires_grad:
@@ -5923,14 +5928,47 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _elman_rnn_test(self, layers, nonlinearity, bidirectional,
                         initial_state, packed_sequence, dropout):
-        batch_first = True if packed_sequence == 2 else False
-        model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, nonlinearity=nonlinearity,
-                             bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
 
-        if packed_sequence == 1:
-            model = RnnModelWithPackedSequence(model, False)
-        if packed_sequence == 2:
-            model = RnnModelWithPackedSequence(model, True)
+        class ElmanWithStateModel(torch.nn.Module):
+            def __init__(self, layers, nonlinearity, bidirect, dropout, batch_first):
+                super(ElmanWithStateModel, self).__init__()
+
+                self.batch_first = batch_first
+                self.inner_model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, nonlinearity=nonlinearity,
+                                                bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
+
+            def forward(self, input: PackedSequence, hx=None):
+                return self.inner_model(input, hx)
+
+        class ElmanWithoutStateModel(torch.nn.Module):
+            def __init__(self, layers, nonlinearity, bidirect, dropout, batch_first):
+                super(ElmanWithoutStateModel, self).__init__()
+                self.batch_first = batch_first
+                self.inner_model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, nonlinearity=nonlinearity,
+                                                bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
+
+            def forward(self, input: PackedSequence):
+                return self.inner_model(input)
+
+        batch_first = True if packed_sequence == 2 else False
+
+        if initial_state:
+            model = ElmanWithStateModel(layers=layers, bidirect=bidirectional, nonlinearity=nonlinearity,
+                                        dropout=dropout, batch_first=batch_first)
+
+            if packed_sequence == 1:
+                model = RnnModelWithPackedSequenceWithState(model, False)
+            if packed_sequence == 2:
+                model = RnnModelWithPackedSequenceWithState(model, True)
+        else:
+            model = ElmanWithStateModel(layers=layers, bidirect=bidirectional,
+                                        nonlinearity=nonlinearity, dropout=dropout,
+                                        batch_first=batch_first)
+
+            if packed_sequence == 1:
+                model = RnnModelWithPackedSequenceWithoutState(model, False)
+            if packed_sequence == 2:
+                model = RnnModelWithPackedSequenceWithoutState(model, True)
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
@@ -5962,13 +6000,23 @@ class TestONNXRuntime(unittest.TestCase):
     def _lstm_test(self, layers, bidirectional, initial_state,
                    packed_sequence, dropout):
         batch_first = True if packed_sequence == 2 else False
-        model = LstmFlatteningResult(
-            RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
-            bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
-        if packed_sequence == 1:
-            model = RnnModelWithPackedSequence(model, False)
-        if packed_sequence == 2:
-            model = RnnModelWithPackedSequence(model, True)
+
+        if packed_sequence == 0:
+            model = LstmFlatteningResultWithoutSeqLength(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
+                                                         bidirectional, dropout, batch_first)
+        else:
+            model = LstmFlatteningResultWithSeqLength(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers,
+                                                      bidirectional, dropout, batch_first)
+            if initial_state:
+                if packed_sequence == 1:
+                    model = RnnModelWithPackedSequenceWithState(model, False)
+                if packed_sequence == 2:
+                    model = RnnModelWithPackedSequenceWithState(model, True)
+            else:
+                if packed_sequence == 1:
+                    model = RnnModelWithPackedSequenceWithoutState(model, False)
+                if packed_sequence == 2:
+                    model = RnnModelWithPackedSequenceWithoutState(model, True)
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
@@ -6000,13 +6048,76 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _gru_test(self, layers, bidirectional, initial_state,
                   packed_sequence, dropout):
+
+        class GRUWithStateModel(torch.nn.Module):
+            def __init__(self, layers, bidirect, dropout, batch_first):
+                super(GRUWithStateModel, self).__init__()
+
+                self.batch_first = batch_first
+                self.inner_model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers=layers,
+                                                bidirectional=bidirectional, dropout=dropout,
+                                                batch_first=batch_first)
+
+            def forward(self, input: PackedSequence, hx):
+                return self.inner_model(input, hx)
+
+        class GRUWithoutStateModel(torch.nn.Module):
+            def __init__(self, layers, bidirect, dropout, batch_first):
+                super(GRUWithoutStateModel, self).__init__()
+                self.batch_first = batch_first
+                self.inner_model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers=layers,
+                                                bidirectional=bidirectional, dropout=dropout,
+                                                batch_first=batch_first)
+
+            def forward(self, input: PackedSequence):
+                return self.inner_model(input)
+
+        class GRUNoSeqLengthWithoutStateModel(torch.nn.Module):
+            def __init__(self, layers, bidirect, dropout, batch_first):
+                super(GRUNoSeqLengthWithoutStateModel, self).__init__()
+                self.batch_first = batch_first
+                self.inner_model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers=layers,
+                                                bidirectional=bidirectional, dropout=dropout,
+                                                batch_first=batch_first)
+
+            def forward(self, input):
+                return self.inner_model(input)
+
+        class GRUNoSeqLengthWithStateModel(torch.nn.Module):
+            def __init__(self, layers, bidirect, dropout, batch_first):
+                super(GRUNoSeqLengthWithStateModel, self).__init__()
+                self.batch_first = batch_first
+                self.inner_model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers=layers,
+                                                bidirectional=bidirectional, dropout=dropout,
+                                                batch_first=batch_first)
+
+            def forward(self, input, hx):
+                return self.inner_model(input, hx)
+
         batch_first = True if packed_sequence == 2 else False
-        model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, bidirectional=bidirectional, dropout=dropout,
-                             batch_first=batch_first)
-        if packed_sequence == 1:
-            model = RnnModelWithPackedSequence(model, False)
-        if packed_sequence == 2:
-            model = RnnModelWithPackedSequence(model, True)
+
+        if packed_sequence == 0:
+            if initial_state:
+                model = GRUNoSeqLengthWithStateModel(layers=layers, bidirect=bidirectional,
+                                                     dropout=dropout, batch_first=batch_first)
+            else:
+                model = GRUNoSeqLengthWithoutStateModel(layers=layers, bidirect=bidirectional,
+                                                        dropout=dropout, batch_first=batch_first)
+        else:
+            if initial_state:
+                model = GRUWithStateModel(layers=layers, bidirect=bidirectional, dropout=dropout,
+                                          batch_first=batch_first)
+                if packed_sequence == 1:
+                    model = RnnModelWithPackedSequenceWithState(model, False)
+                if packed_sequence == 2:
+                    model = RnnModelWithPackedSequenceWithState(model, True)
+            else:
+                model = GRUWithoutStateModel(layers=layers, bidirect=bidirectional, dropout=dropout,
+                                             batch_first=batch_first)
+                if packed_sequence == 1:
+                    model = RnnModelWithPackedSequenceWithoutState(model, False)
+                if packed_sequence == 2:
+                    model = RnnModelWithPackedSequenceWithoutState(model, True)
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
@@ -7277,7 +7388,13 @@ def make_test(name, base, layer, bidirectional, initial_state,
 
     # Cannot export with older opsets because of 'ConstantFill' op
     # ConstantFill was a temp op removed at opset 8. This is no longer supported by onnxruntime
-    @disableScriptTest()  # Test code not scriptable
+    # There are still some issues prevent us from enabling script test for these scenarios:
+    # test_gru_*:
+    #   Operator aten::as_tensor is not supported by exporter yet.
+    #       - https://msdata.visualstudio.com/Vienna/_workitems/edit/1055382
+    #   Operator aten::_pack_padded_sequence is not supported by exporter yet.
+    #       - https://msdata.visualstudio.com/Vienna/_workitems/edit/1055384
+    @disableScriptTest()
     @skipIfUnsupportedMinOpsetVersion(9)
     def f(self):
         self._dispatch_rnn_test(
