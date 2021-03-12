@@ -17,7 +17,6 @@ from torch.quantization._numeric_suite_fx import (
 from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.quantize_fx import (
     convert_fx,
-    fuse_fx,
     prepare_fx,
     prepare_qat_fx,
 )
@@ -87,30 +86,6 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         for k, v in weight_dict.items():
             self.assertTrue(v["float"].shape == v["quantized"].shape)
-
-    @override_qengines
-    def test_compare_weights_conv_static_fx(self):
-        r"""Compare the weights of float and static quantized conv layer"""
-
-        qengine = torch.backends.quantized.engine
-        qconfig = get_default_qconfig(qengine)
-        qconfig_dict = {"": qconfig}
-
-        model_list = [ConvModel(), ConvBnModel(), ConvBnReLUModel()]
-        for float_model in model_list:
-            float_model.eval()
-
-            fused = fuse_fx(float_model)
-            prepared_model = prepare_fx(float_model, qconfig_dict)
-
-            # Run calibration
-            test_only_eval_fn(prepared_model, self.img_data_2d)
-            q_model = convert_fx(prepared_model)
-
-            expected_weight_dict_keys = {"conv.weight"}
-            self.compare_and_validate_model_weights_results_fx(
-                fused, q_model, expected_weight_dict_keys
-            )
 
     @override_qengines
     def test_compare_weights_linear_static_fx(self):
@@ -722,7 +697,9 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = extract_weights('fp32_prepared', mp, 'int8', mq)
-        self.assertTrue(len(results) == results_len)
+        self.assertTrue(
+            len(results) == results_len,
+            f"expected len {results_len}, got len {len(results)}")
         self.assert_ns_compare_dict_valid(results)
 
     def _test_match_activations(
@@ -755,7 +732,9 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
 
         # check activation result correctness
         act_compare_dict = extract_logger_info(mp_ns, mq_ns, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == results_len)
+        self.assertTrue(
+            len(act_compare_dict) == results_len,
+            f"expected len {results_len}, got len {len(act_compare_dict)}")
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
     def _test_match_shadow_activations(
@@ -786,7 +765,9 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         # check activation result correctness
         act_compare_dict = extract_shadow_logger_info(
             mp_shadows_mq, OutputLogger)
-        self.assertTrue(len(act_compare_dict) == results_len)
+        self.assertTrue(
+            len(act_compare_dict) == results_len,
+            f"expected len {results_len}, got len {len(act_compare_dict)}")
         self.assert_ns_compare_dict_valid(act_compare_dict)
 
 
@@ -941,6 +922,17 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
     Tests numeric suite core APIs on non-toy models.
     """
+
+    @skipIfNoFBGEMM
+    def test_compare_weights_conv(self):
+        test_cases = (
+            (ConvModel(),),
+            (ConvBnModel(),),
+            (ConvBnReLUModel(),),
+        )
+        for m, in test_cases:
+            m.eval()
+            self._test_extract_weights(m, results_len=1)
 
     @skipIfNoFBGEMM
     def test_sparsenn_compare_activations(self):
