@@ -419,7 +419,7 @@ inline static void apply_cholesky_lib_potrfBatched(Tensor& self_working_copy, bo
     lda, infos.data_ptr<int>(), batch_size);
 }
 
-Tensor _cholesky_helper_cuda_lib(const Tensor& self, bool upper) {
+Tensor _cholesky_helper_cuda_cusolver(const Tensor& self, bool upper) {
   const int64_t batch_size = batchCount(self);
   at::Tensor infos = at::zeros({batch_size}, self.options().dtype(at::kInt));
   at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
