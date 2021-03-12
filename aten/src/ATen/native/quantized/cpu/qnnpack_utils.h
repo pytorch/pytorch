@@ -129,11 +129,6 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
             transpose_,
             is_per_channel) {
 
-          if (conv_p.per_channel && conv_p.ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
-            TORCH_INTERNAL_ASSERT(
-              "Per channel quantized weights are not supported for XZP kernels");
-          }
-
           pytorch_qnnp_operator_t convolution{nullptr};
           // Initially all the params are set to zero.
           convolution =

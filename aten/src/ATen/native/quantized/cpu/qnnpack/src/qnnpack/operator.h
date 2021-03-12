@@ -34,7 +34,6 @@ enum pytorch_qnnp_ukernel_type {
   pytorch_qnnp_ukernel_type_lut,
   pytorch_qnnp_ukernel_type_max_pooling,
   pytorch_qnnp_ukernel_type_softargmax,
-  pytorch_qnnp_ukernel_type_xzp_gemm,
 };
 
 typedef struct {

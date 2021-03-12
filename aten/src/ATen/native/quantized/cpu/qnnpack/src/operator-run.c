@@ -233,62 +233,6 @@ static void compute_sum_rows(
           block_start);
 }
 
-struct q8gemm_xzp_context {
-  size_t k;
-  size_t k_stride;
-  size_t n;
-  size_t n_stride;
-  const uint8_t* a;
-  size_t a_stride;
-  const void* packed_w;
-  uint8_t* c;
-  size_t c_stride;
-  const int32_t* a_sum;
-  size_t groups;
-  size_t batch_size;
-  size_t a_sum_stride;
-  union pytorch_qnnp_q31_requantization_params requantization_params;
-  const pytorch_q8gemm_xzp_ukernel_function ukernel;
-};
-
-static void compute_q8gemm_xzp(
-    const struct q8gemm_xzp_context context[RESTRICT_STATIC 1],
-    size_t group_index,
-    size_t pixel_index,
-    size_t mr_block_start,
-    size_t nr_block_start,
-    size_t group_range /* always 1 */,
-    size_t pixel_range,
-    size_t mr_block_size,
-    size_t nr_block_size) {
-  const size_t k = context->k;
-  const size_t k_stride = context->k_stride;
-  const size_t n = context->n;
-  const size_t n_stride = context->n_stride;
-  const uint8_t* restrict a = context->a;
-  const size_t a_stride = context->a_stride;
-  const void* restrict packed_w = context->packed_w;
-  uint8_t* restrict c = context->c;
-  const size_t c_stride = context->c_stride;
-  const int32_t* a_sum = context->a_sum;
-  const size_t groups = context->groups;
-  const size_t a_sum_stride = context->a_sum_stride;
-
-  context->ukernel(
-      mr_block_size,
-      nr_block_size,
-      k,
-      a + (pixel_index + mr_block_start) * a_stride + group_index * k,
-      a_stride,
-      a_sum + pixel_index * groups + group_index * a_sum_stride +
-          mr_block_start,
-      (const void*)((uintptr_t)packed_w + (nr_block_start + group_index * n_stride) * (k_stride * sizeof(uint8_t) + sizeof(int32_t))),
-      c + (pixel_index + mr_block_start) * c_stride + nr_block_start +
-          group_index * n,
-      c_stride,
-      &context->requantization_params);
-}
-
 struct q8conv_context {
   size_t bs;
   size_t ks;
@@ -861,74 +805,6 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
         default:
           PYTORCH_QNNP_UNREACHABLE;
       }
-      break;
-    }
-    case pytorch_qnnp_ukernel_type_xzp_gemm: {
-      const size_t batch_size = op->batch_size;
-      const size_t groups = op->groups;
-      const size_t group_input_channels = op->group_input_channels;
-      const size_t group_output_channels = op->group_output_channels;
-      const uint32_t mr = pytorch_qnnp_params.q8conv_xzp.mr;
-      const uint32_t nr = pytorch_qnnp_params.q8conv_xzp.nr;
-      const uint32_t kr = pytorch_qnnp_params.q8conv_xzp.kr;
-      const size_t k_stride = (group_input_channels + (kr - 1)) & -kr;
-      const size_t n_stride = (group_output_channels + (nr - 1)) & -nr;
-
-      /* compute input row sum */
-      const size_t input_size = op->input_height * op->input_width;
-      int32_t* a_sum = (int32_t*)op->a_sum;
-
-      struct q8sum_rows_context context = {
-          .a = op->input,
-          .groups = groups,
-          .m = input_size,
-          .k = group_input_channels,
-          .a_stride = op->input_pixel_stride,
-          .multiplier = (int32_t)-op->kernel_zero_point,
-          .a_sum = a_sum,
-          .a_sum_stride = input_size,
-          .ukernel = pytorch_qnnp_params.q8sum_rows.sum_rows,
-      };
-      pthreadpool_compute_3d_tiled(
-          threadpool,
-          (pthreadpool_function_3d_tiled_t)compute_sum_rows,
-          &context,
-          groups,
-          batch_size,
-          input_size,
-          1,
-          1,
-          pytorch_qnnp_params.q8sum_rows.m);
-
-      struct q8gemm_xzp_context q8gemm_xzp_context = {
-          .k = group_input_channels,
-          .k_stride = k_stride,
-          .n = group_output_channels,
-          .n_stride = n_stride,
-          .a = op->input,
-          .a_stride = op->input_pixel_stride,
-          .packed_w = op->packed_weights,
-          .c = op->output,
-          .c_stride = op->output_pixel_stride,
-          .a_sum = a_sum,
-          .groups = op->groups,
-          .batch_size = batch_size,
-          .a_sum_stride = input_size,
-          .requantization_params = op->requantization_params,
-          .ukernel = pytorch_qnnp_params.q8conv_xzp.gemm,
-      };
-      pthreadpool_compute_4d_tiled(
-          threadpool,
-          (pthreadpool_function_4d_tiled_t)compute_q8gemm_xzp,
-          &q8gemm_xzp_context,
-          groups,
-          batch_size * input_size,
-          input_size,
-          group_output_channels,
-          1,
-          input_size,
-          mr,
-          nr);
       break;
     }
     case pytorch_qnnp_ukernel_type_gemm: {

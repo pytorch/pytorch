@@ -494,132 +494,6 @@ static inline void pytorch_pack_q8dw_w_dilation(
   }
 }
 
-static inline void pytorch_pack_swizzle_q8gemm_bdq(
-    size_t n,
-    size_t kc,
-    uint32_t nr,
-    uint32_t kr,
-    uint32_t sr,
-    uint8_t izp,
-    uint8_t kzp,
-    const uint8_t* k,
-    const int32_t* b,
-    void* packed_w) {
-  const int32_t boff = (int32_t)kc * (int32_t)izp * (int32_t)kzp;
-  for (size_t nr_block_start = 0; nr_block_start < n; nr_block_start += nr) {
-    const size_t nr_block_size = min(n - nr_block_start, nr);
-    int32_t* packed_b = (int32_t*)packed_w;
-    for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
-         nr_block_offset++) {
-      *((int32_t*)packed_w) = b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
-      packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
-    }
-    packed_w =
-        (void*)((uintptr_t)packed_w + (nr - nr_block_size) * sizeof(int32_t));
-
-    for (size_t kr_block_start = 0; kr_block_start < (kc & -sr);
-         kr_block_start += kr) {
-      for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
-           nr_block_offset++) {
-        for (size_t kr_block_offset = 0; kr_block_offset < kr;
-             kr_block_offset++) {
-          const uint8_t kv =
-              k[(nr_block_start + nr_block_offset) * kc +
-                (kr_block_start & -sr) +
-                ((kr_block_start + nr_block_offset * kr) & (sr - 1)) +
-                kr_block_offset];
-          packed_b[nr_block_offset] -= (int32_t)kv * (int32_t)izp;
-          *((uint8_t*)packed_w) = kv;
-          packed_w = (void*)((uintptr_t)packed_w + sizeof(uint8_t));
-        }
-      }
-      packed_w =
-          (void*)((uintptr_t)packed_w + (nr - nr_block_size) * kr * sizeof(uint8_t));
-    }
-
-    for (size_t kr_block_start = (kc & -sr); kr_block_start < kc;
-         kr_block_start += kr) {
-      const size_t kr_block_size = min(kc - kr_block_start, kr);
-      for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
-           nr_block_offset++) {
-        for (size_t kr_block_offset = 0; kr_block_offset < kr_block_size;
-             kr_block_offset++) {
-          const uint8_t kv =
-              k[(nr_block_start + nr_block_offset) * kc +
-                (kr_block_start + kr_block_offset)];
-          packed_b[nr_block_offset] -= (int32_t)kv * (int32_t)izp;
-          *((uint8_t*)packed_w) = kv;
-          packed_w = (void*)((uintptr_t)packed_w + sizeof(uint8_t));
-        }
-        packed_w =
-            (void*)((uintptr_t)packed_w + (kr - kr_block_size) * sizeof(uint8_t));
-      }
-      packed_w =
-          (void*)((uintptr_t)packed_w + (nr - nr_block_size) * kr * sizeof(uint8_t));
-    }
-  }
-}
-
-static inline void pytorch_pack_swizzle_q8gemm_brq(
-    const size_t n,
-    const size_t kc,
-    const uint32_t nr,
-    const uint32_t kr,
-    const uint32_t sr,
-    const uint8_t* const k,
-    const int32_t* const b,
-    void* const packed_w) {
-  union {
-    void* const as_void_ptr;
-    uint8_t* as_uint8_ptr;
-    int32_t* as_int32_ptr;
-  } packed = {packed_w};
-
-  for (size_t nr_block_start = 0; nr_block_start < n; nr_block_start += nr) {
-    const size_t nr_block_size = min(n - nr_block_start, nr);
-    for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
-         nr_block_offset++) {
-      *(packed.as_int32_ptr++) = b ? b[nr_block_start + nr_block_offset] : 0.0f;
-    }
-
-    packed.as_int32_ptr += (nr - nr_block_size);
-
-    for (size_t kr_block_start = 0; kr_block_start < (kc & -sr);
-         kr_block_start += kr) {
-      for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
-           nr_block_offset++) {
-        for (size_t kr_block_offset = 0; kr_block_offset < kr;
-             kr_block_offset++) {
-          const uint8_t kv =
-              k[(nr_block_start + nr_block_offset) * kc +
-                (kr_block_start & -sr) +
-                ((kr_block_start + nr_block_offset * kr) & (sr - 1)) +
-                kr_block_offset];
-          *(packed.as_uint8_ptr++) = kv;
-        }
-      }
-      packed.as_uint8_ptr += (nr - nr_block_size) * kr;
-    }
-
-    for (size_t kr_block_start = (kc & -sr); kr_block_start < kc;
-         kr_block_start += kr) {
-      const size_t kr_block_size = min(kc - kr_block_start, kr);
-      for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
-           nr_block_offset++) {
-        for (size_t kr_block_offset = 0; kr_block_offset < kr_block_size;
-             kr_block_offset++) {
-          const uint8_t kv =
-              k[(nr_block_start + nr_block_offset) * kc +
-                (kr_block_start + kr_block_offset)];
-          *(packed.as_uint8_ptr++) = kv;
-        }
-        packed.as_uint8_ptr += (kr - kr_block_size);
-      }
-      packed.as_uint8_ptr += (nr - nr_block_size) * kr;
-    }
-  }
-}
-
 static inline void pytorch_pack_hgemm_w(
     size_t nc,
     size_t kc,
@@ -726,7 +600,6 @@ static inline void pytorch_pack_sconv_w(
 #define pytorch_pack_q8conv_w pytorch_pack_q8conv_wrq
 #define pytorch_pack_q8deconv_w pytorch_pack_q8deconv_wrq
 #define pytorch_pack_q8dw_w pytorch_pack_q8dw_wrq
-#define pytorch_pack_swizzle_q8gemm_b pytorch_pack_swizzle_q8gemm_brq
 
 #else
 
@@ -734,6 +607,5 @@ static inline void pytorch_pack_sconv_w(
 #define pytorch_pack_q8conv_w pytorch_pack_q8conv_wdq
 #define pytorch_pack_q8deconv_w pytorch_pack_q8deconv_wdq
 #define pytorch_pack_q8dw_w pytorch_pack_q8dw_wdq
-#define pytorch_pack_swizzle_q8gemm_b pytorch_pack_swizzle_q8gemm_bdq
 
 #endif

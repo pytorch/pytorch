@@ -76,8 +76,6 @@ DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_UKERNEL_FUNCTION(pytorch_q8gemm_dq_u
       size_t c_stride,                                    \
       const union pytorch_qnnp_q31_requantization_params* \
           requantization_params);
-DECLARE_PYTORCH_Q8GEMM_XZP_UKERNEL_FUNCTION(pytorch_q8gemm_xzp_ukernel_4x8c2__neon)
-DECLARE_PYTORCH_Q8GEMM_XZP_UKERNEL_FUNCTION(pytorch_q8gemm_xzp_ukernel_4x8c2__aarch32_neon)
 
 PYTORCH_QNNP_INTERNAL void pytorch_q8sumrows_ukernel_4x__neon(
     const uint8_t* a,

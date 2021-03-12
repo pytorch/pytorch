@@ -222,16 +222,10 @@ struct conv_param_t {
           group_input_channels == 1 && group_output_channels == 1 && groups > 1) {
         ukernel_type = pytorch_qnnp_ukernel_type_dwconv;
       } else if (kernel_size == 1 && stride_dims[1] == 1 && stride_dims[0] == 1 && !any_padding) {
-        ukernel_type = group_input_channels >= SIZE_MAX ? pytorch_qnnp_ukernel_type_xzp_gemm : pytorch_qnnp_ukernel_type_gemm;
+        ukernel_type = pytorch_qnnp_ukernel_type_gemm;
       } else {
         ukernel_type = pytorch_qnnp_ukernel_type_conv;
       }
-    }
-
-    if (per_channel && ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
-      pytorch_qnnp_log_error(
-          "Per channel quantized weights are not supported for XZP kernels");
-      assert("Failed to initialize QNNPACK conv_param_t struct.");
     }
   }
 

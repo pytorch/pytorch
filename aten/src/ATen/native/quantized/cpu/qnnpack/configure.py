@@ -121,7 +121,6 @@ def main(args):
                     build.cc("q8gavgpool/up8xm-neon.c"),
                     build.cc("q8gemm/4x-sumrows-neon.c"),
                     build.cc("q8gemm/4x8-neon.c"),
-                    build.cc("q8gemm/4x8c2-xzp-neon.c"),
                     build.cc("q8gemm/6x4-neon.c"),
                     build.cc("q8gemm/8x8-neon.c"),
                     build.cc("q8vadd/neon.c"),
@@ -142,7 +141,6 @@ def main(args):
                     build.cc("q8conv/4x8-aarch32-neon.S"),
                     build.cc("q8dwconv/up8x9-aarch32-neon.S"),
                     build.cc("q8gemm/4x8-aarch32-neon.S"),
-                    build.cc("q8gemm/4x8c2-xzp-aarch32-neon.S"),
                 ]
             if build.target.is_arm64:
                 qnnpytorch_pack_objects += [

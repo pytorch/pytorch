@@ -83,37 +83,6 @@ static void init(void) {
       .row_block_size = 8,
       .col_block_size = 1,
   };
-#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
-  pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
-      .gemm = pytorch_q8gemm_xzp_ukernel_4x8c2__aarch32_neon,
-      .mr = 4,
-      .nr = 8,
-      .kr = 2,
-      .kc = 8,
-      .kthreshold = SIZE_MAX,
-  };
-  /* setup xzp threshold based on measurements */
-  switch (cpuinfo_get_core(0)->uarch) {
-    case cpuinfo_uarch_cortex_a72:
-      pytorch_qnnp_params.q8conv_xzp.kthreshold = 64;
-      break;
-    case cpuinfo_uarch_cortex_a73:
-      pytorch_qnnp_params.q8conv_xzp.kthreshold = 256;
-      break;
-    case cpuinfo_uarch_cortex_a75:
-      pytorch_qnnp_params.q8conv_xzp.kthreshold = 32;
-      break;
-    case cpuinfo_uarch_cortex_a76:
-      pytorch_qnnp_params.q8conv_xzp.kthreshold = 16;
-      break;
-    default:
-      break;
-  }
-#else
-  pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
-      .kthreshold = SIZE_MAX,
-  };
-#endif
   pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv_up_parameters){
       .updw = pytorch_q8dwconv_ukernel_up8x9__aarch32_neon,
       .updw_per_channel = pytorch_q8dwconv_ukernel_up8x9_per_channel__aarch32_neon,
@@ -193,9 +162,6 @@ static void init(void) {
       .mr = 8,
       .nr = 8,
       .kr = 1,
-  };
-  pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
-      .kthreshold = SIZE_MAX,
   };
   pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv_up_parameters){
       .updw = pytorch_q8dwconv_ukernel_up8x9__neon,
@@ -277,9 +243,6 @@ static void init(void) {
       .log2_row_block_size = 3,
       .row_block_size = 8,
       .col_block_size = 1,
-  };
-  pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
-      .kthreshold = SIZE_MAX,
   };
   pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv_up_parameters){
       .updw = pytorch_q8dwconv_ukernel_up8x9__sse2,

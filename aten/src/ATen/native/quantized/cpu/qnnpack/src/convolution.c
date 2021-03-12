@@ -207,10 +207,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
   } else if (
       kernel_size == 1 && subsampling_height == 1 && subsampling_width == 1 &&
       !any_padding) {
-    ukernel_type =
-        group_input_channels >= pytorch_qnnp_params.q8conv_xzp.kthreshold
-        ? pytorch_qnnp_ukernel_type_xzp_gemm
-        : pytorch_qnnp_ukernel_type_gemm;
+    ukernel_type = pytorch_qnnp_ukernel_type_gemm;
   } else {
     ukernel_type = pytorch_qnnp_ukernel_type_conv;
   }
@@ -302,47 +299,6 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
       } else {
         zero_size = sizeof(uint8_t) * c_stride + 8;
         zero_offset = sizeof(uint8_t) * 8;
-      }
-      break;
-    }
-    case pytorch_qnnp_ukernel_type_xzp_gemm: {
-      // TODO: XZP kernels won't be supporting per channel quantization.
-      // For now we dont use XZP kernels anywhere. Probably deprecate it for now
-      // and ressurrect later if needed.
-      const uint32_t nr = pytorch_qnnp_params.q8conv_xzp.nr;
-      const uint32_t kr = pytorch_qnnp_params.q8conv_xzp.kr;
-      const uint32_t sr = pytorch_qnnp_params.q8conv_xzp.kc;
-      const uint32_t n_stride = (group_output_channels + (nr - 1)) & -nr;
-      const uint32_t k_stride = (group_input_channels + (kr - 1)) & -kr;
-
-      const size_t packed_group_weights_size =
-          (sizeof(uint8_t) * kernel_size * k_stride + sizeof(int32_t)) *
-          n_stride;
-      convolution->packed_weights = malloc(packed_group_weights_size * groups);
-      if (convolution->packed_weights == NULL) {
-        pytorch_qnnp_log_error(
-            "failed to allocate %zu bytes for packed weights",
-            packed_group_weights_size * groups);
-        goto error;
-      }
-      /* The XZP ukernel needs the padding to be 0 */
-      memset(
-          convolution->packed_weights, 0, packed_group_weights_size * groups);
-
-      for (uint32_t group = 0; group < groups; group++) {
-        pytorch_pack_swizzle_q8gemm_b(
-            group_output_channels,
-            group_input_channels,
-            nr,
-            kr,
-            sr,
-#if !PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
-            input_zero_point,
-            kernel_zero_points[0],
-#endif
-            kernel + group * group_output_channels * group_input_channels,
-            bias + group * group_output_channels,
-            (void*)((uintptr_t)convolution->packed_weights + group * packed_group_weights_size));
       }
       break;
     }
@@ -457,20 +413,14 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
 
   convolution->kernel_zero_point = kernel_zero_points[0];
 
-  if (ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
-    convolution->requantization_params =
-        pytorch_qnnp_compute_requantization_params(
-            requantization_scales[0], output_zero_point, output_min, output_max);
-  } else {
-    convolution->conv_quantization_params =
-        pytorch_qnnp_compute_conv_quantization_params(
-            input_zero_point,
-            kernel_zero_points,
-            requantization_scales,
-            output_zero_point,
-            output_min,
-            output_max);
-  }
+  convolution->conv_quantization_params =
+      pytorch_qnnp_compute_conv_quantization_params(
+          input_zero_point,
+          kernel_zero_points,
+          requantization_scales,
+          output_zero_point,
+          output_min,
+          output_max);
 
   convolution->ukernel_type = ukernel_type;
   convolution->format = pytorch_qnnp_format_quint8;
@@ -539,20 +489,6 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_convolution2d_nhwc_q8(
     case pytorch_qnnp_ukernel_type_gemm:
       /* Convolution maps directly to GEMM and doesn't use indirection buffer */
       return pytorch_qnnp_status_success;
-    case pytorch_qnnp_ukernel_type_xzp_gemm: {
-      const size_t groups = convolution->groups;
-      void* a_sum = (void*)realloc(
-          convolution->a_sum,
-          sizeof(int32_t) * batch_size * groups * input_height * input_width);
-      if (a_sum == NULL) {
-        pytorch_qnnp_log_error(
-            "failed to allocate %zu bytes for row sum data",
-            sizeof(int32_t) * batch_size * groups * input_height * input_width);
-        return pytorch_qnnp_status_out_of_memory;
-      }
-      convolution->a_sum = a_sum;
-      return pytorch_qnnp_status_success;
-    }
     case pytorch_qnnp_ukernel_type_conv: {
       const size_t groups = convolution->groups;
       const size_t kernel_height = convolution->kernel_height;

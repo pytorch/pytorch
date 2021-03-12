@@ -31,7 +31,6 @@ QNNPACK_SOURCES = {
         "q8gemm/4x-sumrows-neon.c",
         "q8gemm/4x8-neon.c",
         "q8gemm/4x8-dq-neon.c",
-        "q8gemm/4x8c2-xzp-neon.c",
         "q8gemm/6x4-neon.c",
         "q8gemm/8x8-neon.c",
         "q8vadd/neon.c",
@@ -94,7 +93,6 @@ QNNPACK_SOURCES = {
         "q8dwconv/up8x9-aarch32-neon-per-channel.S",
         "q8gemm/4x8-aarch32-neon.S",
         "q8gemm/4x8-dq-aarch32-neon.S",
-        "q8gemm/4x8c2-xzp-aarch32-neon.S",
     ],
     # AArch64-specific uKernels
     "defined(__aarch64__)": [

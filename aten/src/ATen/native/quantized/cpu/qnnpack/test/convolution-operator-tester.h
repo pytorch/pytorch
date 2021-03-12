@@ -90,10 +90,6 @@ pytorch_qnnp_operator_t create_convolution_op(const qnnpack::conv_param_t& conv_
         (void*)((uintptr_t)zero_buffer + zero_offset);
   }
 
-  if (conv_p.per_channel && conv_p.ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
-    pytorch_qnnp_log_error(
-        "Per channel quantized weights are not supported for XZP kernels");
-  }
   return convolution;
 }
 

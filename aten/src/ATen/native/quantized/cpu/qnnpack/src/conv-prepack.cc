@@ -96,41 +96,6 @@ PrePackConvWeights::PrePackConvWeights(
       }
       break;
     }
-    case pytorch_qnnp_ukernel_type_xzp_gemm: {
-      const uint32_t nr = pytorch_qnnp_params.q8conv_xzp.nr;
-      const uint32_t kr = pytorch_qnnp_params.q8conv_xzp.kr;
-      const uint32_t sr = pytorch_qnnp_params.q8conv_xzp.kc;
-      const uint32_t n_stride = (conv_p.group_output_channels + (nr - 1)) & -nr;
-      const uint32_t k_stride = (conv_p.group_input_channels + (kr - 1)) & -kr;
-
-      const size_t packed_group_weights_size =
-          (sizeof(uint8_t) * kernel_size * k_stride + sizeof(int32_t)) *
-          n_stride;
-      packed_weights_ = malloc(packed_group_weights_size * groups);
-      if (packed_weights_ == nullptr) {
-        pytorch_qnnp_log_error(
-            "failed to allocate %zu bytes for packed weights",
-            packed_group_weights_size * groups);
-        assert("QNNPACK Runtime Error.");
-      }
-      /* The XZP ukernel needs the padding to be 0 */
-      memset(packed_weights_, 0, packed_group_weights_size * groups);
-
-      for (uint32_t group = 0; group < groups; group++) {
-        pytorch_pack_swizzle_q8gemm_brq(
-            conv_p.group_output_channels,
-            conv_p.group_input_channels,
-            nr,
-            kr,
-            sr,
-            kernel +
-                group * conv_p.group_output_channels *
-                    conv_p.group_input_channels,
-            bias + group * conv_p.group_output_channels,
-            (void*)((uintptr_t)packed_weights_ + group * packed_group_weights_size));
-      }
-      break;
-    }
     case pytorch_qnnp_ukernel_type_gemm:
     case pytorch_qnnp_ukernel_type_conv: {
       const uint32_t nr = pytorch_qnnp_params.q8conv.nr;
