@@ -44,7 +44,7 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 using ValueSet = std::unordered_set<Value*>;
 using ValueSetPtr = std::shared_ptr<std::unordered_set<Value*>>;
 
-void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
+void InplaceMKLDNNSubgraph(std::shared_ptr<Graph>& graph) {
   // This function first calculates aliasing sets,
   // then calculates the last node each aliasing set is alive for.
   // Then we go through each node, if it's a node which can be inplaced
@@ -103,7 +103,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   };
 
   std::unordered_map<ValueSetPtr, Node*> set_liveness;
-  for (auto set : alias_mapping) {
+  for (auto& set : alias_mapping) {
     if (set_liveness.count(set.second)) {
       continue;
     }

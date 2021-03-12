@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import *
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
 import tools.codegen.api.meta as meta
@@ -231,7 +231,7 @@ class ComputeFunction:
             else:
                 return f"""
 // aten::{f.func}
-{sig.defn()} {{
+{sig.defn(is_redispatching_fn=self.is_redispatching_fn)} {{
     {static_dispatch_block}
 }}
 """

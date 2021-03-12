@@ -2317,6 +2317,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
+            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            self.assertTrue(ddp_logging_data.is_multi_device_module)
         else:
             model, ddp_model, input, target = self._prepare_single_device_module(
                 process_group,
@@ -2325,6 +2327,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
+            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            self.assertFalse(ddp_logging_data.is_multi_device_module)
 
         def step_model(model, input, target):
             model.train()
@@ -3383,8 +3387,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             device_ids=[device_id],
         )
 
-        # ensure that both models start with the same set of parameters. By default they are randomized on construction
+        # ensure that all the three models start with the same set of parameters. By default they are randomized on construction
         for p in ddp_withload.parameters():
+            with torch.no_grad():
+                p.zero_()
+        for p in model_withload.parameters():
             with torch.no_grad():
                 p.zero_()
         for p in ddp_withoutload.parameters():
@@ -3395,9 +3402,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         criterion = nn.CrossEntropyLoss()
 
         optimizer_withload = torch.optim.SGD(ddp_withload.parameters(), lr=0.001)
+        optimizer_non_ddp_withload = torch.optim.SGD(model_withload.parameters(), lr=0.001)
         optimizer_withoutload = torch.optim.SGD(ddp_withoutload.parameters(), lr=0.001)
 
-        input = torch.rand([batch_size, 2], dtype=torch.float)
+        input = torch.rand([batch_size, 2], dtype=torch.float).to(device_id)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(
             device_id
         )
@@ -3405,29 +3413,35 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # run the model for 6 iterations, with a checkpoint in the middle
         train_loop(ddp_withload, optimizer_withload, 3)
 
-        # zero out parameters and reload them from the state dict
+        # zero out parameters of both DDP and non-DDP models and reload them from the DDP state dict
         checkpoint_path = tempfile.gettempdir() + "/model.checkpoint"
         if self.rank == 0:
             torch.save(ddp_withload.state_dict(), checkpoint_path)
 
         dist.barrier()
-        for p in ddp_withload.parameters():
-            with torch.no_grad():
-                p.zero_()
         map_location = {"cuda:%d" % 0: "cuda:%d" % self.rank}
-        ddp_withload.load_state_dict(
-            torch.load(checkpoint_path, map_location=map_location)
-        )
+        ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
+
+        for model in [ddp_withload, model_withload]:
+            for p in ddp_withload.parameters():
+                with torch.no_grad():
+                    p.zero_()
+        ddp_withload.load_state_dict(ddp_state_dict)
+        # the non-DDP model needs to first remove the prefix of "module." from the DDP state dict
+        torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(ddp_state_dict, "module.")
+        model_withload.load_state_dict(ddp_state_dict)
 
         train_loop(ddp_withload, optimizer_withload, 3)
+        train_loop(model_withload, optimizer_non_ddp_withload, 3)
 
         # re-run the model with the same inputs for 6 iterations with no checkpoint
         train_loop(ddp_withoutload, optimizer_withoutload, 6)
 
-        for p_withload, p_withoutload in zip(
-            ddp_withload.parameters(), ddp_withoutload.parameters()
+        for p_withload, p_withoutload, p_non_ddp_withload in zip(
+            ddp_withload.parameters(), ddp_withoutload.parameters(), model_withload.parameters()
         ):
             self.assertEqual(p_withload, p_withoutload)
+            self.assertEqual(p_non_ddp_withload, p_withoutload)
 
     def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
