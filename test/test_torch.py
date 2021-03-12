@@ -4572,7 +4572,6 @@ class TestTorchDeviceType(TestCase):
                 dest[idx_dest] = src[idx_src]
             return dest
 
-        # More thorough testing as in index_add
         for src_contig, idx_contig, out_contig in product([True, False], repeat=3):
             for other_sizes in ((), (4, 5)):
                 for dim in range(len(other_sizes)):
@@ -4607,7 +4606,6 @@ class TestTorchDeviceType(TestCase):
         for source, idx in scalars:
             out = source.index_select(0, idx)
             self.assertEqual(out.item(), source.item())
-
 
     def test_take_empty(self, device):
         for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
