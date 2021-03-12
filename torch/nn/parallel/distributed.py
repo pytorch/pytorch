@@ -229,6 +229,11 @@ class DistributedDataParallel(Module):
             >>>     dist_autograd.backward(context_id, loss)
             >>>     dist_optim.step()
 
+    .. note::
+        To let a non-DDP model load a state dict from a DDP model,
+        :meth:`~torch.nn.modules.utils.consume_prefix_in_state_dict_if_present`
+        needs to be applied to strip the prefix "module." in the DDP state dict before loading.
+
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
         function of the output of this module) are distributed synchronization
@@ -1313,3 +1318,27 @@ class DistributedDataParallel(Module):
         # during synchronization. It will be removed when the API is finalized
         # as part of addressing https://github.com/pytorch/pytorch/issues/43690.
         module._ddp_params_and_buffers_to_ignore = params_and_buffers_to_ignore
+
+
+    def get_ddp_logging_data(self):
+        r"""
+        This interface can be called after DistributedDataParallel() is
+        constructed. It returns DDPLoggingData for debugging and analysis.
+        More detailed explanation of the fields in DDPLoggingData are in
+        ``torch/c10/util/Logging.h``.
+        """
+        return self.logger._get_ddp_logging_data()
+
+    def set_ddp_runtime_logging_sample_rate(self, sample_rate):
+        r"""
+        This interface allows users to set sample_rate of collecting
+        runtime stats. The runtime stats will be recorded for the
+        first 10 iterations, after 10 iteratons runtime stats will be
+        recorded once every "sample_rate" training iterations. In
+        default, runtime stats are recorded for the first 10 iterations,
+        after 10 iterations runtime stats are recorded once every
+        "kDDPRuntimeLoggingSampleRate=100" training iterations.
+        """
+        if sample_rate < 1:
+            raise ValueError("DDP runtime logging sample rate should be equal or greater than 1")
+        self.reducer._set_ddp_runtime_logging_sample_rate(sample_rate)
