@@ -6,7 +6,7 @@ import torch
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor)
+    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor, is_iterable_of_tensors)
 from torch.testing._internal.common_methods_invocations import \
     (op_db)
 from torch.testing._internal.common_device_type import \
@@ -458,19 +458,7 @@ class TestCommon(JitCommonTestCase):
         # Short-circuits if output is not a single tensor or an
         #   iterable of tensors
 
-        # Returns True if iterable is an iterable of tensors (includes empty iterables)
-        #   and False o.w.
-        def _is_iterable_of_tensors(iterable):
-            try:
-                for t in iter(iterable):
-                    if not isinstance(t, torch.Tensor):
-                        return False
-            except TypeError as te:
-                return False
-
-            return True
-
-        if not isinstance(expected, torch.Tensor) and not _is_iterable_of_tensors(expected):
+        if not isinstance(expected, torch.Tensor) and not is_iterable_of_tensors(expected):
             self.skipTest("Skipped! Only supports single tensor or iterable of tensor outputs.")
 
         # A wrapper around map that works with single tensors and always
