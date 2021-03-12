@@ -1754,12 +1754,12 @@
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: fill_
+    CPU, CUDA, QuantizedCPU, QuantizedCUDA: fill_
 
 - func: fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: fill_
+    CPU, CUDA, QuantizedCPU, QuantizedCUDA: fill_
 
 - func: floor(Tensor self) -> Tensor
   variants: function, method
@@ -6505,12 +6505,12 @@
   variants: method, function
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU, CUDA: pow_out
+    CPU, CUDA: pow_Scalar_out
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
-  dispatch:
-    CPU, CUDA: pow
+  structured_delegate: pow.Scalar_out
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   structured: True

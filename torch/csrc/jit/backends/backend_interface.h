@@ -11,6 +11,9 @@ class TORCH_API PyTorchBackendInterface : public torch::CustomClassHolder {
   PyTorchBackendInterface();
   virtual ~PyTorchBackendInterface();
 
+  // Returns true if the backend is available to process delegation calls.
+  virtual bool is_available() = 0;
+
   // Compile the module contained in \p processed using the details provided in
   // \p method_compile_spec for each module method that should be compiled for
   // the backend. \p method_compile_spec should be of type Dict<string, Any>.

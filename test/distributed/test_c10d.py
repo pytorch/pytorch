@@ -4091,6 +4091,50 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
+    class AcceptsParam(torch.nn.Module):
+        def __init__(self, p, factor):
+            super().__init__()
+            self.a = p
+            self.f = factor
+
+        def forward(self, input):
+            return input + self.a * self.f
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_ddp_weight_sharing(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        size = 2048 * 2048
+        dev = self.rank
+        world = self.world_size
+
+        p = torch.nn.Parameter(torch.randn(size, requires_grad=True))
+
+        for try_set_to_none, use_bucket_view in product((False, True), (False, True)):
+            m = torch.nn.Sequential(self.AcceptsParam(p, dev + 1),
+                                    self.AcceptsParam(p, dev + 1)).cuda(dev)
+
+            m = torch.nn.parallel.DistributedDataParallel(m,
+                                                          bucket_cap_mb=1,
+                                                          gradient_as_bucket_view=use_bucket_view,
+                                                          device_ids=[dev],
+                                                          process_group=process_group)
+
+            for i in range(3):
+                m.zero_grad(set_to_none=try_set_to_none)
+                m(1).sum().backward()
+
+                # Each param value is multiplied by "rank + 1" twice in forward, so the grad
+                # values produced by a particular rank should be 2. * (rank + 1).
+                # Summing these over ranks and dividing by world size gives the expected result:
+                analytic = torch.full_like(p, 2. * (world * (world + 1.) / 2.) / world, device=dev)
+                for name, p in m.named_parameters():
+                    self.assertEqual(p.grad, analytic, "mismatch at " + name + ".grad for " +
+                                     "set_to_none = {}, use_bucket_view = {}".format(try_set_to_none,
+                                                                                     use_bucket_view))
+
 
 class ReducerModule(nn.Module):
     def __init__(self):

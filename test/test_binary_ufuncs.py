@@ -650,7 +650,7 @@ class TestBinaryUfuncs(TestCase):
             for test_case in test_cases:
                 self.assertRaisesRegex(RuntimeError, err_msg, test_case)
         else:
-            if isinstance(base, torch.Tensor):
+            if isinstance(base, torch.Tensor) and base.dim() > 0:
                 actual = base.pow(exponent)
                 self.assertEqual(actual, expected.to(actual))
                 actual = base.clone()
@@ -659,7 +659,7 @@ class TestBinaryUfuncs(TestCase):
                     self.assertEqual(actual, expected)
                     self.assertEqual(actual2, expected)
                 else:
-                    self.assertRaisesRegex(RuntimeError, "can't be cast", lambda: actual.pow_(exponent))
+                    self.assertRaisesRegex(RuntimeError, "Found dtype \\w+ but expected \\w+", lambda: actual.pow_(exponent))
 
             actual = torch.pow(base, exponent)
             self.assertEqual(actual, expected.to(actual))
@@ -715,11 +715,15 @@ class TestBinaryUfuncs(TestCase):
 
     @onlyCUDA
     def test_cpu_tensor_pow_cuda_scalar_tensor(self, device):
-        cpu_tensors = [torch.randn((3, 3), device='cpu'), torch.tensor(3.0, device='cpu')]
         cuda_tensors = [torch.tensor(5.0, device='cuda'), torch.tensor(-3, device='cuda')]
-        for base, exp in product(cpu_tensors, cuda_tensors):
+        for exp in cuda_tensors:
+            base = torch.randn((3, 3), device='cpu')
             regex = 'Expected all tensors to be on the same device, but found at least two devices, cuda.* and cpu!'
             self.assertRaisesRegex(RuntimeError, regex, torch.pow, base, exp)
+        for exp in cuda_tensors:
+            # Binary ops with a cpu + cuda tensor are allowed if the cpu tensor has 0 dimension
+            base = torch.tensor(3.0, device='cpu')
+            self._test_pow(base, exp)
 
     @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_dtypes(include_bool=False, include_bfloat16=False)))
