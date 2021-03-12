@@ -47,7 +47,7 @@ def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_
                 yield result
 
 
-def get_numerical_jacobian(func, input, output_idx, target=None, eps=1e-3, grad_out=1.0):
+def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
     """
     input: input to `fn`
     target: the Tensors wrt whom Jacobians are calculated (default=`input`)
@@ -56,9 +56,6 @@ def get_numerical_jacobian(func, input, output_idx, target=None, eps=1e-3, grad_
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
     """
-    def fn(input):
-        return _as_tuple(func(*input))[output_idx]
-
     if target is None:
         target = input
     output_size = fn(input).numel()
@@ -278,7 +275,9 @@ def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> b
     # When there are no differentiable outputs, numerical gradient for a function is
     # expected to be zero.
     for i, o in enumerate(func_out):
-        numerical = get_numerical_jacobian(func, inputs, i, eps=eps)
+        def fn(input):
+            return _as_tuple(func(*input))[i]
+        numerical = get_numerical_jacobian(fn, inputs, eps=eps)
         for n in numerical:
             if torch.ne(n, 0).sum() > 0:
                 return fail_test('Numerical gradient for function expected to be zero')
@@ -561,11 +560,14 @@ def gradcheck(
         return check_no_differentiable_outputs(fail_test, func, tupled_inputs, func_out, eps)
 
     for i, o in enumerate(outputs):
+        def fn(input):
+            return _as_tuple(func(*input))[i]
+
         analytical, failed = check_analytical_jacobian(tupled_inputs, o, nondet_tol, 1.0, check_batched_grad,
                                                        check_grad_dtypes, raise_exception)
         if failed:
             return False
-        numerical = get_numerical_jacobian(func, tupled_inputs, i, eps=eps)
+        numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
 
         if o.is_complex():
             analytical_imag_grad_out, failed = check_analytical_jacobian(tupled_inputs, o, nondet_tol, 1j,
@@ -573,7 +575,7 @@ def gradcheck(
                                                                          raise_exception)
             if failed:
                 return False
-            numerical_imag_grad_out = get_numerical_jacobian(func, tupled_inputs, i, eps=eps, grad_out=1j)
+            numerical_imag_grad_out = get_numerical_jacobian(fn, tupled_inputs, eps=eps, grad_out=1j)
 
         inp_tensors = iter_tensors(tupled_inputs, True)
 
