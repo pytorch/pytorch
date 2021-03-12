@@ -39,7 +39,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, SEED
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     AnnotatedSingleLayerLinearModel,
@@ -206,7 +206,7 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
 def to_tensor(X, device):
     return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
 
-NP_RANDOM_SEED = 19
+NP_RANDOM_SEED = SEED
 tolerance = 1e-6
 
 class TestObserver(QuantizationTestCase):
