@@ -3596,6 +3596,46 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.tensor([4, 5, 8, 9])
         self.run_test(RepeatModel(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_repeat_interleave(self):
+        class FlattenModel(torch.nn.Module):
+            def forward(self, x):
+                return x.repeat_interleave(2)
+
+        x = torch.tensor([1, 2, 3])
+        self.run_test(FlattenModel(), (x,))
+
+        class DimsModel(torch.nn.Module):
+            def forward(self, x):
+                return x.repeat_interleave(4, dim=1)
+
+        x = torch.tensor([[1, 2], [3, 4]])
+        self.run_test(DimsModel(), (x,))
+
+        class DimsModel2(torch.nn.Module):
+            def forward(self, x):
+                repeats = torch.tensor([4])
+                return torch.repeat_interleave(x, repeats, dim=1)
+
+        x = torch.tensor([[1, 2], [3, 4]])
+        self.run_test(DimsModel2(), (x,))
+
+        class RepeatsDimsModel(torch.nn.Module):
+            def forward(self, x):
+                repeats = torch.tensor([1, 2])
+                return torch.repeat_interleave(x, repeats, dim=0)
+
+        x = torch.tensor([[1, 2], [3, 4]])
+        self.run_test(RepeatsDimsModel(), (x,))
+
+        class RepeatsDimsModel2(torch.nn.Module):
+            def forward(self, x):
+                repeats = torch.tensor([1, 2])
+                return torch.repeat_interleave(x, repeats, dim=1)
+
+        x = torch.tensor([[1, 2], [3, 4]])
+        self.run_test(RepeatsDimsModel2(), (x,))
+
     def test_view(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):
