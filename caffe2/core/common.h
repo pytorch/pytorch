@@ -73,6 +73,12 @@ using std::vector;
 #define NOMINMAX
 #endif
 
+#if defined(__has_cpp_attribute) && __has_cpp_attribute(nodiscard)
+#define CAFFE2_NODISCARD [[nodiscard]]
+#else
+#define CAFFE2_NODISCARD
+#endif
+
 using std::make_unique;
 
 #if defined(__ANDROID__) && !defined(__NDK_MAJOR__)

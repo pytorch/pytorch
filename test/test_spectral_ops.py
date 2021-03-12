@@ -185,6 +185,7 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, match):
             op(t)
 
+    @onlyOnCPUAndCUDA
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
@@ -680,6 +681,7 @@ class TestFFT(TestCase):
 
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipCPUIfNoMkl
+    @onlyOnCPUAndCUDA
     @dtypes(torch.double)
     def test_stft(self, device, dtype):
         if not TEST_LIBROSA:
@@ -745,6 +747,7 @@ class TestFFT(TestCase):
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
 
+    @onlyOnCPUAndCUDA
     @skipCPUIfNoMkl
     @dtypes(torch.double, torch.cdouble)
     def test_complex_stft_roundtrip(self, device, dtype):
@@ -786,6 +789,7 @@ class TestFFT(TestCase):
                                       length=x.size(-1), **common_kwargs)
             self.assertEqual(x_roundtrip, x)
 
+    @onlyOnCPUAndCUDA
     @skipCPUIfNoMkl
     @dtypes(torch.double, torch.cdouble)
     def test_stft_roundtrip_complex_window(self, device, dtype):
@@ -826,6 +830,7 @@ class TestFFT(TestCase):
                 self.assertEqual(x_roundtrip, x)
 
 
+    @onlyOnCPUAndCUDA
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
     @dtypes(torch.cdouble)
@@ -846,6 +851,7 @@ class TestFFT(TestCase):
             actual = torch.stft(*args, window=window, center=False)
             self.assertEqual(actual, expected)
 
+    @onlyOnCPUAndCUDA
     @skipCPUIfNoMkl
     @dtypes(torch.cdouble)
     def test_complex_stft_real_equiv(self, device, dtype):
@@ -879,6 +885,7 @@ class TestFFT(TestCase):
                                 center=center, normalized=normalized)
             self.assertEqual(expected, actual)
 
+    @onlyOnCPUAndCUDA
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
     @dtypes(torch.cdouble)
@@ -906,6 +913,7 @@ class TestFFT(TestCase):
                                  return_complex=True)
             self.assertEqual(expected, actual)
 
+    @onlyOnCPUAndCUDA
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
     def test_complex_stft_onesided(self, device):
@@ -928,12 +936,15 @@ class TestFFT(TestCase):
             x.stft(10, pad_mode='constant', onesided=True)
 
     # stft is currently warning that it requires return-complex while an upgrader is written
+    @onlyOnCPUAndCUDA
+    @skipCPUIfNoMkl
     def test_stft_requires_complex(self, device):
         x = torch.rand(100)
         y = x.stft(10, pad_mode='constant')
         # with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
         #     y = x.stft(10, pad_mode='constant')
 
+    @onlyOnCPUAndCUDA
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
     def test_fft_input_modification(self, device):
