@@ -231,7 +231,7 @@ class ComputeFunction:
             else:
                 return f"""
 // aten::{f.func}
-{sig.defn()} {{
+{sig.defn(is_redispatching_fn=self.is_redispatching_fn)} {{
     {static_dispatch_block}
 }}
 """
