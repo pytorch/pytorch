@@ -1301,12 +1301,7 @@ Tensor& nonzero_out_cpu(Tensor& out, const Tensor& self) {
 }
 
 Tensor nonzero_cpu(const Tensor& self) {
-  Tensor out = at::native::empty_cpu(
-      {0},
-      kLong,
-      self.options().layout_opt(),
-      self.options().device_opt(),
-      self.options().pinned_memory_opt());
+  Tensor out = at::empty({0}, self.options());
   return nonzero_out_cpu(out, self);
 }
 
