@@ -6,11 +6,16 @@ namespace jit {
 // necessary to test that the JIT backend registration endpoints and
 // code generation are working correctly. It is not intended to
 // produce numerically correct results.
+template <bool isAvailable>
 class TestBackend : public PyTorchBackendInterface {
  public:
   // Constructor.
   explicit TestBackend() {}
   virtual ~TestBackend() = default;
+
+  bool is_available() override {
+    return isAvailable;
+  }
 
   c10::impl::GenericDict compile(
       c10::IValue processed,
@@ -68,7 +73,11 @@ c10::IValue preprocess(
   return mod._ivalue();
 }
 
-static auto cls = torch::jit::backend<TestBackend>("test_backend", preprocess);
+static auto cls_available =
+    torch::jit::backend<TestBackend<true>>("test_backend", preprocess);
+static auto cls_unavailable = torch::jit::backend<TestBackend<false>>(
+    "test_backend_unavailable",
+    preprocess);
 } // namespace
 
 } // namespace jit
