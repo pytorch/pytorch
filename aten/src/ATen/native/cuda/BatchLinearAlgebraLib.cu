@@ -411,10 +411,7 @@ inline static void apply_cholesky_lib_potrfBatched(Tensor& self_working_copy, bo
   const int matrix_stride = cuda_int_cast(matrixStride(self_working_copy), "matrix_stride");
 
   // cusolver batched kernels require input be "device array of device pointers"
-  Tensor self_working_copy_array = at::arange(
-    reinterpret_cast<int64_t>(self_data),
-    reinterpret_cast<int64_t>(&self_data[(batch_size-1) * matrix_stride]) + 1,
-    static_cast<int64_t>(matrix_stride * sizeof(scalar_t)), self_working_copy.options().dtype(at::kLong));
+  Tensor self_working_copy_array = get_device_pointers<scalar_t>(self_working_copy);
 
   at::cuda::solver::potrfBatched<scalar_t>(
     handle, uplo, n,
