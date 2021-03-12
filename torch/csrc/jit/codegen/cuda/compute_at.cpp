@@ -93,13 +93,20 @@ unsigned int getReplayablePosCasP(
   auto mappable_roots =
       root_map_.getMappableDims(producer->domain(), consumer->domain(), false);
 
-  for (size_t producer_pos = producer->nDims(); producer_pos > 0;
+  auto p_dom = producer->domain()->domain();
+  auto first_reduction =
+      std::find_if(p_dom.begin(), p_dom.end(), [](IterDomain* id) {
+        return id->isReduction();
+      });
+
+  auto max_producer_pos = std::distance(p_dom.begin(), first_reduction);
+
+  for (size_t producer_pos = max_producer_pos; producer_pos > 0;
        producer_pos--) {
     auto all_vals = DependencyCheck::getAllValsBetween(
         {producer->getMaybeRFactorDomain().begin(),
          producer->getMaybeRFactorDomain().end()},
-        {producer->domain()->domain().begin(),
-         producer->domain()->domain().begin() + producer_pos});
+        {p_dom.begin(), p_dom.begin() + producer_pos});
 
     if (std::any_of(
             producer->getMaybeRFactorDomain().begin(),
@@ -256,10 +263,10 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   if (mode_ == ComputeAtMode::BestEffort) {
     producer_compute_at_pos = std::min(
         producer_compute_at_pos,
-        getReplayablePosCasP(producer, consumer, root_map_));
+        getReplayablePosCasP(consumer, producer, root_map_));
   } else if (mode_ == ComputeAtMode::MostInlined) {
     producer_compute_at_pos =
-        getReplayablePosCasP(producer, consumer, root_map_);
+        getReplayablePosCasP(consumer, producer, root_map_);
   }
   auto replay = TransformReplay::replayCasP(
       consumer->domain(),
