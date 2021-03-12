@@ -86,6 +86,7 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   // We automatically add the corresponding autograd key to key_set_ so that backends can stay
   // in the old way of only registering with backend key like DispatchKey::CPU.
   if (c10::InferenceMode::is_enabled()) {
+    // See Note [Expected TLS state in InferenceMode] for why we don't add Autograd & InplaceOrView keys.
     key_set_ = key_set;
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.

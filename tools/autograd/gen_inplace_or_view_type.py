@@ -347,14 +347,14 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     #  - redispatch from VariableType kernel (AutoNonVariableTypeMode is on)
     #  - In inference mode where Autograd keys are excluded as well.
     # If InplaceOrView is hit without Autograd keys being disabled, e.g. apply
-    # inplace/view op on inference tensor outside inference mode
+    # inplace/view op on inference tensor outside inference mode, we throw an
+    # error. You can find an example in Note [Expected TLS state in InferenceMode].
     # If we want to properly support these cases, we need to setup
     # InplaceOrView kernel to make sure the output is inference tensor as well (since
     # their base tensor doesn't have complete information about view/version).
     # This is possible to do, but we currently don't see such use cases so
     # simply throwing errors here.
-    if len(f.func.returns):
-        inplace_view_body.append(THROW_IF_VARIABLETYPE_ON)
+    inplace_view_body.append(THROW_IF_VARIABLETYPE_ON)
     if modifies_arguments(f):  # inplace op
         inplace_view_body.append(INPLACE_REDISPATCH.substitute(
             api_name=api_name,

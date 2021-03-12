@@ -5,6 +5,6 @@
 
 namespace torch { namespace autograd {
 
-using InferenceMode= c10::InferenceMode;
+using InferenceMode = c10::InferenceMode;
 
 }}

@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/InferenceMode.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/ATen.h>
@@ -81,7 +82,7 @@ inline void assert_no_inference_tensor(Args&&... args) {
   // tensor outside InferenceMode yet, thus simply throw out error
   // when it happens. We might consider supporting it if there's a
   // valid use case in the future.
-  if (!c10::InferenceMode::is_enabled()) {
+  if (!InferenceMode::is_enabled()) {
     AssertNoInferenceTensor().apply(std::forward<Args>(args)...);
   }
 }
