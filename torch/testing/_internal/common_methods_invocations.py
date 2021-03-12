@@ -1282,6 +1282,41 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
 def sample_inputs_linalg_svd(op_info, device, dtype, requires_grad=False):
     return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=True)
 
+def sample_inputs_eig(op_info, device, dtype, requires_grad=False):
+    eigvecs = make_tensor((S, S), device=device, dtype=dtype,
+                          low=None, high=None)
+    eigvals = make_tensor((S,), device=device, dtype=dtype,
+                          low=None, high=None)
+    # we produce only diagonazible inputs which do not have
+    # complex eigenvalues for real inputs, as there is no
+    # backward implementation for real inputs with complex
+    # eigenvalues yet.
+    input = (eigvecs * eigvals.unsqueeze(-2)) @ eigvecs.inverse()
+    input.requires_grad_(requires_grad)
+
+    def process_output(eigpair):
+        eigvals, eigvecs = eigpair
+        if dtype.is_complex:
+            # eig produces eigenvectors which are normalized to 1 norm.
+            # Note that if v is an eigenvector, so is v * e^{i \phi},
+            # and |v| = |v * e^{i \phi}| = 1.
+            # This, however, makes the eigenvector backward computation process
+            # rather unstable unless the objective function is gauge-invariant,
+            # that is if f(z) == f(|z|), for example.
+            # Hence for complex inputs we ignore the phases and return only
+            # the absolute values.
+            return eigvals, eigvecs.abs()
+        else:
+            return eigvals, eigvecs
+
+    return [
+        SampleInput(
+            input,
+            kwargs=dict(eigenvectors=True),
+            output_process_fn_grad=process_output
+        ),
+    ]
+
 def sample_inputs_pinverse(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.pinverse with distinct singular values so that autograd is always stable.
@@ -1439,6 +1474,22 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
     samples = (
         SampleInput((_make_tensor_helper((S, S), low=0), _make_tensor_helper((S, S)))),
         SampleInput((_make_tensor_helper((), low=0), _make_tensor_helper(()))),
+    )
+
+    return samples
+
+
+def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        SampleInput((_make_tensor_helper((S, S, S)), 0)),
+        SampleInput((_make_tensor_helper((S, S, S)), 1)),
+        # NOTE: if `dtype` is not same as input, then inplace variants fail with
+        # `provided dtype must match the dtype of self tensor in cumsum`
+        SampleInput((_make_tensor_helper((S, S, S)), 1), kwargs={'dtype': dtype}),
+        SampleInput((_make_tensor_helper(()), 0)),
     )
 
     return samples
@@ -1703,11 +1754,8 @@ foreach_unary_op_db: List[OpInfo] = [
                     inplace=torch._foreach_abs_,
                     ref=torch.abs,
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-                    dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+                    dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.half),
                     dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-                    skips=(
-                        SkipInfo('TestForeach', 'test_unary', device_type='cpu', dtypes=[torch.bool]),
-                    ),
                     safe_casts_outputs=False)
 ]
 
@@ -2054,6 +2102,37 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('cumsum',
+           dtypesIfCPU=all_types_and_complex_and(torch.bool),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53360
+               # For integer inputs,
+               # inplace variant preserves dtype of `self` while method variant
+               # always promotes it to torch.long.
+               # >>> t = torch.randint(2, 10, (3, 2), dtype=torch.int8)
+               # >>> t.cumsum(0).dtype
+               # torch.int64
+               # >>> t.cumsum_(0).dtype
+               # torch.int8
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32]),
+               # Reference: https://github.com/pytorch/pytorch/issues/53358
+               # >>> t = torch.tensor([False])
+               # >>> t.cumsum_(0) # Error "cumsum_out_cpu" not implemented for 'Bool'
+               # >>> t.cuda().cumsum_(0) # Error "cumsum_cuda" not implemented for 'Bool'
+               # >>> t = torch.tensor(False)
+               # >>> t.cumsum_(0) # Error "cumsum_out_cpu" not implemented for 'Bool'
+               # >>> t.cuda().cumsum_(0) # Does not fail!
+               # tensor(False, device='cuda:0')
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=[torch.bool]),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.bool]),
+               # cumsum does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           ),
+           sample_inputs_func=sample_inputs_cumsum),
     UnaryUfuncInfo('deg2rad',
                    ref=np.radians,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -2746,6 +2825,17 @@ op_db: List[OpInfo] = [
                         # These tests do not take into account custom op.get_op()
                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),)
                     ),
+    OpInfo('eig',
+           op=torch.eig,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_out=False,
+           sample_inputs_func=sample_inputs_eig,
+           decorators=[
+               skipCUDAIfNoMagma,
+               skipCPUIfNoLapack,
+               skipCUDAIfRocm
+           ],),
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
@@ -3503,10 +3593,7 @@ def method_tests():
         ('cummin', (S, S, S), (0,), 'dim0', (), [0]),
         ('cummin', (S, S, S), (1,), 'dim1', (), [0]),
         ('cummin', (), (0,), 'dim0_scalar', (), [0]),
-        ('cumsum', (S, S, S), (0,), 'dim0', (), [0]),
-        ('cumsum', (S, S, S), (1,), 'dim1', (), [0]),
         ('cumsum', (S, S, S), (1,), 'dim1_cast', (), [0], (), ident, {'dtype': torch.float64}),
-        ('cumsum', (), (0,), 'dim0_scalar', (), [0]),
         ('cumprod', (S, S, S), (0,)),
         ('cumprod', (S, S, S), (1,), 'dim1', (), [0]),
         ('cumprod', (), (0,), 'scalar'),
