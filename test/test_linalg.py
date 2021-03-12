@@ -4045,7 +4045,7 @@ class TestLinalg(TestCase):
         b = torch.rand(3, 1, dtype=dtype, device=device)
         A = torch.eye(3, 3, dtype=dtype, device=device)
         A[-1, -1] = 0  # Now A is singular
-        err_str = r"triangular_solve_cpu: U\(3,3\) is zero, singular U\."
+        err_str = r"triangular_solve: U\(3,3\) is zero, singular U\."
         with self.assertRaisesRegex(RuntimeError, err_str):
             torch.triangular_solve(b, A)
 

@@ -5849,20 +5849,13 @@
     CUDA: legacy::cuda::_th_gels
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: triangular_solve_out
+    CPU, CUDA: triangular_solve_out
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
   variants: method, function
   dispatch:
-    DefaultBackend: triangular_solve
-
-- func: _triangular_solve_helper(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: _triangular_solve_helper_cpu
-    CUDA: _triangular_solve_helper_cuda
+    CPU, CUDA: triangular_solve
 
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
