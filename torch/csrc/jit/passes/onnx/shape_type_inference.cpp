@@ -446,7 +446,7 @@ void FetchBlockInputMetadataFromParent(Block* b) {
   if (nullptr != n && n->kind() == ::c10::onnx::Loop) {
     // Copy node input metadata to subgraph input.
     for (size_t i = 0; i < n->inputs().size(); ++i) {
-      b->inputs().at(i)->copyMetadata(n->inputs().at(i));
+      b->inputs().at(i)->setType(n->inputs().at(i)->type());
     }
   }
 }
