@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -365,34 +366,35 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
   auto non_differentiable = _parse_non_differentiable(self);
   auto dirty_inputs = _mark_dirty(self);
 
-  std::vector<Variable> raw_output_vars;
+  std::vector<c10::optional<Variable>> raw_output_vars;
   raw_output_vars.reserve(num_outputs);
-  size_t num_tensor_outputs = 0;
   for(int i = 0; i < num_outputs; ++i){
-    PyObject* obj = PyTuple_GetItem(raw_output, i);
+    PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
     // Only process tensors as outputs for autograd purposes.
     if (THPVariable_Check(obj)) {
-      raw_output_vars.push_back(((THPVariable*)obj)->cdata);
-      num_tensor_outputs++;
+      raw_output_vars.emplace_back(((THPVariable*)obj)->cdata);
+    } else {
+      raw_output_vars.emplace_back();
     }
   }
 
   // Wrap only the tensor outputs.
   auto wrapped_outputs = _wrap_outputs(input_vars, non_differentiable, dirty_inputs, raw_output_vars, cdata_if_executable);
 
-  size_t tensor_output_idx = 0;
   for (int i = 0; i < num_outputs; i++) {
-    PyObject* obj = PyTuple_GetItem(raw_output, i);
-
+    PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
     // Keep the non-tensor outputs as is.
     if (!THPVariable_Check(obj)) {
       if (is_executable) {
-        self->output_info.emplace_back(wrapped_outputs[tensor_output_idx]);
+        self->output_info.emplace_back();
       }
       Py_INCREF(obj);
       PyTuple_SET_ITEM(outputs, i, obj);
     } else {
-      PyTuple_SET_ITEM(outputs, i, THPVariable_Wrap(wrapped_outputs[tensor_output_idx++]));
+      if (is_executable) {
+        self->output_info.emplace_back(*wrapped_outputs[i]);
+      }
+      PyTuple_SET_ITEM(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
     }
   }
 }
@@ -418,7 +420,7 @@ static void _save_variables(const std::shared_ptr<PyNode>& cdata_ptr, THPFunctio
       bool is_output = variable->cdata.grad_fn().get() == cdata_ptr.get();
       self->saved_variables.emplace_back(variable->cdata, is_output);
     } else {
-      throw TypeError(
+      throw torch::TypeError(
           "save_for_backward can only save variables, but argument %d is of "
           "type %s", i, Py_TYPE(obj)->tp_name);
     }
@@ -500,7 +502,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
 }
 
 static void _assert_not_tracing(const char* name, const variable_list& input_vars) {
-  if (tracer::isTracing()) {
+  if (jit::tracer::isTracing()) {
     std::ostringstream oss;
     oss << "Attempted to trace " << name;
     oss << ", but tracing of legacy functions is not supported";
@@ -573,6 +575,11 @@ static void _trace_post_record(
         value->inferTypeFrom(var->cdata);
         jit::tracer::setValueTrace(var->cdata, value);
       }
+    } else {
+      // Regular python type.
+      Value* value = node->outputs()[i];
+      value->setType(PyObjectType::create());
+      jit::tracer::setValueTrace(torch::jit::toIValue(py::cast(obj), PyObjectType::create()), value);
     }
   }
 }

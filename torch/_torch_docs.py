@@ -4404,7 +4404,10 @@ Args:
 
 Keyword arguments:
     {out}
-    {dtype}
+    dtype (torch.dtype, optional): the data type to perform the computation in.
+        Default: if None, uses the global default dtype (see torch.get_default_dtype())
+        when both :attr:`start` and :attr:`end` are real,
+        and corresponding complex dtype when either is complex.
     {layout}
     {device}
     {requires_grad}
@@ -4773,7 +4776,10 @@ Args:
 
 Keyword arguments:
     {out}
-    {dtype}
+    dtype (torch.dtype, optional): the data type to perform the computation in.
+        Default: if None, uses the global default dtype (see torch.get_default_dtype())
+        when both :attr:`start` and :attr:`end` are real,
+        and corresponding complex dtype when either is complex.
     {layout}
     {device}
     {requires_grad}
@@ -9573,11 +9579,10 @@ Keyword args:
 
 Example::
 
-    >>> torch.empty(2, 3)
-    tensor(1.00000e-08 *
-           [[ 6.3984,  0.0000,  0.0000],
-            [ 0.0000,  0.0000,  0.0000]])
-
+    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
+    >>> torch.empty_like(a)
+    tensor([[0, 0, 0],
+            [0, 0, 0]], device='cuda:0', dtype=torch.int32)
 """.format(**factory_common_args))
 
 add_docstr(torch.empty_like,
@@ -10563,6 +10568,24 @@ Example::
     >>> g_cpu = torch.Generator()
     >>> g_cpu.device
     device(type='cpu')
+""")
+
+add_docstr(torch._assert_async,
+           r"""
+_assert_async(tensor) -> void
+
+Asynchronously assert that the contents of tensor are nonzero.  For CPU tensors,
+this is equivalent to ``assert tensor`` or ``assert tensor.is_nonzero()``; for
+CUDA tensors, we DO NOT synchronize and you may only find out the assertion
+failed at a later CUDA kernel launch.  Asynchronous assertion can be helpful for
+testing invariants in CUDA tensors without giving up performance.  This function
+is NOT intended to be used for regular error checking, as it will trash your CUDA
+context if the assert fails (forcing you to restart your PyTorch process.)
+
+Args:
+    tensor (Tensor): a one element tensor to test to see if it is nonzero.  Zero
+        elements (including False for boolean tensors) cause an assertion failure
+        to be raised.
 """)
 
 add_docstr(torch.searchsorted,

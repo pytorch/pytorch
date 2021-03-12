@@ -144,13 +144,13 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 # Getter body
 GETTER_BODY_SAVEDVAR = """\
-return THPVariable_Wrap(prop.unpack());
+return THPVariable_Wrap(prop.unpack(self->cdata));
 """
 
 GETTER_BODY_VEC_SAVEDVAR = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
 for (int i = 0; i < prop.size(); i++) {
-  PyTuple_SetItem(tup, (Py_ssize_t) i, THPVariable_Wrap(prop[i].unpack()));
+  PyTuple_SetItem(tup, (Py_ssize_t) i, THPVariable_Wrap(prop[i].unpack(self->cdata)));
 }
 return tup;
 """

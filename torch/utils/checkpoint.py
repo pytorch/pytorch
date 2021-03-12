@@ -127,12 +127,10 @@ class CheckpointFunction(torch.autograd.Function):
         # run backward() with only tensor that requires grad
         outputs_with_grad = []
         args_with_grad = []
-        tensor_args_index = 0
         for i in range(len(outputs)):
             if torch.is_tensor(outputs[i]) and outputs[i].requires_grad:
                 outputs_with_grad.append(outputs[i])
-                args_with_grad.append(args[tensor_args_index])
-                tensor_args_index += 1
+                args_with_grad.append(args[i])
         if len(outputs_with_grad) == 0:
             raise RuntimeError(
                 "none of output has requires_grad=True,"
