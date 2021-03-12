@@ -1999,6 +1999,10 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_floor_divide,
            decorators=[_wrap_warn_once("floor_divide is deprecated, and will be removed")],
+           skips=(
+               # `test_duplicate_method_tests` doesn't raise any warning, as it doesn't actually
+               # call the operator.
+               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            supports_autograd=False,
            ),
     OpInfo('linalg.norm',
