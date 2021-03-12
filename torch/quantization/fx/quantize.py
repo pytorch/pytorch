@@ -29,9 +29,9 @@ from ..quantize import (
 from ..utils import (
     get_combined_dict,
     get_swapped_custom_module_class,
-    activation_is_quantized,
     weight_is_quantized,
     activation_is_statically_quantized,
+    activation_is_int8_quantized,
     activation_dtype,
     weight_dtype,
 )
@@ -173,7 +173,7 @@ def insert_observer_for_output_of_the_node(
     # need to be statically quantized
     assert modules is not None
     # TODO: Add warnings in the quantize handlers that does not support fp16 quantization
-    if activation_is_quantized(qconfig):
+    if activation_is_statically_quantized(qconfig):
         if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) \
                 and model.training:
             # we only insert fake quantize module in qat
@@ -209,7 +209,10 @@ def insert_observer_for_output_of_the_node(
                 elif isinstance(input_arg, list):
                     return all(map(is_observed, input_arg))
 
-            if activation_dtype(qconfig) == torch.float16:
+            # insert observers for fixedqparams ops like sigmoid, since
+            # it supports fp16 static quantization
+            if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) and \
+               activation_dtype(qconfig) == torch.float16:
                 insert_observer(
                     node, qconfig.activation(),
                     model, activation_post_process_map, env, observed_graph,
@@ -326,6 +329,7 @@ WEIGHT_PREPACK_OPS = {
     torch._ops.ops.quantized.linear_prepack,
     torch._ops.ops.quantized.linear_prepack_fp16,
     torch._ops.ops.quantized.conv2d_prepack,
+    torch._ops.ops.quantized.conv3d_prepack,
 }
 
 class Quantizer:
@@ -690,11 +694,7 @@ class Quantizer:
                     ' in quantized or non quantized environment, env: ' + \
                     str(env) + ' quant_env:' + str(quant_env)
                 quant_env_node = quant_env[n.name]
-                if node_return_type_is_int(quant_env_node):
-                    # we don't need to dequantize integers
-                    env[n.name] = quant_env[n.name]
-                else:
-                    env[n.name] = Proxy(quant_env[n.name]).dequantize().node
+                env[n.name] = Proxy(quant_env[n.name]).dequantize().node
             return env[n.name]
 
         def load_quantized(n: Node) -> Node:
@@ -804,8 +804,10 @@ class Quantizer:
                     'CopyNode of type ' + node.op + ' is not handled'
                 quantized = node_arg_is_quantized(node.args[0])
 
-            if not activation_is_statically_quantized(qconfig) or \
+            if not activation_is_int8_quantized(qconfig) or \
                not input_output_observed(obj):
+                quantized = False
+            if node_return_type_is_int(node):
                 quantized = False
 
             return quantized
@@ -1059,8 +1061,10 @@ class Quantizer:
                             this_node_qconfig = self.qconfig_map[node.name]
                             if this_node_qconfig:
                                 dtypes = get_qconfig_dtypes(this_node_qconfig)
-                                skip_this_match = \
-                                    dtypes not in binary_op_supported_dtypes[node.target]
+                                skip_this_match = (
+                                    (node.target in binary_op_supported_dtypes) and
+                                    (dtypes not in binary_op_supported_dtypes[node.target])
+                                )
 
                         if not skip_this_match:
                             matched: List[Any] = []
@@ -1130,7 +1134,7 @@ class Quantizer:
                 # this is the case for glow
                 should_add_handler = qconfig is not None and (
                     (is_activation and
-                     activation_is_quantized(qconfig)) or
+                     activation_is_statically_quantized(qconfig)) or
                     (is_weight and weight_is_quantized(qconfig)) or
                     (is_bias and activation_dtype(qconfig) == torch.float16)
                     and weight_dtype(qconfig) == torch.float16) and \
