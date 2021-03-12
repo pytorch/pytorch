@@ -15,7 +15,7 @@ from typing import List, Sequence, Tuple, Dict, Any, Union
 
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes, floating_types, floating_types_and,
-     floating_and_complex_types, floating_and_complex_types_and,
+     floating_and_complex_types, floating_and_complex_types_and, all_types,
      all_types_and_complex_and, all_types_and, all_types_and_complex,
      integral_types_and)
 from torch.testing._internal.common_device_type import \
@@ -1055,6 +1055,22 @@ def sample_inputs_index_copy(op_info, device, dtype, requires_grad):
 
     samples.extend(SampleInput(t, args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
     return samples
+
+def sample_inputs_mode(op_info, device, dtype, requires_grad):
+    inputs = []
+    args = (
+        ((S, S, S), (),),
+        ((S, S, S), (1, ),),
+        ((S, S, S), (1, True, ),),
+        ((), (0,),),
+        ((), (0, True,),),
+    )
+    inputs = list((SampleInput(make_tensor(input_tensor, device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                               args=args,))
+                  for input_tensor, args in args)
+    return inputs
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
     return (
@@ -3075,6 +3091,14 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
+    OpInfo('mode',
+           op=torch.mode,
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCPU=all_types(),
+           dtypesIfCUDA=all_types_and(torch.float16),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_mode,),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
