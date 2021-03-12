@@ -1259,7 +1259,9 @@ class DistributedDataParallel(Module):
                 # upon a rank to sync module buffers from, since rank 0 may
                 # already have been joined and have stale module buffers.
                 if self.ddp_uneven_inputs_config.ddp_join_enabled:
-                    authoritative_rank = self._find_common_rank(dist.get_rank(), True)
+                    authoritative_rank = self._find_common_rank(
+                        dist.get_rank(self.process_group), True
+                    )
                 else:
                     # The process with rank 0 is considered the authoritative copy.
                     authoritative_rank = 0
