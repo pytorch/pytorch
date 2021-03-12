@@ -1741,6 +1741,43 @@ class TestQuantizeFx(QuantizationTestCase):
         # make sure it runs
         m(torch.randn(5, 5))
 
+    def test_getattr_with_nontensor_result(self):
+        """
+        Verifies that binary ops get quantized correctly if some
+        of the args are nodes but not Tensors, such as an `x.ndim`
+        pattern.
+        """
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                dims = x.ndim
+                dims_sub = dims - 1
+                dims_sub2 = dims_sub - 1
+                x = torch.add(x, dims_sub2)
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                dims = x.ndim
+                dims_sub = dims - 2
+                mul = [1] * dims_sub
+                dims_list = [-1, x.size(1)] + mul
+                x = x.view(dims_list)
+                return x
+
+        for cls in (M1, M2):
+            m = cls().eval()
+            m(torch.rand(4, 4, 4, 4))
+            qconfig_dict = {'': torch.quantization.default_qconfig}
+            mp = prepare_fx(m, qconfig_dict)
+            mp(torch.rand(4, 4, 4, 4))
+            mc = convert_fx(mp)
+
     def test_state_dict(self):
         """ Make sure packed params appear in state_dict
         """
