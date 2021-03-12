@@ -118,13 +118,16 @@ void LoopNestGenerator::handle(const Expr* expr) {
   // Fill the entire loop structure by Looking at each axis
   // individually in out's domain
   for (size_t out_i = 0; out_i < out_tv->nDims(); out_i++) {
+    auto out_id = out_tv->axis(out_i);
+    // If out_id is derived from trivial reductions and its root axes
+    // are also all the case, it's safe to skip this axis.
+    if (gpu_lower->trivialReductionInfo().isDerivedFromRoot(out_id)) {
+      continue;
+    }
     // Look up the concrete ID in the parallel map, not in the loop
     // map, which also maps non-CA axes.
     auto concrete_id =
         gpu_lower->caParallelMap().getConcreteMappedID(out_tv->axis(out_i));
-    if (gpu_lower->isDerivedFromTrivialReduction(concrete_id)) {
-      continue;
-    }
     loop_structure.push_back(concrete_id);
   }
 

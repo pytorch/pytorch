@@ -202,6 +202,10 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
       }
     }
 
+    if (gpu_lower->trivialReductionInfo().isDerivedFromRoot(local_id)) {
+      continue;
+    }
+
     auto lowered_local_id =
         gpu_lower->lowerValue(local_id)->as<kir::IterDomain>();
     loops_it = std::find_if(

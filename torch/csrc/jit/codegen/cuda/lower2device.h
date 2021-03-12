@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <memory>
@@ -50,20 +51,8 @@ class TORCH_CUDA_CU_API GpuLower {
     return ca_parallel_map_;
   }
 
-  const auto& trivialReductions() const {
-    return trivial_reductions_;
-  }
-
-  const auto& kirTrivialReductions() const {
-    return kir_trivial_reductions_;
-  }
-
-  bool isDerivedFromTrivialReduction(IterDomain* id) const {
-    return trivialReductions().find(id) != trivialReductions().end();
-  }
-
-  bool isDerivedFromTrivialReduction(kir::IterDomain* id) const {
-    return kirTrivialReductions().find(id) != kirTrivialReductions().end();
+  const auto& trivialReductionInfo() const {
+    return trivial_reduction_info_;
   }
 
  private:
@@ -89,8 +78,7 @@ class TORCH_CUDA_CU_API GpuLower {
   ComputeAtMap ca_loop_map_;
   ComputeAtMap ca_index_map_;
   ComputeAtMap ca_parallel_map_;
-  std::unordered_set<IterDomain*> trivial_reductions_;
-  std::unordered_set<kir::IterDomain*> kir_trivial_reductions_;
+  TrivialReductionInfo trivial_reduction_info_;
 
   Fusion* fusion_ = nullptr;
 };

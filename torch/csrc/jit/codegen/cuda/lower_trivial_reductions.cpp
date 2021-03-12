@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
@@ -15,7 +16,7 @@ namespace cuda {
 
 namespace {
 
-bool isDerivedFromTrivialReduction(TensorView* tv, IterDomain* id);
+bool analyzeIfDerivedFromTrivialReduction(TensorView* tv, IterDomain* id);
 
 bool traverseToRFactorTensor(TensorView* tv, IterDomain* root_id) {
   TORCH_INTERNAL_ASSERT(
@@ -51,10 +52,10 @@ bool traverseToRFactorTensor(TensorView* tv, IterDomain* root_id) {
 
   auto producer_root_id = producer_id_it->second;
 
-  return isDerivedFromTrivialReduction(producer, producer_root_id);
+  return analyzeIfDerivedFromTrivialReduction(producer, producer_root_id);
 }
 
-bool isDerivedFromTrivialReduction(TensorView* tv, IterDomain* id) {
+bool analyzeIfDerivedFromTrivialReduction(TensorView* tv, IterDomain* id) {
   auto id_inputs = InputsOf::output(id->fusion(), id);
   for (auto root_id : ir_utils::filterByType<IterDomain>(id_inputs)) {
     if (root_id->isReduction() && root_id->rawExtent()->isOneInt()) {
@@ -72,29 +73,64 @@ bool isDerivedFromTrivialReduction(TensorView* tv, IterDomain* id) {
 
 } // namespace
 
-std::unordered_set<IterDomain*> detectTrivialReductionDerivedDomains(
-    Fusion* fusion) {
+void TrivialReductionInfo::build(Fusion* fusion, GpuLower* gpu_lower) {
   auto used_vals = DependencyCheck::getAllValsBetween(
       {fusion->inputs().begin(), fusion->inputs().end()}, fusion->outputs());
 
-  std::unordered_set<IterDomain*> trivial_reductions;
-
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
     for (auto id : tv->domain()->domain()) {
-      if (isDerivedFromTrivialReduction(tv, id)) {
+      if (analyzeIfDerivedFromTrivialReduction(tv, id)) {
         // If id is a trivial reduction, all of its ancestor vals are
         // also trivial reductions.
         for (auto dep_id : DependencyCheck::getAllValsBetween(
                  std::unordered_set<Val*>(
                      tv->getRootDomain().begin(), tv->getRootDomain().end()),
                  {id})) {
-          trivial_reductions.insert(dep_id->as<IterDomain>());
+          domains_.insert(dep_id->as<IterDomain>());
+          domains_derived_from_root_.insert(dep_id->as<IterDomain>());
         }
+      } else if (id->isReduction() && id->rawExtent()->isOneInt()) {
+        // This happens when a leaf domain is trivial but its root
+        // axes are not. For example, consider a non-trivial domain
+        // split by one. The inner output axis is a trivial domain,
+        // whereas the outer output axis is not. Since the root axis
+        // is not trivial, a for-loop needs to be generated.
+        domains_.insert(id);
       }
     }
   }
 
-  return trivial_reductions;
+  buildKir(fusion, gpu_lower);
+}
+
+void TrivialReductionInfo::buildKir(Fusion* fusion, GpuLower* gpu_lower) {
+  for (auto id : domains_) {
+    auto kir_trivial_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
+    kir_domains_.insert(kir_trivial_id);
+  }
+
+  for (auto id : domains_derived_from_root_) {
+    auto kir_trivial_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
+    kir_domains_derived_from_root_.insert(kir_trivial_id);
+  }
+}
+
+bool TrivialReductionInfo::isDerived(IterDomain* id) const {
+  return domains_.find(id) != domains_.end();
+}
+
+bool TrivialReductionInfo::isDerivedFromRoot(IterDomain* id) const {
+  return domains_derived_from_root_.find(id) !=
+      domains_derived_from_root_.end();
+}
+
+bool TrivialReductionInfo::isDerived(kir::IterDomain* id) const {
+  return kir_domains_.find(id) != kir_domains_.end();
+}
+
+bool TrivialReductionInfo::isDerivedFromRoot(kir::IterDomain* id) const {
+  return kir_domains_derived_from_root_.find(id) !=
+      kir_domains_derived_from_root_.end();
 }
 
 } // namespace cuda

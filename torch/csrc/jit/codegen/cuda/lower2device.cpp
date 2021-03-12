@@ -109,12 +109,7 @@ void GpuLower::lower() {
   // prepare for lowering
   validateIr(fusion_);
   replaceSymbolicSizes();
-
-  trivial_reductions_ = detectTrivialReductionDerivedDomains(fusion_);
-  for (auto id : trivial_reductions_) {
-    auto kir_trivial_id = lowerValue(id)->as<kir::IterDomain>();
-    kir_trivial_reductions_.insert(kir_trivial_id);
-  }
+  trivial_reduction_info_.build(fusion_, this);
 
   // In the future we may directly use this map, but for now it will propagate
   // and validate (to some extent) the parallelization strategy.
@@ -314,8 +309,7 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
             [&](IterDomain* id) {
               // If id is a reduction axis, is it a trivial reduction?
               if (id->isReduction()) {
-                return gpu_lower_->trivial_reductions_.find(id) !=
-                    gpu_lower_->trivial_reductions_.end();
+                return gpu_lower_->trivialReductionInfo().isDerived(id);
               } else {
                 return true;
               }

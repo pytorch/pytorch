@@ -9930,7 +9930,7 @@ TEST(NVFuserTest, FusionTrivialReduction3_CUDA) {
 
 // Make sure trivial reductions are correctly detected even with
 // scheduling applied.
-TEST(NVFuserTest, FusionDetectTrivialReduction_CUDA) {
+TEST(NVFuserTest, FusionDetectTrivialReduction1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9957,10 +9957,9 @@ TEST(NVFuserTest, FusionDetectTrivialReduction_CUDA) {
   auto tv11 = sum(tv10, {1});
   fusion.addOutput(tv11);
 
-  tv7->split(0, 3);
+  tv8->split(0, 3);
   tv10->split(1, 4);
   tv11->split(1, 5);
-  ;
 
   tv0->computeAt(tv2, -1);
   tv0->computeAt(tv8, -1);
@@ -9988,6 +9987,36 @@ TEST(NVFuserTest, FusionDetectTrivialReduction_CUDA) {
 
   testValidate(
       &fusion, cg_outputs, aten_inputs, {t0, t0, t0}, __LINE__, __FILE__);
+}
+
+// Test detection of partially trivial reduction
+TEST(NVFuserTest, FusionDetectTrivialReduction2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = add(tv1, new Double(1));
+  fusion.addOutput(tv2);
+
+  tv1->split(1, 1);
+  // tv1->axis(1): non-trivial
+  // tv1->axis(2): trivial
+
+  auto tv3 = tv1->rFactor({-1});
+
+  GpuLower gpulw(&fusion);
+
+  // tv3's reduction axis is a trivial reduction. The only
+  // kir::ReductionOp should be for tv1.
+  for (const auto& kir_node : gpulw.kernel()->irNodes()) {
+    if (kir_node->isA<kir::ReductionOp>()) {
+      auto reduction_out =
+          kir_node->as<kir::ReductionOp>()->outputs()[0]->as<kir::TensorView>();
+      TORCH_CHECK(reduction_out->fuserTv() == tv1);
+    }
+  }
 }
 
 TEST(NVFuserTest, FusionInputsIdLookup_CUDA) {

@@ -83,7 +83,7 @@ std::vector<kir::Bool*> PredicateCompute::computePredicates(
     const bool simple_ind = indices[i]->definition() == nullptr;
 
     if (root[i]->isBroadcast() || (buffer_init && root[i]->isReduction()) ||
-        gpu_lower->isDerivedFromTrivialReduction(root[i])) {
+        gpu_lower->trivialReductionInfo().isDerived(root[i])) {
       continue;
     } else if (simple_ind && !zero_ind) {
       extent = nullptr;
