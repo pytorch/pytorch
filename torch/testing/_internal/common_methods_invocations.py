@@ -2952,7 +2952,7 @@ op_db: List[OpInfo] = [
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
-           supports_out=False,
+           supports_out=False,  # index_select does not correctly warn when resizing out=
            sample_inputs_func=sample_inputs_index_select),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16),
