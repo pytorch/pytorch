@@ -80,9 +80,8 @@ def fp16_compress_wrapper(
     """
 
     def fp16_compress_wrapper_hook(hook_state, bucket: dist.GradBucket) -> torch.futures.Future:
-        # Cast tensors to FP16.
-        bucket_tensors = bucket.get_tensors()
-        bucket_tensors[0] = bucket_tensors[0].to(torch.float16)
+        # Overwrite bucket tensors to the fp16 cast tensors.
+        bucket.set_tensor(bucket.get_tensors()[0].to(torch.float16), 0)
 
         fut = hook(hook_state, bucket)
 

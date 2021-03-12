@@ -57,6 +57,11 @@ class GradBucket {
     return index_ == 0;
   }
 
+  // Overwrites a tensor at a specific index in the bucket.
+  void setTensor(at::Tensor& tensor, int i) {
+    tensors_[i] = tensor;
+  }
+
  private:
   size_t index_;
   std::vector<at::Tensor> tensors_;
