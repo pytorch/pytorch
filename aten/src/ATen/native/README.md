@@ -1,6 +1,5 @@
 ATen "native" functions are the modern mechanism for adding operators and
-functions to ATen (they are "native" in contrast to legacy functions, which are bound
-via TH/THC cwrap metadata).  Native functions
+functions to ATen.  Native functions
 are declared in `native_functions.yaml` and have implementations defined
 in one of the `cpp` files in this directory.
 
@@ -10,10 +9,7 @@ either as methods on `Tensor` (`t.mymeth()`) and functions in the ATen
 namespace (`at::myfunc()`).  In PyTorch, they are made available as
 methods on `Variable` or as functions on `torch._C._FunctionBase`
 (it is the user's responsibility to re-exporting these functions in
-a more user-facing module.)  At the moment, only
-functions which ingest `Variable` are made available; to use a function
-with non-differentiable tensors, wrap your tensors with `Variable` before
-passing them in.
+a more user-facing module.)
 
 The rest of this document describes how to implement an ATen function.
 
@@ -65,18 +61,16 @@ signature.
 - `int`. Think about this like a Python int. This is translated into a C++ argument of type `int64_t`.
 - `float`. Think about this like a Python `float`. It is translated into a C++ argument of type `double`.
 - `bool`
-- `str`
+- `str`.  It is translated into a C++ argument of type `std::string`
+  (but we should fix this, see https://github.com/pytorch/pytorch/issues/53546)
 - `Scalar`. `Scalar` supports binding to any numerical types from Python, including integral types,
   floating point types, and zero dimensional tensors. `int` and `float` bind to the corresponding Python
-  numerical types. However, you probably don't want to use `Scalar`. It's really used for binding
-  to TH/THC code "real" types where the Python APIs you are binding to are actually different types.
-  `float` and `int` argument types should suffice for most algorithms.
+  numerical types. However, you probably don't want to use `Scalar`;
+  `float` and `int` argument types should suffice for most algorithms
+  (you should only use `Scalar` if the operator truly may accept either
+  type).
 - `Generator?`, the state for a random number generator,
 - `bool[N]` (where N is `1-4`).
-- `TensorOptions`.  Tensor options provide information about how a
-  tensor should be constructed; it is most useful when you are writing a
-  factory function, where you have no `Tensor` inputs and thus
-  cannot otherwise determine how to construct a `Tensor`.
 - `*` is a special sentinel argument, which doesn't translate into an actual
   argument, but indicates that in the Python bindings, any subsequent arguments
   must be specified as keyword arguments (and cannot be provided positionally).
@@ -100,21 +94,19 @@ Functions with no tensor inputs are called *factory functions*, and
 are handled specially by code generation.  If your function is behaving
 differently than another example, check first and see if one is a
 factory while another is not. In some rare cases, factory function might have a
-tensor argument. In this case mark it with 'category_override: factory'
+tensor argument. In this case mark it with `category_override: factory`
 explicitly.
 
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
 change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
-least). For more details please see the section on `variants`.
+least, and it may affect Python keyword arguments). For more details please see the section on `variants`.
 
 As a convention we use 'out' to indicate an output argument. This aligns with the
 Python bindings. Even if a function might not be used in the Python bindings, we
 still advise to follow this convention. Check the generated code when making a change
 to make sure you're not breaking the API when renaming an argument name of an
 existing function.
-
-TODO: Do argument names affect Python keyword arguments?
 
 **Defaults.** Any suffix of arguments can have a default value defined;
 these default values translate into C++/Python default values which
@@ -184,7 +176,10 @@ argument as an overload name.
 
 If you add a new overload to an existing function, please leave the existing
 overload names as they are (for backwards compatibility), but give the new
-overload a new, unique name.
+overload a new, unique name.  Although overload names are not directly
+used by the Python or C++ APIs, they are public API surface for external
+backends (who register to specific overload names) and deployed mobile
+models (which use overload names as part of the serialization format.)
 
 Not specifying an overload name is equivalent to specifying an empty overload
 name. If you add a new function with multiple overloads, give them unique
@@ -281,12 +276,14 @@ Available backend options can be found by searching `dispatch_keys` in
 [codegen](https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py).
 Among the supported backends, there're a few alias keys that maps to a set of backends:
   - `DefaultBackend`: an alias that maps to all backends. Functions registered to
-    `DefaultBackend` should work for any backend inference.
+    `DefaultBackend` should work for any backend for inference.  (Note:
+    calling into a DispatchStub does NOT mean it works for any backend;
+    DispatchStub only works for `CPU, CUDA`)
   - `Math`: an alias that maps to all backend and autograd backend keys. Functions
     registered to `Math` key should be plain mathematical composition of other
     `at::` functions and support training and inference for any backend.
 
-`DefaultBackend` and `Math` keys act as defaults: for example, you can specify a custom
+`DefaultBackend` and `Math` keys act as defaults that can be overridden: for example, you can specify a custom
 kernel for a particular backend using a backend-specific dispatch key, and use
 `DefaultBackend` or `Math` to specify a generic kernel for the others.
 
@@ -330,9 +327,6 @@ added if applicable), so that it's still available for other backends to use.
 If you implemented a native function in C++ and want to find out which dispatch keyword
 should be used in native_functions.yaml, please [follow steps in dispatch keywords](#choosing-the-right-dispatch-keyword)
 
-This work is currently WIP and you can find the design proposal in
-https://github.com/pytorch/pytorch/issues/44680.
-
 ### `device_guard`
 
 ```
@@ -351,10 +345,6 @@ e.g., you call a function already manages device guard setting, or
 you're a function that simply does not interact with any devices. In
 that case, code generation of the device guard can be disabled by adding
 `device_guard: False` to your function definition.
-
-**Note.** We are considering eliminating automatic generation of DeviceGuard,
-in which case this field would go away. If you have an opinion on the
-matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 
 ### `matches_jit_signature`
 
@@ -543,37 +533,6 @@ the torch._C._nn (marked with `python_module: nn`),
 torch._C._fft (marked with `python_module: fft`),
 torch._C._linalg (marked with `python_module: linalg`) objects,
 or torch._C._special (marked with `python_module: special`) objects.
-
-### Can it handle being passed Variables?
-
-The biggest subtlety of writing an ATen implementation is the fact that
-`Tensor` is not a "final" class: your implementation may be passed objects
-which inherit from `Tensor` (in particular, the `Variable` subclass
-implements automatic differentiation in PyTorch.)  This has some
-direct consequences on valid implementations:
-
-* Never create a `Tensor` directly (e.g., `at::CPU` or `at::CUDA`), as a
-  caller will be expecting to get `Variable`s out if it passes `Variable`.
-  Instead, create tensors using the `options()` of one of the input
-  tensors.  E.g., `at::empty(sizes, input.options())` or
-  `at::ones(input.options().dtype(kByte))`, if you need
-  a different scalar type.
-
-* If you need to call other ATen functions, be sure to qualify the call
-  with `at::`; don't call them unqualified (in the `at::native` namespace).
-  Using the qualified name ensures that your invocation gets dispatched to
-  the `Variable` (which may be overridden to behave differently than
-  simply dispatch to `at::native`).
-
-These are not hard and fast rules: in particular, if you explicitly define
-a derivative for a function, it will only ever be called with `Tensor`
-arguments.  However, it is considered good style to abide by these rules,
-since code written in this style is more robust.
-
-NB: There is one downside to following the `at::` qualification rule, which
-is that if you know that you will only ever be called with `Tensor`, a
-direct `at::native` call will be more efficient (as it avoids a dynamic
-dispatch).
 
 ### Undefined tensor conventions
 
