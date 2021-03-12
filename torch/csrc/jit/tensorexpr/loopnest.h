@@ -43,8 +43,10 @@ class TORCH_API LoopNest {
   }
 
   std::vector<For*> getLoopStmtsFor(Tensor*) const;
+  std::vector<For*> getLoopStmtsFor(const Buf*) const;
   std::vector<For*> getLoopStmtsFor(Stmt*) const;
   Stmt* getLoopBodyFor(Tensor*) const;
+  Stmt* getLoopBodyFor(const Buf*) const;
   bool hasLoopBodyFor(Tensor*) const;
 
   static void vectorize(For*);
