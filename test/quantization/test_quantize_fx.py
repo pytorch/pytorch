@@ -1778,6 +1778,29 @@ class TestQuantizeFx(QuantizationTestCase):
             mp(torch.rand(4, 4, 4, 4))
             mc = convert_fx(mp)
 
+    def test_assert_on_size_after_quant_layer(self):
+        """
+        Verifies that calculating a size of a quantized tensor works
+        correctly in quantization passes.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                torch._assert(x.size(1) == 1, 'foobar')
+                return x
+
+        m = M().eval()
+        m(torch.rand(4, 1, 4, 4))
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mp(torch.rand(4, 1, 4, 4))
+        mc = convert_fx(mp)
+        mc(torch.rand(4, 1, 4, 4))
+
     def test_state_dict(self):
         """ Make sure packed params appear in state_dict
         """

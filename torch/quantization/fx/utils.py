@@ -380,3 +380,13 @@ def all_node_args_have_no_tensors(node: Node) -> bool:
             else:
                 found_one_tensor = True
     return not found_one_tensor
+
+
+def node_return_type_is_int(node: Node) -> bool:
+    """
+    Returns true if this node results in an integer, even if some of the args
+    are Tensors.
+    """
+    if node.op == 'call_method' and node.target == 'size':
+        return True
+    return False
