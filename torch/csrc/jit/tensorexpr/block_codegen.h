@@ -123,7 +123,7 @@ class TORCH_API BlockCodeGen : public CodeGen {
 
   void Initialize();
 
-  std::string getCodeText() override {
+  std::string getCodeText(const std::string& attr = "") override {
     return oss_.str();
   }
 
