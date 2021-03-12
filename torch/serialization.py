@@ -843,7 +843,10 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         storage = loaded_storages[key]
         return storage
 
-    load_module_mapping: Dict[str, str] = {}
+    load_module_mapping: Dict[str, str] = {
+        # See https://github.com/pytorch/pytorch/pull/51633
+        'torch.tensor': 'torch._tensor'
+    }
 
     # Need to subclass Unpickler instead of directly monkey-patching the find_class method
     # because it's marked readonly in pickle.
