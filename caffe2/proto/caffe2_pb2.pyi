@@ -696,6 +696,36 @@ class DBReaderProto(google.protobuf.message.Message):
     def ClearField(self, field_name: typing_extensions.Literal[u"db_type",b"db_type",u"key",b"key",u"name",b"name",u"source",b"source"]) -> None: ...
 global___DBReaderProto = DBReaderProto
 
+class BlobSerializationOptions(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
+    BLOB_NAME_REGEX_FIELD_NUMBER: builtins.int
+    CHUNK_SIZE_FIELD_NUMBER: builtins.int
+    blob_name_regex: typing.Text = ...
+    chunk_size: builtins.int = ...
+
+    def __init__(self,
+        *,
+        blob_name_regex : typing.Optional[typing.Text] = ...,
+        chunk_size : typing.Optional[builtins.int] = ...,
+        ) -> None: ...
+    def HasField(self, field_name: typing_extensions.Literal[u"blob_name_regex",b"blob_name_regex",u"chunk_size",b"chunk_size"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing_extensions.Literal[u"blob_name_regex",b"blob_name_regex",u"chunk_size",b"chunk_size"]) -> None: ...
+global___BlobSerializationOptions = BlobSerializationOptions
+
+class SerializationOptions(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
+    OPTIONS_FIELD_NUMBER: builtins.int
+
+    @property
+    def options(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___BlobSerializationOptions]: ...
+
+    def __init__(self,
+        *,
+        options : typing.Optional[typing.Iterable[global___BlobSerializationOptions]] = ...,
+        ) -> None: ...
+    def ClearField(self, field_name: typing_extensions.Literal[u"options",b"options"]) -> None: ...
+global___SerializationOptions = SerializationOptions
+
 DeviceType = DeviceTypeProto
 
 # These are freedom-patched into caffe2_pb2 in caffe2/proto/__init__.py
