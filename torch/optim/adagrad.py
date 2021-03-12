@@ -38,6 +38,12 @@ class Adagrad(Optimizer):
                         initial_accumulator_value=initial_accumulator_value)
         super(Adagrad, self).__init__(params, defaults)
 
+    def share_memory(self):
+        for group in self.param_groups:
+            for p in group['params']:
+                state = self.state[p]
+                state['sum'].share_memory_()
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
