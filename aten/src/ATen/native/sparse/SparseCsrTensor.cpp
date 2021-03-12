@@ -52,7 +52,7 @@ Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices,
   TORCH_CHECK(values.dim() == 1, "values must have dim=1 but got values.dim()=", values.dim());
 
   TORCH_CHECK((crow_indices.numel() - 1) == size[0], 
-    "crow_indices.numel() must be size(0), but got: ", crow_indices.numel());
+    "crow_indices.numel() must be size(0) + 1, but got: ", crow_indices.numel());
 
   SparseTensor self = new_csr_tensor(options);
   get_sparse_csr_impl(self)->resize_and_clear_(values.numel(), size);

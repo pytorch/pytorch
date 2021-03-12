@@ -18,7 +18,7 @@ namespace at { namespace native {
 // Functions for matrix multiplication.
 using namespace at::sparse;
 
-bool is_vs_code() {
+bool is_msvc() {
 #ifdef _MSC_VER
   return true;
 #else
@@ -34,6 +34,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     Scalar beta,
     Scalar alpha) {
   Tensor expand_self;
+  AT_ASSERT(op1.is_sparse_csr());
   std::tie(expand_self) = expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_csr");
 
   AT_ASSERT(expand_self.device().type() == kCPU);
@@ -75,7 +76,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   });
 
   // Do not use MKL for Windows due to linking issues with sparse MKL routines.
-  if (at::hasMKL() && !is_vs_code()) {
+  if (at::hasMKL() && !is_msvc()) {
     at::_sparse_mm_mkl_(out, op1, op2, expand_self, alpha, beta);
   }
   else {

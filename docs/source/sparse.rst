@@ -368,7 +368,7 @@ assumption that the fill value is negative infinity.
 Sparse CSR Tensor
 +++++++++++++++++
 
-The CSR (Compressed Sparse Row) sparse tensor format implemented the CSR format
+The CSR (Compressed Sparse Row) sparse tensor format implements the CSR format
 for storage of 2 dimensional tensors. Although there is no support for N-dimensional
 tensors, the primary advantage over the COO format is better use of storage and
 much faster computation operations such as sparse matrix-vector multiplication
@@ -415,8 +415,8 @@ and ``col_indices`` if it is not present.
 Operations on sparse CSR tensors
 --------------------------------
 
-The simplest way of constructing a sparse CSR tensor from a strided tensor
-is to use :meth:`tensor.to_sparse_csr`. Any zeros in the strided tensor will
+The simplest way of constructing a sparse CSR tensor from a strided or sparse COO 
+tensor is to use :meth:`tensor.to_sparse_csr`. Any zeros in the (strided) tensor will
 be interpreted as missing values in the sparse tensor:
 
     >>> a = torch.tensor([[0, 0, 1, 0], [1, 2, 0, 0], [0, 0, 0, 0]], dtype = torch.float64)

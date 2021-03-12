@@ -131,6 +131,16 @@ class TestSparseCSR(TestCase):
         dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=torch.double)
         self.assertEqual(csr.to_dense(), dense)
 
+    def test_coo_to_csr_convert(self):
+        size = (5, 5)
+        dense = torch.randn(size)
+        sparse_coo = dense.to_sparse()
+        sparse_csr = sparse_coo.to_sparse_csr()
+
+        self.assert(sparse_csr.is_sparse_csr())
+        self.assertEqual(sparse_csr.to_dense(), dense)
+
+
     def test_mkl_matvec_warnings(self):
         if torch.has_mkl:
             sp = torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),

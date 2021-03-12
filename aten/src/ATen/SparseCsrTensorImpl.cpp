@@ -64,33 +64,30 @@ void SparseCsrTensorImpl::set_member_tensors(const Tensor& crow_indices, const T
 
   TORCH_CHECK(crow_indices_type == col_indices_type, "both crow_indices and col_indices should have the same type.");
   TORCH_CHECK(crow_indices_type == kInt || crow_indices_type == kLong, 
-              "crow_indices must be an int32 or int64 type, but got: ", crow_indices_type);
-  TORCH_CHECK(col_indices_type == kInt || col_indices_type == kLong,
-              "col_indices must be int32 or int64 type, but got: ", col_indices_type);
+              "crow_indices and col_indices must be an int32 or int64 type, but got: ", crow_indices_type);
   TORCH_CHECK(values.scalar_type() == typeMetaToScalarType(dtype()), 
               "dtype of values (", values.scalar_type(), ") must match dtype of sparse tensor (", 
               typeMetaToScalarType(dtype()), ")");
 
   TORCH_CHECK(col_indices.layout() == kStrided, 
-              "expected col_indices to be a dense tensor, but got indices of layout ", 
+              "expected col_indices to be a strided tensor, but got indices of layout ", 
               col_indices.layout());
   TORCH_CHECK(crow_indices.layout() == kStrided, 
-              "expected crow_indices to be a dense tensor, but got crow_indices of layout ", 
+              "expected crow_indices to be a strided tensor, but got crow_indices of layout ", 
               crow_indices.layout());
   TORCH_CHECK(values.layout() == kStrided, 
-              "expected values to be a dense tensor, but got values of layout ", 
+              "expected values to be a strided tensor, but got values of layout ", 
               values.layout());
 
   TORCH_CHECK(values.device().type() == device().type(), "device type of values (", values.device().type(),
               ") must match device type of device().type()", device().type(), ")");
-  TORCH_CHECK(!col_indices.is_cuda() || col_indices.get_device() == values.get_device(), "device of col_indices (", 
-              col_indices.get_device(), ") must match device of values (", values.get_device(), ")");
-  TORCH_CHECK(!crow_indices.is_cuda() || crow_indices.get_device() == values.get_device(), "device of crow_indices (", 
-              crow_indices.get_device(), ") must match device of values (", values.get_device(), ")");
+  TORCH_CHECK(values.is_cuda() || col_indices.get_device() == crow_indices.get_device(),
+    "crow_indices and col_indices devices (", crow_indices.get_device(), ", ", col_indices.get_device(), 
+    ") must match with the (non-cuda) device of values (", values.get_device(), ")");
 
   TORCH_CHECK(col_indices.size(0) == values.size(0), 
-              "col_indices and values must have same nnz, but got nnz from indices: ",
-              col_indices.size(0), ", nnz from values: ", values.size(0));
+              "col_indices and values must have equal sizes, but got col_indices.size(0): ",
+              col_indices.size(0), ", values.size(0): ", values.size(0));
 
   crow_indices_ = crow_indices;
   col_indices_ = col_indices;

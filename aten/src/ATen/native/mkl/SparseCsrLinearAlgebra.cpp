@@ -9,7 +9,11 @@ namespace at { namespace native {
     using namespace at::sparse;
     Tensor _sparse_mm_mkl_(Tensor& self, const SparseTensor& sparse_, const Tensor& dense, const Tensor& t,
                             Scalar alpha, Scalar beta) {
-      AT_ERROR("sparse_mm_mkl: ATen not compiled with MKL support");
+      #if _MSC_VER
+        AT_ERROR("sparse_mm_mkl: MKL support is disabled on Windows");
+      #else
+        AT_ERROR("sparse_mm_mkl: ATen not compiled with MKL support");
+      #endif
     }
 }}
 
@@ -42,7 +46,7 @@ namespace at { namespace native {
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
       int retval = mkl_sparse_s_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, crow_indices,
                               crow_indices+1, col_indices, values);
-      TORCH_CHECK(retval == 0, "mkl_sparse_d_create_csr failed with error code: ", retval);
+      TORCH_CHECK(retval == 0, "mkl_sparse_s_create_csr failed with error code: ", retval);
 
       mkl_sparse_s_mm(SPARSE_OPERATION_NON_TRANSPOSE, alpha, A, desc,
                       SPARSE_LAYOUT_ROW_MAJOR, dense, dense_ncols, dense_ncols, beta,
@@ -99,6 +103,14 @@ namespace at { namespace native {
       }
       if (sparse_.col_indices().scalar_type() != kInt) {
         TORCH_WARN("Pytorch is compiled with MKL LP64 and will convert col_indices to int32.");
+      }
+      }
+    else { // This is for future proofing if we ever change to using MKL ILP64.
+      if (sparse_.crow_indices().scalar_type() != kLong) {
+        TORCH_WARN("Pytorch is compiled with MKL ILP64 and will convert crow_indices dtype to int64.");
+      }
+      if (sparse_.col_indices().scalar_type() != kLong) {
+        TORCH_WARN("Pytorch is compiled with MKL ILP64 and will convert col_indices dtype to int64.");
       }
     }
     AT_DISPATCH_FLOATING_TYPES(

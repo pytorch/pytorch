@@ -913,7 +913,7 @@ class Tensor(torch._C._TensorBase):
             >>> dense = torch.randn(5, 5)
             >>> sparse = dense.to_sparse_csr()
             >>> sparse._nnz()
-            3125
+            25
 
         """
         shape = self.size()
