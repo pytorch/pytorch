@@ -3755,6 +3755,28 @@ TEST(LoopNest, CompoundTensorSimple) {
   assertAllEqual(a_data, a_ref);
 }
 
+TEST(LoopNest, InlineConstantIndex) {
+  KernelScope kernel_scope;
+  const int N = 10;
+  Placeholder x_buf("a", kFloat, {1, N, 1});
+  Tensor* y = Compute(
+      "f",
+      {{1, "m"}, {N, "n"}, {1, "o"}},
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
+        return x_buf.load(m, n, o);
+      });
+  Tensor* z = Compute(
+      "f",
+      {{1, "m"}, {N, "n"}, {1, "o"}},
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
+        return y->call(m, n, o);
+      });
+
+  LoopNest l({z});
+  l.simplify();
+  ASSERT_TRUE(l.computeInline(y->buf()));
+}
+
 TEST(LoopNest, CompoundTensorUsed) {
   KernelScope kernel_scope;
 
