@@ -1617,6 +1617,11 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   return getLoopStmtsFor(cur_stmt);
 }
 
+std::vector<For*> LoopNest::getLoopStmtsFor(const Buf* buf) const {
+  Stmt* cur_stmt = getLoopBodyFor(buf);
+  return getLoopStmtsFor(cur_stmt);
+}
+
 std::vector<For*> LoopNest::getLoopStmtsFor(Stmt* s) const {
   std::vector<For*> result;
 
@@ -1645,7 +1650,11 @@ void LoopNest::setBufferMap(
 }
 
 Stmt* LoopNest::getLoopBodyFor(Tensor* t) const {
-  auto writes = WritesToBuf::find(root_stmt_, t->buf());
+  return getLoopBodyFor(t->buf());
+}
+
+Stmt* LoopNest::getLoopBodyFor(const Buf* buf) const {
+  auto writes = WritesToBuf::find(root_stmt_, buf);
 
   // special case for reduction Tensors, ignore the initializer if it's the only
   // op:

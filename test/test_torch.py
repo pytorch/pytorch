@@ -3724,6 +3724,17 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
+    @onlyCUDA
+    @dtypesIfCUDA(torch.half, torch.float)
+    def test_exponential_no_zero(self, device, dtype):
+        # naively, 0 in exponential can be generated with probability 2^-24
+        # so we need more samples to check if it's not generated
+        # instead of doing one
+        # don't test CPU, that would be a long test
+        x = torch.empty(50000000, device=device, dtype=dtype).exponential_()
+        self.assertTrue(x.min() > 0)
+
+
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_uniform_kstest(self, device, dtype):
@@ -5546,27 +5557,6 @@ class TestTorchDeviceType(TestCase):
         x = torch.randn(4, 3, 8, 8, 8, device=device)
         ndhwc = x.contiguous(memory_format=torch.channels_last_3d)
         y = ndhwc.permute(0, 1, 4, 3, 2).permute(0, 1, 4, 3, 2)
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
-
-    def test_memory_format_preserved_after_upsample(self, device):
-        x = torch.randn(4, 3, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last)
-        y = torch._C._nn.upsample_nearest2d(nhwc, (2, 2))
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
-
-        x = torch.randn(4, 3, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last)
-        y = torch._C._nn.upsample_bilinear2d(nhwc, (2, 2), True)
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
-
-        x = torch.randn(4, 3, 8, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last_3d)
-        y = torch._C._nn.upsample_nearest3d(nhwc, (2, 2, 2))
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
-
-        x = torch.randn(4, 3, 8, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last_3d)
-        y = torch._C._nn.upsample_trilinear3d(nhwc, (2, 2, 2), True)
         self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
 
     def test_memory_format_propagation_rules(self, device):

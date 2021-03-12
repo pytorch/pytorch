@@ -493,6 +493,8 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/rmsprop.cpp",
     "torch/csrc/api/src/optim/serialize.cpp",
     "torch/csrc/api/src/optim/sgd.cpp",
+    "torch/csrc/api/src/optim/schedulers/lr_scheduler.cpp",
+    "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
 ]
@@ -563,6 +565,9 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
     "torch/csrc/jit/python/pybind_utils.cpp",
+    "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp",
+    "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.cpp",
+    "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.cpp",
     "torch/csrc/jit/python/python_arg_flatten.cpp",
     "torch/csrc/jit/python/python_custom_class.cpp",
     "torch/csrc/jit/python/python_interpreter.cpp",
