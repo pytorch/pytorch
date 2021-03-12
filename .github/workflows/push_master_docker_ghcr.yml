@@ -39,8 +39,8 @@ jobs:
     # env:
     #   GHCR_PAT: ${{ secrets.GHCR_PAT }}
     steps:
-      - name: Clean runner workspace
-        run: rm -rf "${{ github.workspace }}"
+      # - name: Clean runner workspace
+      #   run: rm -rf "${{ github.workspace }}"
       - name: Checkout
         uses: actions/checkout@v2
       - name: Build master docker
