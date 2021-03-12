@@ -2294,8 +2294,12 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16, torch.half),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
                    skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/41245
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 dtypes=[torch.bfloat16, torch.float16, torch.float32, torch.float64]),
+                       # >>> np.sign(True)
+                       # ufunc 'sign' did not contain a loop
+                       # with signature matching types dtype('bool') -> dtype('bool')
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                 dtypes=[torch.bool]),
                    )),
@@ -2305,8 +2309,12 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
                    skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/41245
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 dtypes=[torch.bfloat16, torch.float16, torch.float32, torch.float64]),
+                       # >>> np.sign(True)
+                       # ufunc 'sign' did not contain a loop
+                       # with signature matching types dtype('bool') -> dtype('bool')
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                 dtypes=[torch.bool]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
