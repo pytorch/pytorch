@@ -253,7 +253,7 @@ class TestForeach(TestCase):
     #
     @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_int_scalar(self, device, dtype):
+    def test_tensorlist_int_scalar_op(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
@@ -319,7 +319,7 @@ class TestForeach(TestCase):
     # Current schema is using 'float[]' as scalar list type.
     @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_int_scalarlist(self, device, dtype):
+    def test_tensorlist_int_scalarlist_op(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
@@ -361,7 +361,7 @@ class TestForeach(TestCase):
 
     @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_float_scalar(self, device, dtype):
+    def test_tensorlist_float_scalar_op(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
@@ -403,7 +403,7 @@ class TestForeach(TestCase):
 
     @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_float_scalarlist(self, device, dtype):
+    def test_tensorlist_float_scalarlist_op(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
@@ -475,7 +475,7 @@ class TestForeach(TestCase):
 
     @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_complex_scalar(self, device, dtype):
+    def test_tensorlist_complex_scalar_op(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
@@ -509,7 +509,7 @@ class TestForeach(TestCase):
 
     @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_complex_scalarlist(self, device, dtype):
+    def test_tensorlist_complex_scalarlist_op(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
@@ -538,7 +538,7 @@ class TestForeach(TestCase):
 
     @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_bool_scalar(self, device, dtype):
+    def test_tensorlist_bool_scalar_op(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
@@ -568,7 +568,7 @@ class TestForeach(TestCase):
 
     @skipCUDAIfRocm
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_bool_scalarlist(self, device, dtype):
+    def test_tensorlist_bool_scalarlist_op(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
@@ -609,7 +609,7 @@ class TestForeach(TestCase):
                     self.assertEqual(tensors, res)
 
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_mixed_scalarlist(self, device, dtype):
+    def test_tensorlist_mixed_scalarlist_op(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
@@ -623,7 +623,7 @@ class TestForeach(TestCase):
                         foreach_bin_op(tensors, scalars)
 
                     # There are a two types of different errors that will be thrown.
-                    # - Sub with bool is not allowed. 
+                    # - Sub with bool is not allowed.
                     # - Result type can't be cast to the desired output type
                     with self.assertRaises(RuntimeError):
                         foreach_bin_op_(tensors, scalars)
@@ -639,7 +639,6 @@ class TestForeach(TestCase):
                 else:
                     with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
                         foreach_bin_op_(tensors, scalars)
-                    continue
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_with_different_size_tensors(self, device, dtype):
