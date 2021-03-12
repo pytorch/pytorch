@@ -2,6 +2,8 @@
 
 #include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
 
+#include <sstream>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -21,13 +23,18 @@ struct ReductionParams {
   // Perform multiple reductions per block?
   bool multiple_reds_per_blk = false;
   // Unrolling factor
-  int64_t loop_unroll = 4;
+  int64_t loop_unroll = 1;
+  // Should unrolling be done on reduction dimension
+  bool reduction_unroll = true;
   // Number of batches for each block
   int64_t batches_per_block = 1;
   // Number of warps per block
   int64_t num_warps = 1;
   // Store input in shared memory or registers to reduce global memory reads
   bool persistent_kernel = false;
+
+  // Split grid dim in case it's too large for cuda
+  bool split_grid_dim = false;
 
   LaunchParams lparams;
 
@@ -39,8 +46,29 @@ struct ReductionParams {
         other.loop_unroll == loop_unroll &&
         other.batches_per_block == batches_per_block &&
         other.num_warps == num_warps &&
-        other.persistent_kernel == persistent_kernel;
+        other.persistent_kernel == persistent_kernel &&
+        other.reduction_unroll == reduction_unroll &&
+        other.split_grid_dim == split_grid_dim;
     return attr_equal;
+  }
+
+  std::string toString() {
+    std::stringstream ss;
+    ss << "\n===== Reduction Parameters ========\n"
+       << (fastest_dim ? "Red On Fastest Dim\n" : "Red On Slow Dim\n")
+       << "Reduction Characteristics:\n"
+       << (multiple_reds_per_blk ? "Multiple Reds Per Block\n" : "")
+       << (cross_block ? "Cross block reduction\n" : "")
+       << (cross_grid ? "Cross grid reduction\n" : "") << "Blocking:"
+       << "\n"
+       << " GridY: " << lparams.gdimy() << " BlckY: " << lparams.bdimy()
+       << " BlckX: " << lparams.bdimx() << "\n";
+    if (loop_unroll > 1) {
+      ss << (reduction_unroll ? "Unroll reduction dim, " : "Unroll iter dim, ")
+         << "Factor: " << loop_unroll << "\n";
+    }
+    ss << "====================================\n";
+    return ss.str();
   }
 };
 
@@ -55,7 +83,9 @@ class ReductionParamsHash {
         static_cast<size_t>(rp.multiple_reds_per_blk) << (bits - 4) |
         static_cast<size_t>(rp.batches_per_block) << (bits - 5) |
         static_cast<size_t>(rp.num_warps) << (bits - 6) |
-        static_cast<size_t>(rp.persistent_kernel) << (bits - 7);
+        static_cast<size_t>(rp.persistent_kernel) << (bits - 7) |
+        static_cast<size_t>(rp.reduction_unroll) << (bits - 8) |
+        static_cast<size_t>(rp.split_grid_dim) << (bits - 9);
     return attr_hash;
   }
 };
