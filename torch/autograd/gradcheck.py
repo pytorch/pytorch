@@ -268,6 +268,22 @@ def check_outputs(outputs) -> None:
                          'Please call to_dense() on the output of fn for gradcheck.')
 
 
+def check_no_differentiable_outputs(func, inputs, func_out, config):
+    # When there are no differentiable outputs, numerical gradient for a function is
+    # expected to be zero.
+    for i, o in enumerate(func_out):
+        def fn(input):
+            return _as_tuple(func(*input))[i]
+        numerical = get_numerical_jacobian(fn, inputs, eps=config.eps)
+        for n in numerical:
+            if torch.ne(n, 0).sum() > 0:
+                if config.raise_exception:
+                    raise RuntimeError('Numerical gradient for function expected to be zero')
+                else:
+                    return False
+    return True
+
+
 FAILED_BATCHED_GRAD_MSG = """
 gradcheck or gradgradcheck failed while testing batched gradient computation.
 This could have been invoked in a number of ways (via a test that calls
@@ -458,22 +474,6 @@ def _as_tuple(x):
 
 def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
-
-
-def check_no_differentiable_outputs(func, inputs, func_out, config):
-    # When there are no differentiable outputs, numerical gradient for a function is
-    # expected to be zero.
-    for i, o in enumerate(func_out):
-        def fn(input):
-            return _as_tuple(func(*input))[i]
-        numerical = get_numerical_jacobian(fn, inputs, eps=config.eps)
-        for n in numerical:
-            if torch.ne(n, 0).sum() > 0:
-                if config.raise_exception:
-                    raise RuntimeError('Numerical gradient for function expected to be zero')
-                else:
-                    return False
-    return True
 
 
 @dataclass
