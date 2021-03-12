@@ -619,7 +619,7 @@ def gradcheck(
                         return fail_test(get_notallclose_msg(a, n, i, j))
 
         if check_batched_grad:
-            test_batched_grad(fail_test, tupled_inputs, o, j)
+            test_batched_grad(fail_test, tupled_inputs, o, i)
 
     if not test_backward_mul_by_grad_output(func, tupled_inputs, config):
         return False
