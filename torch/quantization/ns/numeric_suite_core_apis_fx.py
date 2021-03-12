@@ -142,7 +142,7 @@ class NSTracer(Tracer):
         return super().is_leaf_module(m, module_qualified_name)
 
 
-def _add_weight_info_to_dict(
+def _extract_weights_one_model(
     model_name: str,
     model: GraphModule,
     nodes_and_names_to_instrument: List[Tuple[Node, str]],
@@ -199,7 +199,7 @@ def _add_weight_info_to_dict(
                 }]
 
 
-def _compare_weights_impl(
+def _extract_weights_impl(
     model_name_a: str,
     gm_a: GraphModule,
     model_name_b: str,
@@ -217,15 +217,15 @@ def _compare_weights_impl(
 
     # populate the results, one model at a time
     results: NSResultsType = {}
-    _add_weight_info_to_dict(
+    _extract_weights_one_model(
         model_name_a, gm_a, nodes_and_names_to_instrument_a, results)
-    _add_weight_info_to_dict(
+    _extract_weights_one_model(
         model_name_b, gm_b, nodes_and_names_to_instrument_b, results)
 
     return results
 
 
-def compare_weights(
+def extract_weights(
     model_name_a: str,
     model_a: nn.Module,
     model_name_b: str,
@@ -238,10 +238,10 @@ def compare_weights(
     tracer_a, tracer_b = NSTracer(), NSTracer()
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    return _compare_weights_impl(model_name_a, gm_a, model_name_b, gm_b)
+    return _extract_weights_impl(model_name_a, gm_a, model_name_b, gm_b)
 
 
-def _prepare_single_model_output(
+def _add_loggers_one_model(
     model_name: str,
     model: GraphModule,
     nodes_and_names_to_instrument: List[Tuple[Node, str]],
@@ -261,7 +261,7 @@ def _prepare_single_model_output(
     return model
 
 
-def _prepare_model_outputs_impl(
+def _add_loggers_impl(
     name_a: str,
     gm_a: GraphModule,
     name_b: str,
@@ -280,16 +280,16 @@ def _prepare_model_outputs_impl(
         nodes_and_names_to_instrument_a.append((node_end_a, match_name))
         nodes_and_names_to_instrument_b.append((node_end_b, match_name))
 
-    new_model_a = _prepare_single_model_output(
+    new_model_a = _add_loggers_one_model(
         name_a, gm_a, nodes_and_names_to_instrument_a, logger_cls,
         should_log_inputs=should_log_inputs)
-    new_model_b = _prepare_single_model_output(
+    new_model_b = _add_loggers_one_model(
         name_b, gm_b, nodes_and_names_to_instrument_b, logger_cls,
         should_log_inputs=should_log_inputs)
     return (new_model_a, new_model_b)
 
 
-def prepare_model_outputs(
+def add_loggers(
     name_a: str,
     model_a: nn.Module,
     name_b: str,
@@ -300,12 +300,12 @@ def prepare_model_outputs(
     tracer_a, tracer_b = NSTracer(), NSTracer()
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    return _prepare_model_outputs_impl(
+    return _add_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs)
 
 
-def add_activation_info_to_dict(
+def _extract_logger_info_one_model(
     model: nn.Module,
     results: NSResultsType,
     logger_cls: Callable,
@@ -345,13 +345,13 @@ def add_activation_info_to_dict(
 
 # TODO(future PR): align on naming
 # this is equivalent of just the comparison extraction part of `ns.compare_model_outputs`
-def get_matching_activations(
+def extract_logger_info(
     model_a: nn.Module,
     model_b: nn.Module,
     logger_cls: Callable,
 ) -> NSResultsType:
     """
-    Same thing as ns.get_matching_activations, but for models prepared with
+    Same thing as ns.extract_logger_info, but for models prepared with
     this module.
 
     TODO(future PR): real docblock
@@ -360,11 +360,11 @@ def get_matching_activations(
     """
     results: NSResultsType = {}
     for model in (model_a, model_b):
-        add_activation_info_to_dict(model, results, logger_cls)
+        _extract_logger_info_one_model(model, results, logger_cls)
     return results
 
 
-def _prepare_model_with_stubs_impl(
+def _add_shadow_loggers_impl(
     name_a: str,
     gm_a: GraphModule,
     name_b: str,
@@ -379,7 +379,7 @@ def _prepare_model_with_stubs_impl(
     return gm_a_shadows_b
 
 
-def prepare_model_with_stubs(
+def add_shadow_loggers(
     name_a: str,
     model_a: nn.Module,
     name_b: str,
@@ -388,27 +388,25 @@ def prepare_model_with_stubs(
     should_log_inputs: bool = False,
 ) -> nn.Module:
     """
-    Same thing as prepare_model_outputs, but for an `a_shadows_b` model.
+    Same thing as add_loggers, but for an `a_shadows_b` model.
     TODO(future PR): real docblock
     """
     tracer_a, tracer_b = NSTracer(), NSTracer()
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    return _prepare_model_with_stubs_impl(
+    return _add_shadow_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs)
 
 
-# TODO(future PR): align on naming
-# this is equivalent of just the comparison extraction part of `ns.compare_model_stub`
-def get_matching_activations_a_shadows_b(
+def extract_shadow_logger_info(
     model_a_shadows_b: nn.Module,
     logger_cls: Callable,
 ) -> NSResultsType:
     """
-    Same thing as get_matching_activations, but for an `a_shadows_b` model.
+    Same thing as extract_logger_info, but for an `a_shadows_b` model.
     TODO(future PR): real docblock
     """
     results: NSResultsType = collections.defaultdict(dict)
-    add_activation_info_to_dict(model_a_shadows_b, results, logger_cls)
+    _extract_logger_info_one_model(model_a_shadows_b, results, logger_cls)
     return dict(results)
