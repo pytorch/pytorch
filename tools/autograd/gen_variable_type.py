@@ -22,23 +22,21 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
-from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
-    MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
-from .gen_autograd_functions import uses_single_grad
 from .gen_trace_type import (
     MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, MANUAL_AUTOGRAD,
     declare_returned_variables, tie_return_values, get_return_value, type_wrapper_name,
 )
+from .gen_inplace_or_view_type import emit_view_body, get_view_info, is_tensor_list_type, unpack_args, get_base_name
 
 from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.gen import FileManager
 from tools.codegen.context import with_native_function
+from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
 from tools.codegen.model import *
-from typing import Callable, List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Union
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -203,9 +201,6 @@ m.impl("${unqual_operator_name_with_overload}",
 );
 """)
 
-UNPACK_TENSOR = CodeTemplate("""\
-auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
-
 DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
 """)
@@ -232,12 +227,6 @@ grad_fn = std::shared_ptr<${op}>(new ${op}(${op_ctor}), deleteNode);
 grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
-CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
-at::${api_name}(${unpacked_args})""")
-
-CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
-${var}.${api_name}(${unpacked_method_args})""")
-
 CALL_REDISPATCH = CodeTemplate("""\
 at::redispatch::${api_name}(${unpacked_args})""")
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
@@ -252,27 +241,6 @@ auto tmp = ([&]() {
 
 ASSIGN_RETURN_VALUE = CodeTemplate("""\
 ${return_values} = ${rhs_value};
-""")
-
-ARRAYREF_TO_VEC = CodeTemplate("""\
-auto ${vec} = ${arg}.vec();
-""")
-
-OPTIONAL_TO_VAL = CodeTemplate("""\
-auto ${val} = ${arg}.value_or(${default});
-""")
-
-SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate("""\
-std::function<at::Tensor(const at::Tensor&)> func=nullptr;
-if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided()) {
-  ${replay_view_func}
-}
-""")
-
-REPLAY_VIEW_LAMBDA_FUNC = CodeTemplate("""\
-func = [=](const at::Tensor& ${input_base}) {
-  return ${replay_view_call};
-};
 """)
 
 DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
@@ -299,8 +267,6 @@ RUN_ONLY_IN_DEBUG_MODE = CodeTemplate("""\
 ${statements}
 #endif
 """)
-
-
 
 def gen_variable_type(
     out: str,
@@ -401,13 +367,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     inplace = f.func.kind() == SchemaKind.inplace
     is_out_fn = f.func.kind() == SchemaKind.out
     returns_void = len(f.func.returns) == 0
-    base_name = f.func.name.name.base  # TODO: should be str(f.func.name.name)?
-    view_info = VIEW_FUNCTIONS.get(base_name, None)
-    if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
-        view_info = "self"
-
-    def is_differentiable(name: str, type: Type) -> bool:
-        return type.is_tensor_like() and (info is None or name not in info.non_differentiable_arg_names)
+    base_name = get_base_name(f)
+    view_info = get_view_info(fn)
 
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
@@ -421,7 +382,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # not handled properly as they are irrelevant for this codegen.
         cpp_type = cpp.argument_type(a, binds=a.name).cpp_type()
 
-        if not is_differentiable(a.name, a.type):
+        if not is_differentiable(a.name, a.type, info):
             return None
         return DifferentiableInput(
             name=a.name,
@@ -444,31 +405,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             raise RuntimeError(f'Missing arguments for derivatives: {missing} in {info.name}')
         return differentiable
 
-    def gen_differentiable_outputs(f: NativeFunction) -> List[DifferentiableOutput]:
-        outputs: List[DifferentiableOutput] = [
-            DifferentiableOutput(name=name, type=ret.type, cpp_type=cpp.return_type(ret))
-            for name, ret in zip(cpp.return_names(f), f.func.returns)]
-
-        output_differentiability = info.output_differentiability if info else None
-        if output_differentiability is not None:
-            differentiable_outputs: List[DifferentiableOutput] = []
-            if False in output_differentiability and f.func.kind() == SchemaKind.inplace:
-                raise RuntimeError("output_differentiability=False for inplace operation (version_counter won't get updated)")
-            for differentiable, output in zip(output_differentiability, outputs):
-                if differentiable:
-                    differentiable_outputs.append(output)
-            return differentiable_outputs
-
-        candidate_differentiable_outputs = list(filter(lambda r: is_differentiable(r.name, r.type), outputs))
-
-        if uses_single_grad(info):
-            return candidate_differentiable_outputs[:1]
-        else:
-            return candidate_differentiable_outputs
-
     differentiable_inputs = gen_differentiable_inputs(f)
     args_with_derivatives = find_args_with_derivatives(differentiable_inputs)
-    differentiable_outputs = gen_differentiable_outputs(f)
+    differentiable_outputs = gen_differentiable_outputs(fn)
 
     requires_derivative = (
         base_name not in DONT_REQUIRE_DERIVATIVE and name not in DONT_REQUIRE_DERIVATIVE and
@@ -636,84 +575,22 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     #  - Pre-compute the full DispatchKeySet. This saves the dispatcher from having to read from TLS.
     #  - redispatch() avoids a redundant call to RecordFunction, which was already called right before
     #    we entered this autograd kernel.
-    # For view replay calls, we generate an ordinary Dispatcher::call() instead, because:
-    #  - We want to replay the entire call into the op, including any previously-set dispatch keys (including autograd!).
-    #  - The view replay call also is not part of the hot path.
-    def emit_dispatch_call(f: NativeFunction, input_base: str, unpacked_args: Sequence[str], *, is_view_call: bool) -> str:
+    def emit_dispatch_call(f: NativeFunction, input_base: str, unpacked_args: Sequence[str]) -> str:
         """ Dispatch call via function in a namespace or method on Tensor."""
         dispatcher_sig = DispatcherSignature.from_schema(f.func)
         dispatcher_exprs = dispatcher_sig.exprs()
 
-        if is_view_call:
-            # View replay functions use the standard Dispatcher::call API.
-            if Variant.function in f.variants:
-                call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
-                    api_name=cpp.name(
-                        f.func,
-                        faithful_name_for_out_overloads=True,
-                    ),
-                    unpacked_args=unpacked_args)
-            else:
-                call = CALL_DISPATCH_VIA_METHOD.substitute(
-                    api_name=cpp.name(f.func),
-                    var=input_base,
-                    unpacked_method_args=unpacked_args[1:])
-        else:
-            # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
-            # Ops also always have a function variant of the redispatch API.
-            # See Note [Plumbing Keys Through The Dispatcher] for details.
-            dispatch_key_set = 'ks & c10::after_autograd_keyset'
-            call = CALL_REDISPATCH.substitute(
-                api_name=cpp.name(
-                    f.func,
-                    faithful_name_for_out_overloads=True,
-                ),
-                unpacked_args=[dispatch_key_set] + list(unpacked_args))
+        # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
+        # Ops also always have a function variant of the redispatch API.
+        # See Note [Plumbing Keys Through The Dispatcher] for details.
+        dispatch_key_set = 'ks & c10::after_autograd_keyset'
+        call = CALL_REDISPATCH.substitute(
+            api_name=cpp.name(
+                f.func,
+                faithful_name_for_out_overloads=True,
+            ),
+            unpacked_args=[dispatch_key_set] + list(unpacked_args))
         return call
-
-    def emit_view_lambda(unpacked_bindings: List[Binding]) -> str:
-        """ Generate an additional lambda function to recover views in backward when as_strided is not supported.
-        See Note [View + Inplace update for base tensor] and [View + Inplace update for view tensor] for more details."""
-        input_base = 'input_base'
-        replay_view_func = ''
-        updated_unpacked_args: List[str] = []
-        known_view_arg_simple_types: List[str] = ['int64_t', 'c10::optional<int64_t>', 'bool', 'IntArrayRef']
-        for unpacked_binding in unpacked_bindings:
-            arg, arg_type = unpacked_binding.name, unpacked_binding.type
-            if arg == 'self_':
-                updated_unpacked_args.append(input_base)
-                continue
-            if arg_type not in known_view_arg_simple_types:
-                known_types_str = ', '.join(known_view_arg_simple_types)
-                raise TypeError(f'You are adding an {arg_type} {arg} argument to op {cpp.name(f.func)} in addition to known types: '
-                                f'{known_types_str}. Please update the list or materialize it so that it can be closed '
-                                'over by value, also add a test in pytorch/xla/test/test_operations.py where this code '
-                                'is exercised.')
-
-            if arg_type == 'IntArrayRef':
-                # It's not safe to close over IntArrayRef by value, since this is a
-                # reference type, so materialize a vector to close over by value
-                arg_vec = arg + '_vec'
-                replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
-                updated_unpacked_args.append(arg_vec)
-            elif arg_type == 'c10::optional<int64_t>':
-                # Materialize int64_t? to int64_t
-                arg_value = arg + '_val'
-                replay_view_func += OPTIONAL_TO_VAL.substitute(arg=arg, val=arg_value, default='0')
-                updated_unpacked_args.append(arg_value)
-            else:
-                updated_unpacked_args.append(arg)
-
-        replay_view_call = emit_dispatch_call(f, input_base, updated_unpacked_args, is_view_call=True)
-        replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
-            input_base=input_base,
-            replay_view_call=replay_view_call)
-
-        is_view_with_metadata_change = 'true' if name in VIEW_FUNCTIONS_WITH_METADATA_CHANGE else 'false'
-
-        return SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE.substitute(
-            is_view_with_metadata_change=is_view_with_metadata_change,
-            replay_view_func=replay_view_func)
 
     def wrap_output(f: NativeFunction, unpacked_bindings: List[Binding], var: str) -> str:
         call = ''
@@ -721,43 +598,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         if not any(r.type.is_tensor_like() for r in f.func.returns):
             rhs_value = var
         elif view_info is not None:
-            # See NOTE [ Autograd View Variables ] in variable.h for details.
-            differentiable_output_vars = {r.name for r in differentiable_outputs}
-
-            if not isinstance(view_info, str):
-                raise TypeError(f'The view info should be a string for {base_name}, but it is: {view_info}')
-
-            if len(differentiable_output_vars) == 0:
-                # no output is differentiable (.indices() for SparseTensors for example)
-                rhs_value = f'as_view({view_info}, {var}, /* is_bw_differentiable */ false, /* is_fw_differentiable */ false)'
-            elif len(differentiable_output_vars) == 1:
-                # Single differentiable output (Tensor or Tensor[])
-                return_info = differentiable_outputs[0]
-                # We only support simple Tensor or a TensorList for functions that return views
-                if not is_tensor_type(return_info.type) and not is_tensor_list_type(return_info.type):
-                    raise RuntimeError(f'{base_name} that return differentiable views can only return Tensor or Tensor[]')
-                # Only allow rebasing of the history if we return a single Tensor
-                # If we are in a no grad block, raise a warning
-                # See NOTE [ View + Inplace detection ] for more details about this logic
-                if is_tensor_list_type(return_info.type):
-                    if base_name in MULTI_OUTPUT_SAFE_FUNCTIONS:
-                        creation_meta = 'CreationMeta::MULTI_OUTPUT_SAFE'
-                    else:
-                        creation_meta = 'CreationMeta::MULTI_OUTPUT_NODE'
-                    call += (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
-                             '/* is_fw_differentiable */ true, '
-                             f'/* creation_meta */ {creation_meta});')
-                    rhs_value = f'std::move({var})'
-                else:
-                    call += emit_view_lambda(unpacked_bindings)
-                    creation_meta = 'GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE'
-                    rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
-                                 '/* is_fw_differentiable */ true, '
-                                 f'/* view_func */ func, /* creation_meta */ {creation_meta})')
-            else:
-                # This could be supported but we don't need it at the moment, so keeping things simple.
-                raise RuntimeError('Function that return multiple differentiable output '
-                                   'when at least one of them is view is not supported.')
+            as_view_call, rhs_value = emit_view_body(fn, var)
+            call += as_view_call
         else:
             rhs_value = f'std::move({var})'
         assert rhs_value is not None
@@ -801,7 +643,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # in are now Variables.
         # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
         unpacked_args = [b.name for b in unpacked_bindings]
-        base_type_call = emit_dispatch_call(f, 'self_', unpacked_args, is_view_call=False)
+        base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
         if not modifies_arguments(f) and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
@@ -874,54 +716,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     if not returns_void:
         body.append(f'return {get_return_value(f)};')
     return body
-
-@with_native_function
-def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
-    body: List[str] = []
-    unpacked_bindings: List[Binding] = []
-
-    bindings = [r for a in f.func.schema_order_arguments()
-                for r in cpp.argument(a,
-                                      method=False,
-                                      cpp_no_default_args=set(),
-                                      faithful=False,
-                                      has_tensor_options=False)]
-
-    for i, binding in enumerate(bindings):
-        assert not isinstance(binding.argument, SelfArgument)
-        if isinstance(binding.argument, TensorOptionsArguments):
-            raise RuntimeError("VariableKernel shouldn't take TensorOptions")
-
-        is_nullable = binding.argument.type.is_nullable()
-        if not binding.argument.type.is_tensor_like() or is_nullable:
-            unpacked_bindings.append(binding)
-            continue
-
-        is_tensor_list = is_tensor_list_type(binding.argument.type)
-        ref = (not is_nullable) and not is_tensor_list
-        suffix = '_opt' if is_nullable and not is_tensor_list else ''
-        body.append(UNPACK_TENSOR.substitute(
-            arg_name=binding.name,
-            arg_pos=i,
-            suffix=suffix,
-            ref='&' if ref else '',
-        ))
-        unpacked_bindings.append(Binding(
-            name=binding.name + '_',
-            ctype=binding.ctype,
-            argument=binding.argument,
-            default=binding.default,
-        ))
-
-    return body, unpacked_bindings
-
-def is_tensor_type(t: Type) -> bool:
-    # TODO: Should handle optional here?
-    return t.is_tensor_like() and t.is_list_like() is None
-
-def is_tensor_list_type(t: Type) -> bool:
-    # TODO: Should handle optional here?
-    return t.is_tensor_like() and t.is_list_like() is not None
 
 def modifies_arguments(f: NativeFunction) -> bool:
     return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
