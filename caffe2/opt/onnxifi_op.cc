@@ -533,6 +533,87 @@ void OnnxifiOp<CPUContext>::setOutputShapeAndType(
   }
 }
 
+string mapOnnxStatusToString(onnxStatus status) {
+  switch (status) {
+    case ONNXIFI_STATUS_SUCCESS:
+      return "ONNXIFI_STATUS_SUCCESS";
+    case ONNXIFI_STATUS_FALLBACK:
+      return "ONNXIFI_STATUS_FALLBACK";
+    case ONNXIFI_STATUS_INVALID_ID:
+      return "ONNXIFI_STATUS_INVALID_ID";
+    case ONNXIFI_STATUS_INVALID_SIZE:
+      return "ONNXIFI_STATUS_INVALID_SIZE";
+    case ONNXIFI_STATUS_INVALID_POINTER:
+      return "ONNXIFI_STATUS_INVALID_POINTER";
+    case ONNXIFI_STATUS_INVALID_PROTOBUF:
+      return "ONNXIFI_STATUS_INVALID_PROTOBUF";
+    case ONNXIFI_STATUS_INVALID_MODEL:
+      return "ONNXIFI_STATUS_INVALID_MODEL";
+    case ONNXIFI_STATUS_INVALID_BACKEND:
+      return "ONNXIFI_STATUS_INVALID_BACKEND";
+    case ONNXIFI_STATUS_INVALID_GRAPH:
+      return "ONNXIFI_STATUS_INVALID_GRAPH";
+    case ONNXIFI_STATUS_INVALID_EVENT:
+      return "ONNXIFI_STATUS_INVALID_EVENT";
+    case ONNXIFI_STATUS_INVALID_STATE:
+      return "ONNXIFI_STATUS_INVALID_STATE";
+    case ONNXIFI_STATUS_INVALID_NAME:
+      return "ONNXIFI_STATUS_INVALID_NAME";
+    case ONNXIFI_STATUS_INVALID_SHAPE:
+      return "ONNXIFI_STATUS_INVALID_SHAPE";
+    case ONNXIFI_STATUS_INVALID_DATATYPE:
+      return "ONNXIFI_STATUS_INVALID_DATATYPE";
+    case ONNXIFI_STATUS_INVALID_MEMORY_TYPE:
+      return "ONNXIFI_STATUS_INVALID_MEMORY_TYPE";
+    case ONNXIFI_STATUS_INVALID_MEMORY_LOCATION:
+      return "ONNXIFI_STATUS_INVALID_MEMORY_LOCATION";
+    case ONNXIFI_STATUS_INVALID_FENCE_TYPE:
+      return "ONNXIFI_STATUS_INVALID_FENCE_TYPE";
+    case ONNXIFI_STATUS_INVALID_PROPERTY:
+      return "ONNXIFI_STATUS_INVALID_PROPERTY";
+    case ONNXIFI_STATUS_UNSUPPORTED_TAG:
+      return "ONNXIFI_STATUS_UNSUPPORTED_TAG";
+    case ONNXIFI_STATUS_UNSUPPORTED_VERSION:
+      return "ONNXIFI_STATUS_UNSUPPORTED_VERSION";
+    case ONNXIFI_STATUS_UNSUPPORTED_OPERATOR:
+      return "ONNXIFI_STATUS_UNSUPPORTED_OPERATOR";
+    case ONNXIFI_STATUS_UNSUPPORTED_ATTRIBUTE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_ATTRIBUTE";
+    case ONNXIFI_STATUS_UNSUPPORTED_SHAPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_SHAPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_DATATYPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_DATATYPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_MEMORY_TYPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_MEMORY_TYPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_FENCE_TYPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_FENCE_TYPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_PROPERTY:
+      return "ONNXIFI_STATUS_UNSUPPORTED_PROPERTY";
+    case ONNXIFI_STATUS_UNIDENTIFIED_NAME:
+      return "ONNXIFI_STATUS_UNIDENTIFIED_NAME";
+    case ONNXIFI_STATUS_MISMATCHING_SHAPE:
+      return "ONNXIFI_STATUS_MISMATCHING_SHAPE";
+    case ONNXIFI_STATUS_MISMATCHING_DATATYPE:
+      return "ONNXIFI_STATUS_MISMATCHING_DATATYPE";
+    case ONNXIFI_STATUS_NO_SYSTEM_MEMORY:
+      return "ONNXIFI_STATUS_NO_SYSTEM_MEMORY";
+    case ONNXIFI_STATUS_NO_DEVICE_MEMORY:
+      return "ONNXIFI_STATUS_NO_DEVICE_MEMORY";
+    case ONNXIFI_STATUS_NO_SYSTEM_RESOURCES:
+      return "ONNXIFI_STATUS_NO_SYSTEM_RESOURCES";
+    case ONNXIFI_STATUS_NO_DEVICE_RESOURCES:
+      return "ONNXIFI_STATUS_NO_DEVICE_RESOURCES";
+    case ONNXIFI_STATUS_BACKEND_UNAVAILABLE:
+      return "ONNXIFI_STATUS_BACKEND_UNAVAILABLE";
+    case ONNXIFI_STATUS_INTERNAL_ERROR:
+      return "ONNXIFI_STATUS_INTERNAL_ERROR";
+    case ONNXIFI_STATUS_FATAL_ERROR:
+      return "ONNXIFI_STATUS_FATAL_ERROR";
+    default:
+      return "ONNXIFI_STATUS_STRING_NOT_MAPPED";
+  }
+}
+
 template <>
 bool OnnxifiOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
@@ -594,16 +675,22 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
           });
       traces_->numEvents = 0;
     }
+
+    const onnxStatus status = (*onnxSetIOAndRunGraphPointer_)(
+        graph_,
+        input_desc_.size(),
+        input_desc_.data(),
+        output_desc_.size(),
+        output_desc_.data(),
+        &output_fence,
+        traces_.get());
+    const string statusString = mapOnnxStatusToString(status);
     CAFFE_ENFORCE_EQ(
-        (*onnxSetIOAndRunGraphPointer_)(
-            graph_,
-            input_desc_.size(),
-            input_desc_.data(),
-            output_desc_.size(),
-            output_desc_.data(),
-            &output_fence,
-            traces_.get()),
-        ONNXIFI_STATUS_SUCCESS);
+        status,
+        ONNXIFI_STATUS_SUCCESS,
+        "Reason: onnxSetIOAndRunGraph returned status code ",
+        statusString);
+
     current_batch_size = extractOutputBatchSizes();
     onnxEventState eventState;
     onnxStatus eventStatus;
