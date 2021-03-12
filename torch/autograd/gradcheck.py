@@ -476,6 +476,11 @@ def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
 
+def get_notallclose_msg(a, n, i, j, error_str='') -> str:
+    return error_str + 'Jacobian mismatch for output %d with respect to input %d,\n' \
+        'numerical:%s\nanalytical:%s\n' % (i, j, n, a)
+
+
 @dataclass
 class GradCheckConfig:
     raise_exception: bool
@@ -591,34 +596,27 @@ def gradcheck(
 
         if o.is_complex():
             # analytical vjp with grad_out = 1.0j
-            analytical_with_imag_grad_out, failed = get_analytical_jacobian(tupled_inputs, o, config,
+            analytical_imag_grad_out, failed = get_analytical_jacobian(tupled_inputs, o, config,
                                                                             nondet_tol=nondet_tol, grad_out=1j)
             if failed:
                 return False
-            numerical_with_imag_grad_out = get_numerical_jacobian(fn, tupled_inputs, eps=eps, grad_out=1j)
-
-        def checkIfNumericalAnalyticAreClose(a, n, j, error_str=''):
-            if not torch.allclose(a, n, rtol, atol):
-                return fail_test(error_str + 'Jacobian mismatch for output %d with respect to input %d,\n'
-                                 'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
+            numerical_imag_grad_out = get_numerical_jacobian(fn, tupled_inputs, eps=eps, grad_out=1j)
 
         inp_tensors = iter_tensors(tupled_inputs, True)
 
         for j, (a, n, inp) in enumerate(zip(analytical, numerical, inp_tensors)):
             if a.numel() != 0 or n.numel() != 0:
-                if o.is_complex():
-                    # C -> C, R -> C
-                    a_with_imag_grad_out = analytical_with_imag_grad_out[j]
-                    n_with_imag_grad_out = numerical_with_imag_grad_out[j]
-                    checkIfNumericalAnalyticAreClose(a_with_imag_grad_out, n_with_imag_grad_out, j,
-                                                     "Gradients failed to compare equal for grad output = 1j. ")
-                if inp.is_complex():
-                    # C -> R, C -> C
-                    checkIfNumericalAnalyticAreClose(a, n, j,
-                                                     "Gradients failed to compare equal for grad output = 1. ")
-                else:
-                    # R -> R, R -> C
-                    checkIfNumericalAnalyticAreClose(a, n, j)
+                if o.is_complex():    # C -> C, R -> C
+                    if not torch.allclose(analytical_imag_grad_out[j], numerical_imag_grad_out[j], rtol, atol):
+                        return fail_test(get_notallclose_msg(analytical_imag_grad_out[j], numerical_imag_grad_out[j], i, j,
+                                                             "Gradients failed to compare equal for grad output = 1j. "))
+                if inp.is_complex():  # C -> R, C -> C
+                    if not torch.allclose(a, n, atol, rtol):
+                        return fail_test(get_notallclose_msg(a, n, i, j,
+                                                             "Gradients failed to compare equal for grad output = 1. "))
+                else:                 # R -> R, R -> C
+                    if not torch.allclose(a, n, atol, rtol):
+                        return fail_test(get_notallclose_msg(a, n, i, j))
 
         if check_batched_grad:
             test_batched_grad(fail_test, tupled_inputs, o, j)
