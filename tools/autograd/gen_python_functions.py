@@ -1,7 +1,7 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn. torch._C._fft, or torch._C._linalg objects.
+# torch._C._nn. torch._C._fft, torch._C._linalg or torch._C._special objects.
 #
 
 # Code tries to stick to the following rules:
@@ -38,6 +38,7 @@ import yaml
 from .gen_trace_type import should_trace
 
 from tools.codegen.code_template import CodeTemplate
+from tools.codegen.api import cpp
 from tools.codegen.api.types import *
 from tools.codegen.api.python import *
 from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
@@ -132,6 +133,9 @@ def is_py_fft_function(f: NativeFunction) -> bool:
 def is_py_linalg_function(f: NativeFunction) -> bool:
     return f.python_module == 'linalg'
 
+def is_py_special_function(f: NativeFunction) -> bool:
+    return f.python_module == 'special'
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                            Main Function
@@ -157,6 +161,9 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
 
     create_python_bindings(
         fm, functions, is_py_linalg_function, 'torch.linalg', 'python_linalg_functions.cpp', method=False)
+
+    create_python_bindings(
+        fm, functions, is_py_special_function, 'torch.special', 'python_special_functions.cpp', method=False)
 
 def create_python_bindings(
     fm: FileManager,
@@ -528,6 +535,7 @@ if(check_has_torch_function(self_)) {{
         "torch.nn": "THPNNVariableFunctionsModule",
         "torch.fft": "THPFFTVariableFunctionsModule",
         "torch.linalg": "THPLinalgVariableFunctionsModule",
+        "torch.special": "THPSpecialVariableFunctionsModule",
     }[module] if module else "THPVariableClass"
 
     return f"""\

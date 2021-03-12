@@ -63,6 +63,7 @@ def _faulty_process_group_init_backend_handler(
             )
 
         return FaultyProcessGroupAgent(
+            store,
             name,
             group,
             rpc_backend_options.num_send_recv_threads,
