@@ -14,13 +14,13 @@ from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Set, Tuple, cast)
-from xml.dom import minidom  # type: ignore[import]
+from xml.dom import minidom
 
 import requests
 from typing_extensions import TypedDict
-from .stats_utils.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_S3_bucket_readonly,
-                                        Report, Status, Commit, HAVE_BOTO3,
-                                        Version2Case, VersionedReport, Version1Report, Version2Report, ReportMetaMeta)
+from tools.stats_utils.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_S3_bucket_readonly,
+                                              Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
+                                              Version1Report, Version2Report, ReportMetaMeta)
 
 
 
@@ -759,7 +759,7 @@ def send_report_to_s3(head_report: Version2Report) -> None:
         return
     now = datetime.datetime.utcnow().isoformat()
     key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
-    get_S3_object_from_bucket('ossci-metrics', key)
+    obj = get_S3_object_from_bucket('ossci-metrics', key)
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
     # input files of a few megabytes in size like these JSON files, and
