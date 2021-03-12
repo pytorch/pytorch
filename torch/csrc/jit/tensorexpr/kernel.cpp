@@ -23,6 +23,7 @@ static int te_cuda_pointwise_block_size = -1;
 static bool fallback_allowed = false;
 static bool te_generate_block_code = false;
 static bool te_must_use_llvm_on_cpu = true;
+static bool cat_wo_conditionals = false; // NOLINT
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -85,6 +86,10 @@ bool& getTEGenerateBlockCode() {
 
 bool& getTEMustUseLLVMOnCPU() {
   return te_must_use_llvm_on_cpu;
+}
+
+bool& getCatWoConditionals() {
+  return cat_wo_conditionals;
 }
 
 c10::optional<at::Device> pickDeviceType(
@@ -1387,6 +1392,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     }
 
     case aten::cat: {
+      if (getCatWoConditionals()) {
+        return computeCatWoConditionals(v);
+      }
       return Compute(
           "aten_cat",
           dimsFromSizes(sizesForValue(v)),
@@ -1532,11 +1540,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 }
 
 Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
-  std::unordered_set<const Buf*> output_bufs;
-  for (auto t : tensorOutputs_) {
-    output_bufs.insert(t->buf());
-  }
-  torch::jit::tensorexpr::LoopNest l(st, output_bufs);
+  torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
@@ -1559,8 +1563,8 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   l.inlineIntermediateBufs(allow_duplicated_work);
 
   if (backendType == kCudaCodeGen) {
-    for (auto tensor : tensorOutputs_) {
-      std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+    for (auto buf : bufOutputs_) {
+      std::vector<For*> loops = l.getLoopStmtsFor(buf);
       TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
       For* flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
@@ -1604,15 +1608,15 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   }
 
   if (backendType == kBlockCodeGen) {
-    for (auto tensor : tensorOutputs_) {
+    for (auto buf : bufOutputs_) {
       const int default_fp16_blocksize = 16;
       const int default_uint8_blocksize = 32;
       int blockSize = default_fp16_blocksize;
       // We only handle looplevels == 2 for now
-      if (tensor->buf()->dtype().scalar_type() == ScalarType::Byte) {
+      if (buf->dtype().scalar_type() == ScalarType::Byte) {
         blockSize = default_uint8_blocksize;
       }
-      std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+      std::vector<For*> loops = l.getLoopStmtsFor(buf);
       TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
       For* flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
@@ -1977,6 +1981,107 @@ Tensor* TensorExprKernel::computeSoftmax(
            result->stmt()}));
 }
 
+Tensor* TensorExprKernel::computeCatWoConditionals(const torch::jit::Value* v) {
+  auto const& n = v->node();
+  auto inputs = n->inputs()[0]->node()->inputs();
+  if (inputs.size() == 0) {
+    throw std::runtime_error("Empty input list is passed to aten::cat");
+  }
+
+  // Some of the inputs can be empty tensors, we need to skip them
+  // when we construct the expression, but we need to take them into
+  // account in dtype promotion.
+  std::vector<const torch::jit::Value*> nonempty_inputs;
+  for (auto input : inputs) {
+    if (input->type()->kind() == TypeKind::TensorType) {
+      auto tt = input->type()->cast<TensorType>();
+      if (tt->isComplete() && tt->sizes().size() && tt->sizes()[0] &&
+          *tt->sizes()[0]) {
+        nonempty_inputs.push_back(input);
+      }
+    }
+  }
+
+  // Promote input types.
+  // Note that we need to consider all inputs, including empty - they
+  // also affect the resultant dtype.
+  auto maybe_dtype = findDtypeForValue(inputs[0]);
+  TORCH_INTERNAL_ASSERT(
+      maybe_dtype, "Cannot find dtype for one of aten::cat inputs");
+  ScalarType highType = *maybe_dtype;
+  for (const auto input : inputs) {
+    auto maybe_dtype = findDtypeForValue(input);
+    TORCH_INTERNAL_ASSERT(
+        maybe_dtype, "Cannot find dtype for one of aten::cat inputs");
+    highType = promoteTypes(highType, *maybe_dtype);
+  }
+
+  // Now we build one loop per input:
+  //
+  // for i
+  //   for j
+  //     for k
+  //       output[i,j,k] = inp1[i,j,k]
+  // for i
+  //   for j
+  //     for k
+  //       output[i,j+l1,k] = inp2[i,j,k]
+  // for i
+  //   for j
+  //     for k
+  //       output[i,j+l2,k] = inp3[i,j,k]
+
+  auto output_sizes = inferSizesForValue(v);
+  auto output_sizes_expr = ExprHandleVectorToExprVector(output_sizes);
+  auto output_buf = new Buf("aten_cat", output_sizes_expr, ToDtype(highType));
+
+  int64_t concat_dim = n->input(1)->node()->i(attr::value);
+  auto shape = sizesForValue(inputs[0]);
+  size_t norm_concat_dim = normalizeAndCheckIndex(concat_dim, shape.size());
+
+  auto gen_code_for_input = [&](const torch::jit::Value* inp,
+                                size_t inp_pos,
+                                const Expr* concat_dim_size,
+                                const std::vector<ExprHandle>& dims) {
+    std::vector<Var*> for_vars(dims.size());
+    std::vector<const Expr*> load_indices(dims.size());
+    std::vector<const Expr*> store_indices(dims.size());
+    for (size_t i = 0; i < dims.size(); ++i) {
+      for_vars[i] = new Var(
+          "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i), kInt);
+      load_indices[i] = for_vars[i];
+      if (i == norm_concat_dim) {
+        store_indices[i] = new Add(for_vars[i], concat_dim_size);
+      } else {
+        store_indices[i] = for_vars[i];
+      }
+    }
+    auto inp_buf = tensors_.at(inp->unique())->buf();
+    auto load_expr = new Load(inp_buf, load_indices, new IntImm(1));
+    auto load_promoted = promoteToDtype(ExprHandle(load_expr), highType);
+    Stmt* st = new Store(
+        output_buf, store_indices, load_promoted.node(), new IntImm(1));
+    for (size_t i = dims.size(); i > 0; --i) {
+      st = new For(for_vars[i - 1], new IntImm(0), dims[i - 1].node(), st);
+    }
+    return st;
+  };
+
+  Expr* concat_dim_size = nullptr;
+  auto block = new Block({});
+  for (size_t i = 0; i < nonempty_inputs.size(); ++i) {
+    auto input_dims = sizesForValue(nonempty_inputs[i]);
+    if (concat_dim_size == nullptr) {
+      concat_dim_size = new IntImm(0);
+    }
+    block->append_stmt(
+        gen_code_for_input(nonempty_inputs[i], i, concat_dim_size, input_dims));
+    concat_dim_size =
+        new Add(concat_dim_size, input_dims[norm_concat_dim].node());
+  }
+  return new Tensor(output_buf, IRSimplifier::simplify(block));
+}
+
 TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(
     const torch::jit::Node* node) {
   std::vector<size_t> axes;
@@ -2133,8 +2238,8 @@ void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
-  // Vector to collect the Stmts corresponding to all tensors.
-  std::vector<Stmt*> tensor_stmts;
+  // Block to collect the Stmts corresponding to all tensors.
+  auto block = new Block({});
 
   // Bind inputs to buffers.
   nInputs_ = graph_->inputs().size();
@@ -2143,7 +2248,7 @@ void TensorExprKernel::compile() {
     bindInput(input);
     inputTypes_.push_back(input->type());
     if (input->type()->kind() == TypeKind::TensorType) {
-      tensor_stmts.push_back(Stmt::clone(tensors_.at(input->unique())->stmt()));
+      block->append_stmt(tensors_.at(input->unique())->stmt());
     }
   }
 
@@ -2155,8 +2260,7 @@ void TensorExprKernel::compile() {
       for (auto const& output : n->outputs()) {
         if (output->hasUses()) {
           tensors_.emplace(output->unique(), computeValue(output));
-          tensor_stmts.push_back(
-              Stmt::clone(tensors_.at(output->unique())->stmt()));
+          block->append_stmt(tensors_.at(output->unique())->stmt());
         }
       }
     }
@@ -2168,7 +2272,7 @@ void TensorExprKernel::compile() {
 
   device_ = *pickDeviceType(graph_->inputs());
 
-  // Move output operands from `tensors_` to `tensorOutputs_`
+  // Move output operands from `tensors_` to `bufOutputs_`
   for (const auto& output : graph_->outputs()) {
     if (!tensors_.count(output->unique())) {
       throw malformed_input("cannot find output Tensor");
@@ -2178,7 +2282,7 @@ void TensorExprKernel::compile() {
     // strides at the end of the kernel (if already contiguous it's a no-op)
     Tensor* properly_strided_output = convertOutputToCorrectStrides(output);
     if (tensors_.at(output->unique()) != properly_strided_output) {
-      tensor_stmts.push_back(Stmt::clone(properly_strided_output->stmt()));
+      block->append_stmt(properly_strided_output->stmt());
     }
     tensors_[output->unique()] = properly_strided_output;
     const auto& tt = output->type()->expect<TensorType>();
@@ -2194,7 +2298,7 @@ void TensorExprKernel::compile() {
       tensorOutputStrides_.push_back(TensorType::contiguousStridesOf(sizes));
     }
 
-    tensorOutputs_.emplace_back(tensors_.at(output->unique()));
+    bufOutputs_.insert(tensors_.at(output->unique())->buf());
     bufferArgs_.emplace_back(tensors_.at(output->unique()));
     tensorOutputTensorOptions_.emplace_back(
         c10::TensorOptions(tensorType(tensors_[output->unique()]))
@@ -2203,7 +2307,7 @@ void TensorExprKernel::compile() {
   }
 
   BackendType backendType = inferBackendTypeFromDevice(device_);
-  Stmt* stmt = transformLoops(backendType, new Block(tensor_stmts));
+  Stmt* stmt = transformLoops(backendType, block);
 
   // Generate code.
   codegen_ = CreateCodeGen(
@@ -2252,7 +2356,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
   std::vector<CodeGen::CallArg> runArgs;
-  runArgs.reserve(inputs.size() + tensorOutputs_.size());
+  runArgs.reserve(inputs.size() + bufOutputs_.size());
 
   for (const auto& input : inputs) {
     if (input.isInt()) {
@@ -2264,7 +2368,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     }
   }
 
-  for (size_t i = 0, e = tensorOutputs_.size(); i < e; ++i) {
+  for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
     auto const& opts = tensorOutputTensorOptions_[i];
     outputs.emplace_back(codegen_->empty_strided(
         tensorOutputSizes_[i],

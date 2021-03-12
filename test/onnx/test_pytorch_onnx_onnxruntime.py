@@ -1922,11 +1922,12 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(CopyModel(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    # TODO: Limited scripting support with ellipsis indexing.
-    # Due to dependency on input tensor rank being known.
-    def test_copy_ellipsis_tracing(self):
+    def test_copy_ellipsis_script(self):
         class CopyModel(torch.nn.Module):
             def forward(self, x, update):
+                # Insert reshape node to ensure no shape/type info for
+                # x in scripting, without onnx shape inference.
+                x = x.reshape(4, 3, 5, 6)
                 x[2, ..., 1:3] = update
                 return x
 
@@ -2759,7 +2760,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ScatterModel(), input=(input, indices, values))
 
         @torch.jit.script
-        def scatter_sum(src: torch.Tensor, index: torch.Tensor): 
+        def scatter_sum(src: torch.Tensor, index: torch.Tensor):
             size = src.size()
             out = torch.zeros(size, dtype=src.dtype)
             return out.scatter_add_(1, index, src)
@@ -4387,7 +4388,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MaskedSelectModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # dtype not available
     def test_index_put_to_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
             def forward(self, input_mask, some_const):
@@ -4401,7 +4401,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MaskedFillModel(), (mask, constant))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # dtype not available
     def test_index_put_to_masked_scatter(self):
         class MaskedScatterModel(torch.nn.Module):
             def forward(self, input_mask, some_const):
