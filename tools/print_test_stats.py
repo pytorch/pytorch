@@ -18,9 +18,9 @@ from xml.dom import minidom  # type: ignore[import]
 
 import requests
 from typing_extensions import TypedDict
-from torch.testing._internal.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_S3_bucket_readonly,
-                                                    Report, Status, Commit, HAVE_BOTO3,
-                                                    Version2Case, VersionedReport, Version1Report, Version2Report, ReportMetaMeta)
+from .stats_utils.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_S3_bucket_readonly,
+                                        Report, Status, Commit, HAVE_BOTO3,
+                                        Version2Case, VersionedReport, Version1Report, Version2Report, ReportMetaMeta)
 
 
 

@@ -7,7 +7,7 @@ import subprocess
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
-from torch.testing._internal.s3_stat_parser import (get_S3_bucket_readonly, get_cases, Report)
+from stats_utils.s3_stat_parser import (get_S3_bucket_readonly, get_cases, Report)
 
 
 def get_git_commit_history(

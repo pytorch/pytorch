@@ -16,10 +16,16 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
-from torch.testing._internal.s3_stat_parser import (get_S3_bucket_readonly, HAVE_BOTO3)
 
 import torch.distributed as dist
 from typing import Dict, Optional, Tuple, List, Any
+
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from tools.stats_utils.s3_stat_parser import (get_S3_bucket_readonly, HAVE_BOTO3)
+except ImportError:
+    print("Running without S3 stats...")
+    HAVE_BOTO3 = False
 
 
 TESTS = [
@@ -432,6 +438,7 @@ def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, Tup
 
 
 def pull_job_times_from_S3() -> Dict[str, Tuple[float, int]]:
+    print("HAHAHAHAHA")
     if HAVE_BOTO3:
         s3_reports = get_test_time_reports_from_S3()
     else:
