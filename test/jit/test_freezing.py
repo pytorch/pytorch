@@ -1017,6 +1017,24 @@ class TestFreezing(JitTestCase):
         m_f = torch._C._freeze_module(m_s._c)
         self.assertTrue(m_f.hasattr('conv1'))
 
+    def test_freeze_module_no_forward(self):
+
+        class FreezeMe(nn.Module):
+            def __init__(self):
+                super(FreezeMe, self).__init__()
+                self.lin = nn.Linear(10, 1)
+
+            @torch.jit.export
+            def foo(self, x):
+                return self.lin(x)
+
+        m = FreezeMe()
+        m_s = torch.jit.script(m)
+        m_s.eval()
+        m_f = torch._C._freeze_module(m_s._c, preservedAttrs=['foo'])
+        input = torch.ones(10)
+        self.assertEqual(m_s.foo(input), m_f.foo(input))
+
 
     def test_freeze_module_in_training_mode(self):
         class Net(nn.Module):
@@ -1310,10 +1328,10 @@ class TestFreezing(JitTestCase):
         self.assertEqual(mod_eager(True), frozen_mod(True))
         self.assertEqual(mod_eager(False), frozen_mod(False))
 
-    def test_freeze_module_with_non_static_module_dict_index(self):
+    def test_freeze_module_with_non_static_module_container_index(self):
         """
-        Test that a Module contained a non-static ModuleDict index
-        cannot be frozen.
+        Test that Modules containing non-static ModuleDict or ModuleList
+        indexing cannot be frozen.
         """
         @torch.jit.interface
         class ModuleInterface(torch.nn.Module):
@@ -1327,8 +1345,7 @@ class TestFreezing(JitTestCase):
 
                 return inp
 
-        # Test annotation of submodule.
-        class Mod(torch.nn.Module):
+        class ModWithDict(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
@@ -1337,9 +1354,23 @@ class TestFreezing(JitTestCase):
                 value: ModuleInterface = self.d[key]
                 return value.forward(x)
 
-        m = torch.jit.script(Mod())
+        m = torch.jit.script(ModWithDict())
         m.eval()
-        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleDictIndex is not supported"):
+        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleContainerIndex is not supported"):
+            mf = torch._C._freeze_module(m._c)
+
+        class ModWithList(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.ModuleList([ImplementsInterface()])
+
+            def forward(self, x: torch.Tensor, idx: int) -> Any:
+                value: ModuleInterface = self.l[idx]
+                return value.forward(x)
+
+        m = torch.jit.script(ModWithList())
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleContainerIndex is not supported"):
             mf = torch._C._freeze_module(m._c)
 
     def test_freeze_non_module_class_getattr(self):
@@ -1731,3 +1762,103 @@ class TestFrozenOptimizations(JitTestCase):
             self.run_pass("convert_frozen_ops_to_mkldnn", frozen.graph)
             inp = torch.rand([4, 3, 4, 4])
             self.assertEqual(frozen(inp), mod(inp))
+
+@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+class TestMKLDNNReinplacing(JitTestCase):
+    def setUp(self):
+        self.default_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.float)
+
+    def tearDown(self):
+        torch.set_default_dtype(self.default_dtype)
+
+    def getConv(self):
+        return nn.Conv2d(3, 32, kernel_size=3, stride=2).eval()
+
+    def getInput(self):
+        return torch.rand([4, 3, 4, 4])
+
+    def freezeAndConvert(self, mod):
+        mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+        self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+        return mod
+
+    def checkResults(self, mod1, mod2):
+        inp = self.getInput()
+        self.assertEqual(mod1(inp), mod2(inp))
+
+    def test_successful(self):
+        # simple conv-relu
+        mod_eager = nn.Sequential(self.getConv(), nn.ReLU())
+        mod = self.freezeAndConvert(mod_eager)
+        FileCheck().check("mkldnn_convolution").check_next("aten::relu_").run(mod.graph)
+        self.checkResults(mod_eager, mod)
+
+    def test_merge_liveness(self):
+        class Mod(nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.tensor = tensor
+
+            def forward(self, x):
+                # this mul can be inplaced since x is dead after this use
+                temporary = x * self.tensor
+                # temporary livespan is the return node,
+                # add can not be inplaced
+                return temporary + temporary, temporary
+
+        mod_eager = nn.Sequential(self.getConv(), Mod(torch.rand([4, 32, 1, 1])))
+        mod = self.freezeAndConvert(mod_eager)
+        FileCheck().check("aten::mul_").check_not("aten::add_").run(mod.graph)
+        self.checkResults(mod_eager, mod)
+
+    def test_always_alive_values(self):
+        class Mod(nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.tensor = tensor
+
+            def forward(self, x):
+                # x can't be inplaced because its a return value,
+                # check that the inplacing pass doesnt try to inplace
+                # self.tensor because its always alive
+                return x * self.tensor, x
+
+        mod_eager = nn.Sequential(self.getConv(), Mod(torch.rand([4, 32, 1, 1])))
+        mod = self.freezeAndConvert(mod_eager)
+        FileCheck().check_not("aten::mul_").run(mod.graph)
+        self.checkResults(mod_eager, mod)
+
+        conv = self.getConv()
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tensor = torch.rand([4, 32, 1, 1])
+                self.conv = conv
+
+            def forward(self, x):
+                # the shapes dont add up on this just testing a particular pattern
+                conv_output = self.conv(x)
+                return conv_output, self.conv(torch.add(x, x))
+
+        mod = self.freezeAndConvert(Mod())
+        # x is an input to the graph, and so it should not be inplaced
+        # in the torch.add(x, x) call
+        FileCheck().check_not("aten::add_").run(mod.graph)
+
+    def test_switch_inputs_to_inplace(self):
+        class Mod(nn.Module):
+            def __init__(self, tensor):
+                super().__init__()
+                self.tensor = tensor
+
+            def forward(self, x):
+                # self.tensor cannot be inplaced, however x can,
+                # and bc add is commutative we can reverse inputs to add_
+                return self.tensor + x
+
+        mod_eager = nn.Sequential(self.getConv(), Mod(torch.rand([4, 32, 1, 1])))
+        mod = self.freezeAndConvert(mod_eager)
+        FileCheck().check("aten::add_").run(mod.graph)
+        self.checkResults(mod_eager, mod)

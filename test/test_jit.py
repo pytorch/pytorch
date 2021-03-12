@@ -19,7 +19,7 @@ from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
-from jit.test_freezing import TestFreezing, TestFrozenOptimizations  # noqa: F401
+from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_module_containers import TestModuleContainers  # noqa: F401
@@ -7374,7 +7374,7 @@ a")
 
         for op, tensor, const, swap_args in product(ops, tensors, consts, [True, False]):
             # FIXME: things like 2 / long_tensor are not implemented correctly
-            # Look in torch/tensor.py to see how pytorch implements it.
+            # Look in torch/_tensor.py to see how pytorch implements it.
             if op == '/' and tensor.data_ptr() == long_tensor.data_ptr():
                 continue
 
@@ -10756,6 +10756,36 @@ dedent """
 
         self.checkModule(C(), (torch.tensor(1),))
 
+    def test_ellipsis_const_mid(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, Ellipsis, 0:4, 4:8].size()  # noqa T484
+
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_const_mid_select(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, Ellipsis, 4, 4, 4:8, 2].size()  # noqa T484
+
+        dummy = torch.zeros(8, 8, 8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_const_start(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[Ellipsis, 0:4, 4:8].size()  # noqa T484
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_const_end(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[0:4, 2, Ellipsis].size()  # noqa T484
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
     def test_ellipsis_mid(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
@@ -12320,7 +12350,7 @@ dedent """
                 cu = torch.jit.CompilationUnit(funcs_str)
                 f_script = cu.fn
                 f = scope['fn']
-                with self.maybeWarnsRegex(UserWarning, "floor_divide"):
+                with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
                     self.assertEqual(f_script(), f())
 
     def test_call_python_fn_from_script_fn(self):
