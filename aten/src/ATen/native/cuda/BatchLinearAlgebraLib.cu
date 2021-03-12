@@ -388,7 +388,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
 
 
 template<typename scalar_t>
-inline static void apply_cholesky_lib_potrf(Tensor& self_working_copy, bool upper, Tensor& infos) {
+inline static void apply_cholesky_cusolver_potrf(Tensor& self_working_copy, bool upper, Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const int n = cuda_int_cast(self_working_copy.size(-1), "n");
@@ -400,7 +400,7 @@ inline static void apply_cholesky_lib_potrf(Tensor& self_working_copy, bool uppe
 }
 
 template<typename scalar_t>
-inline static void apply_cholesky_lib_potrfBatched(Tensor& self_working_copy, bool upper, Tensor& infos) {
+inline static void apply_cholesky_cusolver_potrfBatched(Tensor& self_working_copy, bool upper, Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const int n = cuda_int_cast(self_working_copy.size(-1), "n");
@@ -426,12 +426,12 @@ Tensor _cholesky_helper_cuda_cusolver(const Tensor& self, bool upper) {
 
   if (batch_size > 1) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrfBatched", [&] {
-      apply_cholesky_lib_potrfBatched<scalar_t>(self_working_copy, upper, infos);
+      apply_cholesky_cusolver_potrfBatched<scalar_t>(self_working_copy, upper, infos);
     });
   }
   else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrf", [&] {
-      apply_cholesky_lib_potrf<scalar_t>(self_working_copy, upper, infos);
+      apply_cholesky_cusolver_potrf<scalar_t>(self_working_copy, upper, infos);
     });
   }
   batchCheckErrors(infos, "cholesky_cuda");
