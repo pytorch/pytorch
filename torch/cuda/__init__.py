@@ -14,7 +14,7 @@ import torch
 import traceback
 import warnings
 import threading
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Any
 from ._utils import _get_device_index, _dummy_type
 from .streams import Stream, Event, _Graph
 from .. import device as _device
@@ -213,21 +213,22 @@ class device(object):
             this argument is a negative integer or ``None``.
     """
 
-    def __init__(self, device):
+    def __init__(self, device: Any):
         self.idx = _get_device_index(device, optional=True)
         self.prev_idx = -1
 
     def __enter__(self):
         if self.idx == -1:
             return
-        self.prev_idx = torch._C._cuda_getDevice()
+        self.prev_idx = torch.cuda.current_device()
         if self.prev_idx != self.idx:
-            torch._C._cuda_setDevice(self.idx)
-        _lazy_init()
+            torch.cuda.set_device(self.idx)
+        if not torch.jit.is_scripting():
+            _lazy_init()
 
-    def __exit__(self, *args):
+    def __exit__(self, type: Any, value: Any, traceback: Any):
         if self.prev_idx != self.idx:
-            torch._C._cuda_setDevice(self.prev_idx)
+            torch.cuda.set_device(self.prev_idx)
         return False
 
 
@@ -322,40 +323,83 @@ def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
     return torch._C._cuda_canDeviceAccessPeer(device, peer_device)
 
 
-@contextlib.contextmanager
-def stream(stream):
+class StreamContext(object):
     r"""Context-manager that selects a given stream.
 
     All CUDA kernels queued within its context will be enqueued on a selected
     stream.
 
     Args:
+        Stream (Stream): selected stream. This manager is a no-op if it's
+            ``None``.
+    .. note:: Streams are per-device.
+    """
+    cur_stream : Optional['torch.cuda.Stream']
+
+    def __init__(self, stream: Optional['torch.cuda.Stream']):  # type: ignore
+        self.idx = -1
+        self.stream = stream
+        # Initialize the below streams to default stream on the current device
+        self.src_prev_stream = torch.cuda.default_stream(None)
+        self.dst_prev_stream = torch.cuda.default_stream(None)
+
+    def __enter__(self):
+        self.idx = _get_device_index(device=None, optional=True)
+        # If there is no CUDA device available, return
+        if self.idx == -1:
+            return
+
+        # Local cur_stream variable for type refinement
+        cur_stream = self.stream
+        # Return if stream is None
+        if cur_stream is None:
+            return
+        self.src_prev_stream = torch.cuda.current_stream(None)
+
+        # If the stream is not on the current device, then
+        # set the current stream on the device
+        if self.src_prev_stream.device != cur_stream.device:
+            with device(cur_stream.device):
+                self.dst_prev_stream = torch.cuda.current_stream(cur_stream.device)
+        torch.cuda.set_stream(cur_stream)  # type: ignore
+
+    def __exit__(self, type: Any, value: Any, traceback: Any):
+        # Local cur_stream variable for type refinement
+        cur_stream = self.stream
+        # If stream is None or no CUDA device available, return
+        if cur_stream is None or self.idx == -1:
+            return
+
+        # Reset the stream on the original device
+        # and destination device
+        if self.src_prev_stream.device != cur_stream.device:
+            torch.cuda.set_stream(self.dst_prev_stream)  # type: ignore
+        torch.cuda.set_stream(self.src_prev_stream)  # type: ignore
+
+def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ignore
+    r"""Wrapper around the Context-manager StreamContext that
+        selects a given stream.
+    Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
+    ..Note:: In eager mode stream is of type Stream class while in JIT it is
+    an object of the custom class ``torch.classes.cuda.Stream``.
+    """
+    return StreamContext(stream)
 
-    .. note:: Streams are per-device. If the selected stream is not on the
-        current device, this function will also change the current device to
-        match the stream.
+def set_stream(stream: Stream):
+    r"""Sets the current stream.
+    This is a wrapper API to set the stream.
+    Usage of this function is discouraged. It is recommended to
+    use ``torch._C._cuda_setStream`` API instead of this. This
+    API is only for internal usage.
+    Args:
+        stream (Stream): selected stream. This function is a no-op
+            if this argument is ``None``.
     """
     if stream is None:
-        yield
         return
-    src_prev_stream = current_stream()
-
-    if src_prev_stream.device != stream.device:
-        # The given stream is on a different device; have to restore the
-        # current_stream on that device on exit as well
-        with device(stream.device):
-            dst_prev_stream = current_stream()
-
     torch._C._cuda_setStream(stream._cdata)
-    try:
-        yield
-    finally:
-        if src_prev_stream.device != stream.device:
-            torch._C._cuda_setStream(dst_prev_stream._cdata)
-        torch._C._cuda_setStream(src_prev_stream._cdata)
-
 
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
