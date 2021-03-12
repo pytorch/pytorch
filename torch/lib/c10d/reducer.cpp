@@ -140,6 +140,13 @@ Reducer::Reducer(
         // The gradient accumulator is stored as weak_ptr in the autograd
         // metadata of the variable, so we have to keep it alive here for
         // the raw pointer to be valid.
+        TORCH_CHECK(
+            grad_accumulators_[replica_index][variable_index] == nullptr,
+            c10::str(
+                "Reducer tried to register duplicate grad accumulator for replica ",
+                replica_index,
+                " variable ",
+                variable_index));
         grad_accumulators_[replica_index][variable_index] =
             std::move(grad_accumulator);
       }
