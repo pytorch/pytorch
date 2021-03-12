@@ -45,11 +45,11 @@ TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, std
     build_binary_op(maybe_get_output(), self, other);
   } else if (rounding_mode == "floor") {
     build_binary_op(maybe_get_output(), self, other);
+  } else {
+    TORCH_CHECK(false,
+        "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
+        "but found '", rounding_mode, "'");
   }
-
-  TORCH_CHECK(false,
-      "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
-      "but found '", rounding_mode, "'");
 }
 
 } // namespace meta
