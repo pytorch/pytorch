@@ -1,0 +1,50 @@
+name: Build PyTorch master Docker images and push to GitHub Container Registry
+on:
+  push:
+    # TODO: uncomment this before merging
+    # branches:
+    #   - master
+
+jobs:
+  build-publish-docker:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: linux.2xlarge
+    strategy:
+      matrix:
+        # TODO: don't hardcode this list
+        image_name:
+          - pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9
+          - pytorch-linux-bionic-py3.6-clang9
+          - pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9
+          - pytorch-linux-bionic-py3.8-gcc9
+          - pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4
+          - pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7
+          - pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7
+          - pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7
+          - pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
+          - pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7
+          - pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7
+          - pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+          - pytorch-linux-xenial-py3-clang5-asan
+          - pytorch-linux-xenial-py3-clang7-onnx
+          - pytorch-linux-xenial-py3.8
+          - pytorch-linux-xenial-py3.6-clang7
+          - pytorch-linux-xenial-py3.6-gcc5.4 # TODO: filter this one
+          - pytorch-linux-xenial-py3.6-gcc7.2
+          - pytorch-linux-xenial-py3.6-gcc7
+          - pytorch-linux-bionic-rocm3.9-py3.6
+          - pytorch-linux-bionic-rocm3.10-py3.6
+          - pytorch-linux-bionic-rocm4.0.1-py3.6
+      # fail-fast: false
+    # env:
+    #   GHCR_PAT: ${{ secrets.GHCR_PAT }}
+    steps:
+      - name: Clean runner workspace
+        run: rm -rf "${{ github.workspace }}"
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Build master docker
+        run: |
+          cd .circleci/docker
+          ./build.sh ${{ matrix.image_name }}
+      # TODO: Add a step here for uploading images
