@@ -453,9 +453,6 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -e
-          if [[ "${DOCKER_IMAGE}" == *rocm3.9* ]]; then
-            export DOCKER_TAG="f3d89a32912f62815e4feaeed47e564e887dffd6"
-          fi
           if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
             echo 'BUILD_CAFFE2=OFF' >> "${BASH_ENV}"
           fi
