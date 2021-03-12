@@ -56,6 +56,7 @@ from .quantization_patterns import *
 
 from .utils import (
     _parent_name,
+    all_node_args_have_no_tensors,
     quantize_node,
     get_custom_module_class_keys,
     get_new_attr_name_with_prefix,
@@ -220,7 +221,7 @@ def insert_observer_for_output_of_the_node(
                 if is_observed(node.args[0]):
                     observed_node_names_set.add(node.name)
         elif (isinstance(quantize_handler, BinaryOp) and
-              quantize_handler.num_node_args == 1):
+              quantize_handler.num_tensor_args == 1):
             assert matched_nodes is not None
             input_node = matched_nodes[-1]  # first node in the sequence
 
@@ -251,7 +252,7 @@ def insert_observer_for_output_of_the_node(
 
             if output_is_quantized:
                 observed_node_names_set.add(node.name)
-        elif (quantize_handler.all_node_args and
+        elif (quantize_handler.all_node_args_are_tensors and
               input_output_observed(quantize_handler)):
             # observer for outputs
             new_observer = qconfig.activation()
@@ -320,6 +321,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
                 if kwarg_name == 'bias' and arg is kwarg_value:
                     return True
     return False
+
 
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
@@ -1046,6 +1048,10 @@ class Quantizer:
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
                     if is_match(modules, node, pattern):
+                        if value is BinaryOp:
+                            use_copy_node = all_node_args_have_no_tensors(node)
+                            if use_copy_node:
+                                value = CopyNode  # type: ignore
                         matched: List[Any] = []
                         record_match(pattern, node, matched)
                         for n in matched:
@@ -1108,6 +1114,7 @@ class Quantizer:
                 is_weight = node_arg_is_weight(node, arg)
                 is_bias = node_arg_is_bias(node, arg)
                 is_activation = not (is_weight or is_bias)
+                no_tensors = all_node_args_have_no_tensors(arg)
                 # bias needs to be quantized if activation is fp16 and weight is fp16
                 # this is the case for glow
                 should_add_handler = qconfig is not None and (
@@ -1115,7 +1122,8 @@ class Quantizer:
                      activation_is_statically_quantized(qconfig)) or
                     (is_weight and weight_is_quantized(qconfig)) or
                     (is_bias and activation_dtype(qconfig) == torch.float16)
-                    and weight_dtype(qconfig) == torch.float16)
+                    and weight_dtype(qconfig) == torch.float16) and \
+                    (not no_tensors)
 
                 if should_add_handler:
                     act_post_process_ctr = qconfig.weight if is_weight else \
