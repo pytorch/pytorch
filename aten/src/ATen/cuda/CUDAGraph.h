@@ -7,7 +7,7 @@
 
 namespace at {
 
-class CUDAGeneratorImpl;
+struct CUDAGeneratorImpl;
 
 namespace cuda {
 
