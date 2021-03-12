@@ -117,6 +117,12 @@ class Reducer {
   // Saves thread local state to be used by autograd engine callbacks.
   void save_thread_local_state();
 
+  // An function for users to set sample_rate of collecting
+  // runtime stats. The time stats will be recorded for the
+  // first 10 iterations, after 10 iteratons time stats will be
+  // recorded once every "sample_rate" training iterations.
+  void set_ddp_runtime_logging_sample_rate(int sample_rate);
+
  protected:
   // Forward declaration.
   struct Bucket;
@@ -374,6 +380,9 @@ class Reducer {
   void record_backward_compute_end_time();
   void record_backward_comm_start_time();
   void record_backward_comm_end_time();
+
+  int get_ddp_runtime_logging_sample_rate();
+  int ddp_runtime_logging_sample_rate_ = kDDPRuntimeLoggingSampleRate;
 
   bool is_multi_device_module_ = false;
 
