@@ -217,35 +217,6 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
                         )
 
     @override_qengines
-    def test_compare_model_outputs_conv_static_fx(self):
-        r"""Compare the output of conv layer in static quantized model and corresponding
-        output of conv layer in float model
-        """
-
-        qengine = torch.backends.quantized.engine
-        qconfig = get_default_qconfig(qengine)
-        qconfig_dict = {"": qconfig}
-
-        model_list = [ConvModel(), ConvBnReLUModel()]
-
-        for float_model in model_list:
-            float_model.eval()
-            prepared_model = prepare_fx(float_model, qconfig_dict)
-            prepared_float_model = copy.deepcopy(prepared_model)
-
-            # Run calibration
-            test_only_eval_fn(prepared_model, self.img_data_2d)
-            q_model = convert_fx(prepared_model)
-
-            expected_act_compare_dict_keys = {"x.stats", "conv.stats"}
-            self.compare_and_validate_model_outputs_results_fx(
-                prepared_float_model,
-                q_model,
-                expected_act_compare_dict_keys,
-                self.img_data_2d[0][0],
-            )
-
-    @override_qengines
     def test_compare_model_outputs_linear_static_fx(self):
         r"""Compare the output of linear layer in static quantized model and corresponding
         output of linear layer in float model
@@ -633,6 +604,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
             len(act_compare_dict) == results_len,
             f"expected len {results_len}, got len {len(act_compare_dict)}")
         self.assert_ns_compare_dict_valid(act_compare_dict)
+        return act_compare_dict
 
     def _test_match_shadow_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
@@ -851,6 +823,18 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
         m = LSTMwithHiddenDynamicModel().eval()
         res = self._test_extract_weights(
             m, results_len=1, qconfig_dict=qconfig_dict)
+
+    @skipIfNoFBGEMM
+    def test_compare_activations_conv(self):
+        test_cases = (
+            (ConvModel(),),
+            (ConvBnModel(),),
+            (ConvBnReLUModel(),),
+        )
+        for m, in test_cases:
+            m.eval()
+            res = self._test_match_activations(
+                m, (torch.randn(1, 3, 4, 4),), results_len=1)
 
     @skipIfNoFBGEMM
     def test_sparsenn_compare_activations(self):
