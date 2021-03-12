@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import (
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor, _wrap_maybe_warns)
+    wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor, _wrap_warn_once)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -2867,21 +2867,35 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(len(w), 0)
 
             # Setting use_deterministic_algorithms(True) throws a warning once per process
-            with self.maybeWarnsRegex(UserWarning, "torch.use_deterministic_algorithms is in beta"):
+            with self.assertWarnsOnceRegex(UserWarning, "torch.use_deterministic_algorithms is in beta"):
                 torch.use_deterministic_algorithms(True)
 
     @onlyCPU
     def test_set_deterministic_deprecated_warning(self, device):
         with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Calling set_deterministic throws a warning about deprecation once per process
-            with self.maybeWarnsRegex(UserWarning, "torch.set_deterministic is deprecated"):
-                torch.set_deterministic(True)
+            # Calling set_deterministic throws a warning about deprecation once
+            # per process but testing this is tricky here since we actually get
+            # two warnings: one for the deprecated use of `set_deterministic`
+            # and one for the 'beta' use of `use_deterministic_algorithms`.
+            # The assertWarnsOnceRegex cannot handle two different warnings
+            with warnings.catch_warnings(record=True) as ws:
+                warnings.simplefilter("always")  # allow any warning to be raised
+                prev = torch.is_warn_always_enabled()
+                torch.set_warn_always(True)
+                try:
+                    torch.set_deterministic(True)
+                finally:
+                    torch.set_warn_always(prev)
+                for w in ws:
+                    txt = str(w.message)
+                    assert ("torch.use_deterministic_algorithms is in beta" in txt or
+                            "torch.set_deterministic is deprecated" in txt)
 
     @onlyCPU
     def test_is_deterministic_deprecated_warning(self, device):
         with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             # Calling is_deterministic throws a warning about deprecation once per process
-            with self.maybeWarnsRegex(UserWarning, "torch.is_deterministic is deprecated"):
+            with self.assertWarnsOnceRegex(UserWarning, "torch.is_deterministic is deprecated"):
                 torch.is_deterministic()
 
     @dtypes(torch.float32, torch.complex64)
@@ -3323,12 +3337,11 @@ class TestTorchDeviceType(TestCase):
         with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
             torch.from_numpy(a)
 
-        # Make sure emitting two warnings, even if they pass the regex, will fail
-        # the assertWarnsOnceRegex context manager which only allows a single warning
-        with self.assertRaisesRegex(AssertionError, '.*too many.*non-writeable.*'):
-            with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
-                torch.from_numpy(a)
-                torch.from_numpy(a)
+        # Make sure emitting two warnings will pass the assertWarnsOnceRegex
+        # context manager
+        with self.assertWarnsOnceRegex(UserWarning, '.*non-writeable.*'):
+            torch.from_numpy(a)
+            torch.from_numpy(a)
 
     # TODO: this test should be in test_nn.py
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
@@ -3348,6 +3361,7 @@ class TestTorchDeviceType(TestCase):
         input_.sum().backward()
 
     # TODO: this test should be in test_nn.py
+    @onlyCUDA
     @largeTensorTest('12GB')
     def test_conv_transposed_large(self, device):
         # ConvTranspose3d works for large input tensors (gh-32866)
@@ -3709,6 +3723,17 @@ class TestTorchDeviceType(TestCase):
         # Tests that negative lambda fails
         with self.assertRaises(RuntimeError):
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
+
+    @onlyCUDA
+    @dtypesIfCUDA(torch.half, torch.float)
+    def test_exponential_no_zero(self, device, dtype):
+        # naively, 0 in exponential can be generated with probability 2^-24
+        # so we need more samples to check if it's not generated
+        # instead of doing one
+        # don't test CPU, that would be a long test
+        x = torch.empty(50000000, device=device, dtype=dtype).exponential_()
+        self.assertTrue(x.min() > 0)
+
 
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
@@ -4409,7 +4434,7 @@ class TestTorchDeviceType(TestCase):
 
         self.assertEqual(expected, actual)
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, "This overload of addcmul is deprecated"):
             self.assertEqual(actual, torch.addcmul(a, alpha, b, c))
 
@@ -5140,7 +5165,7 @@ class TestTorchDeviceType(TestCase):
             actual = torch.addcdiv(a, b, c, value=alpha)
             self.assertEqual(expected, actual)
 
-            with self.maybeWarnsRegex(
+            with self.assertWarnsOnceRegex(
                     UserWarning, "This overload of addcdiv is deprecated"):
                 self.assertEqual(actual, torch.addcdiv(a, alpha, b, c))
 
@@ -6797,18 +6822,18 @@ tensor_op_tests = [
         _cpu_types, True, [tf32_on_and_off(0.01)]),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
-        [tf32_on_and_off(0.01), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
+        [tf32_on_and_off(0.01), _wrap_warn_once("This overload of addbmm_? is deprecated")]),
     ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         1e-1, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
-        [tf32_on_and_off(0.01), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
+        [tf32_on_and_off(0.01), _wrap_warn_once("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)),
     ('baddbmm', 'scalar', _small_3d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types, _cpu_types, True,
-        [tf32_on_and_off(0.05), _wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
+        [tf32_on_and_off(0.05), _wrap_warn_once("This overload of baddbmm_? is deprecated")]),
     ('baddbmm', 'two_scalars', _small_3d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types,
-        _cpu_types, True, [tf32_on_and_off(0.05), _wrap_maybe_warns("This overload of baddbmm_? is deprecated")]),
+        _cpu_types, True, [tf32_on_and_off(0.05), _wrap_warn_once("This overload of baddbmm_? is deprecated")]),
     ('bmm', '', _small_3d, lambda t, d: [_small_3d(t, d)],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
     ('addcdiv', '', _small_2d,
@@ -6824,29 +6849,29 @@ tensor_op_tests = [
     ('addcmul', 'scalar', _small_3d,
         lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)], 1e-2,
         1e-1, 1e-5, torch.testing.get_all_dtypes(include_complex=True, include_bool=False), _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
+        [_wrap_warn_once("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM),
         _cpu_types, True, [tf32_on_and_off(0.01)], 0, True),
     ('addmm', 'scalar', _medium_2d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
-        [tf32_on_and_off(0.01), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
+        [tf32_on_and_off(0.01), _wrap_warn_once("This overload of addmm_? is deprecated")]),
     ('addmm', 'two_scalars', _medium_2d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)], 1e-1, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM), _cpu_types, True,
-        [tf32_on_and_off(0.01), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
+        [tf32_on_and_off(0.01), _wrap_warn_once("This overload of addmm_? is deprecated")]),
     ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types,
         True, [], 0, True),
     ('addmv', 'scalar', _medium_1d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
+        [_wrap_warn_once("This overload of addmv_? is deprecated")]),
     ('addmv', 'two_scalars', _medium_1d,
         lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)], 1e-2, 1e-1, 1e-4,
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
-        [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
+        [_wrap_warn_once("This overload of addmv_? is deprecated")]),
     ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _types, _types_no_half),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
     ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
