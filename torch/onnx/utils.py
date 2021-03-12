@@ -124,19 +124,14 @@ def _split_tensor_list_constants(g, block):
 
 
 def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    params_dict=None, use_new_jit_passes=True, dynamic_axes=None, input_names=None, module=None):
+                    params_dict=None, dynamic_axes=None, input_names=None, module=None):
     # Inline everything
     torch._C._jit_pass_inline(graph)
 
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
-
-    if use_new_jit_passes:
-        torch._C._jit_pass_lower_all_tuples(graph)
-        torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
-    else:
-        torch._C._jit_pass_remove_inplace_ops(graph)
+    torch._C._jit_pass_lower_all_tuples(graph)
 
     # we record now record some ops like ones/zeros
     # into a trace where we previously recorded constants
@@ -144,6 +139,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # without implementing symbolics for all of them
     if _disable_torch_constant_prop is False:
         torch._C._jit_pass_constant_propagation(graph)
+
     _split_tensor_list_constants(graph, graph)
     # run dce to eliminate dead parts of the graph that might have been
     # left behind by things like symbolic_override
@@ -152,7 +148,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
     torch._C._jit_pass_canonicalize_graph_fuser_ops(graph)
     torch._C._jit_pass_lint(graph)
-
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_fuse_addmm(graph)
     torch._C._jit_pass_lint(graph)
@@ -166,9 +161,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         # until the point where it is unpacked by listUnpack node.
         # This pass does a preprocess, and prepares the nodes such that enough context can be received
         # by the symbolic function.
+        torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
         torch._C._jit_pass_onnx_preprocess(graph)
-        # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
-        torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
         # onnx does not support tuples, so try to remove them
         torch._C._jit_pass_lint(graph)
@@ -211,7 +205,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
         if dynamic_axes is None or not bool(dynamic_axes):
             torch._C._jit_pass_onnx_fold_if(graph)
-
         from torch.onnx.symbolic_helper import _export_onnx_opset_version
         torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
         torch._C._jit_pass_lint(graph)
@@ -387,20 +380,16 @@ def _trace_and_get_graph_from_model(model, args):
     return trace_graph, torch_out
 
 
-def _create_jit_graph(model, args, _retain_param_name, use_new_jit_passes):
+def _create_jit_graph(model, args, _retain_param_name):
     torch_out = None
     params: Union[List, Tuple]
     if isinstance(model, torch.jit.ScriptModule):
         try:
             graph = model.forward.graph
             torch._C._jit_pass_onnx_function_substitution(graph)
-            if not use_new_jit_passes:
-                method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
-                module = model._c
-            else:
-                freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
-                module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
-                method_graph = module._get_method('forward').graph
+            freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
+            module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
+            method_graph = module._get_method('forward').graph
 
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
@@ -444,8 +433,7 @@ def _model_to_graph(model, args, verbose=False,
                     example_outputs=None,
                     _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    training=None, use_new_jit_passes=True,
-                    dynamic_axes=None):
+                    training=None, dynamic_axes=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -455,15 +443,13 @@ def _model_to_graph(model, args, verbose=False,
         example_outputs = (example_outputs,)
 
     graph, params, torch_out, module = _create_jit_graph(model, args,
-                                                         _retain_param_name,
-                                                         use_new_jit_passes)
+                                                         _retain_param_name)
 
     params_dict = _get_named_param_dict(graph, params)
 
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
                             fixed_batch_size=fixed_batch_size, params_dict=params_dict,
-                            use_new_jit_passes=use_new_jit_passes,
                             dynamic_axes=dynamic_axes, input_names=input_names,
                             module=module)
     from torch.onnx.symbolic_helper import _onnx_shape_inference
@@ -633,10 +619,6 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
 # the trace of a Module. In the case that a torch.nn.ScriptModule is passed in,
 # this output will be None, since we are not doing any tracing but rather
 # directly extracting the graph.
-# use_new_jit_passes is a flag which enables new jit scripting API for ONNX export.
-# The purpose of this flag is to enable the new API temporarily for testing purposes.
-# Once these jit APIs are fully tested, they will become part of production code-path by
-# removing this flag.
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
@@ -644,7 +626,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
             enable_onnx_checker=True, use_external_data_format=False,
-            onnx_shape_inference=True, use_new_jit_passes=True):
+            onnx_shape_inference=True):
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
@@ -697,7 +679,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                 val_do_constant_folding,
                                 fixed_batch_size=fixed_batch_size,
                                 training=training,
-                                use_new_jit_passes=use_new_jit_passes,
                                 dynamic_axes=dynamic_axes)
 
             # TODO: Don't allocate a in-memory string for the protobuf
