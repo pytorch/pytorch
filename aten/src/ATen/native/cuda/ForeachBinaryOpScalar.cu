@@ -68,7 +68,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(TensorList tensor
 FOREACH_BINARY_OP_SCALAR(add, std::plus, false);
 FOREACH_BINARY_OP_SCALAR(mul, std::multiplies, false);
 
-// In the case of division, integer inputs will result in float. 
+// In the case of division, integer inputs will result in float.
 // Currently multi tensor apply can only return result of the same type as input.
 FOREACH_BINARY_OP_SCALAR(div, std::divides, true);
 
