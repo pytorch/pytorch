@@ -482,10 +482,7 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
 }
 
 Tensor cumsum_backward(const Tensor & grad, int64_t dim) {
-  /* Implements w.flip(dim).cumsum(dim).flip(dim) without copying.
-     This implementation gives a similar performance on GPU but a
-     noticeable (up to x10) speed-up on CPU.
-   */
+  /* Logically implements w.flip(dim).cumsum(dim).flip(dim) without copying. */
   // Trivial case
   if (grad.numel() <= 1 || grad.size(dim) == 1) {
     return grad;

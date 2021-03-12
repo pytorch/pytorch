@@ -170,10 +170,7 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
 }
 
 Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
-  /* Implements w.flip(dim).cumsum(dim).flip(dim) without copying.
-     This implementation gives a similar performance on GPU but a
-     noticeable (up to x10) speed-up on CPU.
-   */
+  /* Logically implements w.flip(dim).cumsum(dim).flip(dim) without copying. */
   const auto w_cumsum = w.cumsum(dim);
   const auto w_sum = w_cumsum.narrow(dim, -1, 1);
   return w_sum - w_cumsum + w;
@@ -255,7 +252,8 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
 
     dy_j / dx_z1 = y_j / x_z1
 
-    as, y_j = x_z1 = 0 for j >= z1. We to compute it with the formula for its derivative, that is:
+    as, y_j = x_z1 = 0 for j >= z1. We need to compute it with the formula for its derivative,
+    that is:
 
     dy_j / dx_z1 = prod(x[:z1]) * (grad_output[z1] + sum(grad_output[z1+1:z2] * cumprod(x[z1+1:z2])))
   */
@@ -286,7 +284,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // From here on we need to use some mask gymnastics to
     // account for the tensorial dimensions
     // We do a cumsum of the zeros along the dimension.
-    // For a vector is_zero = [False, True, Fals, True, False]
+    // For a vector is_zero = [False, True, False, True, False]
     // we would have cumsum = [0, 1, 1, 2, 2]
     // As such we have (in python code for simplicity)
     // The mask for the range [0, z1):
@@ -312,13 +310,15 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // case k = z1
     // We start by select the first zero [z1]
     // We locate the indices of the first zero using the max function
-    // We then go from the indices to a mask using scatter_
+    // We then go from the indices to a mask index_fill_
     // When there is no zero in the slice, max will return the index 0.
-    // To account for this, we need to apply the mask which is true in the range [z1, z2)
+    // To account for this, we need to do an intersection with mask,
+    // which is true in the range [z1, z2)
     const auto first_zero_index = std::get<1>(mask.max(dim, /*keepdim*/ true));
     const auto first_zero_mask = at::zeros_like(mask)
-                                  .scatter_(dim, first_zero_index, /*src*/ true)
+                                  .scatter_(dim, first_zero_index, /*src*/ 1)
                                   .logical_and_(mask);
+
     // select everything between the first zero and the second zero (z1, z2)
     mask &= ~first_zero_mask;
     // here we compute
