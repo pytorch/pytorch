@@ -100,13 +100,13 @@ class _ConvNd(Module):
         # reverse order than the dimension.
         self._reversed_padding_repeated_twice = _reverse_repeat_tuple(self.padding, 2)
         if transposed:
-            self.weight = Parameter(torch.Tensor(
+            self.weight = Parameter(torch.empty(
                 in_channels, out_channels // groups, *kernel_size))
         else:
-            self.weight = Parameter(torch.Tensor(
+            self.weight = Parameter(torch.empty(
                 out_channels, in_channels // groups, *kernel_size))
         if bias:
-            self.bias = Parameter(torch.Tensor(out_channels))
+            self.bias = Parameter(torch.empty(out_channels))
         else:
             self.register_parameter('bias', None)
         self.reset_parameters()
