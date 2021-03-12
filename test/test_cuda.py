@@ -1095,14 +1095,14 @@ class TestCuda(TestCase):
         return e_tik.elapsed_time(e_tok)
 
     @staticmethod
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def _test_stream_event_nogil(self, sync_func, p2c, c2p):
         with torch.cuda.device('cuda:1'):
             c2p.put(0)
             p2c.get()
             c2p.put(sync_func(self, TestCuda.FIFTY_MIL_CYCLES))
 
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_stream_event_nogil(self):
         for sync_func in [TestCuda._stream_synchronize,
