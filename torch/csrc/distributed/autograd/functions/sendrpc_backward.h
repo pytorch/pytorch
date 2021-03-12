@@ -25,9 +25,6 @@ struct TORCH_API SendRpcBackward : public torch::autograd::Node {
   // computation.
   void setGrads(const torch::autograd::variable_list& grads);
 
-  // Retrieve the grads for the function.
-  const torch::autograd::variable_list& getGrads() const;
-
  private:
   torch::autograd::variable_list grads_;
 };
