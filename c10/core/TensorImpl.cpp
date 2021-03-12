@@ -394,7 +394,9 @@ void TensorImpl::copy_tensor_metadata(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) {
   copy_tensor_metadata_except_version_counter(src_impl, dest_impl, allow_tensor_metadata_change);
+#ifndef C10_DISABLE_AUTOGRAD
   dest_impl->set_version_counter(version_counter);
+#endif
 }
 
 void TensorImpl::copy_tensor_metadata(
@@ -403,7 +405,9 @@ void TensorImpl::copy_tensor_metadata(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) {
   copy_tensor_metadata_except_version_counter(src_impl, dest_impl, allow_tensor_metadata_change);
+#ifndef C10_DISABLE_AUTOGRAD
   dest_impl->set_version_counter(std::move(version_counter));
+#endif
 }
 
 namespace impl {

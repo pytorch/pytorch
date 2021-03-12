@@ -219,7 +219,16 @@ struct C10_API NamedTensorMetaInterface {
 // when saving a tensor can introduce race conditions when we are running the forward
 // pass in multi-thread scenarios, thus making the forward pass not thread-safe anymore,
 // which breaks the invariant.
+
 struct C10_API VariableVersion {
+#ifdef C10_DISABLE_AUTOGRAD
+  VariableVersion() = default;
+  VariableVersion(uint32_t) {}
+
+  uint32_t current_version() const {
+    TORCH_INTERNAL_ASSERT(false, "may not get variable version with C10_DISABLE_AUTOGRAD build");
+  }
+#else
  private:
   struct VersionCounter : intrusive_ptr_target {
     VersionCounter(uint32_t version) : version_(version) {}
@@ -244,6 +253,7 @@ struct C10_API VariableVersion {
   uint32_t current_version() const noexcept {
     return version_counter_->version_;
   }
+#endif
 };
 
 /**
@@ -474,7 +484,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool unique_version() const {
+#ifdef C10_DISABLE_AUTOGRAD
+    TORCH_INTERNAL_ASSERT(false, "must not call unique_version with C10_DISABLE_AUTOGRAD build!");
+#else
     return version_counter_.unique();
+#endif
   }
 
   /**
@@ -1077,20 +1091,36 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   void set_version_counter(
     const c10::VariableVersion& version_counter) noexcept {
+#ifdef C10_DISABLE_AUTOGRAD
+    TORCH_INTERNAL_ASSERT(false, "must not set_version_counter with C10_DISABLE_AUTOGRAD build");
+#else
     version_counter_ = version_counter;
+#endif
   }
 
   void set_version_counter(
     c10::VariableVersion&& version_counter) noexcept {
+#ifdef C10_DISABLE_AUTOGRAD
+    TORCH_INTERNAL_ASSERT(false, "must not set_version_counter with C10_DISABLE_AUTOGRAD build");
+#else
     version_counter_ = std::move(version_counter);
+#endif
   }
 
   const c10::VariableVersion& version_counter() const noexcept {
+#ifdef C10_DISABLE_AUTOGRAD
+    TORCH_INTERNAL_ASSERT(false, "must not get version_counter with C10_DISABLE_AUTOGRAD build");
+#else
     return version_counter_;
+#endif
   }
 
   void bump_version() noexcept {
+#ifdef C10_DISABLE_AUTOGRAD
+    TORCH_INTERNAL_ASSERT(false, "must not bump_version with C10_DISABLE_AUTOGRAD build");
+#else
     version_counter_.bump();
+#endif
   }
 
   inline void set_pyobj(PyObject* pyobj) noexcept {
@@ -1740,7 +1770,9 @@ private:
 protected:
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
 
+#ifndef C10_DISABLE_AUTOGRAD
   c10::VariableVersion version_counter_;
+#endif
 
   // This field contains a weak reference to a PyObject representing
   // this Tensor.  It MUST NOT be a strong reference, as that would
@@ -1909,7 +1941,11 @@ protected:
 //    DispatchKeySet
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 23,
-              "You changed the size of TensorImpl on 64-bit arch."
+              sizeof(TensorImpl) == sizeof(int64_t) * 23
+#ifdef C10_DISABLE_AUTOGRAD
+              - sizeof(int64_t)
+#endif
+
+              , "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10

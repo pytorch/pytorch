@@ -44,6 +44,11 @@ namespace at {
 // out of VariableType.
 
 struct TORCH_API AutoNonVariableTypeMode {
+#ifdef C10_DISABLE_AUTOGRAD
+  AutoNonVariableTypeMode(bool enabled = true) {
+    TORCH_INTERNAL_ASSERT(enabled);
+  }
+#else
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
   // TODO: Eliminate this parameter entirely
   AutoNonVariableTypeMode(bool enabled = true) :
@@ -54,6 +59,7 @@ struct TORCH_API AutoNonVariableTypeMode {
 
   // disable all autograd dispatch keys
   c10::impl::ExcludeDispatchKeyGuard autograd_guard_;
+#endif
 };
 
 } // namespace at

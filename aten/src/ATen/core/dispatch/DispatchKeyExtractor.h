@@ -19,6 +19,13 @@ namespace impl {
 // moved to TensorImpl constructor.
 const DispatchKeySet always_included{DispatchKey::BackendSelect};
 
+#ifdef C10_DISABLE_AUTOGRAD
+constexpr DispatchKeySet always_excluded{c10::autograd_dispatch_keyset};
+#else
+// TODO: inspect dispatcher, make sure this is optimized out
+constexpr DispatchKeySet always_excluded;
+#endif
+
 // Take a DispatchKeySet for a Tensor and determine what the actual dispatch
 // DispatchKey should be, taking into account TLS, and skipping backends which
 // fall through.
@@ -49,7 +56,7 @@ static inline DispatchKeySet computeDispatchKeySet(
   // it's a bit troublesome, because fastpath TLS access requires the type of
   // the TLS in question to be zero-initialized, so you don't actually win
   // anyting in that case.
-  return (((ks | local.included_ | always_included) - local.excluded_) & key_mask);
+  return (((ks | local.included_ | always_included) - local.excluded_ - always_excluded) & key_mask);
 }
 
 }
