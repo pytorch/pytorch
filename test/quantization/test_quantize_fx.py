@@ -1839,6 +1839,36 @@ class TestQuantizeFx(QuantizationTestCase):
             mc = convert_fx(mp)
             mc(torch.rand(4, 1, 4, 4))
 
+    def test_ndim_of_quant_tensor(self):
+        """
+        Verify that we do not dequantize to calculate ndim of a tensor.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.conv2 = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                xdim = x.ndim
+                x = self.conv2(x)
+                x = torch.add(x, xdim)
+                return x
+
+        m = M().eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mp(torch.randn(4, 1, 4, 4))
+        mc = convert_fx(mp)
+        mc(torch.randn(4, 1, 4, 4))
+        convert_node_occurrence = {
+            # the only dequant should be at the end of conv2
+            ns.call_method("dequantize"): 1,
+        }
+        self.checkGraphModuleNodes(
+            mc, expected_node_occurrence=convert_node_occurrence)
+
     def test_state_dict(self):
         """ Make sure packed params appear in state_dict
         """

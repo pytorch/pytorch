@@ -905,6 +905,11 @@ class Quantizer:
                 else:
                     env[node.name] = \
                         self.quantized_graph.node_copy(node, load_non_quantized)
+            elif node.op == 'call_function' and node.target is getattr:
+                # getattr nodes can work on quantized or non-quantized
+                # tensors
+                env[node.name] = \
+                    self.quantized_graph.node_copy(node, load_x)
             else:
                 # copy quantized or non-quantized node
                 env[node.name] = \
