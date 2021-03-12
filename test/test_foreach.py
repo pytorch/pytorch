@@ -711,7 +711,7 @@ class TestForeach(TestCase):
                         foreach_bin_op(tensors, scalars)
 
                     # There are a two types of different errors that will be thrown.
-                    # - Sub with bool is not allowed. 
+                    # - Sub with bool is not allowed.
                     # - Result type can't be cast to the desired output type
                     with self.assertRaises(RuntimeError):
                         foreach_bin_op_(tensors, scalars)
@@ -727,7 +727,6 @@ class TestForeach(TestCase):
                 else:
                     with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
                         foreach_bin_op_(tensors, scalars)
-                    continue
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_with_different_size_tensors(self, device, dtype):
