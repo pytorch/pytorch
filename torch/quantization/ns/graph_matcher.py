@@ -46,6 +46,11 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
             toq.linear,
             toq.linear_relu,
         ]),
+        # LSTM
+        'torch.nn.LSTM': set([
+            nn.LSTM,
+            nnqd.LSTM,
+        ]),
         # add
         'torch.add': set([
             torch.add,

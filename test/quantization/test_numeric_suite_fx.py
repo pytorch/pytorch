@@ -9,12 +9,9 @@ from torch.quantization import get_default_qconfig, default_dynamic_qconfig
 import torch.nn.quantized as nnq
 toq = torch.ops.quantized
 from torch.quantization._numeric_suite_fx import (
-    remove_qconfig_observer_fx,
     compare_model_outputs_fx,
-    compare_weights_fx,
     compare_model_stub_fx,
 )
-from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.quantize_fx import (
     convert_fx,
     prepare_fx,
@@ -50,63 +47,6 @@ from torch.quantization.ns.numeric_suite_core_apis_fx import (
 
 
 class TestGraphModeNumericSuite(QuantizationTestCase):
-    @override_qengines
-    def test_remove_qconfig_observer_fx(self):
-        r"""Remove activation_post_process node from fx prepred model"""
-        float_model = SingleLayerLinearModel()
-        float_model.eval()
-
-        qengine = torch.backends.quantized.engine
-        qconfig = get_default_qconfig(qengine)
-
-        qconfig_dict = {"": qconfig}
-
-        prepared_model = prepare_fx(float_model, qconfig_dict)
-
-        prepared_float_model = copy.deepcopy(prepared_model)
-        prepared_float_model.eval()
-
-        model = remove_qconfig_observer_fx(prepared_float_model)
-
-        modules = dict(model.named_modules())
-        for node in model.graph.nodes:
-            if node.op == "call_module":
-                self.assertFalse(is_activation_post_process(modules[node.target]))
-
-    def compare_and_validate_model_weights_results_fx(
-        self, prepared_float_model, q_model, expected_weight_dict_keys
-    ):
-
-        weight_dict = compare_weights_fx(
-            prepared_float_model.state_dict(), q_model.state_dict()
-        )
-
-        self.assertTrue(weight_dict.keys() == expected_weight_dict_keys)
-        self.assertEqual(len(weight_dict), 1)
-
-        for k, v in weight_dict.items():
-            self.assertTrue(v["float"].shape == v["quantized"].shape)
-
-    @override_qengines
-    def test_compare_weights_lstm_dynamic_fx(self):
-        r"""Compare the weights of float and dynamic quantized lstm layer"""
-
-        qconfig_dict = {"object_type": [(nn.LSTM, default_dynamic_qconfig)]}
-
-        float_model = LSTMwithHiddenDynamicModel()
-        float_model.eval()
-
-        prepared_model = prepare_fx(float_model, qconfig_dict)
-
-        prepared_float_model = copy.deepcopy(prepared_model)
-        prepared_float_model.eval()
-
-        q_model = convert_fx(prepared_model)
-
-        expected_weight_dict_keys = {"lstm._all_weight_values.0.param"}
-        self.compare_and_validate_model_weights_results_fx(
-            prepared_float_model, q_model, expected_weight_dict_keys
-        )
 
     # TODO: Add submodule and functional test cases for compare_model_stub_fx
     def compare_and_validate_model_stub_results_fx(
@@ -904,6 +844,13 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             m.eval()
             res = self._test_extract_weights(
                 m, results_len=1, qconfig_dict=qconfig_dict)
+
+    @skipIfNoFBGEMM
+    def test_compare_weights_lstm_dynamic(self):
+        qconfig_dict = {"object_type": [(nn.LSTM, default_dynamic_qconfig)]}
+        m = LSTMwithHiddenDynamicModel().eval()
+        res = self._test_extract_weights(
+            m, results_len=1, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
     def test_sparsenn_compare_activations(self):
