@@ -88,8 +88,6 @@ static void registerIntrinsics(
     assertSuccess(
         JD.define(absoluteSymbols({entry(kv.first.c_str(), kv.second)})));
   }
-  assertSuccess(JD.define(
-      absoluteSymbols({entry("DispatchParallel", DispatchParallel)})));
 }
 
 namespace llvm {

@@ -252,6 +252,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::TypeCheck, // used in interpreter only
       prim::RequiresGradCheck, // used in interpreter only
       prim::FallbackGraph, // converted into prim::CallFunction
+
   };
 
   // These namespaces are required to have Python printers unless

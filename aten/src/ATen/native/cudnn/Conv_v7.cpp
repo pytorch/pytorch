@@ -864,8 +864,7 @@ void raw_cudnn_convolution_add_relu_out(
   zdesc.set(z);
 
   TensorDescriptor bdesc;
-  Tensor bias_data = bias.expand({1, bias.size(0)});
-  bdesc.set(bias_data, output.dim());
+  bdesc.set(bias.expand({1, bias.size(0)}), output.dim());
 
   ActivationDescriptor adesc;
   adesc.set(CUDNN_ACTIVATION_RELU);
@@ -902,7 +901,7 @@ void raw_cudnn_convolution_add_relu_out(
                 zdesc.desc(),
                 z.data_ptr(),
                 bdesc.desc(),
-                bias_data.data_ptr(),
+                bias.data_ptr(),
                 adesc.desc(),
                 args.odesc.desc(),
                 output.data_ptr()),
