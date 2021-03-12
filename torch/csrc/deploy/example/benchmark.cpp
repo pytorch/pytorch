@@ -51,7 +51,8 @@ struct Report {
 const int min_items_to_complete = 1;
 
 struct RunPython {
-  static torch::MovableObject load_and_wrap(torch::Package& package) {
+  static torch::deploy::ReplicatedObj load_and_wrap(
+      torch::deploy::Package& package) {
     auto I = package.acquire_session();
     auto obj = I.self.attr("load_pickle")({"model", "model.pkl"});
     if (cuda) {
@@ -60,9 +61,9 @@ struct RunPython {
     return I.create_movable(obj);
   }
   RunPython(
-      torch::Package& package,
+      torch::deploy::Package& package,
       std::vector<at::IValue> eg,
-      const torch::Interpreter* interps)
+      const torch::deploy::Interpreter* interps)
       : obj_(load_and_wrap(package)), eg_(std::move(eg)), interps_(interps) {}
   void operator()(int i) {
     auto I = obj_.acquire_session();
@@ -74,9 +75,9 @@ struct RunPython {
       I.self(eg_);
     }
   }
-  torch::MovableObject obj_;
+  torch::deploy::ReplicatedObj obj_;
   std::vector<at::IValue> eg_;
-  const torch::Interpreter* interps_;
+  const torch::deploy::Interpreter* interps_;
 };
 
 // def to_device(i, d):
@@ -157,7 +158,7 @@ struct RunJIT {
 
 struct Benchmark {
   Benchmark(
-      torch::InterpreterManager& manager,
+      torch::deploy::InterpreterManager& manager,
       size_t n_threads,
       std::string strategy,
       std::string file_to_run,
@@ -180,7 +181,7 @@ struct Benchmark {
   Report run() {
     pthread_barrier_init(&first_run_, nullptr, n_threads_ + 1);
 
-    torch::Package package = manager_.load_package(file_to_run_);
+    torch::deploy::Package package = manager_.load_package(file_to_run_);
 
     std::vector<at::IValue> eg;
     {
@@ -268,7 +269,7 @@ struct Benchmark {
       results.push_back(time);
     }
   }
-  torch::InterpreterManager& manager_;
+  torch::deploy::InterpreterManager& manager_;
   size_t n_threads_;
   std::string strategy_;
   std::string file_to_run_;
@@ -286,7 +287,7 @@ int main(int argc, char* argv[]) {
   cuda = std::string(argv[2]) == "cuda";
   bool jit_enable = std::string(argv[3]) == "jit";
   Report::report_header(std::cout);
-  torch::InterpreterManager manager(max_thread);
+  torch::deploy::InterpreterManager manager(max_thread);
 
   // make sure gpu_wrapper.py is in the import path
   for (auto& interp : manager.all_instances()) {

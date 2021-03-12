@@ -75,11 +75,11 @@ bool will_promote_tensor(const Tensor& tensor, Scalar scalar, bool does_op_promo
   return result_dtype != tensor.scalar_type();
 }
 
-// Please, make sure to call check_foreach_api_restrictions before calling this method. 
-// There is a set of preconditions that have to be satisfied. 
+// Please, make sure to call check_foreach_api_restrictions before calling this method.
+// There is a set of preconditions that have to be satisfied.
 bool check_fast_path_restrictions(
-  ArrayRef<TensorList> tensorLists, 
-  ArrayRef<Scalar> scalarList = {}, 
+  ArrayRef<TensorList> tensorLists,
+  ArrayRef<Scalar> scalarList = {},
   bool does_op_promote_integer_inputs_to_float = false) {
     auto expected_device = tensorLists[0][0].device();
 
@@ -135,8 +135,8 @@ bool check_fast_path_restrictions(
     return true;
 }
 
-bool can_use_fast_route(ArrayRef<TensorList> tensorLists, 
-                        ArrayRef<Scalar> scalarList = {}, 
+bool can_use_fast_route(ArrayRef<TensorList> tensorLists,
+                        ArrayRef<Scalar> scalarList = {},
                         bool does_op_promote_integer_inputs_to_float = false) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;

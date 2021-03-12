@@ -381,7 +381,7 @@ class TestForeach(TestCase):
     # Special cases
     #
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_mixed_scalarlist(self, device, dtype):
+    def test_tensorlist_mixed_scalarlist_op(self, device, dtype):
         for N in N_values:
             for foreach_bin_op, foreach_bin_op_, torch_bin_op in self.bin_ops:
                 tensors = self._get_test_data(device, dtype, N)
@@ -395,7 +395,7 @@ class TestForeach(TestCase):
                         foreach_bin_op(tensors, scalars)
 
                     # There are a two types of different errors that will be thrown.
-                    # - Sub with bool is not allowed. 
+                    # - Sub with bool is not allowed.
                     # - Result type can't be cast to the desired output type
                     with self.assertRaises(RuntimeError):
                         foreach_bin_op_(tensors, scalars)
@@ -411,7 +411,6 @@ class TestForeach(TestCase):
                 else:
                     with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
                         foreach_bin_op_(tensors, scalars)
-                    continue
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_with_different_size_tensors(self, device, dtype):
