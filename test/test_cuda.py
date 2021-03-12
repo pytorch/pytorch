@@ -1101,6 +1101,8 @@ class TestCuda(TestCase):
             p2c.get()
             c2p.put(sync_func(self, TestCuda.FIFTY_MIL_CYCLES))
 
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_stream_event_nogil(self):
         for sync_func in [TestCuda._stream_synchronize,
@@ -1686,6 +1688,8 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 2)
         self.assertEqual(torch.cuda.current_stream(), default_stream)
 
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     def test_streaming_backwards_multiple_streams(self):
 
         class StreamModel(torch.nn.Module):
@@ -1721,6 +1725,8 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 5)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     def test_streaming_backwards_device_transfer(self):
         # This function must run with non-default current streams on all devices, otherwise it's meaningless.
         # The intention is to test that to()'s backward (CopyBackward) interacts properly with the
@@ -1824,6 +1830,39 @@ t2 = threading.Thread(target=worker, args=(1,))
 t1.start()
 t2.start()
 """])
+
+    # ROCm doesn't support device side asserts
+    @skipIfRocm
+    def test_fixed_cuda_assert_async(self):
+        with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
+            torch._assert_async(torch.tensor([], device="cuda"))
+        with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with more than one value is ambiguous"):
+            torch._assert_async(torch.tensor([0, 0], device="cuda"))
+
+        torch._assert_async(torch.tensor(1, device="cuda"))
+        torch._assert_async(torch.tensor(0.1, device="cuda"))
+        torch._assert_async(torch.tensor(-0.1, device="cuda"))
+        torch._assert_async(torch.tensor(True, device="cuda"))
+        torch._assert_async(torch.tensor(0 + 0.1j, device="cuda"))
+
+        fail_stmts = [
+            "torch._assert_async(torch.tensor(0, device='cuda'))",
+            "torch._assert_async(torch.tensor(0.0, device='cuda'))",
+            "torch._assert_async(torch.tensor(False, device='cuda'))",
+            "torch._assert_async(torch.tensor(0 + 0j, device='cuda'))",
+        ]
+
+        import subprocess
+        for stmt in fail_stmts:
+            with self.subTest(stmt=stmt):
+                r = subprocess.call([sys.executable, '-c', f"""\
+import torch
+
+{stmt}
+torch.cuda.synchronize()
+"""])
+                self.assertTrue(r != 0)
+
 
     def test_grad_scaling_unscale(self, dtype=torch.float):
         inv_scale = torch.full((1,), 0.25, dtype=torch.float, device="cuda:0")
@@ -2292,6 +2331,8 @@ t2.start()
                 self.assertTrue(torch.allclose(c, s, atol=1e-7))
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     def test_grad_scaling_multigpu(self):
         # Same as above, but runs some of the models on device 1.
         # GradScaler should transparently handle losses and gradients on multiple devices.

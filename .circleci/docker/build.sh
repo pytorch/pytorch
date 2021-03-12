@@ -189,7 +189,7 @@ case "$image" in
     PROTOBUF=yes
     ANDROID=yes
     ANDROID_NDK_VERSION=r19c
-    GRADLE_VERSION=4.10.3
+    GRADLE_VERSION=6.8.3
     CMAKE_VERSION=3.7.0
     NINJA_VERSION=1.9.0
     ;;
@@ -236,6 +236,7 @@ case "$image" in
     ;;
   pytorch-linux-bionic-rocm3.9-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -243,6 +244,7 @@ case "$image" in
     ;;
   pytorch-linux-bionic-rocm3.10-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -250,6 +252,7 @@ case "$image" in
     ;;
   pytorch-linux-bionic-rocm4.0.1-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
