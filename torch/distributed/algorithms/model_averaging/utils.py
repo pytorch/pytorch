@@ -14,6 +14,7 @@ def _init_per_machine_process_groups(
     This is a requirement of :meth:`torch.distributed.new_group` API.
     Returns the per-machine process group that contains the current rank.
     """
+    ret_group = None
     for machine_rank in range(
         dist.get_world_size(group=process_group) // num_gpus_per_machine
     ):
@@ -23,12 +24,14 @@ def _init_per_machine_process_groups(
         per_machine_ranks = list(range(start_rank, end_rank))
         per_machine_process_group = dist.new_group(per_machine_ranks, backend=backend)
         if global_rank >= start_rank and global_rank < end_rank:
+            ret_group = per_machine_process_group
             logging.info(
                 "Global rank {} is assigned to per-machine process group {}".format(
                     global_rank, per_machine_ranks
                 )
             )
-            return per_machine_process_group
+
+    return ret_group
 
 
 def _average_parameters(
