@@ -2686,6 +2686,10 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
+           skips=(
+               # `take_along_dim` does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           ),
            sample_inputs_func=sample_inputs_take_along_dim),
     ShapeFuncInfo('tile',
                   ref=np.tile,
