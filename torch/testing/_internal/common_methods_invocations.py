@@ -2317,10 +2317,19 @@ op_db: List[OpInfo] = [
                        # with signature matching types dtype('bool') -> dtype('bool')
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                 dtypes=[torch.bool]),
+                       # Test fails in comparison on Nan as the `equal_nan` is True for
+                       # comparing the tensor.
+                       # Vectorized and Non-Vectorized path produce different output.
+                       # Note: Non-Vectorized path is consistent with the hand-rolled reference
+                       # t = torch.tensor([complex(0, float('inf'))] * 4)
+                       # tensor([nan+nanj, nan+nanj, nan+nanj, nan+nanj])
+                       # t = torch.tensor([complex(0, float('inf'))] * 9)
+                       # tensor([0.+nanj, 0.+nanj, 0.+nanj, 0.+nanj, 0.+nanj, 0.+nanj, 0.+nanj, 0.+nanj, nan+nanj])
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                dtypes=[torch.complex64, torch.complex128]),
+                                device_type='cpu', dtypes=[torch.complex64, torch.complex128]),
+                       # Reference: https://github.com/pytorch/pytorch/issues/48486
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                dtypes=[torch.complex64])
+                                device_type='cpu', dtypes=[torch.complex64])
                    )),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
