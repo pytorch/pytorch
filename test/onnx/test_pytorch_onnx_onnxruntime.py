@@ -2537,10 +2537,6 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return (x / y).to(dtype=torch.long)
 
-        class GemmModule(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.mm(x, y).to(dtype=torch.long)
-
         class PowModule(torch.nn.Module):
             def forward(self, x, y):
                 return x.pow(y).to(dtype=torch.long)
@@ -2552,8 +2548,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([2, 3, 5], dtype=torch.uint8)
         y = torch.tensor([2, 3, 5], dtype=torch.uint8)
         z = torch.tensor([1], dtype=torch.uint8)
-        mat1 = torch.randn(2, 3).to(dtype=torch.uint8)
-        mat2 = torch.randn(3, 2).to(dtype=torch.uint8)
         self.run_test(AddModule(), (x, y))
         self.run_test(SubModule(), (x, y))
         self.run_test(MulModule(), (x, y))
@@ -2563,28 +2557,41 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.tensor([2, 3, 5], dtype=torch.int8)
         y = torch.tensor([2, 3, 5], dtype=torch.int8)
-        z = torch.tensor([1], dtype=torch.uint8)
-        mat1 = torch.randn(2, 3).to(dtype=torch.int8)
-        mat2 = torch.randn(3, 2).to(dtype=torch.int8)
+        z = torch.tensor([1], dtype=torch.int8)
         self.run_test(AddModule(), (x, y))
         self.run_test(SubModule(), (x, y))
         self.run_test(MulModule(), (x, y))
         self.run_test(DivModule(), (x, y))
-        self.run_test(GemmModule(), (mat1, mat2))
         self.run_test(PowModule(), (x, z))
         self.run_test(ModModule(), (x, y))
 
         x = torch.tensor([2, 3, 5], dtype=torch.int16)
         y = torch.tensor([2, 3, 5], dtype=torch.int16)
-        mat1 = torch.randn(2, 3).to(dtype=torch.int16)
-        mat2 = torch.randn(3, 2).to(dtype=torch.int16)
+        z = torch.tensor([1], dtype=torch.int16)
         self.run_test(AddModule(), (x, y))
         self.run_test(SubModule(), (x, y))
         self.run_test(MulModule(), (x, y))
         self.run_test(DivModule(), (x, y))
-        self.run_test(GemmModule(), (mat1, mat2))
         self.run_test(PowModule(), (x, z))
         self.run_test(ModModule(), (x, y))
+
+    @unittest.skip("Gemm operator only support float/double in ORT")
+    def test_Gemm_with_low_precision(self):
+        class GemmModule(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.mm(x, y).to(dtype=torch.long)
+
+            mat1 = torch.randn(2, 3).to(dtype=torch.uint8)
+            mat2 = torch.randn(3, 2).to(dtype=torch.uint8)
+            self.run_test(GemmModule(), (mat1, mat2))
+
+            mat1 = torch.randn(2, 3).to(dtype=torch.int8)
+            mat2 = torch.randn(3, 2).to(dtype=torch.int8)
+            self.run_test(GemmModule(), (mat1, mat2))
+
+            mat1 = torch.randn(2, 3).to(dtype=torch.int16)
+            mat2 = torch.randn(3, 2).to(dtype=torch.int16)
+            self.run_test(GemmModule(), (mat1, mat2))
 
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
