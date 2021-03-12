@@ -1,5 +1,4 @@
 import collections
-import enum
 
 import torch
 import torch.nn as nn
@@ -28,11 +27,69 @@ from .graph_passes import (
     create_a_shadows_b,
 )
 
+from .ns_types import (
+    NSSingleResultValuesType,
+)
+
 from typing import Dict, Tuple, Callable, List, Any
 
-class NSSingleResultValuesType(str, enum.Enum):
-    WEIGHT = 'weight'
-    NODE_OUTPUT = 'node_output'
+
+class OutputLogger(nn.Module):
+    stats: List[torch.Tensor]
+
+    def __init__(
+        self,
+        ref_node_name: str,
+        prev_node_name: str,
+        model_name: str,
+        ref_name: str,
+        prev_node_target_type: str,
+        results_type: str,
+        index_within_arg: int,
+    ):
+        super().__init__()
+        self.stats: List[torch.Tensor] = []
+
+        # name of the node which was responsible for adding this logger
+        # Note:
+        # - if we are logging node outputs, this is the same as prev_node_name
+        # - if we are logging node inputs, this is the name of the node
+        #   whose input this logger is logging.
+        #
+        # example, where logger1 is logging input of op1 and logger2 is logging
+        #    the output of op1:
+        #
+        #  x1 -> logger1 -> op1 -> logger2 -> x2
+        #
+        # in this example,
+        #   - logger1's prev_node_name is x1 and ref_node_name is op1
+        #   - logger2's prev_node_name is op1 and ref_node_name is op1
+        self.ref_node_name = ref_node_name
+        # name of the node whose output this Logger is capturing
+        self.prev_node_name = prev_node_name
+
+        # name of the model from which the node originated from
+        self.model_name = model_name
+        # reference name, used to match loggers from separate models
+        # to each other
+        self.ref_name = ref_name
+        # type of the target of the node whose output this logger is logging
+        self.prev_node_target_type = prev_node_target_type
+        # what kind of values are inside of stats
+        self.results_type = results_type
+        # index of this node within the arg of the input/output node
+        # for example, in cat([x1, x2, x3], dim=0), x2 would have index_within_arg == 1
+        self.index_within_arg = index_within_arg
+
+    def forward(self, x: torch.Tensor):
+        self.stats.append(x.detach())
+        return x
+
+    def __repr__(self):
+        return f"""OutputLogger(ref_name={self.ref_name}, model_name={self.model_name},
+prev_node_name={self.prev_node_name}, ref_node_name={self.ref_node_name},
+results_type={self.results_type}, index_within_arg={self.index_within_arg})"""
+
 
 # TODO(future PR): see if we can use typing_extensions's TypedDict instead
 # to properly type the various keys
@@ -43,23 +100,33 @@ class NSSingleResultValuesType(str, enum.Enum):
 #       'type': 'weight',
 #       # the values of type specified above
 #       'values': [torch.Tensor(...), ...],
-#       # name of the node
-#       'node_name': 'linear1',
+#       # name of the node directly before the logger
+#       'prev_node_name': 'linear1',
 #       # type of the underlying function or module
-#       'node_target_type': torch.nn.functional.linear  # or torch.nn.Linear, etc
+#       'prev_node_target_type': torch.nn.functional.linear  # or torch.nn.Linear, etc
+#       # name of the node responsible for adding this logger
+#       # Note: this may differ from prev_node_name if we are logging inputs
+#       'ref_node_name': 'linear1',
+#       # index of this node within the arg of the input/output node
+#       # for example, in cat([x1, x2, x3], dim=0), x2 would have index_within_arg == 1
+#       'index_within_arg': 0,
 #     },
 #   },
 # }
 NSSingleResultType = Dict[str, Any]
 
 # {
-#   'logger_name_1': {
-#     'model_name_a': NSSingleResultType,
-#     'model_name_b': NSSingleResultType,
+#   'layer_name_1': {  # subgraph name
+#     'node_output': {  # results type (node_output, node_input, weight)
+#       'model_name_a':  # model name
+#          [NSSingleResultType, ...],  # results, ordered by index_within_arg
+#       'model_name_b':
+#          [NSSingleResultType, ...],
+#     },
 #   },
 # }
 #
-NSResultsType = Dict[str, Dict[str, NSSingleResultType]]
+NSResultsType = Dict[str, Dict[str, Dict[str, List[NSSingleResultType]]]]
 
 
 class NSTracer(Tracer):
@@ -87,8 +154,9 @@ def _add_weight_info_to_dict(
 
     for node, ref_name in nodes_and_names_to_instrument:
 
+        res_type = NSSingleResultValuesType.WEIGHT.value
         if ref_name not in results:
-            results[ref_name] = {}
+            results[ref_name] = {res_type: {}}
 
         if node.op == 'call_function':
 
@@ -99,12 +167,14 @@ def _add_weight_info_to_dict(
 
             if related_to_linear:
                 weight = get_linear_fun_weight(node, model)
-                results[ref_name][model_name] = {
-                    'type': NSSingleResultValuesType.WEIGHT.value,
+                results[ref_name][res_type][model_name] = [{
+                    'type': res_type,
                     'values': [weight],
-                    'node_name': node.name,
-                    'node_target_type': str(node.target),
-                }
+                    'prev_node_name': node.name,
+                    'prev_node_target_type': str(node.target),
+                    'ref_node_name': node.name,
+                    'index_within_arg': 0,
+                }]
 
         else:  # call_module
             # for call_module, we need to look up the modules to do the type check
@@ -119,12 +189,14 @@ def _add_weight_info_to_dict(
             # TODO(future PR): other module types
             if related_to_conv2d_mod:
                 weight = get_conv_mod_weight(mod)
-                results[ref_name][model_name] = {
-                    'type': NSSingleResultValuesType.WEIGHT.value,
+                results[ref_name][res_type][model_name] = [{
+                    'type': res_type,
                     'values': [weight],
-                    'node_name': node.name,
-                    'node_target_type': str(type(mod)),
-                }
+                    'prev_node_name': node.name,
+                    'prev_node_target_type': str(type(mod)),
+                    'ref_node_name': node.name,
+                    'index_within_arg': 0,
+                }]
 
 
 def _compare_weights_impl(
@@ -169,41 +241,12 @@ def compare_weights(
     return _compare_weights_impl(model_name_a, gm_a, model_name_b, gm_b)
 
 
-class OutputLogger(nn.Module):
-    stats: List[torch.Tensor]
-
-    def __init__(
-        self,
-        node_name: str,
-        model_name: str,
-        ref_name: str,
-        node_target_type: str,
-    ):
-        super().__init__()
-        self.stats: List[torch.Tensor] = []
-        # name of the node whose output this Logger is capturing
-        self.node_name = node_name
-        # name of the model from which the node originated from
-        self.model_name = model_name
-        # reference name, used to match loggers from separate models
-        # to each other
-        self.ref_name = ref_name
-        # type of the target of the node whose output this logger is logging
-        self.node_target_type = node_target_type
-
-    def forward(self, x: torch.Tensor):
-        self.stats.append(x.detach())
-        return x
-
-    def __repr__(self):
-        return f"OutputLogger(ref_name={self.ref_name}, model_name={self.model_name}, node_name={self.node_name})"
-
-
 def _prepare_single_model_output(
     model_name: str,
     model: GraphModule,
     nodes_and_names_to_instrument: List[Tuple[Node, str]],
     logger_cls: Callable,
+    should_log_inputs: bool,
 ) -> nn.Module:
 
     # TODO(future PR): do not observe nodes we do not care
@@ -213,7 +256,8 @@ def _prepare_single_model_output(
         node_to_instrument_to_ref_name[node] = ref_name
 
     model = remove_observers_add_loggers(
-        model, node_to_instrument_to_ref_name, logger_cls, model_name)
+        model, node_to_instrument_to_ref_name, logger_cls, model_name,
+        should_log_inputs=should_log_inputs)
     return model
 
 
@@ -223,6 +267,7 @@ def _prepare_model_outputs_impl(
     name_b: str,
     gm_b: GraphModule,
     logger_cls: Callable,
+    should_log_inputs: bool,
 ) -> Tuple[nn.Module, nn.Module]:
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
     nodes_and_names_to_instrument_a = []
@@ -236,9 +281,11 @@ def _prepare_model_outputs_impl(
         nodes_and_names_to_instrument_b.append((node_end_b, match_name))
 
     new_model_a = _prepare_single_model_output(
-        name_a, gm_a, nodes_and_names_to_instrument_a, logger_cls)
+        name_a, gm_a, nodes_and_names_to_instrument_a, logger_cls,
+        should_log_inputs=should_log_inputs)
     new_model_b = _prepare_single_model_output(
-        name_b, gm_b, nodes_and_names_to_instrument_b, logger_cls)
+        name_b, gm_b, nodes_and_names_to_instrument_b, logger_cls,
+        should_log_inputs=should_log_inputs)
     return (new_model_a, new_model_b)
 
 
@@ -248,11 +295,14 @@ def prepare_model_outputs(
     name_b: str,
     model_b: nn.Module,
     logger_cls: Callable,
+    should_log_inputs : bool = False,
 ) -> Tuple[nn.Module, nn.Module]:
     tracer_a, tracer_b = NSTracer(), NSTracer()
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    return _prepare_model_outputs_impl(name_a, gm_a, name_b, gm_b, logger_cls)
+    return _prepare_model_outputs_impl(
+        name_a, gm_a, name_b, gm_b, logger_cls,
+        should_log_inputs=should_log_inputs)
 
 
 def add_activation_info_to_dict(
@@ -273,12 +323,24 @@ def add_activation_info_to_dict(
             key = mod.ref_name
             if key not in results:
                 results[key] = {}
-            results[key][mod.model_name] = {
-                'type': NSSingleResultValuesType.NODE_OUTPUT.value,
+            assert mod.model_name not in results[key], \
+                f"{mod.model_name} is already present in results"
+            if mod.results_type not in results[key]:
+                results[key][mod.results_type] = {}
+            if mod.model_name not in results[key][mod.results_type]:
+                results[key][mod.results_type][mod.model_name] = []
+            results[key][mod.results_type][mod.model_name].append({
+                'type': mod.results_type,
                 'values': mod.stats,
-                'node_name': mod.node_name,
-                'node_target_type': mod.node_target_type,
-            }
+                'ref_node_name': mod.ref_node_name,
+                'prev_node_name': mod.prev_node_name,
+                'prev_node_target_type': mod.prev_node_target_type,
+                'index_within_arg': mod.index_within_arg,
+            })
+            # ensure the list stays sorted
+            results[key][mod.results_type][mod.model_name].sort(
+                key=lambda res: res['index_within_arg']
+            )
 
 
 # TODO(future PR): align on naming
@@ -308,10 +370,12 @@ def _prepare_model_with_stubs_impl(
     name_b: str,
     gm_b: GraphModule,
     logger_cls: Callable,
+    should_log_inputs: bool,
 ) -> nn.Module:
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
     gm_a_shadows_b = create_a_shadows_b(
-        name_a, gm_a, name_b, gm_b, matched_subgraph_pairs, logger_cls)
+        name_a, gm_a, name_b, gm_b, matched_subgraph_pairs, logger_cls,
+        should_log_inputs=should_log_inputs)
     return gm_a_shadows_b
 
 
@@ -321,6 +385,7 @@ def prepare_model_with_stubs(
     name_b: str,
     model_b: nn.Module,
     logger_cls: Callable,
+    should_log_inputs: bool = False,
 ) -> nn.Module:
     """
     Same thing as prepare_model_outputs, but for an `a_shadows_b` model.
@@ -329,7 +394,9 @@ def prepare_model_with_stubs(
     tracer_a, tracer_b = NSTracer(), NSTracer()
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    return _prepare_model_with_stubs_impl(name_a, gm_a, name_b, gm_b, logger_cls)
+    return _prepare_model_with_stubs_impl(
+        name_a, gm_a, name_b, gm_b, logger_cls,
+        should_log_inputs=should_log_inputs)
 
 
 # TODO(future PR): align on naming
