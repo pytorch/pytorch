@@ -2169,7 +2169,7 @@ class TestIndividualWorkerQueue(TestCase):
                 self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
 
 
-class SetAffinityDataset(torch.utils.data.IterableDataset):
+class SetAffinityDataset(IterableDataset):
 
     def __iter__(self):
         torch.randperm(1)
@@ -2193,6 +2193,26 @@ class TestSetAffinity(TestCase):
         for sample in dataloader:
             self.assertEqual(sample, [2])
 
+class ConvDataset(Dataset):
+    def __init__(self):
+        self.x = torch.ones(1, 1, 24000)
+        # Call convolution on parent process
+        self[0]
+
+    def __len__(self):
+        return 1
+
+    def __getitem__(self, index):
+        return torch.nn.functional.conv1d(self.x, torch.ones(1, 1, 2))
+
+
+@unittest.skipIf(IS_WINDOWS, "Needs fork")
+class TestConvAfterFork(TestCase):
+    # Tests crash reported in https://github.com/pytorch/pytorch/issues/53565
+    def test_conv_after_fork(self):
+        loader = DataLoader(ConvDataset(), num_workers=1)
+        for x in loader:
+            self.assertEqual(x.shape, (1, 1, 1, 23999))
 
 
 if __name__ == '__main__':
