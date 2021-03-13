@@ -339,7 +339,8 @@ class ErrorTrackingProcess(mp.Process):
         set_faulthander_if_available()
         if self.disable_stderr:
             # Disable polluting stderr with errors that are supposed to happen.
-            sys.stderr = open(os.devnull, "w")
+            with open(os.devnull, 'w') as devnull:
+                os.dup2(devnull.fileno(), sys.stderr.fileno())
         try:
             super(ErrorTrackingProcess, self).run()
             self._cconn.send(None)
@@ -525,8 +526,8 @@ def disable_stderr(worker_id):
     sys.stderr.flush()  # flush library buffers that dup2 knows nothing about
     # Can't use a with-block because otherwise the fd will be closed when this
     # function ends.
-    devnull = open(os.devnull, 'w')
-    os.dup2(devnull.fileno(), sys.stderr.fileno())
+    with open(os.devnull, 'w') as devnull:
+        os.dup2(devnull.fileno(), sys.stderr.fileno())
 
 
 def _test_segfault():
