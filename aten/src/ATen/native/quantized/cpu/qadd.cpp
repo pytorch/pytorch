@@ -122,7 +122,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
 
 #ifdef USE_PYTORCH_QNNPACK
 template <bool ReLUFused = false>
-Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point, std::atomic<bool>& qnnpack_add_success) {
+bool qnnpack_add(const Tensor& qa, const Tensor& qb, Tensor& qc, double scale, int64_t zero_point) {
   TORCH_CHECK(qa.ndimension() > 0, "qnnpack_add(): Got empty input tensor.");
   Tensor qa_contig = qa.contiguous(qa.suggest_memory_format());
   // Reason for use qa's memory format for qb is that for the underlying
@@ -145,7 +145,8 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point, std::
       c10::nullopt);
 
   if (qa_contig.size(0) == 0) {
-    return qy;
+    qc = qy;
+    return true;
   }
 
   initQNNPACK();
@@ -175,7 +176,7 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point, std::
       &qnnpack_operator);
 
   if(createStatus != pytorch_qnnp_status_success) {
-    return qy;
+    return false;
   }
 
   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
@@ -191,36 +192,43 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point, std::
       (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
       num_elems /* sum stride */);
 
-  if(createStatus != pytorch_qnnp_status_success) {
-    return qy;
+  if(setupStatus != pytorch_qnnp_status_success) {
+    return false;
   }
 
   pthreadpool_t threadpool = caffe2::pthreadpool_();
   const pytorch_qnnp_status runStatus =
       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
-
-  if(createStatus != pytorch_qnnp_status_success) {
-    return qy;
+  if(runStatus != pytorch_qnnp_status_success) {
+    return false;
   }
-  qnnpack_add_success = true;
-  return qy;
+
+  // pytorch_qnnp is created, set up and run successfully, modify the
+  // qc content in place, and return true to show success.
+  // If qnnpack_add function return false, it means one step fails.
+  qc = qy;
+  return true;
 }
 #endif
 
 template <bool ReLUFused = false>
 Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   check_inputs(qa, qb);
-  std::atomic<bool> qnnpack_add_success(false);
+  Tensor qc;
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qa.scalar_type() == kQUInt8 && qb.scalar_type() == kQUInt8) {
-    Tensor qnnpack_add_output = qnnpack_add<ReLUFused>(qa, qb, scale, zero_point, qnnpack_add_success);
-    if(qnnpack_add_success) {
-      return qnnpack_add_output;
+    // qnnpack_add function will update qc, and return true if
+    // it runs successfully. If qccpack_add return false (many differet
+    // reasons, like scale out of scope, memory allocation fails and etc,
+    // check aten/src/ATen/native/quantized/cpu/qnnpack/src/add.c for
+    // more details), fallback to _add_out function to add tensor qa and qb.
+    if(qnnpack_add<ReLUFused>(qa, qb, qc, scale, zero_point)) {
+      return qc;
     }
   }
 #endif
-  auto qc = at::_empty_affine_quantized(
+  qc = at::_empty_affine_quantized(
       qa.sizes(),
       at::device(kCPU)
          .dtype(qa.scalar_type())
