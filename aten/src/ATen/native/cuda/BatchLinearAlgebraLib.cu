@@ -397,7 +397,7 @@ inline static void apply_cholesky_cusolver_potrf(Tensor& self_working_copy, bool
   int lwork;
   at::cuda::solver::potrf_buffersize<scalar_t>(
     handle, uplo, n, nullptr, lda, &lwork);
-  
+
    // allocate workspace storage
   auto& allocator = *at::cuda::getCUDADeviceAllocator();
   auto work_data = allocator.allocate(sizeof(scalar_t)*lwork);
@@ -417,7 +417,7 @@ inline static void apply_cholesky_cusolver_potrfBatched(Tensor& self_working_cop
 
   const int64_t batch_size = batchCount(self_working_copy);
   const int matrix_stride = matrixStride(self_working_copy);
-  
+
   scalar_t* self_working_copy_ptr = self_working_copy.data_ptr<scalar_t>();
   int* infos_ptr = infos.data_ptr<int>();
 
