@@ -33,7 +33,6 @@ static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
       result2.unsqueeze_(dim);
     }
   }
-
   result1.resize_(self_sizes);
   result2.resize_(self_sizes);
 

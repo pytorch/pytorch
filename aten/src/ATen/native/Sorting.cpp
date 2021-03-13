@@ -214,7 +214,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     int64_t dim_,
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim(), /*wrap_scalar=*/true);
-  if (self.sizes().size() != 0) {
+  if (self.ndimension() != 0) {
     TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
   }
   TORCH_CHECK(
@@ -278,7 +278,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   dim = at::maybe_wrap_dim(dim, self.dim());
 
   int64_t size = self.dim() > 0 ? self.size(dim) : 1;
-  if (self.sizes().size() != 0) {
+  if (self.ndimension() != 0) {
     TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero");
   }
 
