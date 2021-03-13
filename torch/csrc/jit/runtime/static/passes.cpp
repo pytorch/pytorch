@@ -328,18 +328,21 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   });
   m.def(
       "static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor",
-      [](at::Tensor self, ArrayRef<int64_t> dims) -> at::Tensor {
+      [](const at::Tensor& self, ArrayRef<int64_t> dims) -> at::Tensor {
         at::Tensor out = at::empty_like(self);
         at::native::copy_(out, self);
         return out.permute(dims);
       });
   m.def(
-      "static_runtime::to_copy(Tensor self, ScalarType dtype, bool non_blocking, bool copy) -> Tensor",
-      [](at::Tensor self, at::ScalarType dtype, bool non_blocking, bool copy)
-          -> at::Tensor {
+      "static_runtime::to_copy(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      [](const at::Tensor& self,
+         at::ScalarType dtype,
+         bool non_blocking,
+         bool copy,
+         c10::optional<c10::MemoryFormat> format) -> at::Tensor {
         at::Tensor out = at::empty_like(self);
         at::native::copy_(out, self);
-        return out.to(dtype, non_blocking, copy);
+        return out.to(dtype, non_blocking, copy, format);
       });
 }
 

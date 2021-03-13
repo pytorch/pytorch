@@ -64,6 +64,8 @@ Backend backendToBackendOfDeviceType(Backend b, DeviceType d) {
     case DeviceType::MLC:
       TORCH_CHECK(!isSparse(b), "Sparse not implemented for MLC");
       return Backend::MLC;
+    case DeviceType::Meta:
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "torch.tensor not supported for meta (file an issue if you need this)")
     default:
       AT_ERROR("Unknown device type");
   }

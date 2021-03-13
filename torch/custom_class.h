@@ -303,12 +303,13 @@ class class_ {
   /// C++ classes. It is not for general purpose use.
   class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
     auto qualMethodName = qualClassName + "." + name;
-    auto method = std::make_unique<jit::OverloadedFunction>(
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
         qualMethodName,
         std::move(schema),
         std::move(func),
         std::move(doc_string));
     classTypePtr->addMethod(method.get());
+
     registerCustomClassMethod(std::move(method));
     return *this;
   }

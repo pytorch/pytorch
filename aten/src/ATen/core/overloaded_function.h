@@ -56,7 +56,6 @@ struct OverloadedFunction : public Function {
     // name(). Therefore, we don't need to check for mangled names here.
     auto overloadedMethods = owner_class->findOverloadedMethod(name());
     std::vector<const at::FunctionSchema*> schemas;
-
     for (auto method : overloadedMethods) {
       try {
         method->ensure_defined();
