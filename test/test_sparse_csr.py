@@ -146,6 +146,14 @@ class TestSparseCSR(TestCase):
 
         self.assertEqual(coo_product, csr_product)
 
+        vec = torch.randn((2, 1))
+        coo = torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),
+                                      torch.tensor([0, 1, 0, 1]),
+                                      torch.tensor([1, 2, 3, 4], dtype=torch.double))
+        csr = coo.to_sparse_csr()
+        self.assertEqual(coo.matmul(vec), csr.matmul(vec))
+
+
     def test_mkl_matvec_warnings(self):
         if torch.has_mkl:
             sp = torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),

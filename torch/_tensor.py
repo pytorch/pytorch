@@ -922,13 +922,18 @@ class Tensor(torch._C._TensorBase):
 
         if self.is_sparse:
             coalesced_self = self.coalesce()
+            row_indices = coalesced_self.indices()[0]
             ro = [0]
             i = 0
             for irow in range(self.shape[0]):
-                
+                while i < row_indices.size()[0] and row_indices[i] == irow:
+                    i += 1
+                ro.append(i)
 
-            return self.to_dense().to_sparse_csr()  # TODO: optimize this.
-        if self.is_sparse_csr:
+            return torch.sparse_csr_tensor(torch.tensor(ro, dtype=row_indices.dtype),
+                                           self.indices()[1], self.values(),
+                                           size=self.shape, dtype=self.dtype)
+        elif self.is_sparse_csr:
             return self
         else:
             ro = [0]
