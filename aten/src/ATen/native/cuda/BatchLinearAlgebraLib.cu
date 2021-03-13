@@ -415,7 +415,7 @@ inline static void apply_cholesky_cusolver_potrfBatched(Tensor& self_working_cop
   const int n = cuda_int_cast(self_working_copy.size(-1), "n");
   const int lda = std::max<int>(1, n);
 
-  const int batch_size = cuda_int_cast(batchCount(self_working_copy), "batch_size");
+  const int64_t batch_size = batchCount(self_working_copy);
   const int matrix_stride = matrixStride(self_working_copy);
   
   scalar_t* self_working_copy_ptr = self_working_copy.data_ptr<scalar_t>();
@@ -429,7 +429,7 @@ inline static void apply_cholesky_cusolver_potrfBatched(Tensor& self_working_cop
   scalar_t* work_data_ptr = static_cast<scalar_t*>(work_data.get());
 
   // currently cusolverDnXpotrfBatched may wrongly create nan output, so a loop of single matrix implementation is used
-  for (int i=0; i<batch_size; i++) {
+  for (int64_t i=0; i<batch_size; i++) {
     at::cuda::solver::potrf<scalar_t>(
       handle, uplo, n,
       self_working_copy.data_ptr<scalar_t>() + i * matrix_stride,

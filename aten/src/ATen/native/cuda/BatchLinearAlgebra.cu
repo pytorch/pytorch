@@ -1652,7 +1652,12 @@ Tensor _cholesky_helper_cuda_magma(const Tensor& self, bool upper) {
 
 Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
 #ifdef USE_CUSOLVER
-  return _cholesky_helper_cuda_cusolver(self, upper);
+  if (batchCount(self) == 1 || !use_magma_) {
+    return _cholesky_helper_cuda_cusolver(self, upper);
+  }
+  else {
+    return _cholesky_helper_cuda_magma(self, upper);
+  }
 #else
   return _cholesky_helper_cuda_magma(self, upper);
 #endif
