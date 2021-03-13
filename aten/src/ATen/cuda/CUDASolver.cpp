@@ -352,81 +352,83 @@ void gesvdjBatched<c10::complex<double>>(
 
 template<>
 void potrf<float>(
-  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, float* A, int lda, int* info
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, float* A, int lda, float* work, int lwork, int* info
 ) {
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnSpotrf_bufferSize(handle, uplo, n, A, lda, &lwork));
-
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto dataPtr = allocator.allocate(sizeof(float)*lwork);
-
   TORCH_CUSOLVER_CHECK(cusolverDnSpotrf(
-    handle, uplo, n, A, lda,
-    static_cast<float*>(dataPtr.get()),
-    lwork, info));
+    handle, uplo, n, A, lda, work, lwork, info));
 }
 
 template<>
 void potrf<double>(
-  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, double* A, int lda, int* info
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, double* A, int lda, double* work, int lwork, int* info
 ) {
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnDpotrf_bufferSize(handle, uplo, n, A, lda, &lwork));
-
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto dataPtr = allocator.allocate(sizeof(double)*lwork);
-
   TORCH_CUSOLVER_CHECK(cusolverDnDpotrf(
-    handle, uplo, n, A, lda,
-    static_cast<double*>(dataPtr.get()),
-    lwork, info));
+    handle, uplo, n, A, lda, work, lwork, info));
 }
 
 template<>
 void potrf<c10::complex<float>>(
-  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<float>* A, int lda, int* info
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<float>* A, int lda, c10::complex<float>* work, int lwork, int* info
 ) {
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnCpotrf_bufferSize(handle, uplo, n,
-    reinterpret_cast<cuComplex*>(A),
-    lda, &lwork));
-
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto dataPtr = allocator.allocate(sizeof(cuComplex)*lwork);
-
   TORCH_CUSOLVER_CHECK(cusolverDnCpotrf(
     handle,
     uplo,
     n,
     reinterpret_cast<cuComplex*>(A),
     lda,
-    static_cast<cuComplex*>(dataPtr.get()),
+    reinterpret_cast<cuComplex*>(work),
     lwork,
     info));
 }
 
 template<>
 void potrf<c10::complex<double>>(
-  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<double>* A, int lda, int* info
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<double>* A, int lda, c10::complex<double>* work, int lwork, int* info
 ) {
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnZpotrf_bufferSize(
-    handle, uplo, n,
-    reinterpret_cast<cuDoubleComplex*>(A),
-    lda, &lwork));
-
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  auto dataPtr = allocator.allocate(sizeof(cuDoubleComplex)*lwork);
-
   TORCH_CUSOLVER_CHECK(cusolverDnZpotrf(
     handle,
     uplo,
     n,
     reinterpret_cast<cuDoubleComplex*>(A),
     lda,
-    static_cast<cuDoubleComplex*>(dataPtr.get()),
+    reinterpret_cast<cuDoubleComplex*>(work),
     lwork,
     info));
+}
+
+
+template<>
+void potrf_buffersize<float>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, float* A, int lda, int* lwork
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSpotrf_bufferSize(handle, uplo, n, A, lda, lwork));
+}
+
+template<>
+void potrf_buffersize<double>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, double* A, int lda, int* lwork
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDpotrf_bufferSize(handle, uplo, n, A, lda, lwork));
+}
+
+template<>
+void potrf_buffersize<c10::complex<float>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<float>* A, int lda, int* lwork
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCpotrf_bufferSize(
+    handle, uplo, n,
+    reinterpret_cast<cuComplex*>(A),
+    lda, lwork));
+}
+
+template<>
+void potrf_buffersize<c10::complex<double>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<double>* A, int lda, int* lwork
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZpotrf_bufferSize(
+    handle, uplo, n,
+    reinterpret_cast<cuDoubleComplex*>(A),
+    lda, lwork));
 }
 
 
