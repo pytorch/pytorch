@@ -683,6 +683,7 @@ enum IntrinsicsOp {
   kFrac,
   kIsNan,
   kRand, // We need more discussions on this. Should we consider stateful?
+  kMaxIntrinsicsOp,
 };
 
 class Intrinsics : public CallNode<Intrinsics> {
@@ -830,9 +831,9 @@ class Intrinsics : public CallNode<Intrinsics> {
     return op_type_ != kRand;
   }
 
- private:
   TORCH_API static int OpArgCount(IntrinsicsOp op_type);
 
+ private:
   const Expr* DefaultMutator(
       const std::vector<const Expr*>& new_params) const override {
     return new Intrinsics(this->op_type(), new_params);

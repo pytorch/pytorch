@@ -158,6 +158,14 @@ class Var : public ExprNode<Var> {
     return name_hint_;
   }
 
+  void set_name_hint(const std::string& name) {
+    name_hint_ = name;
+  }
+
+  void set_name_hint(std::string&& name) {
+    name_hint_ = name;
+  }
+
   Var(const std::string& name_hint, Dtype dtype)
       : ExprNodeBase(dtype, kPrimitive), name_hint_(name_hint) {}
 

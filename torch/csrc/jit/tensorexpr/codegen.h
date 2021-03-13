@@ -44,6 +44,10 @@ class TORCH_API CodeGen {
     stmt_ = stmt_->accept_mutator(mutator);
   }
 
+  void apply_visitor(IRVisitor* visitor) {
+    stmt_->accept(visitor);
+  }
+
   std::vector<BufferArg>& buffer_args() {
     return buffer_args_;
   }
