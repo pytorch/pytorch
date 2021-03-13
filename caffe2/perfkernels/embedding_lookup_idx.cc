@@ -29,7 +29,7 @@ static bool EmbeddingLookupGenericSlowIdx(
     bool normalize_by_lengths,
     OutType* out) {
   int64_t current = 0;
-  for (int m = 0; m < output_size; ++m) {
+  for (int64_t m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
     if (current != offsets[m] - offsets[0]) {
       return false;
@@ -37,7 +37,7 @@ static bool EmbeddingLookupGenericSlowIdx(
     int64_t start_offset = offsets[m];
     int64_t end_offset = offsets[m + 1];
     int64_t length = end_offset - start_offset;
-    for (int i = start_offset; i < end_offset; ++i) {
+    for (int64_t i = start_offset; i < end_offset; ++i) {
       int64_t idx = indices[current];
       if (idx < 0 || idx >= data_size) {
         return false;
@@ -57,7 +57,7 @@ static bool EmbeddingLookupGenericSlowIdx(
         w = w * scale_bias[2 * indices[current]];
       }
 
-      for (int j = 0; j < block_size; ++j) {
+      for (int64_t j = 0; j < block_size; ++j) {
         out[j] += w * input[block_size * indices[current] + j] + b;
       }
 
@@ -65,7 +65,7 @@ static bool EmbeddingLookupGenericSlowIdx(
     }
     if (normalize_by_lengths && length) {
       float scale = 1.f / length;
-      for (int j = 0; j < block_size; ++j) {
+      for (int64_t j = 0; j < block_size; ++j) {
         out[j] *= scale;
       }
     }

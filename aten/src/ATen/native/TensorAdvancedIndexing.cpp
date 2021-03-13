@@ -60,6 +60,8 @@
 #include <ATen/native/Copy.h>
 #include <ATen/Parallel.h>
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <functional>
 #include <numeric>
@@ -505,7 +507,7 @@ static void check_indexarray_range(
     const IndexType* indices,
     int64_t n,
     IndexType indexing_axis_dim) {
-  for (auto i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     auto idx = indices[i];
     TORCH_CHECK(
         0 <= idx && idx < indexing_axis_dim,

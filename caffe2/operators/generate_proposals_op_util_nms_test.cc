@@ -18,7 +18,7 @@ TEST(UtilsNMSTest, TestNMS) {
   // test utils::nms_cpu without indices input
   auto proposals = input.block(0, 0, input.rows(), 4);
   auto scores = input.col(4);
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (size_t i = 0; i < input_thresh.size(); i++) {
     auto cur_out = utils::nms_cpu(
         proposals, scores, input_thresh[i], true /* legacy_plus_one */);
     EXPECT_EQ(output_gt[i], cur_out);
@@ -31,7 +31,7 @@ TEST(UtilsNMSTest, TestNMS) {
       indices.data(),
       indices.data() + indices.size(),
       [&scores](int lhs, int rhs) { return scores(lhs) > scores(rhs); });
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (size_t i = 0; i < input_thresh.size(); i++) {
     auto cur_out = utils::nms_cpu(
         proposals,
         scores,
@@ -45,7 +45,7 @@ TEST(UtilsNMSTest, TestNMS) {
   // test utils::nms_cpu with topN
   std::vector<int> top_n = {1, 1, 2, 2, 3};
   auto gt_out = output_gt;
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (size_t i = 0; i < input_thresh.size(); i++) {
     auto cur_out = utils::nms_cpu(
         proposals,
         scores,
@@ -149,7 +149,7 @@ TEST(UtilsNMSTest, TestSoftNMS) {
       9.99834776e-01, 9.99737203e-01;
 
   Eigen::ArrayXf out_scores;
-  for (int i = 0; i < method.size(); ++i) {
+  for (size_t i = 0; i < method.size(); ++i) {
     LOG(INFO) << "Testing SoftNMS with method=" << method[i]
               << ", overlap_thresh=" << overlap_thresh[i];
     const auto& expected_scores = scores_gt.col(i);
@@ -254,7 +254,7 @@ TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
   proposals.col(3) = input.col(3) - input.col(1) + 1.0; // h = y2 - y1 + 1
 
   auto scores = input.col(4);
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (size_t i = 0; i < input_thresh.size(); i++) {
     auto cur_out = utils::nms_cpu(
         proposals, scores, input_thresh[i], true /* legacy_plus_one */);
     EXPECT_EQ(output_gt[i], cur_out);
@@ -267,7 +267,7 @@ TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
       indices.data(),
       indices.data() + indices.size(),
       [&scores](int lhs, int rhs) { return scores(lhs) > scores(rhs); });
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (size_t i = 0; i < input_thresh.size(); i++) {
     auto cur_out = utils::nms_cpu(
         proposals,
         scores,
@@ -281,7 +281,7 @@ TEST(UtilsNMSTest, TestNMSRotatedAngle0) {
   // test utils::nms_cpu with topN
   std::vector<int> top_n = {1, 1, 2, 2, 3};
   auto gt_out = output_gt;
-  for (int i = 0; i < input_thresh.size(); i++) {
+  for (size_t i = 0; i < input_thresh.size(); i++) {
     auto cur_out = utils::nms_cpu(
         proposals,
         scores,
@@ -342,7 +342,7 @@ TEST(UtilsNMSTest, TestSoftNMSRotatedAngle0) {
       9.99834776e-01, 9.99737203e-01;
 
   Eigen::ArrayXf out_scores;
-  for (int i = 0; i < method.size(); ++i) {
+  for (size_t i = 0; i < method.size(); ++i) {
     LOG(INFO) << "Testing SoftNMS with method=" << method[i]
               << ", overlap_thresh=" << overlap_thresh[i];
     const auto& expected_scores = scores_gt.col(i);

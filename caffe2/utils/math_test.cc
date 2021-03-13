@@ -456,7 +456,7 @@ class BroadcastTest : public testing::Test {
         Y_.mutable_data<float>(),
         cpu_context_.get());
     ASSERT_EQ(Y_data.size(), Y_.numel());
-    for (int i = 0; i < Y_data.size(); ++i) {
+    for (size_t i = 0; i < Y_data.size(); ++i) {
       EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
     }
   }

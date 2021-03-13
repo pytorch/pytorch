@@ -43,7 +43,7 @@ TEST_F(StringJoinOpTest, testString1DJoin) {
   auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size());
   auto* data = tensor->template mutable_data<std::string>();
-  for (int i = 0; i < input.size(); ++i) {
+  for (size_t i = 0; i < input.size(); ++i) {
     *data++ = input[i];
   }
 
@@ -63,8 +63,8 @@ TEST_F(StringJoinOpTest, testString2DJoin) {
   auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size(), input[0].size());
   auto* data = tensor->template mutable_data<std::string>();
-  for (int i = 0; i < input.size(); ++i) {
-    for (int j = 0; j < input[0].size(); ++j) {
+  for (size_t i = 0; i < input.size(); ++i) {
+    for (size_t j = 0; j < input[0].size(); ++j) {
       *data++ = input[i][j];
     }
   }
@@ -83,7 +83,7 @@ TEST_F(StringJoinOpTest, testFloat1DJoin) {
   auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size());
   auto* data = tensor->template mutable_data<float>();
-  for (int i = 0; i < input.size(); ++i) {
+  for (size_t i = 0; i < input.size(); ++i) {
     *data++ = input[i];
   }
 
@@ -103,8 +103,8 @@ TEST_F(StringJoinOpTest, testFloat2DJoin) {
   auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size(), input[0].size());
   auto* data = tensor->template mutable_data<float>();
-  for (int i = 0; i < input.size(); ++i) {
-    for (int j = 0; j < input[0].size(); ++j) {
+  for (size_t i = 0; i < input.size(); ++i) {
+    for (size_t j = 0; j < input[0].size(); ++j) {
       *data++ = input[i][j];
     }
   }
@@ -123,8 +123,8 @@ TEST_F(StringJoinOpTest, testLong2DJoin) {
   auto* tensor = BlobGetMutableTensor(blob.get(), CPU);
   tensor->Resize(input.size(), input[0].size());
   auto* data = tensor->template mutable_data<int64_t>();
-  for (int i = 0; i < input.size(); ++i) {
-    for (int j = 0; j < input[0].size(); ++j) {
+  for (size_t i = 0; i < input.size(); ++i) {
+    for (size_t j = 0; j < input[0].size(); ++j) {
       *data++ = input[i][j];
     }
   }

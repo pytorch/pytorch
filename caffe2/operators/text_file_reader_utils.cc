@@ -11,7 +11,7 @@ Tokenizer::Tokenizer(const std::vector<char>& delims, char escape)
     : escape_(escape) {
   reset();
   std::memset(delimTable_, 0, sizeof(delimTable_));
-  for (int i = 0; i < delims.size(); ++i) {
+  for (size_t i = 0; i < delims.size(); ++i) {
     delimTable_[(unsigned char)delims.at(i)] = i + 1;
   }
 }

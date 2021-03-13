@@ -6,6 +6,7 @@
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 #include <ATen/Config.h>
 #include <c10/macros/Macros.h>
@@ -488,7 +489,7 @@ static void check_shape_forward(const at::Tensor& input,
              ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
              ", but got bias of size ", bias.sizes(), " instead");
 
-    for (int i = 2; i < k; ++i) {
+    for (const auto i : c10::irange(2, k)) {
       input_shape.push_back(input.size(i) + 2 * padding[i-2]);
       // log new kernel size considering dilation
       kernel_shape.push_back(dilation[i-2] * (weight_sizes[i]-1) + 1);

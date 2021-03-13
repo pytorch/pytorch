@@ -306,7 +306,7 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
   }
 
   float total_sum = 0;
-  for (int i = 0; i < bins_f.size(); ++i) {
+  for (size_t i = 0; i < bins_f.size(); ++i) {
     total_sum += bins_f[i];
   }
   float selected_sum = 0;

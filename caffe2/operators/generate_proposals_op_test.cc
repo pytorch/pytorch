@@ -719,7 +719,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   // Verify that the resulting angles are correct
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.size(0), rois.size(1));
-  for (int i = 0; i < rois.size(0); ++i) {
+  for (size_t i = 0; i < rois.size(0); ++i) {
     EXPECT_LE(std::abs(rois_data(i, 5) - expected_angle), 1e-4);
   }
 }

@@ -27,7 +27,7 @@ static bool EmbeddingLookupGenericSlow(
     bool normalize_by_lengths,
     OutType* out) {
   int64_t current = 0;
-  for (int m = 0; m < output_size; ++m) {
+  for (int64_t m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
     if (current + lengths[m] > index_size) {
       return false;
@@ -52,7 +52,7 @@ static bool EmbeddingLookupGenericSlow(
         w = w * scale_bias[2 * indices[current]];
       }
 
-      for (int j = 0; j < block_size; ++j) {
+      for (int64_t j = 0; j < block_size; ++j) {
         out[j] += w * input[block_size * indices[current] + j] + b;
       }
 
@@ -60,7 +60,7 @@ static bool EmbeddingLookupGenericSlow(
     }
     if (normalize_by_lengths && lengths[m]) {
       float scale = 1.f / lengths[m];
-      for (int j = 0; j < block_size; ++j) {
+      for (int64_t j = 0; j < block_size; ++j) {
         out[j] *= scale;
       }
     }

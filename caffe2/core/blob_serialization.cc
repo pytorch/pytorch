@@ -379,7 +379,7 @@ void TensorSerializer::Serialize(
     case TensorProto_DataType_STRING: {
       proto.mutable_string_data()->Reserve(chunkSize);
       const string* content = input.template data<string>();
-      for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
+      for (size_t i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
         proto.add_string_data(content[i]);
       }
       break;
@@ -426,7 +426,7 @@ void TensorSerializer::Serialize(
       proto.mutable_string_data()->Reserve(chunkSize);
       if (chunkSize > 0) {
         const char* raw_data = static_cast<const char*>(input.raw_data());
-        for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
+        for (size_t i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
           proto.add_string_data(SerializeBlob(
               raw_data + i * input.itemsize(), input.dtype(), ""));
         }

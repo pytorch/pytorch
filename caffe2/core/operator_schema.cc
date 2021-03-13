@@ -256,7 +256,7 @@ OpSchema& OpSchema::IdenticalTypeAndShapeOfMultipleInputs(
   return TensorInferenceFunction(
       [indices](const OperatorDef&, const vector<TensorShape>& input_types) {
         vector<TensorShape> out(indices.size());
-        for (int i = 0; i < indices.size(); i++) {
+        for (size_t i = 0; i < indices.size(); i++) {
           out[i] = input_types[indices.at(i)];
         }
         return out;

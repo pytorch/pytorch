@@ -12,6 +12,8 @@
 #include <ATen/native/TensorDimApply.h>
 #include <ATen/native/SharedReduceOps.h>
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <functional>
 #include <limits>
@@ -273,7 +275,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
   Tensor grad_input = at::zeros(input.sizes(), grad.options());
   Tensor prods_from_k_plus_1;
   Tensor omitted_products;
-  for (int k = 0; k < dim_size; ++k) {
+  for (const auto k : c10::irange(dim_size)) {
     if (k == 0) {
       prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
       omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);

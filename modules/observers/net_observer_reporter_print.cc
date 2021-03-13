@@ -97,7 +97,7 @@ static std::string get_tensor_shapes(PerformanceInformation p) {
   std::stringstream shape_stream;
   if (!p.tensor_shapes.empty()) {
     shape_stream << "[";
-    for (int i = 0; i < p.tensor_shapes.size(); i++) {
+    for (size_t i = 0; i < p.tensor_shapes.size(); i++) {
       shape_stream << "[";
       for (int j = 0; j < p.tensor_shapes[i].dims_size(); j++) {
         shape_stream << p.tensor_shapes[i].dims(j) << ", ";
@@ -117,7 +117,7 @@ static std::string get_op_args(PerformanceInformation p) {
   if (!p.args.empty()) {
     std::stringstream args;
     args << "[";
-    for (int i = 0; i < p.args.size(); i++) {
+    for (size_t i = 0; i < p.args.size(); i++) {
       args << "{" << p.args[i].name() << ": ";
       if (p.args[i].has_i()) {
         args << p.args[i].i();

@@ -80,7 +80,7 @@ void fp32_to_bfp14(const float* source, size_t size, float* dest) {
 
 void fp32_to_bfp16_scalar(const float* source, size_t size, float* dest) {
   constexpr int mask = 0xFFFF0000;
-  for (auto i = 0; i < size; i++) {
+  for (size_t i = 0; i < size; i++) {
     *(int*)(dest + i) = *(int*)(source + i) & mask;
   }
 }

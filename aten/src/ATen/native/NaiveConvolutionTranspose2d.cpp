@@ -5,6 +5,8 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/im2col.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 
@@ -253,7 +255,7 @@ void slow_conv_transpose2d_out_cpu_template(
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
       input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
         // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           // Helpers
           Tensor input_n;
           Tensor output_n;
@@ -448,7 +450,7 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
         Tensor grad_output_n = Tensor();
 
         // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           // Matrix mulitply per sample:
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
@@ -639,7 +641,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
         scalar_t scale = static_cast<scalar_t>(scale_);
 
         // For each elt in batch, do:
-        for (int elt = 0; elt < batch_size; elt++) {
+        for (const auto elt : c10::irange(batch_size)) {
           // Matrix mulitply per output:
           grad_output_n = grad_output.select(0, elt);
 

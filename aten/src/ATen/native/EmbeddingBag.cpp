@@ -5,6 +5,8 @@
 
 #include <ATen/native/CPUBlas.h>
 
+#include <c10/util/irange.h>
+
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #else
@@ -401,11 +403,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
     auto weight_stride1 = weight.stride(1);
     auto output_stride = output.stride(0);
 
-    for (int i = 0; i < numIndices; ++i) {
+    for (const auto i : c10::irange(numIndices)) {
       auto bag = offset2bag_data[i];
       auto word_idx = indices_data[i];
 
-      for (int dim = 0; dim < featureSize; dim++) {
+      for (const auto dim : c10::irange(featureSize)) {
         auto& current_item = output_data[output_stride * bag + dim];
         auto weight_item =
             weight_data[weight_stride0 * word_idx + dim * weight_stride1];
@@ -670,7 +672,7 @@ static std::vector<index_t> compute_counts(
     index_t* indices_data,
     int64_t indices_length) {
   std::vector<index_t> counts(num_weights, 0);
-  for (int i = 0; i < indices_length; i++) {
+  for (const auto i : c10::irange(indices_length)) {
     counts[indices_data[i]]++;
   }
   return counts;
