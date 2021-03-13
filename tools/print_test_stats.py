@@ -14,7 +14,7 @@ from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Set, Tuple, cast)
-from xml.dom import minidom
+from xml.dom import minidom  # type: ignore[import]
 
 import requests
 from typing_extensions import TypedDict
