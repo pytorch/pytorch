@@ -248,10 +248,15 @@ void TCPStoreDaemon::waitHandler(int socket) {
     tcputil::sendValue<WaitResponseType>(
         socket, WaitResponseType::STOP_WAITING);
   } else {
+    int numKeysToAwait = 0;
     for (auto& key : keys) {
-      waitingSockets_[key].push_back(socket);
+      // Only count keys that have not already been set
+      if (tcpStore_.find(key) == tcpStore_.end()) {
+        waitingSockets_[key].push_back(socket);
+        numKeysToAwait++;
+      }
     }
-    keysAwaited_[socket] = keys.size();
+    keysAwaited_[socket] = numKeysToAwait;
   }
 }
 
