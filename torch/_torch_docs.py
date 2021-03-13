@@ -7784,7 +7784,7 @@ Returns a new tensor with the signs (definition below) of the elements of :attr:
 
 .. math::
     \text{out}_{i} = \begin{cases}
-                    0 & |\text{{input}}_i| \\
+                    0 & |\text{{input}}_i| == 0 \\
                     \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|} & \text{otherwise}
                     \end{cases}
 
