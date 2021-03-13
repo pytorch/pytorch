@@ -2274,12 +2274,13 @@ class TestReductions(TestCase):
         # where it should only fail if the dimension being reduced has size 0.
         for name, fn in [('median', torch.median), ('nanmedian', torch.nanmedian)]:
             ident_err = 'Expected reduction dim'
+            error_msg = f"test function: {name}"
             self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
             self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1, keepdim=True))
-            self.assertEqual(fn(x, dim=0)[0].shape, (shape[1], shape[2]))
-            self.assertEqual(fn(x, dim=0, keepdim=True)[0].shape, (1, shape[1], shape[2]))
-            self.assertEqual(fn(x, dim=2)[0].shape, (shape[0], shape[1]))
-            self.assertEqual(fn(x, dim=2, keepdim=True)[0].shape, (shape[0], shape[1], 1))
+            self.assertEqual(fn(x, dim=0)[0].shape, (shape[1], shape[2]), msg=error_msg)
+            self.assertEqual(fn(x, dim=0, keepdim=True)[0].shape, (1, shape[1], shape[2]), msg=error_msg)
+            self.assertEqual(fn(x, dim=2)[0].shape, (shape[0], shape[1]), msg=error_msg)
+            self.assertEqual(fn(x, dim=2, keepdim=True)[0].shape, (shape[0], shape[1], 1), msg=error_msg)
 
         for item in fns_to_test:
             name, fn, identity = item

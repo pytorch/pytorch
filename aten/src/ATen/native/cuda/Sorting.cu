@@ -14,7 +14,6 @@
 
 #include <cassert>
 #include <cstdlib>
-#include <iostream>
 
 namespace at {
 namespace native {
