@@ -1436,7 +1436,7 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
     int_alpha, float_alpha, complex_alpha = 2, 0.1, 1 + 0.6j
 
     if variant == 'tensor':
-        samples = (
+        samples = (  # type: ignore
             SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)))),
             SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)))),
             SampleInput((_make_tensor_helper((S,)), _make_tensor_helper((S, S)))),
@@ -1458,12 +1458,10 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
         samples += tuple(_samples_with_alpha_helper(args, alphas))  # type: ignore
     elif variant == 'scalar':
         # Scalar Other
-        samples = (  # type: ignore
-            SampleInput((_make_tensor_helper((S, S)), 0.5)),
-            SampleInput((_make_tensor_helper(()), 0.5)),
-            SampleInput((_make_tensor_helper((S, S)), 1.5j)),
-            SampleInput((_make_tensor_helper(()), 1.5j)),
-        )
+        samples = (SampleInput((_make_tensor_helper((S, S)), 0.5)),
+                   SampleInput((_make_tensor_helper(()), 0.5)),
+                   SampleInput((_make_tensor_helper((S, S)), 1.5j)),
+                   SampleInput((_make_tensor_helper(()), 1.5j)),)  # type: ignore
 
         scalar_args = [(_make_tensor_helper((S, S)), 0.5), (_make_tensor_helper(()), 0.5),
                        (_make_tensor_helper((S, S)), 2.7j), (_make_tensor_helper(()), 2.7j)]  # type: ignore
