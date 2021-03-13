@@ -945,7 +945,6 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
   } else {
     auto typePtr = ctx->srcFutures.get(0)->elementType();
     for (const auto i : c10::irange(ctx->srcFutures.size())) {
-      TORCH_CHECK(i == 0 || *ctx->srcFutures.get(i)->elementType() == *typePtr);
 
       auto fut = ctx->srcFutures.get(i);
       std::function<void()> func = [ctx, fut]() {
