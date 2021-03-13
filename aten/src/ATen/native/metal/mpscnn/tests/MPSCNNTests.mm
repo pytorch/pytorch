@@ -440,6 +440,47 @@ bool test_mul_broadcast2() {
   });
 }
 
+bool test_div() {
+    __block std::vector<int64_t> x{1, 3, 192, 192};
+    return TEST(x, __PRETTY_FUNCTION__, ^bool {
+      auto X1 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto X2 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto Y1 = at::div(X1, X2);
+      auto MX1 = X1.metal();
+      auto MX2 = X2.metal();
+      auto Y2 = at::div(MX1, MX2).cpu();
+      return almostEqual(Y1, Y2);
+    });
+}
+
+bool test_div_broadcast() {
+    __block std::vector<int64_t> x1{4, 3, 192, 192};
+    __block std::vector<int64_t> x2{4, 3, 1, 1};
+    return TEST(x1, __PRETTY_FUNCTION__, ^bool {
+      auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto Y1 = at::div(X1, X2);
+      auto MX1 = X1.metal();
+      auto MX2 = X2.metal();
+      auto Y2 = at::div(MX1, MX2).cpu();
+      return almostEqual(Y1, Y2);
+    });
+}
+
+bool test_div_broadcast2() {
+    __block std::vector<int64_t> x2{1, 3, 192, 1};
+    __block std::vector<int64_t> x1{1, 3, 192, 192};
+    return TEST(x1, __PRETTY_FUNCTION__, ^bool {
+      auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+      auto Y1 = at::div(X1, X2);
+      auto MX1 = X1.metal();
+      auto MX2 = X2.metal();
+      auto Y2 = at::div(MX1, MX2).cpu();
+      return almostEqual(Y1, Y2);
+    });
+}
+
 bool test_t() {
   bool result = true;
   for (int i = 0; i < ITER_COUNT; ++i) {

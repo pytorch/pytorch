@@ -120,6 +120,20 @@ kernel void elementwise_mul(texture2d_array<half, access::read> in0[[texture(0)]
     elementwise_broadcast(in0, in1, out, gid, Mul);
 }
 
+kernel void elementwise_div_nonarray(texture2d<half, access::read> in0[[texture(0)]],
+                                     texture2d<half, access::read> in1[[texture(1)]],
+                                     texture2d<half, access::write> out[[texture(2)]],
+                                     ushort2 gid[[thread_position_in_grid]]) {
+    elementwise_broadcast_nonarry(in0, in1, out, gid, Div);
+}
+
+kernel void elementwise_div(texture2d_array<half, access::read> in0[[texture(0)]],
+                            texture2d_array<half, access::read> in1[[texture(1)]],
+                            texture2d_array<half, access::write> out[[texture(2)]],
+                            ushort3 gid[[thread_position_in_grid]]) {
+    elementwise_broadcast(in0, in1, out, gid, Div);
+}
+
 kernel void copy_nchw_to_metal(constant float* in[[buffer(0)]],
                                texture2d_array<half, access::write> out[[texture(0)]],
                                ushort3 gid[[thread_position_in_grid]]) {
