@@ -411,7 +411,7 @@ def gradcheck(
                     return fail_test('Numerical gradient for function expected to be zero')
         return True
 
-    for i, o in enumerate(func_out):
+    for i, o in enumerate(_as_tuple(func_out)):
         if not (torch.is_tensor(o) and o.requires_grad):
             continue
 
