@@ -2942,9 +2942,9 @@ torch.cuda.synchronize()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_capture_simple(self):
-        s1 = torch.cuda.Stream()
+        s = torch.cuda.Stream()
 
-        with torch.cuda.stream(s1):
+        with torch.cuda.stream(s):
             a = torch.full((1000,), 1, device="cuda")
             g = torch.cuda._Graph()
             g.capture_begin()
@@ -2952,7 +2952,7 @@ torch.cuda.synchronize()
             for _ in range(10):
                 b = b + 1
             g.capture_end()
-        torch.cuda.current_stream().wait_stream(s1)
+        torch.cuda.current_stream().wait_stream(s)
 
         g.replay()
 
@@ -3117,10 +3117,17 @@ torch.cuda.synchronize()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_two_successive(self):
+        torch.cuda.empty_cache()
+
         size = 1000
         kSmallBuffer = 2097152
 
-        torch.cuda.empty_cache()
+        def func_with_temps(t, val):
+            x = t.clone() + val
+            y = t.clone() + val
+            return x + y
+
+        s = torch.cuda.Stream()
 
         for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
             g0 = torch.cuda._Graph()
@@ -3128,23 +3135,21 @@ torch.cuda.synchronize()
 
             a = torch.ones((size,), device="cuda")
 
-            def func_with_temps(t, val):
-                x = t.clone() + val
-                y = t.clone() + val
-                return x + y
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
+                g0.capture_begin(*g0_args)
+                b = a.clone()
+                for _ in range(5):
+                    b = func_with_temps(b, 1)
+                g0.capture_end()
 
-            g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
-            g0.capture_begin(*g0_args)
-            b = a.clone()
-            for _ in range(5):
-                b = func_with_temps(b, 1)
-            g0.capture_end()
-
-            g1_args = (g0.pool(),) if share_mem == "via pool()" else g0_args
-            g1.capture_begin(*g1_args)
-            for _ in range(5):
-                b = func_with_temps(b, 1)
-            g1.capture_end()
+                g1_args = (g0.pool(),) if share_mem == "via pool()" else g0_args
+                g1.capture_begin(*g1_args)
+                for _ in range(5):
+                    b = func_with_temps(b, 1)
+                g1.capture_end()
+            torch.cuda.current_stream().wait_stream(s)
 
             # mixes unrelated eager ops with replays
             c = a.clone()
@@ -3166,7 +3171,9 @@ torch.cuda.synchronize()
             else:
                 reserved_no_sharing = torch.cuda.memory_stats()["reserved_bytes.all.current"]
 
-            del a, b, g0, g1
+            del a, b, c, g0, g1
+            # Tensors used across streams (a and b) were held until just now, so no need to call record_stream on them.
+            torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
     @unittest.skipIf((not TEST_CUDA) or
@@ -3182,6 +3189,8 @@ torch.cuda.synchronize()
             y = t.clone() + val
             return x + y
 
+        s = torch.cuda.Stream()
+
         for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
             g0 = torch.cuda._Graph()
             g1 = torch.cuda._Graph()
@@ -3191,22 +3200,24 @@ torch.cuda.synchronize()
 
             a = torch.ones((size,), device="cuda")
 
-            g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
-            g0.capture_begin(*g0_args)
-            b = a.clone()
-            for _ in range(5):
-                b = func_with_temps(b, 1)
-            g0.capture_end()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
+                g0.capture_begin(*g0_args)
+                b = a.clone()
+                for _ in range(5):
+                    b = func_with_temps(b, 1)
+                g0.capture_end()
 
-            g1_args = (g0.pool(),) if share_mem == "via pool()" else g0_args
-            g1.capture_begin(*g1_args)
-            c = a.clone()
-            for _ in range(5):
-                c = func_with_temps(c, 2)
-            g1.capture_end()
+                g1_args = (g0.pool(),) if share_mem == "via pool()" else g0_args
+                g1.capture_begin(*g1_args)
+                c = a.clone()
+                for _ in range(5):
+                    c = func_with_temps(c, 2)
+                g1.capture_end()
 
-            s0.wait_stream(torch.cuda.current_stream())
-            s1.wait_stream(torch.cuda.current_stream())
+            s0.wait_stream(s)
+            s1.wait_stream(s)
             with torch.cuda.stream(s0):
                 g0.replay()
             with torch.cuda.stream(s1):
@@ -3224,6 +3235,8 @@ torch.cuda.synchronize()
                 self.assertEqual(c.sum().item(), size * 156)
 
             del a, b, c, g0, g1
+            # Tensors used across streams (a, b, c) were held until just now, so no need to call record_stream on them.
+            torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
     @unittest.skipIf((not TEST_CUDA) or
@@ -3234,6 +3247,8 @@ torch.cuda.synchronize()
 
         size = 1000
 
+        s = torch.cuda.Stream()
+
         for share_mem in ("Don't share", "via pool()", "via graph_pool_handle()"):
             a = torch.ones((size,), device="cuda")
 
@@ -3241,23 +3256,26 @@ torch.cuda.synchronize()
             g1 = torch.cuda._Graph()
             g2 = torch.cuda._Graph()
 
-            g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
-            g0.capture_begin(*g0_args)
-            b = a.clone()
-            c = b + 1
-            d = b + 2
-            g0.capture_end()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                g0_args = (torch.cuda._graph_pool_handle(),) if share_mem == "via graph_pool_handle()" else ()
+                g0.capture_begin(*g0_args)
+                b = a.clone()
+                c = b + 1
+                d = b + 2
+                g0.capture_end()
 
-            args = (g0.pool(),) if share_mem == "via pool()" else g0_args
+                args = (g0.pool(),) if share_mem == "via pool()" else g0_args
 
-            g1.capture_begin(*args)
-            e = c + 3
-            del c
-            g1.capture_end()
+                g1.capture_begin(*args)
+                e = c + 3
+                del c
+                g1.capture_end()
 
-            g2.capture_begin(*args)
-            f = d + 4
-            g2.capture_end()
+                g2.capture_begin(*args)
+                f = d + 4
+                g2.capture_end()
+            torch.cuda.current_stream().wait_stream(s)
 
             # Tests that replaying in capture order is valid
             g0.replay()
@@ -3278,6 +3296,8 @@ torch.cuda.synchronize()
             self.assertEqual(f.sum().item(), size * 7)
 
             del a, b, d, e, f, g0, g1, g2
+            # Tensors used across streams (a, e, f) were held until just now, so no need to call record_stream on them.
+            torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
     @unittest.skipIf((not TEST_CUDA) or
@@ -3310,6 +3330,8 @@ torch.cuda.synchronize()
         gc.collect()
         torch.cuda.empty_cache()
 
+        s = torch.cuda.Stream()
+
         for (numel,
              delta_cudaMallocs,
              delta_cudaMalloc_bytes,
@@ -3327,11 +3349,14 @@ torch.cuda.synchronize()
             precapture_stats = torch.cuda.memory_stats()
 
             g = torch.cuda._Graph()
-            g.capture_begin()
-            b = a.clone()
-            for _ in range(5):
-                b = b.clone() + 1
-            g.capture_end()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                g.capture_begin()
+                b = a.clone()
+                for _ in range(5):
+                    b = b.clone() + 1
+                g.capture_end()
+            torch.cuda.current_stream().wait_stream(s)
 
             gc.collect()
 
@@ -3372,8 +3397,9 @@ torch.cuda.synchronize()
 
             # del a, b before the next case is essential, otherwise overwriting a and b in the next case
             # can throw off its allocation/deallocation counts.
-            del a
-            del b
+            del a, b
+            # Tensors used across streams (a and b) were held until just now, so no need to call record_stream on them.
+            torch.cuda.synchronize()
             torch.cuda.empty_cache()
 
     def test_batch_norm_gather_stats(self):
