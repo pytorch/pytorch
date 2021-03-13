@@ -9,7 +9,6 @@
 #import <Foundation/Foundation.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
-#include <ATen/CPUFunctions.h>
 #include <sstream>
 
 #define ITER_COUNT 5
