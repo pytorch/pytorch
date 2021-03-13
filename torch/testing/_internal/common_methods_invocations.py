@@ -1430,16 +1430,33 @@ def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
     return samples
 
 
+def reference_sign(x):
+    if x.dtype == np.bool_:
+        # `np.sign` doesn't support `bool`.
+        # >>> np.sign(True)
+        # ufunc 'sign' did not contain a loop
+        # with signature matching types dtype('bool') -> dtype('bool')
+        return np.sign(x, dtype=np.uint8)
+    return np.sign(x)
+
+
 def reference_sgn(x):
+    # NumPy doesn't have an equivalent to `torch.sgn` when the dtype is complex.
+    # For complex inputs, `np.sign` returns sign(x.real) + 0j if x.real != 0 else sign(x.imag) + 0j.
+    # while `torch.sgn` returns, 0 if abs(input) == 0 else input/abs(input)
     if x.dtype not in [np.complex64, np.complex128]:
-        return np.sign(x)
+        return reference_sign(x)
 
     out = (x / np.abs(x))
     if out.ndim == 0:
+        # Handle x == 0 case
         if (x == 0):
+            # Can't assign to np.complex object
+            # So make a new one.
             return np.array(complex(0, 0), dtype=x.dtype)
         return out
 
+    # Handle x == 0 case
     mask = (x == 0)
     out[mask] = complex(0, 0)
     return out
@@ -2289,7 +2306,7 @@ op_db: List[OpInfo] = [
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
     UnaryUfuncInfo('sign',
-                   ref=np.sign,
+                   ref=reference_sign,
                    dtypes=all_types_and(torch.bfloat16, torch.half),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16, torch.half),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
@@ -2297,11 +2314,6 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/41245
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 dtypes=[torch.bfloat16, torch.float16, torch.float32, torch.float64]),
-                       # >>> np.sign(True)
-                       # ufunc 'sign' did not contain a loop
-                       # with signature matching types dtype('bool') -> dtype('bool')
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                dtypes=[torch.bool]),
                    )),
     UnaryUfuncInfo('sgn',
                    ref=reference_sgn,
@@ -2312,19 +2324,9 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/issues/41245
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 dtypes=[torch.bfloat16, torch.float16, torch.float32, torch.float64]),
-                       # >>> np.sign(True)
-                       # ufunc 'sign' did not contain a loop
-                       # with signature matching types dtype('bool') -> dtype('bool')
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                dtypes=[torch.bool]),
+                       # Reference: https://github.com/pytorch/pytorch/issues/53958
                        # Test fails in comparison on Nan as the `equal_nan` is True for
-                       # comparing the tensor.
-                       # Vectorized and Non-Vectorized path produce different output.
-                       # Note: Non-Vectorized path is consistent with the hand-rolled reference
-                       # t = torch.tensor([complex(0, float('inf'))] * 4)
-                       # tensor([nan+nanj, nan+nanj, nan+nanj, nan+nanj])
-                       # t = torch.tensor([complex(0, float('inf'))] * 9)
-                       # tensor([0.+nanj, 0.+nanj, 0.+nanj, 0.+nanj, 0.+nanj, 0.+nanj, 0.+nanj, 0.+nanj, nan+nanj])
+                       # comparing the CPU tensors.
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.complex64, torch.complex128]),
                        # Reference: https://github.com/pytorch/pytorch/issues/48486
