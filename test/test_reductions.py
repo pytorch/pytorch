@@ -2183,6 +2183,7 @@ class TestReductions(TestCase):
     def test_tensor_compare_ops_empty(self, device):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
+        empty_input = torch.randn((), device=device)
         test_functions = [
             ('amax', torch.amax, {}),
             ('amin', torch.amin, {}),
@@ -2204,7 +2205,8 @@ class TestReductions(TestCase):
             self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=-1, keepdim=True), msg=error_msg)
 
             # Check if function raises error on specified zero'd dimension as reduction dim.
-            self.assertRaisesRegex(RuntimeError, "Expected reduction dim", lambda: fn(master_input, dim=1), msg=error_msg)
+            self.assertRaisesRegex(RuntimeError, "Expected reduction dim", lambda: fn(master_input, dim=1))
+            self.assertRaisesRegex(IndexError, "Dimension out of range", lambda: fn(empty_input, dim=1))
 
     def test_tensor_reduce_ops_empty(self, device):
         shape = (2, 0, 4)
@@ -2243,51 +2245,9 @@ class TestReductions(TestCase):
                 # ignore if there is no allreduce.
                 self.assertTrue('dim' in str(err))
 
-    def test_reduction_empty(self, device):
-        fns_to_test = [
-            # name, function, identity
-            ('max', torch.max, None),
-            ('amax', torch.amax, None),
-            ('argmax', torch.argmax, None),
-            ('min', torch.min, None),
-            ('amin', torch.amin, None),
-            ('argmin', torch.argmin, None),
-            ('mode', torch.mode, None),
-            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs), None),
-            ('prod', torch.prod, 1.),
-            ('sum', torch.sum, 0.),
-            ('norm', torch.norm, 0.),
-            ('mean', torch.mean, nan),
-            ('var', torch.var, nan),
-            ('std', torch.std, nan),
-            ('logsumexp', torch.logsumexp, -inf),
-        ]
-
+    def test_reduction_empty_any_all(self, device):
         shape = (2, 0, 4)
         x = torch.randn(shape, device=device)
-
-        for fn in [torch.max, torch.min]:
-            ident_err = 'Expected reduction dim'
-            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x))
-
-        # median and nanmedian have been updated to follow the new convention for empty tensors
-        # where it should only fail if the dimension being reduced has size 0.
-        for name, fn in [('median', torch.median), ('nanmedian', torch.nanmedian)]:
-            ident_err = 'Expected reduction dim'
-            error_msg = f"test function: {name}"
-            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
-            self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1, keepdim=True))
-            self.assertEqual(fn(x, dim=0)[0].shape, (shape[1], shape[2]), msg=error_msg)
-            self.assertEqual(fn(x, dim=0, keepdim=True)[0].shape, (1, shape[1], shape[2]), msg=error_msg)
-            self.assertEqual(fn(x, dim=2)[0].shape, (shape[0], shape[1]), msg=error_msg)
-            self.assertEqual(fn(x, dim=2, keepdim=True)[0].shape, (shape[0], shape[1], 1), msg=error_msg)
-
-        for item in fns_to_test:
-            name, fn, identity = item
-            if identity is None:
-                ident_err = 'Expected reduction dim'
-                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1))
-                self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=1, keepdim=True))
 
         for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
                                                   include_bool=True, include_complex=True):
@@ -2312,7 +2272,6 @@ class TestReductions(TestCase):
             self.assertEqual(torch.ones((2, 4), device=device, dtype=out_dtype), xb.all(1))
             self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=out_dtype), xb.all(1, keepdim=True))
             self.assertEqual(torch.ones((), device=device, dtype=out_dtype), xb.all())
-
 
 instantiate_device_type_tests(TestReductions, globals())
 
