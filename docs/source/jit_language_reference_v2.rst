@@ -24,7 +24,7 @@
 
     torch.jit.trace = trace_wrapper
 
-.. _language-reference:
+.. _language-reference-v2:
 
 TorchScript Language Reference
 ==============================

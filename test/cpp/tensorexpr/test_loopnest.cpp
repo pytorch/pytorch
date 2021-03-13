@@ -3755,6 +3755,28 @@ TEST(LoopNest, CompoundTensorSimple) {
   assertAllEqual(a_data, a_ref);
 }
 
+TEST(LoopNest, InlineConstantIndex) {
+  KernelScope kernel_scope;
+  const int N = 10;
+  Placeholder x_buf("a", kFloat, {1, N, 1});
+  Tensor* y = Compute(
+      "f",
+      {{1, "m"}, {N, "n"}, {1, "o"}},
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
+        return x_buf.load(m, n, o);
+      });
+  Tensor* z = Compute(
+      "f",
+      {{1, "m"}, {N, "n"}, {1, "o"}},
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
+        return y->call(m, n, o);
+      });
+
+  LoopNest l({z});
+  l.simplify();
+  ASSERT_TRUE(l.computeInline(y->buf()));
+}
+
 TEST(LoopNest, CompoundTensorUsed) {
   KernelScope kernel_scope;
 
@@ -3849,8 +3871,27 @@ static Stmt* splitTailReorder(Tensor* b) {
   LoopNest nest({b});
   auto loops = nest.getLoopStmtsFor(b);
   nest.splitWithTail(loops[0], kVectorWidth, &outer, &inner, &tail);
-  loops = nest.getLoopStmtsFor(b);
-  nest.reorderAxis(loops[1], loops[2]);
+  // Now the loopnests will look like:
+  //
+  // for (int n_outer = 0; ...
+  //   for (int n_inner = 0; ...
+  //     b[n_outer * 8 + n_inner] = float(0);
+  //     for (int m = 0; ...
+  //       b[n_outer * 8 + n_inner] = ReduceOp(...);
+  //
+  // for (int n_tail = 0; ...
+  //   b[n_tail + ((100 - 0) / 8) * 8] = float(0);
+  //   for (int m = 0; ...
+  //     b[n_tail + ((100 - 0) / 8) * 8] = ReduceOp(...);
+  //
+  // Since there are 4 writes to b, we will get 4 loopnests from the
+  // call to `getAllLoopNestsWritingToBuf` below.
+  //
+  // Write #2: "b[n_outer * 8 + n_inner] = ReduceOp(...)"
+  // Loopnest #2: {n_outer, n_inner, m};
+  // We will have to reorder n_inner and m.
+  auto loopnests = nest.getAllLoopNestsWritingToBuf(b->buf());
+  nest.reorderAxis(loopnests[1][1], loopnests[1][2]);
   nest.prepareForCodegen();
   return nest.root_stmt();
 }
@@ -3894,14 +3935,47 @@ TEST(LoopNest, ColReduceSplitTailEvenReorder) {
   constexpr int M = 76, N = 128;
   auto p = colReduce(M, N);
   Stmt* s = splitTailReorder(p.second);
+
+  std::ostringstream oss;
+  oss << *s;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int n_outer
+# CHECK-NEXT: for (int n_inner
+# CHECK-NEXT: b[
+# CHECK: for (int m
+# CHECK-NEXT: for (int n_inner
+# CHECK-NEXT: b[
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
   checkColReduce(s, *p.first, p.second);
 }
 
-TEST(LoopNest, DISABLED_ColReduceSplitTailUnevenReorder) {
+TEST(LoopNest, ColReduceSplitTailUnevenReorder) {
   KernelScope kernel_scope;
   constexpr int M = 76, N = 100;
   auto p = colReduce(M, N);
   Stmt* s = splitTailReorder(p.second);
+
+  std::ostringstream oss;
+  oss << *s;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int n_outer
+# CHECK-NEXT: for (int n_inner
+# CHECK-NEXT: b[
+# CHECK: for (int m
+# CHECK-NEXT: for (int n_inner
+# CHECK-NEXT: b[
+# CHECK: for (int n_tail
+# CHECK-NEXT: b[
+# CHECK-NEXT: for (int m
+# CHECK-NEXT: b[
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
   checkColReduce(s, *p.first, p.second);
 }
 

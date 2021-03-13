@@ -330,8 +330,6 @@ filegroup(
         "aten/src/TH/THTensorMath.cpp",
         "aten/src/TH/THTensorMoreMath.cpp",
         "aten/src/TH/THTensorRandom.cpp",
-        "aten/src/TH/THVector.cpp",
-        "aten/src/TH/vector/AVX.cpp",
     ],
 )
 

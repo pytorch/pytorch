@@ -1889,19 +1889,15 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
   // any further.
   while (!mods.empty() && repeat) {
     repeat = false;
-    for (std::vector<const Term*>::iterator mit = mods.end() - 1;
-         mit != mods.begin() - 1;
-         mit--) {
-      const Term* m = *mit;
+    for (int i = mods.size() - 1; i >= 0; i--) {
+      const Term* m = mods[i];
       const Mod* mod = dynamic_cast<const Mod*>(m->variables()[0]);
       CHECK(mod);
       const Expr* mod_lhs = IRSimplifier::simplify(mod->lhs());
       const Expr* mod_rhs = IRSimplifier::simplify(mod->rhs());
       bool merged = false;
-      for (std::vector<const Term*>::iterator mrit = mod_rounds.end() - 1;
-           mrit != mod_rounds.begin() - 1;
-           mrit--) {
-        const Term* mr = *mrit;
+      for (int j = mod_rounds.size() - 1; j >= 0; j--) {
+        const Term* mr = mod_rounds[j];
         auto a = isModRound(mr);
         CHECK(a);
         const ModRound* mod_round = dynamic_cast<const ModRound*>(*a);
@@ -1927,8 +1923,8 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
           merged = true;
           repeat = true;
           didAnything = true;
-          mods.erase(mit);
-          mod_rounds.erase(mrit);
+          mods.erase(mods.begin() + i);
+          mod_rounds.erase(mod_rounds.begin() + j);
           break;
         }
       }
@@ -1937,10 +1933,8 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
         continue;
       }
 
-      for (std::vector<const Term*>::iterator rit = rounds.end() - 1;
-           rit != rounds.begin() - 1;
-           rit--) {
-        const Term* r = *rit;
+      for (int k = rounds.size() - 1; k >= 0; k--) {
+        const Term* r = rounds[k];
         const RoundOff* roundoff =
             dynamic_cast<const RoundOff*>(r->variables()[0]);
         CHECK(roundoff);
@@ -1953,18 +1947,17 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
                 evaluateOp(new Sub(r->scalar(), m->scalar())), 0)) {
           continue;
         }
-        const Expr* round_lhs =
-            IRSimplifier::simplify(new Mul(r->scalar(), roundoff->lhs()));
+        const Expr* round_lhs = IRSimplifier::simplify(roundoff->lhs());
         const Expr* round_rhs = IRSimplifier::simplify(roundoff->rhs());
         // Valid optimization if LHS and RHS are equal for both.
         if (hasher.hash(round_lhs) == hasher.hash(mod_lhs) &&
             hasher.hash(round_rhs) == hasher.hash(mod_rhs)) {
-          const Term* merged_r = new Term(hasher, new IntImm(1), round_lhs);
+          const Term* merged_r = new Term(hasher, r->scalar(), round_lhs);
           others.push_back(merged_r);
           merged = true;
           didAnything = true;
-          mods.erase(mit);
-          rounds.erase(rit);
+          mods.erase(mods.begin() + i);
+          rounds.erase(rounds.begin() + k);
           break;
         }
       }
@@ -1972,7 +1965,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
       // If we didn't merge, move out the Mod.
       if (!merged) {
         others.push_back(m);
-        mods.erase(mit);
+        mods.erase(mods.begin() + i);
       }
 
     } // end of for-loop
