@@ -15,7 +15,8 @@ from typing import List, Tuple, Dict, Any
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes, floating_types, floating_types_and,
      floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and, all_types_and, all_types_and_complex)
+     all_types_and_complex_and, all_types_and, all_types_and_complex,
+     integral_types_and)
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
@@ -1689,6 +1690,13 @@ op_db: List[OpInfo] = [
            supports_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_broadcast_to),
+    UnaryUfuncInfo('bitwise_not',
+                   ref=np.bitwise_not,
+                   dtypes=integral_types_and(torch.bool),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None,
+                   dtypesIfROCM=None,
+                   supports_autograd=False),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
                    dtypes=floating_types_and(torch.half),
