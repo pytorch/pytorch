@@ -15,7 +15,8 @@ from typing import List, Tuple, Dict, Any
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and,
      floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and, all_types_and, all_types_and_complex)
+     all_types_and_complex_and, all_types_and, all_types_and_complex, all_types,
+     integral_types_and, integral_types)
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
@@ -1079,6 +1080,17 @@ class TriangularOpInfo(OpInfo):
             out.append(SampleInput(a, kwargs=dict(upper=True)))
         return out
 
+def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False):
+    from torch.testing._internal.common_utils import random_well_conditioned_matrix
+    out = []
+    for batch in ((), (3,), (3, 3)):
+        shape = batch + (3, 3)
+        # NOTE: inputs are not marked with `requires_grad` since
+        # linalg_lstsq is not differentiable
+        a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
+        b = make_tensor(shape, device, dtype, low=None, high=None)
+        out.append(SampleInput((a, b)))
+    return out
 
 def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False):
     """
@@ -2013,6 +2025,13 @@ op_db: List[OpInfo] = [
            supports_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_broadcast_to),
+    UnaryUfuncInfo('bitwise_not',
+                   ref=np.bitwise_not,
+                   dtypes=integral_types_and(torch.bool),
+                   dtypesIfCPU=None,
+                   dtypesIfCUDA=None,
+                   dtypesIfROCM=None,
+                   supports_autograd=False),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
                    dtypes=floating_types_and(torch.half),
@@ -2331,6 +2350,21 @@ op_db: List[OpInfo] = [
            decorators=[_wrap_warn_once("floor_divide is deprecated, and will be removed")],
            supports_autograd=False,
            ),
+    OpInfo('linalg.lstsq',
+           aten_name='linalg_lstsq',
+           op=torch.linalg.lstsq,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_out=False,
+           sample_inputs_func=sample_inputs_linalg_lstsq,
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           skips=(
+               # skip because `linalg_lstsq` is not differentiable
+               SkipInfo('TestGradients', 'test_fn_grad'),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           )),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
