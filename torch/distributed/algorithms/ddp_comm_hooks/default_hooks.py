@@ -73,9 +73,12 @@ def fp16_compress_wrapper(
     This wrapper casts the input gradient tensors of a given DDP communication hook to half-precision
     floating point format (``torch.float16``), and casts the resulting tensors of the given hook back to
     the input data type, such as ``float32``.
+
+    Therefore, ``fp16_compress_hook`` is equivalent to ``fp16_compress_wrapper(allreduce_hook)``.
+
     Example::
-    >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1, start_powerSGD_iter=10)
-    >>> ddp_model.register_comm_hook(state, fp16_compress_wrapper(powerSGD_hook))
+        >>> state = PowerSGDState(process_group=process_group, matrix_approximation_rank=1, start_powerSGD_iter=10)
+        >>> ddp_model.register_comm_hook(state, fp16_compress_wrapper(powerSGD_hook))
     """
 
     def fp16_compress_wrapper_hook(hook_state, bucket: dist.GradBucket) -> torch.futures.Future:
