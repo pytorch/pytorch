@@ -1670,6 +1670,54 @@ bool LoopNest::hasLoopBodyFor(Tensor* t) const {
   return getLoopBodyFor(t) != nullptr;
 }
 
+For* LoopNest::getParentLoop(const Stmt* st) {
+  if (st == nullptr) {
+    return nullptr;
+  }
+  auto par = st->get_parent();
+  if (auto f = dynamic_cast<For*>(par)) {
+    return f;
+  }
+  return getParentLoop(par);
+}
+
+std::vector<For*> LoopNest::getEnclosingLoopNest(const Stmt* st) {
+  std::vector<For*> loops;
+  auto f = getParentLoop(st);
+  while (f) {
+    loops.push_back(f);
+    f = getParentLoop(f);
+  }
+  std::reverse(loops.begin(), loops.end());
+  return loops;
+}
+
+std::vector<const Stmt*> LoopNest::getAllWritesToBuf(const Buf* buf) const {
+  return WritesToBuf::find(root_stmt_, buf);
+}
+
+std::vector<For*> LoopNest::getAllInnermostLoopsWritingToBuf(
+    const Buf* buf) const {
+  auto writes = getAllWritesToBuf(buf);
+  std::vector<For*> innermost_loops;
+  innermost_loops.reserve(writes.size());
+  for (auto w : writes) {
+    innermost_loops.push_back(LoopNest::getParentLoop(w));
+  }
+  return innermost_loops;
+}
+
+std::vector<std::vector<For*>> LoopNest::getAllLoopNestsWritingToBuf(
+    const Buf* buf) const {
+  auto writes = getAllWritesToBuf(buf);
+  std::vector<std::vector<For*>> loopnests;
+  loopnests.reserve(writes.size());
+  for (auto w : writes) {
+    loopnests.emplace_back(LoopNest::getEnclosingLoopNest(w));
+  }
+  return loopnests;
+}
+
 Stmt* LoopNest::simplify() {
   root_stmt_ = IRSimplifier::simplify(root_stmt_);
   return root_stmt_;
