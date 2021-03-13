@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 from threading import Lock
+from threading import Event
 import time
 import unittest
 from collections import namedtuple
@@ -3033,6 +3034,34 @@ class RpcTest(RpcAgentTestFixture):
             with _wait_all():
                 raise_func()
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+
+    timed_out_rpc_event = None
+
+    @staticmethod
+    def timed_out_rpc():
+        RpcTest.timed_out_rpc_event.wait()
+
+    @dist_init
+    def test_wait_all_exit_early(self):
+        # Initialize the event in the subprocess.
+        RpcTest.timed_out_rpc_event = Event()
+
+        # Wait for all processes to initialize event.
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        dist.barrier()
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        fut1 = rpc.rpc_async(dst, RpcTest.timed_out_rpc)
+        fut2 = rpc.rpc_async(dst, raise_func)
+
+        # We should receive the error from fut2
+        with self.assertRaisesRegex(ValueError, expected_err):
+            torch.futures.wait_all([fut1, fut2])
+
+        # Unblock RPC thread for fut1
+        RpcTest.timed_out_rpc_event.set()
+
 
     @dist_init
     def test_function_not_on_callee(self):
