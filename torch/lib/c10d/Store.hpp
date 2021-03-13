@@ -17,7 +17,7 @@ class Store : public torch::CustomClassHolder {
   static constexpr std::chrono::milliseconds kNoTimeout =
       std::chrono::milliseconds::zero();
 
-  Store() {}
+  Store() : timeout_(kDefaultTimeout) {}
 
   explicit Store(const std::chrono::milliseconds& timeout)
       : timeout_(timeout) {}
