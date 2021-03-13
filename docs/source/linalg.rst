@@ -31,3 +31,4 @@ Functions
 .. autofunction:: tensorsolve
 .. autofunction:: inv
 .. autofunction:: qr
+.. autofunction:: lstsq
