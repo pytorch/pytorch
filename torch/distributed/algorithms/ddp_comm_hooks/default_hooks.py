@@ -1,6 +1,7 @@
+from typing import Any, Callable
+
 import torch
 import torch.distributed as dist
-from typing import Any, Callable
 
 
 def _allreduce_fut(
@@ -66,6 +67,7 @@ def fp16_compress_hook(
 
     return fut.then(decompress)
 
+
 def fp16_compress_wrapper(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future]
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future]:
@@ -81,7 +83,9 @@ def fp16_compress_wrapper(
         >>> ddp_model.register_comm_hook(state, fp16_compress_wrapper(powerSGD_hook))
     """
 
-    def fp16_compress_wrapper_hook(hook_state, bucket: dist.GradBucket) -> torch.futures.Future:
+    def fp16_compress_wrapper_hook(
+        hook_state, bucket: dist.GradBucket
+    ) -> torch.futures.Future:
         # Overwrite bucket tensors to the fp16 cast tensors.
         bucket.set_tensor(bucket.get_tensors()[0].to(torch.float16), 0)
 
