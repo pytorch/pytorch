@@ -22,7 +22,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
-     onlyCUDA, skipMeta)
+     onlyCUDA, skipMeta, skipCUDAIfNoCusolver)
 from torch.testing import floating_and_complex_types, floating_types, all_types
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
 
@@ -117,6 +117,8 @@ class TestLinalg(TestCase):
         run_test_case(zero_strided, b)
         run_test_case(a, zero_strided)
 
+    # https://github.com/pytorch/pytorch/issues/53976 tracks ROCm skip
+    @skipCUDAIfRocm
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -467,25 +469,16 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float64, torch.complex128)
-    def test_cholesky_autograd(self, device, dtype):
-        def func(root):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
-            return torch.linalg.cholesky(x)
-
+    def test_cholesky_hermitian_grad(self, device, dtype):
+        # Check that the gradient is Hermitian (or symmetric)
         def run_test(shape):
-            root = torch.rand(*shape, dtype=dtype, device=device, requires_grad=True)
-            root = root + torch.eye(shape[-1], dtype=dtype, device=device)
-
-            gradcheck(func, root)
-            gradgradcheck(func, root)
-
             root = torch.rand(*shape, dtype=dtype, device=device)
             root = torch.matmul(root, root.transpose(-1, -2).conj())
             root.requires_grad_()
             chol = torch.linalg.cholesky(root).sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())
 
-        shapes = ((3, 3), (4, 3, 2, 2))
+        shapes = ((3, 3), (1, 1, 3, 3))
         for shape in shapes:
             run_test(shape)
 
@@ -909,35 +902,16 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float64, torch.complex128)
-    def test_eigh_autograd(self, device, dtype):
+    def test_eigh_hermitian_grad(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
-        def func(x, uplo):
-            x = 0.5 * (x + x.conj().transpose(-2, -1))
-            return torch.linalg.eigh(x, UPLO=uplo)
-
-        def func_grad_w(x, uplo):
-            return func(x, uplo)[0]
-
-        def func_grad_v(x, uplo):
-            # gauge invariant loss function
-            return abs(func(x, uplo)[1])
-
         def run_test(dims, uplo):
-            x = torch.randn(*dims, dtype=dtype, device=device, requires_grad=True)
-
-            gradcheck(func_grad_w, [x, uplo])
-            gradgradcheck(func_grad_w, [x, uplo])
-
-            gradcheck(func_grad_v, [x, uplo])
-            gradgradcheck(func_grad_v, [x, uplo])
-
             x = random_hermitian_matrix(dims[-1], *dims[:-2]).requires_grad_()
             w, v = torch.linalg.eigh(x)
             (w.sum() + abs(v).sum()).backward()
             self.assertEqual(x.grad, x.grad.conj().transpose(-1, -2))  # Check the gradient is Hermitian
 
-        for dims, uplo in itertools.product([(3, 3), (2, 3, 3)], ["L", "U"]):
+        for dims, uplo in itertools.product([(3, 3), (1, 1, 3, 3)], ["L", "U"]):
             run_test(dims, uplo)
 
     @skipCUDAIfNoMagma
@@ -2630,6 +2604,7 @@ class TestLinalg(TestCase):
 
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-7, torch.complex128: 1e-7})
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinv(self, device, dtype):
@@ -4471,7 +4446,7 @@ class TestLinalg(TestCase):
             self.assertEqual(res, expected, msg="renorm failed for {}-norm".format(p))
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_orgqr(self, device, dtype):
@@ -4524,7 +4499,7 @@ class TestLinalg(TestCase):
             run_test(shape)
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCUDAIfRocm
     def test_orgqr_errors_and_warnings(self, device):
         test_cases = [
@@ -5603,6 +5578,7 @@ else:
 
     @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinverse(self, device, dtype):
@@ -7022,6 +6998,7 @@ else:
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, atol=1e-8, rtol=0)
 
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     def test_lapack_empty(self, device):
         # FIXME: these are just a selection of LAPACK functions -- we need a general strategy here.
