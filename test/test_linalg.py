@@ -117,6 +117,8 @@ class TestLinalg(TestCase):
         run_test_case(zero_strided, b)
         run_test_case(a, zero_strided)
 
+    # https://github.com/pytorch/pytorch/issues/53976 tracks ROCm skip
+    @skipCUDAIfRocm
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -6903,8 +6905,6 @@ else:
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
-    # https://github.com/pytorch/pytorch/issues/53976 tracks ROCm skip
-    @skipCUDAIfRocm
     def test_lstsq(self, device, dtype):
         def _test_underdetermined(a, b, expectedNorm):
             # underdetermined systems are only supported on CPU
