@@ -229,6 +229,10 @@ Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> 
   return at::native::templates::uniform_impl_<UniformStub, Generator>(self, from, to, gen);
 }
 
+Tensor& uniform_meta_(Tensor& self, double from, double to, c10::optional<Generator> gen) {
+  return self;
+}
+
 // ==================================================== Normal ========================================================
 
 template<typename RNG>
@@ -240,6 +244,11 @@ struct NormalStub {
 
 Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl_<NormalStub, Generator>(self, mean, std, gen);
+}
+
+Tensor& normal_meta_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);  // TODO: dedupe
+  return self;
 }
 
 Tensor& normal_out(Tensor& output, const Tensor& mean, double std, c10::optional<Generator> gen) {
@@ -295,6 +304,18 @@ Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<
 
 Tensor& random_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
   return random_(self, 0, to, gen);
+}
+
+Tensor& random_meta_(Tensor& self, c10::optional<Generator> gen) {
+  return self;
+}
+
+Tensor& random_meta_(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> gen) {
+  return self;
+}
+
+Tensor& random_meta_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
+  return self;
 }
 
 // ====================================================================================================================

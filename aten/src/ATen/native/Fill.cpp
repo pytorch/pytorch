@@ -114,5 +114,9 @@ Tensor& zero_(Tensor &self) {
   return self.fill_(0);
 }
 
+Tensor& zero_meta_(Tensor& self) {
+  return self;
+}
+
 } // namespace native
 } // namespace at

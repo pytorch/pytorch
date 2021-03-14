@@ -4250,6 +4250,7 @@
   variants: method, function
   dispatch:
     CPU, CUDA: zero_
+    Meta: zero_meta_
     SparseCPU, SparseCUDA: zero_sparse_
     MkldnnCPU: mkldnn_zero_
 
@@ -5323,21 +5324,25 @@
   variants: method
   dispatch:
     CPU, CUDA: random_
+    Meta: random_meta_
 
 - func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU, CUDA: random_
+    Meta: random_meta_
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU, CUDA: random_
+    Meta: random_meta_
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU, CUDA: uniform_
+    Meta: uniform_meta_
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
@@ -6571,6 +6576,7 @@
   variants: method
   dispatch:
     CPU, CUDA: normal_
+    Meta: normal_meta_
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
