@@ -23,6 +23,9 @@ void lapackEig(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *w,
 template<class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
+template <class scalar_t>
+void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t* a, int lda, scalar_t* b, int ldb, int* info);
+
 #endif
 
 using cholesky_inverse_fn = Tensor& (*)(Tensor& /*result*/, Tensor& /*infos*/, bool /*upper*/);
@@ -100,5 +103,15 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau, Tensor& infos, int64_t 
 
 using orgqr_fn = Tensor& (*)(Tensor& /*result*/, const Tensor& /*tau*/, Tensor& /*infos*/, int64_t /*n_columns*/);
 DECLARE_DISPATCH(orgqr_fn, orgqr_stub);
+
+using triangular_solve_fn = void (*)(
+    Tensor& /*A*/,
+    Tensor& /*b*/,
+    Tensor& /*infos*/,
+    bool /*upper*/,
+    bool /*transpose*/,
+    bool /*conjugate_transpose*/,
+    bool /*unitriangular*/);
+DECLARE_DISPATCH(triangular_solve_fn, triangular_solve_stub);
 
 }} // namespace at::native
