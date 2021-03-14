@@ -1,5 +1,4 @@
 #include <c10/util/intrusive_ptr.h>
-
 #include <benchmark/benchmark.h>
 #include <memory>
 
