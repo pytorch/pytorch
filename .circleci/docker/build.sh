@@ -148,8 +148,8 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.0
+  pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.1
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=7
@@ -189,7 +189,7 @@ case "$image" in
     PROTOBUF=yes
     ANDROID=yes
     ANDROID_NDK_VERSION=r19c
-    GRADLE_VERSION=4.10.3
+    GRADLE_VERSION=6.8.3
     CMAKE_VERSION=3.7.0
     NINJA_VERSION=1.9.0
     ;;
@@ -206,7 +206,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    VULKAN_SDK_VERSION=1.2.148.0
+    VULKAN_SDK_VERSION=1.2.162.1
     SWIFTSHADER=yes
     ;;
   pytorch-linux-bionic-py3.8-gcc9)
@@ -234,48 +234,9 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9)
-    CUDA_VERSION=11.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
-  pytorch-linux-bionic-cuda11.0-cudnn8-py3.8-gcc9)
-    CUDA_VERSION=11.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
-  pytorch-linux-bionic-cuda11.2-cudnn8-py3.6-gcc9)
-    CUDA_VERSION=11.2.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
-  pytorch-linux-bionic-cuda11.2-cudnn8-py3.8-gcc9)
-    CUDA_VERSION=11.2.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
   pytorch-linux-bionic-rocm3.9-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -283,6 +244,7 @@ case "$image" in
     ;;
   pytorch-linux-bionic-rocm3.10-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -290,6 +252,7 @@ case "$image" in
     ;;
   pytorch-linux-bionic-rocm4.0.1-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes

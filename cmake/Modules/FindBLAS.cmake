@@ -154,23 +154,15 @@ endif()
 
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "open")))
-  FIND_PACKAGE(OpenBLAS)
-  if(OpenBLAS_FOUND)
-    SET(BLAS_INFO "open")
-    SET(BLAS_LIBRARIES ${OpenBLAS_LIB})
-    SET(BLAS_INCLUDE_DIR ${OpenBLAS_INCLUDE_DIR})
-    SET(BLAS_VERSION ${OpenBLAS_VERSION})
-  else()
-    check_fortran_libraries(
-    BLAS_LIBRARIES
-    BLAS
-    sgemm
-    ""
-    "openblas")
-    if(BLAS_LIBRARIES)
-      set(BLAS_INFO "open")
-    endif(BLAS_LIBRARIES)
-  endif()
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "openblas")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "open")
+  endif(BLAS_LIBRARIES)
 endif()
 
 if((NOT BLAS_LIBRARIES)

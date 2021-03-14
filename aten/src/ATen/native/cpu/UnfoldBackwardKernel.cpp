@@ -39,7 +39,7 @@
 // grad_in[...,i_in_dim,...,i_in_last_dim], where
 // i_in_dim is in [left_idx_fold, right_idx_fold],
 // i_in_last_dim = i_out_dim - i_in_dim * step,
-// left_idx_fold = (i_out_dim - size) / step 
+// left_idx_fold = (i_out_dim - size) / step
 //  if i_out_dim in [left_idx_fold * step, left_idx_fold * step + size)
 //  else (i_out_dim - size) / step + 1,
 // right_idx_fold = i_out_dim / step.

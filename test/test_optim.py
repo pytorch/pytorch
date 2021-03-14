@@ -305,8 +305,6 @@ class TestOptim(TestCase):
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
             )
 
-    @skipIfRocm
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
     def test_multi_tensor_optimizers(self):
         if not torch.cuda.is_available():
             return
@@ -380,7 +378,6 @@ class TestOptim(TestCase):
             for p1, p2 in zip(res[0], res[1]):
                 self.assertEqual(p1, p2)
 
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
             self._test_basic_cases(
@@ -426,7 +423,6 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
     def test_adamw(self):
         for optimizer in [optim.AdamW, optim_mt.AdamW]:
             self._test_basic_cases(
@@ -461,7 +457,6 @@ class TestOptim(TestCase):
 
     # ROCm precision is too low to pass this test
     @skipIfRocm
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
     def test_adadelta(self):
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
@@ -538,7 +533,6 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
 
-    @unittest.skipIf(True, "test does not pass for CUDA 11.2")
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:
             self._test_basic_cases(
@@ -637,6 +631,26 @@ class TestOptim(TestCase):
             optim.SGD([param, param], lr=0.1)
             self.assertEqual(len(w), 1)
             self.assertIn('a parameter group with duplicate parameters', str(w[0].message))
+
+    def test_no_grad_for_all_params(self):
+        param = torch.randn(5, 5, requires_grad=False)
+
+        optimizer_list = [
+            optim.Adadelta,
+            optim.AdamW,
+            optim.Adam,
+            optim.Adagrad,
+            optim.Adamax,
+            optim.RMSprop,
+            optim.SGD,
+            optim.SparseAdam,
+            optim.ASGD,
+        ]
+        for optim_ctr in optimizer_list:
+            opt = optim_ctr([param, param], lr=0.1)
+            # make sure step can still run even if
+            # all params have no grad
+            opt.step()
 
 
 class SchedulerTestNet(torch.nn.Module):

@@ -181,6 +181,12 @@ class C10_API TypeError : public Error {
   using Error::Error;
 };
 
+// Used in ATen for functionality that is not implemented.  These turn into
+// NotImplementedError when they cross to Python.
+class C10_API NotImplementedError : public Error {
+  using Error::Error;
+};
+
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
 class C10_API EnforceFiniteError : public Error {
@@ -196,20 +202,6 @@ class C10_API OnnxfiBackendSystemError : public Error {
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
 C10_API std::string GetExceptionString(const std::exception& e);
-
-namespace detail {
-
-// Return x if it is non-empty; otherwise return y.
-inline std::string if_empty_then(const std::string& x, const std::string& y) {
-  if (x.empty()) {
-    return y;
-  } else {
-    return x;
-  }
-}
-
-}
-
 
 } // namespace c10
 
@@ -292,18 +284,21 @@ inline std::string if_empty_then(const std::string& x, const std::string& y) {
         #cond "INTERNAL ASSERT FAILED at" C10_STRINGIZE(__FILE__)); \
   }
 #else
-#define TORCH_INTERNAL_ASSERT(cond, ...)                        \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                         \
-    ::c10::detail::torchCheckFail(                              \
-        __func__, __FILE__, static_cast<uint32_t>(__LINE__),    \
-        ::c10::str(                                             \
-            #cond " INTERNAL ASSERT FAILED at "                 \
-            C10_STRINGIZE(__FILE__)                             \
-            ":"                                                 \
-            C10_STRINGIZE(__LINE__)                             \
-            ", please report a bug to PyTorch. ",               \
-            ::c10::str(__VA_ARGS__)                             \
-        ));                                                     \
+// It would be nice if we could build a combined string literal out of
+// the TORCH_INTERNAL_ASSERT prefix and a user-provided string literal
+// as the first argument, but there doesn't seem to be any good way to
+// do that while still supporting having a first argument that isn't a
+// string literal.
+#define TORCH_INTERNAL_ASSERT(cond, ...)                     \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                      \
+    ::c10::detail::torchInternalAssertFail(                  \
+        __func__, __FILE__, static_cast<uint32_t>(__LINE__), \
+        #cond "INTERNAL ASSERT FAILED at "                   \
+        C10_STRINGIZE(__FILE__)                              \
+        ":"                                                  \
+        C10_STRINGIZE(__LINE__)                              \
+        ", please report a bug to PyTorch. ",                \
+        c10::str(__VA_ARGS__));                              \
   }
 #endif
 
@@ -341,13 +336,27 @@ inline std::string if_empty_then(const std::string& x, const std::string& y) {
     );                                                     \
   }
 #else
-#define TORCH_CHECK_MSG(cond, type, ...)                              \
-  ::c10::detail::if_empty_then(                                       \
-      ::c10::str(__VA_ARGS__),                                        \
-      "Expected " #cond " to be true, but got false.  "               \
-      "(Could this error message be improved?  If so, "               \
-      "please report an enhancement request to PyTorch.)"             \
-  )
+namespace c10 {
+namespace detail {
+template<typename... Args>
+decltype(auto) torchCheckMsgImpl(const char* msg, const Args&... args) {
+  return ::c10::str(args...);
+}
+inline C10_API const char* torchCheckMsgImpl(const char* msg) {
+  return msg;
+}
+// If there is just 1 user-provided C-string argument, use it.
+inline C10_API const char* torchCheckMsgImpl(const char* msg, const char* args) {
+  return args;
+}
+} // namespace detail
+} // namespace c10
+
+#define TORCH_CHECK_MSG(cond, type, ...)                                \
+  (::c10::detail::torchCheckMsgImpl(                                    \
+      "Expected " #cond " to be true, but got false.  "                 \
+      "(Could this error message be improved?  If so, "                 \
+      "please report an enhancement request to PyTorch.)", ##__VA_ARGS__))
 #define TORCH_CHECK_WITH_MSG(error_t, cond, type, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
     C10_THROW_ERROR(error_t,                                          \
@@ -362,15 +371,35 @@ namespace detail {
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg);
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const char* msg);
 
-} // namespace detail
-} // namespace 10
+// The c10::str() call that creates userMsg can have 1 of 3 return
+// types depending on the number and types of arguments passed to
+// TORCH_INTERNAL_ASSERT.  0 arguments will get a
+// CompileTimeEmptyString, 1 const char * will be passed straight
+// through, and anything else will get converted to std::string.
+[[noreturn]] C10_API void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, const char* userMsg);
+[[noreturn]] inline C10_API void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, ::c10::detail::CompileTimeEmptyString userMsg) {
+  torchCheckFail(func, file, line, condMsg);
+}
+[[noreturn]] C10_API void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, const std::string& userMsg);
 
+} // namespace detail
+} // namespace c10
+
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                                          \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
     ::c10::detail::torchCheckFail(                                      \
         __func__, __FILE__, static_cast<uint32_t>(__LINE__),            \
         TORCH_CHECK_MSG(cond, "", __VA_ARGS__));                        \
   }
+#else
+#define TORCH_CHECK(cond, ...)                                          \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                                 \
+    ::c10::detail::torchCheckFail(                                      \
+        __func__, __FILE__, static_cast<uint32_t>(__LINE__),            \
+        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__));                      \
+  }
+#endif
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host code,
 // otherwise does nothing. Supposed to be used in the code shared between host and
@@ -378,7 +407,7 @@ namespace detail {
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...)
 #else
-#define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...) TORCH_CHECK(cond, __VA_ARGS__)
+#define TORCH_CHECK_IF_NOT_ON_CUDA(cond, ...) TORCH_CHECK(cond, ##__VA_ARGS__)
 #endif
 
 // Debug only version of TORCH_INTERNAL_ASSERT. This macro only checks in debug
@@ -409,6 +438,10 @@ namespace detail {
 // Like TORCH_CHECK, but raises TypeErrors instead of Errors.
 #define TORCH_CHECK_TYPE(cond, ...) \
   TORCH_CHECK_WITH_MSG(TypeError, cond, "TYPE", __VA_ARGS__)
+
+// Like TORCH_CHECK, but raises NotImplementedErrors instead of Errors.
+#define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
+  TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
 
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<

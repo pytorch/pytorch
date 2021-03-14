@@ -50,6 +50,7 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
   AT_ASSERT(values_.device() == device());
 
   is_non_overlapping_and_dense_ = false;
+  set_storage_access_should_throw();
 }
 
 IntArrayRef SparseTensorImpl::strides() const {
@@ -76,9 +77,11 @@ bool SparseTensorImpl::has_storage() const {
   return false;
 }
 #endif
-const Storage& SparseTensorImpl::storage() const {
-  AT_ERROR("sparse tensors do not have storage");
+
+const char* SparseTensorImpl::tensorimpl_type_name() const {
+  return "SparseTensorImpl";
 }
+
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
   TORCH_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe ", err_msg_tensor_metadata_change_not_allowed);
 
