@@ -267,7 +267,7 @@ bool TensorImpl::has_storage() const {
 #endif
 
 void TensorImpl::throw_storage_access_error() const {
-  TORCH_CHECK(false, "Cannot access storage of ", tensorimpl_type_name());
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
 bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
