@@ -399,11 +399,13 @@ std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
       weight_zp[i] = (uint8_t)(weight_contig.q_zero_point() + 128);
     }
   } else if (qtype == at::kPerChannelAffine) {
+    TORCH_CHECK(
+        weight_contig.q_per_channel_zero_points().scalar_type() == at::kLong,
+        "Per channel zero points dtype must be long int.");
+    const int64_t* per_channel_zero_points =
+      weight_contig.q_per_channel_zero_points().data_ptr<int64_t>();
     for (int i = 0; i < num_output_channels; ++i) {
-      weight_zp[i] =
-          (uint8_t)(
-              weight_contig.q_per_channel_zero_points()[i].item<int32_t>() +
-              128);
+      weight_zp[i] = (uint8_t)(per_channel_zero_points[i] + 128);
     }
   } else {
     TORCH_INTERNAL_ASSERT("Unsupported quantization scheme.");
@@ -418,9 +420,13 @@ std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
       weight_scales_data[i] = weight_contig.q_scale();
     }
   } else if (qtype == at::kPerChannelAffine) {
+    TORCH_CHECK(
+        weight_contig.q_per_channel_scales().scalar_type() == at::kDouble,
+        "Per channel scales dtype must be double.");
+    const double* per_channel_scales =
+      weight_contig.q_per_channel_scales().data_ptr<double>();
     for (int i = 0; i < num_output_channels; ++i) {
-      weight_scales_data[i] =
-        weight_contig.q_per_channel_scales()[i].item<float>();
+      weight_scales_data[i] = static_cast<float>(per_channel_scales[i]);
     }
   } else {
     TORCH_INTERNAL_ASSERT("Unsupported quantization scheme.");
