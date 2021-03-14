@@ -1272,7 +1272,8 @@ AT_ERROR("solve: MAGMA library not found in "
 std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& A) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  auto infos = at::empty({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
+  // infos might not get filled for empty inputs therefore at::zeros is used instead of at::empty
+  auto infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cuda", [&]{
     apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });

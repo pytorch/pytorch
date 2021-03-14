@@ -38,6 +38,7 @@ Particularly, :class:`torch.distributed.GradBucket` represents a bucket of gradi
 .. autofunction:: torch.distributed.GradBucket.get_tensors
 .. autofunction:: torch.distributed.GradBucket.get_per_parameter_tensors
 .. autofunction:: torch.distributed.GradBucket.is_the_last_bucket_to_allreduce
+.. autofunction:: torch.distributed.GradBucket.set_tensor
 
 Default Communication Hooks
 ---------------------------

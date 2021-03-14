@@ -1,5 +1,5 @@
 #include <ATen/Utils.h>
-#include <ATen/cuda/CUDAConfig.h>
+#include <aten/src/ATen/cuda/CUDAConfig.h>
 
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/constants.h>
