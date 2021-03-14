@@ -65,7 +65,6 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("noarch", [XImportant(True)]),
                 ]),
-                XImportant("3.6"),
             ]),
             ("9", [
                 ("3.6", [

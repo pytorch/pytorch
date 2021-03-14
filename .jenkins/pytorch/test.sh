@@ -125,6 +125,12 @@ test_python_shard2() {
   assert_git_not_dirty
 }
 
+test_python() {
+  time python test/run_test.py --exclude-jit-executor --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
+}
+
+
 test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
@@ -433,8 +439,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4
   test_cpp_extensions
 else
   install_torchvision
-  test_python_shard1
-  test_python_shard2
+  test_python
   test_aten
   test_vec256
   test_libtorch
