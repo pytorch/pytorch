@@ -241,6 +241,20 @@ class StoreTestBase(object):
     def test_set_get(self):
         self._test_set_get(self._create_store())
 
+    def test_compare_set(self):
+        store = self._create_store()
+        missing_key_result = store.compare_set("key0", "wrong_old_value", "new_value0")
+        self.assertEqual(b"wrong_old_value", missing_key_result)
+
+        store.set("key0", "value0")
+        self.assertEqual(b"value0", store.get("key0"))
+        old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
+        self.assertEqual(b"value0", old_value_result)
+        self.assertEqual(b"value0", store.get("key0"))
+        new_value_result = store.compare_set("key0", "value0", "new_value0")
+        self.assertEqual(b"new_value0", new_value_result)
+        self.assertEqual(b"new_value0", store.get("key0"))
+
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -260,6 +274,15 @@ class FileStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+@skip_if_win32()
+class HashStoreTest(TestCase, StoreTestBase):
+    def setUp(self):
+        super(HashStoreTest, self).setUp()
+
+    def _create_store(self):
+        store = c10d.HashStore()
+        store.set_timeout(timedelta(seconds=300))
+        return store
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -342,20 +365,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
-
-    def test_compare_set(self):
-        store = self._create_store()
-        missing_key_result = store.compare_set("key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"wrong_old_value", missing_key_result)
-
-        store.set("key0", "value0")
-        self.assertEqual(b"value0", store.get("key0"))
-        old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"value0", old_value_result)
-        self.assertEqual(b"value0", store.get("key0"))
-        new_value_result = store.compare_set("key0", "value0", "new_value0")
-        self.assertEqual(b"new_value0", new_value_result)
-        self.assertEqual(b"new_value0", store.get("key0"))
 
     def _create_client(self, index, addr, port, world_size, messages):
         try:
@@ -3839,6 +3848,28 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             # check whether the grads are equal to what DDP without hook would return.
             self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
+    def _test_fp16_compress_wrapper(self, gradient_as_bucket_view=False):
+        """
+        This unit test verifies whether wrapping the ALLREDUCE and POWER_SGD hooks with
+        the FP16_WRAPPER can give the same result as when there is no hook registered.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        powerSGD_state = powerSGD.PowerSGDState(process_group=process_group)
+
+        hook_args = [(powerSGD.powerSGD_hook, powerSGD_state), (default.allreduce_hook, process_group)]
+
+        for hook, state in hook_args:
+            gpu_model = self._gpu_model_with_ddp_comm_hook(
+                process_group,
+                default.fp16_compress_wrapper(hook),
+                gradient_as_bucket_view,
+                state
+            )
+
+            # check whether the grads are equal to what DDP without hook would return.
+            self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+
     def _test_powerSGD_ddp_comm_hook_nccl(self, gradient_as_bucket_view=False):
         """
         This unit test verifies whether Python DDP communication hook POWER_SGD
@@ -3896,6 +3927,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_fp16_compress_wrapper_nccl(self):
+        self._test_fp16_compress_wrapper()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_builtin_ddp_comm_hooks_nccl(self):
         self._test_builtin_ddp_comm_hooks_nccl()
 
@@ -3932,6 +3968,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_default_ddp_comm_hooks_nccl_is_view(self):
         self._test_default_ddp_comm_hooks_nccl(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_fp16_compress_wrapper_is_view(self):
+        self._test_fp16_compress_wrapper(gradient_as_bucket_view=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
