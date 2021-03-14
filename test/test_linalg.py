@@ -6900,6 +6900,8 @@ else:
         self.assertEqual(b, b_placeholder)
         self.assertEqual(c, c_placeholder)
 
+    # https://github.com/pytorch/pytorch/issues/53976 tracks ROCm skip
+    @skipCUDAIfRocm
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
