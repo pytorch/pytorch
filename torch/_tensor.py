@@ -931,8 +931,8 @@ class Tensor(torch._C._TensorBase):
                 ro.append(i)
 
             return torch.sparse_csr_tensor(torch.tensor(ro, dtype=row_indices.dtype),
-                                           self.indices()[1], self.values(),
-                                           size=self.shape, dtype=self.dtype)
+                                           coalesced_self.indices()[1], coalesced_self.values(),
+                                           size=coalesced_self.shape, dtype=coalesced_self.dtype)
         elif self.is_sparse_csr:
             return self
         else:

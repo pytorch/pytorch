@@ -31,6 +31,8 @@ class TestSparseCSR(TestCase):
         # tests
         self.is_cuda = False
         self.device = 'cpu'
+        self.index_tensor = lambda *args: torch.tensor(*args, dtype=torch.int32)
+        self.value_tensor = lambda *args: torch.tensor(*args, dtype=torch.double)
 
     def test_csr_layout(self):
         self.assertEqual(str(torch.sparse_csr), 'torch.sparse_csr')
@@ -146,13 +148,16 @@ class TestSparseCSR(TestCase):
 
         self.assertEqual(coo_product, csr_product)
 
-        vec = torch.randn((2, 1))
-        coo = torch.sparse_csr_tensor(torch.tensor([0, 2, 4]),
-                                      torch.tensor([0, 1, 0, 1]),
-                                      torch.tensor([1, 2, 3, 4], dtype=torch.double))
+        vec = torch.randn((100, 1))
+        index = self.index_tensor([
+            [1, 0, 35, 14, 39, 6, 71, 66, 40, 27],
+            [92, 31, 62, 50, 22, 65, 89, 74, 56, 34],
+        ])
+        values = self.value_tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+        coo = torch.sparse_coo_tensor(index, values, torch.Size([100, 100]))
         csr = coo.to_sparse_csr()
-        self.assertEqual(coo.matmul(vec), csr.matmul(vec))
 
+        self.assertEqual(coo.matmul(vec), csr.matmul(vec))
 
     def test_mkl_matvec_warnings(self):
         if torch.has_mkl:
