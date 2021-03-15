@@ -40,10 +40,9 @@ struct TORCH_API InferenceMode {
     //     If we don't add InplaceOrView to included set, (*) will skip its as_view
     //     setup entirely, `c` will be a Tensor that is not from Inference mode
     //     but has potentially wrong view metadata which should be forbidden..
-    //     By going through InplaceOrView kernel, we can either
-    //     1. throw an error
-    //     2. setup as_view accordingly to mark `c` as inference tensor as well.
-    //     Currently we take the first approach and throw an error.
+    //     By going through InplaceOrView kernel, we can throw an error since it
+    //     broke our invariant: "Autograd keys must be in excluded set before
+    //     reaching InplaceOrView kernel".
 
     DispatchKeySet included = enabled ? prev_keyset.included_.remove(c10::DispatchKey::InplaceOrView)
          : prev_keyset.included_.add(c10::DispatchKey::InplaceOrView);
@@ -51,18 +50,14 @@ struct TORCH_API InferenceMode {
          : (prev_keyset.excluded_ - c10::autograd_dispatch_keyset);
     c10::impl::PODLocalDispatchKeySet cur_keyset {included.raw_repr(), excluded.raw_repr()};
     c10::impl::_force_tls_local_dispatch_key_set(cur_keyset);
-    set_enabled(enabled);
   }
   ~InferenceMode() {
-    set_enabled(prev_mode);
     c10::impl::_force_tls_local_dispatch_key_set(prev_keyset);
   }
 
   static bool is_enabled();
 
   private:
-    static void set_enabled(bool enabled);
-
     bool prev_mode;
     c10::impl::LocalDispatchKeySet prev_keyset;
 };

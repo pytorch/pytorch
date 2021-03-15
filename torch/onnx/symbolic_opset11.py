@@ -61,13 +61,19 @@ def select(g, self, dim, index):
 
 
 def index_put(g, self, indices_list_value, values, accumulate=False):
-    indices_list = sym_help._unpack_list(indices_list_value)
+    if sym_help._is_packed_list(indices_list_value):
+        indices_list = sym_help._unpack_list(indices_list_value)
+    else:
+        indices_list = [indices_list_value]
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         args = [self] + indices_list + [values, accumulate]
         return g.op("ATen", *args, operator_s='index_put')
 
     from torch.onnx.symbolic_opset9 import add, expand
     accumulate = sym_help._parse_arg(accumulate, 'b')
+
+    if len(indices_list) == 0:
+        return values
 
     index = indices_list[0]
 

@@ -625,9 +625,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
         if get_view_info(fn) is not None or modifies_arguments(f):
-            guard = 'at::AutoNonVariableTypeMode non_var_type_mode(true);'
+            guard = 'at::AutoNonVariableTypeMode guard;'
         else:
-            guard = 'at::AutoDispatchBelowInplaceOrView guard(true);'
+            guard = 'at::AutoDispatchBelowInplaceOrView guard;'
 
         if not modifies_arguments(f) and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
@@ -663,15 +663,12 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             args_with_derivatives=[arg.name for arg in args_with_derivatives]), ]
 
     def emit_assert_no_inference_tensor() -> List[str]:
-        tensor_args = []
-        for arg in f.func.arguments.non_out:
-            if isinstance(arg, TensorOptionsArguments):
-                continue
+        tensor_arg_names = []
+        for arg in f.func.arguments.tensor_args:
             a = arg.argument if isinstance(arg, SelfArgument) else arg
-            if a.type.is_tensor_like():
-                tensor_args.append(a.name)
+            tensor_arg_names.append(a.name)
         return [SETUP_ASSERT_NO_INFERENCE_TENSOR.substitute(
-            tensor_args=tensor_args
+            tensor_args=tensor_arg_names
         )]
 
     def emit_check_inplace() -> List[str]:

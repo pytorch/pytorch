@@ -469,7 +469,7 @@ class StructuredNativeFunctions:
         )
 
 def is_foreach_op(name: str) -> bool:
-    return str(name) in [
+    return str(name) in set([
         '_amp_foreach_non_finite_check_and_unscale_',
         '_foreach_add_.ScalarList',
         '_foreach_sub_.ScalarList',
@@ -515,7 +515,7 @@ def is_foreach_op(name: str) -> bool:
         '_foreach_addcdiv_.Scalar',
         '_foreach_addcmul_.ScalarList',
         '_foreach_addcdiv_.ScalarList',
-        '_foreach_zero_']
+        '_foreach_zero_'])
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
@@ -1092,6 +1092,22 @@ class Arguments:
             ret.append(self.tensor_options)
         ret.extend(self.post_tensor_options_kwarg_only)
         return ret
+
+    # NB: contains out args.
+    @property
+    def tensor_args(self) -> Sequence[Union[Argument, SelfArgument]]:
+        ret: List[Union[Argument, SelfArgument]] = []
+        candidates: List[Union[Argument, SelfArgument]] = []
+        candidates.extend(self.positional)
+        candidates.extend(self.pre_tensor_options_kwarg_only)
+        candidates.extend(self.post_tensor_options_kwarg_only)
+        candidates.extend(self.out)
+        for arg in candidates:
+            a = arg.argument if isinstance(arg, SelfArgument) else arg
+            if a.type.is_tensor_like():
+                ret.append(arg)
+        return ret
+
 
     def signature(self, *, strip_default: bool = False) -> 'Arguments':
         # dataclasses.replace could be used here, but it is less

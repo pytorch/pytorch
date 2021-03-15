@@ -203,7 +203,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradOther,
 });
 
-constexpr DispatchKeySet autograd_dispatch_keyset_with_inplace_view =
+constexpr DispatchKeySet autograd_dispatch_keyset_with_InplaceOrView =
   autograd_dispatch_keyset | DispatchKeySet(DispatchKey::InplaceOrView);
 
 // backend dispatch keys that map to DispatchKey::AutogradOther
@@ -269,12 +269,10 @@ C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 // those cases.
 static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // NB: If you add any extra keys that can be stored in TensorImpl on
-  // top of existing "normal" keys like CPU/CUDA, you need to add it
-  // here.  At the moment, RequiresGrad (replacement for Variable)
-  // is the most likely key that will need this treatment;
-  // After Autograd keys are moved from globally enabled set to TensorImpl,
-  // we should remove all Autograd keys before taking highestPriority.
-  return (s - autograd_dispatch_keyset_with_inplace_view).highestPriorityTypeId();
+  // top of existing "backend" keys like CPU/CUDA, you need to add it
+  // here.  At the moment, autograd keys and InplaceOrView key need this
+  // treatment;
+  return (s - autograd_dispatch_keyset_with_InplaceOrView).highestPriorityTypeId();
 }
 
 template<class T>

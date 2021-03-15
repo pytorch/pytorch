@@ -205,6 +205,7 @@ void retain_grad(Tensor & self) {
 Tensor _fw_primal(const Tensor & self, int64_t level) {
   auto& self_ = unpack(self, "self", 0);
   std::shared_ptr<Identity> grad_fn;
+  assert_no_inference_tensor(self);
   if (compute_requires_grad( self )) {
     grad_fn = std::make_shared<Identity>();
     grad_fn->set_next_edges(collect_next_edges( self ));
@@ -242,6 +243,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   auto& src_ = unpack(src, "src", 1);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
+  assert_no_inference_tensor(self, src);
   requires_grad &= isDifferentiableType(self.scalar_type());
   check_inplace(self, requires_grad);
   if (requires_grad) {
