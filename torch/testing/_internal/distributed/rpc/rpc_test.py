@@ -4697,6 +4697,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
+    @unittest.skip("Disallow new devices in user-function output tensors. See https://github.com/pytorch/pytorch/issues/54017")
     @skip_if_lt_x_gpu(2)
     def test_device_maps_gpu(self):
         options = self.rpc_backend_options
@@ -4783,6 +4784,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             device_map={1 : 1}
         )
 
+    @unittest.skip("Disallow new devices in user-function output tensors. See https://github.com/pytorch/pytorch/issues/54017")
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_default_to_non_default(self):
         self._test_device_maps_gpu(
@@ -4792,6 +4794,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             device_map={0 : 1}
         )
 
+    @unittest.skip("Disallow new devices in user-function output tensors. See https://github.com/pytorch/pytorch/issues/54017")
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_non_default_to_default(self):
         self._test_device_maps_gpu(
