@@ -6,7 +6,8 @@ from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
+from torch.utils.data.typing import _DataPipeAlias
+from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable, _tp_cache, _type_check
 from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)
@@ -173,6 +174,21 @@ class IterableDataset(Dataset[T_co]):
             return cls(source_dp, *args, **kwargs)
         function = functools.partial(class_function, cls_to_register)
         IterableDataset.functions[function_name] = function
+
+    # TODO: Determinin if force all IterableDataset and IterDataPipe with annotation
+    #  def __init_subclass__(cls, *args, **kwargs):
+    #      if not hasattr(cls, 'type'):
+    #          raise TypeError('Class {} needs to be specified with type'.format(cls.__name__))
+
+    @_tp_cache
+    def __class_getitem__(cls, param) -> _DataPipeAlias:
+        # TODO: add global switch for type checking at compile-time
+        if param is None:
+            raise TypeError('None is not valid as type annotation for {}'.format(cls.__name__))
+        if isinstance(param, Sequence):
+            param = Tuple[param]
+        _type_check(param, msg="Annotation for {} must be of type".format(cls.__name__))
+        return _DataPipeAlias(cls, param)
 
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
