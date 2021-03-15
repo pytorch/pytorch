@@ -1,7 +1,11 @@
+from functools import wraps
 from typing import Any, Type
 from torch.utils.data import IterDataPipe
 
 
+######################################################
+# Functional API
+######################################################
 class functional_datapipe(object):
     name: str
 
@@ -15,6 +19,9 @@ class functional_datapipe(object):
         return cls
 
 
+######################################################
+# Determinism
+######################################################
 _determinism: bool = False
 
 
@@ -50,3 +57,14 @@ class non_deterministic(object):
                             "You can turn off determinism for this DataPipe if that is acceptable "
                             "for your application".format(self.cls.__name__))
         return self.cls(*args, **kwargs)  # type: ignore
+
+
+######################################################
+# Determinism
+######################################################
+def force_typing(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        return
+
+    return wrapper

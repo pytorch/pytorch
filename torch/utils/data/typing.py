@@ -38,6 +38,7 @@ class _DataPipeAlias(_GenericAlias, _root=True):  # type: ignore
         super().__init__(origin, params=param, inst=inst, name=name)
         self.datapipe_type = _DataPipeType(param)
         self.datapipe_name = 'DataPipe[' + str(self.datapipe_type) + ']'
+        # MRO -> __origin__
         if self.datapipe_type.fixed:
             self.__origin__ = type(self.datapipe_name, (origin, ),
                                    {'__init_subclass__': _DataPipeAlias.fixed_type_init,
