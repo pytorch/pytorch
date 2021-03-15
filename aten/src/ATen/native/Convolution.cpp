@@ -241,8 +241,8 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
       || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480) // for some case, native is faster
       // OneDNN < 1.8.1 produce incorrect results in this case (see #50042)
       // TODO(VitalyFedyunin): Remove this patch after OneDNN 1.8.1 merged in
-      && !(groups == 24 && weight.size(0) == 24 && weight.size(1) == 1)
-      ); 
+      && !(groups % 24 == 0 && weight.size(0) == groups && weight.size(1) == 1)
+      );
 
 #endif
   return false;
