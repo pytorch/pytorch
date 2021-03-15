@@ -195,7 +195,7 @@ bool is_quantized(Tensor self) {
         #name                                                       \
         " but found ",                                              \
         scalar_type());                                             \
-    return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
+    return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
