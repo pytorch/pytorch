@@ -1075,6 +1075,17 @@ def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False):
         out.append(SampleInput(a))
     return out
 
+def sample_inputs_lu(op_info, device, dtype, requires_grad=False):
+    # not needed once OpInfo tests support Iterables
+    def generate_samples():
+        batch_shapes = ((), (3,), (3, 3))
+        for batch_shape, get_infos in product(batch_shapes, (True, False)):
+            shape = batch_shape + (S, S)
+            input = make_tensor(shape, device, dtype, requires_grad=requires_grad, low=None, high=None)
+            yield SampleInput((input, True, get_infos))
+
+    return list(generate_samples())
+
 
 def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False):
     """
@@ -2073,6 +2084,22 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+    OpInfo('lu',
+           op=torch.lu,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           #check_batched_gradgrad=False,
+           supports_out=False,
+           sample_inputs_func=sample_inputs_lu,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+               # we skip jit tests because lu_backward is impelemented as autograd.Function,
+               # which does not support autograd with scripting
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           )),
     HermitianOpInfo('linalg.cholesky',
                     aten_name='linalg_cholesky',
                     op=torch.linalg.cholesky,
@@ -3699,18 +3726,6 @@ def method_tests():
          'batched_symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
         ('logdet', lambda dtype, device: make_nonzero_det(random_fullrank_matrix_distinct_singular_value(S, 3), 1, 0), NO_ARGS,
          'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (S, S), (True, False), 'square_single_no_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (S, S), (True, True), 'square_single_with_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (3, S, S), (True, False), 'square_batch_no_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (3, S, S), (True, True), 'square_batch_with_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (3, 3, S, S), (True, False), 'square_many_batches_no_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (3, 3, S, S), (True, True), 'square_many_batches_with_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
         ('fill_', (S, S, S), ((),), 'variable'),
