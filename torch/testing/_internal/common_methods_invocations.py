@@ -2062,6 +2062,34 @@ op_db: List[OpInfo] = [
                SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            supports_autograd=False,
            ),
+    UnaryUfuncInfo('frexp',
+                   op=torch.frexp,
+                   ref=np.frexp,
+                   dtypesIfCPU=floating_types_and(torch.half),
+                   dtypesIfCUDA=floating_types_and(torch.half),
+                   # skip testing torch.frexp as it is not supported by ROCm platform yet
+                   decorators=[skipCUDAIfRocm],
+                   test_inplace_grad=False,
+                   supports_out=False,
+                   skips=(
+                       # skips below tests as torch.frexp returns tuple-like (mantissa, exponent) as outputs,
+                       # while theses tests currently requires output to a single tensor.
+                       SkipInfo('TestUnaryUfuncs', 'test_batch_vs_slicing'),
+                       SkipInfo('TestUnaryUfuncs', 'test_contig_vs_every_other'),
+                       SkipInfo('TestUnaryUfuncs', 'test_contig_vs_transposed'),
+                       SkipInfo('TestUnaryUfuncs', 'test_non_contig_expand'),
+                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency'),
+
+                       # skips test_reference_numerics due to error in Windows CI.
+                       # The np.frexp returns exponent as np.intc dtype on Windows platform,
+                       # and np.intc does not have the correspond torch dtype
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                active_if=IS_WINDOWS),
+                   )),
     OpInfo('inverse',
            op=torch.inverse,
            dtypes=floating_and_complex_types(),
