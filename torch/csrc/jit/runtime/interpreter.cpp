@@ -1572,7 +1572,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 c10::Warning::warn(location, msg, /*verbatim=*/true);
               }
             } else {
-              const auto& msg = pop(stack).toStringRef();
+              const auto msg = pop(stack).toStringRef();
               if (need_warn) {
                 TORCH_WARN(msg);
               }
