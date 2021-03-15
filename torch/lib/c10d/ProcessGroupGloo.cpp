@@ -37,6 +37,7 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
 #include <gloo/config.h>
@@ -341,10 +342,10 @@ void initializeStreamsEvents(
     std::vector<at::cuda::CUDAEvent>& events) {
   // Ensure that the tensors in the nested tensor vectors are on the same
   // device.
-  for (auto & tensor : tensors) {
-    auto device_id = tensor[0].device().index();
-    for (size_t j = 1; j < tensor.size(); j++) {
-      if (tensor[j].device().index() != device_id) {
+  for (const auto & tensorgroup : tensors) {
+    const auto device_id = tensorgroup[0].device().index();
+    for (const auto & tensor: tensorgroup) {
+      if (tensor.device().index() != device_id) {
         throw std::runtime_error(
             "tensors in the nested tensor vectors need to "
             "be on the same device");
@@ -1648,9 +1649,9 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     gloo::allgather(opts);
 
     // Unflatten into output tensors.
-    for (auto & output : outputs) {
-      for (size_t j = 0; j < output.size(); j++) {
-        output[j].copy_(flatOutputTensor[j]);
+    for (auto & outputgroup : outputs) {
+      for (const auto j : c10::irange(outputgroup.size())) {
+        outputgroup[j].copy_(flatOutputTensor[j]);
       }
     }
   }
