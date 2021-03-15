@@ -852,7 +852,7 @@ always be real-valued, even if :attr:`input` is complex.
           change in a future PyTorch release.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
-          then the singular values of each matrix in the batch is returned in descending order.
+          then the singular values of each matrix in the batch are returned in descending order.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine ``?gesdd`` (a divide-and-conquer
           algorithm) instead of ``?gesvd`` for speed. Analogously, the SVD on GPU uses the
@@ -860,7 +860,7 @@ always be real-valued, even if :attr:`input` is complex.
           and uses the MAGMA routine ``gesdd`` on earlier versions of CUDA.
 
 .. note:: The returned matrix ``U`` will not be contiguous. It will be represented as a
-          column-major (i.e. fortran-contiguous) matrix.
+          column-major matrix (i.e. fortran-contiguous).
 
 .. note:: Gradients computed using ``U`` and ``V`` may be unstable if :attr:`input` has
           repeated non-unique singular values, e.g., when it is not full-rank.
