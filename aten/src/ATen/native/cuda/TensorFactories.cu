@@ -14,10 +14,12 @@
 #include <thrust/execution_policy.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#include <cub/cub.cuh>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 namespace at {
 namespace native {
@@ -43,7 +45,7 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 }
 
 Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
-  AT_ASSERT(device_or_default(device_opt).type() == at::DeviceType::CUDA);
+  AT_ASSERT(device_or_default(device_opt).is_cuda());
   TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 
@@ -103,28 +105,40 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
   // Generate random values for the keys array
   AT_DISPATCH_ALL_TYPES(
     result.scalar_type(), "randperm_out_cuda", [&] {
+      TORCH_CHECK(n <= std::numeric_limits<int>::max(),
+        "randperm of tensors larger than INT_MAX is not supported yet in pytorch");
+
       auto keys = at::empty(result.sizes(), result.options()).random_(generator);
-      auto keys_data = thrust::device_ptr<scalar_t>(keys.data_ptr<scalar_t>());
+      auto range = at::arange(n, result.options());
+      auto keys_tmp = at::empty_like(keys);
 
       // shuffled_data points to the underlying data of the output tensor if the tensor is contiguous; otherwise it
       // points to a new tensor.
       Tensor shuffled;
-      thrust::device_ptr<scalar_t> shuffled_data;
+      scalar_t *shuffled_data;
       if (result.is_contiguous()) {
-        shuffled_data = thrust::device_ptr<scalar_t>(result.data_ptr<scalar_t>());
+        shuffled_data = result.data_ptr<scalar_t>();
       } else {
         shuffled = at::empty(n, result.options());
-        shuffled_data = thrust::device_ptr<scalar_t>(shuffled.data_ptr<scalar_t>());
+        shuffled_data = shuffled.data_ptr<scalar_t>();
       }
 
-      auto state = globalContext().getTHCState();
-      THCThrustAllocator thrustAlloc(state);
-      auto policy = thrust::cuda::par(thrustAlloc).on(at::cuda::getCurrentCUDAStream());
-
-      thrust::sequence(policy, shuffled_data, shuffled_data + n);
-
       // Use the sorted order of keys to rearrange the result array
-      thrust::sort_by_key(policy, keys_data, keys_data + n, shuffled_data);
+      void *d_temp_storage = nullptr;
+      size_t temp_storage_bytes = 0;
+
+      cub::DeviceRadixSort::SortPairs(
+        nullptr, temp_storage_bytes,
+        keys.data_ptr<scalar_t>(), keys_tmp.data_ptr<scalar_t>(),
+        range.data_ptr<scalar_t>(), shuffled_data, n,
+        0, sizeof(scalar_t) * 8, at::cuda::getCurrentCUDAStream());
+      auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+      auto dataPtr = allocator.allocate(temp_storage_bytes);
+      cub::DeviceRadixSort::SortPairs(
+        dataPtr.get(), temp_storage_bytes,
+        keys.data_ptr<scalar_t>(), keys_tmp.data_ptr<scalar_t>(),
+        range.data_ptr<scalar_t>(), shuffled_data, n,
+        0, sizeof(scalar_t) * 8, at::cuda::getCurrentCUDAStream());
 
       if (!result.is_contiguous()) {
         result.copy_(shuffled);

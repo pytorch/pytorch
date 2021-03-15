@@ -64,6 +64,10 @@ class RegisterDispatchKey:
             assert self.dispatch_key not in g.out.dispatch, \
                 "Do not explicitly specify Meta dispatch key on structured " \
                 "functions, they will be automatically generated for you"
+        elif self.dispatch_key == DispatchKey.DefaultBackend:
+            assert self.dispatch_key not in g.out.dispatch, \
+                "Do not explicitly specify DefaultBackend dispatch key on structured " \
+                "functions, they will be automatically generated for you"
         elif not is_structured_dispatch_key(self.dispatch_key):
             return list(mapMaybe(self.gen_unstructured, g.functions()))
         elif self.dispatch_key not in g.out.dispatch:
@@ -226,14 +230,14 @@ void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
 """
 
     def gen_class_set_output_body(self, k: SchemaKind) -> str:
-        if self.dispatch_key == DispatchKey.CUDA:
+        if self.dispatch_key in [DispatchKey.CUDA, DispatchKey.DefaultBackend]:
             maybe_set_guard = """
 auto current_device = guard_.current_device();
 if (C10_UNLIKELY(current_device.has_value())) {
   TORCH_INTERNAL_ASSERT(*current_device == options.device(),
     "structured kernels don't support multi-device outputs");
 } else {
-  guard_.set_device(options.device());
+  guard_.reset_device(options.device());
 }
 """
         else:
@@ -243,7 +247,7 @@ if (C10_UNLIKELY(current_device.has_value())) {
             if self.dispatch_key == DispatchKey.Meta:
                 return """
 if (strides.empty()) {
-    outputs_[output_idx] = at::empty_meta(sizes, options);
+    outputs_[output_idx] = at::empty(sizes, options.device(at::kMeta));
 } else {
     TORCH_INTERNAL_ASSERT(0, "not implemented yet");
 }
@@ -257,6 +261,9 @@ if (strides.empty()) {
                 elif self.dispatch_key == DispatchKey.CUDA:
                     empty_impl = "at::native::empty_cuda"
                     empty_strided_impl = "at::native::empty_strided_cuda"
+                elif self.dispatch_key == DispatchKey.DefaultBackend:
+                    empty_impl = "at::empty"
+                    empty_strided_impl = "at::empty_strided"
                 else:
                     raise AssertionError("unsupported dispatch key")
                 return f"""
@@ -270,9 +277,16 @@ if (strides.empty()) {{
         elif k is SchemaKind.inplace:
             return maybe_set_guard
         elif k is SchemaKind.out:
+            if self.dispatch_key == DispatchKey.CPU:
+                resize_impl = "resize_output_cpu"
+            else:
+                # Only bothering to include a resize_output fastpath for CPU for now.
+                # We can add one in if for the perf if we need to. But it'll be easier when external backends
+                # have access to meta functions, and we can write one for resize_.
+                resize_impl = "resize_output"
             return f"""
 {maybe_set_guard}
-at::native::resize_output(outputs_[output_idx], sizes);
+at::native::{resize_impl}(outputs_[output_idx], sizes);
 if (!strides.empty()) {{
     TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
     at::native::as_strided_(outputs_[output_idx], sizes, strides);
@@ -314,6 +328,8 @@ if (!strides.empty()) {{
                 guard_field = 'c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;'
             else:
                 guard_field = 'c10::cuda::OptionalCUDAGuard guard_;'
+        elif self.dispatch_key == DispatchKey.DefaultBackend:
+            guard_field = 'c10::OptionalDeviceGuard guard_;'
         else:
             guard_field = ''
 
@@ -334,6 +350,22 @@ struct {class_name} final : public {parent_class} {{
         assert not f.manual_kernel_registration
 
         if self.target is Target.REGISTRATION and not self.selector.is_native_function_selected(f):
+            return None
+
+        # TODO: Now, there is something interesting going on here.  In the code below,
+        # we generate DefaultBackend implementations of functional and inplace
+        # based on the out implementation.  But in fact, out is definable by
+        # functional too (just not very efficiently), and this is honestly the
+        # MORE likely situation for a backend implementor.  How do we pick?
+        # Well, taking a page from Haskell type classes and default methods,
+        # we could conceivably register a circular definition (out in terms
+        # of functional, and functional in terms of out) and just require
+        # someone to implement one or the other.  We'd have to do a little bit
+        # of work to not register one of these "weak" definitions unless there
+        # is a strong definition somewhere in the DAG!  So it's not implemented yet.
+        if self.dispatch_key == DispatchKey.DefaultBackend and f.func.kind() is SchemaKind.out:
+            # Never generate a default implementation for out, that's what you
+            # have to define as a backend implementor
             return None
 
         # Note [Direct dispatch bindings]
@@ -377,8 +409,12 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
             # Initialize the class corresponding to this structured
             # operator; feeding it the output argument(s) if it is known
-            if self.dispatch_key == DispatchKey.Meta:
+            if self.dispatch_key is DispatchKey.Meta:
                 class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
+                parent_class = f"at::meta::{meta.name(self.g)}"
+            elif self.dispatch_key is DispatchKey.DefaultBackend:
+                # TODO: dedup this branch
+                class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
                 parent_class = f"at::meta::{meta.name(self.g)}"
             else:
                 class_name = f"structured_{self.g.out.dispatch[self.dispatch_key]}_{k.name}"
@@ -407,14 +443,43 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # After running meta, op.outputs_ is guaranteed to be valid;
             # add it to the context
             # TODO: handle multi-return
+            assert ConstRefCType(BaseCType("Tensor", structured.out_arguments(self.g)[0].ctype.name)) == \
+                structured.out_arguments(self.g)[0].ctype
             context.append(Expr(
                 expr="op.outputs_[0]",
-                type=structured.out_arguments(self.g)[0].ctype,
+                # TODO: Stop hardcoding that the output type is a Tensor.  Note
+                # that for the codegen here this is fine because outputs_ is
+                # hardcoded to be tensor already
+                type=MutRefCType(BaseCType("Tensor", structured.out_arguments(self.g)[0].ctype.name)),
             ))
 
             # With the expanded context, do the impl call (if not a meta
             # function)
-            if self.dispatch_key != DispatchKey.Meta:
+            if self.dispatch_key == DispatchKey.DefaultBackend:
+                # TODO: https://github.com/pytorch/pytorch/issues/53023
+                out_sig_group = CppSignatureGroup.from_native_function(
+                    self.g.out, method=False, fallback_binding=f.manual_cpp_binding)
+                out_sig = out_sig_group.most_faithful_signature()
+                api_name = out_sig.name()
+                out_exprs = ', '.join(
+                    e.expr for e in translate(
+                        context,
+                        out_sig.arguments(),
+                        method=False
+                    )
+                )
+                # TODO: I think this means structured won't work with method
+                # only functions (but maybe you're saved by faithful? iunno.)
+                # NB: Originally I wrote this as an at::redispatch call, but
+                # I got in trouble because that meant I needed a DispatchKeySet
+                # in the wrapper function, which meant I needed a DispatchKeySet
+                # in the DispatchKeyFunctions declarations, but the defined API
+                # there does NOT permit a dispatch key set.  I think you can
+                # probably unwind this by calling some function to do the TLS
+                # fetch and get the DispatchKeySet when you don't have it, but
+                # I didn't do it for this version
+                sig_body.append(f"at::{api_name}({out_exprs});")
+            elif self.dispatch_key != DispatchKey.Meta:
                 impl_exprs = ', '.join(
                     e.expr for e in translate(
                         context,
@@ -453,8 +518,6 @@ generate_super=self.g.out.structured_inherits is not None
 """
 
         elif self.target is Target.REGISTRATION:
-            dispatcher_sig = DispatcherSignature.from_schema(f.func)
-
             assert local.use_c10_dispatcher() is UseC10Dispatcher.full
             return f'm.impl("{f.func.name}", TORCH_FN({sig.name()}));'
         else:
