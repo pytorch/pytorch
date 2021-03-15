@@ -450,10 +450,15 @@ void testSend(const std::string& path) {
   // test that waiting for work to be sent can be aborted successfully.
   auto selfRank = 0;
   auto dstRank = 1;
+  std::vector<int64_t> shapes{16, 16};
+  std::vector<std::vector<int64_t>> allShapes;
+  allShapes.push_back(shapes);
   std::vector<at::Tensor> tensors = {
-      at::ones({16, 16}),
+      at::ones(shapes),
   };
   auto& pg = tests[selfRank].getProcessGroup();
+  const char* GLOO_SEND_STR = "gloo:send";
+  enableProfilerLegacy(ProfilerConfig(ProfilerState::CPU, /* report_input_shapes */ true, false));
   auto sendWork = pg.send(tensors, dstRank, tag);
   bool sendCompleted;
   std::thread waitSendThreadAbort([&]() { sendCompleted = sendWork->wait(); });
@@ -461,6 +466,9 @@ void testSend(const std::string& path) {
   // Block until the sendWork gets successfully aborted
   waitSendThreadAbort.join();
   EXPECT_FALSE(sendCompleted);
+  auto event_lists = disableProfilerLegacy();
+  checkProfiledEvents(
+      std::move(event_lists), GLOO_SEND_STR, 1, allShapes);
 
   // Now create a separate sender thread to ensure that future waitsends can
   // complete successfully.
@@ -492,10 +500,15 @@ void testRecv(const std::string& path) {
   // test that waiting for work to be received can be aborted successfully.
   auto selfRank = 0;
   auto srcRank = 1;
+  std::vector<int64_t> shapes = {16, 16};
+  std::vector<std::vector<int64_t>> allShapes;
+  allShapes.push_back(shapes);
   std::vector<at::Tensor> tensors = {
-      at::ones({16, 16}),
+      at::ones(shapes),
   };
+  const char* GLOO_RECV_STR = "gloo:recv";
   auto& pg = tests[selfRank].getProcessGroup();
+  enableProfilerLegacy(ProfilerConfig(ProfilerState::CPU, /* report_input_shapes */ true, false));
   auto recvWork = pg.recv(tensors, srcRank, tag);
   bool recvCompleted;
   std::thread waitRecvThreadAbort([&]() { recvCompleted = recvWork->wait(); });
@@ -503,6 +516,9 @@ void testRecv(const std::string& path) {
   // Block until the first recv gets successfully aborted
   waitRecvThreadAbort.join();
   EXPECT_FALSE(recvCompleted);
+  auto event_lists = disableProfilerLegacy();
+  checkProfiledEvents(
+      std::move(event_lists), GLOO_RECV_STR, 1, allShapes);
 
   // Now create a separate receiver thread to ensure that future waits can
   // complete successfully.

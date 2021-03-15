@@ -257,7 +257,13 @@ public:
     // Since cuFFT has limited non-unit stride support and various constraints, we
     // use a flag to keep track throughout this function to see if we need to
     // input = input.clone();
+
+#ifdef __HIP_PLATFORM_HCC__
+    // clone input to avoid issues with hipfft clobering the input and failing tests
+    clone_input = true;
+#else
     clone_input = false;
+#endif
 
     // For half, base strides on the real part of real-to-complex and
     // complex-to-real transforms are not supported. Since our output is always

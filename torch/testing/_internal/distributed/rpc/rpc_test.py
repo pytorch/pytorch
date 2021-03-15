@@ -788,6 +788,17 @@ class RpcTest(RpcAgentTestFixture):
             )
 
     @dist_init(setup_rpc=False)
+    def test_duplicate_name_2(self):
+        with self.assertRaisesRegex(RuntimeError, "is not unique"):
+            rpc.init_rpc(
+                name=worker_name(self.rank % (self.world_size - 1)),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+    @dist_init(setup_rpc=False)
     def test_reinit(self):
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -884,6 +895,16 @@ class RpcTest(RpcAgentTestFixture):
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
         self.assertEqual(ret, torch.ones(n, n) * 2)
+
+    @staticmethod
+    def return_callee_id():
+        return rpc.get_worker_info().id
+
+    @dist_init
+    def test_int_callee(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        ret = rpc.rpc_sync(dst_rank, RpcTest.return_callee_id)
+        self.assertEqual(ret, dst_rank)
 
     @dist_init
     def test_add_with_id(self):

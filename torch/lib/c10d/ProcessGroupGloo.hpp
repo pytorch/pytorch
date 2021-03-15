@@ -117,7 +117,8 @@ class ProcessGroupGloo : public ProcessGroup {
    public:
     explicit RecvWork(
         at::Tensor& tensor,
-        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+        const char* profilingTitle = nullptr);
 
     int sourceRank() const override;
 

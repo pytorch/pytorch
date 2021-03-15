@@ -28,6 +28,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
       bool is_non_overlapping_and_dense = true)
       : TensorImpl(key_set, data_type, device),
         opaque_handle_(std::move(opaque_handle)) {
+    set_storage_access_should_throw();
     sizes_and_strides_.set_sizes(sizes);
     refresh_numel();
     is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
@@ -70,10 +71,6 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
     return false;
   }
 #endif
-
-  const Storage& storage() const override {
-    AT_ERROR("opaque tensors do not have storage");
-  }
 
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
@@ -180,6 +177,10 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
   }
 
  private:
+  const char* tensorimpl_type_name() const override {
+    return "OpaqueTensorImpl";
+  }
+
   OpaqueHandle opaque_handle_;
 };
 

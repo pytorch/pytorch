@@ -31,6 +31,9 @@ namespace c10 {
   _(prim, ReductionSizes)            \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
+  _(prim, ConstantMKLDNNTensor)      \
+  _(prim, BroadcastMKLDNNTensors)    \
+  _(prim, MKLDNNGroup)               \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
@@ -73,7 +76,7 @@ namespace c10 {
   _(prim, ListConstruct)             \
   _(prim, ListUnpack)                \
   _(prim, DictConstruct)             \
-  _(prim, ModuleDictIndex)           \
+  _(prim, ModuleContainerIndex)      \
   _(prim, EnumName)                  \
   _(prim, EnumValue)                 \
   _(prim, StringIndex)               \
@@ -89,7 +92,11 @@ namespace c10 {
   _(aten, ScalarImplicit)            \
   _(aten, Float)                     \
   _(aten, str)                       \
+  _(aten, is_pinned)                 \
   _(aten, Delete)                    \
+  _(aten, relu_)                     \
+  _(aten, dropout_)                  \
+  _(aten, sigmoid_)                  \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, layout)                    \
@@ -110,6 +117,7 @@ namespace c10 {
   _(prim, MMTreeReduce)              \
   _(prim, MMBatchSide)               \
   _(prim, list)                      \
+  _(prim, dict)                      \
   _(prim, min)                       \
   _(prim, max)                       \
   _(prim, abs)                       \
@@ -252,6 +260,7 @@ namespace c10 {
   _(aten, hash)                      \
   _(aten, len)                       \
   _(aten, list)                      \
+  _(aten, dict)                      \
   _(aten, wait)                      \
   _(aten, save)                      \
   _(aten, sub)                       \
@@ -268,6 +277,7 @@ namespace c10 {
   _(aten, trunc_)                    \
   _(aten, fix)                       \
   _(aten, fix_)                      \
+  _(aten, to_mkldnn)                 \
   _(aten, neg)                       \
   _(aten, neg_)                      \
   _(aten, negative)                  \
@@ -294,6 +304,8 @@ namespace c10 {
   _(aten, swapdims_)                 \
   _(aten, movedim)                   \
   _(aten, moveaxis)                  \
+  _(aten, lgamma)                    \
+  _(aten, special_gammaln)           \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
@@ -347,6 +359,11 @@ namespace c10 {
   _(onnx, Conv)                      \
   _(onnx, BatchNormalization)        \
   _(onnx, ReduceProd)                \
+  _(onnx, Neg)                       \
+  _(onnx, NonZero)                   \
+  _(onnx, Range)                     \
+  _(onnx, Tile)                      \
+  _(onnx, Where)                     \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \

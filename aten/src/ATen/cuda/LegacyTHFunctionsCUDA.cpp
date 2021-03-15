@@ -304,9 +304,12 @@ std::tuple<Tensor,Tensor> _th_mode(const Tensor & self, int64_t dim, bool keepdi
     }
     return std::tuple<Tensor, Tensor>(values, indices);
 }
-std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
+std::tuple<Tensor &,Tensor &> _th_sort_out_stable(Tensor & values, Tensor & indices, const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
+
+    TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
+    TORCH_CHECK(!stable.value(), "stable=True is not implemented on CUDA yet.");
 
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
@@ -370,8 +373,15 @@ std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, co
     }
     return std::tuple<Tensor &, Tensor &>(values, indices);
 }
-std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending) {
+std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
+  return _th_sort_out_stable(values, indices, self, /*stable=*/false, dim, descending);
+}
+std::tuple<Tensor,Tensor> _th_sort_stable(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
     // DeviceGuard omitted
+
+    TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
+    TORCH_CHECK(!stable.value(), "stable=True is not implemented on CUDA yet.");
+
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto values_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
     auto values = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(values_));
@@ -422,6 +432,9 @@ std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descen
             AT_ERROR("_th_sort not supported on CUDAType for ", dispatch_scalar_type);
     }
     return std::tuple<Tensor, Tensor>(values, indices);
+}
+std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending) {
+  return _th_sort_stable(self, /*stable=*/false, dim, descending);
 }
 std::tuple<Tensor &,Tensor &> _th_topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
     // DeviceGuard omitted
