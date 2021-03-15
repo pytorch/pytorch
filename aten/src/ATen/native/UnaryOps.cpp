@@ -680,6 +680,40 @@ Tensor& lgamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_fl
 Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub); }
 Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
 
+std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
+  Tensor mantissa = at::empty_like(self);
+  Tensor exponent = at::empty_like(self, self.options().dtype(at::kInt));
+
+  at::frexp_out(mantissa, exponent, self);
+  return std::tuple<Tensor, Tensor>(mantissa, exponent);
+}
+
+std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
+                                       Tensor& mantissa, Tensor& exponent) {
+  // torch.frexp is implemented for floating-point dtypes for now,
+  // should add support for integral dtypes in the future.
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+              "torch.frexp() only supports floating-point dtypes");
+
+  TORCH_CHECK(mantissa.dtype() == self.dtype(),
+              "torch.frexp() expects mantissa to have dtype ", self.dtype(),
+              " but got ", mantissa.dtype());
+  TORCH_CHECK(exponent.dtype() == at::kInt,
+              "torch.frexp() expects exponent to have int dtype "
+              "but got ", exponent.dtype());
+
+  auto iter = TensorIteratorConfig()
+    .add_output(mantissa)
+    .add_output(exponent)
+    .add_input(self)
+    .check_all_same_dtype(false)
+    .set_check_mem_overlap(true)
+    .build();
+  frexp_stub(iter.device_type(), iter);
+
+  return std::tuple<Tensor&, Tensor&>(mantissa, exponent);
+}
+
 // alias for lgamma, implements special.gammanln equivalent to
 // scipy.special.gammaln
 Tensor special_gammaln(const Tensor& self) { return self.lgamma(); }
@@ -712,6 +746,7 @@ DEFINE_DISPATCH(exp2_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
 DEFINE_DISPATCH(frac_stub);
+DEFINE_DISPATCH(frexp_stub);
 DEFINE_DISPATCH(i0_stub);
 DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
