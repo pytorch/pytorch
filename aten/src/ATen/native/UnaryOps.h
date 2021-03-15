@@ -40,6 +40,7 @@ DECLARE_DISPATCH(unary_fn, exp2_stub);
 DECLARE_DISPATCH(unary_fn, expm1_stub);
 DECLARE_DISPATCH(unary_fn, floor_stub);
 DECLARE_DISPATCH(unary_fn, frac_stub);
+DECLARE_DISPATCH(unary_fn, frexp_stub);
 DECLARE_DISPATCH(unary_fn, i0_stub);
 DECLARE_DISPATCH(unary_fn, log_stub);
 DECLARE_DISPATCH(unary_fn, log10_stub);
