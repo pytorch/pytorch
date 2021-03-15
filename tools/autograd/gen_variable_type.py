@@ -621,9 +621,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
         if get_view_info(fn) is not None or modifies_arguments(f):
-            guard = 'at::AutoNonVariableTypeMode non_var_type_mode(true);'
+            guard = 'at::AutoNonVariableTypeMode guard;'
         else:
-            guard = 'at::AutoDispatchBelowInplaceOrView guard(true);'
+            guard = 'at::AutoDispatchBelowInplaceOrView guard;'
 
         if not modifies_arguments(f) and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(

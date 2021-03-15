@@ -58,15 +58,14 @@ struct TORCH_API AutoNonVariableTypeMode {
 };
 
 // Note this guard is used in VariableType kernels for functional ops
-// as well as InplaceOrView kernels for inplace/view ops.
-// Invariant:
+// as well as InplaceOrView kernels for inplace/view ops to enforce the
+// invariant:
 //   Once you are in VariableType/InplaceOrView kernel for an op,
-//   you never go back to the a kernel on same dispatch key until
+//   you never go back to a kernel on same dispatch key until
 //   you finish the current op.
 struct TORCH_API AutoDispatchBelowInplaceOrView {
-  AutoDispatchBelowInplaceOrView(bool enabled = true) :
-    dispatch_key_guard_(c10::autograd_dispatch_keyset_with_inplace_view) {
-    TORCH_INTERNAL_ASSERT(enabled);
+  AutoDispatchBelowInplaceOrView() :
+    dispatch_key_guard_(c10::autograd_dispatch_keyset_with_InplaceOrView) {
   }
   // disable Autograd & InplaceOrView dispatch keys
   c10::impl::ExcludeDispatchKeyGuard dispatch_key_guard_;

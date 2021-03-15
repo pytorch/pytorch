@@ -120,7 +120,7 @@ m.impl("${unqual_operator_name_with_overload}",
 
 INPLACE_REDISPATCH = CodeTemplate("""\
 {
-  at::AutoDispatchBelowInplaceOrView guard(true);
+  at::AutoDispatchBelowInplaceOrView guard;
   at::redispatch::${api_name}(${unpacked_args});
 }
 """)
@@ -131,7 +131,7 @@ ${return_values} = ${rhs_value};
 
 VIEW_REDISPATCH = CodeTemplate("""\
 ${assign_return_values} ([&]() {
-  at::AutoDispatchBelowInplaceOrView guard(true);
+  at::AutoDispatchBelowInplaceOrView guard;
   return at::redispatch::${api_name}(${unpacked_args});
 })();
 """)
@@ -323,7 +323,7 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
+    # code-generated InplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
     # See Note [Plumbing Keys Through The Dispatcher] for details.
     dispatch_key_set = 'ks & c10::after_InplaceOrView_keyset'
     redispatch_args = ', '.join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])

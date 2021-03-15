@@ -469,7 +469,7 @@ class StructuredNativeFunctions:
         )
 
 def is_foreach_op(name: str) -> bool:
-    return str(name) in [
+    return str(name) in set([
         '_amp_foreach_non_finite_check_and_unscale_',
         '_foreach_add_.ScalarList',
         '_foreach_sub_.ScalarList',
@@ -515,7 +515,7 @@ def is_foreach_op(name: str) -> bool:
         '_foreach_addcdiv_.Scalar',
         '_foreach_addcmul_.ScalarList',
         '_foreach_addcdiv_.ScalarList',
-        '_foreach_zero_']
+        '_foreach_zero_'])
 
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,

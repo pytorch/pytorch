@@ -31,6 +31,13 @@ from tools.codegen.api.autograd import (
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import List
+from . import gen_python_functions
+from .gen_autograd_functions import gen_autograd_functions_lib, gen_autograd_functions_python
+from .gen_trace_type import gen_trace_type
+from .gen_variable_type import gen_variable_type
+from .gen_inplace_or_view_type import gen_inplace_or_view_type
+from .gen_variable_factories import gen_variable_factories
+from .load_derivatives import load_derivatives
 
 def gen_autograd(
     aten_path: str,
@@ -41,7 +48,6 @@ def gen_autograd(
     disable_autograd: bool = False,
 ) -> None:
     # Parse and load derivatives.yaml
-    from .load_derivatives import load_derivatives
     differentiability_infos = load_derivatives(
         os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path)
 
@@ -53,25 +59,18 @@ def gen_autograd(
     fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo] = match_differentiability_info(fns, differentiability_infos)
 
     # Generate VariableType.h/cpp
-    from .gen_trace_type import gen_trace_type
-    from .gen_variable_type import gen_variable_type
-    from .gen_inplace_or_view_type import gen_inplace_or_view_type
     if not disable_autograd:
         gen_variable_type(out, native_functions_path, fns_with_diff_infos, template_path)
 
-        # operator filter not applied as tracing sources are excluded in selective build
-        gen_trace_type(out, native_functions_path, template_path)
-
         gen_inplace_or_view_type(out, native_functions_path, fns_with_diff_infos, template_path)
 
-
+        # operator filter not applied as tracing sources are excluded in selective build
+        gen_trace_type(out, native_functions_path, template_path)
     # Generate Functions.h/cpp
-    from .gen_autograd_functions import gen_autograd_functions_lib
     gen_autograd_functions_lib(
         out, differentiability_infos, template_path)
 
     # Generate variable_factories.h
-    from .gen_variable_factories import gen_variable_factories
     gen_variable_factories(out, native_functions_path, template_path)
 
 
@@ -81,19 +80,16 @@ def gen_autograd_python(
     out: str,
     autograd_dir: str,
 ) -> None:
-    from .load_derivatives import load_derivatives
     differentiability_infos = load_derivatives(
         os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path)
 
     template_path = os.path.join(autograd_dir, 'templates')
 
     # Generate Functions.h/cpp
-    from .gen_autograd_functions import gen_autograd_functions_python
     gen_autograd_functions_python(
         out, differentiability_infos, template_path)
 
     # Generate Python bindings
-    from . import gen_python_functions
     deprecated_path = os.path.join(autograd_dir, 'deprecated.yaml')
     gen_python_functions.gen(
         out, native_functions_path, deprecated_path, template_path)
