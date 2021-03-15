@@ -8998,7 +8998,7 @@ Example::
 
 add_docstr(torch.triangular_solve,
            r"""
-triangular_solve(input, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
 
 Solves a system of equations with a triangular coefficient matrix :math:`A`
 and multiple right-hand sides :math:`b`.
@@ -9010,11 +9010,11 @@ with the default keyword arguments.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
 
-Supports real-valued and complex-valued inputs.
+Supports input of float, double, cfloat and cdouble data types.
 
 Args:
-    input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
-                :math:`*` is zero of more batch dimensions (:math:`b`)
+    b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
+                :math:`*` is zero of more batch dimensions
     A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
                 where :math:`*` is zero or more batch dimensions
     upper (bool, optional): whether to solve the upper-triangular system

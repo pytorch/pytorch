@@ -1422,39 +1422,6 @@ class TestUnaryUfuncs(TestCase):
         with self.assertRaises(TypeError):
             torch.isinf(1)  # Parameter must be a tensor
 
-    def test_bitwise_not(self, device):
-        res = 0xffff - torch.arange(127, dtype=torch.int8, device=device)
-        for dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
-            if dtype == torch.bool:
-                a = torch.tensor([True, False], device=device)
-                expected_res = torch.tensor([False, True], device=device)
-            else:
-                a = torch.arange(127, dtype=dtype, device=device)
-                expected_res = res.to(dtype)
-            # new tensor
-            self.assertEqual(expected_res, a.bitwise_not())
-            # out
-            b = torch.empty(0, dtype=dtype, device=device)
-            torch.bitwise_not(a, out=b)
-            self.assertEqual(expected_res, b)
-            # in-place
-            a.bitwise_not_()
-            self.assertEqual(expected_res, a)
-
-        # test exceptions
-        for dtype in (torch.half, torch.float, torch.double):
-            a = torch.zeros(10, dtype=dtype, device=device)
-            # new tensor
-            with self.assertRaises(RuntimeError):
-                a.bitwise_not()
-            # out
-            b = torch.empty(0, dtype=dtype, device=device)
-            with self.assertRaises(RuntimeError):
-                torch.bitwise_not(a, out=b)
-            # in-place
-            with self.assertRaises(RuntimeError):
-                a.bitwise_not_()
-
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):
             self.assertEqual(dim, len(tup))

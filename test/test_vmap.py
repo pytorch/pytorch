@@ -152,6 +152,7 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(out_op)(tensor, tensor)
 
+        tensor = torch.randn(2)
         # The fallback doesn't support TensorList
         with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
             vmap(lambda t: torch.atleast_1d([t]))(tensor)
@@ -1582,6 +1583,19 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         self.assertEqual(vmap(foo)(ctensor), torch.tensor([1, 1, 1]))
         self.assertEqual(vmap(foo)(tensor), torch.tensor([0, 0, 0]))
+
+    def test_is_floating_point(self):
+        float_tensor = torch.tensor([1., 2., 3.])
+        long_tensor = torch.tensor([1, 2, 3])
+
+        def foo(x):
+            if x.is_floating_point():
+                return torch.tensor(1)
+            else:
+                return torch.tensor(0)
+
+        self.assertEqual(vmap(foo)(float_tensor), torch.tensor([1, 1, 1]))
+        self.assertEqual(vmap(foo)(long_tensor), torch.tensor([0, 0, 0]))
 
     def test_is_contiguous(self):
         def foo(x):
