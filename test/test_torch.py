@@ -6169,7 +6169,7 @@ class TestTorchDeviceType(TestCase):
         try_lazy_inits = (True, False) if device.type == "cuda" else (False,)
         for lazy_init_scale in try_lazy_inits:
             a = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
-            self.assertTrue(a.is_enabled() if torch.cuda.is_available() else not a.is_enabled())
+            self.assertTrue(not a.is_enabled() if torch.cuda.amp.common.amp_definitely_not_available() else a.is_enabled())
             if lazy_init_scale:
                 # Dummy a.scale() call lazy-inits a._scale Tensor.
                 a.scale(torch.tensor([4.0], dtype=torch.float32, device=device))
