@@ -117,8 +117,6 @@ class TestLinalg(TestCase):
         run_test_case(zero_strided, b)
         run_test_case(a, zero_strided)
 
-    # https://github.com/pytorch/pytorch/issues/53976 tracks ROCm skip
-    @skipCUDAIfRocm
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
