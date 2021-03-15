@@ -44,6 +44,10 @@ inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo
   return torch::linalg_eigvalsh_out(result, self, uplo);
 }
 
+inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<std::string> driver) {
+  return torch::linalg_lstsq(self, b, cond, driver);
+}
+
 inline Tensor norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
@@ -66,14 +70,6 @@ inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermiti
 
 inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<double> tol, bool hermitian) {
   return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
-}
-
-inline Tensor multi_dot(TensorList tensors) {
-  return torch::linalg_multi_dot(tensors);
-}
-
-inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
-  return torch::linalg_multi_dot_out(result, tensors);
 }
 
 inline Tensor pinv(const Tensor& input, double rcond, bool hermitian) {
@@ -176,6 +172,10 @@ inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo
   return detail::eigvalsh_out(result, self, uplo);
 }
 
+inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<std::string> driver) {
+  return detail::lstsq(self, b, cond, driver);
+}
+
 inline Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
@@ -199,15 +199,6 @@ inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermiti
 
 inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<double> tol, bool hermitian) {
   return detail::matrix_rank_out(result, input, tol, hermitian);
-}
-
-/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.multi_dot
-inline Tensor multi_dot(TensorList tensors) {
-  return torch::linalg_multi_dot(tensors);
-}
-
-inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
-  return torch::linalg_multi_dot_out(result, tensors);
 }
 
 /// Computes pseudo-inverse
