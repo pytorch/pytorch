@@ -213,3 +213,10 @@ jobs:
           git ls-files -z -- bootstrap '*.cmake' '*.cmake.in' '*CMakeLists.txt' | \
           grep -E -z -v '^(cmake/Modules/|cmake/Modules_CUDA_fix/)' | \
           xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
+
+  test_ecr_pull:
+    runs-on: linux.2xlarge
+    steps:
+      - name: Checking ECR pulling capabilities from EC2
+        run: |
+          docker pull 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9:9e4caef77adcb160c0d1799dfa17cdd984106e12
