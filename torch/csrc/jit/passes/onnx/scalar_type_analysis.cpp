@@ -30,8 +30,6 @@ static const std::unordered_map<c10::ScalarType, int, ScalarTypeHashFunction>
         {c10::kDouble, 11},
 };
 
-static std::unordered_map<NodeKind, c10::ScalarType> opUnsupportedType = {};
-
 static int64_t ScalarTypeToONNXType(const c10::ScalarType& st) {
   int64_t onnx_type = -1;
   const auto it = scalarTypeToONNXTypeMap.find(st);
@@ -129,7 +127,8 @@ static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
   return typeFromTensor;
 }
 
-static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
+static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n,
+    std::unordered_map<NodeKind, c10::ScalarType>& opUnsupportedType) {
   std::vector<c10::ScalarType> typesFromTensors;
   std::vector<c10::ScalarType> typesFromScalars;
 
@@ -283,7 +282,8 @@ static void UpdateScalarTypeForOutput(
 
 static void ImplicitCastNodeForONNX(Node* n) {
   if (IsImplicitCastSupported(n->kind())) {
-    auto expected_scalar_type = InferExpectedScalarType(n);
+    std::unordered_map<NodeKind, c10::ScalarType> opUnsupportedType = {};
+    auto expected_scalar_type = InferExpectedScalarType(n, opUnsupportedType);
     if (expected_scalar_type) {
       UpdateScalarTypeForInputs(n, *expected_scalar_type);
       if (!IsComparisonOp(n->kind())) {
