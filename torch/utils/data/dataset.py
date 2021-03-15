@@ -7,7 +7,8 @@ from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
 from torch.utils.data.typing import _DataPipeAlias
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable, _tp_cache, _type_check
+from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
+from typing import _tp_cache, _type_check  # type: ignore
 from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)

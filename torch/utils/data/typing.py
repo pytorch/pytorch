@@ -3,11 +3,12 @@
 
 import collections
 import copy
-from typing import get_type_hints, Any, TypeVar, _GenericAlias, _type_repr
+from typing import get_type_hints, Any, TypeVar
+from typing import _GenericAlias, _type_repr  # type: ignore
 
 
 def _fixed_type(param):
-    if isinstance(param, TypeVar) or param in (Any, ...):
+    if isinstance(param, TypeVar) or param in (Any, ...):  # type: ignore
         return False
     if hasattr(param, '__args__'):
         for arg in param.__args__:
@@ -27,12 +28,12 @@ class _DataPipeType:
     def __eq__(self, other):
         if isinstance(other, _DataPipeType):
             return self.param == other.param
-        elif isinstance(other, (type, TypeVar, _GenericAlias)):
+        elif isinstance(other, (type, TypeVar, _GenericAlias)):  # type: ignore
             return self.param == other
         return NotImplementedError
 
 
-class _DataPipeAlias(_GenericAlias, _root=True):
+class _DataPipeAlias(_GenericAlias, _root=True):  # type: ignore
     def __init__(self, origin, param, *, inst=True, name=None):
         super().__init__(origin, params=param, inst=inst, name=name)
         self.datapipe_type = _DataPipeType(param)
