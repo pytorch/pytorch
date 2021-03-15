@@ -48,14 +48,21 @@ C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   return _singleton;
 }
 
-c10::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_name) {
-  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> c10::optional<OperatorHandle> {
+c10::optional<Dispatcher::OperatorCleanup> Dispatcher::findOp_(const OperatorName& overload_name) {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorCleanup>& operatorLookupTable) -> c10::optional<OperatorCleanup> {
     auto found = operatorLookupTable.find(overload_name);
     if (found == operatorLookupTable.end()) {
       return c10::nullopt;
     }
     return found->second;
   });
+}
+
+c10::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_name) {
+  if (auto op = findOp_(overload_name)) {
+    return OperatorHandle(*op);
+  }
+  return {};
 }
 
 c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
@@ -89,15 +96,15 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
 
 // Postcondition: caller is responsible for disposing of registration when they
 // are done
-OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
-  const auto found = findOp(op_name);
+Dispatcher::OperatorCleanup Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
+  const auto found = findOp_(op_name);
   if (found != c10::nullopt) {
     return *found;
   }
 
   operators_.emplace_back(OperatorName(op_name));
-  OperatorHandle handle(--operators_.end());
-  operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
+  OperatorCleanup handle(--operators_.end());
+  operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorCleanup>& operatorLookupTable) {
     operatorLookupTable.emplace(op_name, handle);
   });
 
@@ -134,39 +141,39 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
   OperatorName op_name = schema.operator_name();
   auto op = findOrRegisterName_(op_name);
 
-  TORCH_CHECK(op.operatorDef_->def_count == 0, "Tried to register an operator (", schema, ") with the same name and overload name multiple times.",
-                                                    " Each overload's schema should only be registered with a single call to def().",
-                                                    " Duplicate registration: ", debug, ". Original registration: ", op.operatorDef_->op.debug());
-  op.operatorDef_->op.registerSchema(std::move(schema), std::move(debug));
-  listeners_->callOnOperatorRegistered(op);
+  TORCH_CHECK(op->def_count == 0, "Tried to register an operator (", schema, ") with the same name and overload name multiple times.",
+                                  " Each overload's schema should only be registered with a single call to def().",
+                                  " Duplicate registration: ", debug, ". Original registration: ", op->op.debug());
+  op->op.registerSchema(std::move(schema), std::move(debug));
+  listeners_->callOnOperatorRegistered(OperatorHandle(op));
 
   // NB: do not increment the counts until AFTER error checking
-  ++op.operatorDef_->def_count;
-  ++op.operatorDef_->def_and_impl_count;
+  ++op->def_count;
+  ++op->def_and_impl_count;
 
   return RegistrationHandleRAII([this, op, op_name] {
     deregisterDef_(op, op_name);
   });
 }
 
-void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op_name) {
+void Dispatcher::deregisterDef_(const OperatorCleanup& op, const OperatorName& op_name) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
-  TORCH_INTERNAL_ASSERT(op.schema().operator_name() == op_name);
+  TORCH_INTERNAL_ASSERT(op->op.schema().operator_name() == op_name);
 
   // reduce def_count and actually deregister if no references left
-  TORCH_INTERNAL_ASSERT(op.operatorDef_->def_count > 0);
-  TORCH_INTERNAL_ASSERT(op.operatorDef_->def_and_impl_count > 0);
+  TORCH_INTERNAL_ASSERT(op->def_count > 0);
+  TORCH_INTERNAL_ASSERT(op->def_and_impl_count > 0);
 
-  --op.operatorDef_->def_count;
-  --op.operatorDef_->def_and_impl_count;
-  if (0 == op.operatorDef_->def_count) {
+  --op->def_count;
+  --op->def_and_impl_count;
+  if (0 == op->def_count) {
     // note: call listeners *before* operator is removed, i.e. dispatcher is still valid for removed op
     // TODO: check that listeners are not relying on prepareForDeregistration()
     // invariant
-    listeners_->callOnOperatorDeregistered(op);
-    op.operatorDef_->op.deregisterSchema();
+    listeners_->callOnOperatorDeregistered(OperatorHandle(op));
+    op->op.deregisterSchema();
   }
 
   cleanup(op, op_name);
@@ -184,7 +191,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
 
   auto op = findOrRegisterName_(op_name);
 
-  auto handle = op.operatorDef_->op.registerKernel(
+  auto handle = op->op.registerKernel(
     *this,
     dispatch_key,
     std::move(kernel),
@@ -193,22 +200,22 @@ RegistrationHandleRAII Dispatcher::registerImpl(
     std::move(debug)
   );
 
-  ++op.operatorDef_->def_and_impl_count;
+  ++op->def_and_impl_count;
 
   return RegistrationHandleRAII([this, op, op_name, dispatch_key, handle] {
     deregisterImpl_(op, op_name, dispatch_key, handle);
   });
 }
 
-void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::AnnotatedKernel>::iterator handle) {
+void Dispatcher::deregisterImpl_(const OperatorCleanup& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, std::list<impl::AnnotatedKernel>::iterator handle) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  op.operatorDef_->op.deregisterKernel_(*this, dispatch_key, handle);
+  op->op.deregisterKernel_(*this, dispatch_key, handle);
 
-  TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
+  TORCH_INTERNAL_ASSERT(op->op.operator_name() == op_name);
 
-  TORCH_INTERNAL_ASSERT(op.operatorDef_->def_and_impl_count > 0);
-  --op.operatorDef_->def_and_impl_count;
+  TORCH_INTERNAL_ASSERT(op->def_and_impl_count > 0);
+  --op->def_and_impl_count;
 
   cleanup(op, op_name);
 }
@@ -216,28 +223,28 @@ void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& o
 RegistrationHandleRAII Dispatcher::registerName(OperatorName op_name) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto op = findOrRegisterName_(op_name);
-  ++op.operatorDef_->def_and_impl_count;
+  ++op->def_and_impl_count;
   return RegistrationHandleRAII(
       [this, op, op_name] { deregisterName_(op, op_name); });
 }
 
 void Dispatcher::deregisterName_(
-    const OperatorHandle& op,
+    const OperatorCleanup& op,
     const OperatorName& op_name) {
   std::lock_guard<std::mutex> lock(mutex_);
-  TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
-  TORCH_INTERNAL_ASSERT(op.operatorDef_->def_and_impl_count > 0);
-  --op.operatorDef_->def_and_impl_count;
+  TORCH_INTERNAL_ASSERT(op->op.operator_name() == op_name);
+  TORCH_INTERNAL_ASSERT(op->def_and_impl_count > 0);
+  --op->def_and_impl_count;
   cleanup(op, op_name);
 }
 
 // Test if the operator entry is completely dead, and if so remove it completely
-void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) {
-  if (0 == op.operatorDef_->def_and_impl_count) {
+void Dispatcher::cleanup(const OperatorCleanup& op, const OperatorName& op_name) {
+  if (0 == op->def_and_impl_count) {
     // NOTE: Making this call fast is the only reason OperatorHandle
     // stores operatorIterator_!
-    operators_.erase(op.operatorIterator_);
-    operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
+    operators_.erase(op);
+    operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorCleanup>& operatorLookupTable) {
       operatorLookupTable.erase(op_name);
     });
   }
@@ -298,11 +305,11 @@ void Dispatcher::checkInvariants() const {
 }
 
 std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
-  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorHandle> {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorCleanup>& operatorLookupTable) -> std::vector<OperatorHandle> {
     std::vector<OperatorHandle> opsWithDanglingImpls;
     for (const auto& op : operatorLookupTable) {
-      if (!op.second.hasSchema()) {
-        opsWithDanglingImpls.push_back(op.second);
+      if (!op.second->op.hasSchema()) {
+        opsWithDanglingImpls.push_back(OperatorHandle(op.second));
       }
     }
     return opsWithDanglingImpls;

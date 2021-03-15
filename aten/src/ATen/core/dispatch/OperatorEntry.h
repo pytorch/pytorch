@@ -150,7 +150,7 @@ public:
 
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
   template<class FuncType>
-  void assertSignatureIsCorrect() {
+  void assertSignatureIsCorrect() const {
     if (C10_UNLIKELY(cpp_signature_.has_value() && (CppSignature::make<FuncType>() != cpp_signature_->signature))) {
       reportSignatureError(CppSignature::make<FuncType>().name());
     }
