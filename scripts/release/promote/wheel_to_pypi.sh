@@ -49,7 +49,7 @@ for pkg in ${pkgs_to_promote}; do
     )
 
     if [[ -n "${VERSION_SUFFIX}" ]]; then
-        OUTPUT_DIR=${output_tmp_dir} ${DIR}/prep_binary_for_pypi.sh "${orig_pkg}"
+        OUTPUT_DIR="${output_tmp_dir}" ${DIR}/prep_binary_for_pypi.sh "${orig_pkg}"
     else
         mv "${orig_pkg}" "${output_tmp_dir}/"
     fi
