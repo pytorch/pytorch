@@ -4,7 +4,7 @@ import collections
 import contextlib
 import dataclasses
 import textwrap
-from typing import cast, Any, DefaultDict, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import cast, Any, DefaultDict, Dict, Iterable, Iterator, List, Optional, Tuple, TypeVar
 
 import numpy as np
 import torch
@@ -12,6 +12,7 @@ import torch
 
 __all__ = ["TaskSpec", "Measurement"]
 
+T = TypeVar("T")
 
 _MAX_SIGNIFICANT_FIGURES = 4
 _MIN_CONFIDENCE_INTERVAL = 25e-9  # 25 ns
@@ -62,6 +63,10 @@ class TaskSpec:
             self.setup_str(),
         ]
         return "\n".join([f"{i}\n" if "\n" in i else i for i in sections if i])
+
+    @property
+    def as_row_name(self) -> str:
+        return self.sub_label or self.stmt or "[Unknown]"
 
 _TASKSPEC_FIELDS = tuple(i.name for i in dataclasses.fields(TaskSpec))
 
@@ -190,10 +195,6 @@ class Measurement:
             else cast(str, self.taskspec.env)
         )
 
-    @property
-    def as_row_name(self) -> str:
-        return self.sub_label or self.stmt or "[Unknown]"
-
     def __repr__(self) -> str:
         """
         Example repr:
@@ -274,6 +275,12 @@ def trim_sigfig(x: float, n: int) -> float:
     magnitude = int(np.ceil(np.log10(np.abs(x))))
     scale = 10 ** (magnitude - n)
     return float(np.round(x / scale) * scale)
+
+
+def get_unique(values: Iterable[T]) -> T:
+    unique_values = {v for v in values}
+    assert len(unique_values) == 1, f"Values are not unique: {unique_values}"
+    return unique_values.pop()
 
 
 def ordered_unique(elements: Iterable[Any]) -> List[Any]:

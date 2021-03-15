@@ -81,17 +81,17 @@ def main():
         sys.stdout.flush()
     print()
 
-    comparison = benchmark_utils.Compare([
-        pickle.loads(i) for i in serialized_results
-    ])
+    results = [pickle.loads(i) for i in serialized_results]
 
     print("== Unformatted " + "=" * 80 + "\n" + "/" * 95 + "\n")
-    comparison.print()
+    benchmark_utils.Compare(results).print()
 
     print("== Formatted " + "=" * 80 + "\n" + "/" * 93 + "\n")
-    comparison.trim_significant_figures()
-    comparison.colorize()
-    comparison.print()
+    benchmark_utils.Compare(
+        results,
+        colorize=True,
+        trim_significant_figures=True,
+    ).print()
 
 
 if __name__ == "__main__":
