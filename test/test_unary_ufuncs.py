@@ -317,7 +317,7 @@ class TestUnaryUfuncs(TestCase):
     #   values on given tensors
     def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
         for t in tensors:
-            torch_kwargs, numpy_kwargs = op.sample_kwargs(device, dtype, t)
+            torch_kwargs, numpy_kwargs = op.sample_kwargs(t.device, dtype, t)
             if dtype is torch.bfloat16:
                 a = t.cpu().to(torch.float32).numpy()
             else:
