@@ -4762,7 +4762,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
-
     @skip_if_lt_x_gpu(2)
     def test_device_map_error_on_new_gpu_0(self):
         self._test_device_maps_new_gpu(
@@ -4780,7 +4779,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             z_to=1,
             device_map={0 : 1}
         )
-
 
     def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map, dst=None):
         x_to = device_map[x_from]
