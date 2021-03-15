@@ -8428,25 +8428,26 @@ svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition of either a matrix or batch of
 matrices :attr:`input`. The singular value decomposition is represented as a
-namedtuple (`U,S,V`), such that
-:attr:`input` = `U` diag(`S`) `Vᴴ`,
-where `Vᴴ` is the transpose of `V` for the real-valued inputs,
-or the conjugate transpose of `V` for the complex-valued inputs.
-If :attr:`input` is a batch of tensors, then `U`, `S`, and `V` are also
+namedtuple ``(U, S, V)``, such that
+:math:`\texttt{input} = \texttt{U} \operatorname{diag}(\texttt{S}) \texttt{V}^{\text{H}}`
+where :math:`\texttt{V}^{\text{H}}` is the transpose of ``V`` for real inputs,
+and the conjugate transpose of ``V`` for complex inputs.
+If :attr:`input` is a batch of matrices, then ``U``, ``S``, and ``V`` are also
 batched with the same batch dimensions as :attr:`input`.
 
 If :attr:`some` is ``True`` (default), the method returns the reduced singular
-value decomposition i.e., if the last two dimensions of :attr:`input` are
-`m` and `n`, then the returned `U` and `V` matrices will contain only
-min(`n, m`) orthonormal columns.
+value decomposition. In this case, if the last two dimensions of :attr:`input` are
+``m`` and ``n``, then the returned ``U`` and ``V`` matrices will contain only
+``min(n, m)`` orthonormal columns.
 
-If :attr:`compute_uv` is ``False``, the returned `U` and `V` will be
-zero-filled matrices of shape `(m × m)` and `(n × n)`
+
+If :attr:`compute_uv` is ``False``, the returned ``U`` and ``V`` will be
+zero-filled matrices of shape ``(m × m)`` and ``(n × n)``
 respectively, and the same device as :attr:`input`. The :attr:`some`
 argument has no effect when :attr:`compute_uv` is ``False``.
 
-Supports input of float, double, cfloat and cdouble data types.
-The dtypes of `U` and `V` are the same as :attr:`input`'s. `S` will
+Supports :attr:`input` of float, double, cfloat and cdouble data types.
+The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
 always be real-valued, even if :attr:`input` is complex.
 
 .. warning:: :func:`torch.svd` is deprecated. Please use
@@ -8456,50 +8457,53 @@ always be real-valued, even if :attr:`input` is complex.
 .. note:: Differences with :func:`torch.linalg.svd`:
 
              * :attr:`some` is the opposite of
-               :func:`torch.linalg.svd`'s :attr:`full_matricies`. Note that
+               :func:`torch.linalg.svd`'s :attr:`full_matrices`. Note that
                default value for both is ``True``, so the default behavior is
                effectively the opposite.
-
-             * :func:`torch.svd` returns `V`, whereas :func:`torch.linalg.svd` returns `Vᴴ`.
-
-             * If :attr:`compute_uv=False`, :func:`torch.svd` returns zero-filled tensors for
-               ``U`` and ``Vh``, whereas :func:`torch.linalg.svd` returns
+             * :func:`torch.svd` returns ``V``, whereas :func:`torch.linalg.svd` returns
+               ``Vh``, that is, ``\texttt{V}^{\text{H}}``.
+             * If :attr:`compute_uv` is ``False``, :func:`torch.svd` returns zero-filled
+               tensors for ``U`` and ``Vh``, whereas :func:`torch.linalg.svd` returns
                empty tensors.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
-          then the singular values of each matrix in the batch is returned in descending order.
+          then the singular values of each matrix in the batch are returned in descending order.
 
-.. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
-          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the cuSOLVER routines
-          `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later, and uses the MAGMA routine `gesdd`
-          on earlier versions of CUDA.
+.. note:: The implementation of SVD on CPU uses the LAPACK routine ``?gesdd`` (a divide-and-conquer
+          algorithm) instead of ``?gesvd`` for speed. Analogously, the SVD on GPU uses the
+          cuSOLVER routines ``gesvdj`` and ``gesvdjBatched`` on CUDA 10.1.243 and later,
+          and uses the MAGMA routine ``gesdd`` on earlier versions of CUDA.
 
-.. note:: The returned matrix `U` will be transposed, i.e. with strides
-          :code:`U.contiguous().transpose(-2, -1).stride()`.
+.. note:: The returned matrix ``U`` will not be contiguous. It will be represented as a
+          column-major (i.e. fortran-contiguous) matrix.
 
-.. note:: Gradients computed using `U` and `V` may be unstable if
-          :attr:`input` is not full rank or has non-unique singular values.
+.. note:: Gradients computed using ``U`` and ``V`` may be unstable if :attr:`input` has
+          repeated non-unique singular values, e.g., when it is not full-rank.
+          See also the last note in this list.
 
-.. note:: When :attr:`some` = ``False``, the gradients on :code:`U[..., :, min(m, n):]`
-          and :code:`V[..., :, min(m, n):]` will be ignored in backward as those vectors
+.. note:: When :attr:`some` is ``False``, the gradients on ``U[..., :, min(m, n):]``
+          and ``V[..., :, min(m, n):]`` will be ignored in backward as those vectors
           can be arbitrary bases of the subspaces.
 
-.. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
+.. note:: The ``S`` tensor can only be used to compute gradients if :attr:`compute_uv` is ``True``.
 
-.. note:: With the complex-valued input the backward operation works correctly only
-          for gauge invariant loss functions. Please look at `Gauge problem in AD`_ for more details.
-
-.. note:: Since `U` and `V` of an SVD is not unique, each vector can be multiplied by
-          an arbitrary phase factor :math:`e^{i \phi}` while the SVD result is still correct.
-          Different platforms, like Numpy, or inputs on different device types, may produce different
-          `U` and `V` tensors.
+.. note:: For complex-valued :attr:`input` the SVD is not unique, as ``U`` and ``V`` may
+          be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.
+          The same happens when :attr:`input` has repeated singular values, where one may multiply
+          the columns of the spanning subspace in ``U`` and ``V`` by a rotation matrix
+          and the resulting vectors will span the same subspace.
+          Different platforms, like Numpy, or inputs on different device types,
+          may produce different ``U`` and ``V`` tensors.
+          In these cases, the backward operation is only well-defined when the cost-function
+          is invariant under these transformations, i.e., when it just depends on the spanned
+          subspaces and not on the particular basis.
 
 Args:
-    input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
-                    batch dimensions consisting of `(m × n)` matrices.
+    input (Tensor): the input tensor of size ``(*, m, n)`` where ``*`` is zero or more
+                    batch dimensions consisting of ``(m × n)`` matrices.
     some (bool, optional): controls whether to compute the reduced or full decomposition, and
-                           consequently the shape of returned `U` and `V`. Defaults to True.
-    compute_uv (bool, optional): option whether to compute `U` and `V` or not. Defaults to True.
+                           consequently the shape of returned ``U`` and ``V``. Default: ``True``.
+    compute_uv (bool, optional): option whether to compute ``U`` and ``V`` or not. Default: ``True``.
 
 Keyword args:
     out (tuple, optional): the output tuple of tensors
@@ -8533,7 +8537,6 @@ Example::
     >>> torch.dist(a_big, torch.matmul(torch.matmul(u, torch.diag_embed(s)), v.transpose(-2, -1)))
     tensor(2.6503e-06)
 
-.. _Gauge problem in AD: https://re-ra.xyz/Gauge-Problem-in-Automatic-Differentiation/
 """)
 
 add_docstr(torch.symeig, r"""
