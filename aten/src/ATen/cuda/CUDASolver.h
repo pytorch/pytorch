@@ -2,6 +2,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
+// See https://github.com/pytorch/pytorch/pull/53040
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11000
 // cuSOLVER version >= 11000 includes 64-bit API
 #define USE_CUSOLVER_64_BIT

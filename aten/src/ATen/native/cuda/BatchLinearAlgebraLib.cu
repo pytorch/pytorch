@@ -387,6 +387,10 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
 }
 
 
+// Todo: cusolverDnXpotrfBatched has some numerical issue and is not used here.
+//     A loop of cusolverDnXpotrf is used in case MAGMA is not linked in the pytorch build.
+//     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
+//     See https://github.com/pytorch/pytorch/issues/53879.
 template<typename scalar_t>
 inline static void apply_cholesky_cusolver_potrf(Tensor& self_working_copy, bool upper, Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
