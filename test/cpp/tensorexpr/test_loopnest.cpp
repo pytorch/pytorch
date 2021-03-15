@@ -3995,12 +3995,53 @@ TEST(LoopNest, ColReduceSplitMaskEvenReorder) {
   checkColReduce(s, *p.first, p.second);
 }
 
-TEST(LoopNest, DISABLED_ColReduceSplitMaskUnevenReorder) {
+TEST(LoopNest, ColReduceSplitMaskUnevenReorder) {
   KernelScope kernel_scope;
   constexpr int M = 76, N = 100;
   auto p = colReduce(M, N);
   Stmt* s = splitMaskReorder(p.second);
   checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, ReorderAxisWithMultipleConds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     if i > 5 {
+  //       if i < 10 {
+  //         for (int j = 0; j < 100; j++) {
+  //           A[i] = i * j;
+  //         }
+  //       }
+  //     }
+  //   }
+  BufHandle a_buf("A", {20}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto forJ = For::make(j, 0, 100, Store::make(a_buf, {i}, Mul::make(i, j)));
+  auto inner_cond = Cond::make(CompareSelect::make(i, 10, kLT), forJ, nullptr);
+  auto outer_cond =
+      Cond::make(CompareSelect::make(i, 5, kGT), inner_cond, nullptr);
+  auto forI = For::make(i, 0, 20, outer_cond);
+  Stmt* par = Block::make({forI});
+  LoopNest l(par, {a_buf.node()});
+  l.reorderAxis(forI, forJ);
+  ASSERT_EQ(par, l.root_stmt());
+  par = IRSimplifier::simplify(par);
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int j
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: if (i>5
+# CHECK-NEXT: if (i<10
+# CHECK-NEXT: A[i] = i * j
+# CHECK-NOT: for (
+      )IR";
+  std::ostringstream oss;
+  oss << *par;
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
 TEST(LoopNest, VectorizeUse) {

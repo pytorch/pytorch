@@ -1489,6 +1489,19 @@ void LoopNest::reorderAxis(For* a, For* b) {
   For* last = internal_axes.front();
   Stmt* newInner = body;
 
+  s = inner;
+  while (s != outer) {
+    if (auto cond = dynamic_cast<Cond*>(s->get_parent())) {
+      if (s == cond->true_stmt()) {
+        newInner = cond->cloneWithNewBody(newInner);
+      } else {
+        // s is the false branch of Cond
+        newInner = cond->cloneWithNewBodies(new Block({}), newInner);
+      }
+    }
+    s = s->get_parent();
+  }
+
   // This is the major complexity in loop reordering: handling statements not in
   // the straight line of the reorder. To handle this we partition the tree into
   // the section before the critical path and after the critical path.
