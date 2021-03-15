@@ -604,7 +604,6 @@ cc_library(
         ":c10_headers",
         ":aten_src_TH_THGeneral",
         ":aten_src_THC_THCGeneral",
-        ":aten_src_ATen_cuda_config",
     ],
 )
 
@@ -657,6 +656,7 @@ cc_library(
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
+        ":aten_src_ATen_cuda_config",
         ":generated_cpp",
     ],
     copts = ATEN_COPTS,
