@@ -2137,7 +2137,7 @@ class TestFX(JitTestCase):
 
         self.checkGraphModule(M(), (torch.rand(2, 3), A()), kwargs=None)
 
-    @unittest.skipIf(sys.version_info >= (3, 7), "`__future__` feature "
+    @unittest.skipIf(sys.version_info < (3, 7), "`__future__` feature "
                      "`annotations` is not defined in Python <3.7")
     def test_annotation_with_future(self):
         try:
