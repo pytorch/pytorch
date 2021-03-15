@@ -801,6 +801,7 @@ jobs:
             export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            export PYTHONPATH="$PWD"
             pip install typing_extensions boto3
             python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           when: always

@@ -24,7 +24,7 @@ try:
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     from tools.stats_utils.s3_stat_parser import (get_S3_bucket_readonly, HAVE_BOTO3)
 except ImportError:
-    print("Running without S3 stats...")
+    print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
     HAVE_BOTO3 = False
 
 
@@ -438,11 +438,11 @@ def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, Tup
 
 
 def pull_job_times_from_S3() -> Dict[str, Tuple[float, int]]:
-    print("HAHAHAHAHA")
     if HAVE_BOTO3:
         s3_reports = get_test_time_reports_from_S3()
     else:
-        print('Please install boto3 to enable using S3 test times for automatic sharding and test categorization.')
+        print('Uh oh, boto3 is not found. Either it is not installed or we failed to import s3_stat_parser.')
+        print('If not installed, please install boto3 for automatic sharding and test categorization.')
         s3_reports = []
 
     if len(s3_reports) == 0:
