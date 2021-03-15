@@ -419,10 +419,10 @@ inline static void apply_cholesky_cusolver_potrf(Tensor& self_working_copy, bool
   for (int64_t i = 0; i < batch_size; i++) {
     at::cuda::solver::xpotrf(
       handle, params, uplo, n, datatype,
-      static_cast<void*>(self_working_copy_ptr + i * matrix_stride),
+      self_working_copy_ptr + i * matrix_stride,
       lda, datatype,
-      workdata_device_ptr + i * worksize_device, worksize_device,
-      workdata_host_ptr + i * worksize_host, worksize_host,
+      (char*)workdata_device_ptr + i * worksize_device, worksize_device,
+      (char*)workdata_host_ptr + i * worksize_host, worksize_host,
       infos_ptr + i
     );
   }
