@@ -49,10 +49,10 @@ void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2, Scalar al
     });
 }
 
-#define FOREACH_BINARY_OP_LIST(NAME, OP)                                                                    \
+#define FOREACH_BINARY_OP_LIST(NAME, OP, DIVISION_OP)                                                       \
 void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {                  \
     check_foreach_api_restrictions(tensors1, tensors2);                                                     \
-    if (!can_use_fast_route({tensors1, tensors2})) {                                                        \
+    if (!can_use_fast_route(tensors1, tensors2, DIVISION_OP)) {                                             \
         return at::native::foreach_tensor_##NAME##_list_kernel_slow_(tensors1, tensors2);                   \
     }                                                                                                       \
                                                                                                             \
@@ -61,7 +61,7 @@ void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList t
                                                                                                             \
 std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {    \
     check_foreach_api_restrictions(tensors1, tensors2);                                                     \
-    if (!can_use_fast_route({tensors1, tensors2})) {                                                        \
+    if (!can_use_fast_route(tensors1, tensors2, DIVISION_OP)) {                                             \
         return at::native::foreach_tensor_##NAME##_list_kernel_slow(tensors1, tensors2);                    \
     }                                                                                                       \
                                                                                                             \
@@ -89,7 +89,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1
 
 FOREACH_BINARY_OP_LIST_ALPHA(add, std::plus);
 FOREACH_BINARY_OP_LIST_ALPHA(sub, std::minus);
-FOREACH_BINARY_OP_LIST(mul, std::multiplies);
-FOREACH_BINARY_OP_LIST(div, std::divides);
+FOREACH_BINARY_OP_LIST(mul, std::multiplies, /*division_op*/ false);
+FOREACH_BINARY_OP_LIST(div, std::divides, /*division_op*/ true);
 
 }} // namespace at::native
