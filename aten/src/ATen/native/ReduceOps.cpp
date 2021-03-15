@@ -500,12 +500,19 @@ Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional
 
 // ALL REDUCE #################################################################
 
-static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarType> dtype,
-                            bool promote_integers=false) {
+inline ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarType> dtype) {
+  TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
   if (dtype.has_value()) {
     return dtype.value();
-  } else if (result.defined()) {
+  } else {
     return result.scalar_type();
+  }
+}
+
+inline ScalarType get_dtype(const Tensor& self, optional<ScalarType> dtype,
+                            bool promote_integers) {
+  if (dtype.has_value()) {
+    return dtype.value();
   }
   ScalarType src_type = self.scalar_type();
   if (promote_integers && at::isIntegralType(src_type, /*includeBool=*/true)) {
@@ -516,7 +523,7 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
 
 Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
                        bool keepdim, optional<ScalarType> opt_dtype) {
-  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  ScalarType dtype = get_dtype(result, self, opt_dtype);
   auto iter = make_reduction("sum", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {
     result.zero_();
@@ -529,7 +536,8 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
 Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::native::sum(self, std::vector<int64_t>{}, false, dtype);
 }
-Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
+  ScalarType dtype = get_dtype(self, opt_dtype, true);
   Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::sum_out(result, self, dim, keepdim, dtype);
 }
@@ -551,7 +559,7 @@ Tensor& nansum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
     return at::sum_out(result, self, dim, keepdim, opt_dtype);
   }
 
-  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  ScalarType dtype = get_dtype(result, self, opt_dtype);
   auto iter = make_reduction("nansum", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {
     result = result.zero_();
@@ -572,7 +580,7 @@ Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<S
 
 static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,
                         bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  ScalarType dtype = get_dtype(result, self, opt_dtype);
   auto iter = make_reduction("prod", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {
     result.fill_(1);
@@ -589,7 +597,7 @@ Tensor trace_cpu(const Tensor& self) {
   // Returns the ScalarType of the self tensor if the tensor is non integral type
   // In the case, self is an integer type tensor, at::kLong is return since promote_integers
   // is set to true
-  ScalarType dtype = get_dtype(result, self, c10::nullopt, true);
+  ScalarType dtype = get_dtype(self, c10::nullopt, true);
   result = at::empty({}, self.options().dtype(dtype));
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "trace", [&] {
     using accscalar_t = at::acc_type<scalar_t, false>;
@@ -650,7 +658,7 @@ Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
       "Can only calculate the mean of floating types. Got ",
       toString(scalarType),
       " instead.");
-  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  ScalarType dtype = get_dtype(result, self, opt_dtype);
   // TODO: the TensorIterator reduction implementation of mean
   // (mean_kernel_impl()) is unvectorized and leads to very poor performance
   // for production workloads. Once that's fixed, the following code can be used
@@ -1097,7 +1105,7 @@ static Tensor& std_var_out(Tensor& result, const Tensor& self, IntArrayRef dim, 
               "std and var only support floating-point dtypes");
 
   if (at::isComplexType(self.scalar_type())){
-    ScalarType dtype = c10::toValueType(get_dtype(result, self, {}, true));
+    ScalarType dtype = c10::toValueType(get_dtype(result, self, {}));
     Tensor real_in = at::real(self);
     Tensor real_out = at::empty({0}, self.options().dtype(dtype));
     auto iter = make_reduction("std or var", real_out, real_in, dim, keepdim, dtype);
@@ -1117,7 +1125,7 @@ static Tensor& std_var_out(Tensor& result, const Tensor& self, IntArrayRef dim, 
     at::add_out(result, real_out, imag_out);
     take_sqrt ? at::sqrt_out(result, result) : result;
   } else{
-    ScalarType dtype = get_dtype(result, self, {}, true);
+    ScalarType dtype = get_dtype(result, self, {});
     auto iter = make_reduction("std or var", result, self, dim, keepdim, dtype);
     if (iter.numel() == 0) {
       result.fill_(NAN);
@@ -1143,7 +1151,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
            toString(result2.scalar_type()),
            ".");
   if (at::isComplexType(self.scalar_type())){
-    ScalarType dtype = c10::toValueType(get_dtype(result1, self, {}, true));
+    ScalarType dtype = c10::toValueType(get_dtype(result1, self, {}));
     Tensor real_in = at::real(self);
     Tensor real_out_var = at::empty({0}, self.options().dtype(dtype));
     Tensor real_out_mean = at::empty({0}, self.options().dtype(dtype));
@@ -1168,7 +1176,7 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
     take_sqrt ? at::sqrt_out(result1, result1) : result1;
     at::add_out(result2, real_out_mean, at::mul(imag_out_mean, c10::complex<double>{0.0, 1.0}));
   } else {
-    ScalarType dtype = get_dtype(result1, self, {}, true);
+    ScalarType dtype = get_dtype(result1, self, {});
     auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
     if (iter.numel() == 0) {
       result1.fill_(NAN);
