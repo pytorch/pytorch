@@ -273,13 +273,13 @@ If the type annotation is not specified, TorchScript compiler fails with the run
 
 ::
 
-	RuntimeError:
-	Tensor (inferred) cannot be used as a tuple:
-	  File <filename>
-	        def forward(self, x, tup):
-	            t0, t1 = tup
-	                     ~~~ <--- HERE
-	            return t0 + t1 + x
+  RuntimeError:
+  Tensor (inferred) cannot be used as a tuple:
+    File <filename>
+          def forward(self, x, tup):
+              t0, t1 = tup
+                       ~~~ <--- HERE
+              return t0 + t1 + x
 
 
 Write PyTorch model in Torch way
@@ -315,7 +315,6 @@ Avoid using .data field
 The .data field is an old field that is kept for backward compatibility and should be avoided when writing models.
 It's usage is dangerous and can make computations wrong, furthermore it can produce an incorrect trace graph and
 therefore an incorrect ONNX graph. A safer alternative is to use .detach() instead.
-
 
 Using dictionaries to handle Named Arguments as model inputs
 ------------------------------------------------------------
