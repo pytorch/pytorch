@@ -99,7 +99,7 @@ static std::string get_tensor_shapes(PerformanceInformation p) {
   std::stringstream shape_stream;
   if (!p.tensor_shapes.empty()) {
     shape_stream << "[";
-    for (const auto i : c10::irange(tensor_shapes.size())) {
+    for (const auto i : c10::irange(p.tensor_shapes.size())) {
       shape_stream << "[";
       for (int j = 0; j < p.tensor_shapes[i].dims_size(); j++) {
         shape_stream << p.tensor_shapes[i].dims(j) << ", ";
