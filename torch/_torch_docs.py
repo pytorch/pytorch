@@ -8440,11 +8440,10 @@ value decomposition. In this case, if the last two dimensions of :attr:`input` a
 ``m`` and ``n``, then the returned ``U`` and ``V`` matrices will contain only
 ``min(n, m)`` orthonormal columns.
 
-
 If :attr:`compute_uv` is ``False``, the returned ``U`` and ``V`` will be
-zero-filled matrices of shape ``(m × m)`` and ``(n × n)``
-respectively, and the same device as :attr:`input`. The :attr:`some`
-argument has no effect when :attr:`compute_uv` is ``False``.
+zero-filled matrices of shape ``(m, m)`` and ``(n, n)``
+respectively, and the same device as :attr:`input`. The argument :attr:`some`
+has no effect when :attr:`compute_uv` is ``False``.
 
 Supports :attr:`input` of float, double, cfloat and cdouble data types.
 The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
@@ -8500,7 +8499,7 @@ always be real-valued, even if :attr:`input` is complex.
 
 Args:
     input (Tensor): the input tensor of size ``(*, m, n)`` where ``*`` is zero or more
-                    batch dimensions consisting of ``(m × n)`` matrices.
+                    batch dimensions consisting of ``(m, n)`` matrices.
     some (bool, optional): controls whether to compute the reduced or full decomposition, and
                            consequently the shape of returned ``U`` and ``V``. Default: ``True``.
     compute_uv (bool, optional): option whether to compute ``U`` and ``V`` or not. Default: ``True``.
