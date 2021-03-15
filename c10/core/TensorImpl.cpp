@@ -103,6 +103,29 @@ IntArrayRef TensorImpl::strides() const {
   return sizes_and_strides_.strides_arrayref();
 }
 
+void TensorImpl::HandleResize() {
+  // If needed, we will free the data. the next mutable_data() call
+  // will create the data storage.
+  bool reset_tensor = false;
+  if (reserved_) {
+    // If tensor is reserved then don't claim its memeory unless nbytes()
+    // is smaller than new size
+    reset_tensor = storage_.nbytes() <
+      (storage_offset_ + numel_) * data_type_.itemsize();
+  } else {
+    reset_tensor = storage_.nbytes() <
+      (storage_offset_ + numel_) * data_type_.itemsize() ||
+      !FLAGS_caffe2_keep_on_shrink ||
+      storage_.nbytes() -
+      (storage_offset_ + numel_) * data_type_.itemsize() >
+      static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
+  }
+
+  if (reset_tensor && storage_initialized()) {
+    FreeMemory();
+  }
+}
+
 bool TensorImpl::compute_contiguous() const {
   bool is_contiguous = true;
   if (is_empty())

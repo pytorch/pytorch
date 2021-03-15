@@ -18,7 +18,7 @@ def get_current_device_index() -> int:
     Arguments: ``None``
     """
     if torch.cuda.device_count() > 0:
-        return torch.cuda._current_device()
+        return torch.cuda.current_device()
     return -1
 
 def get_device_index(device: Optional[_device] = None, optional: bool = False, allow_cpu: bool = False) -> int:
@@ -74,14 +74,14 @@ class device(object):
 
         if self.idx == -1:
             return
-        self.prev_idx = torch.cuda._current_device()
+        self.prev_idx = torch.cuda.current_device()
 
         if self.prev_idx != self.idx:
-            torch.cuda._set_device(self.idx)
+            torch.cuda.set_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
         if self.prev_idx != self.idx:
-            torch.cuda._set_device(self.prev_idx)
+            torch.cuda.set_device(self.prev_idx)
 
 class StreamContext(object):
     r"""Context-manager that selects a given stream.
@@ -121,7 +121,7 @@ class StreamContext(object):
         if self.src_prev_stream.device_index() != cur_stream.device_index():
             with device(cur_stream.device()):
                 self.dst_prev_stream = torch.cuda.current_stream(cur_stream.device_index())
-            torch.cuda._set_device(cur_stream.device_index())
+            torch.cuda.set_device(cur_stream.device_index())
         torch.cuda.set_stream(cur_stream)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
@@ -135,7 +135,7 @@ class StreamContext(object):
         # Set the current stream on the device to the src_prev_stream
         if self.src_prev_stream.device_index() != cur_stream.device_index():
             torch.cuda.set_stream(self.dst_prev_stream)
-            torch.cuda._set_device(self.idx)
+            torch.cuda.set_device(self.idx)
         torch.cuda.set_stream(self.src_prev_stream)
 
 def stream(stream: Optional['torch.classes.cuda.Stream']) -> StreamContext:
@@ -148,15 +148,15 @@ def stream(stream: Optional['torch.classes.cuda.Stream']) -> StreamContext:
     """
     return StreamContext(stream)
 
-def Stream(device: int = -1, priority: int = 0) -> 'torch.classes.cuda.Stream':
+def Stream(device: Optional[torch.device] = None, priority: int = 0) -> 'torch.classes.cuda.Stream':
     r"""Wrapper around a CUDA stream.
     A CUDA stream is a linear sequence of execution that belongs to a specific
     device, independent from other streams.  See :ref:`cuda-semantics` for
     details.
     Arguments:
-        device(int, optional): a device on which to allocate
-            the stream. If :attr:`device` is ``None`` (default) or a negative
-            integer, this will use the current device.
+        device(torch.device, optional): a device on which to allocate
+            the stream. If :attr:`device` is ``None`` (default), stream will be
+            created on the current device.
         priority(int, optional): priority of the stream. Can be either
             -1 (high priority) or 0 (low priority). By default, streams have
             priority 0.
