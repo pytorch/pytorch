@@ -342,7 +342,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_complex_extremals = handles_complex_extremals
         self.supports_complex_to_float = supports_complex_to_float
 
-        # test_unary_ufuncs.py generates its own inputs to test the consistency 
+        # test_unary_ufuncs.py generates its own inputs to test the consistency
         # of the operator on sliced tensors, non-contig tensors, etc.
         # `sample_kwargs` is a utility function to provide kwargs
         # along with those inputs if required (eg. clamp).
