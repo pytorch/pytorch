@@ -1085,6 +1085,13 @@ class TestJit(JitTestCase):
                 self.assertFalse(fn.has_trace_for(*unk_config))
         self.assertEqual(fn.hits, 0)
 
+    def test_optional_inputs(self):
+        def fn(t, n: Optional[int]):
+            return torch.fft.fftn(t, n)
+
+            A = torch.rand(2, 3)
+            self.checkScript(fn, (A, 3, ))
+
     def test_torch_complex(self):
         def fn(real, img):
             return torch.complex(real, img)

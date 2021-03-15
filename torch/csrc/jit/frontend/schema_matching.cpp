@@ -20,6 +20,15 @@ static inline bool isIntOrFloatUsedAsList(
     const Argument& arg) {
   // Look for int[N] or float[N]
   const auto& v_type = value->type();
+  // Check if value is optional Type of Int or Float
+  if (value->type()->kind() == OptionalType::Kind) {
+    auto opt_v_type = unwrapOptional(value->type());
+    if (opt_v_type != FloatType::get() && opt_v_type != IntType::get())
+      return false;
+    auto arg_type = unwrapOptional(arg.type());
+    auto list_type = arg_type->cast<ListType>();
+    return list_type && list_type->getElementType() == opt_v_type && arg.N();
+  }
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
   auto arg_type = unwrapOptional(arg.type());
@@ -148,6 +157,11 @@ static Value* tryMatchArgument(
   // also allow single ints/floats to be passed in their place. The single
   // int/float is then repeated to the length of the list
   if (isIntOrFloatUsedAsList(value, arg)) {
+    if (value->type()->kind() == OptionalType::Kind) {
+      // If value is of optionalType, reset the type of the value to be
+      // of type `int` or `float`
+      value->setType(unwrapOptional(value->type()));
+    }
     std::vector<Value*> repeated(*arg.N(), value);
     value =
         graph.insertNode(graph.createList(value->type(), repeated))->output();
