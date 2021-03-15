@@ -346,12 +346,6 @@ class CPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
-class MetaTestBase(DeviceTypeTestBase):
-    device_type = 'meta'
-
-    def _should_stop_test_suite(self):
-        return False
-
 class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
@@ -405,10 +399,8 @@ def get_device_type_test_bases():
                 test_bases.append(CUDATestBase)
         else:
             test_bases.append(CPUTestBase)
-            test_bases.append(MetaTestBase)
     else:
         test_bases.append(CPUTestBase)
-        test_bases.append(MetaTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
