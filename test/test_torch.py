@@ -4588,11 +4588,11 @@ class TestTorchDeviceType(TestCase):
                     dest = torch.index_select(src, dim, idx, out=out)
                     dest2 = ref_index_select(src, dim, idx)
                     self.assertEqual(dest, dest2)
-                    try:
+                    if self.device.type != 'xla':
                         self.assertEqual(out.data_ptr(), dest.data_ptr())
-                    except RuntimeError:
+                    else:
                         # XLA does not have data_ptr()
-                        out.fill_(99)
+                        out.fill_(13)
                         self.assertEqual(out, dest)
 
         for idx_type in (torch.int32, torch.int64):
