@@ -75,13 +75,30 @@ struct WorkEntry {
 class ProcessGroupMPI : public ProcessGroup {
  public:
   class WorkMPI : public ProcessGroup::Work {
+   public:
+    WorkMPI(
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt)
+        : ProcessGroup::Work(
+              -1,
+              OpType::UNKNOWN,
+              profilingTitle,
+              inputTensors) {}
+
    protected:
     friend class ProcessGroupMPI;
   };
 
   class AsyncWork : public ProcessGroup::Work {
    public:
-    AsyncWork(at::Tensor tensor, MPI_Request request);
+    AsyncWork(
+        at::Tensor tensor,
+        MPI_Request request,
+        const char* profilingTitle = nullptr,
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt);
+
     virtual ~AsyncWork();
 
     bool isCompleted() override;
@@ -111,7 +128,7 @@ class ProcessGroupMPI : public ProcessGroup {
   void abort();
 
   const std::string getBackendName() const override {
-      return std::string(MPI_BACKEND_NAME);
+    return std::string(MPI_BACKEND_NAME);
   }
 
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
@@ -202,7 +219,10 @@ class ProcessGroupMPI : public ProcessGroup {
   // Helper function that is called by the destructor
   void destroy();
 
-  c10::intrusive_ptr<ProcessGroup::Work> enqueue(std::unique_ptr<WorkEntry> entry);
+  c10::intrusive_ptr<ProcessGroup::Work> enqueue(
+      std::unique_ptr<WorkEntry> entry,
+      const char* profilingTitle = nullptr,
+      const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt);
 
   bool stop_;
 

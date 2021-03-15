@@ -210,9 +210,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def(
-          "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
-          PrepareInplaceOpsForONNX)
-      .def(
           "_jit_pass_onnx_node_shape_type_inference",
           [](Node* n,
              std::map<std::string, IValue>& params_dict,
@@ -1104,8 +1101,7 @@ void initJITBindings(PyObject* module) {
                           self_func.ptr(),
                           module_name.c_str()));
                 }
-                return invokeOperatorFromPython(
-                    operations, std::move(args), std::move(kwargs));
+                return invokeOperatorFromPython(operations, args, kwargs);
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
