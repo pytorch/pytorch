@@ -4,6 +4,8 @@
 #include <ostream>
 #include <sstream>
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 ProfDAGCounters::ProfDAGCounters(const std::shared_ptr<const NetDef>& net_def) {
@@ -81,7 +83,7 @@ void ProfDAGCounters::ReportRunEnd() {
   CaffeMap<std::string, float> cum_per_type_time_run;
   CaffeMap<std::string, float> cum_per_type_invocations_run;
   std::vector<float> per_op_time_run(report_.op_types_.size(), 0.0);
-  for (size_t op_id = 0U; op_id < report_.op_types_.size(); ++op_id) {
+  for (const auto op_id : c10::irange(report_.op_types_.size())) {
     // check that we have valid times, otherwise return;
     // times might not be valid if network execution ended prematurely
     // because of operator errors

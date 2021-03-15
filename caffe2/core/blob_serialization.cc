@@ -4,6 +4,7 @@
 #include <sstream>
 #include <utility>
 
+#include <c10/util/irange.h>
 #include <c10/util/string_view.h>
 
 #include "caffe2/core/blob.h"
@@ -379,7 +380,7 @@ void TensorSerializer::Serialize(
     case TensorProto_DataType_STRING: {
       proto.mutable_string_data()->Reserve(chunkSize);
       const string* content = input.template data<string>();
-      for (size_t i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
+      for (const auto i : c10::irange(chunkBegin, chunkBegin + chunkSize)) {
         proto.add_string_data(content[i]);
       }
       break;

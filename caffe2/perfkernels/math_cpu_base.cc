@@ -9,6 +9,8 @@
 #include "common.h"
 #include "math.h"
 
+#include <c10/util/irange.h>
+
 using std::uint64_t;
 using std::uint8_t;
 
@@ -32,7 +34,7 @@ void quantize_and_compress__base(
 
   // basic info
   float minimum_element = INFINITY, maximum_element = -INFINITY;
-  for (uint64_t i = 0; i < input_size; ++i) {
+  for (const auto i : c10::irange(input_size)) {
     minimum_element =
         input_data[i] < minimum_element ? input_data[i] : minimum_element;
     maximum_element =
