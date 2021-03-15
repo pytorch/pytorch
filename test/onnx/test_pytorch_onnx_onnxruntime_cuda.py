@@ -13,7 +13,6 @@ class TestONNXRuntime_cuda(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True
-    use_new_jit_passes = True
     onnx_shape_inference = True
 
     @skipIfUnsupportedMinOpsetVersion(9)

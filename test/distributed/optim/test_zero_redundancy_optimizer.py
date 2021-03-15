@@ -7,12 +7,16 @@
 
 import copy
 import os
+import sys
 from contextlib import suppress
 from typing import List, Any, Type, cast
 
 import numpy as np
 import torch
 import torch.distributed as dist
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -21,6 +25,14 @@ from torch.testing._internal import common_utils, common_distributed
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO  # type: ignore
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def check_same_model_params(model_a: torch.nn.Module, model_b: torch.nn.Module, message: str = "") -> None:
+    for p_a, p_b in zip(model_a.parameters(), model_b.parameters()):
+        assert torch.allclose(p_a, p_b, atol=1e-3), f"Model parameters differ\n{p_a} {p_b}\n" + message
+
+    for b_a, b_b in zip(model_a.buffers(), model_b.buffers()):
+        assert torch.allclose(b_a, b_b), f"Model buffers differ {b_a} - {b_b}\n" + message
 
 
 class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
@@ -61,7 +73,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         """
         self.dist_init(self.rank)
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.1, momentum=0.9)
+        o = ZeroRedundancyOptimizer([x], optimizer_class=SGD, lr=0.1, momentum=0.9)
         x.backward()
         o.step()
         self.assertEqual(x, torch.tensor([0.9], device=DEVICE))
@@ -88,7 +100,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
                 self.assertEqual(state_dict["param_groups"][0][k], o.param_groups[0][k])
 
         # Check that it's correctly loaded
-        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.01)
+        o = ZeroRedundancyOptimizer([x], optimizer_class=SGD, lr=0.01)
         o.load_state_dict(state_dict)
 
         # Check that state is correct and on proper device
@@ -111,7 +123,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         self.dist_init(self.rank)
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
         x2 = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.01)
+        o = ZeroRedundancyOptimizer([x], optimizer_class=SGD, lr=0.01)
         o2 = torch.optim.SGD([x2], lr=0.01)
         s = torch.optim.lr_scheduler.StepLR(o, 1)
         s2 = torch.optim.lr_scheduler.StepLR(o2, 1)
@@ -137,7 +149,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
 
         kwarg: List[Any] = []
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeroRedundancyOptimizer([x], optim=SGDWithStepKWArg, lr=0.1)
+        o = ZeroRedundancyOptimizer([x], optimizer_class=SGDWithStepKWArg, lr=0.1)
         x.backward()
         o.step(0, kwarg=kwarg)
         self.assertEqual(kwarg, [5])
@@ -156,7 +168,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
                 self.param_groups[0]["new_key"] = 0.1
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeroRedundancyOptimizer([x], optim=SGDWithNewKey, lr=0.1)
+        o = ZeroRedundancyOptimizer([x], optimizer_class=SGDWithNewKey, lr=0.1)
         x.backward()
         o.step()
         self.assertEqual(o.param_groups[0]["new_key"], 0.1)
@@ -171,7 +183,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
                 return super().step()
 
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
-        o = ZeroRedundancyOptimizer([x], optim=SGDWithoutClosure, lr=0.1)
+        o = ZeroRedundancyOptimizer([x], optimizer_class=SGDWithoutClosure, lr=0.1)
         x.backward()
         o.step()
         self.assertEqual(x, torch.tensor([0.9], device=DEVICE))
@@ -181,7 +193,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         self.dist_init(self.rank)
         x = torch.rand(1)
         m = torch.nn.Linear(1, 1)
-        o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
+        o = ZeroRedundancyOptimizer(m.parameters(), optimizer_class=SGD, lr=0.1)
         y = m(x)
         y.backward(x)
         self.assertNotEqual(m.weight.grad, torch.zeros_like(m.weight))
@@ -213,7 +225,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             m.bias.data = torch.tensor([2.0])
             m.to(self.device)
 
-            o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
+            o = ZeroRedundancyOptimizer(m.parameters(), optimizer_class=SGD, lr=0.1)
             y = m(x)
             y.backward(x)
             for p in m.parameters():
@@ -235,39 +247,45 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         context = suppress() if not torch.cuda.is_available() else torch.cuda.device(self.rank)
 
         with context:
-            x_val = self.rank + 1
-            weight = 1.0
-            bias = 2.0
-            error = 1.0
-            target = torch.tensor([x_val * weight + bias + error], device=self.device)
-            loss_fn = torch.nn.L1Loss()
+            for bucket_view in [False, True]:
+                x_val = self.rank + 1
+                weight = 1.0
+                bias = 2.0
+                error = 1.0
+                target = torch.tensor([x_val * weight + bias + error], device=self.device)
+                loss_fn = torch.nn.L1Loss()
 
-            x = torch.tensor([float(x_val)], device=self.device)
-            m = torch.nn.Linear(1, 1)
-            m.weight.data = torch.tensor([[weight]])
-            m.bias.data = torch.tensor([bias])
-            m.to(self.device)
+                x = torch.tensor([float(x_val)], device=self.device)
+                m = torch.nn.Linear(1, 1)
+                m.weight.data = torch.tensor([[weight]])
+                m.bias.data = torch.tensor([bias])
+                m.to(self.device)
 
-            o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
+                o = ZeroRedundancyOptimizer(
+                    m.parameters(),
+                    optimizer_class=SGD,
+                    parameters_as_bucket_view=bucket_view,
+                    lr=0.1,
+                )
 
-            y = m(x)
-            y.backward(x)
-            for p in m.parameters():
-                dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
-                p.grad.data /= self.world_size
+                y = m(x)
+                y.backward(x)
+                for p in m.parameters():
+                    dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
+                    p.grad.data /= self.world_size
 
-            def closure():
-                o.zero_grad()
-                output = m(x)
-                loss = loss_fn(output, target)
-                loss.backward()
-                return loss
+                def closure():
+                    o.zero_grad()
+                    output = m(x)
+                    loss = loss_fn(output, target)
+                    loss.backward()
+                    return loss
 
-            loss = o.step(closure=closure)
+                loss = o.step(closure=closure)
 
-            self.assertEqual(loss, torch.tensor(error))
-            self.assertEqual(m.weight, torch.tensor([[1.1]]))
-            self.assertEqual(m.bias, torch.tensor([2.1]))
+                self.assertEqual(loss, torch.tensor(error))
+                self.assertEqual(m.weight, torch.tensor([[1.1]]))
+                self.assertEqual(m.bias, torch.tensor([2.1]))
 
     def test_sharding(self):
         """ Check the sharding at construction time"""
@@ -276,7 +294,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         params = []
         for size in sizes * self.world_size:
             params.append(torch.rand(size, 1))
-        o = ZeroRedundancyOptimizer(params, optim=SGD, lr=0.1)
+        o = ZeroRedundancyOptimizer(params, optimizer_class=SGD, lr=0.1)
         self.assertEqual(sum([x.numel() for x in o.optim.param_groups[0]["params"]]), sum(sizes))
 
     def test_add_param_group(self):
@@ -297,7 +315,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             for p in params:
                 p.requires_grad = True
 
-            o = ZeroRedundancyOptimizer(params, optim=SGD, lr=0.1)
+            o = ZeroRedundancyOptimizer(params, optimizer_class=SGD, lr=0.1)
 
             assert len(o.param_groups) == 1
             o.add_param_group({"params": [torch.rand(3, 1)]})
@@ -317,7 +335,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             for p in params[1:]:
                 p.requires_grad = True
 
-            o = ZeroRedundancyOptimizer(params, optim=SGD, lr=0.1)
+            o = ZeroRedundancyOptimizer(params, optimizer_class=SGD, lr=0.1)
 
             assert len(o.param_groups) == 1
             o.add_param_group({"params": [torch.rand(3, 1)]})
@@ -328,6 +346,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         all_trainable()
         some_trainable()
 
+    @common_distributed.skip_if_not_multigpu
     def test_collect_shards(self):
         """ Check the state consolidation mechanism, and the state dict exposed by ZeroRedundancyOptimizer"""
         self.dist_init(self.rank)
@@ -345,7 +364,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         loss_fn.to(self.device)
 
         # With SGD, Momentum is required to get a state to shard
-        optimizer = ZeroRedundancyOptimizer(model.parameters(), optim=SGD, lr=0.1, momentum=0.99)
+        optimizer = ZeroRedundancyOptimizer(model.parameters(), optimizer_class=SGD, lr=0.1, momentum=0.99)
 
         def closure():
             optimizer.zero_grad()
@@ -357,7 +376,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         _ = optimizer.step(closure=closure)
 
         # Update the optimizer state on the reference rank
-        optimizer.consolidate_state_dict(recipient_rank=RECIPIENT_RANK)
+        optimizer.consolidate_state_dict(to=RECIPIENT_RANK)
 
         # Fetch the state on the reference rank
         # - check that it has the correct size
@@ -432,12 +451,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
             # With SGD, Momentum is required to get a state to shard
             optimizer = ZeroRedundancyOptimizer(
-                model.parameters(),
-                optim=SGD,
-                lr=0.1,
-                momentum=0.99,
-                group=process_group,
-                bucket_cap_kb=2 ** 10,
+                model.parameters(), optimizer_class=SGD, lr=0.1, momentum=0.99, group=process_group
             )
             check(optimizer)
 
@@ -450,11 +464,10 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             # With SGD, Momentum is required to get a state to shard
             optimizer = ZeroRedundancyOptimizer(
                 model.parameters(),
-                optim=SGD,
+                optimizer_class=SGD,
                 lr=0.1,
                 momentum=0.99,
                 group=process_group,
-                bucket_cap_kb=0,
             )
             check(optimizer)
 
@@ -465,6 +478,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         """
 
         self.dist_init(self.rank)
+        BATCHS = 20
 
         with torch.cuda.device(self.rank):
             torch.manual_seed(self.rank)
@@ -480,29 +494,21 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 model.register_buffer("test_buffer", torch.ones((1)) * self.rank)
                 model.to(self.device)
 
-                sharded_optimizer = ZeroRedundancyOptimizer(params=model.parameters(), optim=optimizer, lr=1e-3)
-                sharded_ddp_model = DDP(module=model, device_ids=[self.rank], broadcast_buffers=True)
+                sharded_optimizer = ZeroRedundancyOptimizer(params=model.parameters(), optimizer_class=optimizer, lr=1e-3)
+                sharded_ddp_model = DDP(
+                    module=model, device_ids=[self.rank], broadcast_buffers=True, find_unused_parameters=True
+                )
 
                 ddp_model_single = copy.deepcopy(model)
                 ddp_model_single.to(self.device)
 
                 ddp_optimizer = optimizer(ddp_model_single.parameters(), lr=1e-3)
-                ddp_model = DDP(ddp_model_single, device_ids=[self.rank], broadcast_buffers=True)
-
-                def check_same_model_params():
-                    for pg, ddp_pg in zip(sharded_optimizer.param_groups, ddp_optimizer.param_groups):
-                        for p, ddp_p in zip(pg["params"], ddp_pg["params"]):
-                            assert torch.allclose(
-                                p, ddp_p, atol=1e-3
-                            ), f"Model parameters differ in between Pytorch optim and ZeroRedundancyOptimizer \n{p} {ddp_p}"
-
-                    for b, ddp_b in zip(sharded_ddp_model.buffers(), ddp_model.buffers()):
-                        assert torch.allclose(
-                            b, ddp_b
-                        ), "Model buffers differ in between Pytorch optim and ZeroRedundancyOptimizer"
+                ddp_model = DDP(
+                    ddp_model_single, device_ids=[self.rank], broadcast_buffers=True, find_unused_parameters=True
+                )
 
                 # The model should be synchronized in between the ranks at construction time, check that
-                check_same_model_params()
+                check_same_model_params(sharded_ddp_model, ddp_model, "Models differ from the start")
 
                 def check_step():
                     input_tensor = torch.rand((64, 2))
@@ -526,17 +532,23 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                         loss_ddp, loss_sharded_optim
                     ), "Losses differ in between Pytorch optim and ZeroRedundancyOptimizer"
 
-                    check_same_model_params()
+                    check_same_model_params(sharded_ddp_model, ddp_model, "Models differ after a step")
 
                 # The models should stay the same in between the ranks
-                for i in range(20):
+                for i in range(BATCHS):
                     check_step()
+
+                    # Change the models trainability, check that parity is maintained
+                    # only check after a couple of constant batchs to go through both regimes
+                    if i > BATCHS // 2:
+                        next(ddp_model.parameters()).requires_grad = bool(i % 2)
+                        next(sharded_ddp_model.parameters()).requires_grad = bool(i % 2)
 
                 # Check that the checkpoints are compatible
                 reference_rank = 0
                 # - get states
                 ddp_state_dict = ddp_optimizer.state_dict()
-                sharded_optimizer.consolidate_state_dict(recipient_rank=reference_rank)
+                sharded_optimizer.consolidate_state_dict(to=reference_rank)
                 sharded_optim_state_dict = [sharded_optimizer.state_dict() if self.rank == reference_rank else {}]
                 dist.broadcast_object_list(sharded_optim_state_dict, src=reference_rank, group=dist.group.WORLD)
                 sharded_optim_state_dict = sharded_optim_state_dict[0]

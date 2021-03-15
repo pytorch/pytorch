@@ -19,7 +19,6 @@ class ObjMismatchError(Exception):
 
     pass
 
-
 class Importer(ABC):
     """Represents an environment to import modules from.
 
@@ -74,9 +73,12 @@ class Importer(ABC):
             # TODO: I guess we should do copyreg too?
             reduce = getattr(obj, "__reduce__", None)
             if reduce is not None:
-                rv = reduce()
-                if isinstance(rv, str):
-                    name = rv
+                try:
+                    rv = reduce()
+                    if isinstance(rv, str):
+                        name = rv
+                except Exception:
+                    pass
         if name is None:
             name = getattr(obj, "__qualname__", None)
         if name is None:
@@ -181,14 +183,3 @@ class OrderedImporter(Importer):
             raise last_err
         else:
             raise ModuleNotFoundError(module_name)
-
-    def get_name(self, obj: Any, name: Optional[str] = None) -> Tuple[str, str]:
-        last_err = None
-        for importer in self._importers:
-            try:
-                return importer.get_name(obj, name)
-            except ObjNotFoundError as err:
-                last_err = err
-
-        assert last_err is not None
-        raise last_err

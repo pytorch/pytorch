@@ -147,14 +147,14 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
          (weight.size(0) % input.size(1) == 0) &&
          (weight.size(2) == 3) &&
          (weight.size(3) == 3) &&
-         (input.device().type() == c10::DeviceType::CPU) &&
+         (input.device().is_cpu()) &&
          (input.scalar_type() == at::kFloat) &&
          input.is_contiguous() &&
-         (weight.device().type() == c10::DeviceType::CPU) &&
+         (weight.device().is_cpu()) &&
          (weight.scalar_type() == at::kFloat) &&
          weight.is_contiguous() &&
          (!bias.defined() ||
-            ((bias.device().type() == c10::DeviceType::CPU) &&
+            ((bias.device().is_cpu()) &&
              (bias.scalar_type() == at::kFloat))) &&
          !is_strided() &&
          !is_dilated() &&
@@ -654,6 +654,15 @@ at::Tensor _convolution(
                           params.output_padding, params.stride, params.dilation,
                           params.groups);
     }
+    if (input_is_mkldnn && weight.is_mkldnn()) {
+      // mkldnn will error on the below 0-dim handling code
+      return empty_mkldnn(
+          o,
+          optTypeMetaToScalarType(input.options().dtype_opt()),
+          input.options().layout_opt(),
+          input.options().device_opt(),
+          input.options().pinned_memory_opt());
+    }
     auto weight_view = at::_unsafe_view(weight, -1);
     auto out = input*weight_view[0];
     if (bias.defined())
@@ -784,7 +793,7 @@ at::Tensor _convolution(
         params.groups);
   } else if (
         !params.transposed && (input.ndimension() == 5) &&
-        (input.device().type() == c10::DeviceType::CPU) &&
+        (input.device().is_cpu()) &&
         !params.is_dilated()) {
       // fast path for grouped conv3d
       output = at::slow_conv3d(
@@ -794,7 +803,7 @@ at::Tensor _convolution(
           bias,
           params.stride,
           params.padding);
-  } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
+  } else if (input.device().is_cpu() || input.is_cuda()) {
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
