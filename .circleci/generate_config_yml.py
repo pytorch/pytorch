@@ -95,7 +95,7 @@ def gen_build_workflows_tree():
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
         cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
-        windows_build_definitions.get_windows_workflows,
+        windows_build_definitions.get_pr_windows_jobs,
         binary_build_definitions.get_post_upload_jobs,
         binary_build_definitions.get_binary_smoke_test_jobs,
     ]
@@ -104,6 +104,10 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_binary_build_jobs,
         binary_build_definitions.get_nightly_tests,
         binary_build_definitions.get_nightly_uploads,
+    ]
+
+    windows_build_functions = [
+        windows_build_definitions.get_extra_windows_jobs,
     ]
 
     return {
@@ -116,6 +120,10 @@ def gen_build_workflows_tree():
                 "when": r"<< pipeline.parameters.run_build >>",
                 "jobs": [f() for f in build_workflows_functions]
             },
+            "windows_extra_build": {
+                "when": r"<< pipeline.parameters.run_extra_windows_build >>",
+                "jobs": [f() for f in windows_build_functions]
+            }
         }
     }
 

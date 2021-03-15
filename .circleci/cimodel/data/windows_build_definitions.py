@@ -136,14 +136,16 @@ class VcSpec:
 
 _VC2019 = VcSpec(2019, ["14", "28", "29333"], hide_version=True)
 
+WINDOWS_CPU_BUILD = WindowsJob(None, _VC2019, None)
+
 WORKFLOW_DATA = [
     # VS2019 CUDA-10.1
-    WindowsJob(None, _VC2019, CudaVersion(10, 1)),
-    WindowsJob(1, _VC2019, CudaVersion(10, 1)),
-    WindowsJob(2, _VC2019, CudaVersion(10, 1)),
+    WindowsJob(None, _VC2019, CudaVersion(10, 1), master_only=True),
+    WindowsJob(1, _VC2019, CudaVersion(10, 1), master_only=True),
+    WindowsJob(2, _VC2019, CudaVersion(10, 1), master_only=True),
     WindowsJob('_azure_multi_gpu', _VC2019, CudaVersion(10, 1), multi_gpu=True, nightly_only=True),
     # VS2019 CUDA-11.1
-    WindowsJob(None, _VC2019, CudaVersion(11, 1)),
+    WindowsJob(None, _VC2019, CudaVersion(11, 1), master_only=True),
     WindowsJob(1, _VC2019, CudaVersion(11, 1), master_only=True),
     WindowsJob(2, _VC2019, CudaVersion(11, 1), master_only=True),
     # VS2019 CPU-only
@@ -154,5 +156,14 @@ WORKFLOW_DATA = [
 ]
 
 
-def get_windows_workflows():
-    return [item.gen_tree() for item in WORKFLOW_DATA]
+def get_extra_windows_jobs():
+    return [
+        item.gen_tree() for item in WORKFLOW_DATA
+    ]
+
+def get_pr_windows_jobs():
+    return [
+        item.gen_tree() for item in [
+            WINDOWS_CPU_BUILD
+        ]
+    ]
