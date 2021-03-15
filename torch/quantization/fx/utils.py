@@ -132,14 +132,21 @@ def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
     if is_input:
         # if the quantize function is at the input of op, then we find the first user of the observer_node
         # to get the path
-        first_use = list(obs_node.users)[0]
+        users = list(obs_node.users)
+        first_use = users[0] if users else None
         prefix = "_input"
     else:
         # if the quantize function is at the output of the op, we use the observer input node to get the path
         first_use = in_node
         prefix = "_output"
 
-    module_path, _ = quantizer.node_name_to_scope[first_use.name]
+    if first_use:
+        module_path, _ = quantizer.node_name_to_scope[first_use.name]
+    else:
+        # TODO: it's not used, so actually we can skip quantization
+        # but this requires changing return type of quantize_node
+        # we can fix it later if needed
+        module_path = ""
     root_module = quantizer.modules['']
     graph = quantizer.quantized_graph
     node_type, quantize_op, qparams = get_quantize_node_info(obs_module)
@@ -330,3 +337,56 @@ def create_qparam_nodes(quantizer: QuantizerCls, node_name: str, scale: Any, zer
     scale_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_scale_"), scale)
     zero_point_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_zero_point_"), zero_point)
     return (scale_node, zero_point_node)
+
+
+def all_node_args_have_no_tensors(node: Node) -> bool:
+    """
+    If we know for sure that all of this node's args have no
+    tensors (are primitives), return True.  If we either
+    find a tensor or are not sure, return False. Note: this
+    function is not exact.
+    """
+    if not isinstance(node, Node):
+        return True
+    elif node.op == 'placeholder':
+        return False
+    elif node.op == 'call_module':
+        return False
+    elif node.op == 'get_attr':
+        return False
+    elif node.target is getattr and node.args[1] == 'ndim':
+        # x1 = x0.ndim
+        return True
+    elif node.op == 'call_method' and node.target == 'size':
+        # x1 = x0.size(0)
+        return True
+
+    found_one_tensor = False
+    for arg in node.args:
+        if isinstance(arg, list):
+            for list_el in arg:
+                if isinstance(list_el, Node):
+                    this_list_el_args_have_no_tensors = \
+                        all_node_args_have_no_tensors(list_el)
+                    found_one_tensor = found_one_tensor or \
+                        (not this_list_el_args_have_no_tensors)
+        elif isinstance(arg, int):
+            pass
+        else:
+            if isinstance(arg, Node):
+                this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg)
+                found_one_tensor = found_one_tensor or \
+                    (not this_arg_args_have_no_tensors)
+            else:
+                found_one_tensor = True
+    return not found_one_tensor
+
+
+def node_return_type_is_int(node: Node) -> bool:
+    """
+    Returns true if this node results in an integer, even if some of the args
+    are Tensors.
+    """
+    if node.op == 'call_method' and node.target == 'size':
+        return True
+    return False
