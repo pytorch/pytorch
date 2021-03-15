@@ -106,7 +106,7 @@ TEST_F(ModulesTest, Conv2dUneven) {
 
 TEST_F(ModulesTest, Conv2dSameStrided) {
   auto options = Conv2dOptions(3, 2, {3, 4});
-	options.stride(1).padding(torch::kSame);
+  options.stride(1).padding(torch::kSame);
   Conv2d model_valid(options);
   ASSERT_THROWS_WITH(
     [&]{ Conv2d model_invalid(options.stride(2)); }(),
@@ -154,7 +154,7 @@ TEST_F(ModulesTest, Conv3d) {
 
 TEST_F(ModulesTest, Conv3dSameStrided) {
   auto options = Conv3dOptions(3, 2, {3, 4, 5});
-	options.stride(1).padding(torch::kSame);
+  options.stride(1).padding(torch::kSame);
   Conv3d model_valid(options);
   ASSERT_THROWS_WITH(
     [&]{ Conv3d model_invalid(options.stride(2)); }(),
