@@ -383,6 +383,11 @@ TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 # it felt a little awkward.
 TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 
+# Disables noarch tests; all but one CI configuration disables these.  We don't
+# disable them for local runs because you still want to run them
+# (unlike slow tests!)
+TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
+
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
 numpy_to_torch_dtype_dict = {
     np.bool_      : torch.bool,
@@ -575,6 +580,20 @@ def slowTest(fn):
         else:
             fn(*args, **kwargs)
     wrapper.__dict__['slow_test'] = True
+    return wrapper
+
+
+# noarch tests are tests that should be only run on one CI configuration,
+# because they don't exercise any interesting platform specific code
+# and so if run once, indicate the test should pass everywhere.
+# See https://github.com/pytorch/pytorch/issues/53743
+def noarchTest(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_SKIP_NOARCH:
+            raise unittest.SkipTest("test is noarch: we are skipping noarch tests due to TEST_SKIP_NOARCH")
+        else:
+            fn(*args, **kwargs)
     return wrapper
 
 
