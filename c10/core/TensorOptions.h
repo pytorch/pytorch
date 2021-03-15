@@ -399,11 +399,6 @@ struct C10_API TensorOptions {
     return merged;
   }
 
-  // Resolves the tensor type set specified by the current construction axes.
-  DispatchKeySet key_set() const noexcept {
-    return DispatchKeySet(computeDispatchKey());
-  }
-
   DispatchKey computeDispatchKey() const {
     return c10::computeDispatchKey(optTypeMetaToScalarType(dtype_opt()), layout_opt(), device_opt());
   }
