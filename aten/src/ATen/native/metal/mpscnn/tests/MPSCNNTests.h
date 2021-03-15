@@ -13,6 +13,7 @@ bool test_relu();
 bool test_addmm();
 bool test_add();
 bool test_add_broadcast();
+bool test_add_broadcast2();
 bool test_sub();
 bool test_sub_broadcast();
 bool test_sub_broadcast2();

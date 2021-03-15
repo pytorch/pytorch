@@ -165,13 +165,12 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
 Tensor add_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
+  TORCH_CHECK(input1.sizes()[0] == input2.sizes()[0]);
+  TORCH_CHECK(input1.sizes()[1] == input2.sizes()[1]);
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNAdd>(input1, input2_);
   } else {
-    // TODO: support broadcast in shader functions for iOS 10 users
-    TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
-    TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
     return binaryElementwiseShaderKernel(
         input1, input2_, @"elementwise_add", @"elementwise_add_nonarray");
   }
@@ -180,13 +179,12 @@ Tensor add_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
 Tensor& add__Tensor(Tensor& input1, const Tensor& input2, Scalar alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
+  TORCH_CHECK(input1.sizes()[0] == input2.sizes()[0]);
+  TORCH_CHECK(input1.sizes()[1] == input2.sizes()[1]);
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel_<MPSCNNAdd>(input1, input2_);
   } else {
-    // TODO: support broadcast in for iOS 10 users
-    TORCH_CHECK(input1.sizes()[2] == input2.sizes()[2]);
-    TORCH_CHECK(input1.sizes()[3] == input2.sizes()[3]);
     return binaryElementwiseShaderKernel_(
         input1, input2_, @"elementwise_add", @"elementwise_add_nonarray");
   }
@@ -195,12 +193,12 @@ Tensor& add__Tensor(Tensor& input1, const Tensor& input2, Scalar alpha) {
 Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
+  TORCH_CHECK(input1.sizes()[0] == input2.sizes()[0]);
+  TORCH_CHECK(input1.sizes()[1] == input2.sizes()[1]);
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNSubtract>(input1, input2_);
   } else {
-    // TODO: support non-broadcast for iOS 10 users
-    TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
     return binaryElementwiseShaderKernel(
         input1, input2_, @"elementwise_sub", @"elementwise_sub_nonarray");
   }
@@ -209,12 +207,12 @@ Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, Scalar alpha) {
 Tensor mul_Tensor(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
+  TORCH_CHECK(input1.sizes()[0] == input2.sizes()[0]);
+  TORCH_CHECK(input1.sizes()[1] == input2.sizes()[1]);
   auto input2_ = input2.is_metal() ? input2 : input2.metal();
   if (@available(iOS 11.3, *)) {
     return binaryElementwiseMPSCNNKernel<MPSCNNMultiply>(input1, input2_);
   } else {
-    // TODO: support non-broadcast for iOS 10 users
-    TORCH_CHECK(input2.sizes()[2] == input2.sizes()[3] == 1);
     return binaryElementwiseShaderKernel(
         input1, input2_, @"elementwise_mul", @"elementwise_mul_nonarray");
   }
