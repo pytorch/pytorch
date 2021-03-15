@@ -391,54 +391,66 @@ template<typename scalar_t>
 inline static void apply_cholesky_cusolver_potrf(Tensor& self_working_copy, bool upper, Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
-  const int n = cuda_int_cast(self_working_copy.size(-1), "n");
-  const int lda = std::max<int>(1, n);
-
-  int lwork;
-  at::cuda::solver::potrf_buffersize<scalar_t>(
-    handle, uplo, n, nullptr, lda, &lwork);
-
-   // allocate workspace storage
-  auto& allocator = *at::cuda::getCUDADeviceAllocator();
-  auto work_data = allocator.allocate(sizeof(scalar_t)*lwork);
-
-  at::cuda::solver::potrf<scalar_t>(
-    handle, uplo, n, self_working_copy.data_ptr<scalar_t>(), lda,
-    static_cast<scalar_t*>(work_data.get()), lwork, infos.data_ptr<int>()
-  );
-}
-
-template<typename scalar_t>
-inline static void apply_cholesky_cusolver_potrfBatched(Tensor& self_working_copy, bool upper, Tensor& infos) {
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-  const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
-  const int n = cuda_int_cast(self_working_copy.size(-1), "n");
-  const int lda = std::max<int>(1, n);
-
+  const int64_t n = self_working_copy.size(-1);
+  const int64_t lda = std::max<int64_t>(1, n);
   const int64_t batch_size = batchCount(self_working_copy);
-  const int matrix_stride = matrixStride(self_working_copy);
+  const int64_t matrix_stride = matrixStride(self_working_copy);
 
   scalar_t* self_working_copy_ptr = self_working_copy.data_ptr<scalar_t>();
   int* infos_ptr = infos.data_ptr<int>();
 
-  int lwork;
-  at::cuda::solver::potrf_buffersize<scalar_t>(handle, uplo, n, nullptr, lda, &lwork);
+#ifdef USE_CUSOLVER_64_BIT
+  size_t worksize_device;
+  size_t worksize_host;
+  cusolverDnParams_t params;
+  cudaDataType datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
+  TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
+  at::cuda::solver::xpotrf_buffersize(handle, params, uplo, n, datatype, nullptr, lda, datatype, &worksize_device, &worksize_host);
+
   // allocate workspace storage
+  auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
+  auto workdata_device = device_allocator.allocate(worksize_device * batch_size);
+  void* workdata_device_ptr = workdata_device.get();
+
+  auto& host_allocator = *at::getCPUAllocator();
+  auto workdata_host = host_allocator.allocate(worksize_host * batch_size);
+  void* workdata_host_ptr = workdata_host.get();
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    at::cuda::solver::xpotrf(
+      handle, params, uplo, n, datatype,
+      static_cast<void*>(self_working_copy_ptr + i * matrix_stride),
+      lda, datatype,
+      workdata_device_ptr + i * worksize_device, worksize_device,
+      workdata_host_ptr + i * worksize_host, worksize_host,
+      infos_ptr + i
+    );
+  }
+
+  TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
+#else // USE_CUSOLVER_64_BIT
+  int n_32 = cuda_int_cast(n, "n");
+  int lda_32 = cuda_int_cast(lda, "lda");
+  int lwork;
+  at::cuda::solver::potrf_buffersize<scalar_t>(
+    handle, uplo, n_32, nullptr, lda_32, &lwork);
+
+   // allocate workspace storage
   auto& allocator = *at::cuda::getCUDADeviceAllocator();
   auto work_data = allocator.allocate(sizeof(scalar_t)*lwork * batch_size);
   scalar_t* work_data_ptr = static_cast<scalar_t*>(work_data.get());
 
-  // currently cusolverDnXpotrfBatched may wrongly create nan output, so a loop of single matrix implementation is used
-  for (int64_t i=0; i<batch_size; i++) {
+  for (int64_t i = 0; i < batch_size; i++) {
     at::cuda::solver::potrf<scalar_t>(
-      handle, uplo, n,
-      self_working_copy.data_ptr<scalar_t>() + i * matrix_stride,
-      lda,
+      handle, uplo, n_32,
+      self_working_copy_ptr + i * matrix_stride,
+      lda_32,
       work_data_ptr + i * lwork,
       lwork,
       infos_ptr + i
     );
   }
+#endif // USE_CUSOLVER_64_BIT
 }
 
 Tensor _cholesky_helper_cuda_cusolver(const Tensor& self, bool upper) {
@@ -446,16 +458,10 @@ Tensor _cholesky_helper_cuda_cusolver(const Tensor& self, bool upper) {
   at::Tensor infos = at::zeros({batch_size}, self.options().dtype(at::kInt));
   at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
 
-  if (batch_size > 1) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrfBatched", [&] {
-      apply_cholesky_cusolver_potrfBatched<scalar_t>(self_working_copy, upper, infos);
-    });
-  }
-  else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrf", [&] {
-      apply_cholesky_cusolver_potrf<scalar_t>(self_working_copy, upper, infos);
-    });
-  }
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrf", [&] {
+    apply_cholesky_cusolver_potrf<scalar_t>(self_working_copy, upper, infos);
+  });
+
   batchCheckErrors(infos, "cholesky_cuda");
 
   return self_working_copy;

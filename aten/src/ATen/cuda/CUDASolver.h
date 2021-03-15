@@ -2,6 +2,11 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
+#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11000
+// cuSOLVER version >= 11000 includes 64-bit API
+#define USE_CUSOLVER_64_BIT
+#endif
+
 #ifdef CUDART_VERSION
 
 namespace at {
@@ -169,6 +174,28 @@ template <>
 void orgqr<c10::complex<float>>(CUDASOLVER_ORGQR_ARGTYPES(c10::complex<float>));
 template <>
 void orgqr<c10::complex<double>>(CUDASOLVER_ORGQR_ARGTYPES(c10::complex<double>));
+
+#ifdef USE_CUSOLVER_64_BIT
+
+template<class Dtype>
+cudaDataType get_cusolver_datatype() {
+  TORCH_CHECK(false, "cusolver doesn't support data type ", typeid(Dtype).name());
+}
+template<> cudaDataType get_cusolver_datatype<float>();
+template<> cudaDataType get_cusolver_datatype<double>();
+template<> cudaDataType get_cusolver_datatype<c10::complex<float>>();
+template<> cudaDataType get_cusolver_datatype<c10::complex<double>>();
+
+void xpotrf_buffersize(
+    cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, cudaDataType dataTypeA, const void *A,
+    int64_t lda, cudaDataType computeType, size_t *workspaceInBytesOnDevice, size_t *workspaceInBytesOnHost); 
+
+void xpotrf(
+    cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, cudaDataType dataTypeA, void *A,
+    int64_t lda, cudaDataType computeType, void *bufferOnDevice, size_t workspaceInBytesOnDevice, void *bufferOnHost, size_t workspaceInBytesOnHost,
+    int *info);
+
+#endif // USE_CUSOLVER_64_BIT
 
 } // namespace solver
 } // namespace cuda

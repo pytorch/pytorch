@@ -571,6 +571,33 @@ void orgqr<c10::complex<double>>(
       devInfo));
 }
 
+#ifdef USE_CUSOLVER_64_BIT
+
+template<> cudaDataType get_cusolver_datatype<float>() { return CUDA_R_32F; }
+template<> cudaDataType get_cusolver_datatype<double>() { return CUDA_R_64F; }
+template<> cudaDataType get_cusolver_datatype<c10::complex<float>>() { return CUDA_C_32F; }
+template<> cudaDataType get_cusolver_datatype<c10::complex<double>>() { return CUDA_C_64F; }
+
+void xpotrf_buffersize(
+    cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, cudaDataType dataTypeA, const void *A,
+    int64_t lda, cudaDataType computeType, size_t *workspaceInBytesOnDevice, size_t *workspaceInBytesOnHost) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXpotrf_bufferSize(
+    handle, params, uplo, n, dataTypeA, A, lda, computeType, workspaceInBytesOnDevice, workspaceInBytesOnHost
+  ));
+}
+
+void xpotrf(
+    cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, cudaDataType dataTypeA, void *A,
+    int64_t lda, cudaDataType computeType, void *bufferOnDevice, size_t workspaceInBytesOnDevice, void *bufferOnHost, size_t workspaceInBytesOnHost,
+    int *info) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXpotrf(
+    handle, params, uplo, n, dataTypeA, A, lda, computeType, bufferOnDevice, workspaceInBytesOnDevice, bufferOnHost, workspaceInBytesOnHost, info
+  ));
+}
+
+
+#endif // USE_CUSOLVER_64_BIT
+
 } // namespace solver
 } // namespace cuda
 } // namespace at
