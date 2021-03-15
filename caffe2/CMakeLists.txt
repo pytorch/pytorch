@@ -13,7 +13,7 @@ endif()
 
 # Debug messages - if you want to get a list of source files and examine
 # target information, enable the following by -DPRINT_CMAKE_DEBUG_INFO=ON.
-set(PRINT_CMAKE_DEBUG_INFO TRUE CACHE BOOL "print cmake debug information")
+set(PRINT_CMAKE_DEBUG_INFO FALSE CACHE BOOL "print cmake debug information")
 if(PRINT_CMAKE_DEBUG_INFO)
   include(../cmake/DebugHelper.cmake)
 endif()
@@ -497,6 +497,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/gen_python_functions.py"
     "${TOOLS_PATH}/autograd/gen_variable_factories.py"
     "${TOOLS_PATH}/autograd/gen_variable_type.py"
+    "${TOOLS_PATH}/autograd/gen_inplace_or_view_type.py"
     "${TOOLS_PATH}/autograd/load_derivatives.py"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
@@ -698,6 +699,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/serialize.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/lr_scheduler.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
     )
@@ -906,19 +909,32 @@ if(NOT INTERN_BUILD_MOBILE)
   add_dependencies(torch_cpu Caffe2_PROTO)
 endif()
 
-add_custom_command(TARGET torch_cpu
-COMMAND
-"${PYTHON_EXECUTABLE}" ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
-  --yaml_file_path "${SELECTED_OP_LIST}"
-  --output_file_path "${TORCH_ROOT}/aten/src/ATen/selected_mobile_ops.h"
-WORKING_DIRECTORY "${TORCH_ROOT}")
+#add_custom_command(TARGET torch_cpu
+#        COMMAND
+#        "${PYTHON_EXECUTABLE}" ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
+#        --yaml_file_path "${SELECTED_OP_LIST}"
+#        --output_file_path "${TORCH_ROOT}/aten/src/ATen/selected_mobile_ops.h"
+#        WORKING_DIRECTORY "${TORCH_ROOT}")
 
-add_custom_command(TARGET torch_cpu
-COMMAND
-"${PYTHON_EXECUTABLE}" ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
-  --yaml_file_path "${SELECTED_OP_LIST}"
-  --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h"
-WORKING_DIRECTORY "${TORCH_ROOT}")
+# add_custom_command(TARGET torch_cpu
+#         COMMAND
+#         "${PYTHON_EXECUTABLE}" ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
+#         --yaml_file_path "${SELECTED_OP_LIST}"
+#         --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h"
+#         WORKING_DIRECTORY "${TORCH_ROOT}")
+
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+        COMMAND
+        "${PYTHON_EXECUTABLE}" ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
+        --yaml_file_path "${SELECTED_OP_LIST}"
+        --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h"
+        WORKING_DIRECTORY "${TORCH_ROOT}")
+
+add_custom_target(
+  __selected_mobile_ops_header_gen
+  DEPENDS ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h)
+add_dependencies(torch_cpu __selected_mobile_ops_header_gen)
+
 
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT NO_API)
