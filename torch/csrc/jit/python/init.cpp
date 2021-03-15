@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -43,6 +44,8 @@
 #include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
+#include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
@@ -208,9 +211,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def(
-          "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
-          PrepareInplaceOpsForONNX)
-      .def(
           "_jit_pass_onnx_node_shape_type_inference",
           [](Node* n,
              std::map<std::string, IValue>& params_dict,
@@ -315,6 +315,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_frozen_conv_bn", &FoldFrozenConvBatchnorm)
       .def("_jit_pass_fold_frozen_conv_add_or_sub", &FoldFrozenConvAddOrSub)
       .def("_jit_pass_fold_frozen_conv_mul_or_div", &FoldFrozenConvMulOrDiv)
+      .def("_jit_pass_convert_frozen_ops_to_mkldnn", &ConvertFrozenOpsToMKLDNN)
       .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
@@ -497,6 +498,11 @@ void initJITBindings(PyObject* module) {
                 python::unflatten(vars, desc));
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
+      .def(
+          "_jit_pass_onnx_encapsulate_pattern_into_subblock",
+          EncapsulatePatternIntoSubblock)
+      .def(
+          "_jit_onnx_convert_pattern_from_subblock", ConvertPatternFromSubblock)
       .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
@@ -650,6 +656,12 @@ void initJITBindings(PyObject* module) {
           [](bool use_llvm) {
             using namespace torch::jit::tensorexpr;
             getTEMustUseLLVMOnCPU() = use_llvm;
+          })
+      .def(
+          "_jit_cat_wo_conditionals",
+          [](bool optimize_cat) {
+            using namespace torch::jit::tensorexpr;
+            getCatWoConditionals() = optimize_cat;
           })
       .def(
           "_llvm_enabled",
@@ -990,6 +1002,11 @@ void initJITBindings(PyObject* module) {
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
       .def(
+          "has_record",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.hasRecord(key);
+          })
+      .def(
           "get_storage_from_record",
           [](PyTorchStreamReader& self,
              const std::string& key,
@@ -1086,8 +1103,7 @@ void initJITBindings(PyObject* module) {
                           self_func.ptr(),
                           module_name.c_str()));
                 }
-                return invokeOperatorFromPython(
-                    operations, std::move(args), std::move(kwargs));
+                return invokeOperatorFromPython(operations, args, kwargs);
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
@@ -1339,7 +1355,7 @@ void initJITBindings(PyObject* module) {
   initTreeViewBindings(module);
   initJitScriptBindings(module);
   initJitBackendBindings(module);
-  initStaticRuntimeBindings(module);
+  initStaticModuleBindings(module);
   initTensorExprBindings(module);
 
   setPrintHandler([](const std::string& str) {

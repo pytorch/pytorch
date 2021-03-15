@@ -2,6 +2,7 @@ import dis
 import torch
 import inspect
 import operator
+import traceback
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
@@ -9,6 +10,7 @@ from .node import Target, Node, Argument, base_types, map_aggregate
 
 class TracerBase:
     graph: Graph
+    record_stack_traces : bool = False
 
     def create_node(self, kind : str, target : Target,
                     args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,
@@ -36,11 +38,44 @@ class TracerBase:
         a default parameter, we use the ``args`` tuple. ``args`` is
         otherwise empty for ``placeholder`` Nodes.
         '''
+
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
         assert isinstance(args_, tuple)
         assert isinstance(kwargs_, dict)
-        return self.proxy(self.create_node(kind, target, args_, kwargs_, name, type_expr))
+        proxy = self.proxy(self.create_node(kind, target, args_, kwargs_, name, type_expr))
+
+        # Optionally set stack trace on the created Node for debugging purposes
+        if self.record_stack_traces:
+            user_frame = self._find_user_frame()
+            if user_frame:
+                walk_stack_gen = traceback.walk_stack(user_frame)
+                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore
+                tb_lines = summary.format()
+                proxy.node.stack_trace = ''.join(tb_lines)
+
+        return proxy
+
+    def _find_user_frame(self):
+        """
+        Find the Python stack frame executing the user code during
+        symbolic tracing.
+        """
+        # We have to do a little dance here. Basically, walk up the callstack and
+        # record the first frame not in the FX source. This is the frame executing
+        # the user code during tracing.
+        frame = inspect.currentframe()
+
+        fx_files = ['torch/fx/proxy.py', 'torch/fx/symbolic_trace.py']
+        while frame:
+            frame = frame.f_back
+            if frame and all(not frame.f_code.co_filename.endswith(file) for file in fx_files):
+                break
+
+        if not frame:
+            return None
+
+        return frame
 
     def create_arg(self, a: Any) -> Argument:
         """
@@ -174,6 +209,10 @@ class Proxy:
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
+        if isinstance(orig_method, torch._C.ScriptMethod):
+            assert isinstance(args[0], torch._C.ScriptMethod)
+            args = (args[0].owner,) + args[1:]
+            return self.tracer.create_proxy('call_method', orig_method.name, args, kwargs)
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:

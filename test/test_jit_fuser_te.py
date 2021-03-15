@@ -122,6 +122,26 @@ class TestTEFuser(JitTestCase):
         scripted = self.checkScript(func, (a,))
         self.assertLastGraphAllFused()
 
+    def test_typecheck(self):
+        a = torch.ones(1)
+
+        def fused_kernel(a, b):
+            return (a + b) * 2.
+
+        scripted = self.checkScript(fused_kernel, (a, a))
+        graph = scripted.graph_for(a, a)
+        # double check we fused
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        # we use a bigger tensor now (size 2)
+        # if we won't trigger a recompilation
+        # we will still create a tensor up to (size 1)
+        # if the type check fails
+        a = torch.ones(2)
+        # shape changed if we don't trigger recompilation
+        # we would compute the wrong result silently
+        self.assertEqual(scripted(a, a), fused_kernel(a, a))
+
     def test_sum_simple(self):
         def func(x):
             x2 = x * x

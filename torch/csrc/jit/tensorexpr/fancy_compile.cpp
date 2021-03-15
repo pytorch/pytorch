@@ -142,9 +142,6 @@ class AOT_NNC_Compiler {
 
     process_block(optimized_graph->block());
 
-    std::cerr << "Stmt simplified:\n"
-              << *IRSimplifier::simplify(root_stmt) << "\n";
-
     ConstantPropagationImmutableTypes(optimized_graph);
     EliminateDeadCode(optimized_graph->block());
     optimized_graph->dump();
@@ -282,6 +279,7 @@ class AOT_NNC_Compiler {
       int dW,
       int groups);
   Tensor* generate_matmul(const Buf* a, const Buf* b);
+  Tensor* generate_mm(const Buf* a, const Buf* b);
   void printSizes(torch::jit::Value* v);
   void* preallocateBuf(Stmt* s, const Buf* b);
   std::vector<std::pair<void*, const Buf*>> preallocateTemps(Stmt* s);
@@ -429,6 +427,38 @@ Tensor* AOT_NNC_Compiler::generate_matmul(const Buf* a, const Buf* b) {
 
   return t;
 }
+Tensor* AOT_NNC_Compiler::generate_mm(const Buf* a, const Buf* b) {
+  Stmt* s = nullptr;
+  Tensor* t = nullptr;
+  const Buf* out = nullptr;
+
+  auto size_a = ExprVectorToExprHandleVector(a->dims());
+  auto size_b = ExprVectorToExprHandleVector(b->dims());
+  const IntImm* total_size = dynamic_cast<const IntImm*>(
+      IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
+
+  if (false && total_size && total_size->value() < 3000) {
+    t = Reduce(
+        "nnc_mm",
+        {{size_a[0], "M"}, {size_b[1], "N"}},
+        Sum(),
+        [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+          BufHandle ah(a);
+          BufHandle bh(b);
+          return Load::make(ah, {m, k}, 1) * Load::make(bh, {k, n}, 1);
+        },
+        {{size_a[1], "K"}});
+  } else {
+    BufHandle ResultBuf(
+        "mm", {ExprHandle(size_a[0]), ExprHandle(size_b[1])}, kFloat);
+    s = ExternalCall::make(
+        ResultBuf, "nnc_aten_mm", {BufHandle(a), BufHandle(b)}, {});
+    out = ResultBuf.node();
+    t = new Tensor(out, s);
+  }
+
+  return t;
+}
 
 std::vector<ExprHandle> AOT_NNC_Compiler::sizesForValue(torch::jit::Value* v) {
   return size_map[v];
@@ -554,6 +584,29 @@ void AOT_NNC_Compiler::process_block(torch::jit::Block* bb) {
       print_vector(input1_shape);
       std::cerr << "[QQ] Input2 shape: ";
       print_vector(input2_shape);
+    } else if (n->kind() == aten::mm) {
+      const auto& input1_shape = size_map.at(n->input(0));
+      const auto& input2_shape = size_map.at(n->input(1));
+      std::vector<ExprHandle> shape = {input1_shape[0], input2_shape[1]};
+      size_map[n->output()] = shape;
+      printSizes(n->output());
+
+      Tensor* t =
+          generate_mm(buf_map.at(n->input(0)), buf_map.at(n->input(1)));
+
+      Stmt* s = nullptr;
+      s = t->stmt();
+      auto v = n->output();
+      buf_map[v] = t->buf();
+
+      std::cerr << "mm stmt:\n[QQ] " << *s << "\n";
+      handled = true;
+      root_stmt->append_stmt(s);
+
+      std::cerr << "[QQ] Input1 shape: ";
+      print_vector(input1_shape);
+      std::cerr << "[QQ] Input2 shape: ";
+      print_vector(input2_shape);
     } else if (n->kind() == aten::adaptive_avg_pool2d) {
       auto sizes_arg = toIValue(n->input(1))->toIntVector();
       std::vector<ExprHandle> shape;
@@ -624,6 +677,66 @@ void AOT_NNC_Compiler::process_block(torch::jit::Block* bb) {
       handled = true;
       root_stmt->append_stmt(s);
 
+    } else if (n->kind() == aten::flatten) {
+      int start_dim = toIValue(n->input(1))->toInt();
+      int end_dim = toIValue(n->input(2))->toInt();
+      auto inp_shape = size_map.at(n->input(0));
+      if (end_dim == -1) {
+        end_dim = inp_shape.size();
+      }
+
+      std::vector<ExprHandle> out_shape;
+      std::vector<ExprHandle> multipliers;
+      std::vector<ExprHandle> mods;
+      int idx = 0;
+      for (idx = 0; idx < start_dim; idx++) {
+        out_shape.push_back(inp_shape[idx]);
+//         strides.push_back(IntImm::make(1));
+      }
+      ExprHandle flattened_shape = IntImm::make(1);
+      for (; idx < end_dim; idx++) {
+        flattened_shape = flattened_shape * inp_shape[idx];
+      }
+      out_shape.push_back(flattened_shape);
+      for (; idx < inp_shape.size(); idx++) {
+        out_shape.push_back(inp_shape[idx]);
+      }
+      size_map[n->output()] = out_shape;
+      printSizes(n->output());
+
+//       Tensor* t = Compute(
+//           std::string("flatten_op"),
+//           c10::fmap<DimArg>(out_shape),
+//           [&](const std::vector<VarHandle>& axes) {
+//             int i = 0;
+//             std::vector<ExprHandle> input_indices;
+//             for (const auto& s : size_map.at(n->output(0))) {
+//               if (isOne(inp_shape[i])) {
+//                 input_indices.push_back(IntImm::make(0));
+//               } else {
+//                 input_indices.push_back(axes[i]);
+//               }
+//               i++;
+//             }
+//
+//             std::vector<ExprHandle> indices(axes.begin(), axes.end());
+//
+//             std::cerr << "===========================\n";
+//             print_vector(indices);
+//             print_vector(input_indices);
+//
+//             return Load::make(
+//                 BufHandle(buf_map.at(n->input(0))),
+//                 input_indices,
+//                 IntImm::make(1));
+//           });
+//
+//       buf_map[n->output()] = t->buf();
+//       Stmt* s = t->stmt();
+//       std::cerr << "FLATTEN:\n" << *s << "\n";
+//       handled = true;
+//       root_stmt->append_stmt(s);
+
     } else if (n->kind() == aten::dropout) {
       size_map[n->output()] = size_map.at(n->input(0));
       printSizes(n->output());
@@ -660,7 +773,7 @@ void AOT_NNC_Compiler::process_block(torch::jit::Block* bb) {
       handled = true;
       root_stmt->append_stmt(s);
 
-    } else if (n->kind() == aten::view) {
+    } else if (n->kind() == aten::reshape || n->kind() == aten::view) {
       auto sizes_arg = toIValue(n->input(1))->toIntVector();
       std::vector<ExprHandle> shape;
       for (auto e : sizes_arg) {
@@ -811,8 +924,14 @@ void AOT_NNC_Compiler::process_block(torch::jit::Block* bb) {
         std::vector<const Buf*> bufs = {buf_map.at(n->input(0))};
         t = computeNaryOp(
             "mul", bufs, shapes, [&](const std::vector<ExprHandle>& ops) {
+            double vv = 1.0;
+            if( ival_map.at(n->input(1)).isInt()) {
+              vv = ival_map.at(n->input(1)).toInt();
+            } else  if( ival_map.at(n->input(1)).isDouble()) {
+              vv = ival_map.at(n->input(1)).toDouble();
+            }
               return ops[0] *
-                  tensorexpr::cast<float>(ival_map.at(n->input(1)).toDouble());
+                  tensorexpr::cast<float>(vv);
             });
       }
       buf_map[n->output()] = t->buf();
