@@ -5,6 +5,7 @@
 #include <map>
 #include <unordered_set>
 
+#include <c10/util/string_view.h>
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/db.h"
@@ -309,7 +310,7 @@ class TORCH_API SaveOpImpl {
   std::string full_db_name_;
   std::string db_type_;
   std::vector<std::string> blob_names_;
-  int chunk_size_;
+  SerializationOptions options_;
 };
 } // namespace internal
 
