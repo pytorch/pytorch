@@ -66,7 +66,7 @@ endif()
 # Library dependencies.
 if(@BUILD_SHARED_LIBS@)
   find_package(Caffe2 REQUIRED PATHS ${CMAKE_CURRENT_LIST_DIR}/../Caffe2)
-  set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
+  set(TORCH_LIBRARIES torch)
   append_torchlib_if_found(c10)
 else()
   add_library(torch STATIC IMPORTED) # set imported_location at the bottom
