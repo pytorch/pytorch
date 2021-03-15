@@ -1,14 +1,14 @@
 torch.hub
 ===================================
-Pytorch Hub is a pre-trained model repository designed to facilitate research reproducibility.
+PyTorch Hub is a pre-trained model repository designed to facilitate research reproducibility.
 
 Publishing models
 -----------------
 
-Pytorch Hub supports publishing pre-trained models(model definitions and pre-trained weights)
-to a github repository by adding a simple ``hubconf.py`` file;
+PyTorch Hub supports publishing pre-trained models (model definitions and pre-trained weights)
+to a GitHub repository by adding a simple ``hubconf.py`` file;
 
-``hubconf.py`` can have multiple entrypoints. Each entrypoint is defined as a python function
+``hubconf.py`` can have multiple entrypoints. Each entrypoint is defined as a Python function
 (example: a pre-trained model you want to publish).
 
 ::
@@ -19,7 +19,7 @@ to a github repository by adding a simple ``hubconf.py`` file;
 
 How to implement an entrypoint?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Here is a code snippet specifies an entrypoint for ``resnet18`` model if we expand
+Here is a code snippet that specifies an entrypoint for ``resnet18`` model if we expand
 the implementation in ``pytorch/vision/hubconf.py``.
 In most case importing the right function in ``hubconf.py`` is sufficient. Here we
 just want to use the expanded version as an example to show how it works.
@@ -47,9 +47,9 @@ You can see the full script in
 - ``args`` and ``kwargs`` are passed along to the real callable function.
 - Docstring of the function works as a help message. It explains what does the model do and what
   are the allowed positional/keyword arguments. It's highly recommended to add a few examples here.
-- Entrypoint function can either return a model(nn.module), or auxiliary tools to make the user workflow smoother, e.g. tokenizers.
+- Entrypoint function can either return a model (`nn.Module`), or auxiliary tools to make the user workflow smoother, e.g. tokenizers.
 - Callables prefixed with underscore are considered as helper functions which won't show up in :func:`torch.hub.list()`.
-- Pretrained weights can either be stored locally in the github repo, or loadable by
+- Pretrained weights can either be stored locally in the GitHub repo, or loadable by
   :func:`torch.hub.load_state_dict_from_url()`. If less than 2GB, it's recommended to attach it to a `project release <https://help.github.com/en/articles/distributing-large-binaries>`_
   and use the url from the release.
   In the example above ``torchvision.models.resnet.resnet18`` handles ``pretrained``, alternatively you can put the following logic in the entrypoint definition.
@@ -57,7 +57,7 @@ You can see the full script in
 ::
 
     if pretrained:
-        # For checkpoint saved in local github repo, e.g. <RELATIVE_PATH_TO_CHECKPOINT>=weights/save.pth
+        # For checkpoint saved in local GitHub repo, e.g. <RELATIVE_PATH_TO_CHECKPOINT>=weights/save.pth
         dirname = os.path.dirname(__file__)
         checkpoint = os.path.join(dirname, <RELATIVE_PATH_TO_CHECKPOINT>)
         state_dict = torch.load(checkpoint)
@@ -77,7 +77,7 @@ Important Notice
 Loading models from Hub
 -----------------------
 
-Pytorch Hub provides convenient APIs to explore all available models in hub
+PyTorch Hub provides convenient APIs to explore all available models in hub
 through :func:`torch.hub.list()`, show docstring and examples through
 :func:`torch.hub.help()` and load the pre-trained models using
 :func:`torch.hub.load()`.
@@ -131,7 +131,7 @@ By default, we don't clean up files after loading it. Hub uses the cache by defa
 directory returned by :func:`~torch.hub.get_dir()`.
 
 Users can force a reload by calling ``hub.load(..., force_reload=True)``. This will delete
-the existing github folder and downloaded weights, reinitialize a fresh download. This is useful
+the existing GitHub folder and downloaded weights, and reinitialize a fresh download. This is useful
 when updates are published to the same branch, users can keep up with the latest release.
 
 
@@ -141,7 +141,7 @@ Torch hub works by importing the package as if it was installed. There're some s
 introduced by importing in Python. For example, you can see new items in Python caches
 ``sys.modules`` and ``sys.path_importer_cache`` which is normal Python behavior.
 
-A known limitation that worth mentioning here is user **CANNOT** load two different branches of
-the same repo in the **same python process**. It's just like installing two packages with the
+A known limitation that is worth mentioning here is that the user **CANNOT** load two different branches of
+the same repo in the **same Python process**. It's just like installing two packages with the
 same name in Python, which is not good. Cache might join the party and give you surprises if you
 actually try that. Of course it's totally fine to load them in separate processes.
