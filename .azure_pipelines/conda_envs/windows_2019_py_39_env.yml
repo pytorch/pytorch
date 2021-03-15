@@ -1,0 +1,15 @@
+dependencies:
+  - python=3.9.1
+  - numpy
+  - ninja
+  - pyyaml
+  - mkl
+  - mkl-include
+  - setuptools
+  - cmake
+  - cffi
+  - typing_extensions
+  - future
+  - six
+  - requests
+  - dataclasses
