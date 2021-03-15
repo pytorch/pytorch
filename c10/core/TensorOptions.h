@@ -638,7 +638,7 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
           case DeviceType::Meta:
             return DispatchKey::Meta;
           default:
-            TORCH_CHECK(false, "Unsupported device type for dense layout: ", device_.type());
+            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for dense layout: ", device_.type());
         }
       }
       case Layout::Sparse:
@@ -652,14 +652,14 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
           case DeviceType::XPU:
             return DispatchKey::SparseXPU;
           default:
-            TORCH_CHECK(false, "Unsupported device type for sparse layout: ", device_.type());
+            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for sparse layout: ", device_.type());
         }
       case Layout::Mkldnn:
         switch (device_.type()) {
           case DeviceType::CPU:
             return DispatchKey::MkldnnCPU;
           default:
-            TORCH_CHECK(false, "Unsupported device type for mkldnn layout: ", device_.type());
+            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for mkldnn layout: ", device_.type());
         }
       default:
         TORCH_CHECK(false, "Unsupported layout: ", layout_);
