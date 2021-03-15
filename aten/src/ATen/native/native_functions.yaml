@@ -2887,6 +2887,7 @@
   dispatch:
     CPU: batch_norm_backward_cpu
     CUDA: batch_norm_backward_cuda
+    MkldnnCPU: mkldnn_batch_norm_backward
 
 - func: batch_norm_backward_reduce(Tensor grad_out, Tensor input, Tensor mean, Tensor invstd, Tensor? weight, bool input_g, bool weight_g, bool bias_g) -> (Tensor, Tensor, Tensor, Tensor)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -3828,6 +3829,7 @@
   dispatch:
     CPU: threshold_backward
     CUDA: threshold_backward_cuda
+    MkldnnCPU: mkldnn_relu_backward
 
 - func: tile(Tensor self, int[] dims) -> Tensor
   variants: function, method
@@ -4208,6 +4210,15 @@
 
 - func: norm.names_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+
+- func: frexp.Tensor(Tensor self) -> (Tensor mantissa, Tensor exponent)
+  variants: method, function
+  dispatch:
+    DefaultBackend: frexp
+
+- func: frexp.Tensor_out(Tensor self, *, Tensor(a!) mantissa, Tensor(b!) exponent) -> (Tensor(a!) mantissa, Tensor(b!) exponent)
+  dispatch:
+    DefaultBackend: frexp_out
 
 - func: frobenius_norm(Tensor self) -> Tensor
   variants: function
