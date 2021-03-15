@@ -512,13 +512,26 @@ class Conv3d(_ConvNd):
             in_channels, out_channels, kernel_size_, stride_, padding_, dilation_,
             False, _triple(0), groups, bias, padding_mode)
 
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+        if self.padding_mode != "zeros":
+            return F.conv3d(
+                F.pad(
+                    input, self._reversed_padding_repeated_twice, mode=self.padding_mode
+                ),
+                weight,
+                bias,
+                self.stride,
+                _triple(0),
+                self.dilation,
+                self.groups,
+            )
+        return F.conv3d(
+            input, weight, bias, self.stride, self.padding, self.dilation, self.groups
+        )
+
     def forward(self, input: Tensor) -> Tensor:
-        if self.padding_mode != 'zeros':
-            return F.conv3d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
-                            self.weight, self.bias, self.stride, _triple(0),
-                            self.dilation, self.groups)
-        return F.conv3d(input, self.weight, self.bias, self.stride,
-                        self.padding, self.dilation, self.groups)
+        return self._conv_forward(input, self.weight, self.bias)
+
 
 
 class _ConvTransposeNd(_ConvNd):
@@ -1055,6 +1068,9 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
@@ -1113,6 +1129,9 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
     the ``in_channels`` argument of the :class:`Conv2d` that is inferred from
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1173,6 +1192,9 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
@@ -1232,6 +1254,9 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
@@ -1290,6 +1315,9 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
@@ -1347,6 +1375,9 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
     the ``in_channels`` argument of the :class:`ConvTranspose3d` that is inferred from
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
