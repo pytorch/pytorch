@@ -4588,7 +4588,7 @@ class TestTorchDeviceType(TestCase):
                     dest = torch.index_select(src, dim, idx, out=out)
                     dest2 = ref_index_select(src, dim, idx)
                     self.assertEqual(dest, dest2)
-                    self.assertEqual(out.storage().data_ptr(), dest.storage().data_ptr())
+                    self.assertEqual(out.data_ptr(), dest.data_ptr())
 
         for idx_type in (torch.int32, torch.int64):
             other_sizes = (3, 2)
