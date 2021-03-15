@@ -1,3 +1,5 @@
+#include <test/cpp/jit/test_utils.h>
+
 #include <gtest/gtest.h>
 
 #include <c10/core/TensorOptions.h>
@@ -12,14 +14,6 @@
 #include <torch/torch.h>
 
 #include <unordered_set>
-
-#define ASSERT_THROWS_WITH(statement, substring)                         \
-  try {                                                                  \
-    (void)statement;                                                     \
-    ASSERT_TRUE(false);                                                  \
-  } catch (const std::exception& e) {                                    \
-    ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
-  }
 
 // Tests go in torch::jit
 namespace torch {
@@ -281,7 +275,7 @@ TEST(LiteInterpreterTest, LoadOrigJit) {
   )");
   std::stringstream ss;
   m.save(ss);
-  ASSERT_THROWS_WITH(_load_for_mobile(ss), "file not found");
+  ASSERT_THROWS_WITH_MESSAGE(_load_for_mobile(ss), "file not found");
 }
 
 TEST(LiteInterpreterTest, WrongMethodName) {
@@ -298,7 +292,8 @@ TEST(LiteInterpreterTest, WrongMethodName) {
   std::vector<IValue> inputs;
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
-  ASSERT_THROWS_WITH(bc.get_method("forward")(inputs), "is not defined");
+  ASSERT_THROWS_WITH_MESSAGE(
+      bc.get_method("forward")(inputs), "is not defined");
 }
 
 TEST(LiteInterpreterTest, SetState) {
@@ -865,15 +860,29 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   std::ostringstream oss;
   std::unordered_map<std::string, std::string> extra_files;
   extra_files["metadata.json"] = "abc";
+  extra_files["mobile_info.json"] = "{\"key\": 23}";
   module->_save_for_mobile(oss, extra_files);
 
   std::istringstream iss(oss.str());
   caffe2::serialize::IStreamAdapter adapter{&iss};
   std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";
-  auto loaded_module =
-      torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
+  torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+
+  loaded_extra_files.clear();
+  std::vector<std::string> all_files =
+      caffe2::serialize::PyTorchStreamReader(&iss).getAllRecords();
+
+  for (auto& file_name : all_files) {
+    if (file_name.find("extra/") == 0) {
+      loaded_extra_files[file_name.substr(6)] = "";
+    }
+  }
+
+  torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+  ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
 }
 
 TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {

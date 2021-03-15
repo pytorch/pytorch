@@ -189,6 +189,7 @@ size_t getPadding(
 }
 
 bool PyTorchStreamReader::hasRecord(const std::string& name) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
   std::string ss = archive_name_plus_slash_ + name;
   mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
   bool result = ar_->m_last_error != MZ_ZIP_FILE_NOT_FOUND;
@@ -200,6 +201,7 @@ bool PyTorchStreamReader::hasRecord(const std::string& name) {
 }
 
 std::vector<std::string> PyTorchStreamReader::getAllRecords() {
+  std::lock_guard<std::mutex> guard(reader_lock_);
   mz_uint num_files = mz_zip_reader_get_num_files(ar_.get());
   std::vector<std::string> out;
   char buf[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
@@ -220,6 +222,10 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
   return out;
 }
 
+const std::vector<std::string>& PyTorchStreamWriter::getAllWrittenRecords() {
+  return files_written;
+}
+
 size_t PyTorchStreamReader::getRecordID(const std::string& name) {
   std::string ss = archive_name_plus_slash_ + name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
@@ -232,6 +238,7 @@ size_t PyTorchStreamReader::getRecordID(const std::string& name) {
 
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string& name) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
   size_t key = getRecordID(name);
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
@@ -248,6 +255,7 @@ static int64_t read_le_16(uint8_t* buf) {
 }
 
 size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
   valid("retrieving file meta-data for ", name.c_str());
@@ -356,6 +364,7 @@ void PyTorchStreamWriter::writeRecord(
       nullptr,
       0);
   valid("writing file ", name.c_str());
+  files_written.push_back(name);
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {

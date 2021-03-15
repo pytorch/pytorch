@@ -122,7 +122,7 @@ void logit_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
-      iter.dtype(),
+      iter.common_dtype(),
       "logit_cuda",
       [&]() {
         using T_ACC = acc_type<scalar_t, true>;
@@ -252,6 +252,27 @@ void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, doub
   });
 }
 
+void frexp_kernel_cuda(TensorIterator& iter) {
+#ifdef __HIP_PLATFORM_HCC__
+  // Reference: https://rocmdocs.amd.com/en/latest/ROCm_API_References/HIP-MATH.html
+  //            https://github.com/ROCm-Developer-Tools/HIP/issues/2169
+  // ROCm does not support frexp function yet
+  TORCH_CHECK(false, "torch.frexp() is not implemented on ROCm platform.");
+#else
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half,
+    // The iter.dtype() here is the dtype of mantissa output.
+    // It's a floating point type and must be the same as the input's dtype.
+    iter.dtype(),
+    "frexp_cuda", [&]() {
+      gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t a) -> thrust::tuple<scalar_t, int32_t> {
+        int32_t exponent;
+        scalar_t mantissa = std::frexp(a, &exponent);
+        return {mantissa, exponent};
+      });
+  });
+#endif
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
@@ -270,6 +291,7 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
+REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
 
 } // namespace native
 } // namespace at

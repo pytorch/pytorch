@@ -4,8 +4,9 @@ import warnings
 import collections
 try:
     import numpy as np
+    HAS_NUMPY = True
 except ModuleNotFoundError:
-    np = None
+    HAS_NUMPY = False
 from torch._six import string_classes
 from .common import amp_definitely_not_available
 
@@ -149,7 +150,7 @@ def _cast(value, dtype):
         return value.to(dtype) if is_eligible else value
     elif isinstance(value, string_classes):
         return value
-    elif np is not None and isinstance(value, np.ndarray):
+    elif HAS_NUMPY and isinstance(value, np.ndarray):
         return value
     elif isinstance(value, collections.abc.Mapping):
         return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}

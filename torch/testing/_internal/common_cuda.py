@@ -66,7 +66,7 @@ def tf32_off():
     try:
         torch.backends.cuda.matmul.allow_tf32 = False
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
-            yield 
+            yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
@@ -79,7 +79,7 @@ def tf32_on(self, tf32_precision=1e-5):
         torch.backends.cuda.matmul.allow_tf32 = True
         self.precision = tf32_precision
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
-            yield 
+            yield
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
         self.precision = old_precison
@@ -149,6 +149,6 @@ def with_tf32_off(f):
 
 def _get_torch_cuda_version():
     if torch.version.cuda is None:
-        return [0, 0]
+        return (0, 0)
     cuda_version = str(torch.version.cuda)
-    return [int(x) for x in cuda_version.split(".")]
+    return tuple(int(x) for x in cuda_version.split("."))

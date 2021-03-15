@@ -3,8 +3,6 @@
 # shellcheck disable=SC2034
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
-git submodule sync --recursive
-git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Build PyTorch
@@ -32,7 +30,7 @@ if [ -z "${CROSS_COMPILE_ARM}" ]; then
   USE_DISTRIBUTED=1 python setup.py install
 else
   export MACOSX_DEPLOYMENT_TARGET=11.0
-  USE_DISTRIBUTED=1 CMAKE_OSX_ARCHITECTURES=arm64 USE_MKLDNN=OFF USE_NNPACK=OFF USE_QNNPACK=OFF USE_PYTORCH_QNNPACK=OFF BUILD_TEST=OFF python setup.py bdist_wheel
+  USE_DISTRIBUTED=1 CMAKE_OSX_ARCHITECTURES=arm64 USE_MKLDNN=OFF USE_NNPACK=OFF USE_QNNPACK=OFF BUILD_TEST=OFF python setup.py bdist_wheel
 fi
 
 assert_git_not_dirty
