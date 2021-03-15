@@ -7,12 +7,16 @@
 
 import copy
 import os
+import sys
 from contextlib import suppress
 from typing import List, Any, Type, cast
 
 import numpy as np
 import torch
 import torch.distributed as dist
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -342,6 +346,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         all_trainable()
         some_trainable()
 
+    @common_distributed.skip_if_not_multigpu
     def test_collect_shards(self):
         """ Check the state consolidation mechanism, and the state dict exposed by ZeroRedundancyOptimizer"""
         self.dist_init(self.rank)

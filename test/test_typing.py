@@ -3,8 +3,8 @@
 import itertools
 import os
 import re
-from typing import IO, Dict, List
 import shutil
+from typing import IO, Dict, List
 
 import pytest
 
