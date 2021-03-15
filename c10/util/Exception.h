@@ -145,6 +145,9 @@ namespace Warning {
 C10_API void warn(SourceLocation source_location,
     const std::string& msg,
     bool verbatim);
+C10_API void warn(SourceLocation source_location,
+    const char* msg,
+    bool verbatim);
 /// Sets the global warning handler. This is not thread-safe, so it should
 /// generally be called once during initialization or while holding the GIL
 /// for programs that use python.
@@ -448,7 +451,7 @@ namespace detail {
 //
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_WARN(...) \
-  ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, {}, false)
+  ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, nullptr, false)
 #else
 #define TORCH_WARN(...) \
   ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__), false)
@@ -460,7 +463,7 @@ namespace detail {
 #ifdef STRIP_ERROR_MESSAGES
 #define _TORCH_WARN_ONCE(...) \
   C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
-    ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, {}, false); \
+    ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, nullptr, false); \
     return true; \
   }()
 #else
