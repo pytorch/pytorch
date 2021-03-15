@@ -604,6 +604,7 @@ cc_library(
         ":c10_headers",
         ":aten_src_TH_THGeneral",
         ":aten_src_THC_THCGeneral",
+        ":aten_src_ATen_cuda_config",
     ],
 )
 

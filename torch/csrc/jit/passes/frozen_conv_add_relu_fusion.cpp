@@ -1,4 +1,5 @@
 #include <ATen/Utils.h>
+#include <ATen/cuda/CUDAConfig.h>
 
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -14,7 +15,7 @@ namespace jit {
 
 namespace {
 void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
-#ifdef USE_CUDNN
+#if AT_CUDNN_ENABLED()
   SubgraphRewriter rewriter;
 
   // TODO: fix CUDNN conv1d failure
