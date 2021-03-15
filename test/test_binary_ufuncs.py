@@ -650,11 +650,15 @@ class TestBinaryUfuncs(TestCase):
             for test_case in test_cases:
                 self.assertRaisesRegex(RuntimeError, err_msg, test_case)
         else:
-            if isinstance(base, torch.Tensor) and base.dim() > 0:
+            if isinstance(base, torch.Tensor):
                 actual = base.pow(exponent)
                 self.assertEqual(actual, expected.to(actual))
                 actual = base.clone()
-                if torch.can_cast(torch.result_type(base, exponent), base.dtype):
+                # When base is a 0-dim cpu tensor and exp is a cuda tensor, we exp `pow` to work but `pow_` to fail, since
+                # `pow` will try to create the output tensor on a cuda device, but `pow_` needs to use the cpu tensor as the output
+                if base.dim() == 0 and base.device.type == 'cpu' and exponent.device.type == 'cuda':
+                    regex = 'Expected all tensors to be on the same device, but found at least two devices, cuda.* and cpu!'
+                elif torch.can_cast(torch.result_type(base, exponent), base.dtype):
                     actual2 = actual.pow_(exponent)
                     self.assertEqual(actual, expected)
                     self.assertEqual(actual2, expected)
