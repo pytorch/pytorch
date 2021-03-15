@@ -191,8 +191,10 @@ bool InterpreterState::run(Stack& stack) {
         ++pc;
       } break;
       case NAMED_TUPLE_CONSTRUCT: {
-        auto type = code_->types_[inst.X]->expect<at::TupleType>();
-        namedTupleConstruct(stack, type, inst.N);
+        namedTupleConstruct(
+            stack,
+            code_->types_[inst.X]->expect<at::TupleType>(),
+            inst.N);
         ++pc;
       } break;
       case CREATE_OBJECT: {
@@ -213,7 +215,7 @@ bool InterpreterState::run(Stack& stack) {
         // STRIP_ERROR_MESSAGES is defined (which happens for production
         // mobile builds). This will cause the stack to be in an inconsistent
         // state. It has previously resulted in a SEV (S22350).
-        auto sref = pop(stack).toStringRef();
+        const auto& sref = pop(stack).toStringRef();
         TORCH_WARN(sref);
         ++pc;
       } break;
