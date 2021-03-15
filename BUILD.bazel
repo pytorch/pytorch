@@ -656,7 +656,6 @@ cc_library(
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
-        ":aten_src_ATen_cuda_config",
         ":generated_cpp",
     ],
     copts = ATEN_COPTS,
