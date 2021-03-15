@@ -179,6 +179,25 @@ struct AllocParams {
   cudaError_t err;
 };
 
+struct ScopedCounter {
+  int& counter;
+
+  ScopedCounter(int& cnt) : counter(cnt) {
+    ++counter;
+  }
+
+  ~ScopedCounter() {
+    --counter;
+  }
+
+  bool is_reentrant() const {
+    return counter != 1;
+  }
+
+  ScopedCounter(const ScopedCounter&) = delete;
+  ScopedCounter& operator=(const ScopedCounter&) = delete;
+};
+
 } // namespace
 
 class DeviceCachingAllocator {
@@ -210,6 +229,9 @@ class DeviceCachingAllocator {
 
   bool set_fraction = false;
 
+  // track reentrant calls into malloc
+  int malloc_recursion_depth = 0;
+
  public:
 
   DeviceCachingAllocator() :
@@ -222,6 +244,7 @@ class DeviceCachingAllocator {
   Block* malloc(int device, size_t size, cudaStream_t stream)
   {
     std::unique_lock<std::recursive_mutex> lock(mutex);
+    const ScopedCounter counter(malloc_recursion_depth);
 
     // process outstanding cudaEvents
     process_events();
@@ -237,13 +260,13 @@ class DeviceCachingAllocator {
       // Search pool
       get_free_block(params)
       // Trigger callbacks and retry search
-      || (trigger_free_memory_callbacks(params) && get_free_block(params))
+      || (!counter.is_reentrant() && trigger_free_memory_callbacks(params) && get_free_block(params))
       // Attempt allocate
       || alloc_block(params, false)
       // Free all non-split cached blocks and retry alloc.
       || (free_cached_blocks() && alloc_block(params, true))
       // Run expensive free memory callbacks and try again
-      || (trigger_expensive_free_memory_callbacks(params) && get_free_block(params));
+      || (!counter.is_reentrant() && trigger_expensive_free_memory_callbacks(params) && get_free_block(params));
 
     TORCH_INTERNAL_ASSERT((!block_found && params.err != cudaSuccess) || params.block);
     if (!block_found) {
