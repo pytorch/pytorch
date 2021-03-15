@@ -70,8 +70,6 @@ class DispatchKey(Enum):
     QuantizedCPU = auto()
     QuantizedCUDA = auto()
     QuantizedXPU = auto()
-    ComplexCPU = auto()
-    ComplexCUDA = auto()
     CustomRNGKeyId = auto()
     MkldnnCPU = auto()
     SparseCPU = auto()
@@ -143,7 +141,6 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
     return dk in {
         DispatchKey.CUDA,
         DispatchKey.QuantizedCUDA,
-        DispatchKey.ComplexCUDA,
         DispatchKey.SparseCUDA,
         DispatchKey.AutogradCUDA,
         DispatchKey.CUDATensorId,
