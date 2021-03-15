@@ -278,7 +278,7 @@ def trim_sigfig(x: float, n: int) -> float:
 
 
 def get_unique(values: Iterable[T]) -> T:
-    unique_values = {v for v in values}
+    unique_values = set(values)
     assert len(unique_values) == 1, f"Values are not unique: {unique_values}"
     return unique_values.pop()
 
