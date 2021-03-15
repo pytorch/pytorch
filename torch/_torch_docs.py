@@ -4404,7 +4404,10 @@ Args:
 
 Keyword arguments:
     {out}
-    {dtype}
+    dtype (torch.dtype, optional): the data type to perform the computation in.
+        Default: if None, uses the global default dtype (see torch.get_default_dtype())
+        when both :attr:`start` and :attr:`end` are real,
+        and corresponding complex dtype when either is complex.
     {layout}
     {device}
     {requires_grad}
@@ -4773,7 +4776,10 @@ Args:
 
 Keyword arguments:
     {out}
-    {dtype}
+    dtype (torch.dtype, optional): the data type to perform the computation in.
+        Default: if None, uses the global default dtype (see torch.get_default_dtype())
+        when both :attr:`start` and :attr:`end` are real,
+        and corresponding complex dtype when either is complex.
     {layout}
     {device}
     {requires_grad}
@@ -8962,7 +8968,7 @@ Example::
 
 add_docstr(torch.triangular_solve,
            r"""
-triangular_solve(input, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
 
 Solves a system of equations with a triangular coefficient matrix :math:`A`
 and multiple right-hand sides :math:`b`.
@@ -8974,11 +8980,11 @@ with the default keyword arguments.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
 
-Supports real-valued and complex-valued inputs.
+Supports input of float, double, cfloat and cdouble data types.
 
 Args:
-    input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
-                :math:`*` is zero of more batch dimensions (:math:`b`)
+    b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
+                :math:`*` is zero of more batch dimensions
     A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
                 where :math:`*` is zero or more batch dimensions
     upper (bool, optional): whether to solve the upper-triangular system
@@ -9573,11 +9579,10 @@ Keyword args:
 
 Example::
 
-    >>> torch.empty(2, 3)
-    tensor(1.00000e-08 *
-           [[ 6.3984,  0.0000,  0.0000],
-            [ 0.0000,  0.0000,  0.0000]])
-
+    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
+    >>> torch.empty_like(a)
+    tensor([[0, 0, 0],
+            [0, 0, 0]], device='cuda:0', dtype=torch.int32)
 """.format(**factory_common_args))
 
 add_docstr(torch.empty_like,
@@ -10565,9 +10570,9 @@ Example::
     device(type='cpu')
 """)
 
-add_docstr(torch.assert_async,
+add_docstr(torch._assert_async,
            r"""
-assert_async(tensor) -> void
+_assert_async(tensor) -> void
 
 Asynchronously assert that the contents of tensor are nonzero.  For CPU tensors,
 this is equivalent to ``assert tensor`` or ``assert tensor.is_nonzero()``; for

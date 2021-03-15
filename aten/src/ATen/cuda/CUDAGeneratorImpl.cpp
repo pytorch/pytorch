@@ -193,7 +193,7 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   } else {
     TORCH_CHECK(new_state_size == total_size, "RNG state is wrong size");
   }
-  
+
   uint64_t input_seed;
   auto new_rng_state = new_state.data<uint8_t>();
   memcpy(&input_seed, new_rng_state + states_size, seed_size);

@@ -2085,53 +2085,146 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return u_term + sigma_term + v_term;
 }
 
+// The implementation follows:
 // "An extended collection of matrix derivative results for forward and reverse mode algorithmic differentiation"
 // https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
+// However, the reference does not cover the constraints on eigenvectors to have 1-norm.
+// See the details below.
 Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                    bool eigenvectors, const Tensor& lambda, const Tensor& v) {
-  // This gradient only works for real eigenvalues at the moment.
-  TORCH_CHECK(eigenvectors,
+                    bool is_eigvec_tensor_nonempty, const Tensor& eigenvalues, const Tensor& eigenvectors) {
+  TORCH_CHECK(is_eigvec_tensor_nonempty,
            "eig_backward: Setting eigenvectors to false in torch.eig doesn't compute eigenvectors ",
            "and hence we cannot compute backward. Please use torch.eig(eigenvectors=True)");
-  auto zeros = at::zeros({1}, lambda.options());
-  TORCH_CHECK(
-      at::allclose(lambda.slice(/*dim=*/-1, /*start=*/1, /*end=*/2), zeros),
-      "eig_backward: Backward calculation does not support complex eigenvalues at the moment.");
 
-  auto glambda = grads[0];
-  auto gv = grads[1];
-  auto vt = v.transpose(-2, -1);
+  // variable names correspond to the ones in the reference document
+  auto D = eigenvalues;
+  auto U = eigenvectors;
+  auto D_grad = grads[0];
+  auto U_grad = grads[1];
 
-  Tensor result;
-  // contribution from the eigenvectors
-  if (gv.defined()) {
-    auto rlambda = lambda.slice(/*dim=*/-1, /*start=*/0, /*end=*/1);
-
-    auto hm = rlambda.transpose(-2,-1) - rlambda;
-    hm.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
-    hm.pow_(-1.0);
-
-    auto gvortho = gv - at::sum(gv * v, /*dim=*/-2, /*keepdim=*/true) * v;
-    auto B = hm * at::matmul(vt, gvortho);
-    auto A = at::matmul(B, vt);
-
-    std::tie(result, std::ignore) = at::solve(A, vt);
+  // The condition below is trying to marry torch.eig and torch.linalg.eig
+  // for real inputs.
+  //
+  // For real inputs torch.eig returns a real 2D tensor representing real and complex
+  // components of eigenvalues, while torch.linalg.eig will most likely always
+  // return complex eigenvalues.
+  if (!self.is_complex()) {
+    auto is_imag_eigvals_zero = false;
+    // path for torch.eig with always a "real" 2D tensor of eigenvalues
+    if (!D.is_complex()) {
+      // narrow extracts the column corresponding to the imaginary part
+      is_imag_eigvals_zero = (D.narrow(-1, 1, 1) == 0.0).min().item<bool>();
+    }
+    // path for torch.linalg.eig with always a complex tensor of eigenvalues
+    else {
+      is_imag_eigvals_zero = (at::imag(D) == 0.0).min().item<bool>();
+      // insert an additional dimension to be compatible with torch.eig.
+      // Recall that it produces 2D tensors.
+      // We extract only the real parts as there is no support for
+      // complex eigenvalues with real inputs yet.
+      D = at::real(D).unsqueeze(-1);
+      D_grad = at::real(D_grad).unsqueeze(-1);
+    }
+    // No support for complex eigenvalues for real inputs yet.
+    TORCH_CHECK(
+      is_imag_eigvals_zero,
+      "eig_backward: Backward calculation does not support complex eigenvalues for real inputs at the moment.");
   }
-  // contribution from eigenvalues
-  if (glambda.defined()) {
-    auto grlambda = glambda.slice(/*dim=*/-1, /*start=*/0, /*end=*/1) * vt;
-    auto A = at::matmul(v, grlambda);
-    auto vvt = at::matmul(v, vt);
-    if (result.defined()) {
-      Tensor result1;
-      std::tie(result1, std::ignore) = at::solve(A, vvt);
-      result = result.add(result1);
+  else {
+    // torch.eig returns 2d tensors for eigenvalues,
+    // while torch.linalg.eig returns 1d.
+    // Hence we insert additional dimension for complex input,
+    // such that the same code could be used for both methods.
+    // It will become unnecessary once torch.eig is deprecated.
+    D = D.unsqueeze(-1);
+    if (D_grad.defined()) {
+      D_grad = D_grad.unsqueeze(-1);
+    }
+  }
+
+  if (!D_grad.defined() && !U_grad.defined()) {
+    return at::zeros_like(self, at::MemoryFormat::Contiguous);
+  }
+
+  auto Uh = U.transpose(-2, -1).conj();
+
+  // Adapting the result from the reference above for the complex input, we get:
+  //
+  // A_grad = U^{-H} (D_grad + F.conj() * (U^H U_grad)) U^H,
+  // where M^H := (M.transpose(-2, -1)).conj() and * is the Hadamard (element-wise) product.
+  //
+  // torch.eig/torch.linalg.eig produce eigenvectors which are
+  // normalized to 1 norm, and the reference does not take that into account.
+  // Hence, we have to modify the formula accordingly.
+  //
+  // Normalization to 1 norm imposes the following constraint on the eigenvectors, i.e.
+  // (U^H U) * I = I, where I is an identity matrix.
+  // Forward AD for this expression yields:
+  // (dU^H U + U^H dU) * I = 0 => U^H dU * I = 0 <=> diag(U^H dU) = 0, which means
+  // that each i-th column of U is orthogonal to the i-th column of dU.
+  // Now, the value of dU which does not take this constraint into consideration
+  // comes straight from the reference:
+  // dU = U(F * U^{-1} dA U).
+  // To make sure that U^H dU * I = 0, and using U^H U * I = I (normalization),
+  // we propose a modifed forward AD for U:
+  // dU_new = dU - U(U^H dU * I) (think of Gram-Schmidt)
+  //
+  // The rest is very similar to what is done in the reference and we finally arrive at:
+  //
+  // A_grad = U^{-H} (D_grad + (U^H U_grad - U^H U (U^H U_grad * I)) * F.conj()) U^H
+  //        = U^{-H} (eigenvalues_contribs + eigenvectors_contrib) U^H, where
+  // eigenvalues_contribs := D_grad,
+  // eigenvectors_contribs := (U^H U_grad - U^H U (U^H U_grad * I)) * F.conj().
+  // The contributions from the eigenvectors and the eigenvalues are computed below,
+  // and then we solve the system
+  // U^H A_grad = (eigenvalues_contribs + eigenvectors_contribs) U_H
+  // to produce A_grad.
+
+  // contribution from the eigenvectors
+  Tensor U_contrib;
+  if (U_grad.defined()) {
+    // narrow extracts the column corresponding to the real part
+    D = D.narrow(-1, 0, 1);
+    auto F = (D.transpose(-2, -1) - D);
+    if (!F.is_complex()) {
+      F.diagonal(0, -2, -1).fill_(INFINITY);
+      F.pow_(-1);
     }
     else {
-      std::tie(result, std::ignore) = at::solve(A, vvt);
+      // The F matrix construction for complex eigenvalues
+      // if different from its real counterpart.
+      // There is no complex INFINITY, and we cannot use
+      //
+      // F.pow_(-1);
+      // F.diagonal(0, -2, -1).fill_(0);
+      //
+      // as it breaks gradgradcheck by double backward
+      // propagating nans through F.pow_(-1) at zero,
+      // the point of discontinuity.
+      // Hence this hack below.
+      F.diagonal(0, -2, -1).fill_(1);
+      F.pow_(-1);
+      F.diagonal(0, -2, -1).fill_(0);
     }
+    auto U_grad_proj_onto_U = at::matmul(Uh, U_grad);
+    auto Uh_U = at::matmul(Uh, U);
+    U_contrib = (U_grad_proj_onto_U - Uh_U * U_grad_proj_onto_U.diagonal(0, -2, -1).unsqueeze(-2)) * F.conj();
   }
-  return result;
+  else {
+    U_contrib = at::zeros_like(self, at::MemoryFormat::Contiguous);
+  }
+
+  // contributions from the eigenvalues
+  Tensor D_contrib;
+  if (D_grad.defined()) {
+    // narrow extracts the column corresponding to the real part
+    D_contrib = D_grad.narrow(-1, 0, 1);
+  }
+  else {
+    D_contrib = at::zeros_like(D, at::MemoryFormat::Contiguous);
+  }
+
+  return at::linalg_solve(Uh, at::matmul(U_contrib, Uh) + D_contrib * Uh);
 }
 
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
