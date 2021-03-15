@@ -1075,17 +1075,6 @@ def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False):
         out.append(SampleInput(a))
     return out
 
-def sample_inputs_lu(op_info, device, dtype, requires_grad=False):
-    # not needed once OpInfo tests support Iterables
-    def generate_samples():
-        batch_shapes = ((), (3,), (3, 3))
-        for batch_shape, get_infos in product(batch_shapes, (True, False)):
-            shape = batch_shape + (S, S)
-            input = make_tensor(shape, device, dtype, requires_grad=requires_grad, low=None, high=None)
-            yield SampleInput((input, True, get_infos))
-
-    return list(generate_samples())
-
 
 def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False):
     """
@@ -1161,6 +1150,18 @@ def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False):
     for sample in out:
         sample.input = tuple(reversed(sample.input))
     return out
+
+
+def sample_inputs_lu(op_info, device, dtype, requires_grad=False):
+    # not needed once OpInfo tests support Iterables
+    def generate_samples():
+        batch_shapes = ((), (3,), (3, 3))
+        for batch_shape, get_infos in product(batch_shapes, (True, False)):
+            shape = batch_shape + (S, S)
+            input = make_tensor(shape, device, dtype, requires_grad=requires_grad, low=None, high=None)
+            yield SampleInput((input, True, get_infos))
+
+    return list(generate_samples())
 
 
 def sample_inputs_std_var(op_info, device, dtype, requires_grad):
@@ -2084,22 +2085,6 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
-    OpInfo('lu',
-           op=torch.lu,
-           dtypes=floating_and_complex_types(),
-           test_inplace_grad=False,
-           #check_batched_gradgrad=False,
-           supports_out=False,
-           sample_inputs_func=sample_inputs_lu,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # cuda gradchecks are slow
-               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
-               # we skip jit tests because lu_backward is impelemented as autograd.Function,
-               # which does not support autograd with scripting
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
-           )),
     HermitianOpInfo('linalg.cholesky',
                     aten_name='linalg_cholesky',
                     op=torch.linalg.cholesky,
@@ -2261,6 +2246,22 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
                                 dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
                    )),
+    OpInfo('lu',
+           op=torch.lu,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           #check_batched_gradgrad=False,
+           supports_out=False,
+           sample_inputs_func=sample_inputs_lu,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+               # we skip jit tests because lu_backward is impelemented as autograd.Function,
+               # which does not support autograd with scripting
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+           )),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
