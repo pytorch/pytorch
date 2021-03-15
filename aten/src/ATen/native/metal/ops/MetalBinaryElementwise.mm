@@ -204,7 +204,7 @@ Tensor sub_Tensor(const Tensor& input1, const Tensor& input2, const Scalar& alph
   }
 }
 
-Tensor& sub__Tensor(Tensor& input1, const Tensor& input2, Scalar alpha) {
+Tensor& sub__Tensor(Tensor& input1, const Tensor& input2, const Scalar& alpha) {
   TORCH_CHECK(input1.is_metal());
   TORCH_CHECK(input1.dim() == input2.dim());
   TORCH_CHECK(input1.sizes()[0] == input2.sizes()[0]);
