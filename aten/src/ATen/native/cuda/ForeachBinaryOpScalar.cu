@@ -73,7 +73,7 @@ FOREACH_BINARY_OP_SCALAR(mul, std::multiplies, false);
 FOREACH_BINARY_OP_SCALAR(div, std::divides, true);
 
 // In the case of subtraction, we dont allow scalar to be boolean following the torch.sub logic
-void foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
+void foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, const Scalar& scalar) {
     check_foreach_api_restrictions(tensors);
     at::native::sub_check(tensors[0], scalar);
 
@@ -84,7 +84,7 @@ void foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
     foreach_binary_op_<std::minus>(tensors, scalar);
 }
 
-std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
+std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, const Scalar& scalar) {
     check_foreach_api_restrictions(tensors);
     at::native::sub_check(tensors[0], scalar);
 
