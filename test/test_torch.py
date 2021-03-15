@@ -2591,9 +2591,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         @noarchTest
         def test_upsample_nearest1d_meta(self):
-            # TODO: this is not a sustainable way of testing meta functions,
-            # but I want some quick scaffolding first before a more
-            # integrated testing strategy
+            # TODO: this test should be triggered by test_nn.py but right
+            # now meta is not enabled (and even if it was, we are probably
+            # missing too many meta functions to get through the test unmolested)
+
             # NB: Can't make the exponent too big, or it will overflow
             # signed 64-bit integer
             x = torch.empty(2 * 10 ** 8, 3, 2 * 10 ** 8, device='meta')
@@ -2601,12 +2602,41 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
             self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
+            # TODO: the out tests cannot be triggered by test_nn.py because
+            # we don't actually do out= arguments for nn functions, so there
+            # is no public API by which to get the out version
+
             # interpolate doesn't seem to support out=
             # (not sure why passing None here doesn't work? How strange...)
             z = torch.empty(0, device='meta')
             torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 8,), 2, out=z)
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
             self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
+
+        @noarchTest
+        def test_upsample_nearest2d_meta(self):
+            # TODO: the out tests cannot be triggered by test_nn.py because
+            # we don't actually do out= arguments for nn functions, so there
+            # is no public API by which to get the out version
+
+            # Make sure we don't clobber strides of out tensor.  NB: this
+            # test must be done on 2d/3d, because 1d doesn't have any meaningful
+            # layout support
+            x = torch.empty(4, 3, 8, 8, device='meta')
+            out = torch.empty(4, 3, 16, 16, device='meta', memory_format=torch.channels_last)
+            torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+
+            x = torch.empty(4, 3, 8, 8, device='meta', memory_format=torch.channels_last)
+            out = torch.empty(4, 3, 16, 16, device='meta')
+            torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
+            self.assertTrue(out.is_contiguous())
+
+            # But if resize occurs, do clobber
+            x = torch.empty(4, 3, 8, 8, device='meta', memory_format=torch.channels_last)
+            out = torch.empty(0, device='meta')
+            torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
 
         def test_normal_shape(self):
             warned = False
