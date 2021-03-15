@@ -2989,7 +2989,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index_select),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           test_inplace_grad=False,
            supports_out=False,
            sample_inputs_func=sample_inputs_index_add),
     OpInfo('sort',
