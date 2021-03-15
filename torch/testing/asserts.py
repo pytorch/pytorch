@@ -1,5 +1,6 @@
 import functools
 import inspect
+import sys
 import warnings
 from typing import Callable, Optional, Tuple
 
@@ -26,7 +27,21 @@ def _get_default_rtol_and_atol(a: torch.Tensor, b: torch.Tensor) -> Tuple[float,
     return _TestCase()._getDefaultRtolAndAtol(a.dtype, b.dtype)
 
 
-def _hide_internal_traceback(fn):
+def _hide_internal_traceback_pytest(fn):
+    """Decorator for user-facing function that hides the internal traceback for :mod:`pytest`.
+
+    The decorator works by assigning ``__tracebackhide__ = True`` in each previous frame in case an
+    :class:`AssertionError` is encountered. If it is set manually, ``__tracebackhide__`` is not overwritten.
+
+    This is a :mod:`pytest`
+    `feature <https://docs.pytest.org/en/stable/example/simple.html#writing-well-integrated-assertion-helpers>`_
+    and thus this is a no-op if it is not present.
+    """
+    # The module 'pytest' will be imported if the 'pytest' runner is used. This will only give false-positives in case
+    # the test directly or indirectly imports 'pytest', but is run by another runner such as 'unittest'.
+    if "pytest" not in sys.modules:
+        return fn
+
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
@@ -99,7 +114,7 @@ def _tensors_equal_asserter(a: torch.Tensor, b: torch.Tensor):
         raise AssertionError("ADDME")
 
 
-@_hide_internal_traceback
+@_hide_internal_traceback_pytest
 def assert_tensors_equal(
     a: torch.Tensor,
     b: torch.Tensor,
@@ -150,7 +165,7 @@ def _tensors_allclose_asserter(a: torch.Tensor, b: torch.Tensor, rtol: Optional[
         raise AssertionError("ADDME")
 
 
-@_hide_internal_traceback
+@_hide_internal_traceback_pytest
 def assert_tensors_allclose(
     a: torch.Tensor,
     b: torch.Tensor,
