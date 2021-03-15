@@ -21,7 +21,7 @@ import torch.distributed as dist
 from typing import Dict, Optional, Tuple, List, Any
 
 try:
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     from tools.stats_utils.s3_stat_parser import (get_S3_bucket_readonly, HAVE_BOTO3)
 except ImportError:
     print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
