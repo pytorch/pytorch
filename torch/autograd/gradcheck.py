@@ -161,8 +161,8 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
     return jacobian
 
 
-def check_analytical_jacobian(inputs, output, nondet_tol, grad_out, check_batched_grad,
-                              check_grad_dtypes, raise_exception):
+def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out, check_grad_dtypes,
+                                         raise_exception):
     jacobian, reentrant, correct_grad_sizes, correct_grad_types = \
         get_analytical_jacobian(inputs, output, nondet_tol, grad_out)
 
@@ -174,20 +174,14 @@ def check_analytical_jacobian(inputs, output, nondet_tol, grad_out, check_batche
             raise RuntimeError(msg)
 
     if not correct_grad_types and check_grad_dtypes:
-        fail_test('Gradient{0} has dtype mismatch'.format(complex_str))
+        fail_test(f'Gradient{complex_str} has dtype mismatch')
     if not correct_grad_sizes:
-        fail_test('Analytical gradient{0} has incorrect size'.format(complex_str))
+        fail_test(f'Analytical gradient{complex_str} has incorrect size')
     if not reentrant:
-        fail_test("Backward{0} is not reentrant, i.e., running backward with same "
-                  "input and grad_output multiple times gives different values, "
-                  "although analytical gradient matches numerical gradient. "
-                  "The tolerance for nondeterminism was {1}.".format(complex_str, nondet_tol))
-    if check_batched_grad:
-        assert reentrant, ('Batched gradient checking makes the assumption that '
-                           'backward is reentrant. This assertion should never '
-                           'be triggered: we expect gradcheck to have early '
-                           'exited before reaching this point if backward is '
-                           'not reentrant. Please file us a bug report.')
+        fail_test(f'Backward{complex_str} is not reentrant, i.e., running backward with '
+                  'same input and grad_output multiple times gives different values, '
+                  'although analytical gradient matches numerical gradient. '
+                  f'The tolerance for nondeterminism was {nondet_tol}.')
     failed = not (reentrant and correct_grad_sizes and correct_grad_types)
     return jacobian, failed
 
@@ -247,7 +241,7 @@ def check_inputs(fail_test, tupled_inputs, check_sparse_nnz) -> bool:
             if content.layout is not torch._mkldnn:  # type: ignore
                 if not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
                     raise RuntimeError(
-                        'The {}th input has a dimension with stride 0. gradcheck only '
+                        f'The {idx}th input has a dimension with stride 0. gradcheck only '
                         'supports inputs that are non-overlapping to be able to '
                         'compute the numerical gradients correctly. You should call '
                         '.contiguous on the input before passing it to gradcheck.')
@@ -563,16 +557,15 @@ def gradcheck(
         def fn(input):
             return _as_tuple(func(*input))[i]
 
-        analytical, failed = check_analytical_jacobian(tupled_inputs, o, nondet_tol, 1.0, check_batched_grad,
-                                                       check_grad_dtypes, raise_exception)
+        analytical, failed = check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, 1.0,
+                                                                  check_grad_dtypes, raise_exception)
         if failed:
             return False
         numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
 
         if o.is_complex():
-            analytical_imag_grad_out, failed = check_analytical_jacobian(tupled_inputs, o, nondet_tol, 1j,
-                                                                         check_batched_grad, check_grad_dtypes,
-                                                                         raise_exception)
+            analytical_imag_grad_out, failed = check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, 1j,
+                                                                                    check_grad_dtypes, raise_exception)
             if failed:
                 return False
             numerical_imag_grad_out = get_numerical_jacobian(fn, tupled_inputs, eps=eps, grad_out=1j)
