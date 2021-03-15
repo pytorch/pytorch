@@ -1913,6 +1913,9 @@
 - name: mkldnn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: mkldnn_adaptive_avg_pool2d_backward(grad, self)
 
+- name: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
+  self: grad.reshape(self.sizes())
+
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
   self: fft_r2c_backward(grad, dim, normalization, onesided, self.size(dim.back()))
