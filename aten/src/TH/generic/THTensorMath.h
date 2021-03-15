@@ -10,10 +10,6 @@ TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
 
 TH_API ptrdiff_t THTensor_(numel)(THTensor *t);
 
-#if !defined(TH_REAL_IS_BOOL)
-TH_API void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value);
-#endif
-
 #if !defined(TH_REAL_IS_BFLOAT16)
 
 void THTensor_(preserveReduceDimSemantics)(THTensor *r_, int in_dims, int reduce_dimension, int keepdim);

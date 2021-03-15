@@ -149,7 +149,11 @@ class TORCH_API Tensor {
   }
 
   bool is_floating_point() const {
-        return at::isFloatingType(this->scalar_type());
+    return at::isFloatingType(this->scalar_type());
+  }
+
+  bool is_signed() const {
+    return at::isSignedType(this->scalar_type());
   }
 
   int64_t size(int64_t dim) const {
