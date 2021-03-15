@@ -582,22 +582,47 @@ class TestMkldnn(TestCase):
 
     def _test_batch_norm_base(self, dim, channels, input):
         bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
-        # TODO: support training
-        for train in [False]:
-            bn = bn_module[dim](channels).float().train(train)
-            mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
-            self.assertEqual(
-                bn(input),
-                mkldnn_bn(input.to_mkldnn()).to_dense())
+        bn = bn_module[dim](channels).float().train(False)
+        mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
+        self.assertEqual(
+            bn(input),
+            mkldnn_bn(input.to_mkldnn()).to_dense())
 
-            self._test_serialization(mkldnn_bn, (input.to_mkldnn(),))
-            self._test_tracing(mkldnn_bn, (input.to_mkldnn(),))
+        self._test_serialization(mkldnn_bn, (input.to_mkldnn(),))
+        self._test_tracing(mkldnn_bn, (input.to_mkldnn(),))
+
+    def _test_batch_norm_train_base(self, dim, channels, input):
+        # TODO: support 3d batchnorm training.
+        bn_module = {2 : torch.nn.BatchNorm2d}
+        # TODO: support none affine.
+        options = itertools.product([True], [True, False])
+        for affine, track_running_stats in options:
+            bn = bn_module[dim](
+                num_features=channels,
+                affine=affine,
+                track_running_stats=track_running_stats).float().train(True)
+            mkldnn_bn = copy.deepcopy(bn)
+            x1 = input.clone().requires_grad_()
+            x2 = input.clone().to_mkldnn().requires_grad_()
+            y1 = bn(x1)
+            y2 = mkldnn_bn(x2).to_dense()
+            loss1 = y1.sum()
+            loss2 = y2.sum()
+            loss1.backward()
+            loss2.backward()
+            self.assertEqual(y1, y2)
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+            self.assertEqual(bn.weight.grad, mkldnn_bn.weight.grad, rtol=1e-3, atol=1e-3)
+            if track_running_stats:
+                self.assertEqual(bn.running_mean, mkldnn_bn.running_mean)
+                self.assertEqual(bn.running_var, mkldnn_bn.running_var, rtol=1e-5, atol=1e-5)
 
     def test_batch_norm_2d(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 100, (1,)).item()
         x = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
         self._test_batch_norm_base(dim=2, channels=C, input=x)
+        self._test_batch_norm_train_base(dim=2, channels=C, input=x)
 
     def test_batch_norm_3d(self):
         N = torch.randint(3, 10, (1,)).item()
