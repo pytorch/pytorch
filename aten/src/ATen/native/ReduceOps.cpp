@@ -188,7 +188,8 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     We will first deduce the formula for the case when
     x[i] != 0 for 1 <= i <= n.
 
-    For F : R^n -> R the cost function, we have
+    For F : R^n -> R the cost function (we will look at the complex case later),
+    we have
 
     dF / dx_k = sum_j (dF / dy_j) * (dy_j / dx_k)   (1)
 
@@ -256,6 +257,11 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     that is:
 
     dy_j / dx_z1 = prod(x[:z1]) * (grad_output[z1] + sum(grad_output[z1+1:z2] * cumprod(x[z1+1:z2])))
+
+    When the imputs are complex, this is map is holomorphic. As such, to compute
+    its backwards is just the conjugate of the usual backwards. This simplifies to
+    conjugating the input. We may also reuse the output as, since the map is holomorphic,
+    cumprod(input.conj()) = cumprod(input).conj()
   */
 
   if (input.numel() <= 1) {
