@@ -4581,14 +4581,19 @@ class TestTorchDeviceType(TestCase):
                     dest2 = ref_index_select(src, dim, idx)
                     self.assertEqual(dest, dest2)
 
-                    # Out version
+                    # Out version points to the same tensor
                     out_size = list(src.size())
                     out_size[dim] = len(idx)
                     out = make_arg(tuple(out_size), num_src, dim, out_contig)
                     dest = torch.index_select(src, dim, idx, out=out)
                     dest2 = ref_index_select(src, dim, idx)
                     self.assertEqual(dest, dest2)
-                    self.assertEqual(out.data_ptr(), dest.data_ptr())
+                    try:
+                        self.assertEqual(out.data_ptr(), dest.data_ptr())
+                    except RuntimeError:
+                        # XLA does not have data_ptr()
+                        out.fill_(99)
+                        self.assertEqual(out, dest)
 
         for idx_type in (torch.int32, torch.int64):
             other_sizes = (3, 2)
