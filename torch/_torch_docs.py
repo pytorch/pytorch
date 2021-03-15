@@ -8428,9 +8428,8 @@ svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition of either a matrix or batch of
 matrices :attr:`input`. The singular value decomposition is represented as a
-namedtuple ``(U, S, V)``, such that
-:math:`\texttt{input} = \texttt{U} \operatorname{diag}(\texttt{S}) \texttt{V}^{\text{H}}`
-where :math:`\texttt{V}^{\text{H}}` is the transpose of ``V`` for real inputs,
+namedtuple ``(U, S, V)``, such that ``input = U diag(S) Vᴴ``.
+where ``Vᴴ`` is the transpose of ``V`` for real inputs,
 and the conjugate transpose of ``V`` for complex inputs.
 If :attr:`input` is a batch of matrices, then ``U``, ``S``, and ``V`` are also
 batched with the same batch dimensions as :attr:`input`.
@@ -8468,17 +8467,17 @@ always be real-valued, even if :attr:`input` is complex.
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch are returned in descending order.
 
-.. note:: The implementation of SVD on CPU uses the LAPACK routine ``?gesdd`` (a divide-and-conquer
-          algorithm) instead of ``?gesvd`` for speed. Analogously, the SVD on GPU uses the
-          cuSOLVER routines ``gesvdj`` and ``gesvdjBatched`` on CUDA 10.1.243 and later,
-          and uses the MAGMA routine ``gesdd`` on earlier versions of CUDA.
+.. note:: The implementation of :func:`torch.svd` on CPU uses the LAPACK routine ``?gesdd``
+          (a divide-and-conquer algorithm) instead of ``?gesvd`` for speed. Analogously,
+          :func:`torch.svd` on GPU uses the cuSOLVER routines ``gesvdj`` and ``gesvdjBatched``
+          on CUDA 10.1.243 and later, and uses the MAGMA routine ``gesdd`` on earlier versions of CUDA.
 
 .. note:: The returned matrix ``U`` will not be contiguous. It will be represented as a
-          column-major matrix (i.e. fortran-contiguous).
+          column-major matrix (i.e. Fortran-contiguous).
 
 .. note:: Gradients computed using ``U`` and ``V`` may be unstable if :attr:`input` has
           repeated non-unique singular values, e.g., when it is not full-rank.
-          See also the last note in this list.
+          See also the note below on complex gradients.
 
 .. note:: When :attr:`some` is ``False``, the gradients on ``U[..., :, min(m, n):]``
           and ``V[..., :, min(m, n):]`` will be ignored in backward as those vectors
@@ -8486,14 +8485,14 @@ always be real-valued, even if :attr:`input` is complex.
 
 .. note:: The ``S`` tensor can only be used to compute gradients if :attr:`compute_uv` is ``True``.
 
-.. note:: For complex-valued :attr:`input` the SVD is not unique, as ``U`` and ``V`` may
-          be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.
+.. note:: For complex-valued :attr:`input` the singular value decomposition is not unique,
+          as ``U`` and ``V`` may be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.
           The same happens when :attr:`input` has repeated singular values, where one may multiply
           the columns of the spanning subspace in ``U`` and ``V`` by a rotation matrix
           and the resulting vectors will span the same subspace.
-          Different platforms, like Numpy, or inputs on different device types,
+          Different platforms, like NumPy, or inputs on different device types,
           may produce different ``U`` and ``V`` tensors.
-          In these cases, the backward operation is only well-defined when the cost-function
+          In these cases, the gradient is only well-defined when the cost-function
           is invariant under these transformations, i.e., when it just depends on the spanned
           subspaces and not on the particular basis.
 
