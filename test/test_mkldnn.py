@@ -290,12 +290,29 @@ class TestMkldnn(TestCase):
 
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
-        self.assertEqual(torch.relu(x), torch.relu(x.to_mkldnn()).to_dense())
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        y1 = torch.relu(x1)
+        y2 = torch.relu(x2).to_dense()
+        loss1 = y1.sum()
+        loss2 = y2.sum()
+        loss1.backward()
+        loss2.backward()
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad.to_dense())
 
     def test_relu_(self):
-        x1 = torch.randn((4, 5), dtype=torch.float32) * 10
-        x2 = x1.clone().to_mkldnn()
-        self.assertEqual(torch.relu_(x1), torch.relu_(x2).to_dense())
+        x = torch.randn((4, 5), dtype=torch.float32) * 10
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        y1 = torch.relu_(x1.clone())
+        y2 = torch.relu_(x2.clone()).to_dense()
+        loss1 = y1.sum()
+        loss2 = y2.sum()
+        loss1.backward()
+        loss2.backward()
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad.to_dense())
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_relu_bf16_base(self, name):
@@ -767,6 +784,22 @@ class TestMkldnn(TestCase):
         y_plain_reshape = y_plain.reshape(C, -1)
 
         self.assertEqual(y_plain_reshape, y_block_reshape.to_dense())
+
+    def test_reshape_backward(self):
+        x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
+        size = (x.size(0), -1)
+
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        in_features = 20
+        out_features = torch.randint(3, 100, (1,)).item()
+        linear = torch.nn.Linear(in_features, out_features).float()
+
+        y1 = linear(x1.reshape(size)).sum()
+        y2 = linear(x2.reshape(size).to_dense()).sum()
+        y1.backward()
+        y2.backward()
+        self.assertEqual(x1.grad, x2.grad.to_dense())
 
     def test_clone(self):
         x = torch.randn(4, 5, dtype=torch.float32) * 10

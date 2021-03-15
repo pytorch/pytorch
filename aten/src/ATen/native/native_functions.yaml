@@ -3828,6 +3828,7 @@
   dispatch:
     CPU: threshold_backward
     CUDA: threshold_backward_cuda
+    MkldnnCPU: mkldnn_relu_backward
 
 - func: tile(Tensor self, int[] dims) -> Tensor
   variants: function, method
