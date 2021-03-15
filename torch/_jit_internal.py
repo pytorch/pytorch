@@ -875,7 +875,7 @@ def is_scripting():
             return x
 
         def linear(x):
-           if not torch.jit.is_scripting():
+           if torch.jit.is_scripting():
               return torch.linear(x)
            else:
               return unsupported_linear_op(x)
