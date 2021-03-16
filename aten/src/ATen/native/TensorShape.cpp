@@ -1312,21 +1312,21 @@ std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t
 }
 
 std::vector<Tensor> hsplit(const Tensor& self, int64_t split_size) {
-  TORCH_CHECK(self.dim() >= 1, "torch.hsplit requires a tensor with at least 1 dimension")
+  TORCH_CHECK(self.dim() >= 1, "torch.hsplit requires a tensor with at least 1 dimension, but got a tensor with ", self.dim(), " dimensions!")
   int64_t dim = (self.dim() == 1) ? 0 : 1;
-  TORCH_CHECK(self.sizes()[dim] % split_size == 0, "self.sizes(", dim, ")=", self.sizes()[dim], " is not divisible by split_size=", split_size);
+  TORCH_CHECK(self.sizes()[dim] % split_size == 0, "torch.hsplit attempted to split along dimension ", dim,", but the size of the dimension ", self.sizes()[dim], " is not divisible by the split_size ", split_size, "!");
   return at::tensor_split(self, split_size, dim);
 }
 
 std::vector<Tensor> vsplit(const Tensor& self, int64_t split_size) {
-  TORCH_CHECK(self.dim() >= 2, "torch.vsplit requires a tensor with at least 2 dimensions")
-  TORCH_CHECK(self.sizes()[0] % split_size == 0, "self.sizes(", 0, ")=", self.sizes()[0], " is not divisible by split_size=", split_size);
+  TORCH_CHECK(self.dim() >= 2, "torch.vsplit requires a tensor with at least 2 dimension, but got a tensor with ", self.dim(), " dimensions!")
+  TORCH_CHECK(self.sizes()[0] % split_size == 0, "torch.vsplit attempted to split along dimension ", 0,", but the size of the dimension ", self.sizes()[0], " is not divisible by the split_size ", split_size, "!");
   return at::tensor_split(self, split_size, 0);
 }
 
 std::vector<Tensor> dsplit(const Tensor& self, int64_t split_size) {
-  TORCH_CHECK(self.dim() >= 3, "torch.dsplit requires a tensor with at least 3 dimensions")
-  TORCH_CHECK(self.sizes()[2] % split_size == 0, "self.sizes(", 2, ")=", self.sizes()[2], " is not divisible by split_size=", split_size);
+  TORCH_CHECK(self.dim() >= 3, "torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with ", self.dim(), " dimensions!")
+  TORCH_CHECK(self.sizes()[2] % split_size == 0, "torch.dsplit attempted to split along dimension ", 2,", but the size of the dimension ", self.sizes()[2], " is not divisible by the split_size ", split_size, "!");
   return at::tensor_split(self, split_size, 2);
 }
 
@@ -1363,16 +1363,17 @@ std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef spli
 }
 
 std::vector<Tensor> hsplit(const Tensor& self, IntArrayRef split_sizes) {
-  TORCH_CHECK(self.dim() >= 1, "torch.hsplit requires a tensor with at least 1 dimension")
+  TORCH_CHECK(self.dim() >= 1, "torch.hsplit requires a tensor with at least 1 dimension, but got a tensor with ", self.dim(), " dimensions!")
   return at::tensor_split(self, split_sizes, (self.dim() == 1) ? 0 : 1);
 }
 
 std::vector<Tensor> vsplit(const Tensor& self, IntArrayRef split_sizes) {
-  TORCH_CHECK(self.dim() >= 2, "torch.vsplit requires a tensor with at least 1 dimension")
+  TORCH_CHECK(self.dim() >= 2, "torch.vsplit requires a tensor with at least 2 dimension, but got a tensor with ", self.dim(), " dimensions!")
   return at::tensor_split(self, split_sizes, 0);
 }
+
 std::vector<Tensor> dsplit(const Tensor& self, IntArrayRef split_sizes) {
-  TORCH_CHECK(self.dim() >= 3, "torch.dsplit requires a tensor with at least 1 dimension")
+  TORCH_CHECK(self.dim() >= 3, "torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with ", self.dim(), " dimensions!")
   return at::tensor_split(self, split_sizes, 2);
 }
 

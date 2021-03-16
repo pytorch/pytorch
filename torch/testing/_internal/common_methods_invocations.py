@@ -467,33 +467,34 @@ def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad):
     return inputs
 
 def sample_inputs_hsplit(op_info, device, dtype, requires_grad):
-    return (SampleInput(make_tensor((), device, dtype,
+    return (SampleInput(make_tensor((6,), device, dtype,
                                     low=None, high=None,
                                     requires_grad=requires_grad),
-                        args=(2),),
-            SampleInput(make_tensor((M), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=(2),),
+                        args=(2,),),
             SampleInput(make_tensor((S, S, S), device, dtype,
                                     low=None, high=None,
                                     requires_grad=requires_grad),
-                        args=([1, 2, 3],),)
+                        args=([1, 2, 3],),),)
 
 def sample_inputs_vsplit(op_info, device, dtype, requires_grad):
-    return (SampleInput(make_tensor((M, S), device, dtype,
+    return (SampleInput(make_tensor((6, S), device, dtype,
                                     low=None, high=None,
                                     requires_grad=requires_grad),
-                        args=(2),),
+                        args=(2,),),
             SampleInput(make_tensor((S, S, S), device, dtype,
                                     low=None, high=None,
-                                    requires_grad=requires_grad),),)
+                                    requires_grad=requires_grad),
+                        args=([1, 2, 3],),),)
 
 def sample_inputs_dsplit(op_info, device, dtype, requires_grad):
     return (SampleInput(make_tensor((S, S, S), device, dtype,
                                     low=None, high=None,
                                     requires_grad=requires_grad),
-                        args=([1, 2, 3],),)
+                        args=([1, 2, 3],),),
+            SampleInput(make_tensor((S, S, 6), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad),
+                        args=(2,),),)
 
 def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
     # Each test case consists of the sizes in the chain of multiplications
@@ -4559,28 +4560,16 @@ op_db: List[OpInfo] = [
            skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            sample_inputs_func=sample_inputs_tensor_split,),
     OpInfo('hsplit',
-           dtypes=all_types_and_complex_and(torch.bool),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
-           test_inplace_grad=False,
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            sample_inputs_func=sample_inputs_hsplit,),
-    OpInfo('tensor_vsplit',
-           dtypes=all_types_and_complex_and(torch.bool),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+    OpInfo('vsplit',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
-           test_inplace_grad=False,
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            sample_inputs_func=sample_inputs_vsplit,),
-    OpInfo('tensor_dsplit',
-           dtypes=all_types_and_complex_and(torch.bool),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+    OpInfo('dsplit',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
-           test_inplace_grad=False,
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            sample_inputs_func=sample_inputs_dsplit,),
     OpInfo('triangular_solve',
            op=torch.triangular_solve,
