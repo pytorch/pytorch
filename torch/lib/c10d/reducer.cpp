@@ -59,14 +59,14 @@ Reducer::Reducer(
   {
     std::set<int> unique_devices;
     for (const auto& v : replicas_[0]) {
-        auto device_idx = int(v.device().index());
-        if (unique_devices.find(device_idx) == unique_devices.end()) {
-          unique_devices.insert(device_idx);
-          if (unique_devices.size() > 1) {
-            is_multi_device_module_ = true;
-            break;
-          }
+      auto device_idx = int(v.device().index());
+      if (unique_devices.find(device_idx) == unique_devices.end()) {
+        unique_devices.insert(device_idx);
+        if (unique_devices.size() > 1) {
+          is_multi_device_module_ = true;
+          break;
         }
+      }
     }
   }
 
@@ -423,8 +423,8 @@ void Reducer::push_rebuilt_params(const VariableIndex& index) {
 void Reducer::autograd_hook(VariableIndex index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
 
-  // Carry over thread local state from main thread. This allows for thread-local
-  // flags such as profiler enabled to be configure correctly.
+  // Carry over thread local state from main thread. This allows for
+  // thread-local flags such as profiler enabled to be configure correctly.
   at::ThreadLocalStateGuard g(thread_local_state_);
   // See Note [Skip allreducing local_used_maps_dev]
   if (find_unused_parameters_) {
@@ -970,7 +970,8 @@ void Reducer::prepare_for_backward(
     }
   }
 
-  // Warn user about unnecessary perf hit if all parameters were used in forward.
+  // Warn user about unnecessary perf hit if all parameters were used in
+  // forward.
   if (unused_parameters_.empty()) {
     TORCH_WARN_ONCE(
         "find_unused_parameters=True was specified in DDP constructor, "
@@ -1388,14 +1389,17 @@ void Reducer::ensure_prior_reduction_finished() {
   // The variable `require_finalize_` is true until all gradients
   // have been computed and reduction of all buckets has been kicked off.
   if (require_finalize_) {
-    std::string kBaseErrorMsg = "Expected to have finished reduction in the prior iteration before "
+    std::string kBaseErrorMsg =
+        "Expected to have finished reduction in the prior iteration before "
         "starting a new one. "
         ""
         "This error indicates that your module has parameters that were "
         "not used in producing loss. ";
-    std::string kOutputsNotUsedInLossErrorMsg = "making sure all "
+    std::string kOutputsNotUsedInLossErrorMsg =
+        "making sure all "
         "`forward` function outputs participate in calculating loss. ";
-    std::string kDDPBugErrorMsg = "\nIf you already have done the above, then the distributed "
+    std::string kDDPBugErrorMsg =
+        "\nIf you already have done the above, then the distributed "
         "data parallel module wasn't able to locate the output tensors in the "
         "return value of your module's `forward` function. "
         "Please include the loss function and the structure of the return "
@@ -1405,7 +1409,8 @@ void Reducer::ensure_prior_reduction_finished() {
     if (!find_unused_parameters_) {
       // Parameters may have been unused in forward pass, or not all outputs
       // were used in producing loss.
-      kBaseErrorMsg += "You can enable unused parameter detection by passing the "
+      kBaseErrorMsg +=
+          "You can enable unused parameter detection by passing the "
           "keyword argument `find_unused_parameters=True` to "
           "`torch.nn.parallel.DistributedDataParallel`, and by \n";
       kBaseErrorMsg += kOutputsNotUsedInLossErrorMsg;
@@ -1414,7 +1419,8 @@ void Reducer::ensure_prior_reduction_finished() {
       // Note that it does not really matter whether unused_parameters_.empty(),
       // since user may have enabled detection but this particular iteration
       // could have used or not used all parameters.
-      kBaseErrorMsg += "Since `find_unused_parameters=True` is enabled, this likely "
+      kBaseErrorMsg +=
+          "Since `find_unused_parameters=True` is enabled, this likely "
           " means that not all `forward` outputs participate in computing loss. You can fix this by ";
       kBaseErrorMsg += kOutputsNotUsedInLossErrorMsg;
       kBaseErrorMsg += kDDPBugErrorMsg;
@@ -1423,10 +1429,18 @@ void Reducer::ensure_prior_reduction_finished() {
   }
 }
 
+void Reducer::set_ddp_runtime_logging_sample_rate(int sample_rate) {
+  ddp_runtime_logging_sample_rate_ = sample_rate;
+}
+
+int Reducer::get_ddp_runtime_logging_sample_rate() {
+  return ddp_runtime_logging_sample_rate_;
+}
+
 bool Reducer::should_collect_runtime_stats() {
   if (num_iterations_ > 0 &&
-    (num_iterations_ <= 10 ||
-    num_iterations_ % kDDPRuntimeLoggingSampleRate == 0)) {
+      (num_iterations_ <= 10 ||
+       num_iterations_ % get_ddp_runtime_logging_sample_rate() == 0)) {
     return true;
   }
   return false;

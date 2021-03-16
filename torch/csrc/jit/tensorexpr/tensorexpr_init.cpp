@@ -263,7 +263,9 @@ void initTensorExprBindings(PyObject* module) {
       .def("prepare_for_codegen", &LoopNest::prepareForCodegen)
       .def(
           "get_loop_body_for",
-          &LoopNest::getLoopBodyFor,
+          [](const LoopNest& self, Tensor* t) {
+            return self.getLoopBodyFor(t);
+          },
           py::return_value_policy::reference)
       .def(
           "get_loops_for",
@@ -371,14 +373,22 @@ void initTensorExprBindings(PyObject* module) {
       py::return_value_policy::reference);
 
   py::class_<CodeGen>(te, "CodeGen")
-      .def("call", [](CodeGen& self, const std::vector<at::Tensor>& values) {
-        std::vector<CodeGen::CallArg> value_ptrs;
-        value_ptrs.reserve(values.size());
-        for (const auto& value : values) {
-          value_ptrs.emplace_back(CodeGen::CallArg(value.data_ptr()));
-        }
-        self.call(value_ptrs);
-      });
+      .def(
+          "call",
+          [](CodeGen& self, const std::vector<at::Tensor>& values) {
+            std::vector<CodeGen::CallArg> value_ptrs;
+            value_ptrs.reserve(values.size());
+            for (const auto& value : values) {
+              value_ptrs.emplace_back(CodeGen::CallArg(value.data_ptr()));
+            }
+            self.call(value_ptrs);
+          })
+      .def(
+          "getCodeText",
+          [](CodeGen& self, const std::string& attr = "") {
+            return self.getCodeText(attr);
+          },
+          py::arg("attr") = "");
   py::class_<SimpleIREvaluator, CodeGen>(te, "SimpleIREvaluator"); // NOLINT
 #ifdef TORCH_ENABLE_LLVM
   py::class_<LLVMCodeGen, CodeGen>(te, "LLVMCodeGen"); // NOLINT
