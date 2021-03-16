@@ -12,6 +12,8 @@ GENERATED_CPP = [
     "autograd/generated/TraceType_2.cpp",
     "autograd/generated/TraceType_3.cpp",
     "autograd/generated/TraceType_4.cpp",
+    "autograd/generated/InplaceOrViewType_0.cpp",
+    "autograd/generated/InplaceOrViewType_1.cpp",
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
@@ -49,6 +51,8 @@ def libtorch_generated_sources(gencode_pattern):
         "autograd/generated/TraceType_2.cpp",
         "autograd/generated/TraceType_3.cpp",
         "autograd/generated/TraceType_4.cpp",
+        "autograd/generated/InplaceOrViewType_0.cpp",
+        "autograd/generated/InplaceOrViewType_1.cpp",
     ]]
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
