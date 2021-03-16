@@ -598,6 +598,23 @@ static void rsqrt_kernel(TensorIterator& iter) {
   });
 }
 
+static void frexp_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf,
+    // The iter.dtype() here is the dtype of mantissa output.
+    // It's a floating point type and must be the same as the input's dtype.
+    iter.dtype(),
+    "frexp_cpu", [&]() {
+      cpu_kernel_multiple_outputs(
+        iter,
+        [](scalar_t a) -> std::tuple<scalar_t, int32_t> {
+          int32_t exponent;
+          scalar_t mantissa = std::frexp(a, &exponent);
+          return std::tuple<scalar_t, int32_t>(mantissa, exponent);
+        }
+      );
+  });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -645,6 +662,18 @@ static void rsqrt_kernel(TensorIterator& iter) {
   }                                                                                              \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 
+  #define IMPLEMENT_COMPLEX_STRUCTURED_KERNEL(op)                                                \
+  static void op##_kernel(TensorIteratorBase& iter) {                                            \
+    TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
+      iter.serial_for_each(                                                                      \
+          IMPLEMENT_ITERATOR_LAMBDA(op),                                                         \
+          {0, iter.numel()});                                                                    \
+    });                                                                                          \
+    iter.cast_outputs();                                                                         \
+  }                                                                                              \
+  REGISTER_DISPATCH(op##_stub, &op##_kernel)
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
@@ -689,6 +718,7 @@ REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel)
+REGISTER_DISPATCH(frexp_stub, &frexp_kernel)
 
 
 IMPLEMENT_COMPLEX_KERNEL(acos)
@@ -708,7 +738,7 @@ IMPLEMENT_FLOAT_KERNEL(log1p)
 IMPLEMENT_COMPLEX_KERNEL(log2)
 IMPLEMENT_FLOAT_KERNEL(i0)
 IMPLEMENT_FLOAT_KERNEL(round)
-IMPLEMENT_COMPLEX_KERNEL(sin)
+IMPLEMENT_COMPLEX_STRUCTURED_KERNEL(sin)
 IMPLEMENT_COMPLEX_KERNEL(sqrt)
 IMPLEMENT_COMPLEX_KERNEL(tan)
 IMPLEMENT_COMPLEX_KERNEL(tanh)

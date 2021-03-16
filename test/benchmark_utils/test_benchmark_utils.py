@@ -516,7 +516,7 @@ class TestBenchmarkUtils(TestCase):
 
         # Check that the repeats are at least somewhat repeatable.
         counts = collections.Counter([s.counts(denoise=True) for s in stats])
-        self.assertGreater(max(counts.values), 1, repr(counts))
+        self.assertGreater(max(counts.values), 1, f"Every instruction count total was unique: {counts}")
 
         from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import wrapper_singleton
         self.assertIsNone(

@@ -272,7 +272,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.argmin: lambda input: -1,
         torch.argsort: lambda input, dim=None: -1,
         torch.asin: lambda input, out=None: -1,
-        torch.assert_async: lambda input: -1,
+        torch._assert_async: lambda input: -1,
         torch.arcsin: lambda input, out=None: -1,
         torch.asinh: lambda input, out=None: -1,
         torch.arcsinh: lambda input, out=None: -1,
@@ -432,6 +432,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.float_power: lambda input, exponent, out=None: -1,
         torch.fmod: lambda input, other, out=None: -1,
         torch.frac: lambda input, out=None: -1,
+        torch.frexp: lambda input, out=None: -1,
         torch.full_like: lambda input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
         torch.functional.lu_unpack: lambda LU_data, LU_pivots, unpack_data=True, unpack_pivots=True: -1,
         torch.gather: lambda input, dim, index, out=None, sparse_grad=False: -1,
@@ -1029,6 +1030,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
+        torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }
 
     ret2 = {}
