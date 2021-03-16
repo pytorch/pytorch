@@ -676,16 +676,18 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     Message&& responseMessage =
         std::move(*futureResponseMessage->value().toCustomClass<Message>());
     responseMessage.setId(messageId);
-    std::vector<c10::DeviceIndex> devices;
-    try {
-      devices = getDevicesForRemote(pipe->getRemoteName(), responseMessage);
+
+    auto ctxDevices = ctx->devices();
+    if (!ctxDevices.empty()) {
+      // FIXME: skipping this check when ctxDevices is empty to allow
+      // RRef.to_here().
       for (const auto& tensor : responseMessage.tensors()) {
         const auto device = tensor.device().index();
-        if (device != -1 && !ctx->hasDevice(device)) {
+        if (device != -1 && ctxDevices.find(device) == ctxDevices.end()) {
           std::ostringstream oss;
           std::copy(
-              devices.begin(),
-              devices.end(),
+              ctxDevices.begin(),
+              ctxDevices.end(),
               // interpreting c10::DeviceIndex as int32_t to avoid printing
               // it as a char.
               std::ostream_iterator<int32_t>(oss, ", "));
@@ -701,6 +703,11 @@ void TensorPipeAgent::sendCompletedResponseMessage(
           break;
         }
       }
+    }
+
+    std::vector<c10::DeviceIndex> devices;
+    try {
+      devices = getDevicesForRemote(pipe->getRemoteName(), responseMessage);
     } catch (const std::exception& e) {
       responseMessage = createExceptionResponse(e.what(), messageId);
     }
