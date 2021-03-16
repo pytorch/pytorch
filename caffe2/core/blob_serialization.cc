@@ -4,7 +4,10 @@
 #include <sstream>
 #include <utility>
 
+#include <c10/util/string_view.h>
+
 #include "caffe2/core/blob.h"
+#include "caffe2/core/common.h"
 #include "caffe2/utils/proto_utils.h"
 #ifdef USE_FBGEMM
 #include "fbgemm/FbgemmConvert.h"
@@ -44,16 +47,16 @@ class Range {
   Range(Iter b, Iter e) : begin_{b}, end_{e} {}
   Range(Iter b, size_t size) : begin_{b}, end_{b + size} {}
 
-  [[nodiscard]] constexpr Iter data() const {
+  CAFFE2_NODISCARD constexpr Iter data() const {
     return begin_;
   }
-  [[nodiscard]] constexpr Iter begin() const {
+  CAFFE2_NODISCARD constexpr Iter begin() const {
     return begin_;
   }
-  [[nodiscard]] constexpr Iter end() const {
+  CAFFE2_NODISCARD constexpr Iter end() const {
     return end_;
   }
-  [[nodiscard]] constexpr size_t size() const {
+  CAFFE2_NODISCARD constexpr size_t size() const {
     return end_ - begin_;
   }
 
@@ -102,7 +105,7 @@ c10::ArrayRef<T> GetTensorDataRange(
       start + numElements,
       ") with total tensor size ",
       tensor.numel());
-  return c10::ArrayRef(tensor.template data<T>() + start, numElements);
+  return c10::ArrayRef<T>(tensor.template data<T>() + start, numElements);
 }
 
 } // namespace
@@ -438,7 +441,7 @@ void SerializeTensorData(const SerializeParams<float>& params) {
 
     Range<fbgemm::bfloat16*> dest(
         reinterpret_cast<fbgemm::bfloat16*>(
-            params.tensor_proto.mutable_raw_data()->data()),
+            &(*params.tensor_proto.mutable_raw_data())[0]),
         params.input.size());
 
     fbgemm::FloatToBfloat16_simd(src, dest.data(), params.input.size());
@@ -757,7 +760,7 @@ struct DeserializeParams {
   DeserializeParams(Range<T*> dst, const TensorProto& proto, BaseContext& ctx)
       : dest{dst}, tensor_proto{proto}, context{ctx} {}
 
-  void LiteralCopy(std::string_view src) const {
+  void LiteralCopy(c10::string_view src) const {
     // Simply copy the data as-is from src to dest
     CAFFE_ENFORCE_EQ(
         dest.size() * sizeof(T),
