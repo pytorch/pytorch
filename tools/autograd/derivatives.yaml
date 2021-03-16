@@ -609,8 +609,8 @@
   other: zeros_like(other)
 
 - name: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor
-  self: "handle_r_to_c(self.scalar_type(), grad * (1 - (weight.isComplex() ? weight.conj().toComplexDouble() :weight.toDouble())))"
-  end: handle_r_to_c(end.scalar_type(), grad * weight.conj())
+  self: "weight.isComplex() ? grad * (1 - weight.conj().toComplexDouble()) : grad * (1 - weight.toDouble())"
+  end: grad * weight.conj()
 
 - name: lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor
   self: grad * (1 - weight).conj()
