@@ -21,7 +21,7 @@ TORCH_META_FUNC2(add, Tensor) (
 }
 
 TORCH_META_FUNC2(sub, Tensor) (
-  const Tensor& self, const Tensor& other, Scalar alpha
+  const Tensor& self, const Tensor& other, const Scalar& alpha
 ) {
   native::sub_check(self, other);
   build_binary_op(maybe_get_output(), self, other);
@@ -114,7 +114,7 @@ TORCH_IMPL_FUNC(add_out) (
 }
 
 TORCH_IMPL_FUNC(sub_out) (
-  const Tensor& self, const Tensor& other, Scalar alpha, const Tensor& result
+  const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
 ) {
   sub_stub(device_type(), *this, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
