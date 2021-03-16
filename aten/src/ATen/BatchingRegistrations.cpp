@@ -234,6 +234,29 @@ Tensor unsqueeze_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+// Checks if the batch dims in `bdims` appear at the front of the tensor.
+static bool areBdimsAtFrontInOrder(BatchDimsRef bdims) {
+  for (int64_t idx = 0; idx < bdims.size(); idx++) {
+    if (bdims[idx].dim() != idx) {
+      return false;
+    }
+  }
+  return true;
+}
+
+Tensor& unsqueeze__batching_rule(Tensor& self, int64_t dim) {
+  auto* batched = maybeGetBatchedImpl(self);
+  TORCH_CHECK(areBdimsAtFrontInOrder(batched->bdims()), "NYI: unsqueeze_ with bdims not at front");
+  auto num_bdims = batched->bdims().size();
+  auto logical_dim = self.dim();
+  auto dim_physical = num_bdims + maybe_wrap_dim(dim, logical_dim + 1);
+  batched->value().unsqueeze_(dim_physical);
+
+  // Also need to change some metadata...
+  batched->refreshSizesAndStrides();
+  return self;
+}
+
 Tensor& fill_inplace_scalar_batching_rule(Tensor& self, Scalar value) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   self_physical.tensor().fill_(value);
@@ -1092,6 +1115,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("unfold", unfold_batching_rule);
   m.impl("unsqueeze", unsqueeze_batching_rule);
+  m.impl("unsqueeze_", unsqueeze__batching_rule);
   m.impl("view", view_batching_rule);
   m.impl("view_as", native::view_as); // composite wrt autograd
 // 

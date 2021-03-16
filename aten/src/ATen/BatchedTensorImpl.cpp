@@ -71,17 +71,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
 
   TORCH_INTERNAL_ASSERT(bdims_.size() == 1);
 
-  const auto public_dims = value_.dim() - bdims_.size();
-  const auto value_sizes = value_.sizes();
-  const auto value_strides = value_.strides();
-  sizes_and_strides_.resize(public_dims);
-  for (int64_t dim = 0; dim < public_dims; dim++) {
-    auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
-    sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
-    sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
-  }
-  refresh_numel();
-  refresh_contiguous();
+  refreshSizesAndStrides();
 }
 
 BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, BatchDims bdims)
@@ -97,7 +87,10 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, Batch
   checkInvariants();
 
   TORCH_INTERNAL_ASSERT(bdims_.size() == 1);
+  refreshSizesAndStrides();
+}
 
+void BatchedTensorImpl::refreshSizesAndStrides() {
   const auto public_dims = value_.dim() - bdims_.size();
   const auto value_sizes = value_.sizes();
   const auto value_strides = value_.strides();

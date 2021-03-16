@@ -90,6 +90,8 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
       bool allow_tensor_metadata_change) const override;
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override;
 
+  void refreshSizesAndStrides();
+
  private:
   // see NOTE: [BatchedTensorImpl levels invariant]
   void checkInvariants() const;
