@@ -45,11 +45,11 @@ Tensor pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
   // Next, shuffle by permuting the new upscale_factor dims alongside the height and width dims.
   std::vector<int64_t> permutation(self.sizes().begin(), self_sizes_batch_end);
   // std::iota is used to maintain the batch dims within the permutation.
-  // Since 2 dims were added, the correct batch dim offsets are now:
-  // -added_dims_shape.size(), ..., -7, -6.
-  std::iota(permutation.begin(), permutation.end(), -added_dims_shape.size());
-  permutation.insert(permutation.end(), {-5 /* oc */, -2 /* h */, -4 /* 1st upscale_factor */, -1 /* w */,
-                                         -3 /* 2nd upscale_factor */});
+  std::iota(permutation.begin(), permutation.end(), 0);
+  const auto NUM_BATCH_DIMS = self.sizes().size() - NUM_NON_BATCH_DIMS;
+  permutation.insert(permutation.end(), {NUM_BATCH_DIMS /* oc */, NUM_BATCH_DIMS + 3 /* h */,
+    NUM_BATCH_DIMS + 1 /* 1st upscale factor */, NUM_BATCH_DIMS + 4 /* w */,
+    NUM_BATCH_DIMS + 2 /* 2nd upscale factor */});
   const auto input_permuted = input_reshaped.permute(permutation);
 
   // Finally, upscale by collapsing (h, upscale_factor) -> a single dim (oh)
@@ -98,11 +98,11 @@ Tensor pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
   // Next, unshuffle by permuting the downscale_factor dims alongside the channel dim.
   std::vector<int64_t> permutation(self.sizes().begin(), self_sizes_batch_end);
   // std::iota is used to maintain the batch dims within the permutation.
-  // Since 2 dims were added, the correct batch dim offsets are now:
-  // -added_dims_shape.size(), ..., -7, -6.
-  std::iota(permutation.begin(), permutation.end(), -added_dims_shape.size());
-  permutation.insert(permutation.end(), {-5 /* c */, -3 /* 1st downscale_factor */, -1 /*2nd downscale_factor */,
-                                         -4 /* oh */, -2 /* ow */});
+  std::iota(permutation.begin(), permutation.end(), 0);
+  const auto NUM_BATCH_DIMS = self.sizes().size() - NUM_NON_BATCH_DIMS;
+  permutation.insert(permutation.end(), {NUM_BATCH_DIMS /* c */, NUM_BATCH_DIMS + 2 /* 1st downscale factor */,
+    NUM_BATCH_DIMS + 4 /* 2nd upscale factor */, NUM_BATCH_DIMS + 1 /* oh */,
+    NUM_BATCH_DIMS + 3 /* ow */});
   const auto input_permuted = input_reshaped.permute(permutation);
 
   // Finally, downscale by collapsing (c, downscale_factor, downscale_factor) -> a single dim (oc),
