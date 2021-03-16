@@ -47,9 +47,11 @@ class NormalizeArgs(Transformer):
                     return super().call_function(target, args, kwargs)
                 target_for_analysis = if_true
 
+            assert callable(target_for_analysis)
             sig = inspect.signature(inspect.unwrap(target_for_analysis))
             new_kwargs = self._args_kwargs_to_normalized_kwargs(sig, args, kwargs)
         else:
+            assert callable(target)
             torch_op_schemas = get_signature_for_torch_op(target)
             if torch_op_schemas:
                 for candidate_signature in torch_op_schemas:
