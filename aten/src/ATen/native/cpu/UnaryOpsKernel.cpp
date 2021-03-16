@@ -117,7 +117,7 @@ void LogitMKLKernel(T eps, TensorIterator* it) {
 
 #endif // AT_MKL_ENABLED
 
-void logit_kernel(TensorIterator& iter, Scalar eps_scalar) {
+void logit_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
@@ -426,7 +426,7 @@ static void nan_to_num_kernel(
   });
 }
 
-static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
+static void clamp_kernel(TensorIterator& iter, const Scalar& min_scalar, const Scalar& max_scalar) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
     auto min = min_scalar.to<scalar_t>();
     auto max = max_scalar.to<scalar_t>();
@@ -438,7 +438,7 @@ static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_sca
   });
 }
 
-static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
+static void clamp_max_kernel(TensorIterator& iter, const Scalar& max_scalar) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
     auto max = max_scalar.to<scalar_t>();
     auto max_vec = Vec256<scalar_t>(max);
@@ -448,7 +448,7 @@ static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
   });
 }
 
-static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
+static void clamp_min_kernel(TensorIterator& iter, const Scalar& min_scalar) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
     auto min = min_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);

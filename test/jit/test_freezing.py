@@ -1799,13 +1799,15 @@ class TestFrozenOptimizations(JitTestCase):
             else:
                 scripted_mod = torch.jit.script(mod_eager)
 
-            frozen_mod = torch.jit.freeze(scripted_mod)
-            FileCheck().check("aten::relu").run(frozen_mod.graph)
-            self.run_pass("fuse_frozen_conv_add_relu", frozen_mod.graph)
+            torch._C._jit_pass_inline(scripted_mod.graph)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            FileCheck().check("aten::relu").run(scripted_mod.graph)
 
+            self.run_pass("fuse_frozen_conv_add_relu", scripted_mod.graph)
+            print(scripted_mod.graph)
             if add_z:
-                FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
+                FileCheck().check("aten::cudnn_convolution_add_relu").run(scripted_mod.graph)
             else:
-                FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
+                FileCheck().check("aten::cudnn_convolution_relu").run(scripted_mod.graph)
 
-            self.assertEqual(mod_eager(inp), frozen_mod(inp))
+            self.assertEqual(mod_eager(inp), scripted_mod(inp))
