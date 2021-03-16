@@ -130,24 +130,23 @@ Reducer::Reducer(
         // This is used later on when the autograd graph is traversed
         // to check for parameters for which no gradient is computed, if
         // find_unused_parameters=True.
-        // We maintain a mapping of gradient accumulator to vector of variables,
-        // since multiple parameters may share the same grad accumulator.
+        // Note that the mapping of gradient accumulator to variable should be
+        // one to one as we deduplicate shared parameters before constructing
+        // Reducer.
         if (find_unused_parameters_) {
-          auto gradAcc = gradAccToVariablesMap_.find(grad_accumulator.get());
-          if (gradAcc == gradAccToVariablesMap_.end()) {
-            std::vector<VariableIndex> indexVec{index};
-            gradAccToVariablesMap_[grad_accumulator.get()] =
-                std::move(indexVec);
-          } else {
-            // Scenario where we have indices whose corresponding parameters
-            // share the same grad accumulator.
-            gradAcc->second.push_back(index);
-          }
+          gradAccToVariableMap_[grad_accumulator.get()] = index;
         }
 
         // The gradient accumulator is stored as weak_ptr in the autograd
         // metadata of the variable, so we have to keep it alive here for
         // the raw pointer to be valid.
+        TORCH_CHECK(
+            grad_accumulators_[replica_index][variable_index] == nullptr,
+            c10::str(
+                "Reducer tried to register duplicate grad accumulator for replica ",
+                replica_index,
+                " variable ",
+                variable_index));
         grad_accumulators_[replica_index][variable_index] =
             std::move(grad_accumulator);
       }
@@ -959,14 +958,11 @@ void Reducer::prepare_for_backward(
   }
 
   // Find accumulator functions that don't show up in this graph.
-  for (const auto& it : gradAccToVariablesMap_) {
+  for (const auto& it : gradAccToVariableMap_) {
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
     if (seen.count(it.first) == 0) {
-      auto& indices = it.second;
-      unused_parameters_.reserve(unused_parameters_.size() + indices.size());
-      unused_parameters_.insert(
-          unused_parameters_.end(), indices.begin(), indices.end());
+      unused_parameters_.push_back(it.second);
     }
   }
 

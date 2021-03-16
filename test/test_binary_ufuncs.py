@@ -741,18 +741,26 @@ class TestBinaryUfuncs(TestCase):
     @onlyOnCPUAndCUDA
     def test_pow_scalar_type_promotion(self, device):
         # We expect the computation to be performed in uint8 (overflowing to 0), and then cast to int64
-        out_uint8 = torch.pow(2, torch.tensor([17], dtype=torch.uint8, device=device), out=torch.tensor(0, dtype=torch.int64, device=device))
-        out_int64 = torch.pow(2, torch.tensor([17], dtype=torch.int64, device=device), out=torch.tensor(0, dtype=torch.int64, device=device))
+        input_tensor_uint8 = torch.tensor([17], dtype=torch.uint8, device=device)
+        out_uint8_computation = torch.pow(2, input_tensor_uint8, out=torch.tensor(0, dtype=torch.int64, device=device))
 
-        self.assertNotEqual(out_uint8, out_int64)
-        self.assertEqual(out_uint8.to(dtype=torch.uint8), out_int64.to(dtype=torch.uint8))
+        # Computation should run in int64, and not overflow
+        input_tensor_int64 = torch.tensor([17], dtype=torch.int64, device=device)
+        out_int64_computation = torch.pow(2, input_tensor_int64, out=torch.tensor(0, dtype=torch.int64, device=device))
+
+        self.assertNotEqual(out_uint8_computation, out_int64_computation)
+        self.assertEqual(out_uint8_computation.to(dtype=torch.uint8), out_int64_computation.to(dtype=torch.uint8))
 
         # We expect the computation to be performed in uint8 (overflowing to 0), and then cast to int64
-        out_uint8 = torch.pow(2, torch.tensor(17, dtype=torch.uint8, device=device), out=torch.tensor(0, dtype=torch.int64, device=device))
-        out_int64 = torch.pow(2, torch.tensor(17, dtype=torch.int64, device=device), out=torch.tensor(0, dtype=torch.int64, device=device))
+        input_tensor_uint8 = torch.tensor(17, dtype=torch.uint8, device=device)
+        out_uint8_computation = torch.pow(2, input_tensor_uint8, out=torch.tensor(0, dtype=torch.int64, device=device))
 
-        self.assertNotEqual(out_uint8, out_int64)
-        self.assertEqual(out_uint8.to(dtype=torch.uint8), out_int64.to(dtype=torch.uint8))
+        # Computation should run in int64, and not overflow
+        input_tensor_int64 = torch.tensor(17, dtype=torch.int64, device=device)
+        out_int64_computation = torch.pow(2, input_tensor_int64, out=torch.tensor(0, dtype=torch.int64, device=device))
+
+        self.assertNotEqual(out_uint8_computation, out_int64_computation)
+        self.assertEqual(out_uint8_computation.to(dtype=torch.uint8), out_int64_computation.to(dtype=torch.uint8))
 
     def test_tensor_pow_tensor(self, dev):
         def rotate(l, n):

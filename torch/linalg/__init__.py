@@ -1049,7 +1049,7 @@ Args:
                     ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``.
     other (Tensor): "right-hand-side" tensor of shape ``input.shape[other.ndim]``.
     dims (Tuple[int]): dimensions of :attr:`input` to be moved before the computation.
-                       Equivalent to calling ``input = movedim(input, dims, range(len(dims) - input.ndim, 0))``.
+                       Equivalent to calling ``input = movedim(input, dims, range(len(dims) - input.ndim + 1, 0))``.
                        If None (default), no dimensions are moved.
 
 Keyword args:

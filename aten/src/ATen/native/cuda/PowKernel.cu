@@ -158,7 +158,7 @@ void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
   }
 }
 
-void pow_tensor_scalar_kernel(TensorIteratorBase& iter, Scalar exp_scalar) {
+void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar) {
   if (isComplexType(iter.common_dtype()) || exp_scalar.isComplex()) {
     AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
