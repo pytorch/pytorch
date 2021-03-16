@@ -201,7 +201,8 @@ class TestOptimizer(TestCase):
         optimized_scripted_model = optimize_for_mobile(m, methods_to_optimize=['foo'])
         optimized_result = optimized_scripted_model.foo(input_data)
 
-        FileCheck().check_not("__torch__.torch.nn.modules.dropout.Dropout") \
+
+        FileCheck().check_not("dropout.__") \
                    .run(optimized_scripted_model.foo.graph)
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
