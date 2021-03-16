@@ -243,7 +243,8 @@ jobs:
       - name: Run mypy
         run: |
           set -eux
-          mypy --config=mypy.ini | tee ${GITHUB_WORKSPACE}/mypy-output.txt
-      - name: Catch any other warnings
+          mypy --config=mypy.ini
+      - name: Run mypy strict
         run: |
-          [ ! -s mypy-output.txt ]
+          set -eux
+          mypy --config=mypy-strict.ini
