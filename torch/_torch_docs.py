@@ -3250,6 +3250,36 @@ Example::
     tensor([ 0.0000,  0.5000, -0.2000])
 """)
 
+add_docstr(torch.frexp,
+           r"""
+frexp(input, *, out=None) -> (Tensor mantissa, Tensor exponent)
+
+Decomposes :attr:`input` into mantissa and exponent tensors
+such that :math:`\text{input} = \text{mantissa} \times 2^{\text{exponent}}`.
+
+The range of mantissa is the open interval (-1, 1).
+
+Supports float inputs.
+
+Args:
+    input (Tensor): the input tensor
+
+
+Keyword args:
+    out (tuple, optional): the output tensors
+
+Example::
+
+    >>> x = torch.arange(9.)
+    >>> mantissa, exponent = torch.frexp(x)
+    >>> mantissa
+    >>> tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
+    >>> exponent
+    >>> tensor([0, 1, 2, 2, 3, 3, 3, 3, 4], dtype=torch.int32)
+    >>> torch.ldexp(mantissa, exponent)
+    tensor([0., 1., 2., 3., 4., 5., 6., 7., 8.])
+""")
+
 add_docstr(torch.from_numpy,
            r"""
 from_numpy(ndarray) -> Tensor
@@ -5037,37 +5067,11 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.matrix_power, r"""
-matrix_power(input, n) -> Tensor
-
-Returns the matrix raised to the power :attr:`n` for square matrices.
-For batch of matrices, each individual matrix is raised to the power :attr:`n`.
-
-If :attr:`n` is negative, then the inverse of the matrix (if invertible) is
-raised to the power :attr:`n`.  For a batch of matrices, the batched inverse
-(if invertible) is raised to the power :attr:`n`. If :attr:`n` is 0, then an identity matrix
-is returned.
+matrix_power(input, n, *, out=None) -> Tensor
 
 .. note:: :func:`torch.matrix_power` is deprecated, use :func:`torch.linalg.matrix_power` instead.
 
-Args:
-    {input}
-    n (int): the power to raise the matrix to
-
-Example::
-
-    >>> a = torch.randn(2, 2, 2)
-    >>> a
-    tensor([[[-1.9975, -1.9610],
-             [ 0.9592, -2.3364]],
-
-            [[-1.2534, -1.3429],
-             [ 0.4153, -1.4664]]])
-    >>> torch.matrix_power(a, 3)
-    tensor([[[  3.9392, -23.9916],
-             [ 11.7357,  -0.2070]],
-
-            [[  0.2468,  -6.7168],
-             [  2.0774,  -0.8187]]])
+Alias for :func:`torch.linalg.matrix_power`
 """.format(**common_args))
 
 add_docstr(torch.matrix_exp,
@@ -8969,7 +8973,7 @@ Example::
 
 add_docstr(torch.triangular_solve,
            r"""
-triangular_solve(input, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
 
 Solves a system of equations with a triangular coefficient matrix :math:`A`
 and multiple right-hand sides :math:`b`.
@@ -8981,11 +8985,11 @@ with the default keyword arguments.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
 
-Supports real-valued and complex-valued inputs.
+Supports input of float, double, cfloat and cdouble data types.
 
 Args:
-    input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
-                :math:`*` is zero of more batch dimensions (:math:`b`)
+    b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
+                :math:`*` is zero of more batch dimensions
     A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
                 where :math:`*` is zero or more batch dimensions
     upper (bool, optional): whether to solve the upper-triangular system
