@@ -6,7 +6,7 @@
 namespace at { namespace native {
 
 template<template<class> class Op>
-std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
+std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     std::vector<at::Tensor> vec_res;
     vec_res.reserve(input.size());
@@ -34,7 +34,7 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
 }
 
 template<template<class> class Op>
-void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
+void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(input.vec());
     tensor_lists.emplace_back(tensors1.vec());
@@ -102,7 +102,7 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
 }
 
 #define FOREACH_POINTWISE_OP_SCALAR(NAME, OP)                                                                                         \
-std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {  \
+std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {  \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
     bool has_integral = has_int_or_bool_tensor(input);                                                                                \
                                                                                                                                       \
@@ -113,7 +113,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, Tensor
     return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalar);                                                               \
 }                                                                                                                                     \
                                                                                                                                       \
-void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {                \
+void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, const Scalar& scalar) {                \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
     bool has_integral = has_int_or_bool_tensor(input);                                                                                \
                                                                                                                                       \
