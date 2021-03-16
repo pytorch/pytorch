@@ -327,7 +327,7 @@ class UnaryUfuncInfo(OpInfo):
       - they typically support the out kwarg
       - they typically have NumPy or SciPy references
     See NumPy's universal function documentation
-    (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
+    (https://numpy.org/doc/stable/reference/ufuncs.html) for more details
     about the concept of ufuncs.
     """
 
@@ -378,6 +378,58 @@ class UnaryUfuncInfo(OpInfo):
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
         self._domain_eps = 1e-5
+
+
+# Metadata class for binary "universal functions (ufuncs)" that accept two
+# tensor and have common properties
+class _BinaryUfuncInfo(OpInfo):
+    """Operator information for 'universal binary functions (binary ufuncs).'
+    These are functions of two tensors with common properties like:
+      - they are elementwise functions
+      - the output shape is determined by the input shape
+      - they typically have method and inplace variants
+      - they typically support the out kwarg
+      - they typically have NumPy or SciPy references
+    See NumPy's universal function documentation
+    (https://numpy.org/doc/stable/reference/ufuncs.html) for more details
+    about the concept of ufuncs.
+    """
+
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 ref,  # a reference function
+                 dtypes=floating_types(),
+                 dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
+                 dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+                 dtypesIfROCM=floating_types_and(torch.half),
+                 domain=(None, None),  # the [low, high) domain of the function
+                 handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
+                 handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
+                 handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
+                 supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
+                 sample_inputs_func=sample_inputs_unary,
+                 supports_sparse=False,
+                 **kwargs):
+        super(_BinaryUfuncInfo, self).__init__(name,
+                                             dtypes=dtypes,
+                                             dtypesIfCPU=dtypesIfCPU,
+                                             dtypesIfCUDA=dtypesIfCUDA,
+                                             dtypesIfROCM=dtypesIfROCM,
+                                             sample_inputs_func=sample_inputs_func,
+                                             supports_sparse=supports_sparse,
+                                             **kwargs)
+        self.ref = ref
+        self.domain = domain
+        self.handles_large_floats = handles_large_floats
+        self.handles_extremals = handles_extremals
+        self.handles_complex_extremals = handles_complex_extremals
+        self.supports_complex_to_float = supports_complex_to_float
+
+        # Epsilon to ensure grad and gradgrad checks don't test values
+        #   outside a function's domain.
+        self._domain_eps = 1e-5
+
 
 def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S, S), device, dtype,
@@ -4443,8 +4495,31 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
 ]
 
+for op in (('add', 'add'), ('mul', 'multiply'), ('div', 'divide')):
+    op_db.append(
+        _BinaryUfuncInfo(op[0],
+               aliases = (op[1],),
+               ref=getattr(np, op[1]),
+               dtypes=all_types_and_complex(),
+               dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+               test_inplace_grad=True,
+               supports_out=True,
+        ))
+
+op_db.append(
+        _BinaryUfuncInfo('sub',
+               aliases = ('subtract',),
+               ref=np.subtract,
+               # skip subtraction of bool types
+               dtypes=all_types_and_complex(),
+               dtypesIfCUDA=all_types_and_complex_and(torch.half),
+               test_inplace_grad=True,
+               supports_out=True,
+        ))
+
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
+binary_ufuncs = [op for op in op_db if isinstance(op, _BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]

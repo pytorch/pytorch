@@ -319,6 +319,7 @@ class TestUnaryUfuncs(TestCase):
     @suppress_warnings
     @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
+        import pdb;pdb.set_trace()
         tensors = generate_numeric_tensors(device, dtype,
                                            domain=op.domain)
         self._test_reference_numerics(dtype, op, tensors)
