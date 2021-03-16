@@ -4,7 +4,7 @@
 import collections
 import copy
 from typing import get_type_hints, Any, TypeVar
-from typing import _GenericAlias, _type_repr  # type: ignore
+from typing import _type_repr  # type: ignore
 
 
 def _fixed_type(param):
@@ -28,25 +28,39 @@ class _DataPipeType:
     def __eq__(self, other):
         if isinstance(other, _DataPipeType):
             return self.param == other.param
-        elif isinstance(other, (type, TypeVar, _GenericAlias)):  # type: ignore
+        if isinstance(other, (type, TypeVar)):  # type: ignore
             return self.param == other
         return NotImplementedError
 
 
-class _DataPipeAlias(_GenericAlias, _root=True):  # type: ignore
-    def __init__(self, origin, param, *, inst=True, name=None):
-        super().__init__(origin, params=param, inst=inst, name=name)
-        self.datapipe_type = _DataPipeType(param)
-        self.datapipe_name = 'DataPipe[' + str(self.datapipe_type) + ']'
-        # MRO -> __origin__
-        if self.datapipe_type.fixed:
-            self.__origin__ = type(self.datapipe_name, (origin, ),
+# _GenericAlias from typing is introduced after Python 3.6
+class _DataPipeAlias:
+    def __init__(self, origin, param):
+        self._type = _DataPipeType(param)
+        self._name = 'DataPipe[' + str(self._type) + ']'
+        if self._type.fixed:
+            self.__origin__ = type(self._name, (origin, ),
                                    {'__init_subclass__': _DataPipeAlias.fixed_type_init,
-                                    'type': self.datapipe_type})
+                                    'type': self._type})
         else:
-            self.__origin__ = type(self.datapipe_name, (origin, ),
+            self.__origin__ = type(self._name, (origin, ),
                                    {'__init_subclass__': _DataPipeAlias.nonfixed_type_init,
-                                    'type': self.datapipe_type})
+                                    'type': self._type})
+
+    def __eq__(self, other):
+        if not isinstance(other, _DataPipeAlias):
+            return NotImplemented
+        return (self.__origin__ == other.__origin__
+                and self._type == other._type)
+
+    def __hash__(self):
+        return hash((self.__origin__, self._type))
+
+    def __repr__(self):
+        return '{}[{}]'.format(self._name, str(self._type))
+
+    def __mro_entries__(self, bases):
+        return (self.__origin__, )
 
     @staticmethod
     def static_check_iter(sub_cls):
@@ -61,9 +75,9 @@ class _DataPipeAlias(_GenericAlias, _root=True):  # type: ignore
                 raise TypeError('Iterator is required as the return annotation for `__iter__` of {}'
                                 ', but {} is found'.format(sub_cls.__name__, hints['return']))
             data_type = return_hint.__args__[0]
-            if sub_cls.type != data_type:
+            if sub_cls.type.param != data_type:
                 raise TypeError('Unmatched type annotation for {} ({} vs {})'
-                                .format(sub_cls.__name__, sub_cls.type, data_type))
+                                .format(sub_cls.__name__, sub_cls.type, _type_repr(data_type)))
 
     @staticmethod
     def fixed_type_init(sub_cls, *args, **kwargs):
