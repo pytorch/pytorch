@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 namespace torch {
@@ -257,6 +259,10 @@ void ClipRangesGatherRangesX2SigridHash(
 
   fuse.RegisterRewritePattern(pattern2, fused_pattern2);
   fuse.runOnGraph(graph);
+
+  // reverse the ops that got fused in step 1 but not in step2
+  fuse.RegisterRewritePattern(fused_pattern, pattern);
+  fuse.runOnGraph(graph);
 }
 
 void ClipRangesGatherRangesX2SigridHashPrecompute(
@@ -294,10 +300,16 @@ void ClipRangesGatherRangesX2SigridHashPrecompute(
 
   fuse.RegisterRewritePattern(pattern2, fused_pattern2);
   fuse.runOnGraph(graph);
+
+  // reverse the ops that got fused in step 1 but not in step2
+  fuse.RegisterRewritePattern(fused_pattern, pattern);
+  fuse.runOnGraph(graph);
 }
 
 void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
+  SplitOutPrecomputeOpsForSparseNN(graph);
+
   ConcatAddMulReplaceNaNClip(graph);
   CastedBatchOneHotLengths(graph);
   ConcatBatchMatMulBatchGather(graph);
@@ -305,9 +317,9 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
   ClipRangesGatherRangesLengthsToOffsets(graph);
   ClipRangesGatherSigridHash(graph);
   ClipRangesGatherRangesSigridHash(graph);
-  // TODO: re-enable after bug fix
-  // ClipRangesGatherRangesX2SigridHash(graph);
-  // ClipRangesGatherRangesX2SigridHashPrecompute(graph);
+
+  ClipRangesGatherRangesX2SigridHash(graph);
+  ClipRangesGatherRangesX2SigridHashPrecompute(graph);
 
   // prioritize clip_ranges+gather_ranges+sigrid_hash fusion over
   // clip_ranges+gather_ranges
@@ -319,6 +331,8 @@ void SplitOutPrecomputeOpsForSparseNN(
     std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
   PrecomputeMultiplierShiftForSigridHash(graph);
+  ConstantPropagation(graph);
+  ConstantPooling(graph);
 #endif
 }
 
