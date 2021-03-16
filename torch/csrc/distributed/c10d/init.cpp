@@ -249,6 +249,15 @@ Returns:
 Returns:
     Whether this bucket is the last bucket to allreduce in an iteration.
     This also means that this bucket corresponds to the first few layers in the forward pass.
+)")
+      .def(
+          "set_tensor",
+          &::c10d::GradBucket::setTensor,
+          py::arg("tensor"),
+          py::arg("i"),
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Replaces the ith tensor in the bucket with the input tensor.
 )");
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
@@ -1071,7 +1080,7 @@ Arguments:
   // base ProcessGroup::Options binding
   auto processGroupOptions =
       intrusive_ptr_class_<::c10d::ProcessGroup::Options>(
-          module, "ProcessGroupOptions")
+          processGroup, "Options")
           .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
           .def_readwrite("timeout", &::c10d::ProcessGroup::Options::timeout);
 

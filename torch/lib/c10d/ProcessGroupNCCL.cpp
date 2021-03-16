@@ -985,7 +985,7 @@ void ProcessGroupNCCL::workEnqueue(
 ProcessGroupNCCL::Options::Options(
     std::chrono::milliseconds timeout,
     bool is_high_priority_stream)
-    : ProcessGroup::Options(timeout, "nccl"),
+    : ProcessGroup::Options(timeout, NCCL_BACKEND_NAME),
       is_high_priority_stream(is_high_priority_stream) {}
 
 template <typename Fn, typename PreProcess, typename PostProcess>

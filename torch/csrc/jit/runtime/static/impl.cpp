@@ -437,15 +437,10 @@ PrepareForStaticModule(const torch::jit::Module& m) {
   auto module = m.copy();
   module.eval();
 
-  Method method = module.get_method("forward");
-  auto graph = method.graph();
-  // Move this pass to before running the freeze_module pass so that the
-  // sigrid_hash_compute_multipler_shift op can be precomputed and the results
-  // being folded into the module as constants. This is required to enable the
-  // ClipRangesGatherRangesX2SigridHashPrecompute pass. See D26833478
-  SplitOutPrecomputeOpsForSparseNN(graph);
   module = freeze_module(module);
-  graph = module.get_method("forward").graph();
+
+  Method method = module.get_method("forward");
+  auto graph = module.get_method("forward").graph();
   PrepareGraphForStaticModule(graph);
 
   c10::FunctionSchema s = RemoveSelfFromSchema(method.function().getSchema());

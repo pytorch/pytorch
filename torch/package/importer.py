@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from pickle import _getattribute, _Pickler  # type: ignore
 from pickle import whichmodule as _pickle_whichmodule  # type: ignore
 from types import ModuleType
-from typing import Any, Optional, Tuple, List
+from typing import Any, List, Optional, Tuple
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
 
@@ -18,6 +18,7 @@ class ObjMismatchError(Exception):
     """Raised when an importer found a different object with the same name as the user-provided one."""
 
     pass
+
 
 class Importer(ABC):
     """Represents an environment to import modules from.
