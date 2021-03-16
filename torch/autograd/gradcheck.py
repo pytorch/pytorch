@@ -608,7 +608,8 @@ def gradcheck(
                         return fail_test(get_notallclose_msg(a, n, i, j))
 
         if check_batched_grad:
-            return test_batched_grad(fail_test, tupled_inputs, o, i)
+            if not test_batched_grad(fail_test, tupled_inputs, o, i):
+                return False
 
     if not test_backward_mul_by_grad_output(fail_test, outputs, tupled_inputs, check_sparse_nnz):
         return False
