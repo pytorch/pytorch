@@ -192,9 +192,7 @@ bool InterpreterState::run(Stack& stack) {
       } break;
       case NAMED_TUPLE_CONSTRUCT: {
         namedTupleConstruct(
-            stack,
-            code_->types_[inst.X]->expect<at::TupleType>(),
-            inst.N);
+            stack, code_->types_[inst.X]->expect<at::TupleType>(), inst.N);
         ++pc;
       } break;
       case CREATE_OBJECT: {
