@@ -436,10 +436,10 @@ def _model_to_graph(model, args, verbose=False,
                     training=None, dynamic_axes=None):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
-    if isinstance(args, torch.Tensor):
+    if isinstance(args, (torch.Tensor, int, float, bool)):
         args = (args, )
 
-    if isinstance(example_outputs, torch.Tensor):
+    if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
         example_outputs = (example_outputs,)
 
     graph, params, torch_out, module = _create_jit_graph(model, args,
@@ -456,7 +456,7 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule or " \
                                             "ScriptFunction."
-        if if isinstance(example_outputs, (list, int, float, bool)):
+        if isinstance(example_outputs, list):
             example_outputs = [example_outputs]
 
         out_vars, desc = torch.jit._flatten(tuple(example_outputs))
