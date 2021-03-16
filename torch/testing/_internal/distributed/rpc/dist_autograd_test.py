@@ -2285,7 +2285,7 @@ class TensorPipeDistAutogradTest(RpcAgentTestFixture):
             return self.next_stage.rpc_sync().forward(input)
 
     @skip_if_lt_x_gpu(4)
-    def test_remote_module(self):
+    def test_dist_autograd_sync_streams(self):
 
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
