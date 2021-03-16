@@ -35,12 +35,16 @@ fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
+# CIRCLE_PULL_REQUEST comes from CircleCI
+# GITHUB_HEAD_REF comes from Github Actions
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
+if [ -n "$IN_PULL_REQUEST" ]; then
   DETERMINE_FROM="${TMP_DIR}/determine_from"
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
-if [[ "${CIRCLE_JOB}" == *11* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 

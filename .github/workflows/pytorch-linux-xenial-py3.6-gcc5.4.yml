@@ -14,6 +14,8 @@ on:
 env:
   BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-gcc5.4
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4
+  SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+  TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
 
 jobs:
@@ -50,14 +52,20 @@ jobs:
           docker pull "${DOCKER_IMAGE}"
       - name: Build PyTorch
         run: |
+          SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
+          MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
+          MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
           # TODO: Find some way to make this not rely on the "jenkins" user
           #       and to rely on some other named user
           docker run \
+            -e BUILD_ENVIRONMENT \
+            -e MAX_JOBS \
+            -e SCCACHE_BUCKET \
+            -e TORCH_CUDA_ARCH_LIST \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --user jenkins \
             --tty \
-            -e BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT} \
             -v ${GITHUB_WORKSPACE}:/var/lib/jenkins \
             -w /var/lib/jenkins \
             ${DOCKER_IMAGE} \
@@ -66,7 +74,7 @@ jobs:
       - name: Clean up workspace
         if: always()
         run: |
-          rm -rf *
+          rm -rfv "${GITHUB_WORKSPACE}"
           # Prune all of the docker images
           docker system prune -af
   # TODO: Add test step here
