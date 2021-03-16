@@ -34,7 +34,7 @@ jobs:
     runs-on: linux.2xlarge
     needs: calculate-docker-image
     env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.calculate-tag.outputs.docker_image }}
+      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
