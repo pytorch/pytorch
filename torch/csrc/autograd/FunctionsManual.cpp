@@ -118,7 +118,7 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
-static Tensor wrapped_scalar_tensor(Scalar scalar) {
+static Tensor wrapped_scalar_tensor(const Scalar& scalar) {
   auto tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
@@ -737,7 +737,7 @@ Tensor sparse_sparse_matmul_backward(
   return _sparse_matrix_mask(b_grad.coalesce(), b.coalesce());
 }
 
-Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
   auto transposed_sizes = self.transpose(dim, 0).sizes().vec();
   auto flatten = [&](const Tensor & t) {
     return t.transpose(dim, 0).contiguous().view({t.size(dim), -1});
@@ -1305,7 +1305,7 @@ Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const T
   return (r * grad).sum();
 }
 
-Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scalar beta, Scalar threshold) {
+Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, const Scalar& beta, const Scalar& threshold) {
   auto x = (input * beta);
   return sigmoid_backward(grad, x.sigmoid()) * (x < threshold).type_as(grad) * beta;
 }
@@ -1957,9 +1957,9 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 Tensor elu_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,
-    Scalar alpha,
-    Scalar scale,
-    Scalar input_scale,
+    const Scalar& alpha,
+    const Scalar& scale,
+    const Scalar& input_scale,
     bool is_result,
     const Tensor& self_or_result) {
 

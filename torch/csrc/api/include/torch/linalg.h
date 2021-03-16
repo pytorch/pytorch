@@ -52,7 +52,11 @@ inline Tensor& householder_product_out(Tensor& result, const Tensor& input, cons
   return torch::linalg_householder_product_out(result, input, tau);
 }
 
-inline Tensor norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<std::string> driver) {
+  return torch::linalg_lstsq(self, b, cond, driver);
+}
+
+inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -60,7 +64,7 @@ inline Tensor norm(const Tensor& self, std::string ord, optional<IntArrayRef> op
   return torch::linalg_norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -187,7 +191,11 @@ inline Tensor& householder_product_out(Tensor& result, const Tensor& input, cons
   return detail::householder_product_out(result, input, tau);
 }
 
-inline Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<std::string> driver) {
+  return detail::lstsq(self, b, cond, driver);
+}
+
+inline Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
@@ -195,7 +203,7 @@ inline Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArray
   return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
