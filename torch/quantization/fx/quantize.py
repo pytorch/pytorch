@@ -56,12 +56,14 @@ from .quantization_patterns import *
 
 from .utils import (
     _parent_name,
+    all_node_args_have_no_tensors,
     quantize_node,
     get_custom_module_class_keys,
     get_new_attr_name_with_prefix,
     collect_producer_nodes,
     graph_module_from_producer_nodes,
     assert_and_get_unique_device,
+    node_return_type_is_int,
 )
 
 from .qconfig_utils import *
@@ -92,6 +94,8 @@ def insert_observer(
          node: Node
          observer: observer/fake_quantize module instance
     """
+    if not model.training and isinstance(observer, torch.quantization.FixedQParamsFakeQuantize):
+        return
     # respect device affinity when adding observers
     model_device = assert_and_get_unique_device(model)
     if model_device:
@@ -111,11 +115,6 @@ def insert_observer(
     env[node.name] = observed_graph.create_node(
         'call_module', observer_name, (load_arg(node),), {})
     observed_node_names_set.add(node.name)
-    # remove one activation_post_process in quants map
-    # since we inserted observer for the output of the node here
-    # so that we don't insert repeated act_post_process
-    # if node.name in quants:
-    #     quants[node.name].pop(0)
 
 def maybe_insert_observer_for_special_module(
         quantize_handler: QuantizeHandler, modules: Dict[str, torch.nn.Module],
@@ -185,6 +184,7 @@ def insert_observer_for_output_of_the_node(
     # need to be statically quantized
     assert modules is not None
     # TODO: Add warnings in the quantize handlers that does not support fp16 quantization
+    inserted_observer = False
     if activation_is_statically_quantized(qconfig):
         if isinstance(quantize_handler, FixedQParamsOpQuantizeHandler) \
                 and model.training:
@@ -205,17 +205,18 @@ def insert_observer_for_output_of_the_node(
                 activation_post_process_indexes,
                 env, observed_graph,
                 load_arg, observed_node_names_set, quants)
+            inserted_observer = True
         elif (isinstance(quantize_handler,
                          FixedQParamsOpQuantizeHandler) and
               not model.training) or \
-                isinstance(quantize_handler, CopyNode):
+                isinstance(quantize_handler, CopyNodeQuantizeHandler):
             # inserting observers for output of observed module, or
             # mark the output as observed
             assert node.op in [
                 'call_module',
                 'call_function',
                 'call_method'], \
-                'CopyNode of type ' + node.op + ' is not handled'
+                'CopyNodeQuantizeHandler of type ' + node.op + ' is not handled'
 
             def is_observed(input_arg):
                 if isinstance(input_arg, Node):
@@ -237,8 +238,9 @@ def insert_observer_for_output_of_the_node(
                 # propagate observed property from input
                 if is_observed(node.args[0]):
                     observed_node_names_set.add(node.name)
-        elif (isinstance(quantize_handler, BinaryOp) and
-              quantize_handler.num_node_args == 1):
+            inserted_observer = True
+        elif (isinstance(quantize_handler, BinaryOpQuantizeHandler) and
+              quantize_handler.num_tensor_args == 1):
             assert matched_nodes is not None
             input_node = matched_nodes[-1]  # first node in the sequence
 
@@ -262,6 +264,7 @@ def insert_observer_for_output_of_the_node(
                     activation_post_process_indexes,
                     env, observed_graph,
                     load_arg, observed_node_names_set, quants)
+            inserted_observer = True
         elif isinstance(quantize_handler,
                         StandaloneModuleQuantizeHandler):
             assert node.op == "call_module"
@@ -271,7 +274,7 @@ def insert_observer_for_output_of_the_node(
 
             if output_is_quantized:
                 observed_node_names_set.add(node.name)
-        elif (quantize_handler.all_node_args and
+        elif (quantize_handler.all_node_args_are_tensors and
               input_output_observed(quantize_handler)):
             # observer for outputs
             new_observer = qconfig.activation()
@@ -281,6 +284,7 @@ def insert_observer_for_output_of_the_node(
                 activation_post_process_indexes,
                 env, observed_graph,
                 load_arg, observed_node_names_set, quants)
+            inserted_observer = True
 
         # insert observer for input of standalone module
         if standalone_module_input_idxs is not None:
@@ -293,11 +297,12 @@ def insert_observer_for_output_of_the_node(
                         activation_post_process_indexes,
                         env, observed_graph,
                         load_arg, observed_node_names_set, quants)
+                    inserted_observer = True
 
-        # if the node is not a CopyNode, currently we will insert activation_post_process
-        # for output, since we already inserted activation_post_process here
-        # we do not need to do it again
-        if not isinstance(quantize_handler, CopyNode) and node.name in quants:
+        # we already inserted activation_post_process for the outputvalue
+        # which is the same as the input value of the next op, so we
+        # can skip inserting one activation_post_process for the input
+        if node.name in quants and inserted_observer:
             quants[node.name].pop(0)
 
 def insert_observer_for_input_arg_of_observed_node(
@@ -353,6 +358,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
                 if kwarg_name == 'bias' and arg is kwarg_value:
                     return True
     return False
+
 
 # weight prepacking ops
 WEIGHT_PREPACK_OPS = {
@@ -839,24 +845,26 @@ class Quantizer:
             quantized = True
 
             # Need to get correct quantized/non-quantized state forn the output
-            # of CopyNode
+            # of CopyNodeQuantizeHandler
             if type(obj) in [
-                    CopyNode,
+                    CopyNodeQuantizeHandler,
                     FixedQParamsOpQuantizeHandler
             ]:
                 assert node.op in [
                     'call_module',
                     'call_function',
                     'call_method'], \
-                    'CopyNode of type ' + node.op + ' is not handled'
+                    'CopyNodeQuantizeHandler of type ' + node.op + ' is not handled'
                 # TODO: need to extend this to consider all relevant args instead of just arg[0]
                 quantized = node_arg_is_quantized(node.args[0])
 
             # the output is unquantized if the node is not a CopyNode
             # and activation is fp16 (since we will output fp32 currently for fp16
             # converter
-            if (not isinstance(obj, CopyNode) and not activation_is_int8_quantized(qconfig)) or \
+            if (not isinstance(obj, CopyNodeQuantizeHandler) and not activation_is_int8_quantized(qconfig)) or \
                not input_output_observed(obj):
+                quantized = False
+            if node_return_type_is_int(node):
                 quantized = False
 
             return quantized
@@ -1082,7 +1090,7 @@ class Quantizer:
 
         For example, {
           'relu_1': (relu_1, [relu_1], torch.nn.functional.relu,
-                     <CopyNode instance>, QConfig(...)),
+                     <CopyNodeQuantizeHandler instance>, QConfig(...)),
           ...
         }
         """
@@ -1113,15 +1121,34 @@ class Quantizer:
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
                     if is_match(modules, node, pattern):
-                        matched: List[Any] = []
-                        record_match(pattern, node, matched)
-                        for n in matched:
-                            match_map[n.name] = (
-                                node, matched, pattern, value(self, node),  # type: ignore
-                                self.qconfig_map[n.name])
-                            all_matched.add(n.name)
-                        # break after finding the first match
-                        break
+                        skip_this_match = False
+                        if value is BinaryOpQuantizeHandler:
+                            use_copy_node = all_node_args_have_no_tensors(node)
+                            if use_copy_node:
+                                # TODO(future PR): update the pattern to quantize
+                                # handler logic to take this into account.
+                                value = CopyNodeQuantizeHandler  # type: ignore
+
+                            this_node_qconfig = self.qconfig_map[node.name]
+                            if this_node_qconfig:
+                                dtypes = get_qconfig_dtypes(this_node_qconfig)
+                                # TODO(future PR): update the pattern to quantize
+                                # handler logic to take this into account.
+                                skip_this_match = (
+                                    (node.target in binary_op_supported_dtypes) and
+                                    (dtypes not in binary_op_supported_dtypes[node.target])
+                                )
+
+                        if not skip_this_match:
+                            matched: List[Any] = []
+                            record_match(pattern, node, matched)
+                            for n in matched:
+                                match_map[n.name] = (
+                                    node, matched, pattern, value(self, node),  # type: ignore
+                                    self.qconfig_map[n.name])
+                                all_matched.add(n.name)
+                            # break after finding the first match
+                            break
 
         # add custom module instances to the match result
         assert self.modules is not None
@@ -1181,6 +1208,7 @@ class Quantizer:
                 is_weight = node_arg_is_weight(node, arg)
                 is_bias = node_arg_is_bias(node, arg)
                 is_activation = not (is_weight or is_bias)
+                no_tensors = all_node_args_have_no_tensors(arg)
                 # bias needs to be quantized if activation is fp16 and weight is fp16
                 # this is the case for glow
                 should_add_handler = qconfig is not None and (
@@ -1188,7 +1216,8 @@ class Quantizer:
                      activation_is_statically_quantized(qconfig)) or
                     (is_weight and weight_is_quantized(qconfig)) or
                     (is_bias and activation_dtype(qconfig) == torch.float16)
-                    and weight_dtype(qconfig) == torch.float16)
+                    and weight_dtype(qconfig) == torch.float16) and \
+                    (not no_tensors)
 
                 if should_add_handler:
                     act_post_process_ctr = qconfig.weight if is_weight else \
@@ -1213,9 +1242,9 @@ class Quantizer:
             if node.name in matches:
                 root_node, matched_nodes, matched_pattern, quantize_handler, \
                     qconfig = matches[node.name]
-                # don't attach observer/fake_quant for CopyNode
-                if isinstance(quantize_handler, CopyNode):
-                    qconfig = None
+                # don't attach observer/fake_quant for CopyNodeQuantizeHandler
+                # if isinstance(quantize_handler, CopyNodeQuantizeHandler):
+                #     qconfig = None
                 if root_node is node and \
                         input_output_observed(quantize_handler):
                     # matched_nodes[-1] is the first op in the sequence and
