@@ -16,7 +16,8 @@ struct TORCH_API StaticModuleOptions {
   bool cleanup_activations{true};
   bool enable_out_variant{true};
   bool optimize_memory{true};
-  bool optimize_output_memory{false}; // to enable MemoryPlanner on output tensors
+  bool optimize_output_memory{
+      false}; // to enable MemoryPlanner on output tensors
 };
 
 /// The static runime supports two execution modes.
@@ -77,10 +78,10 @@ class TORCH_API StaticModule {
       const torch::jit::Module& m,
       const StaticModuleOptions& opts = StaticModuleOptions());
 
- typedef enum {
+  typedef enum {
     CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
-    INPUT_VALUE = -1,    // VALUE nodes representing graph inputs
-    OTHER_VALUE = 0      // other VALUE nodes (use non-negative index)
+    INPUT_VALUE = -1, // VALUE nodes representing graph inputs
+    OTHER_VALUE = 0 // other VALUE nodes (use non-negative index)
   } VALUE_KIND;
 
  private:
@@ -94,7 +95,7 @@ class TORCH_API StaticModule {
   //   if kind == CONSTANT_KIND: map to constants_[idx]
   //   if kind == INPUT_KIND: map to inputs_[idx]
   //   otherwise: map to nodes_[kind].outputs()[idx]
-  typedef std::pair<VALUE_KIND, int> DEF_INFO;
+  typedef std::pair<VALUE_KIND, int> DefInfo;
 
  public:
   std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
@@ -113,12 +114,12 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
-  inline const std::unordered_map<int, std::vector<DEF_INFO>>&
-  index_map() const {
-    return node_inputs_ssa_def_map;
+  inline const std::unordered_map<int, std::vector<DefInfo>>& index_map()
+      const {
+    return node_inputs_ssa_def_map_;
   }
 
-  inline const std::vector<DEF_INFO>& output_indices() const {
+  inline const std::vector<DefInfo>& output_indices() const {
     return output_ssa_defs_;
   }
 
@@ -152,13 +153,14 @@ class TORCH_API StaticModule {
   // IValue table (defined by prim::Constant nodes)
   std::vector<IValue> constants_;
   // a vector of ssa_defs corresponding to graph->outputs()
-  std::vector<DEF_INFO> output_ssa_defs_;
+  std::vector<DefInfo> output_ssa_defs_;
   // map a node idx (in graph order) to a vector of ssa_defs for node inputs
-  std::unordered_map<int, std::vector<DEF_INFO>> node_inputs_ssa_def_map;
+  std::unordered_map<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
   // The nodes we need to run
   std::vector<ProcessedNode> nodes_;
   // map a value to the set of values that may share the same storage with it
-  std::unordered_map<const Value*, std::vector<const Value*>> value_to_same_storage_values_;
+  std::unordered_map<const Value*, std::vector<const Value*>>
+      value_to_same_storage_values_;
   // values whose live-time exceeds that of running one inference (e.g., input,
   // output, prim::Constants, and their aliases)
   std::unordered_set<const Value*> external_values_;

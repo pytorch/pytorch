@@ -204,7 +204,8 @@ LivenessInformation GetLivenessInformation(
     }
   };
 
-  auto traverse_node_fn = [&](const Node* node, std::vector<const Value*>& dead) {
+  auto traverse_node_fn = [&](const Node* node,
+                              std::vector<const Value*>& dead) {
     if (live_nodes.count(node)) {
       for (const auto* v : live_nodes.at(node)) {
         live_values.at(v).erase(node);
@@ -327,7 +328,8 @@ GetOptimizableValues(const std::shared_ptr<torch::jit::Graph>& graph) {
 //
 // NB: This is a deterministic implementation, which makes it easier to tune
 // and debug.
-std::unordered_map<const Value*, std::vector<const Value*>> FindSameStorageValues(
+std::unordered_map<const Value*, std::vector<const Value*>>
+FindSameStorageValues(
     const LivenessInformation& lm,
     const std::pair<std::vector<const Value*>, std::vector<const Value*>>&
         optimizable,
@@ -338,7 +340,8 @@ std::unordered_map<const Value*, std::vector<const Value*>> FindSameStorageValue
   const auto& all_values = optimizable.second;
 
   // map Value* to a set Value* that can share the same storage with it
-  std::unordered_map<const Value*, std::vector<const Value*>> same_storage_values;
+  std::unordered_map<const Value*, std::vector<const Value*>>
+      same_storage_values;
 
   // make new_v and old_v map to the same storage (i.e., add to each other's
   // same_storage_values set)
@@ -477,7 +480,7 @@ StaticModule::StaticModule(
   // map Value* to IValue (from inputs or prim::Constant) or null
   std::unordered_map<Value*, IValue*> value_to_ivalue;
   // map Value* to its SSA definition IR
-  std::unordered_map<Value*, DEF_INFO> value_to_ssa_def;
+  std::unordered_map<Value*, DefInfo> value_to_ssa_def;
 
   // N inputs map to the first N entries in storage
   for (auto i = 0; i < graph_->inputs().size(); ++i) {
@@ -520,17 +523,18 @@ StaticModule::StaticModule(
       continue;
     }
     std::vector<const IValue*> ivalue_inputs;
-    std::vector<DEF_INFO> input_ssa_defs;
+    std::vector<DefInfo> input_ssa_defs;
     for (Value* input : node->inputs()) {
       ivalue_inputs.emplace_back(value_to_ivalue.at(input));
       input_ssa_defs.emplace_back(value_to_ssa_def.at(input));
     }
-    node_inputs_ssa_def_map[node_idx] = input_ssa_defs;
+    node_inputs_ssa_def_map_[node_idx] = input_ssa_defs;
     nodes_.emplace_back(
         ProcessedNode(node, std::move(ivalue_inputs), opts.enable_out_variant));
     for (size_t i = 0; i < node->outputs().size(); ++i) {
       value_to_ivalue[node->outputs()[i]] = nullptr;
-      value_to_ssa_def[node->outputs()[i]] = std::make_pair(static_cast<VALUE_KIND>(node_idx), i);
+      value_to_ssa_def[node->outputs()[i]] =
+          std::make_pair(static_cast<VALUE_KIND>(node_idx), i);
     }
     node_idx++;
   }
@@ -1020,12 +1024,14 @@ MemoryPlanner::MemoryPlanner(
         }
 
         if (value_to_storage_idx.count(val)) {
-          managed_storage_[value_to_storage_idx.at(val)].second.emplace_back(impl);
+          managed_storage_[value_to_storage_idx.at(val)].second.emplace_back(
+              impl);
         } else {
           auto p =
               std::make_pair<size_t, std::vector<c10::StorageImpl*>>(0, {impl});
           managed_storage_.emplace_back(std::move(p));
-          // first of a group, update the value_to_storage_idx map with the index
+          // first of a group, update the value_to_storage_idx map with the
+          // index
           if (value_to_same_storage_values.count(val)) {
             for (const auto* v : value_to_same_storage_values.at(val)) {
               value_to_storage_idx[v] = managed_storage_.size() - 1;
