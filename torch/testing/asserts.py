@@ -169,6 +169,7 @@ def _compare_tensors(
     b: torch.Tensor,
     /,
     values_asserter: Callable[[torch.Tensor, torch.Tensor], None],
+    *,
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
@@ -178,12 +179,15 @@ def _compare_tensors(
     Args:
         a (torch.Tensor): First tensor.
         b (torch.Tensor): Second tensor.
-        values_asserter (Callable[[torch.Tensor, torch.Tensor], None]): Will be called with :attr:`a` and :attr:`a`
+        values_asserter (Callable[[torch.Tensor, torch.Tensor], None]): Will be called with :attr:`a` and :attr:`b`
             after the attribute checks. Must raise an :class:`AssertionError` if the values do not match.
         check_device (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` live in the same
-            :attr:`~torch.Tensor.device` memory.
+            :attr:`~torch.Tensor.device` memory. If this check is disabled **and** :attr:`a` and :attr:`b` do not live
+            in the same memory :attr:`~torch.Tensor.device`, they are moved to the CPU memory.
         check_dtype (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
-            :attr:`~torch.Tensor.dtype`.
+            :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`a` and :attr:`b` do not have the same
+            :attr:`~torch.Tensor.dtype`, the comparison :attr:`~torch.Tensor.dtype` is determined by
+            :func:`torch.promote_types`.
         check_stride (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
             :meth:`~torch.Tensor.stride`.
 
