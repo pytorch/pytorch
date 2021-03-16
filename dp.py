@@ -30,40 +30,6 @@ from functional_utils import grad, grad_with_value
 from functools import partial
 # from resnet import resnet18
 
-class CudaMemoryLeakCheck():
-    def __init__(self, name):
-        self.name = name
-
-        # initialize context & RNG to prevenikkt false positive detections
-        # when the test is the first to initialize those
-        from torch.testing._internal.common_cuda import initialize_cuda_context_rng
-        initialize_cuda_context_rng()
-
-    @staticmethod
-    def get_cuda_memory_usage():
-        # we don't need CUDA synchronize because the statistics are not tracked at
-        # actual freeing, but at when marking the block as free.
-        num_devices = torch.cuda.device_count()
-        import gc
-        gc.collect()
-        return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
-
-    def __enter__(self):
-        self.befores = self.get_cuda_memory_usage()
-
-    def __exit__(self, exec_type, exec_value, traceback):
-        # Don't check for leaks if an exception was thrown
-        if exec_type is not None:
-            return
-
-        afters = self.get_cuda_memory_usage()
-
-        for i, (before, after) in enumerate(zip(self.befores, afters)):
-            if after - before == 0:
-                continue
-            raise RuntimeError(f'{self.name} leaked {after-before} bytes')
-
-
 def save_checkpoint(state, is_best, filename="checkpoint.tar"):
     torch.save(state, filename)
     if is_best:
