@@ -1634,30 +1634,6 @@ class TestLinalg(TestCase):
             self.assertEqual(expected[0], actual[0])
             self.assertEqual(expected[1], actual[1])
 
-            # check out= variant
-            complex_dtype = dtype
-            if not dtype.is_complex:
-                complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
-            out0 = torch.empty(0, dtype=complex_dtype, device=device)
-            out1 = torch.empty(0, dtype=complex_dtype, device=device)
-            ans = torch.linalg.eig(a, out=(out0, out1))
-            self.assertEqual(ans[0], out0)
-            self.assertEqual(ans[1], out1)
-            self.assertEqual(expected[0].to(complex_dtype), out0)
-            self.assertEqual(expected[1].to(complex_dtype), out1)
-
-            # check non-contiguous out
-            if a.numel() > 0:
-                out0 = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
-                out1 = torch.empty(2 * shape[0], *shape[1:], dtype=complex_dtype, device=device)[::2]
-                self.assertFalse(out0.is_contiguous())
-                self.assertFalse(out1.is_contiguous())
-                ans = torch.linalg.eig(a, out=(out0, out1))
-                self.assertEqual(ans[0], out0)
-                self.assertEqual(ans[1], out1)
-                self.assertEqual(expected[0].to(complex_dtype), out0)
-                self.assertEqual(expected[1].to(complex_dtype), out1)
-
         shapes = [(0, 0),  # Empty matrix
                   (5, 5),  # Single matrix
                   (0, 0, 0), (0, 5, 5),  # Zero batch dimension tensors
