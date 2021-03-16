@@ -909,32 +909,20 @@ if(NOT INTERN_BUILD_MOBILE)
   add_dependencies(torch_cpu Caffe2_PROTO)
 endif()
 
-#add_custom_command(TARGET torch_cpu
-#        COMMAND
-#        "${PYTHON_EXECUTABLE}" ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
-#        --yaml_file_path "${SELECTED_OP_LIST}"
-#        --output_file_path "${TORCH_ROOT}/aten/src/ATen/selected_mobile_ops.h"
-#        WORKING_DIRECTORY "${TORCH_ROOT}")
+# Codegen selected_mobile_ops.h for template selective build
+if(BUILD_LITE_INTERPRETER)
+  add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+          COMMAND
+          "${PYTHON_EXECUTABLE}" ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
+          --yaml_file_path "${SELECTED_OP_LIST}"
+          --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h"
+          WORKING_DIRECTORY "${TORCH_ROOT}")
 
-# add_custom_command(TARGET torch_cpu
-#         COMMAND
-#         "${PYTHON_EXECUTABLE}" ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
-#         --yaml_file_path "${SELECTED_OP_LIST}"
-#         --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h"
-#         WORKING_DIRECTORY "${TORCH_ROOT}")
-
-add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
-        COMMAND
-        "${PYTHON_EXECUTABLE}" ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
-        --yaml_file_path "${SELECTED_OP_LIST}"
-        --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h"
-        WORKING_DIRECTORY "${TORCH_ROOT}")
-
-add_custom_target(
-  __selected_mobile_ops_header_gen
-  DEPENDS ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h)
-add_dependencies(torch_cpu __selected_mobile_ops_header_gen)
-
+  add_custom_target(
+    __selected_mobile_ops_header_gen
+    DEPENDS ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h)
+  add_dependencies(torch_cpu __selected_mobile_ops_header_gen)
+endif()
 
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT NO_API)

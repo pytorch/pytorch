@@ -12,24 +12,23 @@
 
 #ifdef XPLAT_MOBILE_BUILD
 #include <ATen/selected_mobile_ops.h>
- #else
- namespace at {
- /**
-  * The method should_include_kernel_dtype() returns true/false
-  * based on whether the switching code for a specific dtype should be
-  * included based on build time constants generated from tracing model
-  * execution. This method will be implmeneted via code-generation and
-  * included in this file when code-gen is ready.
-  */
- inline constexpr bool should_include_kernel_dtype(
-   const char *kernel_tag_str,
-   at::ScalarType scalar_type
- ) {
-   return true;
- }
- }
+#else
+namespace at {
+/**
+ * The method should_include_kernel_dtype() returns true/false
+ * based on whether the switching code for a specific dtype should be
+ * included based on build time constants generated from tracing model
+ * execution. This method will be implmeneted via code-generation and
+ * included in this file when code-gen is ready.
+ */
+inline constexpr bool should_include_kernel_dtype(
+  const char *kernel_tag_str,
+  at::ScalarType scalar_type
+) {
+  return true;
+}
+}
 #endif
-
 
 /**
  * In the Facebook internal build (using BUCK), this macro is enabled by

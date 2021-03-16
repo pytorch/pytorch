@@ -70,7 +70,6 @@ def get_selected_kernel_dtypes_code(
 # Write the file selected_mobile_ops.h with optionally:
 # 1. The selected root operators
 # 2. The selected kernel dtypes
-#
 def write_selected_mobile_ops(
         output_file_path: str,
         selective_builder: SelectiveBuilder,
@@ -85,6 +84,10 @@ def write_selected_mobile_ops(
         header_contents = "".join(body_parts)
         out_file.write(header_contents.encode("utf-8"))
 
+# root_ops: a set of selected root operators for selective build
+# Write the file selected_mobile_ops.h with optionally:
+# 1. The selected root operators from root_ops
+# 2. All kernel dtypes
 def write_selected_mobile_ops(
     output_file_path: str,
     root_ops: Set[str],
@@ -92,7 +95,6 @@ def write_selected_mobile_ops(
     with open(output_file_path, "wb") as out_file:
         body_parts = [selected_mobile_ops_preamble]
         body_parts.append("#define TORCH_OPERATOR_WHITELIST " + (";".join(sorted(root_ops))) + ";\n\n")
-
 
         selective_builder = SelectiveBuilder.get_nop_selector()
         body_parts.append(get_selected_kernel_dtypes_code(selective_builder))
