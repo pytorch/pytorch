@@ -103,9 +103,8 @@ def write_selected_mobile_ops_with_all_dtypes(
         out_file.write(header_contents.encode("utf-8"))
 
 def main():
-    parser = argparse.ArgumentParser(description="selected_mobile_ops.h:"
-        "Primary operators used by templated selective build and Kernel Function"
-        "dtypes captured by tracing ")
+    parser = argparse.ArgumentParser(
+        description="Generate selected_mobile_ops.h for selective build."
     parser.add_argument(
         "-p", "--yaml_file_path", type=str, required=True, help="Path to the yaml"
         " file with a list of operators used by the model."
