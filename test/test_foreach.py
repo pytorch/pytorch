@@ -89,12 +89,12 @@ class TestForeach(TestCase):
     def test_unary_ops(self, device, dtype, op):
         for N in N_values:
             tensors = op.sample_inputs(device, dtype, N)
-            ref_res = [op.ref(t) for t in tensors]
+            expected = [op.ref(t) for t in tensors]
 
             method = op.get_method()
             inplace = op.get_inplace()
-            fe_res = method(tensors)
-            self.assertEqual(ref_res, fe_res)
+            actual = method(tensors)
+            self.assertEqual(expected, actual)
 
             if op.safe_casts_outputs and dtype in torch.testing.integral_types_and(torch.bool):
                 with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
@@ -105,7 +105,7 @@ class TestForeach(TestCase):
                     inplace(tensors)
             else:
                 inplace(tensors)
-                self.assertEqual(tensors, fe_res)
+                self.assertEqual(tensors, actual)
 
     # Test foreach binary ops with a single scalar
     # Compare results agains reference torch functions
