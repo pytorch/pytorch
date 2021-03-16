@@ -581,10 +581,8 @@ class Quantizer:
 
             root_node, matched_nodes, pattern, obj, qconfig = matches.get(
                 node.name, (None, None, None, None, None))
-            if root_node is None:
-                env[node.name] = observed_graph.node_copy(node, load_arg)
-            elif root_node is node:
-                env[node.name] = observed_graph.node_copy(node, load_arg)
+            env[node.name] = observed_graph.node_copy(node, load_arg)
+            if root_node is node:
                 # index for input of custom module that needs to be observed in
                 # parent
                 if qconfig is not None:
@@ -600,8 +598,6 @@ class Quantizer:
                         env,
                         observed_graph, load_arg, observed_node_names_set,
                         matched_nodes, standalone_module_input_idxs, quants)
-            else:
-                env[node.name] = observed_graph.node_copy(node, load_arg)
 
             if node.op == 'placeholder':
                 # skip adding observers at the graph input if the input is
