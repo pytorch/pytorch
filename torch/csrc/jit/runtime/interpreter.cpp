@@ -1559,7 +1559,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto range = node->sourceRange().source();
             if (range->filename()) {
               drop(stack, 1);
-              const auto msg = pop(stack).toStringRef();
+              const auto& msg = stack.back().toStringRef();
               if (need_warn) {
                 auto line = range->starting_line_no() +
                     range->lineno_for_offset(node->sourceRange().start());
@@ -1570,11 +1570,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 // will print the exception as configured.
                 c10::Warning::warn(location, msg, /*verbatim=*/true);
               }
+              stack.pop_back();
             } else {
-              const auto msg = pop(stack).toStringRef();
+              const auto& msg = stack.back().toStringRef();
               if (need_warn) {
                 TORCH_WARN(msg);
               }
+              stack.pop_back();
             }
             ++frame.pc;
           } break;
