@@ -130,7 +130,7 @@ void orgqr<c10::complex<double>>(CUDASOLVER_ORGQR_ARGTYPES(c10::complex<double>)
 
 template <class scalar_t, class value_t = scalar_t>
 void syevd_bufferSize(CUDASOLVER_SYEVD_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       false,
       "at::cuda::solver::syevd_bufferSize: not implemented for ",
       typeid(scalar_t).name());
@@ -156,7 +156,7 @@ void syevd_bufferSize<c10::complex<double>, double>(
 
 template <class scalar_t, class value_t = scalar_t>
 void syevd(CUDASOLVER_SYEVD_ARGTYPES(scalar_t, value_t)) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       false,
       "at::cuda::solver::syevd: not implemented for ",
       typeid(scalar_t).name());
