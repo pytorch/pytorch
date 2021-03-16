@@ -41,7 +41,7 @@ bool isDefined(const c10::optional<Tensor>& t) {
 }
 
 bool isFwGradDefined(const c10::optional<Tensor>& t) {
-  return t.has_value() && t->defined() && t->fw_grad(/*level */ 0).defined();
+  return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
 }
 
 Tensor toLegacyTensor(const c10::optional<Tensor>& t) {
@@ -49,7 +49,7 @@ Tensor toLegacyTensor(const c10::optional<Tensor>& t) {
 }
 
 Tensor toLegacyFwGrad(const c10::optional<Tensor>& t) {
-  return (t.has_value() && t->defined()) ? t->fw_grad(/*level */ 0) : Tensor();
+  return (t.has_value() && t->defined()) ? t->_fw_grad(/*level */ 0) : Tensor();
 }
 
 Tensor toLegacyPrimal(const c10::optional<Tensor>& t) {
