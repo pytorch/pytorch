@@ -583,6 +583,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     c10::intrusive_ptr<Options> options)
     : ProcessGroup(rank, size),
       store_(new GlooStore(store)),
+      options_(options),
       stop_(false),
       collectiveCounter_(0) {
   auto& devices = options->devices;
