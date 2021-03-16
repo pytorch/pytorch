@@ -4716,6 +4716,24 @@ class CommTest(MultiProcessTestCase):
         dist.destroy_process_group(default_pg)
         self.assertFalse(dist.is_initialized())
 
+    @requires_gloo()
+    def test_pass_gloo_options_and_timeout(self):
+        pg_opts = c10d.ProcessGroupGloo.Options()
+        pg_opts.timeout = timedelta(seconds=10)
+
+        # Test timeout and pg_options both set, should error out
+        with self.assertRaisesRegex(
+            RuntimeError, "timeout value defined in pg_options are conflicting"
+        ):
+            dist.init_process_group(
+                "gloo",
+                init_method=f"file://{self.file_name}",
+                world_size=self.world_size,
+                rank=self.rank,
+                timeout=timedelta(20),
+                pg_options=pg_opts
+            )
+
     @requires_nccl()
     @skip_if_not_multigpu
     def test_pass_nccl_options_high_priority_stream(self):
