@@ -501,15 +501,62 @@ bool test_t() {
 }
 
 bool test_view() {
-  __block std::vector<int64_t> size{1, 3, 2, 2};
+  // array -> array
+  __block std::vector<int64_t> size{1, 10, 2, 2};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = X1.view({3, 4}).contiguous();
+    auto Y1 = X1.view({5, 4, 2}).contiguous();
     auto X2 = X1.metal();
-    auto Y2 = X2.view({3, 4}).cpu();
+    auto Y2 = X2.view({5, 4, 2}).cpu();
     bool b1 = (Y1.sizes() == Y2.sizes());
     bool b2 = (Y1.strides() == Y2.strides());
-    return b1 && b2;
+    bool b3 = almostEqual(Y1, Y2);
+    return b1 && b2 && b3;
+  });
+}
+
+bool test_view2() {
+  // array -> nonarray
+  __block std::vector<int64_t> size{1, 10, 2, 2};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = X1.view({5, 8}).contiguous();
+    auto X2 = X1.metal();
+    auto Y2 = X2.view({5, 8}).cpu();
+    bool b1 = (Y1.sizes() == Y2.sizes());
+    bool b2 = (Y1.strides() == Y2.strides());
+    bool b3 = almostEqual(Y1, Y2);
+    return b1 && b2 && b3;
+  });
+}
+
+bool test_view3() {
+  // nonarry -> array
+  __block std::vector<int64_t> size{5, 8};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = X1.view({1, 10, 2, 2}).contiguous();
+    auto X2 = X1.metal();
+    auto Y2 = X2.view({1, 10, 2, 2}).cpu();
+    bool b1 = (Y1.sizes() == Y2.sizes());
+    bool b2 = (Y1.strides() == Y2.strides());
+    bool b3 = almostEqual(Y1, Y2);
+    return b1 && b2 && b3;
+  });
+}
+
+bool test_view4() {
+  // nonarray -> nonarray
+  __block std::vector<int64_t> size{5, 8};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = X1.view({4, 10}).contiguous();
+    auto X2 = X1.metal();
+    auto Y2 = X2.view({4, 10}).cpu();
+    bool b1 = (Y1.sizes() == Y2.sizes());
+    bool b2 = (Y1.strides() == Y2.strides());
+    bool b3 = almostEqual(Y1, Y2);
+    return b1 && b2 && b3;
   });
 }
 
