@@ -4698,11 +4698,13 @@ class CommTest(MultiProcessTestCase):
         pg_opts._devices = [create_device(interface=LOOPBACK)]
         pg_opts._threads = 2
 
+        store = c10d.FileStore(self.file_name, self.world_size)
+
         dist.init_process_group(
             "gloo",
-            init_method=f"file://{self.file_name}",
             world_size=self.world_size,
             rank=self.rank,
+            store=store,
             pg_options=pg_opts
         )
 
@@ -4721,15 +4723,16 @@ class CommTest(MultiProcessTestCase):
         pg_opts = c10d.ProcessGroupGloo.Options()
         pg_opts.timeout = timedelta(seconds=10)
 
+        store = c10d.FileStore(self.file_name, self.world_size)
         # Test timeout and pg_options both set, should error out
         with self.assertRaisesRegex(
             RuntimeError, "timeout value defined in pg_options are conflicting"
         ):
             dist.init_process_group(
                 "gloo",
-                init_method=f"file://{self.file_name}",
                 world_size=self.world_size,
                 rank=self.rank,
+                store=store,
                 timeout=timedelta(20),
                 pg_options=pg_opts
             )
@@ -4740,12 +4743,13 @@ class CommTest(MultiProcessTestCase):
         pg_opts = ProcessGroupNCCL.Options()
         pg_opts.is_high_priority_stream = True
 
+        store = c10d.FileStore(self.file_name, self.world_size)
         # Test init_process_group accepts options
         dist.init_process_group(
             "nccl",
-            init_method=f"file://{self.file_name}",
             world_size=self.world_size,
             rank=self.rank,
+            store=store,
             pg_options=pg
         )
 
