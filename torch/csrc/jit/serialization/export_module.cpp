@@ -304,7 +304,7 @@ void setstateTuple(
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
-    auto qn = setstate.qualname().qualifiedName();
+    const auto qn = setstate.qualname().qualifiedName();
     if (qn_cache.find(qn) != qn_cache.end()) {
       return;
     }
@@ -340,7 +340,7 @@ void moduleMethodsTuple(
   std::unordered_set<std::string> qn_cache;
   // top level methods
   for (const auto& method : methods) {
-    auto qn = method.function().qualname().qualifiedName();
+    const auto qn = method.function().qualname().qualifiedName();
     if (qn_cache.find(qn) != qn_cache.end()) {
       continue;
     }
