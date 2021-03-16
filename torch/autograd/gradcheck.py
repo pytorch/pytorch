@@ -384,14 +384,13 @@ def test_batched_grad(fail_test, input, output, output_idx) -> bool:
     return True
 
 
-def test_backward_mul_by_grad_output(fail_test, func, inputs, check_sparse_nnz) -> bool:
+def test_backward_mul_by_grad_output(fail_test, outputs, inputs, check_sparse_nnz) -> bool:
     # Tests that backward is multiplied by grad_output
-    output = _differentiable_outputs(func(*inputs))
     diff_input_list: List[torch.Tensor] = list(iter_tensors(inputs, True))
     if not diff_input_list:
         raise RuntimeError("no Tensors requiring grad found in input")
-    grads_input = torch.autograd.grad(output, diff_input_list,
-                                      [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output],
+    grads_input = torch.autograd.grad(outputs, diff_input_list,
+                                      [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in outputs],
                                       allow_unused=True)
     for gi, di in zip(grads_input, diff_input_list):
         if gi is None:
@@ -419,8 +418,7 @@ def test_backward_mul_by_grad_output(fail_test, func, inputs, check_sparse_nnz) 
     return True
 
 
-def test_undefined_grad(fail_test, func, inputs) -> bool:
-    output = _differentiable_outputs(func(*inputs))
+def test_undefined_grad(fail_test, func, outputs, inputs) -> bool:
     diff_input_list: List[torch.Tensor] = list(iter_tensors(inputs, True))
     if not diff_input_list:
         raise RuntimeError("no Tensors requiring grad found in input")
@@ -462,7 +460,7 @@ def test_undefined_grad(fail_test, func, inputs) -> bool:
 
     # If there are multiple output grads, we should be able to undef one at a time without error
     if len(outputs_to_check[0]) > 1:
-        for undef_grad_idx in range(len(output)):
+        for undef_grad_idx in range(len(outputs)):
             output_to_check = _differentiable_outputs(func(*inputs))
             outputs_to_check.append([
                 torch._C._functions.UndefinedGrad()(o) if idx == undef_grad_idx else o
@@ -612,11 +610,11 @@ def gradcheck(
         if check_batched_grad:
             return test_batched_grad(fail_test, tupled_inputs, o, i)
 
-    if not test_backward_mul_by_grad_output(fail_test, func, tupled_inputs, check_sparse_nnz):
+    if not test_backward_mul_by_grad_output(fail_test, outputs, tupled_inputs, check_sparse_nnz):
         return False
 
     if check_undefined_grad:
-        if not test_undefined_grad(fail_test, func, tupled_inputs):
+        if not test_undefined_grad(fail_test, func, outputs, tupled_inputs):
             return False
 
     return True
