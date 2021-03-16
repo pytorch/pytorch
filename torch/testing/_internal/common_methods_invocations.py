@@ -2678,6 +2678,7 @@ op_db: List[OpInfo] = [
                    handles_complex_extremals=False),
     OpInfo('lerp',
            dtypes=floating_and_complex_types(),
+           # Reference: https://github.com/pytorch/pytorch/issues/54048
            # CUDA and ROCM don't support complex inputs
            dtypesIfCUDA=floating_types_and(torch.half),
            dtypesIfROCM=floating_types_and(torch.half),
@@ -2687,6 +2688,7 @@ op_db: List[OpInfo] = [
                # JIT doesn't understand complex literals
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.cfloat, torch.cdouble]),
+               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
            ),
            assert_autodiffed=True),
     OpInfo('linalg.inv',
