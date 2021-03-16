@@ -5,7 +5,7 @@ from torch.overrides import is_tensor_like
 import collections
 from itertools import product
 import warnings
-from typing import Callable, Union, Optional, Iterable, List
+from typing import Callable, Union, Optional, Iterable, List, Dict
 from torch._vmap_internals import vmap
 import functools
 
@@ -194,12 +194,13 @@ def combine_jacobian_rows(jacobians_rows, inputs, output):
 def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_scale, check_grad_dtypes,
                                          raise_exception, custom_backward_fn=None):
     diff_input_list = list(iter_tensors(inputs, True))
+
     def backward_fn(grad_output):
         return torch.autograd.grad(output, diff_input_list, grad_output,
-                                    retain_graph=True, allow_unused=True)
+                                   retain_graph=True, allow_unused=True)
     fn = custom_backward_fn if custom_backward_fn is not None else backward_fn
     jacobians_rows = get_analytical_jacobian(fn, output.clone(), grad_out_scale)
-    jacobians_rows_reentrant =  get_analytical_jacobian(fn, output.clone(), grad_out_scale)
+    jacobians_rows_reentrant = get_analytical_jacobian(fn, output.clone(), grad_out_scale)
 
     jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, output)
     jacobians_reentrant, _, _ = combine_jacobian_rows(jacobians_rows_reentrant, inputs, output)
@@ -231,7 +232,7 @@ def get_analytical_jacobian(fn, sample_output, grad_out_scale):
     # NB: we can't combine the rows into a single jacobian tensor because fn(v) for
     # different v may return tensors with different number of elements
     grad_out_base = torch.zeros_like(sample_output, memory_format=torch.legacy_contiguous_format)
-    flat_grad_out= grad_out_base.view(-1)
+    flat_grad_out = grad_out_base.view(-1)
     # jacobians_rows[i][j] represents the jth row of the ith input
     jacobians_rows: Dict[int, List[Optional[torch.Tensor]]] = {}
 
