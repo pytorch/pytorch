@@ -2045,8 +2045,8 @@ static void apply_magma_eigh(Tensor& values, Tensor& vectors, Tensor& infos, boo
     "Calling torch.linalg.eigh/eigvalsh on a CUDA tensor requires compiling ",
     "PyTorch with MAGMA. Please use PyTorch built with MAGMA support.");
 #else
-  TORCH_INTERNAL_ASSERT(values.device() == kCPU);
-  TORCH_INTERNAL_ASSERT(infos.device() == kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == kCPU);
 
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
 

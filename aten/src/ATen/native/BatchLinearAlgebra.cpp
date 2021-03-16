@@ -1876,26 +1876,26 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out_info(
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of
   // the hierarchy of calls
-  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
-  TORCH_INTERNAL_ASSERT(input.size(-2) == input.size(-1));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.size(-2) == input.size(-1));
 
-  TORCH_INTERNAL_ASSERT(input.device() == vectors.device());
-  TORCH_INTERNAL_ASSERT(input.device() == values.device());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == vectors.device());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == values.device());
 
   // eigenvalues are always real-valued
   ScalarType real_dtype = toValueType(input.scalar_type());
-  TORCH_INTERNAL_ASSERT(values.scalar_type() == real_dtype);
-  TORCH_INTERNAL_ASSERT(input.scalar_type() == vectors.scalar_type());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.scalar_type() == real_dtype);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == vectors.scalar_type());
 
-  TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
-  TORCH_INTERNAL_ASSERT(infos.device() == input.device());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == input.device());
 
   // infos can have the shape equal to input.shape[:-2] or (batchCount(input), ), both would work with the current implementation.
   // infos.shape == input.shape[:-2] might be useful in the future for easier checking the error code for the specific matrix
   // in batched input when we would have a user-exposed way to get infos tensor.
   // 1-dimensional tensor of shape (batchCount(input), ) is currently used for the internal implementation everywhere.
-  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
-  TORCH_INTERNAL_ASSERT(infos.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.numel() == std::max<int64_t>(1, batchCount(input)));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_contiguous());
 
   // if 'vectors' has no elements we can modify it
   if (vectors.numel() == 0) {
@@ -1910,12 +1910,12 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out_info(
   }
 
   // 'vectors' must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT(vectors.transpose(-2, -1).is_contiguous());
-  TORCH_INTERNAL_ASSERT(vectors.sizes().equals(input.sizes()));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.sizes().equals(input.sizes()));
 
   // 'values' must be contiguous
-  TORCH_INTERNAL_ASSERT(values.is_contiguous());
-  TORCH_INTERNAL_ASSERT(values.sizes().equals(values_shape));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.sizes().equals(values_shape));
 
   // linalg_eigh_stub performs calculations in-place and 'vectors' must be a copy of 'input'
   vectors.copy_(input);
