@@ -20,8 +20,8 @@ Tensor addmm(
     const Tensor& bias,
     const Tensor& input,
     const Tensor& weight,
-    Scalar beta,
-    Scalar alpha) {
+    const Scalar& beta,
+    const Scalar& alpha) {
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(weight.device() == kCPU && weight.dim() == 2);
   TORCH_CHECK(bias.device() == kCPU);
