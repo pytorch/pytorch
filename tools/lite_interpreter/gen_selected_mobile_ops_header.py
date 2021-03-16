@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import argparse
 import os
 from typing import Set
@@ -103,6 +104,7 @@ def write_selected_mobile_ops_with_all_dtypes(
 def main():
     parser = argparse.ArgumentParser(
         description="Generate selected_mobile_ops.h for selective build."
+    )
     parser.add_argument(
         "-p", "--yaml_file_path", type=str, required=True, help="Path to the yaml"
         " file with a list of operators used by the model."
