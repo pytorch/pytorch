@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import unittest
-from torch.testing._internal.jit_utils import JitTestCase, TEST_CUDNN
+from torch.testing._internal.jit_utils import JitTestCase
 
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantized import override_quantized_engine
@@ -25,6 +25,13 @@ if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
+
+TEST_CUDA = torch.cuda.is_available()
+TEST_CUDNN = False
+if TEST_CUDA:
+    torch.ones(1).cuda()  # initialize cuda context
+    TEST_CUDNN = (TEST_CUDA and
+        torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
 
 class TestFreezing(JitTestCase):
     def test_freeze_module(self):
@@ -1799,15 +1806,12 @@ class TestFrozenOptimizations(JitTestCase):
             else:
                 scripted_mod = torch.jit.script(mod_eager)
 
-            torch._C._jit_pass_inline(scripted_mod.graph)
-            scripted_mod = torch.jit.freeze(scripted_mod)
-            FileCheck().check("aten::relu").run(scripted_mod.graph)
-
-            self.run_pass("fuse_frozen_conv_add_relu", scripted_mod.graph)
-
+            frozen_mod = torch.jit.freeze(scripted_mod)
+            FileCheck().check("aten::relu").run(frozen_mod.graph)
+            self.run_pass("fuse_frozen_conv_add_relu", frozen_mod.graph)
             if add_z:
-                FileCheck().check("aten::cudnn_convolution_add_relu").run(scripted_mod.graph)
+                FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
             else:
-                FileCheck().check("aten::cudnn_convolution_relu").run(scripted_mod.graph)
+                FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
 
-            self.assertEqual(mod_eager(inp), scripted_mod(inp))
+            self.assertEqual(mod_eager(inp), frozen_mod(inp))

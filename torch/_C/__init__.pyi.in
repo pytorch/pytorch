@@ -794,6 +794,8 @@ class _CudaEventBase:
 class _CudaGraphBase:
     ...
 
+def _graph_pool_handle() -> Tuple[_int, _int]: ...
+
 # Defined in torch/csrc/DataLoader.cpp
 def _set_worker_signal_handlers(*arg: Any) -> None: ...  # THPModule_setWorkerSignalHandlers
 def _set_worker_pids(key: _int, child_pids: Tuple[_int, ...]) -> None: ...  # THPModule_setWorkerPIDs

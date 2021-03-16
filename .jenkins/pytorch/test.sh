@@ -7,6 +7,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
@@ -333,6 +334,7 @@ test_backward_compatibility() {
   set -x
   pushd test/backward_compatibility
   python -m venv venv
+  # shellcheck disable=SC1091
   . venv/bin/activate
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch

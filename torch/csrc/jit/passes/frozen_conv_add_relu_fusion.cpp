@@ -8,6 +8,9 @@
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAConfig.h>
+#endif
 
 namespace torch {
 namespace jit {
@@ -17,7 +20,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
 
   // TODO: fix CUDNN conv1d failure
-  std::string conv_operators[] = {"conv2d", "conv3d"};
+  std::array<std::string, 2> conv_operators = {"conv2d", "conv3d"};
 
   auto conv_relu_rstring = CodeTemplate(R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
@@ -98,12 +101,13 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 
   rewriter.runOnGraph(graph, filter);
 }
-
 } // namespace
 
 void FuseFrozenConvAddRelu(std::shared_ptr<Graph>& graph) {
-#if USE_CUDNN
+#ifdef USE_CUDA
+#if AT_CUDNN_ENABLED()
   fuseFrozenConvAddReluImpl(graph);
+#endif
 #endif
 }
 
