@@ -3160,7 +3160,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
     // we need to recompute input[j] * at::outer(v, v)
     auto tau_unsqueezed = tau.index({"...", j}).unsqueeze(-1);  // tau[..., j][:, None]
     auto tau_unsqueezed2 = tau_unsqueezed.unsqueeze(-1);  // tau[..., j][:, None, None]
-    auto v3 = at::matmul(v1.unsqueeze(-1), v2.conj().unsqueeze(-2));  // batch outer product, at::outer doesn't work for batched input
+    auto v3 = v1.unsqueeze(-1) * v2.conj().unsqueeze(-2);  // batch outer product, at::outer doesn't work for batched input
     auto v4 = tau_unsqueezed2 * v3;
 
     // we don't have an access to the intermediate results of the product of Householder matrices
