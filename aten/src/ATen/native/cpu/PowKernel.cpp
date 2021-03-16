@@ -11,8 +11,8 @@ namespace at { namespace native {
 namespace {
 
 void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
-  if (isFloatingType(iter.dtype()) || isComplexType(iter.dtype())) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "pow", [&]() {
+  if (isFloatingType(iter.common_dtype()) || isComplexType(iter.common_dtype())) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "pow", [&]() {
       using Vec = Vec256<scalar_t>;
       cpu_kernel_vec(iter,
         [=](scalar_t base, scalar_t exp) -> scalar_t {
@@ -24,7 +24,7 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
       );
     });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "pow", [&]() {
       cpu_kernel(iter,
         [=](scalar_t base, scalar_t exp) -> scalar_t {
           return native::powi(base, exp);
@@ -35,10 +35,10 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
 }
 
 void pow_tensor_scalar_kernel(TensorIteratorBase& iter, Scalar exp_scalar) {
-  if (isFloatingType(iter.dtype())) {
+  if (isFloatingType(iter.common_dtype())) {
     const auto exp = exp_scalar.to<double>();
     // Floating types allow AVX2 vector optimizations for pow/sqrt/rsqrt:
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "pow", [&]() {
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "pow", [&]() {
       using Vec = Vec256<scalar_t>;
       if (exp == 0.5) {
         cpu_kernel_vec(iter,
@@ -91,10 +91,10 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, Scalar exp_scalar) {
         );
       }
     });
-  } else if (isComplexType(iter.dtype())) {
+  } else if (isComplexType(iter.common_dtype())) {
     const auto exp = exp_scalar.to<c10::complex<double>>();
     // Floating types allow AVX2 vector optimizations for pow/sqrt/rsqrt:
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow", [&]() {
+    AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "pow", [&]() {
       using Vec = Vec256<scalar_t>;
       if (exp == 0.5) {
         cpu_kernel_vec(iter,
@@ -148,7 +148,7 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, Scalar exp_scalar) {
       }
     });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "pow", [&]() {
       const scalar_t exp = exp_scalar.to<scalar_t>();
       cpu_kernel(iter,
         [=](scalar_t base) -> scalar_t {

@@ -37,6 +37,12 @@ namespace native {
 DEFINE_DISPATCH(pow_tensor_tensor_stub);
 DEFINE_DISPATCH(pow_tensor_scalar_stub);
 
+static Tensor wrapped_scalar_tensor(Scalar scalar, const Device device) {
+  auto tensor = scalar_to_tensor(scalar, device);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
+}
+
 TORCH_IMPL_FUNC(pow_Tensor_Tensor_out) (const Tensor& base, const Tensor& exp, const Tensor& out) {
   if (exp.dim() == 0 && exp.device().is_cpu() && base.is_cuda()) {
     at::pow_out(const_cast<Tensor&>(out), base, exp.item()); // redispatch!
@@ -62,7 +68,7 @@ TORCH_IMPL_FUNC(pow_Scalar_out) (const Scalar base, const Tensor& exp, const Ten
   } else if (!base.isComplex() && base.toDouble() == 1.0) {
     out.fill_(1);
   } else {
-    at::pow_out(const_cast<Tensor&>(out), c10::scalar_to_tensor(base, exp.device()), exp); // redispatch!
+    at::pow_out(const_cast<Tensor&>(out), wrapped_scalar_tensor(base, exp.device()), exp); // redispatch!
   }
 }
 
