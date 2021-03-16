@@ -104,19 +104,23 @@ class non_deterministic(object):
 
 
 ######################################################
-# Determinism
+# typing
 ######################################################
 def force_typing(f):
+    signature = inspect.signature(f)
 
     @wraps(f)
     def wrapper(*args, **kwargs):
-        for arg in args:
+        bound = signature.bind(*args, **kwargs)
+        for argument_name, value in bound.arguments.items():
+            if argument_name == 'self':
+                continue
             if isinstance(arg, IterDataPipe):
                 if not hasattr(arg, 'type'):
-                    raise TypeError('Argument {} must have a type attribute'.format(arg))
+                    raise TypeError("Argument '{}' must have attribute 'type'".format(argument_name))
                 if not isinstance(arg.type, _DataPipeType):
-                    raise TypeError('Type of argument {} must be _DataPipeType, but {} is found'
-                                    .format(arg, type(arg.type)))
+                    raise TypeError("Type of argument '{}' must be _DataPipeType, but {} is found"
+                                    .format(argument_name, type(arg.type)))
 
         return f(*args, **kwargs)
 
