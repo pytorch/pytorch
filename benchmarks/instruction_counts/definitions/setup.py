@@ -1,4 +1,9 @@
-"""Define some common setup blocks which benchmarks can reuse."""
+"""Define some common setup blocks which benchmarks can reuse.
+
+Note that for `parse_stmts`:
+  - Width for the left (Python) column MUST be 40 characters.
+  - The column separator is " | ", not "|". Whitespace matters.
+"""
 
 import enum
 

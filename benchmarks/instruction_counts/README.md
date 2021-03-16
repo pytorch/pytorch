@@ -64,7 +64,7 @@ Timer(
 ```
 
 Moreover, because `signature` is provided we know that creation of `x` and `w`
-is part of setup, and the overall comptation uses `x` and `v` to produce `y`.
+is part of setup, and the overall comptation uses `x` and `w` to produce `y`.
 As a result, we can derive TorchScript'd and AutoGrad variants as well. We can
 deduce that a TorchScript model will take the form:
 
@@ -111,7 +111,7 @@ While nothing above is particularly complex, there is non-trivial bookkeeping
 (managing the model artifact, setting up IValues) which if done manually would
 be rather bug-prone and hard to read.
 
-The story is similar for AutoGrad: because we know the output variable (`y`)
+The story is similar for autograd: because we know the output variable (`y`)
 and we make sure to assign it when calling TorchScript models, testing AutoGrad
 is as simple as appending `y.backward()` (or `y.backward();` in C++) to the
 stmt of the forward only variant. Of course this requires that `signature` be
