@@ -1889,6 +1889,11 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out_info(
 
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
   TORCH_INTERNAL_ASSERT(infos.device() == input.device());
+
+  // infos can have the shape equal to input.shape[:-2] or (batchCount(input), ), both would work with the current implementation.
+  // infos.shape == input.shape[:-2] might be useful in the future for easier checking the error code for the specific matrix
+  // in batched input when we would have a user-exposed way to get infos tensor.
+  // 1-dimensional tensor of shape (batchCount(input), ) is currently used for the internal implementation everywhere.
   TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
   TORCH_INTERNAL_ASSERT(infos.is_contiguous());
 
