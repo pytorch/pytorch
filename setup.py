@@ -758,6 +758,12 @@ def configure_extension_build():
             extra_compile_args += ['-g']
             extra_link_args += ['-g']
 
+    # Cross-compile for M1
+    if IS_DARWIN:
+        macos_target_arch = os.getenv("CMAKE_OSX_ARCHITECTURES", "")
+        if macos_target_arch in ["arm64", "x86_64"]:
+            extra_compile_args += ["-arch", macos_target_arch]
+
 
     def make_relative_rpath_args(path):
         if IS_DARWIN:
