@@ -331,7 +331,6 @@ class StreamContext(object):
 
     Args:
         Stream (Stream): selected stream. This manager is a no-op if it's
-<<<<<<< HEAD
             ``None``.
     .. note:: Streams are per-device.
     """
@@ -391,71 +390,8 @@ def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ign
 def set_stream(stream: Stream):
     r"""Sets the current stream.
     This is a wrapper API to set the stream.
-    Usage of this function is discouraged. It is recommended to
-    use ``torch._C._cuda_setStream`` API instead of this. This
-    API is only for internal usage.
-=======
-            ``None``.
-    .. note:: Streams are per-device.
-    """
-    cur_stream : Optional['torch.cuda.Stream']
-
-    def __init__(self, stream: Optional['torch.cuda.Stream']):  # type: ignore
-        self.idx = -1
-        self.stream = stream
-        # Initialize the below streams to default stream on the current device
-        self.src_prev_stream = torch.cuda.default_stream(None)
-        self.dst_prev_stream = torch.cuda.default_stream(None)
-
-    def __enter__(self):
-        self.idx = _get_device_index(device=None, optional=True)
-        # If there is no CUDA device available, return
-        if self.idx == -1:
-            return
-
-        # Local cur_stream variable for type refinement
-        cur_stream = self.stream
-        # Return if stream is None
-        if cur_stream is None:
-            return
-        self.src_prev_stream = torch.cuda.current_stream(None)
-
-        # If the stream is not on the current device, then
-        # set the current stream on the device
-        if self.src_prev_stream.device != cur_stream.device:
-            with device(cur_stream.device):
-                self.dst_prev_stream = torch.cuda.current_stream(cur_stream.device)
-        torch.cuda.set_stream(cur_stream)  # type: ignore
-
-    def __exit__(self, type: Any, value: Any, traceback: Any):
-        # Local cur_stream variable for type refinement
-        cur_stream = self.stream
-        # If stream is None or no CUDA device available, return
-        if cur_stream is None or self.idx == -1:
-            return
-
-        # Reset the stream on the original device
-        # and destination device
-        if self.src_prev_stream.device != cur_stream.device:
-            torch.cuda.set_stream(self.dst_prev_stream)  # type: ignore
-        torch.cuda.set_stream(self.src_prev_stream)  # type: ignore
-
-def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ignore
-    r"""Wrapper around the Context-manager StreamContext that
-        selects a given stream.
-    Arguments:
-        stream (Stream): selected stream. This manager is a no-op if it's
-            ``None``.
-    ..Note:: In eager mode stream is of type Stream class while in JIT it is
-    an object of the custom class ``torch.classes.cuda.Stream``.
-    """
-    return StreamContext(stream)
-
-def set_stream(stream: Stream):
-    r"""Sets the current stream.
     Usage of this function is discouraged in favor of
     the ``stream`` context manager.
->>>>>>> b0e980215b4d5b221e5b15ed18348eca6e685d35
     Args:
         stream (Stream): selected stream. This function is a no-op
             if this argument is ``None``.
