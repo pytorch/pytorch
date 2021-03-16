@@ -3965,6 +3965,80 @@ class TestAutograd(TestCase):
         gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp, nondet_tol=1e-5, check_batched_grad=False)
         gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp, nondet_tol=1e-5, check_batched_grad=False)
 
+    def test_gradcheck_test_inputs(self):
+        # when inputs are not dense, but check_sparse_nnz is false
+        x = torch.rand(10, requires_grad=True).to_sparse()
+        with self.assertRaisesRegex(RuntimeError, 'dense when check_sparse_nnz is set to False.'):
+            gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=False, check_batched_grad=False)
+        self.assertFalse(gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=False,
+            check_batched_grad=False, raise_exception=False))
+
+        # when none of the inputs require grad (always raises even if raise_exception=False)
+        x = torch.rand(10, requires_grad=False)
+        with self.assertRaisesRegex(ValueError, 'at least one input tensor to require gradient'):
+            gradcheck(lambda x: x, (x,), raise_exception=False)
+
+        # (warning) when inputs are not double precision
+        x = torch.ones(1, dtype=torch.float32, requires_grad=True)
+        with self.assertWarnsRegex(UserWarning, "Input #0 requires gradient and is not a double precision"):
+            self.assertTrue(gradcheck(lambda x: x, (x,), atol=1e-1))
+
+        # when layout is not mkldnn(aka has strides) and input has a dimension with stride 0. (always raises
+        # even if raise_exception=False)
+        x = torch.ones(1, dtype=torch.float64, requires_grad=True)
+        x = x.expand((2, 2))
+        with self.assertRaisesRegex(RuntimeError, 'The 0th input has a dimension with stride 0'):
+            gradcheck(lambda x: x, (x,), raise_exception=False)
+
+    def test_gradcheck_test_outputs(self):
+        # when sparse outputs (always raise)
+        x = torch.rand(10, requires_grad=True).to_sparse()
+        with self.assertRaisesRegex(ValueError, 'Sparse output is not supported at gradcheck yet'):
+            gradcheck(lambda x: x, (x,), check_sparse_nnz=True, check_batched_grad=False, raise_exception=False)
+
+        # when mkldnn outputs (always raise even if raise_exception_False)
+        root = torch.randn(4, 5, dtype=torch.float32, requires_grad=True)
+        with self.assertRaisesRegex(ValueError, 'MKLDNN output is not supported at gradcheck yet'):
+            gradcheck(lambda x: x.to_mkldnn(), (root,), check_batched_grad=False, raise_exception=False)
+
+    def test_gradcheck_check_no_differentiable_outputs(self):
+        # When none of the outputs are differentiable, but numerical gradient is not zero
+        x = torch.ones((1,), requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, 'Numerical gradient for function expected to be zero'):\
+            gradcheck(lambda x: torch.tensor([x]), x)
+
+    def test_gradcheck_check_batched_grad(self):
+        x = torch.rand(10, requires_grad=True).to_sparse()
+        # runtime error while compute batched grad (print big error)
+        with self.assertRaisesRegex(RuntimeError, 'gradcheck or gradgradcheck failed while testing batched gradient'):
+            gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=True, check_batched_grad=True)
+        # TODO: fix and then uncomment
+        # self.assertFalse(gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=True, check_batched_grad=True,
+        #                            raise_exception=False))
+
+    def test_gradcheck_backward_mul_by_grad_output(self):
+        # TODO: cover the below cases
+        # when no Tensors requiring grad found in input
+        # when layout of grad_input is not the same as input
+        # when grad_input is sparse and has incorrect sparse_dim/dense_dim
+        # when backward not multiplied by grad_output (sparse/non-sparse case)
+        # when grad is incorrect type/size
+        pass
+
+    def test_gradcheck_undefined_grad(self):
+        # TODO: cover the below cases
+        # when no Tensors requiring grad found in input
+        # when encounter runtime error while running backward
+        # when we complete backward but grad inputs (the output of .grad()) is not none
+        pass
+
+    def test_gradcheck_check_analytical_jacobian_attributes(self):
+        # TODO: cover the below cases
+        # (for both complex/non complex)
+        # when grad input is incorrect dtype/size
+        # when not reentrant (DONE)
+        pass
+
     def test_version_counter(self):
         x = torch.randn(1, 2)
 
