@@ -55,10 +55,12 @@ jobs:
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --user jenkins \
+            --tty \
+            -e BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT} \
             -v ${GITHUB_WORKSPACE}:/var/lib/jenkins \
             -w /var/lib/jenkins \
             ${DOCKER_IMAGE} \
-            .jenkins/build.sh
+            .jenkins/pytorch/build.sh
       # TODO: Add step to archive built artifacts
       - name: Clean up workspace
         if: always()
