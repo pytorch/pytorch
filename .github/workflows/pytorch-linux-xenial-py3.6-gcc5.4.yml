@@ -74,7 +74,7 @@ jobs:
       - name: Clean up workspace
         if: always()
         run: |
-          rm -rfv "${GITHUB_WORKSPACE}"
+          rm -rf "${GITHUB_WORKSPACE}"
           # Prune all of the docker images
           docker system prune -af
   # TODO: Add test step here
