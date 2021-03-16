@@ -101,7 +101,7 @@ Tensor pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
   std::iota(permutation.begin(), permutation.end(), 0);
   const auto NUM_BATCH_DIMS = self.dim() - NUM_NON_BATCH_DIMS;
   permutation.insert(permutation.end(), {NUM_BATCH_DIMS /* c */, NUM_BATCH_DIMS + 2 /* 1st downscale factor */,
-    NUM_BATCH_DIMS + 4 /* 2nd upscale factor */, NUM_BATCH_DIMS + 1 /* oh */,
+    NUM_BATCH_DIMS + 4 /* 2nd downscale factor */, NUM_BATCH_DIMS + 1 /* oh */,
     NUM_BATCH_DIMS + 3 /* ow */});
   const auto input_permuted = input_reshaped.permute(permutation);
 
