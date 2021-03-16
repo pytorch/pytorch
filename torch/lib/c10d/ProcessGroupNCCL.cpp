@@ -401,10 +401,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     c10::intrusive_ptr<Options> options)
     : ProcessGroup(rank, size),
       store_(store),
+      options_(options),
       ncclCommCounter_(0),
-      terminateProcessGroup_(false),
-      opTimeout_(options->timeout),
-      isHighPriorityStream_(options->is_high_priority_stream) {
+      terminateProcessGroup_(false) {
   TORCH_CHECK(at::cuda::getNumGPUs() != 0,
     "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
@@ -437,8 +436,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "] ProcessGroupNCCL initialized with following options:"
             << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
-            << "\nTIMEOUT(ms): " << opTimeout_.count()
-            << "\nUSE_HIGH_PRIORITY_STREAM: " << isHighPriorityStream_
+            << "\nTIMEOUT(ms): " << options_->timeout.count()
+            << "\nUSE_HIGH_PRIORITY_STREAM: "
+            << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
 }
 
@@ -824,7 +824,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
 
     // Creates the NCCL streams
-    streamVal.push_back(at::cuda::getStreamFromPool(isHighPriorityStream_));
+    streamVal.push_back(
+        at::cuda::getStreamFromPool(options_->is_high_priority_stream));
   }
 
   // [Note 2 ]
@@ -985,7 +986,7 @@ void ProcessGroupNCCL::workEnqueue(
 ProcessGroupNCCL::Options::Options(
     std::chrono::milliseconds timeout,
     bool is_high_priority_stream)
-    : ProcessGroup::Options(timeout, "nccl"),
+    : ProcessGroup::Options(timeout, NCCL_BACKEND_NAME),
       is_high_priority_stream(is_high_priority_stream) {}
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -1059,7 +1060,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   // Set appropriate work parameters.
   work->blockingWait_ = blockingWait_;
-  work->opTimeout_ = opTimeout_;
+  work->opTimeout_ = options_->timeout;
   work->store_ = store_;
 
   if (work->recordFunctionEndCallback_) {
@@ -1143,7 +1144,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     (*work->cudaEvents_)[i].record(ncclStream);
     work->ncclComms_[i] = ncclComms[i];
     work->blockingWait_ = blockingWait_;
-    work->opTimeout_ = opTimeout_;
+    work->opTimeout_ = options_->timeout;
     work->store_ = store_;
   }
 

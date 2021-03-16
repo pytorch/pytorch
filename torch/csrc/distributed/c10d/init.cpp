@@ -249,6 +249,15 @@ Returns:
 Returns:
     Whether this bucket is the last bucket to allreduce in an iteration.
     This also means that this bucket corresponds to the first few layers in the forward pass.
+)")
+      .def(
+          "set_tensor",
+          &::c10d::GradBucket::setTensor,
+          py::arg("tensor"),
+          py::arg("i"),
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Replaces the ith tensor in the bucket with the input tensor.
 )");
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
@@ -1071,8 +1080,8 @@ Arguments:
   // base ProcessGroup::Options binding
   auto processGroupOptions =
       intrusive_ptr_class_<::c10d::ProcessGroup::Options>(
-          module,
-          "ProcessGroupOptions",
+          processGroup,
+          "Options",
           R"(
 Base class for all processs group options implementations, such as the 2 provided by PyTorch
 distributed: (:class:`~torch.distributed.ProcessGroupGloo.Options` and
@@ -1128,8 +1137,8 @@ Example::
       .def(
           py::init<std::chrono::milliseconds>(),
           py::arg("timeout") = kProcessGroupDefaultTimeout)
-      .def_readwrite("devices", &::c10d::ProcessGroupGloo::Options::devices)
-      .def_readwrite("threads", &::c10d::ProcessGroupGloo::Options::threads);
+      .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
+      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
 
   processGroupGloo
       .def_static(
@@ -1191,8 +1200,9 @@ Example::
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = kProcessGroupDefaultTimeout, // NOLINT
-          py::call_guard<py::gil_scoped_release>());
+          py::arg("timeout") = kProcessGroupDefaultTimeout,
+          py::call_guard<py::gil_scoped_release>())
+      .def_property_readonly("options", &::c10d::ProcessGroupGloo::getOptions);
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -1221,7 +1231,9 @@ Example::
               py::arg("rank"),
               py::arg("size"),
               py::arg("timeout") = kProcessGroupDefaultTimeout,
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def_property_readonly(
+              "options", &::c10d::ProcessGroupNCCL::getOptions);
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,

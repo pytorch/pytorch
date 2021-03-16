@@ -183,6 +183,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   };
 
   struct Options : ProcessGroup::Options {
+    // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
+    // operations. This is only used when blockingWait_ is enabled.
     explicit Options(
         std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
         bool is_high_priority_stream = false);
@@ -194,6 +196,7 @@ class ProcessGroupNCCL : public ProcessGroup {
       return c10::make_intrusive<Options>(timeout, is_high_priority_stream);
     }
 
+    // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
   };
 
@@ -229,6 +232,10 @@ class ProcessGroupNCCL : public ProcessGroup {
       : ProcessGroupNCCL(store, rank, size, options) {}
 
   virtual ~ProcessGroupNCCL();
+
+  c10::intrusive_ptr<Options> getOptions() {
+    return options_;
+  }
 
   const std::string getBackendName() const override {
       return std::string(NCCL_BACKEND_NAME);
@@ -418,6 +425,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // The store is used to broadcast the NCCL unique ID of rank 0.
   c10::intrusive_ptr<Store> store_;
 
+  const c10::intrusive_ptr<Options> options_;
+
   // The number of NCCL communicators that have been created during
   // the lifetime of this process group. This sequence number is
   // used to scope keys used in the store.
@@ -526,17 +535,11 @@ class ProcessGroupNCCL : public ProcessGroup {
   // handling.
   bool asyncErrorHandling_ = false;
 
-  // Timeout for operations. This is only used when blockingWait_ is enabled.
-  std::chrono::milliseconds opTimeout_;
-
   // Set of communicators that this process group has aborted and their
   // ncclUniqueId has been written to the store. We don't need a lock
   // for this map since only the watchdog thread accesses this set. The
   // set contains the string representation of ncclUniqueId.
   std::unordered_set<std::string> abortedComms_;
-
-  // Schedule NCCL operations on high priority CUDA streams.
-  bool isHighPriorityStream_ = false;
 
   // The number of active ncclGroupStart() calls. This counter will be increased
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()

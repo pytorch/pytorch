@@ -456,8 +456,8 @@ def init_process_group(backend,
         pg_options (ProcessGroupOptions, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. i.e. for the ``nccl``
-            backend, is_high_priority_stream can be specified so that process
-            group can pick up high priority cuda streams.
+            backend, ``is_high_priority_stream`` can be specified so that
+            process group can pick up high priority cuda streams.
 
 
     To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
@@ -612,14 +612,18 @@ def _new_process_group_helper(world_size,
                 pg_options.timeout = timeout
 
             # If user forget to set devices, we should do it by default
-            if not pg_options.devices:
+            if not pg_options._devices:
                 ifname_env = getenv("GLOO_SOCKET_IFNAME")
                 if ifname_env is not None:
-                    pg_options.devices = [ProcessGroupGloo.create_device(interface=iface) for iface in ifname_env.split(",")]
+                    pg_options._devices = [ProcessGroupGloo.create_device(interface=iface) for iface in ifname_env.split(",")]
                 else:
-                    pg_options.devices = [ProcessGroupGloo.create_default_device()]
+                    pg_options._devices = [ProcessGroupGloo.create_default_device()]
 
-                pg_options.threads = len(pg_options.devices) * 2
+                # user pass in threads but not devices, error that both are required
+                if pg_options._threads != 2:
+                    raise RuntimeError("ProcessGroupGloo.Options threads and devices must be passed in together")
+                else:
+                    pg_options._threads = len(pg_options._devices) * 2
 
             pg = ProcessGroupGloo(
                 prefix_store,

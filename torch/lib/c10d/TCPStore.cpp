@@ -248,10 +248,15 @@ void TCPStoreDaemon::waitHandler(int socket) {
     tcputil::sendValue<WaitResponseType>(
         socket, WaitResponseType::STOP_WAITING);
   } else {
+    int numKeysToAwait = 0;
     for (auto& key : keys) {
-      waitingSockets_[key].push_back(socket);
+      // Only count keys that have not already been set
+      if (tcpStore_.find(key) == tcpStore_.end()) {
+        waitingSockets_[key].push_back(socket);
+        numKeysToAwait++;
+      }
     }
-    keysAwaited_[socket] = keys.size();
+    keysAwaited_[socket] = numKeysToAwait;
   }
 }
 
@@ -506,7 +511,7 @@ int64_t TCPStore::add(const std::string& key, int64_t value) {
 bool TCPStore::deleteKey(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::DELETE_KEY);
-  tcputil::sendString(storeSocket_, regKey, true);
+  tcputil::sendString(storeSocket_, regKey);
   auto numDeleted = tcputil::recvValue<int64_t>(storeSocket_);
   return (numDeleted == 1);
 }
