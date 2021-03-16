@@ -88,7 +88,7 @@ def write_selected_mobile_ops(
 # Write the file selected_mobile_ops.h with optionally:
 # 1. The selected root operators from root_ops
 # 2. All kernel dtypes
-def write_selected_mobile_ops(
+def write_selected_mobile_ops_with_all_dtypes(
     output_file_path: str,
     root_ops: Set[str],
 ) -> None:
@@ -104,8 +104,8 @@ def write_selected_mobile_ops(
 
 def main():
     parser = argparse.ArgumentParser(description="selected_mobile_ops.h:"
-    "Primary operators used by templated selective build and Kernel Function"
-    "dtypes captured by tracing ")
+        "Primary operators used by templated selective build and Kernel Function"
+        "dtypes captured by tracing ")
     parser.add_argument(
         "-p", "--yaml_file_path", type=str, required=True, help="Path to the yaml"
         " file with a list of operators used by the model."
@@ -125,7 +125,7 @@ def main():
 
     root_operators_set = set(loaded_model)
     print("Writing header file selected_mobile_ops.h: ", parsed_args.output_file_path)
-    write_selected_mobile_ops(
+    write_selected_mobile_ops_with_all_dtypes(
         os.path.join(parsed_args.output_file_path),
         root_operators_set)
 
