@@ -52,18 +52,18 @@ DEFINE_DISPATCH(polar_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor arange(Scalar end, const TensorOptions& options) {
+Tensor arange(const Scalar& end, const TensorOptions& options) {
   return native::arange(/*start=*/0, end, options);
 }
 
-Tensor arange(Scalar start, Scalar end, const TensorOptions& options) {
+Tensor arange(const Scalar& start, const Scalar& end, const TensorOptions& options) {
   return native::arange(start, end, /*step=*/1, options);
 }
 
 Tensor arange(
-    Scalar start,
-    Scalar end,
-    Scalar step,
+    const Scalar& start,
+    const Scalar& end,
+    const Scalar& step,
     const TensorOptions& options) {
   bool set_to_integral_dtype = !options.has_dtype() &&
        // bool inputs are considered integral
@@ -77,11 +77,11 @@ Tensor arange(
   return at::arange_out(result, start, end, step);
 }
 
-Tensor& arange_out(Tensor& result, Scalar end) {
+Tensor& arange_out(Tensor& result, const Scalar& end) {
   return at::arange_out(result, /*start=*/0, end);
 }
 
-Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
+Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
   return at::arange_out(result, start, end, /*step=*/1);
 }
 
@@ -389,7 +389,7 @@ namespace {
 
 // Performs dtype inference for full
 TensorOptions infer_full_options(
-  Scalar fill_value,
+  const Scalar& fill_value,
   const TensorOptions& options) {
 
   if (!options.has_dtype()) {
@@ -412,7 +412,7 @@ TensorOptions infer_full_options(
 
 } // anonymous namespace
 
-Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options) {
+Tensor full(IntArrayRef size, const Scalar& fill_value, const TensorOptions& options) {
   TORCH_CHECK(options.layout() != kSparse,
     "full(...) is not implemented for sparse layout");
 
@@ -420,7 +420,7 @@ Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options) {
   return result.fill_(fill_value);
 }
 
-Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
+Tensor& full_out(Tensor& result, IntArrayRef size, const Scalar& fill_value) {
   TORCH_CHECK(!result.is_sparse(),
     "full(...) is not implemented for sparse layout");
 
@@ -430,7 +430,7 @@ Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
 
 Tensor full_like(
     const Tensor& self,
-    Scalar fill_value,
+    const Scalar& fill_value,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
@@ -440,7 +440,7 @@ Tensor full_like(
 Tensor new_full(
     const Tensor& self,
     IntArrayRef size,
-    Scalar fill_value,
+    const Scalar& fill_value,
     const TensorOptions& options
     ) {
   return at::full(size, fill_value, self.options().merge_in(options));
@@ -448,8 +448,8 @@ Tensor new_full(
 
 namespace {
 TensorOptions linspace_logspace_infer_options(
-    Scalar start,
-    Scalar end,
+    const Scalar& start,
+    const Scalar& end,
     const TensorOptions& options) {
   auto result_options = options;
   if (start.isComplex() || end.isComplex()) {
@@ -475,8 +475,8 @@ TensorOptions linspace_logspace_infer_options(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor linspace(
-    Scalar start,
-    Scalar end,
+    const Scalar& start,
+    const Scalar& end,
     c10::optional<int64_t> steps,
     const TensorOptions& options) {
   const auto steps_ = steps.value_or(100);
@@ -489,8 +489,8 @@ Tensor linspace(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor logspace(
-    Scalar start,
-    Scalar end,
+    const Scalar& start,
+    const Scalar& end,
     c10::optional<int64_t> steps,
     double base,
     const TensorOptions& options) {
@@ -521,7 +521,7 @@ Tensor ones_like(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
+Tensor scalar_tensor(const Scalar& s, const TensorOptions& options) {
   if (options.device() == at::kCPU) {
     // This is a fast track to skip device dispatch for making scalar tensor on CPU.
     // See https://github.com/pytorch/pytorch/pull/29915 for more detailed perf
@@ -741,17 +741,17 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, c10::optional<Generator> gen
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ range ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor range(
-    Scalar start,
-    Scalar end,
-    Scalar step,
+    const Scalar& start,
+    const Scalar& end,
+    const Scalar& step,
     const TensorOptions& options) {
   Tensor result = at::empty({0}, options);
   return at::range_out(result, start, end, step);
 }
 
 Tensor range(
-    Scalar start,
-    Scalar end,
+    const Scalar& start,
+    const Scalar& end,
     const TensorOptions& options) {
   return at::native::range(start, end, 1, options);
 }
@@ -1125,7 +1125,7 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
 
 Tensor full(
     IntArrayRef size,
-    Scalar fill_value,
+    const Scalar& fill_value,
     optional<DimnameList> names,
     const TensorOptions& options) {
 
