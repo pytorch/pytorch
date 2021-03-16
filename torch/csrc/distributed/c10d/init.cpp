@@ -184,7 +184,21 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           py::arg("reducer"),
           py::arg("comm_hook_type"));
 
-  shared_ptr_class_<::c10d::GradBucket>(module, "GradBucket")
+  shared_ptr_class_<::c10d::GradBucket>(
+      module,
+      "GradBucket",
+      R"(
+This class mainly passes a list of gradient tensors
+(returned by :meth:`~torch.distributed.GradBucket.get_tensors`)
+to DDP communication hook,
+where each tensor in the list refers to the replica on each device.
+Since DDP communication hook only supports single process single device mode at this time,
+only exactly one tensor is stored in this bucket.
+This tensor is actually a flattened 1D tensor,
+which can be further decomposed into a list of per-parameter tensors within this bucket
+(returned by :meth:`~torch.distributed.GradBucket.get_per_parameter_tensors`)
+to apply layer-wise operations.
+)")
       .def(
           py::init<
               size_t,
@@ -235,6 +249,15 @@ Returns:
 Returns:
     Whether this bucket is the last bucket to allreduce in an iteration.
     This also means that this bucket corresponds to the first few layers in the forward pass.
+)")
+      .def(
+          "set_tensor",
+          &::c10d::GradBucket::setTensor,
+          py::arg("tensor"),
+          py::arg("i"),
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+Replaces the ith tensor in the bucket with the input tensor.
 )");
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
