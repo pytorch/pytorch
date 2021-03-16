@@ -910,13 +910,15 @@ if(NOT INTERN_BUILD_MOBILE)
 endif()
 
 # Codegen selected_mobile_ops.h for template selective build
-if(BUILD_LITE_INTERPRETER and SELECTED_OP_LIST)
-  add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
-          COMMAND
-          "${PYTHON_EXECUTABLE}" ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
-          --yaml_file_path "${SELECTED_OP_LIST}"
-          --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h"
-          WORKING_DIRECTORY "${TORCH_ROOT}")
+if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
+  add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+    COMMAND
+    "${PYTHON_EXECUTABLE}"
+    ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
+    --yaml_file_path "${SELECTED_OP_LIST}"
+    --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h"
+    WORKING_DIRECTORY "${TORCH_ROOT}")
 
   add_custom_target(
     __selected_mobile_ops_header_gen
