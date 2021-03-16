@@ -352,17 +352,6 @@ void IRPrinter::visit(const ReduceOp* v) {
   os() << *v->body() << ", ";
 
   bool first = true;
-  os() << "out_args={";
-  for (auto* d : v->output_args()) {
-    if (!first) {
-      os() << ", ";
-    }
-    os() << *d;
-    first = false;
-  }
-  os() << "}, ";
-
-  first = true;
   os() << "reduce_args={";
   for (auto* d : v->reduce_args()) {
     if (!first) {
@@ -440,8 +429,9 @@ void IRPrinter::visit(const Block* v) {
 
 void IRPrinter::visit(const Allocate* v) {
   emitIndent();
-  os() << "Allocate(" << *v->buffer_var() << ", " << v->dtype().ToCppString();
-  os() << ", {";
+  os() << "Allocate(" << *v->buffer_var()
+       << "); // dtype=" << v->dtype().ToCppString();
+  os() << ", dims=[";
   const std::vector<const Expr*>& dims = v->dims();
   for (size_t i = 0; i < dims.size(); i++) {
     if (i != 0) {
@@ -449,7 +439,7 @@ void IRPrinter::visit(const Allocate* v) {
     }
     os() << *dims[i];
   }
-  os() << "});" << std::endl;
+  os() << "]" << std::endl;
 }
 
 void IRPrinter::visit(const Free* v) {

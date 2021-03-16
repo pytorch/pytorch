@@ -8,7 +8,7 @@ import random
 from functools import partial
 from itertools import product, combinations, permutations
 
-from torch._six import inf, nan, istuple
+from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_SCIPY, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS)
@@ -499,8 +499,8 @@ class TestReductions(TestCase):
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     def test_max_with_inf(self, device, dtype):
         a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
         self.assertTrue(torch.all(torch.max(a, dim=1).values == inf).item())
@@ -508,8 +508,8 @@ class TestReductions(TestCase):
         self.assertTrue(torch.max(a).item() == inf)
         self.assertTrue(torch.amax(a).item() == inf)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.bfloat16, torch.double)
     def test_min_with_inf(self, device, dtype):
         a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
         self.assertTrue(torch.all(torch.min(a, dim=1).values == (-inf)).item())
@@ -533,7 +533,7 @@ class TestReductions(TestCase):
         self.compare_with_numpy(torchfn, reffn, x)
 
         def get_values(x):
-            if istuple(x):
+            if isinstance(x, tuple):
                 return x[0]
             return x
 
@@ -546,7 +546,7 @@ class TestReductions(TestCase):
             for xinp, d in product(inputs, dims):
                 self.compare_with_numpy(lambda x: get_values(torchfn(x, d, False)), lambda x: reffn(x, d, keepdims=False), xinp)
                 result = torchfn(xinp, d, False)
-                if istuple(result):
+                if isinstance(result, tuple):
                     v, i = result
                     if d == 1:
                         self.assertEqual(xinp[torch.arange(size), i], v, atol=0, rtol=0)
@@ -561,30 +561,30 @@ class TestReductions(TestCase):
                     result = torchfn(x, 0)
                     v = get_values(result)
                     self.assertEqual(v, nan)
-                    if istuple(result):
+                    if isinstance(result, tuple):
                         i = result[1]
                         self.assertEqual(i, index)
                 self.assertEqual(torchfn(x), nan)
 
-    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool)
+    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.double)
     def test_max(self, device, dtype):
         self._test_minmax_helper(torch.max, np.amax, device, dtype)
 
-    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool)
+    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.double)
     def test_min(self, device, dtype):
         self._test_minmax_helper(torch.min, np.amin, device, dtype)
 
-    @dtypesIfCPU(torch.float, torch.double, torch.int, torch.long, torch.bool)
+    @dtypesIfCPU(torch.half, torch.float, torch.double, torch.int, torch.long, torch.bool)
     @dtypesIfCUDA(torch.half, torch.float, torch.int, torch.long, torch.bool)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.double)
     def test_amin(self, device, dtype):
         self._test_minmax_helper(torch.amin, np.amin, device, dtype)
 
-    @dtypesIfCPU(torch.float, torch.double, torch.int, torch.long, torch.bool)
+    @dtypesIfCPU(torch.half, torch.float, torch.double, torch.int, torch.long, torch.bool)
     @dtypesIfCUDA(torch.half, torch.float, torch.int, torch.long, torch.bool)
     @dtypes(torch.float, torch.double)
     def test_amax(self, device, dtype):
@@ -1400,7 +1400,7 @@ class TestReductions(TestCase):
         }
 
         # This won't test for 256bit instructions, since we usually
-        # only work on 1 cacheline (1024bit) at a time and these
+        # only work on 1 cacheline (512bit) at a time and these
         # examples aren't big enough to trigger that.
         for dtype in types:
             x = torch.tensor(example, device=device, dtype=dtype)
@@ -1514,7 +1514,7 @@ class TestReductions(TestCase):
 
             def fn(x, dim, keepdim=False, out=None):
                 ans = fn_attr(x, dim, keepdim=keepdim, out=out)
-                return ans if not istuple(ans) else ans[0]
+                return ans if not isinstance(ans, tuple) else ans[0]
 
             def fn_tuple(x, dim, keepdim=False, out=None):
                 return fn_attr(x, dim, keepdim=keepdim, out=out)

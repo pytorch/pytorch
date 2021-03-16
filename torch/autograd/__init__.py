@@ -71,7 +71,7 @@ def backward(
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
     grad_variables: Optional[_TensorOrTensors] = None,
-    inputs: Optional[Sequence[torch.Tensor]] = None,
+    inputs: Optional[_TensorOrTensors] = None,
 ) -> None:
     r"""Computes the sum of gradients of given tensors w.r.t. graph leaves.
 
@@ -103,13 +103,13 @@ def backward(
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
     Args:
-        tensors (sequence of Tensor): Tensors of which the derivative will be
+        tensors (Sequence[Tensor] or Tensor): Tensors of which the derivative will be
             computed.
-        grad_tensors (sequence of (Tensor or None)): The "vector" in the Jacobian-vector
-            product, usually gradients w.r.t. each element of corresponding tensors.
-            None values can be specified for scalar Tensors or ones that don't require
-            grad. If a None value would be acceptable for all grad_tensors, then this
-            argument is optional.
+        grad_tensors (Sequence[Tensor or None] or Tensor, optional): The "vector" in
+            the Jacobian-vector product, usually gradients w.r.t. each element of
+            corresponding tensors. None values can be specified for scalar Tensors or
+            ones that don't require grad. If a None value would be acceptable for all
+            grad_tensors, then this argument is optional.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient
@@ -117,10 +117,10 @@ def backward(
         create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
             Defaults to ``False``.
-        inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
-            accumulated into ``.grad``. All other Tensors will be ignored. If not
-            provided, the gradient is accumulated into all the leaf Tensors that were
-            used to compute the attr::tensors. All the provided inputs must be leaf
+        inputs (Sequence[Tensor] or Tensor, optional): Inputs w.r.t. which the gradient
+            be will accumulated into ``.grad``. All other Tensors will be ignored. If
+            not provided, the gradient is accumulated into all the leaf Tensors that
+            were used to compute the attr::tensors. All the provided inputs must be leaf
             Tensors.
     """
     if grad_variables is not None:
@@ -135,7 +135,8 @@ def backward(
         raise RuntimeError("'inputs' argument to backward() cannot be empty.")
 
     tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
-    inputs = tuple(inputs) if inputs is not None else tuple()
+    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else \
+        tuple(inputs) if inputs is not None else tuple()
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_)
@@ -226,12 +227,11 @@ def grad(
 
 
 # This function applies in case of gradient checkpointing for memory
-# optimization. Currently, for gradient checkpointing, we only support imperative
-# backwards call i.e. torch.autograd.backward() and the torch.autograd.grad() won't
-# work. The reason being that: torch.autograd.grad() only calculates the grads
-# for the inputs that are passed by user but it doesn't calculate grad for
-# anything else e.g. model parameters like weights, bias etc. However, for
-# torch.autograd.backward(), we would actually compute the grad for the weights as well.
+# optimization. Currently, gradient checkpointing is supported only if the
+# execution engine is invoked through torch.autograd.backward() and its
+# inputs argument is not passed. It is not supported for torch.autograd.grad().
+# This is because if inputs are specified, the gradient won't be calculated for
+# anything else e.g. model parameters like weights, bias etc.
 #
 # This function returns whether the checkpointing is valid i.e. torch.autograd.backward
 # or not i.e. torch.autograd.grad. The implementation works by maintaining a thread

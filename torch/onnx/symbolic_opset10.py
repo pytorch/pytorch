@@ -20,6 +20,44 @@ from sys import maxsize
 # release on 04/24/19
 
 
+def div(g, self, other, *args):
+    if len(args) == 0:
+        return torch.onnx.symbolic_opset9.true_divide(g, self, other)
+    else:
+        return _div_rounding_mode(g, self, other, *args)
+
+
+@parse_args('v', 'v', 's')
+def _div_rounding_mode(g, self, other, rounding_mode):
+    if rounding_mode == 'floor':
+        return _floor_divide(g, self, other)
+    else:
+        return torch.onnx.symbolic_opset9._div_rounding_mode(g, self, other, rounding_mode)
+
+
+def _floor_divide(g, self, other):
+    if sym_help._is_fp(self) or sym_help._is_fp(other):
+        out = torch.onnx.symbolic_opset9.true_divide(g, self, other)
+        return g.op('Floor', out)
+    else:
+        # Integer division does trunction rounding
+        div = g.op('Div', self, other)
+        # Division is negative if: self < 0 != other < 0
+        zero = g.op('Constant', value_t=torch.tensor(0, dtype=torch.int64))
+        negative = g.op('Xor',
+                        g.op('Less', self, zero),
+                        g.op('Less', other, zero))
+
+        # For negative numbers with self % other != 0, subtract 1 to round down instead of up
+        mod = g.op('Mod', self, other, fmod_i=0)
+        fixup_mask = g.op('And', negative,
+                          g.op('Not', g.op('Equal', mod, zero)))
+
+        one = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        fixup = g.op('Sub', div, one)
+        return g.op('Where', fixup_mask, fixup, div)
+
+
 @parse_args('v', 'i', 'i', 'none')
 def sort(g, self, dim, decending, out=None):
     return sym_help._sort_helper(g, self, dim, decending=decending, out=out)
@@ -258,3 +296,7 @@ def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128
     zero_point_dtype = torch.int8 if quant_min == -128 else torch.uint8
     zero_point = torch.tensor(zero_point, dtype=zero_point_dtype)  # ONNX requires zero_point to be tensor
     return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
+
+def isinf(g, input):
+    from torch.onnx.symbolic_opset9 import _cast_Double  # type: ignore
+    return g.op("IsInf", _cast_Double(g, input, False))  # type: ignore

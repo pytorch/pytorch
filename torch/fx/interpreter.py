@@ -1,9 +1,9 @@
 from .graph_module import GraphModule
 from .graph import Graph
-from .node import Argument, Node, Target, map_arg
+from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
 from .symbolic_trace import Tracer
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any, Dict, Iterator, Optional, Tuple, Union
 
 class Interpreter:
     """
@@ -116,7 +116,7 @@ class Interpreter:
 
     # Main Node running APIs
 
-    def placeholder(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
+    def placeholder(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``placeholder`` node. Note that this is stateful:
         ``Interpreter`` maintains an internal iterator over
@@ -141,7 +141,7 @@ class Interpreter:
         else:
             return next(self.args_iter)
 
-    def get_attr(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
+    def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``get_attr`` node. Will retrieve an attribute
         value from the ``Module`` hierarchy of ``self.module``.
@@ -159,7 +159,7 @@ class Interpreter:
         assert isinstance(target, str)
         return self.fetch_attr(target)
 
-    def call_function(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
+    def call_function(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``call_function`` node and return the result.
 
@@ -178,7 +178,7 @@ class Interpreter:
         # Execute the function and return the result
         return target(*args, **kwargs)
 
-    def call_method(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
+    def call_method(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``call_method`` node and return the result.
 
@@ -199,7 +199,7 @@ class Interpreter:
         assert isinstance(target, str)
         return getattr(self_obj, target)(*args_tail, **kwargs)
 
-    def call_module(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
+    def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``call_module`` node and return the result.
 
@@ -221,7 +221,7 @@ class Interpreter:
 
         return submod(*args, **kwargs)
 
-    def output(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
+    def output(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         """
         Execute an ``output`` node. This really just retrieves
         the value referenced by the ``output`` node and returns it.
@@ -307,12 +307,12 @@ class Transformer(Interpreter):
         method equivalents). We could subclass ``Transformer`` like so::
 
             class NegSigmSwapXformer(Transformer):
-                def call_function(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
+                def call_function(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(n)
 
-                def call_method(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
+                def call_method(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
                     if target == 'neg':
                         call_self, *args_tail = args
                         return call_self.sigmoid(*args_tail, **kwargs)
@@ -344,7 +344,7 @@ class Transformer(Interpreter):
         self.tracer = TransformerTracer(self.new_graph)
         self.tracer.root = module
 
-    def placeholder(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Proxy:
+    def placeholder(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:
         """
         Execute a ``placeholder`` node. In ``Transformer``, this is
         overridden to insert a new ``placeholder`` into the output
@@ -360,7 +360,7 @@ class Transformer(Interpreter):
         assert isinstance(target, str)
         return Proxy(self.new_graph.placeholder(target), self.tracer)
 
-    def get_attr(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Proxy:
+    def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:
         """
         Execute a ``get_attr`` node. In ``Transformer``, this is
         overridden to insert a new ``get_attr`` node into the output
@@ -376,6 +376,12 @@ class Transformer(Interpreter):
         assert isinstance(target, str)
         return Proxy(self.new_graph.get_attr(target), self.tracer)
 
+    def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+        # Override so that the leaf module policy from `self.tracer` is respected.
+        assert isinstance(target, str)
+        submod = self.fetch_attr(target)
+        return self.tracer.call_module(submod, submod.forward, args, kwargs)
+
     def transform(self) -> GraphModule:
         """
         Transform ``self.module`` and return the transformed
@@ -383,6 +389,7 @@ class Transformer(Interpreter):
         """
         result = super().run()
         if result is not None:
-            assert isinstance(result, Proxy)
-            self.new_graph.output(result.node)
+            def strip_proxy(a : Union[Argument, Proxy]) -> Any:
+                return a.node if isinstance(a, Proxy) else a
+            self.new_graph.output(map_aggregate(result, strip_proxy))
         return GraphModule(self.module, self.new_graph)

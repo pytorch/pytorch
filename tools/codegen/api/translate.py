@@ -98,7 +98,7 @@ def translate(
         # ctx[ConstRefCType(BaseCType("Tensor", "self"))] = "*this"
 
     def unsat(goal: CType) -> NoReturn:
-        ctx_desc = '\n'.join(f"  {t.cpp_type()} {e};" for t, e in ctx.items())
+        ctx_desc = '\n'.join(f"  {t.cpp_type()} {t.name}; // {e}" for t, e in ctx.items())
         raise UnsatError(f'''
 Failed to synthesize the expression "{goal.cpp_type()} {goal.name}".
 When I failed, the following bindings were available in the context:
@@ -148,6 +148,10 @@ Check this module for more information.
             memory_format = direct_solve(
                 OptionalCType(BaseCType("MemoryFormat", SpecialArgName.possibly_redundant_memory_format))
             )
+            # No need to join "memory_format" and "options" if the target API takes "options" directly.
+            # Otherwise it will cause the redundant memory_format error.
+            if options_ctype in goal_ctypes:
+                return memory_format
             try:
                 options = direct_solve(options_ctype)
                 return f"c10::impl::check_tensor_options_and_extract_memory_format({options}, {memory_format})"

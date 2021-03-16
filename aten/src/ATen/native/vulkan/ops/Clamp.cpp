@@ -11,8 +11,8 @@ using namespace api::utils;
 
 Tensor clamp(
     const Tensor& self_arg,
-    const c10::optional<Scalar> min,
-    const c10::optional<Scalar> max) {
+    const c10::optional<Scalar>& min,
+    const c10::optional<Scalar>& max) {
   TORCH_CHECK(
       min || max,
       "At least one of 'min' or 'max' must not be None");
@@ -54,6 +54,7 @@ Tensor clamp(
           },
           VK_KERNEL(clamp),
           v_output.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -80,8 +81,8 @@ Tensor clamp(
 
 Tensor& clamp_(
     Tensor& self,
-    const c10::optional<Scalar> min,
-    const c10::optional<Scalar> max) {
+    const c10::optional<Scalar>& min,
+    const c10::optional<Scalar>& max) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
@@ -119,6 +120,7 @@ Tensor& clamp_(
           },
           VK_KERNEL(clamp_),
           v_self.extents(),
+          context->gpu().adapter->local_work_group_size(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(
@@ -140,15 +142,15 @@ Tensor& clamp_(
 
 Tensor hardtanh(
     const Tensor& self,
-    const Scalar min,
-    const Scalar max) {
+    const Scalar& min,
+    const Scalar& max) {
   return ops::clamp(self, min, max);
 }
 
 Tensor& hardtanh_(
     Tensor& self,
-    const Scalar min,
-    const Scalar max) {
+    const Scalar& min,
+    const Scalar& max) {
   return ops::clamp_(self, min, max);
 }
 

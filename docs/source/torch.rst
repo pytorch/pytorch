@@ -306,6 +306,7 @@ Pointwise Ops
     floor_divide
     fmod
     frac
+    frexp
     imag
     ldexp
     lerp
@@ -563,5 +564,7 @@ Utilities
     promote_types
     use_deterministic_algorithms
     are_deterministic_algorithms_enabled
+    set_warn_always
+    is_warn_always_enabled
     vmap
     _assert

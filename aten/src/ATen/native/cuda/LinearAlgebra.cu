@@ -62,7 +62,7 @@ Tensor prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_ten
 
 namespace {
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
@@ -78,7 +78,13 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes = self_.sizes();
-  TORCH_CHECK(mat1_sizes[1] == mat2_sizes[0], "mat1 dim 1 must match mat2 dim 0");
+  TORCH_CHECK(
+      mat1_sizes[1] == mat2_sizes[0],
+      "mat1 dim 1 must match mat2 dim 0",
+      " mat1 dim1:",
+      mat1_sizes[1],
+      " mat2 dim0: ",
+      mat2_sizes[0]);
   TORCH_CHECK(self__sizes[0] == mat1_sizes[0], "self_ dim 0 must match mat1 dim 0");
   TORCH_CHECK(self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
 
@@ -152,7 +158,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   return result;
 }
 
-Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -259,7 +265,7 @@ Tensor mm_cuda(const Tensor& self, const Tensor& mat2) {
 
 Tensor& addmm_out_cuda(Tensor &out, const Tensor &self,
                         const Tensor &mat1, const Tensor &mat2,
-                        Scalar beta, Scalar alpha) {
+                        const Scalar& beta, const Scalar& alpha) {
   {
     at::NoNamesGuard guard;
     Tensor& result = addmm_out_cuda_impl(out, self, mat1, mat2, beta, alpha);
@@ -269,19 +275,19 @@ Tensor& addmm_out_cuda(Tensor &out, const Tensor &self,
 }
 
 Tensor addmm_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
-                  Scalar beta, Scalar alpha) {
+                  const Scalar& beta, const Scalar& alpha) {
   Tensor out = at::empty({0}, self.options());
   addmm_out_cuda(out, self, mat1, mat2, beta, alpha);
   return out;
 }
 
 Tensor& addmm__cuda(Tensor& self, const Tensor& mat1, const Tensor& mat2,
-                    Scalar beta, Scalar alpha) {
+                    const Scalar& beta, const Scalar& alpha) {
   addmm_out_cuda(self, self, mat1, mat2, beta, alpha);
   return self;
 }
 
-Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   Tensor self_;
   if (&result != &self) {
     std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
@@ -298,12 +304,12 @@ Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch
   return result;
 }
 
-Tensor baddbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor baddbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   Tensor out = at::empty({0}, self.options());
   return baddbmm_out_cuda(out, self, batch1, batch2, beta, alpha);
 }
 
-Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   return baddbmm_out_cuda(self, self, batch1, batch2, beta, alpha);
 }
 
@@ -436,7 +442,7 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
 
 namespace {
 
-void addr_kernel_cuda(TensorIterator &iter, Scalar beta, Scalar alpha) {
+void addr_kernel_cuda(TensorIterator &iter, const Scalar& beta, const Scalar& alpha) {
   if (iter.dtype() == ScalarType::Bool) {
     using scalar_t = bool;
     auto beta_val = beta.to<scalar_t>();

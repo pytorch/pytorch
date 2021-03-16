@@ -40,11 +40,19 @@ if [ -n "$CIRCLE_PULL_REQUEST" ]; then
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
-if [[ "${CIRCLE_JOB}" == *11.1* ]]; then
+if [[ "${CIRCLE_JOB}" == *11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
 run_tests() {
+    # Run nvidia-smi if available
+    for path in  /c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe /c/Windows/System32/nvidia-smi.exe; do
+        if [ -x $path ]; then
+            $path;
+            break
+        fi
+    done
+
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
         $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"
         $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM"

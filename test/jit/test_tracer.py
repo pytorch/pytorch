@@ -17,7 +17,8 @@ from torch.testing._internal.common_utils import suppress_warnings, \
     skipIfCompiledWithoutNumpy, enable_profiling_mode_for_profiling_tests, \
     IS_SANDCASTLE, TemporaryFileName
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, \
-    _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, RUN_CUDA_MULTI_GPU
+    _tmp_donotuse_dont_inline_everything, _trace, RUN_CUDA, \
+    RUN_CUDA_MULTI_GPU, make_global
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch import Tensor
 
@@ -514,6 +515,8 @@ class TestTracer(JitTestCase):
 
         with warnings.catch_warnings(record=True) as warns:
             traced_fn = torch.jit.trace(fn, torch.tensor([1]))
+        for warn in warns:
+            self.assertIs(warn.category, torch.jit.TracerWarning)
         warns = [str(w.message) for w in warns]
         self.assertIn('a Python integer', warns[0])
         self.assertIn('a Python boolean', warns[1])
@@ -1895,6 +1898,44 @@ class TestTracer(JitTestCase):
         x = torch.ones(1)
         torch.jit.trace(Net(), x)
 
+    def test_trace_func_argument_names_captured(self):
+        def fn(first_arg: torch.Tensor, second_arg: torch.Tensor) -> torch.Tensor:
+            return first_arg + second_arg
+
+        traced_fn = torch.jit.trace(fn, (torch.ones(1), torch.ones(1)))
+        FileCheck().check("first_arg").check_next("second_arg") \
+            .run(str(traced_fn.graph))
+
+    def test_trace_partial_func_argument_names_captured(self):
+        def fn(first_arg: torch.Tensor, second_arg=1) -> torch.Tensor:
+            return first_arg + second_arg
+
+        traced_fn = torch.jit.trace(fn, (torch.ones(1),))
+        FileCheck().check("first_arg").check_not("second_arg") \
+            .run(str(traced_fn.graph))
+
+    def test_trace_module_argument_names_captured(self):
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.conv = nn.Conv2d(1, 1, 3)
+
+            def forward(self, first_arg: torch.Tensor, second_arg: torch.Tensor):
+                return self.conv(first_arg) + second_arg
+
+        m = TestModule()
+        example_input = (torch.ones(1, 1, 3, 3), torch.ones(1, 1, 3, 3))
+
+        # Explicitly tracing module's forward method
+        traced_module_forward = torch.jit.trace(m.forward, example_input)
+        FileCheck().check("first_arg").check_next("second_arg") \
+            .run(str(traced_module_forward.graph))
+
+        # Tracing module's directly
+        traced_module = torch.jit.trace(m, example_input)
+        FileCheck().check("first_arg").check_next("second_arg") \
+            .run(str(traced_module.graph))
+
 
 class TestMixTracingScripting(JitTestCase):
     def test_trace_script(self):
@@ -2367,3 +2408,89 @@ class TestMixTracingScripting(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot be understood by the tracer, only outputs matching"):
             mod = ReturnsBadDict()
             traced_module = torch.jit.trace(mod, [torch.ones(1), torch.ones(1)], strict=False)
+
+    def test_trace_linear(self):
+        m = torch.nn.Linear(20, 20)
+        inp = torch.rand([20, 20])
+        self.checkTrace(m, (inp,))
+        g = torch.jit.trace(m, (inp,)).graph
+        FileCheck().check("aten::linear").run(g)
+
+    def test_traced_module_implements_interface(self):
+        @torch.jit.interface
+        class TestModuleInterface(nn.Module):
+            def forward(self, first_arg: torch.Tensor, second_arg: torch.Tensor) -> torch.Tensor:
+                pass
+
+        make_global(TestModuleInterface)
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.conv = nn.Conv2d(1, 1, 3)
+
+            def forward(self, first_arg: torch.Tensor, second_arg: torch.Tensor) -> torch.Tensor:
+                return self.conv(first_arg) + second_arg
+
+        def fn_takes_interface(x: TestModuleInterface):
+            ones = torch.ones(1, 1, 3, 3)
+            return x.forward(ones, ones)
+
+        scripted_test_module = torch.jit.script(TestModule())
+        self.checkScript(fn_takes_interface, (scripted_test_module,))
+
+    def test_traced_module_contains_scripted_interface_types(self):
+
+        class LeafModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.rand(19))
+
+            def forward(self, input: torch.Tensor):
+                return input + self.weight
+
+        class LowerModuleImpl(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.leaf = LeafModule()
+
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                return self.leaf(input)
+
+        @torch.jit.interface
+        class LowerModuleInterface(torch.nn.Module):
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                pass
+
+        class MiddleModule(torch.nn.Module):
+            lower: LowerModuleInterface
+
+            def __init__(self, feature_processor_modules=None):
+                super().__init__()
+                self.lower = LowerModuleImpl()
+
+            def forward(self, input):
+                return self.lower(input)
+
+        class WrapperModule(torch.nn.Module):
+            def __init__(self, m):
+                super().__init__()
+                self.middle = m
+
+            def forward(self, input):
+                return self.middle(input)
+
+        class TopModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                m = MiddleModule()
+                m = torch.jit.script(m)
+                self.sub1 = m
+                self.sub2 = WrapperModule(m)
+
+            def forward(self, input: torch.Tensor):
+                return self.sub1(input) + self.sub2(input)
+
+        top = TopModule()
+        top_example_input = torch.ones(1)
+        torch.jit.trace(top, top_example_input)

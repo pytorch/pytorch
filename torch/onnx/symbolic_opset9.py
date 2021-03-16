@@ -104,11 +104,26 @@ def mul(g, self, other):
     return g.op("Mul", self, other)
 
 
-def div(g, self, other):
-    return true_divide(g, self, other)
+def div(g, self, other, *args):
+    if len(args) == 0:
+        return true_divide(g, self, other)
+    else:
+        return _div_rounding_mode(g, self, other, *args)
 
 
-def floor_divide(g, self, other):
+@parse_args('v', 'v', 's')
+def _div_rounding_mode(g, self, other, rounding_mode):
+    if rounding_mode == 'true':
+        return true_divide(g, self, other)
+    elif rounding_mode == 'floor':
+        return _floor_divide(g, self, other)
+    elif rounding_mode == 'trunc':
+        return _trunc_divide(g, self, other)
+    else:
+        raise RuntimeError(f'Unsupported rounding mode: "{rounding_mode}". Expected "true", "floor" or "trunc"')
+
+
+def _trunc_divide(g, self, other):
     out = g.op('Div', self, other)
     # the correct operation is truncate, which is not supported in ONNX,
     # we cannot call floor since it will behave differently for negative numbers
@@ -134,6 +149,34 @@ def floor_divide(g, self, other):
     else:
         out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Float'])
     return out
+
+
+def _floor_divide(g, self, other):
+    if sym_help._is_fp(self) or sym_help._is_fp(other):
+        out = true_divide(g, self, other)
+        return g.op('Floor', out)
+    else:
+        # Integer division does trunction rounding
+        div = g.op('Div', self, other)
+        # Division is negative if: self < 0 != other < 0
+        zero = g.op('Constant', value_t=torch.tensor(0, dtype=torch.int64))
+        negative = g.op('Xor',
+                        g.op('Less', self, zero),
+                        g.op('Less', other, zero))
+
+        # For negative numbers with self % other != 0, subtract 1 to round down instead of up
+        mod = g.op('Sub', self, g.op('Mul', div, other))
+        fixup_mask = g.op('And', negative,
+                          g.op('Not', g.op('Equal', mod, zero)))
+
+        one = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        fixup = g.op('Sub', div, one)
+        return g.op('Where', fixup_mask, fixup, div)
+
+
+def floor_divide(g, self, other):
+    # Deprecated behavior, floor_divide actually truncates
+    return _trunc_divide(g, self, other)
 
 
 def floordiv(g, self, other):
@@ -428,7 +471,16 @@ def expand_as(g, self, other):
     return g.op("Expand", self, shape)
 
 
+@parse_args('v', 'v', 'i', 'b', 'v')
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
+    if scale_grad_by_freq and sym_help._training_mode:
+        raise RuntimeError('Unsupported: ONNX export of embedding with scale_grad_by_freq=True '
+                           'for training mode. ONNX does not support scaling the gradients.')
+    if padding_idx >= 0 and sym_help._training_mode:
+        warnings.warn('Warning: ONNX export of embedding with padding_idx >= 0 '
+                      'for training mode. '
+                      'ONNX does not support not updating the embedding vector at padding_idx during training.')
+
     return g.op("Gather", weight, indices)
 
 
@@ -562,7 +614,10 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
 
     size = sym_help._get_tensor_dim_size(self, dim)
     if size is None:
-        return sym_help._onnx_opset_unsupported_detailed('split', 9, 11, 'Unknown dimension size not supported')
+        if _outputs is not None:
+            size = split_size * _outputs
+        else:
+            return sym_help._onnx_opset_unsupported_detailed('split', 9, 11, 'Unknown dimension size not supported')
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:
@@ -1319,8 +1374,8 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 
     axes = [-i for i in range(len(normalized_shape), 0, -1)]
 
-    two_cst = g.op("Constant", value_t=torch.tensor(2.))
-    eps_cst = g.op("Constant", value_t=torch.tensor(eps))
+    two_cst = sym_help._generate_wrapped_number(g, 2.)
+    eps_cst = sym_help._generate_wrapped_number(g, eps)
 
     mean = g.op("ReduceMean", input, axes_i=axes)
     numerator = sub(g, input, mean)
@@ -1481,8 +1536,6 @@ def pow(g, self, exponent):
     if not sym_help._is_fp(exponent):
         exponent = g.op("Cast", exponent, to_i=sym_help.cast_pytorch_to_onnx[f_dtype])
     pow = g.op("Pow", self, exponent)
-    if self_dtype and self_dtype != f_dtype:
-        pow = g.op("Cast", pow, to_i=sym_help.cast_pytorch_to_onnx[self_dtype])
     return pow
 
 
@@ -1910,6 +1963,67 @@ def repeat(g, self, repeats):
     return g.op("Tile", self, repeats)
 
 
+def repeat_interleave(g, self, repeats, dim=None):
+    input = self
+    # if dim is None flatten
+    # By default, use the flattened input array, and return a flat output array
+    if sym_help._is_none(dim):
+        input = reshape(g, self, g.op("Constant", value_t=torch.tensor([-1])))
+        dim = 0
+    else:
+        dim = sym_help._maybe_get_scalar(dim)
+
+    repeats_dim = sym_help._get_tensor_rank(repeats)
+    repeats_sizes = sym_help._get_tensor_sizes(repeats)
+    input_sizes = sym_help._get_tensor_sizes(input)
+    if repeats_dim is None:
+        raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
+                           'repeats rank.')
+    if repeats_sizes is None:
+        raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
+                           'repeats size.')
+    if input_sizes is None:
+        raise RuntimeError('Unsupported: ONNX export of repeat_interleave for unknown '
+                           'input size.')
+
+    input_sizes_temp = input_sizes.copy()
+    for idx, input_size in enumerate(input_sizes):
+        if input_size is None:
+            input_sizes[idx], input_sizes_temp[idx] = 0, -1
+
+    # Cases where repeats is an int or single value tensor
+    if (repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1)):
+        if not sym_help._is_tensor(repeats):
+            repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+        if input_sizes[dim] == 0:
+            raise NotImplementedError("Unsupported repeat_interleave along dimension with unknown input size")
+        else:
+            reps = input_sizes[dim]
+            repeats = expand(g, repeats, g.op("Constant", value_t=torch.tensor([reps])), None)
+
+    # Cases where repeats is a 1 dim Tensor
+    elif repeats_dim == 1:
+        assert repeats_sizes[0] == input_sizes[dim], "repeats must have the same size as input along dim"
+        reps = repeats_sizes[0]
+    else:
+        raise RuntimeError("repeats must be 0-dim or 1-dim tensor")
+
+    final_splits = list()
+    r_splits = sym_help._repeat_interleave_split_helper(g, repeats, reps, 0)
+    i_splits = sym_help._repeat_interleave_split_helper(g, input, reps, dim)
+    input_sizes[dim], input_sizes_temp[dim] = -1, 1
+    for idx, r_split in enumerate(r_splits):
+        i_split = unsqueeze(g, i_splits[idx], dim + 1)
+        r_concat = [g.op("Constant", value_t=torch.LongTensor(input_sizes_temp[:dim + 1])),
+                    r_split,
+                    g.op("Constant", value_t=torch.LongTensor(input_sizes_temp[dim + 1:]))]
+        r_concat = g.op("Concat", *r_concat, axis_i=0)
+        i_split = expand(g, i_split, r_concat, None)
+        i_split = reshape(g, i_split, g.op("Constant", value_t=torch.LongTensor(input_sizes)))
+        final_splits.append(i_split)
+    return g.op("Concat", *final_splits, axis_i=dim)
+
+
 @parse_args('v', 'i')
 def pixel_shuffle(g, self, upscale_factor):
     dims = sym_help._get_tensor_sizes(self)
@@ -2273,6 +2387,14 @@ def nonzero_numpy(g, input, _outputs=None):
 def isnan(g, input):
     output = g.op('IsNaN', input)
     return output
+
+def _any(g, input):
+    input = _cast_Long(g, input, False)  # type: ignore
+    input_sum = sym_help._reducesum_helper(g, input, keepdims_i=0)
+    return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
+
+def _all(g, input):
+    return g.op("Not", _any(g, g.op("Not", input)))
 
 
 @parse_args('v', 'i', 'i', 'i')

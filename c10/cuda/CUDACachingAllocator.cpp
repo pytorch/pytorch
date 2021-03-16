@@ -683,7 +683,7 @@ class DeviceCachingAllocator {
     } else if (&pool == &large_blocks) {
       return StatType::LARGE_POOL;
     } else {
-      AT_ERROR("get_stat_type_for_pool: invalid pool");
+      TORCH_CHECK(false, "get_stat_type_for_pool: invalid pool");
     }
   }
 
@@ -694,7 +694,7 @@ class DeviceCachingAllocator {
     } else if (block->pool == &large_blocks) {
       return (size < CachingAllocatorConfig::max_split_size()) && (remaining > kSmallSize);
     } else {
-      AT_ERROR("should_split: invalid pool");
+      TORCH_CHECK(false, "should_split: invalid pool");
     }
   }
 
@@ -1017,7 +1017,7 @@ class THCCachingAllocator {
     }
     Block* block = get_allocated_block(ptr, true /* remove */);
     if (!block) {
-      AT_ERROR("invalid device pointer: ", ptr);
+      TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     device_allocator[block->device]->free(block);
   }
@@ -1051,7 +1051,7 @@ class THCCachingAllocator {
   {
     Block* block = get_allocated_block(ptr);
     if (!block) {
-      AT_ERROR("invalid device pointer: ", ptr);
+      TORCH_CHECK(false, "invalid device pointer: ", ptr);
     }
     return device_allocator[block->device]->getBaseAllocation(block, outSize);
   }

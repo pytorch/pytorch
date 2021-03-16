@@ -2,9 +2,11 @@ import torch
 
 import math
 from pathlib import PurePosixPath
+import random
 
 from torch.testing._internal.common_utils import \
     (TestCase, make_tensor, run_tests, slowTest)
+from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
 from torch.testing._internal import mypy_wrapper
@@ -435,30 +437,90 @@ class TestTesting(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
+    @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
+    def test_make_tensor(self, device, dtype):
+        def check(size, low, high, requires_grad, discontiguous):
+            t = make_tensor(size, device, dtype, low=low, high=high,
+                            requires_grad=requires_grad, discontiguous=discontiguous)
+
+            self.assertEqual(t.shape, size)
+            self.assertEqual(t.device, torch.device(device))
+            self.assertEqual(t.dtype, dtype)
+
+            low = -9 if low is None else low
+            high = 9 if high is None else high
+
+            if t.numel() > 0 and dtype in [torch.long, torch.float]:
+                self.assertTrue(t.le(high).logical_and(t.ge(low)).all().item())
+
+            if dtype in [torch.float, torch.cfloat]:
+                self.assertEqual(t.requires_grad, requires_grad)
+            else:
+                self.assertFalse(t.requires_grad)
+
+            if t.numel() > 1:
+                self.assertEqual(t.is_contiguous(), not discontiguous)
+            else:
+                self.assertTrue(t.is_contiguous())
+
+        for size in (tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)):
+            check(size, None, None, False, False)
+            check(size, 2, 4, True, True)
+
     def test_assert_messages(self, device):
         self.assertIsNone(self._get_assert_msg(msg=None))
         self.assertEqual("\nno_debug_msg", self._get_assert_msg("no_debug_msg"))
         self.assertEqual("no_user_msg", self._get_assert_msg(msg=None, debug_msg="no_user_msg"))
         self.assertEqual("debug_msg\nuser_msg", self._get_assert_msg(msg="user_msg", debug_msg="debug_msg"))
 
+    # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
+    # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
+    # These tests are slow because it spawn another process to run test suite.
+    # See: https://github.com/pytorch/pytorch/issues/49019
     @onlyCUDA
     @slowTest
-    def test_cuda_assert_should_stop_test_suite(self, device):
-        # This test is slow because it spawn another process to run another test suite.
-
-        # Test running of cuda assert test suite should early terminate.
+    def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
+        # test to ensure common_utils.py override has early termination for CUDA.
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python
 
 import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
 
+class TestThatContainsCUDAAssertFailure(TestCase):
+
+    @slowTest
+    def test_throw_unrecoverable_cuda_exception(self):
+        x = torch.rand(10, device='cuda')
+        # cause unrecoverable CUDA exception, recoverable on CPU
+        y = x[torch.tensor([25])].cpu()
+
+    @slowTest
+    def test_trivial_passing_test_case_on_cpu_cuda(self):
+        x1 = torch.tensor([0., 1.], device='cuda')
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        # should capture CUDA error
+        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # should run only 1 test because it throws unrecoverable error.
+        self.assertIn('Ran 1 test', stderr)
+
+
+    @onlyCUDA
+    @slowTest
+    def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
+        # test to ensure common_device_type.py override has early termination for CUDA.
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+#!/usr/bin/env python
+
+import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
-# This test is added to ensure that test suite terminates early when
-# CUDA assert was thrown since all subsequent test will fail.
-# See: https://github.com/pytorch/pytorch/issues/49019
-# This test file should be invoked from test_testing.py
 class TestThatContainsCUDAAssertFailure(TestCase):
 
     @slowTest
@@ -486,6 +548,45 @@ if __name__ == '__main__':
         self.assertIn('CUDA error: device-side assert triggered', stderr)
         # should run only 1 test because it throws unrecoverable error.
         self.assertIn('Ran 1 test', stderr)
+
+
+    @onlyCUDA
+    @slowTest
+    def test_cuda_assert_should_not_stop_common_distributed_test_suite(self, device):
+        # test to ensure common_distributed.py override should not early terminate CUDA.
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+#!/usr/bin/env python
+
+import torch
+from torch.testing._internal.common_utils import (run_tests, slowTest)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import MultiProcessTestCase
+
+class TestThatContainsCUDAAssertFailure(MultiProcessTestCase):
+
+    @slowTest
+    def test_throw_unrecoverable_cuda_exception(self, device):
+        x = torch.rand(10, device=device)
+        # cause unrecoverable CUDA exception, recoverable on CPU
+        y = x[torch.tensor([25])].cpu()
+
+    @slowTest
+    def test_trivial_passing_test_case_on_cpu_cuda(self, device):
+        x1 = torch.tensor([0., 1.], device=device)
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
+
+instantiate_device_type_tests(
+    TestThatContainsCUDAAssertFailure,
+    globals(),
+    only_for='cuda'
+)
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        # we are currently disabling CUDA early termination for distributed tests.
+        self.assertIn('Ran 2 test', stderr)
 
 
 instantiate_device_type_tests(TestTesting, globals())
@@ -550,6 +651,17 @@ def fakehash(char):
     return char * 40
 
 
+def dummy_meta_meta() -> print_test_stats.ReportMetaMeta:
+    return {
+        'build_pr': '',
+        'build_tag': '',
+        'build_sha1': '',
+        'build_branch': '',
+        'build_job': '',
+        'build_workflow_id': '',
+    }
+
+
 def makecase(name, seconds, *, errored=False, failed=False, skipped=False):
     return {
         'name': name,
@@ -560,7 +672,7 @@ def makecase(name, seconds, *, errored=False, failed=False, skipped=False):
     }
 
 
-def makereport(tests):
+def make_report_v1(tests) -> print_test_stats.Version1Report:
     suites = {
         suite_name: {
             'total_seconds': sum(case['seconds'] for case in cases),
@@ -569,59 +681,201 @@ def makereport(tests):
         for suite_name, cases in tests.items()
     }
     return {
+        **dummy_meta_meta(),
         'total_seconds': sum(s['total_seconds'] for s in suites.values()),
         'suites': suites,
+    }
+
+
+def make_case_v2(seconds, status=None) -> print_test_stats.Version2Case:
+    return {
+        'seconds': seconds,
+        'status': status,
+    }
+
+
+def make_report_v2(tests) -> print_test_stats.Version2Report:
+    files = {}
+    for file_name, file_suites in tests.items():
+        suites = {
+            suite_name: {
+                'total_seconds': sum(case['seconds'] for case in cases.values()),
+                'cases': cases,
+            }
+            for suite_name, cases in file_suites.items()
+        }
+        files[file_name] = {
+            'suites': suites,
+            'total_seconds': sum(suite['total_seconds'] for suite in suites.values()),
+        }
+    return {
+        **dummy_meta_meta(),
+        'format_version': 2,
+        'total_seconds': sum(s['total_seconds'] for s in files.values()),
+        'files': files,
     }
 
 
 class TestPrintTestStats(TestCase):
     maxDiff = None
 
-    def test_analysis(self):
-        head_report = makereport({
-            # input ordering of the suites is ignored
-            'Grault': [
-                # not printed: status same and time similar
-                makecase('test_grault0', 4.78, failed=True),
-                # status same, but time increased a lot
-                makecase('test_grault2', 1.473, errored=True),
-            ],
-            # individual tests times changed, not overall suite
-            'Qux': [
-                # input ordering of the test cases is ignored
-                makecase('test_qux1', 0.001, skipped=True),
-                makecase('test_qux6', 0.002, skipped=True),
-                # time in bounds, but status changed
-                makecase('test_qux4', 7.158, failed=True),
-                # not printed because it's the same as before
-                makecase('test_qux7', 0.003, skipped=True),
-                makecase('test_qux5', 11.968),
-                makecase('test_qux3', 23.496),
-            ],
-            # new test suite
-            'Bar': [
-                makecase('test_bar2', 3.742, failed=True),
-                makecase('test_bar1', 50.447),
-            ],
-            # overall suite time changed but no individual tests
-            'Norf': [
-                makecase('test_norf1', 3),
-                makecase('test_norf2', 3),
-                makecase('test_norf3', 3),
-                makecase('test_norf4', 3),
-            ],
-            # suite doesn't show up if it doesn't change enough
-            'Foo': [
-                makecase('test_foo1', 42),
-                makecase('test_foo2', 56),
-            ],
+    version1_report: print_test_stats.Version1Report = make_report_v1({
+        # input ordering of the suites is ignored
+        'Grault': [
+            # not printed: status same and time similar
+            makecase('test_grault0', 4.78, failed=True),
+            # status same, but time increased a lot
+            makecase('test_grault2', 1.473, errored=True),
+        ],
+        # individual tests times changed, not overall suite
+        'Qux': [
+            # input ordering of the test cases is ignored
+            makecase('test_qux1', 0.001, skipped=True),
+            makecase('test_qux6', 0.002, skipped=True),
+            # time in bounds, but status changed
+            makecase('test_qux4', 7.158, failed=True),
+            # not printed because it's the same as before
+            makecase('test_qux7', 0.003, skipped=True),
+            makecase('test_qux5', 11.968),
+            makecase('test_qux3', 23.496),
+        ],
+        # new test suite
+        'Bar': [
+            makecase('test_bar2', 3.742, failed=True),
+            makecase('test_bar1', 50.447),
+        ],
+        # overall suite time changed but no individual tests
+        'Norf': [
+            makecase('test_norf1', 3),
+            makecase('test_norf2', 3),
+            makecase('test_norf3', 3),
+            makecase('test_norf4', 3),
+        ],
+        # suite doesn't show up if it doesn't change enough
+        'Foo': [
+            makecase('test_foo1', 42),
+            makecase('test_foo2', 56),
+        ],
+    })
+
+    version2_report: print_test_stats.Version2Report = make_report_v2(
+        {
+            'test_a': {
+                'Grault': {
+                    'test_grault0': make_case_v2(4.78, 'failed'),
+                    'test_grault2': make_case_v2(1.473, 'errored'),
+                },
+                'Qux': {
+                    'test_qux1': make_case_v2(0.001, 'skipped'),
+                    'test_qux6': make_case_v2(0.002, 'skipped'),
+                    'test_qux4': make_case_v2(7.158, 'failed'),
+                    'test_qux7': make_case_v2(0.003, 'skipped'),
+                    'test_qux8': make_case_v2(11.968),
+                    'test_qux3': make_case_v2(23.496),
+                }
+            },
+            'test_b': {
+                'Bar': {
+                    'test_bar2': make_case_v2(3.742, 'failed'),
+                    'test_bar1': make_case_v2(50.447),
+                },
+                # overall suite time changed but no individual tests
+                'Norf': {
+                    'test_norf1': make_case_v2(3),
+                    'test_norf2': make_case_v2(3),
+                    'test_norf3': make_case_v2(3),
+                    'test_norf4': make_case_v2(3),
+                },
+            },
+            'test_c': {
+                'Foo': {
+                    'test_foo1': make_case_v2(42),
+                    'test_foo2': make_case_v2(56),
+                },
+            }
         })
+
+    def test_simplify(self):
+        self.assertEqual(
+            {
+                '': {
+                    'Bar': {
+                        'test_bar1': {'seconds': 50.447, 'status': None},
+                        'test_bar2': {'seconds': 3.742, 'status': 'failed'},
+                    },
+                    'Foo': {
+                        'test_foo1': {'seconds': 42, 'status': None},
+                        'test_foo2': {'seconds': 56, 'status': None},
+                    },
+                    'Grault': {
+                        'test_grault0': {'seconds': 4.78, 'status': 'failed'},
+                        'test_grault2': {'seconds': 1.473, 'status': 'errored'},
+                    },
+                    'Norf': {
+                        'test_norf1': {'seconds': 3, 'status': None},
+                        'test_norf3': {'seconds': 3, 'status': None},
+                        'test_norf2': {'seconds': 3, 'status': None},
+                        'test_norf4': {'seconds': 3, 'status': None},
+                    },
+                    'Qux': {
+                        'test_qux1': {'seconds': 0.001, 'status': 'skipped'},
+                        'test_qux3': {'seconds': 23.496, 'status': None},
+                        'test_qux4': {'seconds': 7.158, 'status': 'failed'},
+                        'test_qux5': {'seconds': 11.968, 'status': None},
+                        'test_qux6': {'seconds': 0.002, 'status': 'skipped'},
+                        'test_qux7': {'seconds': 0.003, 'status': 'skipped'},
+                    },
+                },
+            },
+            print_test_stats.simplify(self.version1_report)
+        )
+
+        self.assertEqual(
+            {
+                'test_a': {
+                    'Grault': {
+                        'test_grault0': {'seconds': 4.78, 'status': 'failed'},
+                        'test_grault2': {'seconds': 1.473, 'status': 'errored'},
+                    },
+                    'Qux': {
+                        'test_qux1': {'seconds': 0.001, 'status': 'skipped'},
+                        'test_qux3': {'seconds': 23.496, 'status': None},
+                        'test_qux4': {'seconds': 7.158, 'status': 'failed'},
+                        'test_qux6': {'seconds': 0.002, 'status': 'skipped'},
+                        'test_qux7': {'seconds': 0.003, 'status': 'skipped'},
+                        'test_qux8': {'seconds': 11.968, 'status': None},
+                    },
+                },
+                'test_b': {
+                    'Bar': {
+                        'test_bar1': {'seconds': 50.447, 'status': None},
+                        'test_bar2': {'seconds': 3.742, 'status': 'failed'},
+                    },
+                    'Norf': {
+                        'test_norf1': {'seconds': 3, 'status': None},
+                        'test_norf2': {'seconds': 3, 'status': None},
+                        'test_norf3': {'seconds': 3, 'status': None},
+                        'test_norf4': {'seconds': 3, 'status': None},
+                    },
+                },
+                'test_c': {
+                    'Foo': {
+                        'test_foo1': {'seconds': 42, 'status': None},
+                        'test_foo2': {'seconds': 56, 'status': None},
+                    },
+                },
+            },
+            print_test_stats.simplify(self.version2_report),
+        )
+
+    def test_analysis(self):
+        head_report = self.version1_report
 
         base_reports = {
             # bbbb has no reports, so base is cccc instead
             fakehash('b'): [],
             fakehash('c'): [
-                makereport({
+                make_report_v1({
                     'Baz': [
                         makecase('test_baz2', 13.605),
                         # no recent suites have & skip this test
@@ -654,7 +908,7 @@ class TestPrintTestStats(TestCase):
                 }),
             ],
             fakehash('d'): [
-                makereport({
+                make_report_v1({
                     'Foo': [
                         makecase('test_foo1', 40),
                         # removed in cccc
@@ -684,7 +938,7 @@ class TestPrintTestStats(TestCase):
             ],
             fakehash('e'): [],
             fakehash('f'): [
-                makereport({
+                make_report_v1({
                     'Foo': [
                         makecase('test_foo3', 24),
                         makecase('test_foo1', 43),
@@ -967,14 +1221,14 @@ Added    (across    1 suite)      1 test,  totaling +   3.00s
 ''',
             print_test_stats.regression_info(
                 head_sha=fakehash('a'),
-                head_report=makereport({
+                head_report=make_report_v1({
                     'Foo': [
                         makecase('test_foo', 0.02, skipped=True),
                         makecase('test_baz', 3),
                     ]}),
                 base_reports={
                     fakehash('b'): [
-                        makereport({
+                        make_report_v1({
                             'Foo': [
                                 makecase('test_foo', 40),
                                 makecase('test_bar', 1),
@@ -982,7 +1236,7 @@ Added    (across    1 suite)      1 test,  totaling +   3.00s
                         }),
                     ],
                     fakehash('c'): [
-                        makereport({
+                        make_report_v1({
                             'Foo': [
                                 makecase('test_foo', 43),
                             ],
@@ -995,6 +1249,156 @@ Added    (across    1 suite)      1 test,  totaling +   3.00s
                 other_ancestors=0,
             )
         )
+
+    def test_regression_info_new_job(self):
+        self.assertEqual(
+            '''\
+----- Historic stats comparison result ------
+
+    job: foo_job
+    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+
++ class Foo:
++     # now    3.02s
++
++     def test_baz: ...
++         # now   3.000s
++
++     def test_foo: ...
++         # now   0.020s           (skipped)
+
+
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time     3.02s
+    | |
+    | : (3 commits)
+    |/|
+    | : (2 commits)
+    |
+    * bbbbbbbbbb          0 reports
+    * cccccccccc          0 reports
+    |
+    :
+
+Removed  (across    0 suites)     0 tests, totaling     0.00s
+Modified (across    0 suites)     0 tests, totaling     0.00s
+Added    (across    1 suite)      2 tests, totaling +   3.02s
+''',
+            print_test_stats.regression_info(
+                head_sha=fakehash('a'),
+                head_report=make_report_v1({
+                    'Foo': [
+                        makecase('test_foo', 0.02, skipped=True),
+                        makecase('test_baz', 3),
+                    ]}),
+                base_reports={
+                    fakehash('b'): [],
+                    fakehash('c'): [],
+                },
+                job_name='foo_job',
+                on_master=False,
+                ancestry_path=3,
+                other_ancestors=2,
+            )
+        )
+
+
+class TestFrameworkUtils(TestCase):
+    tests = [
+        'super_long_test',
+        'long_test1',
+        'long_test2',
+        'normal_test1',
+        'normal_test2',
+        'normal_test3',
+        'short_test1',
+        'short_test2',
+        'short_test3',
+        'short_test4',
+        'short_test5',
+    ]
+
+    test_times = {
+        'super_long_test': (55, 1),
+        'long_test1': (22, 2),
+        'long_test2': (18, 2),
+        'normal_test1': (9, 2),
+        'normal_test2': (7, 2),
+        'normal_test3': (5, 2),
+        'short_test1': (1, 2),
+        'short_test2': (0.6, 3),
+        'short_test3': (0.4, 5),
+        'short_test4': (0.3, 1),
+        'short_test5': (0.01, 2),
+    }
+
+    def test_calculate_2_shards_with_complete_test_times(self):
+        expected_shards = [
+            (60, ['super_long_test', 'normal_test3']),
+            (58.31, ['long_test1', 'long_test2', 'normal_test1', 'normal_test2', 'short_test1', 'short_test2',
+                     'short_test3', 'short_test4', 'short_test5'])
+        ]
+        self.assertEqual(expected_shards, calculate_shards(2, self.tests, self.test_times))
+
+
+    def test_calculate_5_shards_with_complete_test_times(self):
+        expected_shards = [
+            (55, ['super_long_test']),
+            (22, ['long_test1', ]),
+            (18, ['long_test2', ]),
+            (11.31, ['normal_test1', 'short_test1', 'short_test2', 'short_test3', 'short_test4', 'short_test5']),
+            (12, ['normal_test2', 'normal_test3']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(5, self.tests, self.test_times))
+
+
+    def test_calculate_2_shards_with_incomplete_test_times(self):
+        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
+        expected_shards = [
+            (22, ['long_test1', 'long_test2', 'normal_test3', 'short_test3', 'short_test5']),
+            (10, ['normal_test1', 'short_test1', 'super_long_test', 'normal_test2', 'short_test2', 'short_test4']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(2, self.tests, incomplete_test_times))
+
+
+    def test_calculate_5_shards_with_incomplete_test_times(self):
+        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
+        expected_shards = [
+            (22, ['long_test1', 'normal_test2', 'short_test5']),
+            (9, ['normal_test1', 'normal_test3']),
+            (1, ['short_test1', 'short_test2']),
+            (0, ['super_long_test', 'short_test3']),
+            (0, ['long_test2', 'short_test4']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(5, self.tests, incomplete_test_times))
+
+    def test_calculate_2_shards_against_optimal_shards(self):
+        for _ in range(100):
+            random.seed(120)
+            random_times = {k: (random.random() * 10, 1) for k in self.tests}
+            # all test times except first two
+            rest_of_tests = [i for (k, (i, _)) in random_times.items() if k != 'super_long_test' and k != 'long_test1']
+            sum_of_rest = sum(rest_of_tests)
+            random_times['super_long_test'] = (max(sum_of_rest / 2, max(rest_of_tests)), 1)
+            random_times['long_test1'] = (sum_of_rest - random_times['super_long_test'][0], 1)
+            # An optimal sharding would look like the below, but we don't need to compute this for the test:
+            # optimal_shards = [
+            #     (sum_of_rest, ['super_long_test', 'long_test1']),
+            #     (sum_of_rest, [i for i in self.tests if i != 'super_long_test' and i != 'long_test1']),
+            # ]
+            calculated_shards = calculate_shards(2, self.tests, random_times)
+            max_shard_time = max(calculated_shards[0][0], calculated_shards[1][0])
+            if sum_of_rest != 0:
+                # The calculated shard should not have a ratio worse than 7/6 for num_shards = 2
+                self.assertGreaterEqual(7.0 / 6.0, max_shard_time / sum_of_rest)
+                sorted_tests = sorted(self.tests)
+                sorted_shard_tests = sorted(calculated_shards[0][1] + calculated_shards[1][1])
+                # All the tests should be represented by some shard
+                self.assertEqual(sorted_tests, sorted_shard_tests)
 
 
 if __name__ == '__main__':
