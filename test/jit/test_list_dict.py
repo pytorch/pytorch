@@ -1721,175 +1721,305 @@ class TestScriptList(JitTestCase):
 
         list_add(l, e)
 
+    def _compare_eager_and_script(self, fn, input_list, script_input_list=None):
+        """
+        This is a helper function that facilitates comparing behaviour between
+        Python lists and "scripted" lists.
+        Args:
+            fn: The function to test and compare the behaviour of.
+            input_list: The input list to use for the test (passed to fn).
+            script_input_list: The scripted input list to use for the tests.
+                                If None, input_list is scripted with torch.jit.script
+                                and used instead.
+        """
+        # Create ScriptDict version of input_list if needed.
+        script_input_list = script_input_list or torch.jit.script(input_list)
+
+        # Run fn with both input_list and scripted_dict.
+        eager_raised, script_raised = False, False
+
+        try:
+            eager_out = fn(input_list)
+        except Exception as e:
+            eager_exception = e
+            eager_raised = True
+
+        try:
+            script_out = fn(script_input_list)
+        except Exception as e:
+            script_exception = e
+            script_raised = True
+
+        # Check that both calls raised or none of them raised.
+        self.assertEqual(eager_raised, script_raised)
+
+        if eager_raised:
+            # If fn raised an exception, it should be the same between
+            # regular and scripted lists.
+            self.assertEqual(type(eager_exception), type(script_exception))
+        else:
+            # Otherwise, make sure the outputs match and the lists
+            # match (the latter may not be the same as the output).
+            self.assertEqual(eager_out, script_out)
+            self.assertEqual(input_list, script_input_list)
+
     def test_repr(self):
         """
         Test the __repr__ method.
         """
-        data = [1]
-        l = torch.jit.list(data)
-        exp = repr(data)
-        self.assertEqual(repr(l), exp)
+        self._compare_eager_and_script(lambda l: repr(l), [1])
 
     def test_bool(self):
         """
         Test the __bool__ method. This should return True
         if the list is non-empty and False otherwise.
         """
-        true = torch.jit.list([1])
-        false = torch.jit.empty_list(List[int])
-
-        self.assertEqual(bool(true), True)
-        self.assertEqual(bool(false), False)
+        self._compare_eager_and_script(lambda l: bool(l), [1])
+        self._compare_eager_and_script(lambda l: bool(l), [])
 
     def test_iter(self):
         """
         Test iteration over a list's elements.
         """
-        l = torch.jit.list([1, 2, 3, 4])
+        def sum_elements(input_list):
+            s = 0
+            for k in input_list:
+                s += k
 
-        s = 0
-        for k in l:
-            s += k
+            return s
 
-        self.assertEqual(s, 10)
+        self._compare_eager_and_script(sum_elements, [1, 2, 3, 4])
 
     def test_getitem(self):
         """
         Test accessing list elements using the [] operator.
-        TODO: Add test for KeyError.
-        TODO: Add test that uses slice.
         """
-        l = torch.jit.list([1, 2, 3, 4])
+        data = [1, 2, 3, 4]
 
-        self.assertEqual(l[1], 2)
-        self.assertEqual(l[3], 4)
+        # Test regular indexing.
+        self._compare_eager_and_script(lambda l: l[1], data)
+        self._compare_eager_and_script(lambda l: l[3], data)
+        self._compare_eager_and_script(lambda l: l[-1], data)
+
+        # Test slicing.
+        self._compare_eager_and_script(lambda l: l[1:3], data)
+        self._compare_eager_and_script(lambda l: l[:], data)
+        self._compare_eager_and_script(lambda l: l[1:], data)
+        self._compare_eager_and_script(lambda l: l[:2], data)
+        self._compare_eager_and_script(lambda l: l[-1], data)
+        self._compare_eager_and_script(lambda l: l[-1::-1], data)
+
+        # Test errors.
+        self._compare_eager_and_script(lambda l: l[5], data)
+        self._compare_eager_and_script(lambda l: l[-7], data)
+        self._compare_eager_and_script(lambda l: l["key"], data)
 
     def test_setitem(self):
         """
         Test setting list elements using the [] operator.
-        TODO: Add test for KeyError.
-        TODO: Add test that uses slice.
         """
-        l = torch.jit.list([1, 2, 3, 4])
-        l[1] = 10
-        l[3] = 11
+        data = [1, 2, 3, 4]
 
-        self.assertEqual(l[1], 10)
-        self.assertEqual(l[3], 11)
+        # Test regular assignment.
+        def setitem(input_list):
+            input_list[1] = 10
+            input_list[3] = 11
+            input_list[-1] = 12
+
+        self._compare_eager_and_script(setitem, data.copy())
+
+        # Test slice assignment.
+        # TODO: Something like input_list[:1] = [1, 2, 3, 4, 5]
+        # is allowed in Python, but pybind11/stl_bind.h does not
+        # allow it. Should we?
+        def setitem_slice(input_list):
+            input_list[:4:2] = [10, 11]
+            input_list[-2:] = [15, 16]
+
+        self._compare_eager_and_script(setitem_slice, data)
+
+        # Test errors.
+        def out_of_range(input_list):
+            input_list[11] = 3
+
+        def out_of_range_negative(input_list):
+            input_list[-11] = 3
+
+        def wrong_index_type(input_list):
+            input_list["str"] = 3
+
+        self._compare_eager_and_script(out_of_range, data)
+        self._compare_eager_and_script(out_of_range_negative, data)
+        self._compare_eager_and_script(wrong_index_type, data)
+
+        # Check that using value of an incorrect type throws TypeError.
+        # _compare_eager_and_script cannot be used here since
+        # the following use of __setitem__ is valid in
+        # Python.
+        script_data = torch.jit.script(data)
+
+        with self.assertRaises(TypeError):
+            script_data[0] = "str"
 
     def test_contains(self):
         """
         Test membership checks (x in y, x not in y).
-        TODO: Add test for KeyError.
         """
-        l = torch.jit.list([1, 2, 3, 4])
+        data = [1, 2, 3, 4]
 
-        self.assertTrue(1 in l)
-        self.assertTrue(2 in l)
-        self.assertTrue(3 in l)
-        self.assertTrue(4 in l)
-        self.assertFalse(5 in l)
+        def fn(input_list):
+            return 1 in input_list, 2 not in input_list, 3 in input_list, 4 not in input_list
+
+        self._compare_eager_and_script(fn, data)
+
+        # Check that using a value of an incorrect type throws a TypeError.
+        script_data = torch.jit.script(data)
+
+        with self.assertRaises(TypeError):
+            a = "str" in script_data
 
     def test_delitem(self):
         """
         Test deletion.
-        TODO: Add test for KeyError.
         """
-        l = torch.jit.list([1, 2, 3, 4])
+        data = [1, 2, 3, 4]
 
-        self.assertTrue(2 in l)
+        def del_fn(input_list):
+            del input_list[1]
 
-        del l[1]
+        def del_fn_out_of_range(input_list):
+            del input_list[10]
 
-        self.assertTrue(1 in l)
-        self.assertFalse(2 in l)
-        self.assertTrue(3 in l)
-        self.assertTrue(4 in l)
+        def del_fn_wrong_type(input_list):
+            del input_list["str"]
+
+        self._compare_eager_and_script(del_fn, data.copy())
+        self._compare_eager_and_script(del_fn_out_of_range, data)
+        self._compare_eager_and_script(del_fn_wrong_type, data)
 
     def test_len(self):
         """
         Test len() builtin function.
         """
-        four = torch.jit.list([1, 2, 3, 4])
-        zero = torch.jit.empty_list(List[int])
-
-        self.assertEqual(len(four), 4)
-        self.assertEqual(len(zero), 0)
+        self._compare_eager_and_script(lambda l: len(l), [1, 2, 3, 4])
+        self._compare_eager_and_script(lambda l: len(l), [])
 
     def test_count(self):
         """
         Test count method.
         """
-        l = torch.jit.list([1, 2, 3, 3])
+        self._compare_eager_and_script(lambda l: l.count(3), [1, 2, 3, 3])
 
-        self.assertEqual(l.count(3), 2)
+        # Check that using a value of an incorrect type throws TypeError.
+        script_data = torch.jit.script([1])
+
+        with self.assertRaises(TypeError):
+            script_data.count("str")
 
     def test_remove(self):
         """
         Test remove method.
-        TODO: Add test for ValueError.
         """
-        l = torch.jit.list([1, 2, 3])
-        l.remove(1)
+        self._compare_eager_and_script(lambda l: l.remove(1), [1, 2, 3])
+        self._compare_eager_and_script(lambda l: l.remove(10), [1, 2, 3])
 
-        self.assertFalse(1 in l)
+        # Check that using a value of an incorrect type throws TypeError.
+        script_data = torch.jit.script([1])
+
+        with self.assertRaises(TypeError):
+            script_data.remove("str")
 
     def test_append(self):
         """
         Test append method.
-        TODO: Add test for ValueError (appending value of wrong type).
-        TODO: Add test for appending another list (recursive scripting).
         """
-        l = torch.jit.list([1, 2])
-        l.append(3)
+        self._compare_eager_and_script(lambda l: l.append(1), [4, 3, 2])
 
-        self.assertTrue(3 in l)
+        # Check that using a value of an incorrect type throws TypeError.
+        script_data = torch.jit.script([1])
+
+        with self.assertRaises(TypeError):
+            script_data.append("str")
 
     def test_clear(self):
         """
         Test clear.
         """
-        l = torch.jit.list([1, 2, 3])
-        l.clear()
-
-        self.assertEqual(len(l), 0)
+        self._compare_eager_and_script(lambda l: l.clear(), [4, 3, 2])
 
     def test_extend(self):
         """
         Test extend.
-        TODO: Add test case for dict argument.
-        TODO: Add test case for custom class argument with __iter__ implemented.
-        TODO: Add test case for extending with wrong types.
         """
-        l = torch.jit.list([1, 2, 3])
-        l.extend([4, 5, 6])
+        class Iterable(object):
+            def __init__(self, limit: int):
+                self.limit = limit
+                self.value = 0
 
-        self.assertEqual(len(l), 6)
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.value == limit:
+                    raise StopIteration()
+
+                ret = self.value
+                self.value += 1
+                return ret
+
+        data = [1, 2, 3]
+
+        def extend_list(input_list):
+            input_list.extend([4, 5, 6])
+
+        def extend_dict(input_list):
+            input_list.extend({4: 10, 5: 11, 6: 12})
+
+        def extend_iterable(input_list):
+            input_list.extend(Iterable(3))
+
+        self._compare_eager_and_script(extend_list, data.copy())
+        self._compare_eager_and_script(extend_dict, data.copy())
+        self._compare_eager_and_script(extend_iterable, data)
+
+        # Check that using a value of an incorrect type throws TypeError.
+        script_data = torch.jit.script([1])
+
+        with self.assertRaises(TypeError):
+            script_data.extend(["a"])
+
+        with self.assertRaises(TypeError):
+            script_data.extend({"a": 1})
 
     def test_insert(self):
         """
         Test insert.
-        TODO: Add test case for argument with wrong type.
         """
-        l = torch.jit.list([1, 2, 4])
-        l.insert(3, 2)
+        data = [1, 2, 4]
 
-        self.assertEqual(l[0], 1)
-        self.assertEqual(l[1], 2)
-        self.assertEqual(l[2], 3)
-        self.assertEqual(l[3], 4)
+        self._compare_eager_and_script(lambda l: l.insert(3, 3), data.copy())
+        self._compare_eager_and_script(lambda l: l.insert(0, 3), data.copy())
+        self._compare_eager_and_script(lambda l: l.insert(-2, 3), data)
+
+        # Check that using a value of an incorrect type throws TypeError.
+        script_data = torch.jit.script([1])
+
+        with self.assertRaises(TypeError):
+            script_data.insert((0, "str"))
 
     def test_pop(self):
         """
         Test pop.
-        TODO: Add test case for IndexError.
         """
-        l = torch.jit.list([1, 2, 3])
-        three = l.pop()
-        one = l.pop(0)
+        data = [1, 2, 3, 4, 5]
 
-        self.assertEqual(one, 1)
-        self.assertEqual(three, 3)
+        # Test normal cases.
+        self._compare_eager_and_script(lambda l: l.pop(), data.copy())
+        self._compare_eager_and_script(lambda l: l.pop(2), data.copy())
+        self._compare_eager_and_script(lambda l: l.pop(-3), data.copy())
+
+        # Test error cases.
+        self._compare_eager_and_script(lambda l: l.pop(10), data)
 
     def test_nested(self):
         """
@@ -1907,8 +2037,6 @@ class TestScriptList(JitTestCase):
         # The mutation should be visible in the original list, nested.
         self.assertEqual(len(one), 2)
         self.assertEqual(len(two), 2)
-        # self.assertEqual(one[-1], 3)
-        # self.assertEqual(two[-1], 4)
         self.assertEqual(one[len(one) - 1], 3)
         self.assertEqual(two[len(one) - 1], 4)
         self.assertEqual(len(nested[0]), 2)

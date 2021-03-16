@@ -21,6 +21,7 @@ import torch._jit_internal as _jit_internal
 from torch.utils import set_module
 from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_methods_to_compile
 from torch.nn import Module
+from torch.jit.annotations import ann_to_type
 from torch.jit._state import _enabled
 from torch.jit._builtins import _register_builtin
 from torch._six import with_metaclass
@@ -783,11 +784,34 @@ def call_prepare_scriptable_func_impl(obj, memo):
 
     return obj
 
+
 def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
-def script(obj, optimize=None, _frames_up=0, _rcb=None):
+
+def create_script_list(obj, type_hint=None):
+    """
+    Create a ``torch._C.ScriptList`` instance with the data from ``obj``. If ``type_hint``
+    is provided, it is used to set the type of the ``ScriptList``. If not, the type is
+    inferred based on the data inside ``obj``.
+    Args:
+        obj (dict): The Python list that is used to initialize the ``ScriptList``
+                    returned by this function.
+    Returns:
+        An instance of ``torch._C.ScriptList`` that has the same data as ``obj``
+        and can be passed between Python and TorchScript with reference semantics and
+        zero copy overhead.
+    """
+    # TODO: Does it make sense to pass in loc=None here?
+    if type_hint:
+        ty = ann_to_type(type_hint, None)
+        return torch._C.ScriptList(obj, ty)  # type: ignore
+
+    return torch._C.ScriptList(obj)  # type: ignore
+
+
+def script(obj, optimize=None, _frames_up=0, _rcb=None, type_hint=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
@@ -796,19 +820,23 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     tensors and do control-dependent operations. For a complete guide, see the
     :ref:`language-reference`.
 
-    ``torch.jit.script`` can be used as a function for modules and functions, and as a decorator
+    Scripting a list copies the data inside it into a TorchScript instance than can be
+    subsequently passed by reference between Python and TorchScript with zero copy overhead.
+
+    ``torch.jit.script`` can be used as a function for modules, functions, lists and as a decorator
     ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
 
     Args:
-        obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, or class type to
-                                                  compile.
+        obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, or class type, or
+                                                    list to compile.
 
     Returns:
         If ``obj`` is ``nn.Module``, ``script`` returns
         a :class:`ScriptModule` object. The returned :class:`ScriptModule` will
         have the same set of sub-modules and parameters as the
         original ``nn.Module``. If ``obj`` is a standalone function,
-        a :class:`ScriptFunction` will be returned.
+        a :class:`ScriptFunction` will be returned. If ``obj`` is a ``list``, then
+        ``script`` returns an instance of `torch._C.ScriptList`.
 
     **Scripting a function**
         The ``@torch.jit.script`` decorator will construct a :class:`ScriptFunction`
@@ -947,6 +975,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
+
+    if isinstance(obj, list):
+        return create_script_list(obj, type_hint)
 
     qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):

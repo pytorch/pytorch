@@ -230,6 +230,19 @@ __all__ += [name for name in dir(_C)
             if name[0] != '_' and
             not name.endswith('Base')]
 
+if not TYPE_CHECKING:
+    # issue 38137 and python issue 43367. Submodules of a C extension are
+    # non-standard, and attributes of those submodules cannot be pickled since
+    # pickle expect to be able to import them as "from _C.sub import attr"
+    # which fails with "_C is not a package
+    for attr in dir(_C):
+        candidate = getattr(_C, attr)
+        if type(candidate) is type(_C):
+            # submodule
+            if f'torch._C.{attr}' not in sys.modules:
+                sys.modules[f'torch._C.{attr}'] = candidate
+
+
 ################################################################################
 # Define basic utilities
 ################################################################################
@@ -463,7 +476,7 @@ def is_warn_always_enabled():
 # Define Storage and Tensor classes
 ################################################################################
 
-from .tensor import Tensor
+from ._tensor import Tensor
 from .storage import _StorageBase
 
 
@@ -637,6 +650,7 @@ from torch import optim as optim
 import torch.optim._multi_tensor
 from torch import multiprocessing as multiprocessing
 from torch import sparse as sparse
+from torch import special as special
 import torch.utils.backcompat
 from torch import onnx as onnx
 from torch import jit as jit

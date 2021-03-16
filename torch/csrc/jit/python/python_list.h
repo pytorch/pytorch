@@ -7,6 +7,8 @@
 #include <c10/util/Optional.h>
 #include <pybind11/detail/common.h>
 #include <torch/csrc/utils/pybind.h>
+#include <cstddef>
+#include <stdexcept>
 
 namespace torch {
 namespace jit {
@@ -22,6 +24,7 @@ class ScriptListIterator final {
       c10::impl::GenericList::iterator end)
       : iter_(iter), end_(end) {}
   IValue next();
+  bool done() const;
 
  private:
   c10::impl::GenericList::iterator iter_;
@@ -34,9 +37,11 @@ class ScriptListIterator final {
 /// boundary.
 class ScriptList final {
  public:
-  using size_type = c10::impl::GenericList::size_type;
+  // TODO: Do these make sense?
+  using size_type = size_t;
+  using diff_type = ssize_t;
 
-  // Constructor for empty lists whose type cannot be inferred.
+  // Constructor for empty lists created during slicing, extending, etc.
   ScriptList(const TypePtr& type) {
     auto list_type = type->expect<ListType>();
     auto d = c10::impl::GenericList(list_type);
@@ -85,15 +90,15 @@ class ScriptList final {
   }
 
   // Get the value for the given index.
-  // TODO: Handle negative and wraparound.
-  // TODO: This should really be difference type.
-  IValue getItem(const size_type idx) {
+  IValue getItem(diff_type idx) {
+    idx = wrap_index(idx);
     return list_.toList().get(idx);
   };
 
   // Set the value corresponding to the given index.
   // TODO: Handle negative and wraparound.
-  void setItem(const size_type idx, const IValue& value) {
+  void setItem(diff_type idx, const IValue& value) {
+    idx = wrap_index(idx);
     return list_.toList().set(idx, value);
   }
 
@@ -109,7 +114,8 @@ class ScriptList final {
   }
 
   // Delete the item at the given index from the list.
-  void delItem(const size_type idx) {
+  void delItem(size_type idx) {
+    idx = wrap_index(idx);
     auto iter = list_.toList().begin() + idx;
     list_.toList().erase(iter);
   }
@@ -165,18 +171,18 @@ class ScriptList final {
   }
 
   // Append the contents of an iterable to the list.
-  // TODO: Handle dicts, custom class types.
   void extend(const IValue& iterable) {
     list_.toList().append(iterable.toList());
   }
 
   // Remove and return the element at the specified index from the list. If no
   // index is passed, the last element is removed and returned.
-  IValue pop(const c10::optional<size_type> idx = c10::nullopt) {
+  IValue pop(c10::optional<size_type> idx = c10::nullopt) {
     auto list = list_.toList();
     IValue ret;
 
     if (idx) {
+      idx = wrap_index(*idx);
       ret = list.get(*idx);
       list.erase(list.begin() + *idx);
     } else {
@@ -188,14 +194,39 @@ class ScriptList final {
   }
 
   // Insert a value before the given index.
-  // TODO: Handle index errors.
-  void insert(const IValue& value, const size_type idx) {
+  void insert(const IValue& value, diff_type idx) {
+    // wrap_index cannot be used; idx == len() is allowed
+    if (idx < 0) {
+      idx += len();
+    }
+
+    if (idx < 0 || (size_type)idx > len()) {
+      throw std::out_of_range("list index out of range");
+    }
+
     auto list = list_.toList();
     list.insert(list.begin() + idx, value);
   }
 
   // A c10::List instance that holds the actual data.
   IValue list_;
+
+ private:
+  // Wrap an index so that it can safely be used to access
+  // the list. For list of size sz, this function can successfully
+  // wrap indices in the range [-sz, sz-1]
+  diff_type wrap_index(diff_type idx) {
+    auto sz = len();
+    if (idx < 0) {
+      idx += sz;
+    }
+
+    if (idx < 0 || (size_type)idx >= sz) {
+      throw std::out_of_range("list index out of range");
+    }
+
+    return idx;
+  }
 };
 
 } // namespace jit
