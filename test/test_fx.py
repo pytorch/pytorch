@@ -17,6 +17,8 @@ from pathlib import Path
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
+from test_torch import tensor_op_tests
+from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
@@ -1427,43 +1429,6 @@ class TestFX(JitTestCase):
             if callable(obj):
                 schemas = get_signature_for_torch_op(obj)
 
-    def test_get_torch_func_signature_exhaustive(self):
-        """
-        Run through the OpInfos and get sample inputs. Bind those inputs to the function schema we've
-        created via `get_signature_for_torch_op`
-        """
-        # These tests fail for various reasons (LAPACK mostly)
-        # Just skip them
-        known_failing_tests = {'cholesky_inverse', 'clamp', 'div', 'div', 'div', 'div', 'fft.fft', 'fft.fftn',
-                               'fft.hfft', 'fft.rfft', 'fft.rfftn', 'fft.ifft', 'fft.ifftn', 'fft.ihfft', 'fft.irfft',
-                               'fft.irfftn', 'floor_divide', 'linalg.slogdet', 'masked_scatter', 'masked_select',
-                               'tensor_split', 'triangular_solve', 'linalg.inv', 'linalg.solve', 'linalg.pinv',
-                               'linalg.pinv', 'svd', 'linalg.svd', 'pinverse'}
-
-        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat'}
-
-        for op in op_db:
-            try:
-                sample_inputs_itr = op.sample_inputs('cpu', torch.float, requires_grad=False)
-                schemas = get_signature_for_torch_op(op.op)
-                if not schemas:
-                    assert op.name in known_no_schema
-                    continue
-                for sample_input in sample_inputs_itr:
-                    # Iterate through overloads until we hit a match. If we exit this
-                    # loop via `else`, we haven't found a match
-                    for schema in schemas:
-                        try:
-                            schema.bind(*sample_input.input, **sample_input.kwargs)
-                            break
-                        except TypeError as e:
-                            pass
-                    else:
-                        raise RuntimeError(f'Did not match any schemas for op {op.name}!')
-
-            except Exception as e:
-                assert op.name in known_failing_tests
-
     def test_find_uses(self):
         graph = torch.fx.Graph()
         x = torch.fx.Proxy(graph.placeholder('x'))
@@ -2146,6 +2111,37 @@ def run_getitem_target():
     finally:
         _wrapped_methods_to_patch.pop()
 
+
+class TestOperatorSignatures(JitTestCase):
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
+        known_no_schema = {'stack', 'hstack', 'vstack', 'dstack', 'repeat'}
+
+        try:
+            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+            schemas = get_signature_for_torch_op(op.op)
+            if not schemas:
+                assert op.name in known_no_schema
+                return
+            for sample_input in sample_inputs_itr:
+                # Iterate through overloads until we hit a match. If we exit this
+                # loop via `else`, we haven't found a match
+                for schema in schemas:
+                    try:
+                        bound_args = schema.bind(*sample_input.input, *sample_input.args, **sample_input.kwargs)
+                        bound_args.apply_defaults()
+                        op(*bound_args.args, **bound_args.kwargs)
+                        break
+                    except TypeError as e:
+                        pass
+                else:
+                    raise RuntimeError(f'Did not match any schemas for op {op.name}!')
+
+        except Exception as e:
+            assert op.name in known_failing_tests
+
+instantiate_device_type_tests(TestOperatorSignatures, globals())
 
 if __name__ == '__main__':
     run_tests()
