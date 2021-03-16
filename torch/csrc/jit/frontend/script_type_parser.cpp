@@ -243,6 +243,18 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
       return custom_class_type;
     }
 
+    if (type_name.find("torch.cuda.Stream") == 0) {
+        std::string class_type = "torch.classes.cuda.Stream";
+        auto custom_class_type = getCustomClass("__torch__." + class_type);
+        return custom_class_type;
+    }
+
+    if (type_name.find("torch.cuda.Event") == 0) {
+        std::string class_type = "torch.classes.cuda.Event";
+        auto custom_class_type = getCustomClass("__torch__." + class_type);
+        return custom_class_type;
+    }
+
     throw ErrorReport(expr) << "Unknown type name '" << type_name << "'";
   } else if (auto name = parseBaseTypeName(expr)) {
     auto itr = string_to_type_lut().find(*name);
