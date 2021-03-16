@@ -768,6 +768,7 @@ def configure_extension_build():
                     'xcrun', '--show-sdk-path', '--sdk', 'macosx'
                 ]).decode('utf-8').strip()
             extra_compile_args += ['-arch', macos_target_arch, '-isysroot', macos_sysroot_path]
+            extra_link_args += ['-arch', macos_target_arch]
 
 
     def make_relative_rpath_args(path):
