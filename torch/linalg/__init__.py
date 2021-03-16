@@ -86,7 +86,7 @@ Examples::
 inv = _add_docstr(_linalg.linalg_inv, r"""
 linalg.inv(input, *, out=None) -> Tensor
 
-Computes the multiplicative inverse matrix of a square matrix :attr:`input`, or of each square matrix in a 
+Computes the multiplicative inverse matrix of a square matrix :attr:`input`, or of each square matrix in a
 batched :attr:`input`. The result satisfies the relation:
 
 ``matmul(inv(input),input)`` = ``matmul(input,inv(input))`` = ``eye(input.shape[0]).expand_as(input)``.
@@ -253,7 +253,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
-.. note:: The eigenvalues/eigenvectors are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs, 
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs,
           and MAGMA's `syevd` and `heevd` routines for CUDA inputs.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
@@ -319,7 +319,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
-.. note:: The eigenvalues are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs, 
+.. note:: The eigenvalues are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs,
           and MAGMA's `syevd` and `heevd` routines for CUDA inputs.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
@@ -798,7 +798,7 @@ Keyword args:
     out (Tensor, optional): tensor to write the output to. Default is ``None``.
 
 Returns:
-    The condition number of :attr:`input`. The output dtype is always real valued 
+    The condition number of :attr:`input`. The output dtype is always real valued
     even for complex inputs (e.g. float if :attr:`input` is cfloat).
 
 Examples::
@@ -1049,7 +1049,7 @@ Args:
                     ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``.
     other (Tensor): "right-hand-side" tensor of shape ``input.shape[other.ndim]``.
     dims (Tuple[int]): dimensions of :attr:`input` to be moved before the computation.
-                       Equivalent to calling ``input = movedim(input, dims, range(len(dims) - input.ndim, 0))``.
+                       Equivalent to calling ``input = movedim(input, dims, range(len(dims) - input.ndim + 1, 0))``.
                        If None (default), no dimensions are moved.
 
 Keyword args:

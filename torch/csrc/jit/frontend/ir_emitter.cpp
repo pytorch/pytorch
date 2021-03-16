@@ -500,6 +500,8 @@ struct Environment {
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
           {"pow", std::make_shared<BuiltinFunction>(aten::pow, at::nullopt)},
+          {"complex",
+           std::make_shared<BuiltinFunction>(aten::complex, at::nullopt)},
           {"range", SpecialFormValue::create(prim::range)},
           {"zip", SpecialFormValue::create(prim::zip)},
           {"enumerate", SpecialFormValue::create(prim::enumerate)},
@@ -575,12 +577,12 @@ struct Environment {
   ValueTable value_table;
 };
 
-template <class T, class U>
+template <class T, class Hash>
 static Value* materializeConstant(
     T val,
     Graph& graph,
     const SourceRange& r,
-    std::unordered_map<T, Value*, U>& map) {
+    std::unordered_map<T, Value*, Hash>& map) {
   auto existing_constant = map.find(val);
   if (existing_constant != map.end()) {
     return existing_constant->second;
@@ -668,12 +670,12 @@ struct to_ir {
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
   std::unordered_map<int64_t, Value*, std::hash<int64_t>> integral_constants;
-  std::unordered_map<double, Value*, std::hash<float>> fp_constants;
+  std::unordered_map<double, Value*, std::hash<double>> fp_constants;
   std::unordered_map<
       c10::complex<double>,
       Value*,
       c10::hash<c10::complex<double>>>
-      c_constants;
+      complex_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
   LoopStatus loop_status_ = LoopStatus::NOT_IN_LOOP;
@@ -3687,7 +3689,7 @@ struct to_ir {
       return materializeConstant(
           c.asFloatingPoint(), *graph, c.range(), fp_constants);
     else if (c.isComplex())
-      return materializeConstant(c.asComplex(), *graph, c.range(), c_constants);
+      return materializeConstant(c.asComplex(), *graph, c.range(), complex_constants);
     else
       return materializeConstant(
           c.asIntegral(), *graph, c.range(), integral_constants);

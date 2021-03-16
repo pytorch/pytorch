@@ -1885,8 +1885,8 @@ struct TORCH_API ClassType : public NamedType {
   // getter and (optional) setter for that attribute.
   struct Property {
     std::string name;
-    const torch::jit::Function* getter;
-    const torch::jit::Function* setter;
+    torch::jit::Function* getter;
+    torch::jit::Function* setter;
   };
 
   // Create a class type with name `name` and its methods stored in `cu`.
@@ -2053,6 +2053,10 @@ struct TORCH_API ClassType : public NamedType {
   c10::optional<ClassType::Property> getProperty(const std::string& name);
   // Add a property named \p name with \p getter and \p setter as its getter and setter.
   void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
+
+  const std::vector<Property> properties() const {
+    return properties_;
+  }
 
   bool hasConstant(const std::string& name) const {
     return std::find_if(

@@ -14,6 +14,11 @@
 
 #include <ATen/core/grad_mode.h>
 
+#if C10_MOBILE
+#define C10_DISPATCHER_INLINE_UNLESS_MOBILE inline
+#else
+#define C10_DISPATCHER_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
+#endif
 namespace c10 {
 
 class TORCH_API OperatorHandle;
@@ -380,10 +385,12 @@ public:
   TypedOperatorHandle(const TypedOperatorHandle&) = default;
   TypedOperatorHandle& operator=(const TypedOperatorHandle&) = default;
 
+  // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
   C10_ALWAYS_INLINE Return call(Args... args) const {
     return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
+  // See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
   C10_ALWAYS_INLINE Return redispatch(DispatchKeySet currentDispatchKeySet, Args... args) const {
     return c10::Dispatcher::singleton().redispatch<Return, Args...>(*this, currentDispatchKeySet, std::forward<Args>(args)...);
   }
@@ -398,6 +405,7 @@ namespace detail {
 template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
+// See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
 template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<Return(Args...)>& op, bool pre_sampled, DispatchKeySet dispatchKeySet, const KernelFunction& kernel, Args... args) {
     // Check if we need to run callbacks registered with RecordFunction
@@ -421,8 +429,9 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
   return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
+// See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
 template<class Return, class... Args>
-C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
+C10_DISPATCHER_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(
@@ -446,6 +455,7 @@ C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args.
   return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
+// See [Note: Argument forwarding in the dispatcher] for why Args doesn't use &&
 template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5

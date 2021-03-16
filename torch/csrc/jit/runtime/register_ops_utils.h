@@ -686,6 +686,7 @@ void listSetItem(Stack* stack);
             push(stack, float_op);                                            \
           },                                                                  \
           aliasAnalysisFromSchema())
+
 #define DEFINE_INT_COMPLEX_OP(aten_op, op, result)                          \
   OperatorGenerator(                                                        \
       TORCH_SELECTIVE_SCHEMA(#aten_op                                       \

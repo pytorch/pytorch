@@ -510,15 +510,7 @@ std::ostream& IValue::repr(
                  << d << std::setprecision(orig_prec);
     }
     case IValue::Tag::ComplexDouble: {
-      auto d = v.toComplexDouble();
-      IValue real(d.real()), imag(std::abs(d.imag()));
-      auto sign = "";
-      if (d.imag() >= 0) {
-        sign = "+";
-      } else {
-        sign = "-";
-      }
-      return out << real << sign << imag << "j";
+      return out << v.toComplexDouble();
     }
     case IValue::Tag::Int:
       return out << v.toInt();
@@ -851,6 +843,10 @@ IValue IValue::deepcopy(
     memo[*this] = copy;
   }
   return copy;
+}
+
+void IValue::reportToTensorTypeError() const {
+  TORCH_CHECK(false, "Expected Tensor but got ", tagKind());
 }
 
 std::string ivalue::Object::name() const {

@@ -195,11 +195,11 @@ struct TORCH_API SharedParserData {
     const char* startptr = str.c_str() + start;
     char* endptr;
     torch::jit::strtod_c(startptr, &endptr);
+    *len = endptr - startptr;
     // check if the number is complex valued
+    // access is safe because string is assumed to be null terminated
     if (endptr != nullptr && *endptr == 'j') {
-      *len = endptr - startptr + 1;
-    } else {
-      *len = endptr - startptr;
+      *len += 1;
     }
     return *len > 0;
   }

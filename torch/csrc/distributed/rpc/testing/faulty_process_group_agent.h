@@ -34,6 +34,7 @@ struct FaultyProcessGroupRpcBackendOptions
 class FaultyProcessGroupAgent : public ProcessGroupAgent {
  public:
   FaultyProcessGroupAgent(
+      const c10::intrusive_ptr<::c10d::Store>& store,
       std::string workerName,
       c10::intrusive_ptr<c10d::ProcessGroup> pg,
       int numSendRecvThreads,

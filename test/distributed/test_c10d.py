@@ -10,6 +10,7 @@ import threading
 import time
 import traceback
 import unittest
+from unittest import mock
 from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce
@@ -18,6 +19,11 @@ from sys import platform
 
 import torch
 import torch.distributed as c10d
+
+if not c10d.is_available():
+    print("c10d not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
@@ -55,10 +61,6 @@ from torch.testing._internal.common_utils import (
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
 
 
 if platform == "darwin":
@@ -239,6 +241,20 @@ class StoreTestBase(object):
     def test_set_get(self):
         self._test_set_get(self._create_store())
 
+    def test_compare_set(self):
+        store = self._create_store()
+        missing_key_result = store.compare_set("key0", "wrong_old_value", "new_value0")
+        self.assertEqual(b"wrong_old_value", missing_key_result)
+
+        store.set("key0", "value0")
+        self.assertEqual(b"value0", store.get("key0"))
+        old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
+        self.assertEqual(b"value0", old_value_result)
+        self.assertEqual(b"value0", store.get("key0"))
+        new_value_result = store.compare_set("key0", "value0", "new_value0")
+        self.assertEqual(b"new_value0", new_value_result)
+        self.assertEqual(b"new_value0", store.get("key0"))
+
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -258,6 +274,15 @@ class FileStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+@skip_if_win32()
+class HashStoreTest(TestCase, StoreTestBase):
+    def setUp(self):
+        super(HashStoreTest, self).setUp()
+
+    def _create_store(self):
+        store = c10d.HashStore()
+        store.set_timeout(timedelta(seconds=300))
+        return store
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -341,26 +366,12 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
-    def test_compare_set(self):
-        store = self._create_store()
-        missing_key_result = store.compare_set("key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"wrong_old_value", missing_key_result)
-
-        store.set("key0", "value0")
-        self.assertEqual(b"value0", store.get("key0"))
-        old_value_result = store.compare_set("key0", "wrong_old_value", "new_value0")
-        self.assertEqual(b"value0", old_value_result)
-        self.assertEqual(b"value0", store.get("key0"))
-        new_value_result = store.compare_set("key0", "value0", "new_value0")
-        self.assertEqual(b"new_value0", new_value_result)
-        self.assertEqual(b"new_value0", store.get("key0"))
-
     def _create_client(self, index, addr, port, world_size, messages):
         try:
             client_store = dist.TCPStore(addr, port, world_size, timeout=timedelta(seconds=10))
             self.assertEqual("value".encode(), client_store.get("key"))
             client_store.set(f"new_key{index}", f"new_value{index}")
-            self.assertEqual(f"next_value{index}".encode(), 
+            self.assertEqual(f"next_value{index}".encode(),
                              client_store.compare_set(f"new_key{index}", f"new_value{index}", f"next_value{index}"))
         except Exception:
             messages.put('Caught exception: \n{}exiting process with exit code: {}'
@@ -474,20 +485,18 @@ class RendezvousEnvTest(TestCase):
             "WORLD_SIZE": "1",
             "RANK": "0",
             "MASTER_ADDR": "127.0.0.1",
-            "MASTER_PORT": common.find_free_port(),
+            "MASTER_PORT": str(common.find_free_port()),
         }
 
         class Env(object):
             def __init__(self, vars):
-                self.vars = vars
+                self.env_patcher = mock.patch.dict(os.environ, vars, clear=True)
 
             def __enter__(self):
-                for key, value in self.vars.items():
-                    os.environ[key] = str(value)
+                self.env_patcher.start()
 
             def __exit__(self, type, value, traceback):
-                for key in self.vars.keys():
-                    del os.environ[key]
+                self.env_patcher.stop()
 
         def without(d, key):
             d = d.copy()
@@ -501,6 +510,7 @@ class RendezvousEnvTest(TestCase):
             return d
 
         with Env(without(vars, "WORLD_SIZE")):
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             with self.assertRaisesRegex(ValueError, "WORLD_SIZE expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
@@ -510,6 +520,7 @@ class RendezvousEnvTest(TestCase):
             c10d.destroy_process_group()
 
         with Env(without(vars, "RANK")):
+            self.assertEqual(None, os.environ.get("RANK"))
             with self.assertRaisesRegex(ValueError, "RANK expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
@@ -519,6 +530,8 @@ class RendezvousEnvTest(TestCase):
             c10d.destroy_process_group()
 
         with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+            self.assertEqual(None, os.environ.get("RANK"))
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             c10d.init_process_group(backend="nccl", rank=0, world_size=1)
             self.assertEqual(c10d.get_rank(), 0)
             self.assertEqual(c10d.get_world_size(), 1)
@@ -531,26 +544,32 @@ class RendezvousEnvTest(TestCase):
             c10d.destroy_process_group()
 
         with Env(without(vars, "MASTER_ADDR")):
+            self.assertEqual(None, os.environ.get("MASTER_ADDR"))
             with self.assertRaisesRegex(ValueError, "MASTER_ADDR expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
 
         with Env(without(vars, "MASTER_PORT")):
+            self.assertEqual(None, os.environ.get("MASTER_PORT"))
             with self.assertRaisesRegex(ValueError, "MASTER_PORT expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
 
         with Env(without(vars, "WORLD_SIZE")):
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             gen = c10d.rendezvous("env://?world_size={}".format(1))
             _, _, size = next(gen)
             self.assertEqual(size, 1)
 
         with Env(without(vars, "RANK")):
+            self.assertEqual(None, os.environ.get("RANK"))
             gen = c10d.rendezvous("env://?rank={}".format(0))
             _, rank, _ = next(gen)
             self.assertEqual(rank, 0)
 
         with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+            self.assertEqual(None, os.environ.get("RANK"))
+            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
             gen = c10d.rendezvous("env://?rank={}&world_size={}".format(0, 1))
             _, rank, size = next(gen)
             self.assertEqual(rank, 0)
@@ -2307,6 +2326,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
+            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            self.assertTrue(ddp_logging_data.is_multi_device_module)
         else:
             model, ddp_model, input, target = self._prepare_single_device_module(
                 process_group,
@@ -2315,6 +2336,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 global_batch_size,
                 gradient_as_bucket_view,
             )
+            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            self.assertFalse(ddp_logging_data.is_multi_device_module)
 
         def step_model(model, input, target):
             model.train()
@@ -3057,7 +3080,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         """
 
         def allreduce_hook(
-            process_group: object, bucket: dist._GradBucket
+            process_group: object, bucket: dist.GradBucket
         ) -> torch._C.Future:
             tensors = [t / self.world_size for t in bucket.get_tensors()]
             return process_group.allreduce(tensors).get_future()
@@ -3077,7 +3100,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         """
 
         def allreduce_with_then_hook(
-            process_group: object, bucket: dist._GradBucket
+            process_group: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
             fut = process_group.allreduce(bucket.get_tensors()).get_future()
 
@@ -3373,8 +3396,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             device_ids=[device_id],
         )
 
-        # ensure that both models start with the same set of parameters. By default they are randomized on construction
+        # ensure that all the three models start with the same set of parameters. By default they are randomized on construction
         for p in ddp_withload.parameters():
+            with torch.no_grad():
+                p.zero_()
+        for p in model_withload.parameters():
             with torch.no_grad():
                 p.zero_()
         for p in ddp_withoutload.parameters():
@@ -3385,9 +3411,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         criterion = nn.CrossEntropyLoss()
 
         optimizer_withload = torch.optim.SGD(ddp_withload.parameters(), lr=0.001)
+        optimizer_non_ddp_withload = torch.optim.SGD(model_withload.parameters(), lr=0.001)
         optimizer_withoutload = torch.optim.SGD(ddp_withoutload.parameters(), lr=0.001)
 
-        input = torch.rand([batch_size, 2], dtype=torch.float)
+        input = torch.rand([batch_size, 2], dtype=torch.float).to(device_id)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(
             device_id
         )
@@ -3395,29 +3422,35 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # run the model for 6 iterations, with a checkpoint in the middle
         train_loop(ddp_withload, optimizer_withload, 3)
 
-        # zero out parameters and reload them from the state dict
+        # zero out parameters of both DDP and non-DDP models and reload them from the DDP state dict
         checkpoint_path = tempfile.gettempdir() + "/model.checkpoint"
         if self.rank == 0:
             torch.save(ddp_withload.state_dict(), checkpoint_path)
 
         dist.barrier()
-        for p in ddp_withload.parameters():
-            with torch.no_grad():
-                p.zero_()
         map_location = {"cuda:%d" % 0: "cuda:%d" % self.rank}
-        ddp_withload.load_state_dict(
-            torch.load(checkpoint_path, map_location=map_location)
-        )
+        ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
+
+        for model in [ddp_withload, model_withload]:
+            for p in ddp_withload.parameters():
+                with torch.no_grad():
+                    p.zero_()
+        ddp_withload.load_state_dict(ddp_state_dict)
+        # the non-DDP model needs to first remove the prefix of "module." from the DDP state dict
+        torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(ddp_state_dict, "module.")
+        model_withload.load_state_dict(ddp_state_dict)
 
         train_loop(ddp_withload, optimizer_withload, 3)
+        train_loop(model_withload, optimizer_non_ddp_withload, 3)
 
         # re-run the model with the same inputs for 6 iterations with no checkpoint
         train_loop(ddp_withoutload, optimizer_withoutload, 6)
 
-        for p_withload, p_withoutload in zip(
-            ddp_withload.parameters(), ddp_withoutload.parameters()
+        for p_withload, p_withoutload, p_non_ddp_withload in zip(
+            ddp_withload.parameters(), ddp_withoutload.parameters(), model_withload.parameters()
         ):
             self.assertEqual(p_withload, p_withoutload)
+            self.assertEqual(p_non_ddp_withload, p_withoutload)
 
     def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
@@ -3727,7 +3760,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
 
     def _simple_hook(
-        self, state: object, bucket: dist._GradBucket
+        self, state: object, bucket: dist.GradBucket
     ) -> torch.futures.Future:
         fut = torch.futures.Future()
         fut.set_result([torch.ones_like(t) for t in bucket.get_tensors()])
@@ -3782,7 +3815,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
+        def allreduce_hook(state: object, bucket: dist.GradBucket) -> torch._C.Future:
             tensors = [t / self.world_size for t in bucket.get_tensors()]
             return process_group.allreduce(tensors).get_future()
 
@@ -3810,6 +3843,28 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             # so it cannot be replaced by 'state', although they have the same value.
             gpu_model = self._gpu_model_with_ddp_comm_hook(
                 process_group, hook, gradient_as_bucket_view, state
+            )
+
+            # check whether the grads are equal to what DDP without hook would return.
+            self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+
+    def _test_fp16_compress_wrapper(self, gradient_as_bucket_view=False):
+        """
+        This unit test verifies whether wrapping the ALLREDUCE and POWER_SGD hooks with
+        the FP16_WRAPPER can give the same result as when there is no hook registered.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        powerSGD_state = powerSGD.PowerSGDState(process_group=process_group)
+
+        hook_args = [(powerSGD.powerSGD_hook, powerSGD_state), (default.allreduce_hook, process_group)]
+
+        for hook, state in hook_args:
+            gpu_model = self._gpu_model_with_ddp_comm_hook(
+                process_group,
+                default.fp16_compress_wrapper(hook),
+                gradient_as_bucket_view,
+                state
             )
 
             # check whether the grads are equal to what DDP without hook would return.
@@ -3872,6 +3927,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_fp16_compress_wrapper_nccl(self):
+        self._test_fp16_compress_wrapper()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_builtin_ddp_comm_hooks_nccl(self):
         self._test_builtin_ddp_comm_hooks_nccl()
 
@@ -3911,6 +3971,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_fp16_compress_wrapper_is_view(self):
+        self._test_fp16_compress_wrapper(gradient_as_bucket_view=True)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_builtin_ddp_comm_hooks_nccl_grad_is_view(self):
         self._test_builtin_ddp_comm_hooks_nccl(gradient_as_bucket_view=True)
 
@@ -3930,7 +3995,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce_with_then_hook(
-            state: object, bucket: dist._GradBucket
+            state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
             tensors = [t / self.world_size for t in bucket.get_tensors()]
             fut = process_group.allreduce(tensors).get_future()
@@ -3972,7 +4037,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             model.register_comm_hook(state=None, hook=1)
 
         with self.assertRaisesRegex(
-            ValueError, "bucket annotation should be dist._GradBucket."
+            ValueError, "bucket annotation should be dist.GradBucket."
         ):
 
             def comm_hook(state: object, bucket: int) -> torch.futures.Future:
@@ -3999,7 +4064,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             "Communication hook: return annotation should be torch.futures.Future or torch._C.Future.",
         ):
 
-            def comm_hook(state: object, bucket: dist._GradBucket) -> int:
+            def comm_hook(state: object, bucket: dist.GradBucket) -> int:
                 return torch.futures.Future()
 
             model.register_comm_hook(state=None, hook=comm_hook)
@@ -4009,7 +4074,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             "callback must return a torch.futures.Future or torch._C.Future object, but got",
         ):
 
-            def comm_hook(state: object, bucket: dist._GradBucket):
+            def comm_hook(state: object, bucket: dist.GradBucket):
                 return 1
 
             model.register_comm_hook(state=None, hook=comm_hook)
@@ -4067,7 +4132,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # "get_future" API does not support gloo backend, see GH Issue #42048.
         # Instead, we wait for an allreduce work, and write its result to a Future.
         def allreduce_hook_gloo(
-            state: object, bucket: dist._GradBucket
+            state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future:
             # Prepare allreduced grad bucket tensors by running an async work.
             work = process_group.allreduce(bucket.get_tensors())
@@ -4124,14 +4189,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                     self.assertEqual(p.grad, analytic, "mismatch at " + name + ".grad for " +
                                      "set_to_none = {}, use_bucket_view = {}".format(try_set_to_none,
                                                                                      use_bucket_view))
-
-    def test_ddp_checkpointing(self):
-        pass
-        # gradient_as_bucket_view=True, False
-
-    def test_ddp_checkpointing_weight_sharing(self):
-        pass
-        # gradient_as_bucket_view=True, False
 
 
 class ReducerModule(nn.Module):
@@ -4762,11 +4819,11 @@ class CommTest(MultiProcessTestCase):
     def test_distributed_debug_mode(self):
         # Default should be off
         default_debug_mode = dist._get_debug_mode()
-        self.assertEqual(default_debug_mode, dist._DistributedDebugMode.OFF)
+        self.assertEqual(default_debug_mode, dist._DistributedDebugLevel.OFF)
         mapping = {
-            "OFF": dist._DistributedDebugMode.OFF,
-            "INFO": dist._DistributedDebugMode.INFO,
-            "DETAIL": dist._DistributedDebugMode.DETAIL,
+            "OFF": dist._DistributedDebugLevel.OFF,
+            "INFO": dist._DistributedDebugLevel.INFO,
+            "DETAIL": dist._DistributedDebugLevel.DETAIL,
         }
         invalid_debug_modes = ["foo", 0, 1, -1]
 
@@ -4781,9 +4838,8 @@ class CommTest(MultiProcessTestCase):
 
         for mode in invalid_debug_modes:
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-            with self.assertRaisesRegex(ValueError, f"Invalid value {str(mode)}"):
+            with self.assertRaisesRegex(RuntimeError, "to be one of"):
                 dist._get_debug_mode()
-
 
 if __name__ == "__main__":
     assert (

@@ -22,7 +22,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
-     onlyCUDA)
+     onlyCUDA, skipMeta, skipCUDAIfNoCusolver)
 from torch.testing import floating_and_complex_types, floating_types, all_types
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
 
@@ -117,6 +117,8 @@ class TestLinalg(TestCase):
         run_test_case(zero_strided, b)
         run_test_case(a, zero_strided)
 
+    # https://github.com/pytorch/pytorch/issues/53976 tracks ROCm skip
+    @skipCUDAIfRocm
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -467,25 +469,16 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float64, torch.complex128)
-    def test_cholesky_autograd(self, device, dtype):
-        def func(root):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
-            return torch.linalg.cholesky(x)
-
+    def test_cholesky_hermitian_grad(self, device, dtype):
+        # Check that the gradient is Hermitian (or symmetric)
         def run_test(shape):
-            root = torch.rand(*shape, dtype=dtype, device=device, requires_grad=True)
-            root = root + torch.eye(shape[-1], dtype=dtype, device=device)
-
-            gradcheck(func, root)
-            gradgradcheck(func, root)
-
             root = torch.rand(*shape, dtype=dtype, device=device)
             root = torch.matmul(root, root.transpose(-1, -2).conj())
             root.requires_grad_()
             chol = torch.linalg.cholesky(root).sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())
 
-        shapes = ((3, 3), (4, 3, 2, 2))
+        shapes = ((3, 3), (1, 1, 3, 3))
         for shape in shapes:
             run_test(shape)
 
@@ -909,35 +902,16 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float64, torch.complex128)
-    def test_eigh_autograd(self, device, dtype):
+    def test_eigh_hermitian_grad(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_matrix
 
-        def func(x, uplo):
-            x = 0.5 * (x + x.conj().transpose(-2, -1))
-            return torch.linalg.eigh(x, UPLO=uplo)
-
-        def func_grad_w(x, uplo):
-            return func(x, uplo)[0]
-
-        def func_grad_v(x, uplo):
-            # gauge invariant loss function
-            return abs(func(x, uplo)[1])
-
         def run_test(dims, uplo):
-            x = torch.randn(*dims, dtype=dtype, device=device, requires_grad=True)
-
-            gradcheck(func_grad_w, [x, uplo])
-            gradgradcheck(func_grad_w, [x, uplo])
-
-            gradcheck(func_grad_v, [x, uplo])
-            gradgradcheck(func_grad_v, [x, uplo])
-
             x = random_hermitian_matrix(dims[-1], *dims[:-2]).requires_grad_()
             w, v = torch.linalg.eigh(x)
             (w.sum() + abs(v).sum()).backward()
             self.assertEqual(x.grad, x.grad.conj().transpose(-1, -2))  # Check the gradient is Hermitian
 
-        for dims, uplo in itertools.product([(3, 3), (2, 3, 3)], ["L", "U"]):
+        for dims, uplo in itertools.product([(3, 3), (1, 1, 3, 3)], ["L", "U"]):
             run_test(dims, uplo)
 
     @skipCUDAIfNoMagma
@@ -1700,17 +1674,6 @@ class TestLinalg(TestCase):
             self.assertEqual(ee[:, 0], np_e)  # real part
             self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))  # imaginary part
         self.assertEqual(vv, np_v)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.complex64, torch.complex128)
-    def test_eig_backward_complex(self, device, dtype):
-        # torch.eig's backward is not supported yet for complex types. We
-        # should kill this test once it's implemented.
-        a = torch.tensor([[1., 2], [3, 4]], device=device, dtype=dtype, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "eig does not support automatic differentiation for outputs with complex dtype"):
-            e, v = torch.eig(a, True)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -2626,8 +2589,22 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCPUIfNoLapack
+    @onlyOnCPUAndCUDA   # TODO: XLA doesn't raise exception
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_inverse_errors_large(self, device, dtype):
+        # Test batched inverse of singular matrices reports errors without crashing (gh-51930)
+        x = torch.empty((8, 10, 616, 616), dtype=dtype, device=device)
+        x[:] = torch.eye(616, dtype=dtype, device=device)
+        x[..., 10, 10] = 0
+        with self.assertRaisesRegex(RuntimeError, r'For batch 0: U\(11,11\) is zero'):
+            torch.inverse(x)
+
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-7, torch.complex128: 1e-7})
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinv(self, device, dtype):
@@ -3216,6 +3193,7 @@ class TestLinalg(TestCase):
         run_test_skipped_elements((12, 3, 2), ind=1)
         run_test_skipped_elements((18, 3, 3, 1), ind=1)
 
+    @skipMeta  # See https://github.com/pytorch/pytorch/issues/53739
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -4043,7 +4021,7 @@ class TestLinalg(TestCase):
         b = torch.rand(3, 1, dtype=dtype, device=device)
         A = torch.eye(3, 3, dtype=dtype, device=device)
         A[-1, -1] = 0  # Now A is singular
-        err_str = r"triangular_solve_cpu: U\(3,3\) is zero, singular U\."
+        err_str = r"triangular_solve: U\(3,3\) is zero, singular U\."
         with self.assertRaisesRegex(RuntimeError, err_str):
             torch.triangular_solve(b, A)
 
@@ -4467,8 +4445,9 @@ class TestLinalg(TestCase):
             expected = x / x.norm(p, 0, keepdim=True).clamp(min=1)
             self.assertEqual(res, expected, msg="renorm failed for {}-norm".format(p))
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_orgqr(self, device, dtype):
         def generate_reflectors_and_tau(A):
@@ -4519,8 +4498,9 @@ class TestLinalg(TestCase):
         for shape in shapes:
             run_test(shape)
 
-    @onlyCPU
     @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @skipCUDAIfRocm
     def test_orgqr_errors_and_warnings(self, device):
         test_cases = [
             # input1 size, input2 size, error regex
@@ -4553,19 +4533,17 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, "tau dtype Int does not match input dtype"):
             torch.orgqr(reflectors, tau.to(torch.int))
 
-        # TODO: enable the following tests when orgqr is implemented for CUDA
         if torch.cuda.is_available():
-            with self.assertRaisesRegex(RuntimeError, "the operator doesn't exist for this backend"):
-                # device of out and input should match
-                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-                out = torch.empty_like(reflectors).to(wrong_device)
-                # with self.assertRaisesRegex(RuntimeError, "Expected result and input to be on the same device"):
+            # device of out and input should match
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty_like(reflectors).to(wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
                 torch.orgqr(reflectors, tau, out=out)
 
-                # device of tau and input should match
-                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-                tau = tau.to(wrong_device)
-                # with self.assertRaisesRegex(RuntimeError, "Expected input and tau to be on the same device"):
+            # device of tau and input should match
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            tau = tau.to(wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "Expected input and tau to be on the same device"):
                 torch.orgqr(reflectors, tau)
 
     @precisionOverride({torch.complex64: 5e-6})
@@ -5109,8 +5087,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
 
     @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(*([torch.float, torch.double] +
-                    ([] if TEST_WITH_ROCM else torch.testing.get_all_complex_dtypes())))
+    @dtypesIfCUDA(*([torch.float, torch.double] + torch.testing.get_all_complex_dtypes()))
     @tf32_on_and_off(0.005)
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
@@ -5392,21 +5369,21 @@ else:
         self.assertEqual(out_tensor, ref)
         res3 = out_tensor.clone()
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(out_tensor, func + "_")(1, b1, b2)
         self.assertEqual(out_tensor, ref * 2),
         getattr(res3, func + "_")(b1, b2, beta=1)
         self.assertEqual(out_tensor, res3)
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func}_ is deprecated"):
             getattr(out_tensor, func + "_")(1., .5, b1, b2)
         self.assertEqual(out_tensor, ref * 2.5)
         getattr(res3, func + "_")(b1, b2, beta=1., alpha=.5)
         self.assertEqual(out_tensor, res3)
 
-        with self.maybeWarnsRegex(
+        with self.assertWarnsOnceRegex(
                 UserWarning, f"This overload of {func} is deprecated"):
             self.assertEqual(out_tensor, getattr(torch, func)(1, out_tensor, 0, b1, b2))
 
@@ -5601,6 +5578,7 @@ else:
 
     @precisionOverride({torch.float32: 5e-3, torch.complex64: 1e-3})
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_pinverse(self, device, dtype):
@@ -7020,6 +6998,7 @@ else:
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, atol=1e-8, rtol=0)
 
     @skipCUDAIfNoMagma
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     def test_lapack_empty(self, device):
         # FIXME: these are just a selection of LAPACK functions -- we need a general strategy here.

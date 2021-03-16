@@ -1789,7 +1789,7 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
     TORCH_CHECK(
         false,
         ptr->repr_str(),
-        " is not one of the supported element types for tolist: int, float, bool");
+        " is not one of the supported element types for tolist: int, float, complex, bool");
   }
 
   // Pass in the number of dimensions and base element type as arguments

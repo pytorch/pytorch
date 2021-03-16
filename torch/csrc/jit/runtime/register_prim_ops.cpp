@@ -107,6 +107,14 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::layout(Tensor a) -> int",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.layout());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          prim::tolist,
          // This operator has to be unschematized because the return type
          // depends on the type hint and input. The implementation of this
@@ -136,6 +144,8 @@ RegisterOperators reg(
                out_ty = FloatType::get();
              } else if (elem_ty_val == 2) {
                out_ty = BoolType::get();
+             } else if (elem_ty_val == 3) {
+               out_ty = ComplexType::get();
              } else {
                TORCH_CHECK(
                    false,
@@ -407,7 +417,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Complex.int(int a, int b=0) -> complex"),
+         TORCH_SELECTIVE_SCHEMA("aten::Complex.int(int a=0, int b=0) -> complex"),
          [](Stack* stack) {
            int a = 0, b = 0;
            pop(stack, a, b);
@@ -426,6 +436,25 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
+             "aten::Complex.int_bool(int a, bool b) -> complex"),
+         [](Stack* stack) {
+           int a = 0;
+           bool b = false;
+           pop(stack, a, b);
+           push(stack, c10::complex<double>(static_cast<double>(a), static_cast<double>(b)));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::Complex.float(float a=0, float b=0) -> complex"),
+         [](Stack* stack) {
+           double a = 0, b = 0;
+           pop(stack, a, b);
+           push(stack, c10::complex<double>(a, b));
+         },
+         aliasAnalysisFromSchema()),
+      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
              "aten::Complex.float_int(float a, int b) -> complex"),
          [](Stack* stack) {
            double a = 0;
@@ -434,13 +463,43 @@ RegisterOperators reg(
            push(stack, c10::complex<double>(a, static_cast<double>(b)));
          },
          aliasAnalysisFromSchema()),
+      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::Complex.float_bool(float a, bool b) -> complex"),
+         [](Stack* stack) {
+           double a = 0;
+           bool b = false;
+           pop(stack, a, b);
+           push(stack, c10::complex<double>(a, static_cast<double>(b)));
+         },
+         aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.float(float a, float b=0) -> complex"),
+             "aten::Complex.bool(bool a=False, bool b=False) -> complex"),
          [](Stack* stack) {
-           double a = 0, b = 0;
+           bool a = false, b = false;
            pop(stack, a, b);
-           push(stack, c10::complex<double>(a, b));
+           push(stack, c10::complex<double>(static_cast<double>(a), static_cast<double>(b)));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::Complex.bool_int(bool a=False, int b=0) -> complex"),
+         [](Stack* stack) {
+           bool a = false;
+           int b = 0;
+           pop(stack, a, b);
+           push(stack, c10::complex<double>(static_cast<double>(a), static_cast<double>(b)));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::Complex.bool_float(bool a=False, float b=0) -> complex"),
+         [](Stack* stack) {
+           bool a = false;
+           double b = 0;
+           pop(stack, a, b);
+           push(stack, c10::complex<double>(static_cast<double>(a), b));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -808,7 +867,7 @@ RegisterOperators reg(
      DEFINE_COMPARISON_OP(aten::ge, a >= b),
      DEFINE_BINARY_OP_WITH_COMPLEX(aten::add, a + b),
      DEFINE_BINARY_OP_WITH_COMPLEX(aten::sub, a - b),
-     DEFINE_BINARY_OP(aten::mul, a* b),
+     DEFINE_BINARY_OP_WITH_COMPLEX(aten::mul, a * b),
      DEFINE_BOOL_OP(aten::__and__, a&& b),
      DEFINE_BOOL_OP(aten::__or__, a || b),
      DEFINE_BOOL_OP(aten::__xor__, a != b),

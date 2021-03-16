@@ -130,9 +130,7 @@ struct PeepholeOptimizeImpl {
         }
       } else if (
           node->kind() == aten::Float || node->kind() == aten::Int ||
-          node->kind() == aten::Complex ||
           node->kind() == aten::FloatImplicit ||
-          node->kind() == aten::ComplexImplicit ||
           node->kind() == aten::IntImplicit ||
           node->kind() == aten::ScalarImplicit) {
         Node* input_node = node->input()->node();
@@ -142,6 +140,28 @@ struct PeepholeOptimizeImpl {
               " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
               node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
+        }
+      } else if (
+          node->kind() == aten::Complex ||
+          node->kind() == aten::ComplexImplicit) {
+        Value *inp1 = node->inputs().at(0);
+        Value *inp2 = node->inputs().at(1);
+        if (inp1->node()->kind() == prim::NumToTensor && inp2->node()->kind() == prim::NumToTensor) {
+          GRAPH_UPDATE(
+              getHeader(inp1->node()),
+              " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
+              inp1->debugName());
+          GRAPH_UPDATE(
+              getHeader(inp2->node()),
+              " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
+              inp2->debugName());
+          auto real_ival = toIValue(inp1).value();
+          auto imag_ival = toIValue(inp2).value();
+          double real = real_ival.toInt() ? real_ival.toInt() : real_ival.toDouble();
+          double imag = imag_ival.toInt() ? imag_ival.toInt() : imag_ival.toDouble();
+          IValue ival(c10::complex<double>(real, imag));
+          auto new_constant = node->owningGraph()->insertConstant(ival);
+          node->output()->replaceAllUsesWith(new_constant);
         }
       } else if (
           node->matches("aten::size(Tensor self) -> int[]") &&
@@ -187,6 +207,17 @@ struct PeepholeOptimizeImpl {
           c10::ScalarType dtype = *maybe_dtype;
           WithInsertPoint guard(node);
           IValue ival(at::isFloatingType(dtype));
+          auto new_constant = node->owningGraph()->insertConstant(ival);
+          node->output()->replaceAllUsesWith(new_constant);
+        }
+      } else if (
+          node->matches("aten::is_complex(Tensor self) -> bool") &&
+          shape_peepholes_) {
+        auto ptt = node->inputs().at(0)->type()->cast<TensorType>();
+        if (auto maybe_dtype = ptt->scalarType()) {
+          c10::ScalarType dtype = *maybe_dtype;
+          WithInsertPoint guard(node);
+          IValue ival(at::isComplexType(dtype));
           auto new_constant = node->owningGraph()->insertConstant(ival);
           node->output()->replaceAllUsesWith(new_constant);
         }

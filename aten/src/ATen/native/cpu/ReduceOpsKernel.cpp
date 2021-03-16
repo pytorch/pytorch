@@ -187,7 +187,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
 
 static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
-    Scalar p) {
+    const Scalar& p) {
   float val;
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();
@@ -355,7 +355,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
       std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), -1));
     return;
   }
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "min_values_cpu", [&iter] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "min_values_cpu", [&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
@@ -365,7 +365,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
 }
 
 static void max_values_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "max_values_cpu", [&iter] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "max_values_cpu", [&iter] {
     binary_kernel_reduce_vec(
       iter,
       [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
