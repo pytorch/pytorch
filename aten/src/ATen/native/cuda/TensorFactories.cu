@@ -9,11 +9,6 @@
 #include <c10/util/Exception.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
-
-#include <thrust/device_ptr.h>
-#include <thrust/execution_policy.h>
-#include <thrust/sequence.h>
-#include <thrust/sort.h>
 #include <cub/cub.cuh>
 
 #include <algorithm>
@@ -85,12 +80,6 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
   check_supported_max_int_with_precision(n, result);
 
   result.resize_({n});
-
-  if (n < 30000) {  // For small inputs, we offload it to CPU instead.
-    auto result_cpu = at::empty({n}, result.options().device(kCPU));
-    randperm_out(result_cpu, n, generator);
-    return result.copy_(result_cpu);
-  }
 
 #if 0
   // This if condition should never be true because if n >= 30000 and the tensor has a Half type,
