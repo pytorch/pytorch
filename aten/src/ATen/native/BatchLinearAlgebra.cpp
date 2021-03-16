@@ -1718,7 +1718,11 @@ std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, std::string mode) {
 
 std::tuple<Tensor&,Tensor&> linalg_qr_out(Tensor& Q, Tensor& R, const Tensor& self, std::string mode) {
   TORCH_CHECK(self.dim() >= 2,
-              "qr input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+              "torch.linalg.qr: input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  checkSameDevice("torch.linalg.qr", Q, self, "Q");
+  checkSameDevice("torch.linalg.qr", R, self, "R");
+  checkLinalgCompatibleDtype("torch.linalg.qr", Q, self, "Q");
+  checkLinalgCompatibleDtype("torch.linalg.qr", R, self, "R");
   Tensor Q_tmp, R_tmp;
   std::tie(Q_tmp, R_tmp) = at::_linalg_qr_helper(self, mode);
   at::native::resize_output(Q, Q_tmp.sizes());
@@ -2119,9 +2123,12 @@ std::tuple<Tensor&, Tensor&> eig_out(Tensor& e, Tensor& v, const Tensor& self, b
   TORCH_CHECK(self.dim() == 2, "input should be 2 dimensional");
   TORCH_CHECK(self.size(0) == self.size(1), "input should be square");
   TORCH_CHECK(self.isfinite().all().item<bool>(), "input should not contain infs or NaNs");
-  TORCH_CHECK(e.dtype() == self.dtype(), "Expected 'e' to have dtype ", self.dtype(), " but got ", e.dtype());
-  if (eigenvectors)
-      TORCH_CHECK(v.dtype() == self.dtype(), "Expected 'v' to have dtype ", self.dtype(), " but got ", v.dtype());
+  checkSameDevice("torch.eig", e, self, "eigenvalues");
+  checkLinalgCompatibleDtype("torch.eig", e, self, "eigenvalues");
+  if (eigenvectors) {
+    checkSameDevice("torch.eig", v, self, "eigenvectors");
+    checkLinalgCompatibleDtype("torch.eig", v, self, "eigenvectors");
+  }
   int64_t n = self.size(-1);
 
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
