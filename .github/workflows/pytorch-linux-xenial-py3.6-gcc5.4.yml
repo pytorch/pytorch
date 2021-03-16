@@ -71,10 +71,9 @@ jobs:
             ${DOCKER_IMAGE} \
             .jenkins/pytorch/build.sh
       # TODO: Add step to archive built artifacts
-      - name: Clean up workspace
+      - name: Clean up docker images
         if: always()
         run: |
-          rm -rf "${GITHUB_WORKSPACE}"
           # Prune all of the docker images
           docker system prune -af
   # TODO: Add test step here
