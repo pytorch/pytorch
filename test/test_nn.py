@@ -15373,10 +15373,6 @@ class TestLazyModules(TestCase):
             module.register_parameter('test_param', UninitializedParameter())
             if optim_cls is torch.optim.SGD:
                 optim = optim_cls(module.parameters(), lr=0.0)
-            elif optim_cls is torch.optim.Adagrad:
-                with self.assertRaisesRegex(ValueError, 'uninitialized parameter'):
-                    optim = optim_cls(module.parameters())
-                continue
             else:
                 optim = optim_cls(module.parameters())
             run_step(module, optim)
