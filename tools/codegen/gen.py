@@ -27,7 +27,7 @@ try:
     # use faster C loader if available
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader # type: ignore
+    from yaml import SafeLoader as Loader  # type: ignore
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
