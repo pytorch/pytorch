@@ -91,7 +91,7 @@ void multi_margin_loss_out_cpu_template(
     const Tensor& input,
     const Tensor& target,
     int p,
-    Scalar margin,
+    const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
   int64_t nframe, dim;
@@ -199,7 +199,7 @@ void multi_margin_loss_backward_out_cpu_template(
     const Tensor& input,
     const Tensor& target,
     int p,
-    Scalar margin,
+    const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
   int64_t nframe, dim;
@@ -250,8 +250,8 @@ void multi_margin_loss_backward_out_cpu_template(
 Tensor multi_margin_loss_cpu(
     const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
+    const Scalar& p,
+    const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
   auto output = at::empty({0}, input.options());
@@ -264,8 +264,8 @@ Tensor& multi_margin_loss_cpu_out(
     Tensor& output,
     const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
+    const Scalar& p,
+    const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
   multi_margin_loss_out_cpu_template(
@@ -277,8 +277,8 @@ Tensor multi_margin_loss_cpu_backward(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
+    const Scalar& p,
+    const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
   auto grad_input = at::empty({0}, input.options());
@@ -299,8 +299,8 @@ Tensor& multi_margin_loss_cpu_backward_out(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
-    Scalar p,
-    Scalar margin,
+    const Scalar& p,
+    const Scalar& margin,
     const Tensor& weight,
     int64_t reduction) {
   multi_margin_loss_backward_out_cpu_template(
