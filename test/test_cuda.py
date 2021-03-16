@@ -3216,9 +3216,13 @@ torch.cuda.synchronize()
                     c = func_with_temps(c, 2)
                 g1.capture_end()
 
-            s0.wait_stream(s)
-            s1.wait_stream(s)
+            # To reproduce data corruption, I need g0 and g1's kernels to run concurrently.
+            # But replay() (especially cudaGraphLaunch) can incur significant CPU overhead.
+            # The following pattern helps align device-side execution of g0 and g1's kernels.
+            torch.cuda.synchronize()
             with torch.cuda.stream(s0):
+                torch.cuda._sleep(1000000)
+                s1.wait_stream(s0)
                 g0.replay()
             with torch.cuda.stream(s1):
                 g1.replay()
@@ -3344,13 +3348,16 @@ torch.cuda.synchronize()
                 delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
                 delta_active_bytes = numel * elem
 
-            a = torch.ones((numel,), device="cuda")
-
-            precapture_stats = torch.cuda.memory_stats()
-
             g = torch.cuda._Graph()
             s.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(s):
+                # Allocation stat estimates assume input is created on the same stream as capture_begin()
+                # (in other words, the same stream silo as the rng offset holder, which is not allocated from the
+                # capture's private pool).
+                a = torch.ones((numel,), device="cuda")
+
+                precapture_stats = torch.cuda.memory_stats()
+
                 g.capture_begin()
                 b = a.clone()
                 for _ in range(5):
