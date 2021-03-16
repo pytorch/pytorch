@@ -68,8 +68,8 @@ class WorkerTimerArgs:
     will pass `WorkerTimerArgs` instances to workers for processing.
     """
     stmt: str
-    setup: Optional[str] = None
-    global_setup: Optional[str] = None
+    setup: str = "pass"
+    global_setup: str = ""
     num_threads: int = 1
     language: Language = Language.PYTHON
 

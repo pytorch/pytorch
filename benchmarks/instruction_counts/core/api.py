@@ -3,7 +3,7 @@ import dataclasses
 import enum
 import re
 import textwrap
-from typing import Optional, Tuple, Union, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 from worker.main import WorkerTimerArgs
 
@@ -45,17 +45,15 @@ class AutoLabels:
 
 @dataclasses.dataclass(frozen=True)
 class GroupedSetup:
-    py_setup: Optional[str] = None
-    cpp_setup: Optional[str] = None
-    global_setup: Optional[str] = None
+    py_setup: str = ""
+    cpp_setup: str = ""
+    global_setup: str = ""
 
     def __post_init__(self) -> None:
-        # dedent all populated entries.
         for field in dataclasses.fields(self):
-            assert field.type == Optional[str]
-            value: Optional[str] = getattr(self, field.name)
-            if value is not None:
-                object.__setattr__(self, field.name, textwrap.dedent(value))
+            assert field.type == str
+            value: str = getattr(self, field.name)
+            object.__setattr__(self, field.name, textwrap.dedent(value))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -234,6 +232,51 @@ class GroupedBenchmark:
             num_threads=(num_threads,) if isinstance(num_threads, int) else num_threads,
         )
 
+    @classmethod
+    def init_from_variants(
+        cls,
+        py_block: str = "",
+        cpp_block: str = "",
+        num_threads: Union[int, Tuple[int, ...]] = 1,
+    ) -> Dict[Union[Tuple[str, ...], Optional[str]], "GroupedBenchmark"]:
+
+        py_cases, py_setup, py_global_setup = cls._parse_variants(py_block, Language.PYTHON)
+        cpp_cases, cpp_setup, cpp_global_setup = cls._parse_variants(cpp_block, Language.CPP)
+
+        assert not py_global_setup
+        setup = GroupedSetup(
+            py_setup=py_setup,
+            cpp_setup=cpp_setup,
+            global_setup=cpp_global_setup,
+        )
+
+        # NB: The key is actually `Tuple[str, ...]`, however MyPy gets confused
+        #     and we use the superset `Union[Tuple[str, ...], Optional[str]` to
+        #     match the expected signature.
+        variants: Dict[Union[Tuple[str, ...], Optional[str]], GroupedBenchmark] = {}
+        for label in set(list(py_cases.keys()) + list(cpp_cases.keys())):
+            py_lines = py_cases.get(label, [])
+            cpp_lines = cpp_cases.get(label, [])
+
+            n_lines = max(len(py_lines), len(cpp_lines))
+            py_lines += [""] * (n_lines - len(py_lines))
+            cpp_lines += [""] * (n_lines - len(cpp_lines))
+            lines = [
+                (py_stmt, cpp_stmt)
+                for py_stmt, cpp_stmt in zip(py_lines, cpp_lines)
+                if py_stmt or cpp_stmt
+            ]
+
+            for i, (py_stmt, cpp_stmt) in enumerate(lines):
+                variants[(label, f"Case: {i:>2}")] = GroupedBenchmark.init_from_stmts(
+                    py_stmt=py_stmt or None,
+                    cpp_stmt=cpp_stmt or None,
+                    setup=setup,
+                    num_threads=num_threads,
+                )
+
+        return variants
+
     def __post_init__(self) -> None:
         if self.autograd and self.signature_output is None:
             raise ValueError("An output variable must be specified when `autograd=True`.")
@@ -322,7 +365,34 @@ class GroupedBenchmark:
 
         return py_invocation, cpp_invocation
 
+    @staticmethod
+    def _parse_variants(block: str, language: Language) -> Tuple[Dict[str, List[str]], str, str]:
+        block = textwrap.dedent(block).strip()
+        comment = "#" if language == Language.PYTHON else "//"
+        label_pattern = f"{comment} <-- (.+) -->$"
+        label = ""
+
+        lines_by_label: Dict[str, List[str]] = {"SETUP": [], "GLOBAL_SETUP": []}
+        for line in block.splitlines(keepends=False):
+            match = re.search(label_pattern, line.strip())
+            if match:
+                label = match.groups()[0]
+                if label.replace(" ", "_").upper() in ("SETUP", "GLOBAL_SETUP"):
+                    label = label.replace(" ", "_").upper()
+                continue
+
+            lines_by_label.setdefault(label, [])
+            if line.startswith(comment):
+                line = ""
+            lines_by_label[label].append(line)
+
+        setup = "\n".join(lines_by_label.pop("SETUP"))
+        global_setup = "\n".join(lines_by_label.pop("GLOBAL_SETUP"))
+
+        return lines_by_label, setup, global_setup
+
 
 # These are the user facing APIs.
 GroupedStmts = GroupedBenchmark.init_from_stmts
 GroupedModules = GroupedBenchmark.init_from_model
+GroupedVariants = GroupedBenchmark.init_from_variants

@@ -129,7 +129,7 @@ def _get_setup(
     language: Language,
     stmt: str,
     model_path: Optional[str]
-) -> Optional[str]:
+) -> str:
     """Specialize a GroupedBenchmark for a particular configuration.
 
     Setup requires two extra pieces of information:
@@ -152,7 +152,7 @@ def _get_setup(
         model_setup = benchmark.cpp_model_setup
 
     if runtime == RuntimeMode.EAGER:
-        return "\n".join([setup or "", model_setup or ""])
+        return "\n".join([setup, model_setup or ""])
 
     assert runtime == RuntimeMode.JIT
     assert model_path is not None
@@ -186,7 +186,7 @@ def _get_setup(
         """)
 
     model_load = setup_template.format(stmt=textwrap.indent(stmt, ' ' * 4))
-    return "\n".join([setup or "", model_load])
+    return "\n".join([setup, model_load])
 
 
 def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
@@ -238,7 +238,7 @@ def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
 
                 setup = _get_setup(args, runtime, language, stmt, model_path)
 
-                global_setup: Optional[str] = None
+                global_setup: str = ""
                 if language == Language.CPP and runtime == RuntimeMode.JIT:
                     global_setup = textwrap.dedent("""
                         #include <string>
