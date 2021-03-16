@@ -484,6 +484,9 @@
 - name: frac(Tensor self) -> Tensor
   self: grad
 
+- name: frexp.Tensor(Tensor self) -> (Tensor mantissa, Tensor exponent)
+  self: grad / exponent.exp2()
+
 - name: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   self: gather_backward(grad, self, dim, index, sparse_grad)
   index: non_differentiable
@@ -1909,6 +1912,9 @@
 
 - name: mkldnn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: mkldnn_adaptive_avg_pool2d_backward(grad, self)
+
+- name: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
+  self: grad.reshape(self.sizes())
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor

@@ -33,26 +33,26 @@ DEFINE_DISPATCH(leaky_relu_backward_stub);
 DEFINE_DISPATCH(silu_stub);
 DEFINE_DISPATCH(silu_backward_stub);
 
-Tensor hardtanh(const Tensor& self, Scalar min, Scalar max) {
+Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
   return at::clamp(self, min, max);
 }
 
-Tensor& hardtanh_out(Tensor& result, const Tensor& self, Scalar min, Scalar max) {
+Tensor& hardtanh_out(Tensor& result, const Tensor& self, const Scalar& min, const Scalar& max) {
   return at::clamp_out(result, self, min, max);
 }
 
-Tensor& hardtanh_(Tensor& self, Scalar min, Scalar max) {
+Tensor& hardtanh_(Tensor& self, const Scalar& min, const Scalar& max) {
   return at::clamp_(self, min, max);
 }
 
 Tensor& hardtanh_backward_out(Tensor& grad_input,
-    const Tensor& grad_output, const Tensor& self, Scalar min, Scalar max) {
+    const Tensor& grad_output, const Tensor& self, const Scalar& min, const Scalar& max) {
   auto iter = TensorIterator::binary_op(grad_input, grad_output, self);
   hardtanh_backward_stub(iter.device_type(), iter, min, max);
   return grad_input;
 }
 
-Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, Scalar min, Scalar max) {
+Tensor hardtanh_backward(const Tensor& grad_output, const Tensor& self, const Scalar& min, const Scalar& max) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, grad_output, self);
   hardtanh_backward_stub(iter.device_type(), iter, min, max);
@@ -89,9 +89,9 @@ Tensor hardsigmoid_backward(const Tensor& grad_output, const Tensor& self) {
 Tensor& elu_out(
     Tensor& result,
     const Tensor& self,
-    Scalar alpha,
-    Scalar scale,
-    Scalar input_scale) {
+    const Scalar& alpha,
+    const Scalar& scale,
+    const Scalar& input_scale) {
   auto iter = TensorIterator::unary_op(result, self);
   elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
   return result;
@@ -99,9 +99,9 @@ Tensor& elu_out(
 
 Tensor elu(
     const Tensor& self,
-    Scalar alpha,
-    Scalar scale,
-    Scalar input_scale) {
+    const Scalar& alpha,
+    const Scalar& scale,
+    const Scalar& input_scale) {
   Tensor result;
   auto iter = TensorIterator::unary_op(result, self);
   elu_stub(iter.device_type(), iter, alpha, scale, input_scale);
@@ -110,17 +110,17 @@ Tensor elu(
 
 Tensor & elu_(
     Tensor & self,
-    Scalar alpha,
-    Scalar scale,
-    Scalar input_scale) {
+    const Scalar& alpha,
+    const Scalar& scale,
+    const Scalar& input_scale) {
   return at::elu_out(self, self, alpha, scale, input_scale);
 }
 
 Tensor elu_backward(
     const Tensor& grad_output,
-    Scalar alpha,
-    Scalar scale,
-    Scalar input_scale,
+    const Scalar& alpha,
+    const Scalar& scale,
+    const Scalar& input_scale,
     bool is_result,
     const Tensor& self_or_result) {
   TORCH_CHECK(
@@ -185,14 +185,14 @@ Tensor & relu6_(Tensor & self) {
   return at::hardtanh_(self, /*min_val=*/0, /*max_val=*/6);
 }
 
-Tensor celu(const Tensor & self, Scalar alpha) {
+Tensor celu(const Tensor & self, const Scalar& alpha) {
   TORCH_CHECK(alpha.to<double>() != 0,
       "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
-Tensor & celu_(Tensor & self, Scalar alpha) {
+Tensor & celu_(Tensor & self, const Scalar& alpha) {
   TORCH_CHECK(alpha.to<double>() != 0,
       "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
@@ -239,8 +239,8 @@ inline void _rrelu_with_noise_train(
     Tensor& output,
     const Tensor& input,
     const Tensor& noise,
-    Scalar lower_,
-    Scalar upper_,
+    const Scalar& lower_,
+    const Scalar& upper_,
     c10::optional<Generator> generator) {
   scalar_t lower = lower_.to<scalar_t>();
   scalar_t upper = upper_.to<scalar_t>();
@@ -270,8 +270,8 @@ Tensor& rrelu_with_noise_out_cpu(
     Tensor& output,
     const Tensor& self,
     const Tensor& noise,
-    Scalar lower,
-    Scalar upper,
+    const Scalar& lower,
+    const Scalar& upper,
     bool training,
     c10::optional<Generator> generator) {
   if (training) {
@@ -291,8 +291,8 @@ Tensor& rrelu_with_noise_out_cpu(
 Tensor rrelu_with_noise_cpu(
     const Tensor& self,
     const Tensor& noise,
-    Scalar lower,
-    Scalar upper,
+    const Scalar& lower,
+    const Scalar& upper,
     bool training,
     c10::optional<Generator> generator) {
   auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -302,8 +302,8 @@ Tensor rrelu_with_noise_cpu(
 Tensor& rrelu_with_noise_cpu_(
     Tensor& self,
     const Tensor& noise,
-    Scalar lower,
-    Scalar upper,
+    const Scalar& lower,
+    const Scalar& upper,
     bool training,
     c10::optional<Generator> generator) {
   return at::native::rrelu_with_noise_out_cpu(self, self, noise, lower, upper, training, generator);
@@ -313,8 +313,8 @@ Tensor rrelu_with_noise_backward(
     const Tensor& grad_output,
     const Tensor& self_or_result,
     const Tensor& noise,
-    Scalar lower,
-    Scalar upper,
+    const Scalar& lower,
+    const Scalar& upper,
     bool training,
     bool is_result) {
   auto lower_tensor = scalar_to_tensor(lower);
@@ -328,21 +328,21 @@ Tensor rrelu_with_noise_backward(
   }
 }
 
-Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, c10::optional<Generator> generator) {
+Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool training, c10::optional<Generator> generator) {
   return at::rrelu_with_noise(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
 }
 
-Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, c10::optional<Generator> generator) {
+Tensor & rrelu_(Tensor & self, const Scalar& lower, const Scalar& upper, bool training, c10::optional<Generator> generator) {
   return at::rrelu_with_noise_(self, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT), lower, upper, training, generator);
 }
 
-Tensor & softplus_out(Tensor& result, const Tensor& self, Scalar beta, Scalar threshold) {
+Tensor & softplus_out(Tensor& result, const Tensor& self, const Scalar& beta, const Scalar& threshold) {
   auto iter = TensorIterator::unary_op(result, self);
   softplus_stub(iter.device_type(), iter, beta, threshold);
   return result;
 }
 
-Tensor softplus(const Tensor& self, Scalar beta, Scalar threshold) {
+Tensor softplus(const Tensor& self, const Scalar& beta, const Scalar& threshold) {
   Tensor result;
   auto iter = TensorIterator::unary_op(result, self);
   softplus_stub(iter.device_type(), iter, beta, threshold);
@@ -353,8 +353,8 @@ Tensor & softplus_backward_out(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& self,
-    Scalar beta,
-    Scalar threshold,
+    const Scalar& beta,
+    const Scalar& threshold,
     const Tensor& output) {
   auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
   softplus_backward_stub(iter.device_type(), iter, beta, threshold);
@@ -364,8 +364,8 @@ Tensor & softplus_backward_out(
 Tensor softplus_backward(
     const Tensor& grad_output,
     const Tensor& self,
-    Scalar beta,
-    Scalar threshold,
+    const Scalar& beta,
+    const Scalar& threshold,
     const Tensor& output) {
   Tensor grad_input;
   auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
@@ -378,8 +378,8 @@ Tensor softplus_backward(
 static Tensor threshold_out(
     optional<Tensor> opt_result,
     const Tensor& self,
-    Scalar threshold,
-    Scalar value,
+    const Scalar& threshold,
+    const Scalar& value,
     const Tensor& other) {
   Tensor result = opt_result.value_or(Tensor());
   auto iter = TensorIteratorConfig()
@@ -396,21 +396,21 @@ static Tensor threshold_out(
   return iter.output();
 }
 
-Tensor threshold(const Tensor& self, Scalar threshold, Scalar value) {
+Tensor threshold(const Tensor& self, const Scalar& threshold, const Scalar& value) {
   return threshold_out(nullopt, self, threshold, value, self);
 }
 
-Tensor& threshold_(Tensor& self, Scalar threshold, Scalar value) {
+Tensor& threshold_(Tensor& self, const Scalar& threshold, const Scalar& value) {
   threshold_out(make_optional(self), self, threshold, value, self);
   return self;
 }
 
-Tensor& threshold_out(Tensor& result, const Tensor& self, Scalar threshold, Scalar value) {
+Tensor& threshold_out(Tensor& result, const Tensor& self, const Scalar& threshold, const Scalar& value) {
   threshold_out(make_optional(result), self, threshold, value, self);
   return result;
 }
 
-Tensor threshold_backward(const Tensor& grad, const Tensor& self, Scalar threshold) {
+Tensor threshold_backward(const Tensor& grad, const Tensor& self, const Scalar& threshold) {
   return threshold_out(nullopt, self, threshold, 0, grad);
 }
 
@@ -668,33 +668,33 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
 // -----------------------------------
 // hardshrink
 // -----------------------------------
-Tensor hardshrink(const Tensor & self, Scalar lambd) {
+Tensor hardshrink(const Tensor & self, const Scalar& lambd) {
   auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto iter = TensorIterator::unary_op(out_tensor, self);
   hardshrink_stub(iter.device_type(), iter, lambd);
   return out_tensor;
 }
 
-Tensor hardshrink_backward(const Tensor & grad, const Tensor & self, Scalar lambd) {
+Tensor hardshrink_backward(const Tensor & grad, const Tensor & self, const Scalar& lambd) {
   auto out_tensor = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto iter = TensorIterator::binary_op(out_tensor, grad, self);
   shrink_backward_stub(iter.device_type(), iter, lambd);
   return out_tensor;
 }
 
-static inline void softshrink_check(Scalar lambd) {
+static inline void softshrink_check(const Scalar& lambd) {
   double lamb = lambd.to<double>();
   TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
 }
 
-Tensor& softshrink_out(Tensor& result, const Tensor & self, Scalar lambd) {
+Tensor& softshrink_out(Tensor& result, const Tensor & self, const Scalar& lambd) {
   softshrink_check(lambd);
   auto iter = TensorIterator::unary_op(result, self);
   softshrink_stub(iter.device_type(), iter, lambd);
   return result;
 }
 
-Tensor softshrink(const Tensor & self, Scalar lambd) {
+Tensor softshrink(const Tensor & self, const Scalar& lambd) {
   softshrink_check(lambd);
   Tensor result;
   auto iter = TensorIterator::unary_op(result, self);
@@ -702,13 +702,13 @@ Tensor softshrink(const Tensor & self, Scalar lambd) {
   return iter.output();
 }
 
-Tensor& softshrink_backward_out(Tensor& grad_input, const Tensor & grad, const Tensor & self, Scalar lambd) {
+Tensor& softshrink_backward_out(Tensor& grad_input, const Tensor & grad, const Tensor & self, const Scalar& lambd) {
   auto iter = TensorIterator::binary_op(grad_input, grad, self);
   shrink_backward_stub(iter.device_type(), iter, lambd);
   return grad_input;
 }
 
-Tensor softshrink_backward(const Tensor & grad, const Tensor & self, Scalar lambd) {
+Tensor softshrink_backward(const Tensor & grad, const Tensor & self, const Scalar& lambd) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, grad, self);
   shrink_backward_stub(iter.device_type(), iter, lambd);
@@ -741,7 +741,7 @@ Tensor infinitely_differentiable_gelu_backward(
 Tensor& leaky_relu_out(
     Tensor& result,
     const Tensor& self,
-    Scalar negval) {
+    const Scalar& negval) {
   auto iter = TensorIterator::unary_op(result, self);
   leaky_relu_stub(iter.device_type(), iter, negval);
   return result;
@@ -749,7 +749,7 @@ Tensor& leaky_relu_out(
 
 Tensor leaky_relu(
     const Tensor& self,
-    Scalar negval) {
+    const Scalar& negval) {
   Tensor result;
   auto iter = TensorIterator::unary_op(result, self);
   leaky_relu_stub(iter.device_type(), iter, negval);
@@ -758,7 +758,7 @@ Tensor leaky_relu(
 
 Tensor & leaky_relu_(
     Tensor & self,
-    Scalar neg_val) {
+    const Scalar& neg_val) {
   return at::leaky_relu_out(self, self, neg_val);
 }
 
@@ -771,7 +771,7 @@ Tensor & leaky_relu_(
 Tensor leaky_relu_backward(
     const Tensor& grad_output,
     const Tensor& self_or_result,
-    Scalar negval,
+    const Scalar& negval,
     bool is_result) {
   TORCH_CHECK(
     !is_result || negval.to<double>() >= 0.0,
