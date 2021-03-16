@@ -87,7 +87,7 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   // TODO: Ideally this logic fits best in Variable/Autograd layer so that we only
   // add AutogradBackend key when the tensor requires grad.
   DispatchKey k = key_set.highestPriorityBackendTypeId();
-  key_set_ = key_set.add(getAutogradKeyFromBackend(k));
+  key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
 
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
   // Storages with default devices.
