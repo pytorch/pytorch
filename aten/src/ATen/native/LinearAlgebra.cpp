@@ -142,9 +142,10 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
   if (input.numel() == 0) {
     // The implementation below uses operations that do not work for zero numel tensors
     // therefore we need this early return for 'input.numel() == 0' case
-    auto input_sizes = input.sizes().vec();
-    std::swap(input_sizes[input.dim() - 1], input_sizes[input.dim() - 2]);
-    return at::empty(input_sizes, input.options());
+    Tensor U, S, V;
+    // TODO: replace input.svd with linalg_svd when torch/xla can work with at::linalg_svd
+    std::tie(U, S, V) = input.svd();
+    return at::matmul(V * S.reciprocal().unsqueeze(-2), U.conj().transpose(-2, -1));
   }
 
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
@@ -212,7 +213,7 @@ namespace {
 Tensor linalg_matrix_power_impl(
     const Tensor& self,
     int64_t n,
-    c10::optional<Tensor> _out = c10::nullopt) {
+    c10::optional<Tensor> _out) {
   auto out = _out.value_or(Tensor());
 
   squareCheckInputs(self);
