@@ -12,7 +12,6 @@ import caffe2.python.hip_test_util as hiputl
 import caffe2.python.hypothesis_test_util as hu
 
 import unittest
-import os
 
 class TestGroupConvolution(hu.HypothesisTestCase):
 

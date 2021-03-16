@@ -6,6 +6,7 @@ set -eu -o pipefail
 # build & test mobile libtorch without having to setup Android/iOS
 # toolchain/simulator.
 
+# shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -22,7 +23,9 @@ retry pip install --pre torch torchvision \
 
 # Run end-to-end process of building mobile library, linking into the predictor
 # binary, and running forward pass with a real model.
-if [[ "$BUILD_ENVIRONMENT" == *-mobile-custom-build-dynamic* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-custom-build-static* ]]; then
+  TEST_CUSTOM_BUILD_STATIC=1 test/mobile/custom_build/build.sh
+elif [[ "$BUILD_ENVIRONMENT" == *-mobile-custom-build-dynamic* ]]; then
   export LLVM_DIR="$(llvm-config-5.0 --prefix)"
   echo "LLVM_DIR: ${LLVM_DIR}"
   TEST_CUSTOM_BUILD_DYNAMIC=1 test/mobile/custom_build/build.sh

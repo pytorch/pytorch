@@ -1,4 +1,4 @@
-from numbers import Number
+from numbers import Real, Number
 
 import torch
 from torch.distributions import constraints
@@ -28,12 +28,12 @@ class Beta(ExponentialFamily):
     has_rsample = True
 
     def __init__(self, concentration1, concentration0, validate_args=None):
-        if isinstance(concentration1, Number) and isinstance(concentration0, Number):
+        if isinstance(concentration1, Real) and isinstance(concentration0, Real):
             concentration1_concentration0 = torch.tensor([float(concentration1), float(concentration0)])
         else:
             concentration1, concentration0 = broadcast_all(concentration1, concentration0)
             concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)
-        self._dirichlet = Dirichlet(concentration1_concentration0)
+        self._dirichlet = Dirichlet(concentration1_concentration0, validate_args=validate_args)
         super(Beta, self).__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

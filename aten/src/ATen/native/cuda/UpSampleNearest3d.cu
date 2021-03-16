@@ -87,16 +87,22 @@ __global__ void upsample_nearest3d_backward_out_frame(
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
   int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
+  // note that we do not want to clamp src_z to src_dim_z, since we might
+  // intentionally want to skip in case of scale_factor < 1.0
   int src_z = nearest_neighbor_bw_compute_source_index(depth_scale, dst_z, src_dim_d);
-  int src_z_up = nearest_neighbor_bw_compute_source_index(depth_scale, dst_z+1, src_dim_d+1);
+  int src_z_up = nearest_neighbor_bw_compute_source_index(depth_scale, dst_z+1, src_dim_d);
 
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
+  // note that we do not want to clamp src_y to src_dim_y, since we might
+  // intentionally want to skip in case of scale_factor < 1.0
   int src_y = nearest_neighbor_bw_compute_source_index(height_scale, dst_y, src_dim_h);
-  int src_y_up = nearest_neighbor_bw_compute_source_index(height_scale, dst_y+1, src_dim_h+1);
+  int src_y_up = nearest_neighbor_bw_compute_source_index(height_scale, dst_y+1, src_dim_h);
 
   int dst_x = dst_idx % dst_dim_w;
+  // note that we do not want to clamp src_x to src_dim_w, since we might
+  // intentionally want to skip in case of scale_factor < 1.0
   int src_x = nearest_neighbor_bw_compute_source_index(width_scale, dst_x, src_dim_w);
-  int src_x_up = nearest_neighbor_bw_compute_source_index(width_scale, dst_x+1, src_dim_w+1);
+  int src_x_up = nearest_neighbor_bw_compute_source_index(width_scale, dst_x+1, src_dim_w);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;
@@ -115,7 +121,7 @@ __global__ void upsample_nearest3d_backward_out_frame(
 }
 
 static void upsample_nearest3d_out_cuda_template(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
     c10::optional<double> scales_d,
@@ -123,11 +129,6 @@ static void upsample_nearest3d_out_cuda_template(
     c10::optional<double> scales_w) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_nearest3d_out_cuda", {input_arg, output_arg});
-
-  TORCH_CHECK(
-      output_size.size() == 3,
-      "It is expected output_size equals to 3, but got size ",
-      output_size.size());
 
   int output_depth = output_size[0];
   int output_height = output_size[1];
@@ -139,34 +140,13 @@ static void upsample_nearest3d_out_cuda_template(
   int input_height = input_.size(3);
   int input_width = input_.size(4);
 
-  upsample_3d_shape_check(
-      input_,
-      Tensor(),
-      nbatch,
-      channels,
-      input_depth,
-      input_height,
-      input_width,
-      output_depth,
-      output_height,
-      output_width);
-
-  AT_ASSERT(
-      input_depth > 0 && input_height > 0 && input_width > 0 &&
-      output_depth > 0 && output_height > 0 && output_width > 0);
-
   Tensor input = input_.contiguous();
-  output.resize_({input.size(0),
-                  input.size(1),
-                  output_depth,
-                  output_height,
-                  output_width});
 
   if (input.numel() == 0) {
     return;
   }
 
-  // upsample_3d_shape_check makes sure `nbatch != 0`
+  // upsample_nearest3d meta call makes sure `nbatch != 0`
   unsigned int n = output.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
@@ -199,13 +179,12 @@ static void upsample_nearest3d_out_cuda_template(
             depth_scale,
             height_scale,
             width_scale);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 static void upsample_nearest3d_backward_out_cuda_template(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
@@ -218,16 +197,6 @@ static void upsample_nearest3d_backward_out_cuda_template(
       "upsample_nearest3d_backward_out_cuda",
       {grad_output_arg, grad_input_arg});
 
-  TORCH_CHECK(
-      output_size.size() == 3,
-      "It is expected output_size equals to 3, but got size ",
-      output_size.size());
-
-  TORCH_CHECK(
-      input_size.size() == 5,
-      "It is expected input_size equals to 5, but got size ",
-      input_size.size());
-
   int output_depth = output_size[0];
   int output_height = output_size[1];
   int output_width = output_size[2];
@@ -238,27 +207,13 @@ static void upsample_nearest3d_backward_out_cuda_template(
   int input_height = input_size[3];
   int input_width = input_size[4];
 
-  upsample_3d_shape_check(
-      Tensor(),
-      grad_output_,
-      nbatch,
-      channels,
-      input_depth,
-      input_height,
-      input_width,
-      output_depth,
-      output_height,
-      output_width);
-
   Tensor grad_output = grad_output_.contiguous();
-  grad_input.resize_(
-      {nbatch, channels, input_depth, input_height, input_width});
 
   if (grad_input.numel() == 0) {
     return;
   }
 
-  // upsample_3d_shape_check makes sure `nbatch != 0`
+  // upsample_nearest3d meta call makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
@@ -292,55 +247,32 @@ static void upsample_nearest3d_backward_out_cuda_template(
                 depth_scale,
                 height_scale,
                 width_scale);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 } // namespace
 
-Tensor& upsample_nearest3d_out_cuda(
-    Tensor& output,
+TORCH_IMPL_FUNC(upsample_nearest3d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    c10::optional<double> scales_w,
+    const Tensor& output) {
   upsample_nearest3d_out_cuda_template(output, input, output_size, scales_d, scales_h, scales_w);
-  return output;
 }
 
-Tensor upsample_nearest3d_cuda(const Tensor& input, IntArrayRef output_size,
-                               c10::optional<double> scales_d, c10::optional<double> scales_h, c10::optional<double> scales_w) {
-  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_nearest3d_out_cuda_template(output, input, output_size, scales_d, scales_h, scales_w);
-  return output;
-}
-
-Tensor& upsample_nearest3d_backward_out_cuda(
-    Tensor& grad_input,
+TORCH_IMPL_FUNC(upsample_nearest3d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    c10::optional<double> scales_w,
+    const Tensor& grad_input) {
   upsample_nearest3d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);
-  return grad_input;
-}
-
-Tensor upsample_nearest3d_backward_cuda(
-    const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_nearest3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, scales_d, scales_h, scales_w);
-  return grad_input;
 }
 
 using at::native::upsample::compute_output_size;
@@ -350,15 +282,14 @@ Tensor upsample_nearest3d_cuda(
     const Tensor& input,
     c10::optional<IntArrayRef> output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
-  auto output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
-  upsample_nearest3d_out_cuda_template(output, input, osize, scale_d, scale_h, scale_w);
-  return output;
+  return at::upsample_nearest3d(input, osize, scale_d, scale_h, scale_w);
 }
 
+// when structured kernels can handle QuantizedCPU, update these overloads to be DefaultBackend
 Tensor upsample_nearest3d_backward_cuda(
     const Tensor& grad_output,
     c10::optional<IntArrayRef> output_size,
@@ -368,10 +299,7 @@ Tensor upsample_nearest3d_backward_cuda(
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
-  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_nearest3d_backward_out_cuda_template(
-      grad_input, grad_output, osize, input_size, scale_d, scale_h, scale_w);
-  return grad_input;
+  return at::upsample_nearest3d_backward(grad_output, osize, input_size, scale_d, scale_h, scale_w);
 }
 
 } // namespace native

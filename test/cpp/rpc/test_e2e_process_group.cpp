@@ -19,12 +19,14 @@ class TestE2EProcessGroup : public TestE2EBase {
     options.devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname(serverAddress));
     std::chrono::milliseconds rpcTimeout(30000);
+    options.timeout = rpcTimeout;
 
     // Initialize server rpc agent.
-    auto pg =
-        std::make_shared<c10d::ProcessGroupGloo>(store, 0, numWorkers, options);
+    auto pg = c10::make_intrusive<c10d::ProcessGroupGloo>(
+        store, 0, numWorkers, options);
 
     rpcAgent = std::make_shared<ProcessGroupAgent>(
+        store,
         "worker",
         pg,
         std::max(16U, std::thread::hardware_concurrency()),

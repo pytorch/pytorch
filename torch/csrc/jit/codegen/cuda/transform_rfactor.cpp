@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -393,6 +394,7 @@ TensorDomain* TransformRFactor::runReplay2(
       new_root, new_domain, std::vector<bool>(new_root.size(), true));
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

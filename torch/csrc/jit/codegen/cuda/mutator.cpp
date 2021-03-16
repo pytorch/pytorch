@@ -1,12 +1,14 @@
-#include <torch/csrc/jit/codegen/cuda/mutator.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/mutator.h>
 
 #include <vector>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 void OptOutMutator::mutate(Fusion* fusion) {
   std::vector<Expr*> orig_exprs = fusion->exprs();
@@ -43,7 +45,7 @@ Statement* OptOutMutator::mutate(IterDomain* id) {
 Statement* OptOutMutator::mutate(TensorDomain* td) {
   std::vector<IterDomain*> dom;
   bool mutated = false;
-  for (decltype(td->nDims()) i = 0; i < td->nDims(); i++) {
+  for (const auto i : c10::irange(td->nDims())) {
     IterDomain* id = mutateAsVal(td->axis(i))->as<IterDomain>();
     dom.push_back(id);
     if (!id->sameAs(td->axis(i)))
@@ -198,6 +200,7 @@ Statement* OptOutMutator::mutate(kir::IfThenElse* ite) {
   return ite;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

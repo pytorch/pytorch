@@ -1,5 +1,7 @@
 
 from multiprocessing import Manager
+from contextlib import contextmanager
+from io import StringIO
 import os
 import sys
 import tempfile
@@ -29,8 +31,10 @@ TEST_SKIPS = {
     "no_cuda": TestSkip(74, "CUDA is not available."),
     "multi-gpu": TestSkip(75, "Need at least 2 CUDA devices"),
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
-    "skipIfRocm": TestSkip(78, "Test skipped for ROCm")
+    "skipIfRocm": TestSkip(78, "Test skipped for ROCm"),
+    "no_peer_access": TestSkip(79, "Test skipped because no GPU peer access"),
 }
+
 
 def skip_if_no_gpu(func):
     """ Nccl multigpu tests require at least 2 GPUS. Skip if this is not met"""
@@ -61,15 +65,17 @@ def skip_if_small_worldsize(func):
 
 def skip_if_not_multigpu(func):
     """Multi-GPU tests requires at least 2 GPUS. Skip if this is not met."""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
-            return func(*args, **kwargs)
-        message = "Need at least {} CUDA devices".format(2)
-        TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
-        sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
+                return func(*args, **kwargs)
+            message = "Need at least {} CUDA devices".format(2)
+            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
+            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+        return wrapper
 
-    return wrapper
+    return decorator
 
 def require_n_gpus_for_nccl_backend(n, backend):
     def decorator(func):
@@ -130,6 +136,17 @@ def requires_mpi():
         "c10d was not compiled with the MPI backend",
     )
 
+def skip_if_rocm_single_process(func):
+    """Skips a test for ROCm in a single process environment"""
+    func.skip_if_rocm = True
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not TEST_WITH_ROCM:
+            return func(*args, **kwargs)
+        raise unittest.SkipTest("Test skipped for ROCm")
+
+    return wrapper
 
 def skip_if_rocm(func):
     """Skips a test for ROCm"""
@@ -163,6 +180,15 @@ def create_device(interface=None):
 def get_timeout(test_id):
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
 
+@contextmanager
+def captured_output():
+    new_out, new_err = StringIO(), StringIO()
+    old_out, old_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout, sys.stderr = new_out, new_err
+        yield sys.stdout, sys.stderr
+    finally:
+        sys.stdout, sys.stderr = old_out, old_err
 
 def simple_sparse_reduce_tests(rank, world_size, num_inputs=1):
     """
@@ -245,6 +271,10 @@ class MultiProcessTestCase(TestCase):
     # but we still want to ensure we didn't run into any other errors.
     TEST_ERROR_EXIT_CODE = 10
 
+    # do not early terminate for distributed tests.
+    def _should_stop_test_suite(self):
+        return False
+
     @property
     def world_size(self):
         return 4
@@ -255,12 +285,7 @@ class MultiProcessTestCase(TestCase):
             if self.rank == self.MAIN_PROCESS_RANK:
                 self._join_processes(fn)
             else:
-                try:
-                    fn()
-                except Exception as e:
-                    logging.error('Caught exception: \n{}exiting process with exit code: {}'
-                                  .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
-                    sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
+                fn()
         return types.MethodType(wrapper, self)
 
     # The main process spawns N subprocesses that run the test.
@@ -280,6 +305,8 @@ class MultiProcessTestCase(TestCase):
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         global TEST_SKIPS
         self.old_test_skips = TEST_SKIPS.copy()
+        # pid to pipe consisting of error message from process.
+        self.pid_to_pipe = {}
 
     def tearDown(self):
         super().tearDown()
@@ -304,11 +331,14 @@ class MultiProcessTestCase(TestCase):
 
         self.processes = []
         for rank in range(int(self.world_size)):
+            parent_conn, child_conn = torch.multiprocessing.Pipe()
             process = proc(
                 target=self.__class__._run,
                 name='process ' + str(rank),
-                args=(rank, self._current_test_name(), self.file_name))
+                args=(rank, self._current_test_name(), self.file_name, child_conn))
             process.start()
+            logging.info('Started process {} with pid {}'.format(rank, process.pid))
+            self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
 
     def _fork_processes(self):
@@ -320,16 +350,31 @@ class MultiProcessTestCase(TestCase):
         self._start_processes(proc)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name):
+    def _run(cls, rank, test_name, file_name, pipe):
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
 
-        # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
-        # We're retrieving a corresponding test and executing it.
-        getattr(self, test_name)()
+        self.run_test(test_name, pipe)
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
+
+    def run_test(self, test_name, pipe):
+        # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
+        # We're retrieving a corresponding test and executing it.
+        try:
+            getattr(self, test_name)()
+            # Close pipe after done with test.
+            pipe.close()
+        except Exception as e:
+            logging.error(
+                'Caught exception: \n{}exiting process with exit code: {}'
+                .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
+            )
+            # Send error to parent process.
+            pipe.send(traceback.format_exc())
+            pipe.close()
+            sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
 
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())
@@ -372,6 +417,10 @@ class MultiProcessTestCase(TestCase):
             else:
                 self._check_return_codes(elapsed_time)
         finally:
+            # Close all pipes
+            for pid, pipe in self.pid_to_pipe.items():
+                pipe.close()
+
             global TEST_SKIPS
             TEST_SKIPS = self.old_test_skips
 
@@ -402,10 +451,13 @@ class MultiProcessTestCase(TestCase):
             if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE
         ]
         if errored_processes:
-            error = "Processes {} exited with error code {}".format(
-                " ".join([str(i) for (i, _) in errored_processes]),
-                MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
-            )
+            error = ""
+            for i, process in errored_processes:
+                # Get error from pipe.
+                error_message = self.pid_to_pipe[process.pid].recv()
+                error += "Process {} exited with error code {} and exception:\n{}\n".format(
+                    i, MultiProcessTestCase.TEST_ERROR_EXIT_CODE, error_message)
+
             raise RuntimeError(error)
         # If no process exited uncleanly, we check for timeouts, and then ensure
         # each process exited cleanly.

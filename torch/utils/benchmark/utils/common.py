@@ -3,13 +3,14 @@
 import collections
 import contextlib
 import dataclasses
-from typing import DefaultDict, List, Optional, Tuple
+import textwrap
+from typing import cast, Any, DefaultDict, Dict, Iterable, Iterator, List, Optional, Tuple
 
 import numpy as np
 import torch
 
 
-__all__ = ["Measurement"]
+__all__ = ["TaskSpec", "Measurement"]
 
 
 _MAX_SIGNIFICANT_FIGURES = 4
@@ -27,12 +28,43 @@ class TaskSpec:
     """Container for information used to define a Timer. (except globals)"""
     stmt: str
     setup: str
-    label: Optional[str]
-    sub_label: Optional[str]
-    description: Optional[str]
-    env: Optional[str]
-    num_threads: int
+    global_setup: str = ""
+    label: Optional[str] = None
+    sub_label: Optional[str] = None
+    description: Optional[str] = None
+    env: Optional[str] = None
+    num_threads: int = 1
+
+    @property
+    def title(self) -> str:
+        """Best effort attempt at a string label for the measurement."""
+        if self.label is not None:
+            return self.label + (f": {self.sub_label}" if self.sub_label else "")
+        elif "\n" not in self.stmt:
+            return self.stmt + (f": {self.sub_label}" if self.sub_label else "")
+        return (
+            f"stmt:{f' ({self.sub_label})' if self.sub_label else ''}\n"
+            f"{textwrap.indent(self.stmt, '  ')}"
+        )
+
+    def setup_str(self) -> str:
+        return (
+            "" if (self.setup == "pass" or not self.setup)
+            else f"setup:\n{textwrap.indent(self.setup, '  ')}" if "\n" in self.setup
+            else f"setup: {self.setup}"
+        )
+
+    def summarize(self) -> str:
+        """Build TaskSpec portion of repr string for other containers."""
+        sections = [
+            self.title,
+            self.description or "",
+            self.setup_str(),
+        ]
+        return "\n".join([f"{i}\n" if "\n" in i else i for i in sections if i])
+
 _TASKSPEC_FIELDS = tuple(i.name for i in dataclasses.fields(TaskSpec))
+
 
 @dataclasses.dataclass(init=True, repr=False)
 class Measurement:
@@ -45,9 +77,9 @@ class Measurement:
     number_per_run: int
     raw_times: List[float]
     task_spec: TaskSpec
-    metadata: Optional[dict] = None
+    metadata: Optional[Dict[Any, Any]] = None  # Reserved for user payloads.
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self._sorted_times: Tuple[float, ...] = ()
         self._warnings: Tuple[str, ...] = ()
         self._median: float = -1.0
@@ -55,7 +87,7 @@ class Measurement:
         self._p25: float = -1.0
         self._p75: float = -1.0
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         # Forward TaskSpec fields for convenience.
         if name in _TASKSPEC_FIELDS:
             return getattr(self.task_spec, name)
@@ -123,15 +155,15 @@ class Measurement:
         self._lazy_init()
         return bool(self._warnings)
 
-    def _lazy_init(self):
+    def _lazy_init(self) -> None:
         if self.raw_times and not self._sorted_times:
             self._sorted_times = tuple(sorted(self.times))
-            self._median = np.median(self._sorted_times)
-            self._mean = np.mean(self._sorted_times)
-            self._p25 = np.percentile(self._sorted_times, 25)
-            self._p75 = np.percentile(self._sorted_times, 75)
+            self._median = float(np.median(self._sorted_times))
+            self._mean = float(np.mean(self._sorted_times))
+            self._p25 = float(np.percentile(self._sorted_times, 25))
+            self._p75 = float(np.percentile(self._sorted_times, 75))
 
-            def add_warning(msg):
+            def add_warning(msg: str) -> None:
                 rel_iqr = self.iqr / self.median * 100
                 self._warnings += (
                     f"  WARNING: Interquartile range is {rel_iqr:.1f}% "
@@ -144,30 +176,25 @@ class Measurement:
                 add_warning("This could indicate system fluctuation.")
 
 
-    def meets_confidence(self, threshold=_IQR_WARN_THRESHOLD) -> bool:
+    def meets_confidence(self, threshold: float = _IQR_WARN_THRESHOLD) -> bool:
         return self.iqr / self.median < threshold
 
     @property
     def title(self) -> str:
-        """Best effort attempt at a string label for the measurement."""
-        if self.label is not None:
-            label = self.label
-        elif isinstance(self.stmt, str):
-            label = self.stmt
-        else:
-            label = "[Missing primary label]"
-
-        return label + (f": {self.sub_label}" if self.sub_label else "")
+        return self.task_spec.title
 
     @property
     def env(self) -> str:
-        return "Unspecified env" if self.taskspec.env is None else self.taskspec.env
+        return (
+            "Unspecified env" if self.taskspec.env is None
+            else cast(str, self.taskspec.env)
+        )
 
     @property
     def as_row_name(self) -> str:
         return self.sub_label or self.stmt or "[Unknown]"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """
         Example repr:
             <utils.common.Measurement object at 0x7f395b6ac110>
@@ -186,8 +213,7 @@ class Measurement:
 
         repr_str = f"""
 {super().__repr__()}
-{self.title}
-  {self.description or skip_line}
+{self.task_spec.summarize()}
   {'Median: ' if n > 1 else ''}{self._median / time_scale:.2f} {time_unit}
   {iqr_filter}IQR:    {self.iqr / time_scale:.2f} {time_unit} ({self._p25 / time_scale:.2f} to {self._p75 / time_scale:.2f})
   {n} measurement{'s' if n > 1 else ''}, {self.number_per_run} runs {'per measurement,' if n > 1 else ','} {self.num_threads} thread{'s' if self.num_threads > 1 else ''}
@@ -196,16 +222,17 @@ class Measurement:
         return "\n".join(l for l in repr_str.splitlines(keepends=False) if skip_line not in l)
 
     @staticmethod
-    def merge(measurements):
+    def merge(measurements):  # type: (Iterable[Measurement]) -> List[Measurement]
         """Convenience method for merging replicates.
-        NB: merge will extrapolate times to `number_per_run=1` and will not
-            transfer any metadata (since it might differ between replicates)
+
+        Merge will extrapolate times to `number_per_run=1` and will not
+        transfer any metadata. (Since it might differ between replicates)
         """
         grouped_measurements: DefaultDict[TaskSpec, List[Measurement]] = collections.defaultdict(list)
         for m in measurements:
             grouped_measurements[m.task_spec].append(m)
 
-        def merge_group(task_spec, group):
+        def merge_group(task_spec: TaskSpec, group: List[Measurement]) -> Measurement:
             times: List[float] = []
             for m in group:
                 # Different measurements could have different `number_per_run`,
@@ -222,7 +249,7 @@ class Measurement:
         return [merge_group(t, g) for t, g in grouped_measurements.items()]
 
 
-def select_unit(t: float):
+def select_unit(t: float) -> Tuple[str, float]:
     """Determine how to scale times for O(1) magnitude.
 
     This utility is used to format numbers for human consumption.
@@ -246,15 +273,15 @@ def trim_sigfig(x: float, n: int) -> float:
     assert n == int(n)
     magnitude = int(np.ceil(np.log10(np.abs(x))))
     scale = 10 ** (magnitude - n)
-    return np.round(x / scale) * scale
+    return float(np.round(x / scale) * scale)
 
 
-def ordered_unique(elements):
+def ordered_unique(elements: Iterable[Any]) -> List[Any]:
     return list(collections.OrderedDict({i: None for i in elements}).keys())
 
 
 @contextlib.contextmanager
-def set_torch_threads(n: int):
+def set_torch_threads(n: int) -> Iterator[None]:
     prior_num_threads = torch.get_num_threads()
     try:
         torch.set_num_threads(n)

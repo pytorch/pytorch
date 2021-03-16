@@ -28,15 +28,17 @@ batchnorm_configs_long = op_bench.cross_product_configs(
 
 class BatchNormBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device):
-        self.input_one = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
-        self.mean = torch.rand(N, device=device)
-        self.var = torch.rand(N, device=device)
-        self.weight = torch.rand(N, device=device)
-        self.bias = torch.rand(N, device=device)
+        self.inputs = {
+            "input_one": torch.rand(M, N, K, device=device, requires_grad=self.auto_set()),
+            "mean": torch.rand(N, device=device),
+            "var": torch.rand(N, device=device),
+            "weight": torch.rand(N, device=device),
+            "bias": torch.rand(N, device=device)
+        }
         self.set_module_name("batchnorm")
 
-    def forward(self):
-        return F.batch_norm(self.input_one, self.mean, self.var, self.weight, self.bias)
+    def forward(self, input_one, mean, var, weight, bias):
+        return F.batch_norm(input_one, mean, var, weight, bias)
 
 
 op_bench.generate_pt_test(batchnorm_configs_short + batchnorm_configs_long, BatchNormBenchmark)

@@ -38,9 +38,15 @@ class NodeFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  static std::vector<Node*> find(Stmt* s) {
+  static std::vector<Node*> find(const Stmt* s) {
     NodeFinder<Node> nf;
     s->accept(&nf);
+    return nf.nodes;
+  }
+
+  static std::vector<Node*> find(const Expr* e) {
+    NodeFinder<Node> nf;
+    e->accept(&nf);
     return nf.nodes;
   }
 
@@ -169,20 +175,23 @@ class CreateBufferMap : public IRVisitor {
  private:
   void visit(const Store* v) override {
     auto load_node = dynamic_cast<const Load*>(v->value());
-    auto call_node = dynamic_cast<const FunctionCall*>(v->value());
-    if (load_node || call_node) {
-      TORCH_INTERNAL_ASSERT(!(load_node && call_node));
-      auto t_buf = load_node ? load_node->buf() : call_node->tensor()->buf();
-      if (load_node) {
-        map_input_to_tensor_bufs_.emplace(t_buf->name_hint(), v->buf());
-      } else {
-        map_input_to_tensor_bufs_.emplace(v->buf()->name_hint(), t_buf);
-      }
+    if (load_node) {
+      auto t_buf = load_node->buf();
+      map_input_to_tensor_bufs_.emplace(t_buf->name_hint(), v->buf());
+    } else {
+      auto add_node = dynamic_cast<const Add*>(v->value());
+      auto mul_node = dynamic_cast<const Mul*>(v->value());
+      // This means for now, v->value() can be Add or Mul
+      TORCH_INTERNAL_ASSERT((add_node || mul_node));
+      map_input_to_tensor_bufs_.emplace(v->buf()->name_hint(), v->buf());
     }
     v->value()->accept(this);
   }
   std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
+
+std::vector<Tensor*> findAllNeededTensors(const std::vector<Tensor*>& tensors);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

@@ -144,7 +144,6 @@ struct ConvertTracedAttrReferences {
     // the correctness of CSE over GetAttr Nodes (i think)
     std::unordered_map<Value*, Value*> local_remaps;
 
-    auto prefix_atoms = prefix.atoms();
     for (Node* n : b->nodes()) {
       // The only difference between these two branches is for
       // TracedModuleForward we advance the scope, but for other
@@ -242,7 +241,7 @@ struct ConvertTracedAttrReferences {
 // add block and Node outputs to lift it into a scope in which
 // it dominates the Use.
 struct MakeDefsDominateUses {
-  MakeDefsDominateUses() {}
+  MakeDefsDominateUses() = default;
 
   void run(Block* b) {
     processNode(b->param_node(), b);

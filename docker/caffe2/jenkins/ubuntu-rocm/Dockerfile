@@ -60,7 +60,6 @@ ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
 ENV PATH /opt/rocm/opencl/bin:$PATH
-ENV HIP_PLATFORM hcc
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 

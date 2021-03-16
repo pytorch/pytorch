@@ -1,17 +1,25 @@
 from typing import List, Optional
+import logging
 
 import torch.distributed.rpc as rpc
 import torch.optim as optim
 import torch.jit as jit
+import torch.nn as nn
 from torch import Tensor
 from torch.distributed.rpc import RRef
 from .functional_adagrad import _FunctionalAdagrad
+from .functional_adam import _FunctionalAdam
+from .functional_adamw import _FunctionalAdamW
+from .functional_sgd import _FunctionalSGD
+from .functional_adadelta import _FunctionalAdadelta
+from .functional_rmsprop import _FunctionalRMSprop
 import torch.distributed.autograd as dist_autograd
 
 
 from collections import defaultdict
 from threading import Lock
 
+logger = logging.getLogger(__name__)
 
 # XXX: we define a _ScriptModuleOptimizer here to explicitly
 # compile the FunctionalOptimizer class into TorchScript
@@ -20,7 +28,7 @@ from threading import Lock
 # in ScriptModule or pass it to a ScriptFunction
 # _ScriptLocalOptimizerInterface serves as a common
 # interface type for Optimizer ScriptModules.
-# 
+#
 # TODO (wanchaol): remove this once we added TorchScript
 # class reference semantics
 @jit.interface
@@ -28,7 +36,12 @@ class _ScriptLocalOptimizerInterface(object):
     def step(self, autograd_ctx_id: int) -> None:
         pass
 
-class _ScriptLocalOptimizer(jit.ScriptModule):
+class _ScriptLocalOptimizer(nn.Module):
+    # TorchScript does not support multithread concurrent compiling.
+    # request_callback might invoke concurrent compiling, so we
+    # serialize the compiling with a lock
+    compile_lock = Lock()
+
     def __init__(self, optim_cls, local_params_rref, *args, **kwargs):
         super().__init__()
         self._local_params = [rref.local_value() for rref in local_params_rref]
@@ -37,7 +50,7 @@ class _ScriptLocalOptimizer(jit.ScriptModule):
             *args,
             **kwargs)
 
-    @jit.script_method
+    @jit.export
     def step(self, autograd_ctx_id: int):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
         # apply functional optimizer step with a list of gradients
@@ -49,6 +62,8 @@ class _ScriptLocalOptimizer(jit.ScriptModule):
         self.optim.step(grads)
 
 
+# TODO (wanchaol): remove/merge this with ScriptLocalOptimizer once
+# we have converted all to functional optimizer in distributed.optim
 class _LocalOptimizer(object):
     # Ideally we would only need to share a lock for instances of
     # _LocalOptimizer that deal with the same parameters. We are
@@ -87,8 +102,12 @@ def _local_optimizer_step(local_optim_rref, autograd_ctx_id):
 
 # new/step functions combined with _ScriptLocalOptimizer to provide GIL-free optimizer
 def _new_script_local_optimizer(optim_cls, local_params_rref, *args, **kwargs):
-    return rpc.RRef(
-        _ScriptLocalOptimizer(optim_cls, local_params_rref, *args, **kwargs), _ScriptLocalOptimizerInterface)
+    optim = _ScriptLocalOptimizer(optim_cls, local_params_rref, *args, **kwargs)
+
+    with _ScriptLocalOptimizer.compile_lock:
+        script_optim = jit.script(optim)
+        return rpc.RRef(
+            script_optim, _ScriptLocalOptimizerInterface)
 
 @jit.script
 def _script_local_optimizer_step(
@@ -131,6 +150,13 @@ class DistributedOptimizer:
     to the latest forward pass executed on a given worker. Also, there is no
     guaranteed ordering across workers.
 
+    `DistributedOptimizer` creates the local optimizer with TorchScript enabled
+    by default, so that optimizer updates are not blocked by the Python Global
+    Interpreter Lock (GIL) during multithreaded training (e.g. Distributed Model
+    Parallel). This feature is currently in beta stage, enabled for optimizers
+    including `Adagrad`, `Adam`, `SGD`, `RMSprop`, `AdamW` and `Adadelta`. We
+    are increasing the coverage to all optimizers in future releases.
+
     Args:
         optimizer_class (optim.Optimizer): the class of optimizer to
             instantiate on each worker.
@@ -169,6 +195,11 @@ class DistributedOptimizer:
     # functional optimizer to user and still provide the same API.
     functional_optim_map = {
         optim.Adagrad: _FunctionalAdagrad,
+        optim.Adam: _FunctionalAdam,
+        optim.AdamW: _FunctionalAdamW,
+        optim.SGD: _FunctionalSGD,
+        optim.Adadelta: _FunctionalAdadelta,
+        optim.RMSprop: _FunctionalRMSprop,
     }
 
     def __init__(self, optimizer_class, params_rref, *args, **kwargs):
@@ -176,12 +207,22 @@ class DistributedOptimizer:
         for param in params_rref:
             per_worker_params_rref[param.owner()].append(param)
 
-        optim_ctor = DistributedOptimizer.functional_optim_map.get(optimizer_class, optimizer_class)
+        if optimizer_class in DistributedOptimizer.functional_optim_map and jit._state._enabled:
+            optim_ctor = DistributedOptimizer.functional_optim_map.get(optimizer_class)
+        else:
+            optim_ctor = optimizer_class
         self.is_functional_optim = (optim_ctor != optimizer_class)
 
         if self.is_functional_optim:
             optimizer_new_func = _new_script_local_optimizer
         else:
+            logger.warn(
+                f"Creating the optimizer {optimizer_class} without TorchScript support, "
+                "this might result in slow computation time in multithreading environment"
+                "(i.e. Distributed Model Parallel training on CPU) due to the Python's "
+                "Global Interpreter Lock (GIL). Please file an issue if you need this "
+                "optimizer in TorchScript. "
+            )
             optimizer_new_func = _new_local_optimizer
 
         remote_optim_futs = []

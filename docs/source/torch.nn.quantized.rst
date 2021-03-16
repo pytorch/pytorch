@@ -1,14 +1,12 @@
 torch.nn.quantized
 ------------------
 
-This module implements the quantized versions of the nn layers such as
-~`torch.nn.Conv2d` and `torch.nn.ReLU`.
+This module implements the quantized versions of the nn modules and functionals.
 
 Functional interface
 ~~~~~~~~~~~~~~~~~~~~
 .. automodule:: torch.nn.quantized.functional
 
-.. autofunction:: relu
 .. autofunction:: linear
 .. autofunction:: conv1d
 .. autofunction:: conv2d
@@ -24,11 +22,6 @@ Functional interface
 
 
 .. automodule:: torch.nn.quantized
-
-ReLU
-~~~~~~~~~~~~~~~
-.. autoclass:: ReLU
-    :members:
 
 ReLU6
 ~~~~~~~~~~~~~~~
@@ -120,4 +113,12 @@ InstanceNorm3d
 .. autoclass:: InstanceNorm3d
     :members:
 
+Embedding
+~~~~~~~~~~~~~~~
+.. autoclass:: Embedding
+    :members:
 
+EmbeddingBag
+~~~~~~~~~~~~~~~
+.. autoclass:: EmbeddingBag
+    :members:

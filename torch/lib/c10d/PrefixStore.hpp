@@ -7,11 +7,18 @@ namespace c10d {
 
 class PrefixStore : public Store {
  public:
-  explicit PrefixStore(const std::string& prefix, std::shared_ptr<Store> store);
+  explicit PrefixStore(
+      const std::string& prefix,
+      c10::intrusive_ptr<Store> store);
 
   virtual ~PrefixStore(){};
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
+
+  std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& currentValue,
+      const std::vector<uint8_t>& newValue) override;
 
   std::vector<uint8_t> get(const std::string& key) override;
 
@@ -29,9 +36,13 @@ class PrefixStore : public Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
 
+  const std::chrono::milliseconds& getTimeout() const noexcept override;
+
+  void setTimeout(const std::chrono::milliseconds& timeout) override;
+
  protected:
   std::string prefix_;
-  std::shared_ptr<Store> store_;
+  c10::intrusive_ptr<Store> store_;
 
   std::string joinKey(const std::string& key);
   std::vector<std::string> joinKeys(const std::vector<std::string>& keys);

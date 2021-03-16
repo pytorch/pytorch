@@ -16,7 +16,7 @@ class LoggerBase {
   TORCH_API virtual void addStatValue(
       const std::string& stat_name,
       int64_t val) = 0;
-  virtual ~LoggerBase() {}
+  virtual ~LoggerBase() = default;
 };
 
 TORCH_API LoggerBase* getLogger();
@@ -28,7 +28,7 @@ TORCH_API LoggerBase* setLogger(LoggerBase* logger);
 class NoopLogger : public LoggerBase {
  public:
   void addStatValue(const std::string& stat_name, int64_t val) override {}
-  ~NoopLogger() {}
+  ~NoopLogger() = default;
 };
 
 // Trivial locking logger. Pass in an instance of this to setLogger() to use it.
@@ -42,7 +42,7 @@ class TORCH_API LockingLogger : public LoggerBase {
   virtual int64_t getCounterValue(const std::string& name) const;
   enum class AggregationType { SUM = 0, AVG = 1 };
   void setAggregationType(const std::string& stat_name, AggregationType type);
-  ~LockingLogger() {}
+  ~LockingLogger() = default;
 
  private:
   mutable std::mutex m;
@@ -74,10 +74,11 @@ constexpr const char* EXECUTION_PLAN_CACHE_MISS =
     "pytorch_runtime.execution_plan_cache_miss";
 
 inline std::vector<const char*> allRuntimeCounters() {
-  return {GRAPH_EXECUTORS_CONSTRUCTED,
-          GRAPH_EXECUTOR_INVOCATIONS,
-          EXECUTION_PLAN_CACHE_HIT,
-          EXECUTION_PLAN_CACHE_MISS};
+  return {
+      GRAPH_EXECUTORS_CONSTRUCTED,
+      GRAPH_EXECUTOR_INVOCATIONS,
+      EXECUTION_PLAN_CACHE_HIT,
+      EXECUTION_PLAN_CACHE_MISS};
 }
 
 } // namespace runtime_counters

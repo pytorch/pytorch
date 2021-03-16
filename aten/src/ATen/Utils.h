@@ -2,11 +2,11 @@
 
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
+#include <ATen/Formatting.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
-
-#include <c10/core/ScalarType.h>
-#include <ATen/Formatting.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
@@ -22,7 +22,7 @@
 
 namespace at {
 
-CAFFE2_API int _crash_if_asan(int);
+TORCH_API int _crash_if_asan(int);
 
 // TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
 // away, we can delete this function
@@ -89,14 +89,6 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
   return res;
 }
 
-inline int64_t sum_intlist(ArrayRef<int64_t> list) {
-  return std::accumulate(list.begin(), list.end(), 0ll);
-}
-
-inline int64_t prod_intlist(ArrayRef<int64_t> list) {
-  return std::accumulate(list.begin(), list.end(), 1ll, std::multiplies<int64_t>());
-}
-
 /**
  * Utility function to static cast input Generator* to
  * the backend generator type (CPU/CUDAGeneratorImpl etc.)
@@ -119,5 +111,34 @@ template <typename T>
 static inline T* get_generator_or_default(const c10::optional<Generator>& gen, const Generator& default_gen) {
   return gen.has_value() && gen->defined() ? check_generator<T>(gen) : check_generator<T>(default_gen);
 }
+
+inline void check_size_nonnegative(IntArrayRef size) {
+  for (auto x: size) {
+    TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
+  }
+}
+
+namespace detail {
+TORCH_API
+Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
+                 c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt);
+
+template <typename T>
+TORCH_API
+Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options);
+
+template <typename T>
+TORCH_API
+Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options);
+
+template <typename T>
+TORCH_API
+Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options);
+
+template <typename T>
+TORCH_API
+Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options);
+} // namespace detail
+
 
 } // at

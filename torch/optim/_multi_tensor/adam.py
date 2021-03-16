@@ -1,6 +1,7 @@
 import math
 import torch
 from ..optimizer import Optimizer
+from collections import defaultdict
 
 class Adam(Optimizer):
     r"""Implements Adam algorithm with multi tensor APIs.
@@ -9,7 +10,7 @@ class Adam(Optimizer):
     The implementation of the L2 penalty follows changes proposed in
     `Decoupled Weight Decay Regularization`_.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-3)
@@ -55,7 +56,7 @@ class Adam(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
@@ -106,8 +107,8 @@ class Adam(Optimizer):
 
             beta1, beta2 = group['betas']
 
-            bias_correction1 = [1 - beta1 ** state['step'] for state in states] 
-            bias_correction2 = [1 - beta2 ** state['step'] for state in states] 
+            bias_correction1 = [1 - beta1 ** state['step'] for state in states]
+            bias_correction2 = [1 - beta2 ** state['step'] for state in states]
             if group['weight_decay'] != 0:
                 grads = torch._foreach_add(grads, params_with_grad, alpha=group['weight_decay'])
 
@@ -122,21 +123,43 @@ class Adam(Optimizer):
 
             if amsgrad:
                 # Maintains the maximum of all 2nd moment running avg. till now
-                [torch.max(a, b, out=a) for a, b in zip(max_exp_avg_sq, exp_avg_sq)]
+                max_exp_avg_sq = torch._foreach_maximum(max_exp_avg_sq, exp_avg_sq)
+
                 # Use the max. for normalizing running avg. of gradient
                 max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-                torch._foreach_div_scalar_list_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
+                torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction_sqrt)
                 denom = torch._foreach_add(max_exp_avg_sq_sqrt, group['eps'])
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-                torch._foreach_div_scalar_list_(exp_avg_sq_sqrt, bias_correction_sqrt)
+                torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
                 denom = torch._foreach_add(exp_avg_sq_sqrt, group['eps'])
 
-            step_size = [group['lr'] / bc for bc in bias_correction1]
-
-            for i in range(len(step_size)):
-                params_with_grad[i].addcdiv_(exp_avg[i], denom[i], value=-step_size[i])
+            step_size = [(group['lr'] / bc) * -1 for bc in bias_correction1]
+            torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
 
         return loss
+
+    # TODO: refactor to a base class once foreach ops are in a good shape.
+    def zero_grad(self, set_to_none: bool = False):
+        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is not None:
+                    if set_to_none:
+                        p.grad = None
+                    else:
+                        if p.grad.grad_fn is not None:
+                            p.grad.detach_()
+                        else:
+                            p.grad.requires_grad_(False)
+
+                        if p.grad.is_sparse:
+                            p.grad.zero_()
+                        else:
+                            per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
+
+            for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                for grads in per_dtype_grads.values():
+                    torch._foreach_zero_(grads)

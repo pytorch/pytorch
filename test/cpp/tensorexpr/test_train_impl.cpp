@@ -169,7 +169,7 @@ VTensor* grad(VTensor* y, VTensor* x, VTensor* j) {
           TORCH_CHECK(g, ss.str());
         }
         auto g_outs = g(op->inputs, grad_inputs);
-        for (auto i = 0; i < g_outs.size(); ++i) {
+        for (auto i = 0U; i < g_outs.size(); ++i) {
           auto input = op->inputs[i];
           if (need_grad.find(input) != need_grad.end()) {
             if (grad_map.find(input) != grad_map.end()) {
@@ -198,7 +198,7 @@ VOp::VOp(
     VGraph* graph_)
     : inputs(inputs_), graph(graph_) {
   method = &VMethod::get(name);
-  for (auto i = 0; i < num_outputs; ++i) {
+  for (auto i = 0U; i < num_outputs; ++i) {
     outputs.emplace_back(graph->create_tensor({}));
     outputs.back()->op = this;
   }
@@ -303,8 +303,9 @@ REGISTER_METHOD(
     },
     [](const std::vector<VTensor*>& inputs,
        const std::vector<VTensor*>& ginputs) -> std::vector<VTensor*> {
-      return {call("mul", {ginputs[0], inputs[1]})[0],
-              call("mul", {ginputs[0], inputs[0]})[0]};
+      return {
+          call("mul", {ginputs[0], inputs[1]})[0],
+          call("mul", {ginputs[0], inputs[0]})[0]};
     },
     [](const std::vector<VTensor*>& inputs)
         -> std::vector<std::vector<std::string>> {
@@ -329,8 +330,9 @@ REGISTER_METHOD(
        const std::vector<VTensor*>& ginputs) -> std::vector<VTensor*> {
       auto b_2 = call("mul", {inputs[1], inputs[1]})[0];
       auto a_div_b_2 = call("div", {inputs[0], b_2})[0];
-      return {call("div", {ginputs[0], inputs[1]})[0],
-              call("mul", {ginputs[0], call("neg", {a_div_b_2})[0]})[0]};
+      return {
+          call("div", {ginputs[0], inputs[1]})[0],
+          call("mul", {ginputs[0], call("neg", {a_div_b_2})[0]})[0]};
     },
     [](const std::vector<VTensor*>& inputs)
         -> std::vector<std::vector<std::string>> {
@@ -497,7 +499,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
     }
     auto outs = vop->method->lower(inps, vop->inputs, vbindings);
     TORCH_CHECK(outs.size() == vop->outputs.size());
-    for (auto i = 0; i < outs.size(); ++i) {
+    for (auto i = 0U; i < outs.size(); ++i) {
       bindings[vop->outputs[i]] = outs[i];
     }
   }

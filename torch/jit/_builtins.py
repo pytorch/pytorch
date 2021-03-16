@@ -12,7 +12,7 @@ from typing import Dict, Optional
 
 _builtin_table: Optional[Dict[int, str]] = None
 
-_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg)  # type: ignore
+_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg, torch._C._special)  # type: ignore
 
 _builtin_ops = [
     # Pairs of (function, op_name)
@@ -67,6 +67,7 @@ _builtin_ops = [
     (math.degrees, "aten::degrees"),
     (math.radians, "aten::radians"),
     (math.ldexp, "aten::ldexp"),
+    (torch._assert, "aten::_assert"),
     (torch.autograd.grad, "aten::grad"),
     (torch.autograd.backward, "aten::backward"),
     (torch._C._infer_size, "aten::_infer_size"),

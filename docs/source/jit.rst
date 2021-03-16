@@ -16,6 +16,14 @@ TorchScript
 
     jit_language_reference
 
+
+.. toctree::
+    :maxdepth: 1
+    :caption: Language Reference V2
+
+    jit_language_reference_v2
+
+
 .. contents:: :local:
     :depth: 2
 
@@ -42,18 +50,22 @@ Creating TorchScript Code
 
 .. autosummary::
     :toctree: generated
+    :nosignatures:
 
     script
     trace
+    script_if_tracing
     trace_module
     fork
     wait
     ScriptModule
     ScriptFunction
+    freeze
     save
     load
     ignore
     unused
+    isinstance
 
 Mixing Tracing and Scripting
 ----------------------------
@@ -544,18 +556,18 @@ best practices?
 
       cpu_model = gpu_model.cpu()
       sample_input_cpu = sample_input_gpu.cpu()
-      traced_cpu = torch.jit.trace(traced_cpu, sample_input_cpu)
-      torch.jit.save(traced_cpu, "cpu.pth")
+      traced_cpu = torch.jit.trace(cpu_model, sample_input_cpu)
+      torch.jit.save(traced_cpu, "cpu.pt")
 
-      traced_gpu = torch.jit.trace(traced_gpu, sample_input_gpu)
-      torch.jit.save(traced_gpu, "gpu.pth")
+      traced_gpu = torch.jit.trace(gpu_model, sample_input_gpu)
+      torch.jit.save(traced_gpu, "gpu.pt")
 
       # ... later, when using the model:
 
       if use_gpu:
-        model = torch.jit.load("gpu.pth")
+        model = torch.jit.load("gpu.pt")
       else:
-        model = torch.jit.load("cpu.pth")
+        model = torch.jit.load("cpu.pt")
 
       model(input)
 

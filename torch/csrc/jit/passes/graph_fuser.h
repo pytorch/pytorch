@@ -26,7 +26,7 @@ TORCH_API void FuseGraph(
 //                post condition on the fused subgraph.
 TORCH_API void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
-    std::function<bool(Node*)> is_fusable,
+    const std::function<bool(Node*)>& is_fusable,
     Symbol kind,
     size_t arg_limit = std::numeric_limits<size_t>::max());
 

@@ -3,21 +3,22 @@ import os
 import re
 import shutil
 import random
+import subprocess
 import tempfile
 import textwrap
 import unittest
 import torch
 import torch.nn as nn
 import torch.utils.data
+from torch.utils.data import DataLoader
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-import torch.utils.benchmark as benchmark_utils
+import torch.utils.cpp_extension
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, slowTest
+from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS
 from urllib.error import URLError
-import numpy as np
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -28,7 +29,7 @@ HAS_CUDA = torch.cuda.is_available()
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
-class RandomDatasetMock(object):
+class RandomDatasetMock(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         return torch.tensor([torch.rand(1).item(), random.uniform(0, 1)])
@@ -190,7 +191,7 @@ class TestCheckpoint(TestCase):
         b = torch.randn(1, 100, requires_grad=True)
 
         with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1, a, b)
+            checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
 
     def test_checkpoint_sequential_deprecated_no_args(self):
         class Noop(nn.Module):
@@ -200,7 +201,7 @@ class TestCheckpoint(TestCase):
         model = nn.Sequential(Noop())
 
         with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1)
+            checkpoint_sequential(model, 1)  # type: ignore[call-arg]
 
     def test_checkpoint_rng_cpu(self):
         for _ in range(5):
@@ -268,8 +269,27 @@ class TestCheckpoint(TestCase):
         out = checkpoint(run_fn, input_var, None)
         out.sum().backward()
 
+    def test_checkpoint_partial_grad(self):
+        def run_fn(tensor1, tensor2):
+            # tensor 2 is used for other application logic
+            return tensor1, tensor2
+        input_var = torch.randn(1, 4, requires_grad=True)
+        input_var2 = torch.randn(1, 4, requires_grad=False)
+        out = checkpoint(run_fn, input_var, input_var2)
+        out[0].sum().backward()
 
-class TestDataLoader(TestCase):
+        def run_fn2(tensor1, tensor2):
+            return tensor1
+        input_var = torch.randn(1, 4, requires_grad=False)
+        input_var2 = torch.randn(1, 4, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
+        ):
+            out = checkpoint(run_fn2, input_var, input_var2)
+            out.sum().backward()
+
+class TestDataLoaderUtils(TestCase):
     def setUp(self):
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
@@ -289,35 +309,38 @@ class TestDataLoader(TestCase):
         self.assertEqual(x1, x2)
 
     def test_single_keep(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=0,
-                                                 drop_last=False)
+        # self.dataset is a Tensor here; technically not a valid input because
+        # not a Dataset subclass, but needs to stay working so add ignore's
+        # for type checking with mypy
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=0,
+                                             drop_last=False)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_single_drop(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=0,
-                                                 drop_last=True)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=0,
+                                             drop_last=True)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
     @unittest.skip("FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN")
     def test_multi_keep(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=2,
-                                                 drop_last=False)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=2,
+                                             drop_last=False)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_multi_drop(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=2,
-                                                 drop_last=True)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=2,
+                                             drop_last=True)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
@@ -328,7 +351,7 @@ test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 class TestFFI(TestCase):
     def test_deprecated(self):
         with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension  # noqa: F401
+            from torch.utils.ffi import create_extension  # type: ignore  # noqa: F401
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
@@ -345,9 +368,9 @@ class TestBottleneck(TestCase):
             p.kill()
             output, err = p.communicate()
         rc = p.returncode
-        output = output.decode("ascii")
-        err = err.decode("ascii")
-        return (rc, output, err)
+        output_str = output.decode("ascii")
+        err_str = err.decode("ascii")
+        return (rc, output_str, err_str)
 
     def _run_bottleneck(self, test_file, scriptargs=''):
         curdir = os.path.dirname(os.path.abspath(__file__))
@@ -618,326 +641,85 @@ class TestHipify(TestCase):
         from torch.utils.hipify import hipify_python # noqa
 
 
-class TestBenchmarkUtils(TestCase):
-    def test_timer(self):
-        timer = benchmark_utils.Timer(
-            stmt="torch.ones(())",
-        )
-        sample = timer.timeit(5).median
-        self.assertIsInstance(sample, float)
-
-        median = timer.blocked_autorange(min_run_time=0.01).median
-        self.assertIsInstance(median, float)
-
-        # We set a very high threshold to avoid flakiness in CI.
-        # The internal algorithm is tested in `test_adaptive_timer`
-        median = timer.adaptive_autorange(threshold=0.5).median
-
-    class _MockTimer:
-        _seed = 0
-
-        _timer_noise_level = 0.05
-        _timer_cost = 100e-9  # 100 ns
-
-        _function_noise_level = 0.05
-        _function_costs = (
-            ("pass", 8e-9),
-            ("cheap_fn()", 4e-6),
-            ("expensive_fn()", 20e-6),
-        )
-
-        def __init__(self, stmt, setup, timer, globals):
-            self._random_state = np.random.RandomState(seed=self._seed)
-            self._mean_cost = {k: v for k, v in self._function_costs}[stmt]
-
-        def sample(self, mean, noise_level):
-            return max(self._random_state.normal(mean, mean * noise_level), 5e-9)
-
-        def timeit(self, number):
-            return sum([
-                # First timer invocation
-                self.sample(self._timer_cost, self._timer_noise_level),
-
-                # Stmt body
-                self.sample(self._mean_cost * number, self._function_noise_level),
-
-                # Second timer invocation
-                self.sample(self._timer_cost, self._timer_noise_level),
-            ])
-
-    def test_adaptive_timer(self):
-        class MockTimer(benchmark_utils.Timer):
-            _timer_cls = self._MockTimer
-
-        def assert_reprs_match(measurement, expected):
-            measurement_repr = re.sub(
-                "object at 0x[0-9a-fA-F]+>",
-                "object at 0xXXXXXXXXXXXX>",
-                repr(measurement)
-            )
-            self.assertEqual(measurement_repr, textwrap.dedent(expected).strip())
-
-        assert_reprs_match(
-            MockTimer("pass").blocked_autorange(min_run_time=10),
-            """
-            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
-            pass
-              Median: 7.98 ns
-              IQR:    0.52 ns (7.74 to 8.26)
-              125 measurements, 10000000 runs per measurement, 1 thread"""
-        )
-
-        assert_reprs_match(
-            MockTimer("pass").adaptive_autorange(),
-            """
-            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
-            pass
-              Median: 7.86 ns
-              IQR:    0.71 ns (7.63 to 8.34)
-              6 measurements, 1000000 runs per measurement, 1 thread"""
-        )
-
-        assert_reprs_match(
-            MockTimer("cheap_fn()").blocked_autorange(min_run_time=10),
-            """
-            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
-            cheap_fn()
-              Median: 3.98 us
-              IQR:    0.27 us (3.85 to 4.12)
-              252 measurements, 10000 runs per measurement, 1 thread"""
-        )
-
-        assert_reprs_match(
-            MockTimer("cheap_fn()").adaptive_autorange(),
-            """
-            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
-            cheap_fn()
-              Median: 4.16 us
-              IQR:    0.22 us (4.04 to 4.26)
-              4 measurements, 1000 runs per measurement, 1 thread"""
-        )
-
-        assert_reprs_match(
-            MockTimer("expensive_fn()").blocked_autorange(min_run_time=10),
-            """
-            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
-            expensive_fn()
-              Median: 19.97 us
-              IQR:    1.35 us (19.31 to 20.65)
-              501 measurements, 1000 runs per measurement, 1 thread"""
-        )
-
-        assert_reprs_match(
-            MockTimer("expensive_fn()").adaptive_autorange(),
-            """
-            <torch.utils.benchmark.utils.common.Measurement object at 0xXXXXXXXXXXXX>
-            expensive_fn()
-              Median: 20.79 us
-              IQR:    1.09 us (20.20 to 21.29)
-              4 measurements, 1000 runs per measurement, 1 thread"""
-        )
-
-        class _MockCudaTimer(self._MockTimer):
-            # torch.cuda.synchronize is much more expensive than
-            # just timeit.default_timer
-            _timer_cost = 10e-6
-
-            _function_costs = (
-                self._MockTimer._function_costs[0],
-                self._MockTimer._function_costs[1],
-
-                # GPU should be faster once there is enough work.
-                ("expensive_fn()", 5e-6),
-            )
-
-        class MockCudaTimer(benchmark_utils.Timer):
-            _timer_cls = _MockCudaTimer
-
-        configurations = (
-            (7.9903966e-09, 376, 1000000, MockTimer("pass")),
-            (7.8554826e-09, 4, 100000000, MockCudaTimer("pass")),
-            (3.9930536e-06, 752, 1000, MockTimer("cheap_fn()")),
-            (3.9441239e-06, 8, 100000, MockCudaTimer("cheap_fn()")),
-            (1.9994249e-05, 150, 1000, MockTimer("expensive_fn()")),
-            (4.9301076e-06, 6, 100000, MockCudaTimer("expensive_fn()")),
-        )
-
-        for median, repeats, number_per_run, timer_instance in configurations:
-            measurement = timer_instance.blocked_autorange(min_run_time=3)
-            self.assertEqual(measurement.median, median)
-            self.assertEqual(len(measurement.times), repeats)
-            self.assertEqual(measurement.number_per_run, number_per_run)
-
-    @slowTest
-    @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
-    def test_collect_callgrind(self):
-        timer = benchmark_utils.Timer("y = torch.ones((1,)) + 1")
-
-        # Don't collect baseline to speed up unit test by ~30 seconds.
-        stats = timer.collect_callgrind(number=1000, collect_baseline=False)
-
-        self.assertIsInstance(stats.counts(include_lookdict_unicode=False), int)
-
-    def test_compare(self):
-        # Simulate several approaches.
-        costs = (
-            # overhead_optimized_fn()
-            (1e-6, 1e-9),
-
-            # compute_optimized_fn()
-            (3e-6, 5e-10),
-
-            # special_case_fn()  [square inputs only]
-            (1e-6, 4e-10),
-        )
-
-        sizes = (
-            (16, 16),
-            (16, 128),
-            (128, 128),
-            (4096, 1024),
-            (2048, 2048),
-        )
-
-        # overhead_optimized_fn()
-        class _MockTimer_0(self._MockTimer):
-            _function_costs = tuple(
-                (f"fn({i}, {j})", costs[0][0] + costs[0][1] * i * j)
-                for i, j in sizes
-            )
-
-        class MockTimer_0(benchmark_utils.Timer):
-            _timer_cls = _MockTimer_0
-
-        # compute_optimized_fn()
-        class _MockTimer_1(self._MockTimer):
-            _function_costs = tuple(
-                (f"fn({i}, {j})", costs[1][0] + costs[1][1] * i * j)
-                for i, j in sizes
-            )
-
-        class MockTimer_1(benchmark_utils.Timer):
-            _timer_cls = _MockTimer_1
-
-        # special_case_fn()
-        class _MockTimer_2(self._MockTimer):
-            _function_costs = tuple(
-                (f"fn({i}, {j})", costs[2][0] + costs[2][1] * i * j)
-                for i, j in sizes if i == j
-            )
-
-        class MockTimer_2(benchmark_utils.Timer):
-            _timer_cls = _MockTimer_2
-
-        results = []
-        for i, j in sizes:
-            results.append(
-                MockTimer_0(
-                    f"fn({i}, {j})",
-                    label="fn",
-                    description=f"({i}, {j})",
-                    sub_label="overhead_optimized",
-                ).blocked_autorange(min_run_time=10)
-            )
-
-            results.append(
-                MockTimer_1(
-                    f"fn({i}, {j})",
-                    label="fn",
-                    description=f"({i}, {j})",
-                    sub_label="compute_optimized",
-                ).blocked_autorange(min_run_time=10)
-            )
-
-            if i == j:
-                results.append(
-                    MockTimer_2(
-                        f"fn({i}, {j})",
-                        label="fn",
-                        description=f"({i}, {j})",
-                        sub_label="special_case (square)",
-                    ).blocked_autorange(min_run_time=10)
-                )
-
-        def check_output(output: str, expected: str):
-            # VSCode will strip trailing newlines from `expected`, so we have to match
-            # this behavior when comparing output.
-            output_str = "\n".join(
-                i.rstrip() for i in output.strip().splitlines(keepends=False))
-
-            self.assertEqual(output_str, textwrap.dedent(expected).strip())
-
-        compare = benchmark_utils.Compare(results)
-
-        check_output(
-            str(compare),
-            """
-            [------------------------------------------------- fn ------------------------------------------------]
-                                         |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
-            1 threads: --------------------------------------------------------------------------------------------
-                  overhead_optimized     |    1.3     |     3.0     |     17.4     |     4174.4     |     4174.4
-                  compute_optimized      |    3.1     |     4.0     |     11.2     |     2099.3     |     2099.3
-                  special_case (square)  |    1.1     |             |      7.5     |                |     1674.7
-
-            Times are in microseconds (us)."""
-        )
-
-        compare.trim_significant_figures()
-        check_output(
-            str(compare),
-            """
-            [------------------------------------------------- fn ------------------------------------------------]
-                                         |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
-            1 threads: --------------------------------------------------------------------------------------------
-                  overhead_optimized     |     1      |     3.0     |      17      |      4200      |      4200
-                  compute_optimized      |     3      |     4.0     |      11      |      2100      |      2100
-                  special_case (square)  |     1      |             |       8      |                |      1700
-
-            Times are in microseconds (us)."""
-        )
-
-        compare.colorize()
-        check_output(
-            str(compare),
-            """
-            [------------------------------------------------- fn ------------------------------------------------]
-                                         |  (16, 16)  |  (16, 128)  |  (128, 128)  |  (4096, 1024)  |  (2048, 2048)
-            1 threads: --------------------------------------------------------------------------------------------
-                  overhead_optimized     |     1      |  \x1b[92m\x1b[1m   3.0   \x1b[0m\x1b[0m  |  \x1b[2m\x1b[91m    17    \x1b[0m\x1b[0m  |      4200      |  \x1b[2m\x1b[91m    4200    \x1b[0m\x1b[0m
-                  compute_optimized      |  \x1b[2m\x1b[91m   3    \x1b[0m\x1b[0m  |     4.0     |      11      |  \x1b[92m\x1b[1m    2100    \x1b[0m\x1b[0m  |      2100
-                  special_case (square)  |  \x1b[92m\x1b[1m   1    \x1b[0m\x1b[0m  |             |  \x1b[92m\x1b[1m     8    \x1b[0m\x1b[0m  |                |  \x1b[92m\x1b[1m    1700    \x1b[0m\x1b[0m
-
-            Times are in microseconds (us)."""  # noqa
-        )
-
-
-    @unittest.skipIf(IS_WINDOWS and os.getenv("VC_YEAR") == "2019", "Random seed only accepts int32")
-    def test_fuzzer(self):
-        fuzzer = benchmark_utils.Fuzzer(
-            parameters=[
-                benchmark_utils.FuzzedParameter(
-                    "n", minval=1, maxval=16, distribution="loguniform")],
-            tensors=[benchmark_utils.FuzzedTensor("x", size=("n",))],
-            seed=0,
-        )
-
-        expected_results = [
-            (0.7821, 0.0536, 0.9888, 0.1949, 0.5242, 0.1987, 0.5094),
-            (0.7166, 0.5961, 0.8303, 0.005),
-        ]
-
-        for i, (tensors, _, _) in enumerate(fuzzer.take(2)):
-            x = tensors["x"]
-            self.assertEqual(
-                x, torch.Tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
-
-
 class TestAssert(TestCase):
     def test_assert_true(self):
         # verify assertions work as expected
-        torch.Assert(True, "foo")
+        # bool argument
+        torch._assert(True, "foo")
         with self.assertRaisesRegex(AssertionError, "bar"):
-            torch.Assert(False, "bar")
+            torch._assert(False, "bar")
+        # tensor argument
+        torch._assert(torch.tensor([True], dtype=torch.bool), "foo")
+        with self.assertRaisesRegex(AssertionError, "bar"):
+            torch._assert(torch.tensor([False], dtype=torch.bool), "bar")
+
+    def test_assert_scriptable(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._assert(x.sum() > 0, "foo")
+                return x
+
+        m = M()
+        # scriptable
+        ms = torch.jit.script(m)
+        # data can be passed without errors
+        x = torch.randn(4, 4).fill_(1.0)
+        ms(x)
+        with self.assertRaisesRegex(torch.jit.Error, "foo"):  # type: ignore[type-var]
+            ms(torch.tensor([False], dtype=torch.bool))
+
+
+@unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
+class TestStandaloneCPPJIT(TestCase):
+    def test_load_standalone(self):
+        build_dir = tempfile.mkdtemp()
+        try:
+            src_path = os.path.join(build_dir, "main.cpp")
+            src = textwrap.dedent("""\
+                #include <iostream>
+                #include <torch/torch.h>
+                int main() {
+                    auto x = torch::eye(3);
+                    std::cout << x << std::endl;
+                }
+            """)
+            with open(src_path, "wt") as f:
+                f.write(src)
+
+            exec_path = torch.utils.cpp_extension.load(
+                "standalone_load_test",
+                src_path,
+                build_directory=build_dir,
+                is_python_module=False,
+                is_standalone=True,
+            )
+
+            ext = ".exe" if IS_WINDOWS else ""
+            self.assertEqual(
+                exec_path,
+                os.path.join(build_dir, f"standalone_load_test{ext}")
+            )
+
+            for shell in [True, False]:
+                r = subprocess.run(
+                    [exec_path],
+                    shell=shell,
+                    stdout=subprocess.PIPE,
+                )
+                self.assertEqual(r.returncode, 0)
+                self.assertEqual(
+                    # Windows prints "\r\n" for newlines.
+                    textwrap.dedent(r.stdout.decode("utf-8")).replace("\r\n", "\n"),
+                    textwrap.dedent("""\
+                     1  0  0
+                     0  1  0
+                     0  0  1
+                    [ CPUFloatType{3,3} ]
+                    """)
+                )
+
+        finally:
+            shutil.rmtree(build_dir)
 
 
 if __name__ == '__main__':

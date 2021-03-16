@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 
 namespace at {
@@ -60,6 +62,10 @@ class Cache final {
   Factory factory_;
 };
 
+//
+// Impl
+//
+
 template<typename Factory>
 inline Cache<Factory>::Cache(Factory factory)
   : factory_(std::move(factory)) {
@@ -70,7 +76,7 @@ template<typename Factory>
 inline auto Cache<Factory>::retrieve(
     const Descriptor& descriptor) {
   auto iterator = cache_.find(descriptor);
-  if (cache_.cend() == iterator) {
+  if C10_UNLIKELY(cache_.cend() == iterator) {
     iterator = cache_.insert({descriptor, factory_(descriptor)}).first;
   }
 
@@ -86,3 +92,5 @@ inline void Cache<Factory>::purge() {
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

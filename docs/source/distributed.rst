@@ -55,19 +55,19 @@ Backends that come with PyTorch
 PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
 By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
 distributed (NCCL only when building with CUDA). MPI is an optional backend that can only be
-included if you build PyTorch from source. (e.g.building PyTorch on a host that has MPI
+included if you build PyTorch from source. (e.g. building PyTorch on a host that has MPI
 installed.)
 
-.. warning ::
-    As of PyTorch v1.7, Windows support for the distributed package only covers collective
-    communications with Gloo backend, `FileStore`, and `DistributedDataParallel`. Therefore,
-    the `init_method` argument in :func:`init_process_group` must point to a file. This works
-    for both local and shared file systems:
+.. note ::
+    As of PyTorch v1.8, Windows supports all collective communications backend but NCCL,
+    If  the `init_method` argument of :func:`init_process_group` points to a file it must adhere
+    to the following schema:
 
     - Local file system, ``init_method="file:///d:/tmp/some_file"``
     - Shared file system, ``init_method="file://////{machine_name}/{share_folder_name}/some_file"``
 
-    Similarly, if you directly pass in a `store` argument, it must be a ``FileStore`` instance.
+    Same as on Linux platform, you can enable TcpStore by setting environment variables,
+    MASTER_ADDR and MASTER_PORT.
 
 Which backend to use?
 ^^^^^^^^^^^^^^^^^^^^^
@@ -174,14 +174,6 @@ joined.
 
 .. autofunction:: init_process_group
 
-.. autoclass:: Backend
-
-.. autofunction:: get_backend
-
-.. autofunction:: get_rank
-
-.. autofunction:: get_world_size
-
 .. autofunction:: is_initialized
 
 .. autofunction:: is_mpi_available
@@ -270,6 +262,47 @@ The machine with rank 0 will be used to set up all connections.
 This is the default method, meaning that ``init_method`` does not have to be specified (or
 can be ``env://``).
 
+Post-Initialization
+-------------------
+
+Once :func:`torch.distributed.init_process_group` was run, the following functions can be used. To
+check whether the process group has already been initialized use :func:`torch.distributed.is_initialized`.
+
+.. autoclass:: Backend
+
+.. autofunction:: get_backend
+
+.. autofunction:: get_rank
+
+.. autofunction:: get_world_size
+
+--------------------------------------------------------------------------------
+
+Distributed Key-Value Store
+---------------------------
+
+The distributed package comes with a distributed key-value store, which can be
+used to share information between processes in the group as well as to
+initialize the distributed package in
+:func:`torch.distributed.init_process_group` (by explicitly creating the store
+as an alternative to specifying ``init_method``.) There are 3 choices for
+Key-Value Stores: :class:`~torch.distributed.TCPStore`,
+:class:`~torch.distributed.FileStore`, and :class:`~torch.distributed.HashStore`.
+
+.. autoclass:: Store
+.. autoclass:: TCPStore
+.. autoclass:: HashStore
+.. autoclass:: FileStore
+.. autoclass:: PrefixStore
+
+.. autofunction:: torch.distributed.Store.set
+.. autofunction:: torch.distributed.Store.get
+.. autofunction:: torch.distributed.Store.add
+.. autofunction:: torch.distributed.Store.wait
+.. autofunction:: torch.distributed.Store.num_keys
+.. autofunction:: torch.distributed.Store.delete_key
+.. autofunction:: torch.distributed.Store.set_timeout
+
 Groups
 ------
 
@@ -305,21 +338,53 @@ as they should never be created manually, but they are guaranteed to support two
 
 Synchronous and asynchronous collective operations
 --------------------------------------------------
-Every collective operation function supports the following two kinds of operations:
+Every collective operation function supports the following two kinds of operations,
+depending on the setting of the ``async_op`` flag passed into the collective:
 
-synchronous operation - the default mode, when ``async_op`` is set to False.
-when the function returns, it is guaranteed that
-the collective operation is performed (not necessarily completed if it's a CUDA op since all
-CUDA ops are asynchronous), and any further function calls depending on the data of the
-collective operation can be called. In the synchronous mode, the collective function does not
-return anything
+**Synchronous operation** - the default mode, when ``async_op`` is set to ``False``.
+When the function returns, it is guaranteed that
+the collective operation is performed. In the case of CUDA operations, it is not guaranteed
+that the CUDA operation is completed, since CUDA operations are asynchronous. For CPU collectives, any
+further function calls utilizing the output of the collective call will behave as expected. For CUDA collectives,
+function calls utilizing the output on the same CUDA stream will behave as expected. Users must take care of
+synchronization under the scenario of running under different streams. For details on CUDA semantics such as stream
+synchronization, see `CUDA Semantics <https://pytorch.org/docs/stable/notes/cuda.html>`__.
+See the below script to see examples of differences in these semantics for CPU and CUDA operations.
 
-asynchronous operation - when ``async_op`` is set to True. The collective operation function
+**Asynchronous operation** - when ``async_op`` is set to True. The collective operation function
 returns a distributed request object. In general, you don't need to create it manually and it
 is guaranteed to support two methods:
 
-* ``is_completed()`` - returns True if the operation has finished
-* ``wait()`` - will block the process until the operation is finished.
+* ``is_completed()`` - in the case of CPU collectives, returns ``True`` if completed. In the case of CUDA operations,
+  returns ``True`` if the operation has been successfully enqueued onto a CUDA stream and the output can be utilized on the
+  default stream without further synchronization.
+* ``wait()`` - in the case of CPU collectives, will block the process until the operation is completed. In the case
+  of CUDA collectives, will block until the operation has been successfully enqueued onto a CUDA stream and the
+  output can be utilized on the default stream without further synchronization.
+
+**Example**
+
+The following code can serve as a reference regarding semantics for CUDA operations when using distributed collectives.
+It shows the explicit need to synchronize when using collective outputs on different CUDA streams:
+
+::
+
+    # Code runs on each rank.
+    dist.init_process_group("nccl", rank=rank, world_size=2)
+    output = torch.tensor([rank]).cuda(rank)
+    s = torch.cuda.Stream()
+    handle = dist.all_reduce(output, async_op=True)
+    # Wait ensures the operation is enqueued, but not necessarily complete.
+    handle.wait()
+    # Using result on non-default stream.
+    with torch.cuda.stream(s):
+        s.wait_stream(torch.cuda.default_stream())
+        output.add_(100)
+    if rank == 0:
+        # if the explicit call to wait_stream was omitted, the output below will be
+        # non-deterministically 1 or 101, depending on whether the allreduce overwrote
+        # the value after the add completed.
+        print(output)
 
 
 Collective functions
@@ -343,6 +408,8 @@ Collective functions
 
 .. autofunction:: scatter
 
+.. autofunction:: scatter_object_list
+
 .. autofunction:: reduce_scatter
 
 .. autofunction:: all_to_all
@@ -358,6 +425,25 @@ Collective functions
 
     :class:`~torch.distributed.ReduceOp` is recommended to use instead.
 
+Autograd-enabled communication primitives
+-----------------------------------------
+
+If you want to use collective communication functions supporting autograd
+you can find an implementation of those in the `torch.distributed.nn.*` module.
+
+Functions here are synchronous and will be inserted in the autograd graph, so
+you need to ensure that all the processes that participated in the collective operation
+will do the backward pass for the backward communication to effectively happen and
+don't cause a deadlock.
+
+Please notice that currently the only backend where all the functions are guaranteed to work is ``gloo``.
+.. autofunction:: torch.distributed.nn.broadcast
+.. autofunction:: torch.distributed.nn.gather
+.. autofunction:: torch.distributed.nn.scatter
+.. autofunction:: torch.distributed.nn.reduce
+.. autofunction:: torch.distributed.nn.all_gather
+.. autofunction:: torch.distributed.nn.all_to_all
+.. autofunction:: torch.distributed.nn.all_reduce
 
 Multi-GPU collective functions
 ------------------------------

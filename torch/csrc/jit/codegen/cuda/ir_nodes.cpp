@@ -1,3 +1,5 @@
+#include <c10/util/irange.h>
+
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
@@ -12,6 +14,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -217,7 +220,7 @@ BroadcastOp::BroadcastOp(Val* _out, Val* _in)
 
   bool bad_mismatch = false;
 
-  for (size_t i = 0; i < c_root.size(); i++) {
+  for (const auto i : c10::irange(c_root.size())) {
     if (!c_mapped[i]) {
       if (!c_root[i]->isBroadcast()) {
         bad_mismatch = true;
@@ -225,7 +228,7 @@ BroadcastOp::BroadcastOp(Val* _out, Val* _in)
     }
   }
 
-  for (size_t i = 0; i < p_root.size(); i++) {
+  for (const auto i : c10::irange(p_root.size())) {
     if (!p_mapped[i]) {
       if (!p_root[i]->isReduction()) {
         bad_mismatch = true;
@@ -601,15 +604,15 @@ bool TensorDomain::sameAs(const TensorDomain* const other) const {
   if (getRFactorDomain().size() != other->getRFactorDomain().size())
     return false;
 
-  for (size_t i = 0; i < nDims(); i++)
+  for (const auto i : c10::irange(nDims()))
     if (!(axis(i)->sameAs(other->axis(i))))
       return false;
 
-  for (size_t i = 0; i < getRootDomain().size(); i++)
+  for (const auto i : c10::irange(getRootDomain().size()))
     if (!(getRootDomain()[i]->sameAs(other->getRootDomain()[i])))
       return false;
 
-  for (size_t i = 0; i < getRFactorDomain().size(); i++)
+  for (const auto i : c10::irange(getRFactorDomain().size()))
     if (!(getRFactorDomain()[i]->sameAs(other->getRFactorDomain()[i])))
       return false;
 
@@ -838,7 +841,7 @@ std::vector<IterDomain*> TensorDomain::orderedAs(
 
   // All available new positions
   std::set<int> all_positions;
-  for (decltype(ndims) i{0}; i < ndims; i++)
+  for (const auto i : c10::irange(ndims))
     all_positions.insert(i);
 
   // Check what positions haven't been specified.
@@ -872,13 +875,13 @@ std::vector<IterDomain*> TensorDomain::orderedAs(
 std::vector<IterDomain*> TensorDomain::noReductions(
     const std::vector<IterDomain*>& td) {
   size_t size_out = 0;
-  for (auto id : td)
+  for (const auto& id : td)
     if (!id->isReduction())
       size_out++;
   std::vector<IterDomain*> noReductionDomain(size_out);
 
   int it = 0;
-  for (auto id : td)
+  for (const auto& id : td)
     if (!id->isReduction())
       noReductionDomain[it++] = id;
 
@@ -888,13 +891,13 @@ std::vector<IterDomain*> TensorDomain::noReductions(
 std::vector<IterDomain*> TensorDomain::noBroadcasts(
     const std::vector<IterDomain*>& td) {
   size_t size_out = 0;
-  for (auto id : td)
+  for (const auto& id : td)
     if (!id->isBroadcast())
       size_out++;
   std::vector<IterDomain*> noBroadcastDomain(size_out);
 
   int it = 0;
-  for (auto id : td)
+  for (const auto& id : td)
     if (!id->isBroadcast())
       noBroadcastDomain[it++] = id;
 
@@ -902,13 +905,13 @@ std::vector<IterDomain*> TensorDomain::noBroadcasts(
 }
 
 bool TensorDomain::hasBroadcast(const std::vector<IterDomain*>& td) {
-  for (auto id : td)
+  for (const auto& id : td)
     if (id->isBroadcast())
       return true;
   return false;
 }
 bool TensorDomain::hasReduction(const std::vector<IterDomain*>& td) {
-  for (auto id : td)
+  for (const auto& id : td)
     if (id->isReduction())
       return true;
   return false;
@@ -990,7 +993,7 @@ std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
 
   std::vector<int> axes(axes_.size());
 
-  auto ndims = nDims();
+  const auto ndims = nDims();
   std::transform(axes_.begin(), axes_.end(), axes.begin(), [ndims](int i) {
     return i < 0 ? i + ndims : i;
   });
@@ -1011,7 +1014,7 @@ std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
 
   bool rfactor_found = false;
   bool reduction_found = false;
-  for (decltype(nDims()) i{0}; i < nDims(); i++) {
+  for (const auto i : c10::irange(nDims())) {
     if (axis(i)->isReduction()) {
       if (axes_set.find(i) != axes_set.end()) {
         rfactor_found = true;
@@ -1197,8 +1200,8 @@ class ConcretizeDomain : private BackwardVisitor {
     bcast_domain_map_[id] = concretized(To);
   }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Woverloaded-virtual"
+  using BackwardVisitor::handle;
+
   void handle(ReductionOp* rop) override {
     concretizePwOp(rop);
   }
@@ -1214,7 +1217,6 @@ class ConcretizeDomain : private BackwardVisitor {
   void handle(TernaryOp* top) override {
     concretizePwOp(top);
   };
-#pragma clang diagnostic pop
 
  private:
   using MapType = std::unordered_map<IterDomain*, IterDomain*>;
@@ -1222,7 +1224,12 @@ class ConcretizeDomain : private BackwardVisitor {
 };
 
 void ConcretizeDomain::concretizePwOp(Expr* e) {
-  TensorView* tv = *ir_utils::filterByType<TensorView>(e->outputs()).begin();
+  if (e->output(0)->getValType() != ValType::TensorView) {
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(e->outputs().size() == 1);
+  TensorView* tv = e->output(0)->as<TensorView>();
 
   std::vector<IterDomain*> io = tv->getRootDomain();
 
@@ -1316,8 +1323,13 @@ class ProveValEqual : private IterVisitor {
 
   // Inspect a pointwise op and record the identified equality
   void provePwOp(Expr* e) {
-    TensorView* tv = *ir_utils::filterByType<TensorView>(e->outputs()).begin();
-    std::vector<IterDomain*> io = tv->getRootDomain();
+    if (e->output(0)->getValType() != ValType::TensorView) {
+      return;
+    }
+
+    TORCH_INTERNAL_ASSERT(e->outputs().size() == 1);
+    TensorView* tv = e->output(0)->as<TensorView>();
+    const std::vector<IterDomain*>& io = tv->getRootDomain();
 
     // Record equalities from output to all the inputs
     // ignores un-concretizable broadcasts
@@ -1331,8 +1343,8 @@ class ProveValEqual : private IterVisitor {
     }
   }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Woverloaded-virtual"
+  using IterVisitor::handle;
+
   void handle(ReductionOp* rop) override {
     provePwOp(rop);
   }
@@ -1348,7 +1360,6 @@ class ProveValEqual : private IterVisitor {
   void handle(TernaryOp* top) override {
     provePwOp(top);
   }
-#pragma clang diagnostic pop
 
  private:
   ConcretizeDomain cd_;
@@ -1470,6 +1481,7 @@ c10::optional<ParallelType> NamedScalar::getParallelIndex() const {
   return c10::nullopt;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

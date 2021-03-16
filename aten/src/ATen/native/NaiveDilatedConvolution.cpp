@@ -1,12 +1,14 @@
 
 
-#include <tuple>
 #include <ATen/ATen.h>
-#include <ATen/native/im2col.h>
-#include <ATen/native/vol2col.h>
-
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/DilatedConvolutionUtils.h>
+#include <ATen/native/im2col.h>
+#include <ATen/native/vol2col.h>
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
+
+#include <tuple>
 
 namespace at {
 namespace native {
@@ -181,10 +183,8 @@ void slow_conv_dilated_all_cpu_template(
   // Temporary buffer:
   Tensor columns = at::empty({0}, options);
   if (output.defined() || grad_weight.defined() || grad_input.defined()) {
-    int64_t m = std::accumulate(
-        kernel_size.begin(), kernel_size.end(), 1, std::multiplies<int64_t>());
-    int64_t n = std::accumulate(
-        output_size.begin(), output_size.end(), 1, std::multiplies<int64_t>());
+    const int64_t m = c10::multiply_integers(kernel_size);
+    const int64_t n = c10::multiply_integers(output_size);
     columns.resize_({nInputPlane * m, n});
   }
   // Initialize

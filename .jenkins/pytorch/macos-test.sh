@@ -7,23 +7,16 @@ conda install -y six
 pip install -q hypothesis "librosa>=0.6.2" "numba<=0.49.1" psutil
 
 # TODO move this to docker
-pip install unittest-xml-reporting
+pip install unittest-xml-reporting pytest
 
-# faulthandler become built-in since 3.3
-if [[ ! $(python -c "import sys; print(int(sys.version_info >= (3, 3)))") == "1" ]]; then
-  pip install -q faulthandler
-fi
-
-if [ -z "${IN_CIRCLECI}" ]; then
+if [ -z "${IN_CI}" ]; then
   rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 fi
 
-git submodule sync --recursive
-git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Test PyTorch
-if [ -z "${IN_CIRCLECI}" ]; then
+if [ -z "${IN_CI}" ]; then
   if [[ "${BUILD_ENVIRONMENT}" == *cuda9.2* ]]; then
     # Eigen gives "explicit specialization of class must precede its first use" error
     # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
@@ -34,7 +27,7 @@ if [ -z "${IN_CIRCLECI}" ]; then
 fi
 
 # Download torch binaries in the test jobs
-if [ -z "${IN_CIRCLECI}" ]; then
+if [ -z "${IN_CI}" ]; then
   rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
   aws s3 cp s3://ossci-macos-build/pytorch/${IMAGE_COMMIT_TAG}.7z ${IMAGE_COMMIT_TAG}.7z
   7z x ${IMAGE_COMMIT_TAG}.7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
@@ -63,7 +56,7 @@ test_python_all() {
   # Increase default limit on open file handles from 256 to 1024
   ulimit -n 1024
 
-  python test/run_test.py --verbose --exclude test_jit_cuda_fuser_profiling test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy --determine-from="$DETERMINE_FROM"
+  python test/run_test.py --verbose --exclude-jit-executor --determine-from="$DETERMINE_FROM"
 
   assert_git_not_dirty
 }
@@ -139,11 +132,31 @@ test_custom_script_ops() {
   assert_git_not_dirty
 }
 
+test_jit_hooks() {
+  echo "Testing jit hooks in cpp"
+  pushd test/jit_hooks
+  # Build the custom operator library.
+  rm -rf build && mkdir build
+  pushd build
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  make VERBOSE=1
+  popd
+
+  # Run tests Python-side and export a script module.
+  python model.py --export-script-module=model
+  # Run tests C++-side and load the exported script module.
+  build/test_jit_hooks ./model
+  popd
+  assert_git_not_dirty
+}
+
 
 if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
   test_python_all
   test_libtorch
   test_custom_script_ops
+  test_jit_hooks
   test_custom_backend
 else
   if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
@@ -151,6 +164,7 @@ else
   elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
     test_libtorch
     test_custom_script_ops
+    test_jit_hooks
     test_custom_backend
   fi
 fi

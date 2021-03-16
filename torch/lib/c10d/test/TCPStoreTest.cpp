@@ -9,12 +9,14 @@
 #include <c10d/PrefixStore.hpp>
 #include <c10d/TCPStore.hpp>
 
+constexpr int64_t kShortStoreTimeoutMillis = 100;
+
 // Different ports for different tests.
 void testHelper(const std::string& prefix = "") {
   const auto numThreads = 16;
   const auto numWorkers = numThreads + 1;
 
-  auto serverTCPStore = std::make_shared<c10d::TCPStore>(
+  auto serverTCPStore = c10::make_intrusive<c10d::TCPStore>(
       "127.0.0.1",
       0,
       numWorkers,
@@ -23,7 +25,7 @@ void testHelper(const std::string& prefix = "") {
       /* wait */ false);
 
   auto serverStore =
-      std::make_unique<c10d::PrefixStore>(prefix, serverTCPStore);
+      c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
   // server store
   auto serverThread = std::thread([&serverStore, &serverTCPStore] {
     // Wait for all workers to join.
@@ -42,6 +44,13 @@ void testHelper(const std::string& prefix = "") {
     // helper thread, and the init key to coordinate workers.
     EXPECT_EQ(numKeys, 5);
 
+    // Check compareSet, does not check return value
+    c10d::test::compareSet(
+        *serverStore, "key0", "wrongCurrentValue", "newValue");
+    c10d::test::check(*serverStore, "key0", "value0");
+    c10d::test::compareSet(*serverStore, "key0", "value0", "newValue");
+    c10d::test::check(*serverStore, "key0", "newValue");
+
     auto delSuccess = serverStore->deleteKey("key0");
     // Ensure that the key was successfully deleted
     EXPECT_TRUE(delSuccess);
@@ -51,6 +60,8 @@ void testHelper(const std::string& prefix = "") {
     EXPECT_FALSE(delFailure);
     numKeys = serverStore->getNumKeys();
     EXPECT_EQ(numKeys, 4);
+    auto timeout = std::chrono::milliseconds(kShortStoreTimeoutMillis);
+    serverStore->setTimeout(timeout);
     EXPECT_THROW(serverStore->get("key0"), std::runtime_error);
   });
 
@@ -60,20 +71,20 @@ void testHelper(const std::string& prefix = "") {
   c10d::test::Semaphore sem1, sem2;
 
   // Each thread will have a client store to send/recv data
-  std::vector<std::shared_ptr<c10d::TCPStore>> clientTCPStores;
-  std::vector<std::unique_ptr<c10d::PrefixStore>> clientStores;
+  std::vector<c10::intrusive_ptr<c10d::TCPStore>> clientTCPStores;
+  std::vector<c10::intrusive_ptr<c10d::PrefixStore>> clientStores;
   for (auto i = 0; i < numThreads; i++) {
-    clientTCPStores.push_back(std::make_unique<c10d::TCPStore>(
+    clientTCPStores.push_back(c10::make_intrusive<c10d::TCPStore>(
         "127.0.0.1", serverTCPStore->getPort(), numWorkers, false));
-    clientStores.push_back(std::unique_ptr<c10d::PrefixStore>(
-        new c10d::PrefixStore(prefix, clientTCPStores[i])));
+    clientStores.push_back(
+        c10::make_intrusive<c10d::PrefixStore>(prefix, clientTCPStores[i]));
   }
 
   std::string expectedCounterRes = std::to_string(numThreads * numIterations + 1);
 
   for (auto i = 0; i < numThreads; i++) {
     threads.push_back(
-        std::thread([&sem1, &sem2, &clientStores, i, &expectedCounterRes] {
+        std::thread([&sem1, &sem2, &clientStores, i, &expectedCounterRes, &numIterations, &numThreads] {
           for (auto j = 0; j < numIterations; j++) {
             clientStores[i]->add("counter", 1);
           }

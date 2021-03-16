@@ -10,7 +10,7 @@ def _load_for_lite_interpreter(f, map_location=None):
     Load a :class:`LiteScriptModule`
     saved with :func:`torch.jit._save_for_lite_interpreter`
 
-    Arguments:
+    Args:
         f: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
         map_location: a string or torch.device used to dynamically remap
@@ -51,7 +51,6 @@ def _load_for_lite_interpreter(f, map_location=None):
 
     return LiteScriptModule(cpp_module)
 
-
 class LiteScriptModule(object):
     def __init__(self, cpp_module):
         self._c = cpp_module
@@ -68,3 +67,11 @@ class LiteScriptModule(object):
 
     def run_method(self, method_name, *input):
         return self._c.run_method(method_name, input)
+
+def _export_operator_list(module: LiteScriptModule):
+    r"""
+        return a set of root operator names (with overload name) that are used by any method
+        in this mobile module.
+    """
+    # TODO fix mypy here
+    return torch._C._export_operator_list(module._c)  # type: ignore

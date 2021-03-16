@@ -21,6 +21,7 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_new.h>
@@ -43,9 +44,41 @@ namespace py = pybind11;
 
 PyObject *THPVariableClass = nullptr;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+PyObject *ParameterClass = nullptr;
+
+// clang-tidy gets confused by static const
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
+
+#ifdef USE_DEPLOY
+// used only in libtorch_deployinterpreter.so
+// there are muliple copies of the python interpreter that
+// can shared Tensors, so rather than use their internal pointer
+// to a PyObject use a library-local map.
+static std::unordered_map<void*, PyObject*> impl_to_pyobj;
+
+void set_pyobj(const Variable& self, PyObject* pyobj) {
+  TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
+  void* key = self.unsafeGetTensorImpl();
+  if (!pyobj) {
+    impl_to_pyobj.erase(key);
+    return;
+  }
+  impl_to_pyobj[key] = pyobj;
+}
+
+PyObject* pyobj(const Variable& self) {
+  TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
+  auto it = impl_to_pyobj.find(self.unsafeGetTensorImpl());
+  return it == impl_to_pyobj.end() ? nullptr : it->second;
+}
+#else
+using torch::autograd::impl::pyobj;
+using torch::autograd::impl::set_pyobj;
+#endif
 
 // Creates a new Python object for a Variable. The Variable must not already
 // have a PyObject* associated with it.
@@ -55,7 +88,7 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
   if (obj) {
     auto v = (THPVariable*) obj;
     new (&v->cdata) Variable(std::move(var));
-    torch::autograd::impl::set_pyobj(v->cdata, obj);
+    set_pyobj(v->cdata, obj);
   }
   return obj;
 }
@@ -66,7 +99,7 @@ PyObject * THPVariable_Wrap(Variable var)
     Py_RETURN_NONE;
   }
 
-  if (auto obj = torch::autograd::impl::pyobj(var)) {
+  if (auto obj = pyobj(var)) {
     Py_INCREF(obj);
     return obj;
   }
@@ -121,7 +154,7 @@ static int THPVariable_clear(THPVariable *self)
     // objects stay live, buster!  See
     // https://github.com/pytorch/pytorch/issues/22884 for an example of
     // this actually showing up.
-    torch::autograd::impl::set_pyobj(self->cdata, nullptr);
+    set_pyobj(self->cdata, nullptr);
   }
   self->cdata.reset();
   return 0;
@@ -145,8 +178,9 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
 }
 
 // Instantiates a subclass of self with the same data.
-static PyObject* THPVariable_as_subclass(THPVariable* self, PyObject* args, PyObject* kwargs) {
+static PyObject* THPVariable_as_subclass(PyObject* _self, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
+  auto self = (THPVariable*)_self;
   static PythonArgParser parser({
     "as_subclass(PyObject* cls)",
   });
@@ -388,19 +422,19 @@ PyObject *THPVariable_get_ndim(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPVariable_get_names(THPVariable *self, void *unused)
+PyObject *THPVariable_get_names(PyObject *self, void *unused)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject *)self)) {
-    return handle_torch_function_getter(self, "names");
+  if (check_has_torch_function(self)) {
+    return handle_torch_function_getter((THPVariable*)self, "names");
   }
   // The long-term plan is to return a list of (python) torch.Dimname.
   // However, for now, return a list of string.
-  size_t size = self->cdata.dim();
+  size_t size = ((THPVariable *)self)->cdata.dim();
   THPObjectPtr tuple(PyTuple_New(size));
   if (!tuple) throw python_error();
 
-  const auto dimnames = self->cdata.names();
+  const auto dimnames = ((THPVariable *)self)->cdata.names();
   for (size_t i = 0; i < size; ++i) {
     PyObject* str;
     if (dimnames[i].type() == at::NameType::WILDCARD) {
@@ -423,12 +457,12 @@ PyObject *THPVariable_get_names(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_names(THPVariable *self, PyObject *names) {
+int THPVariable_set_names(PyObject *self, PyObject *names, void *unused) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function((PyObject *)self)) {
-    return handle_torch_function_setter(self, "names", names);
+  if (check_has_torch_function(self)) {
+    return handle_torch_function_setter((THPVariable*)self, "names", names);
   }
-  auto& var = self->cdata;
+  auto& var = ((THPVariable *)self)->cdata;
   if (names == Py_None) {
     at::internal_set_names_inplace(var, at::nullopt);
   } else {
@@ -544,6 +578,16 @@ PyObject *THPVariable_is_cuda(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_is_xpu(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "is_xpu");
+  }
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.is_xpu());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_is_sparse(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -563,6 +607,28 @@ PyObject *THPVariable_is_mkldnn(THPVariable *self, void *unused)
   }
   auto& self_ = self->cdata;
   return torch::autograd::utils::wrap(self_.is_mkldnn());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_is_mlc(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_mlc");
+  }
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.is_mlc());
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPVariable_is_vulkan(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_vulkan");
+  }
+  auto& self_ = self->cdata;
+  return torch::autograd::utils::wrap(self_.is_vulkan());
   END_HANDLE_TH_ERRORS
 }
 
@@ -693,8 +759,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"name", (getter)THPVariable_get_name, nullptr, nullptr, nullptr},
   {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
   {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
+  {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"is_mkldnn", (getter)THPVariable_is_mkldnn, nullptr, nullptr, nullptr},
+  {"is_mlc", (getter)THPVariable_is_mlc, nullptr, nullptr, nullptr},
+  {"is_vulkan", (getter)THPVariable_is_vulkan, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
   {"is_meta", (getter)THPVariable_is_meta, nullptr, nullptr, nullptr},
@@ -715,8 +784,10 @@ static PyMappingMethods THPVariable_as_mapping = {
 };
 
 static PyMethodDef extra_methods[] = {
-  {"as_subclass", (PyCFunction)THPVariable_as_subclass, METH_VARARGS | METH_KEYWORDS, nullptr},
-  {"_make_subclass", (PyCFunction)THPVariable_make_subclass, METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"as_subclass", castPyCFunctionWithKeywords(THPVariable_as_subclass),
+    METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_make_subclass", castPyCFunctionWithKeywords(THPVariable_make_subclass),
+    METH_STATIC | METH_VARARGS | METH_KEYWORDS, nullptr},
   {nullptr}
 };
 

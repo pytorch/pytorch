@@ -24,6 +24,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"double", ParameterType::DOUBLE},
   {"complex", ParameterType::COMPLEX},
   {"TensorList", ParameterType::TENSOR_LIST},
+  {"c10::List<c10::optional<Tensor>>", ParameterType::TENSOR_LIST},
   {"IntArrayRef", ParameterType::INT_LIST},
   {"ArrayRef<double>", ParameterType::FLOAT_LIST},
   {"Generator", ParameterType::GENERATOR},
@@ -35,9 +36,11 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"MemoryFormat", ParameterType::MEMORY_FORMAT},
   {"QScheme", ParameterType::QSCHEME},
   {"Device", ParameterType::DEVICE},
+  {"Stream", ParameterType::STREAM},
   {"std::string", ParameterType::STRING},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
+  {"ScalarList", ParameterType::SCALAR_LIST},
 };
 
 // Default arg name translations for compatibility with NumPy.
@@ -138,7 +141,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 auto handle_torch_function_getter(THPVariable* self, const std::string& property_name) -> PyObject* {
   py::object torch_api = PyObject_FastGetAttrString(THPVariableClass, (char*)property_name.c_str());
   std::string module_name = "torch.Tensor." + property_name;
-  return handle_torch_function((PyObject *)self, "__get__", nullptr, torch_api.ptr(), module_name);
+  return handle_torch_function((PyObject *)self, "__get__", nullptr, nullptr, torch_api.ptr(), module_name);
 }
 
 auto handle_torch_function_setter(THPVariable* self, const std::string& property_name, PyObject* value) -> int {
@@ -147,10 +150,10 @@ auto handle_torch_function_setter(THPVariable* self, const std::string& property
   if (value != nullptr)
   {
     py::tuple args_ = py::make_tuple(py::handle(value));
-    handle_torch_function((PyObject *)self, "__set__", args_.ptr(), torch_api.ptr(), module_name);
+    handle_torch_function((PyObject *)self, "__set__", args_.ptr(), nullptr, torch_api.ptr(), module_name);
   }
   else {
-    handle_torch_function((PyObject *)self, "__delete__", nullptr, torch_api.ptr(), module_name);
+    handle_torch_function((PyObject *)self, "__delete__", nullptr, nullptr, torch_api.ptr(), module_name);
   }
   return 0;
 }
@@ -174,13 +177,13 @@ auto combine_self_args(PyObject *self, PyObject *args) -> py::tuple {
   return args_;
 }
 
-auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args, PyObject* torch_api, const std::string& module_name) -> PyObject* {
+auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args, PyObject* kwargs, PyObject* torch_api, const std::string& module_name) -> PyObject* {
   py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)func_name.c_str());
   TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
   py::tuple py_types = py::make_tuple(py::handle(PyObject_Type(self)));
   py::object torch_function = PyObject_FastGetAttrString(self, "__torch_function__");
-  py::object ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), NULL));
+  py::object ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), kwargs));
   if (ret.ptr() == nullptr) {
     // if an exception occurred in a user's implementation of
     // __torch_function__, throw it
@@ -259,6 +262,28 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
   return handle_torch_function(r, nullptr, args, kwargs, torch_api, module_name);
 }
 
+auto handle_torch_function_indexing(PyObject* self, PyObject* index, PyObject* val) -> PyObject* {
+  const char *func_name = (val == nullptr) ? "__getitem__" : "__setitem__";
+  py::object index_tup;
+  if (PyTuple_Check(index)) {
+    index_tup = py::reinterpret_borrow<py::object>(index);
+  }
+  else {
+    index_tup = py::make_tuple(py::handle(index));
+  }
+  std::vector<py::handle> overridable_args;
+  is_tensor_and_append_overloaded(self, &overridable_args);
+  Py_ssize_t size = PyTuple_GET_SIZE(index_tup.ptr());
+  for (Py_ssize_t i = 0; i < size; i++) {
+    PyObject *obj = PyTuple_GetItem(index_tup.ptr(), i);
+    is_tensor_and_append_overloaded(obj, &overridable_args);
+  }
+  if (val != nullptr) is_tensor_and_append_overloaded(val, &overridable_args);
+  py::object func = PyObject_FastGetAttrString(THPVariableClass, (char *)func_name);
+  py::object args = (val == nullptr) ? py::make_tuple(py::handle(self), py::handle(index)) : py::make_tuple(py::handle(self), py::handle(index), py::handle(val));
+  return handle_torch_function_no_python_arg_parser(overridable_args, args.ptr(), nullptr, func_name, func.ptr(), "torch.Tensor");
+}
+
 /*
  *  obj has a __torch_function__ implementation and may either be a
  *  subclass of Tensor or a Tensor-like duck type. We may need to
@@ -331,7 +356,7 @@ void append_overloaded_arg(std::vector<py::handle>* overloaded_args, PyObject* o
 
 bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args) {
   if (THPVariable_CheckExact(obj)) {
-    // torch.Tensor instances (not subclasses)
+    // torch.Tensor instances (not subclasses, except for Parameter)
     return true;
   }
 
@@ -347,13 +372,28 @@ bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* ove
   return false;
 }
 
-bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error) {
+bool is_scalar_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
   }
   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
   for (size_t idx = 0; idx < size; idx++) {
+    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+    if (!THPUtils_checkScalar(iobj)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error) {
+  auto tuple = six::isTuple(obj);
+  if (!(tuple || PyList_Check(obj))) {
+    return false;
+  }
+  auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  for (long idx = 0; idx < size; idx++) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!is_tensor_and_append_overloaded(iobj, overloaded_args)) {
       if (throw_error) {
@@ -364,6 +404,38 @@ bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>
     }
   }
   return true;
+}
+
+bool is_float_or_complex_list(PyObject* obj) {
+  auto tuple = six::isTuple(obj);
+  if (!(tuple || PyList_Check(obj))) {
+    return false;
+  }
+
+  auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  if (size > 0) {
+    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
+    if (!THPUtils_checkDouble(iobj) && !PyComplex_Check(iobj)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+static bool is_int_list(PyObject* obj, int broadcast_size) {
+  if (PyTuple_Check(obj) || PyList_Check(obj)) {
+    if (PySequence_Size(obj) == 0) {
+      return true;
+    }
+    auto item = py::reinterpret_steal<py::object>(
+        PySequence_GetItem(obj, 0));
+    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+    // in an intlist argument. Even float or complex scalar tensors.
+    return (THPVariable_Check(item.ptr()) || THPUtils_checkIndex(item.ptr()));
+  }
+  // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
+  return broadcast_size > 0 && THPUtils_checkLong(obj);
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.
@@ -413,14 +485,8 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::TENSOR_LIST: {
       return is_tensor_list_and_append_overloaded(obj, &overloaded_args, argnum, true /* throw_error */);
     }
-    case ParameterType::INT_LIST: {
-      if (PyTuple_Check(obj) || PyList_Check(obj)) {
-        return true;
-      }
-      // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
-      return size > 0 && THPUtils_checkLong(obj);
-    }
-    case ParameterType::FLOAT_LIST: return (PyTuple_Check(obj) || PyList_Check(obj));
+    case ParameterType::INT_LIST: return is_int_list(obj, size);
+    case ParameterType::FLOAT_LIST: return is_float_or_complex_list(obj);
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
@@ -431,8 +497,13 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::QSCHEME: return THPQScheme_Check(obj);
     case ParameterType::DEVICE:
       return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
+    case ParameterType::STREAM:
+      return THPStream_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
     default: throw std::runtime_error("unknown parameter type");
+    case ParameterType::SCALAR_LIST: {
+      return is_scalar_list(obj);
+    }
   }
 }
 
@@ -458,6 +529,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::STRING: return "str";
     case ParameterType::DIMNAME: return "name";
     case ParameterType::DIMNAME_LIST: return "tuple of names";
+    case ParameterType::SCALAR_LIST: return "tuple of Scalars";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -501,6 +573,62 @@ static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int6
     args.emplace_back(std::stol(tok));
   }
   return args;
+}
+
+// Parse a string literal to remove quotes and escape sequences
+static std::string parse_string_literal(c10::string_view str) {
+  TORCH_CHECK(str.length() >= 2, "String defaults must be quoted");
+
+  if (str.front() == '"') {
+    TORCH_CHECK(str.back() == '"',
+                "Mismatched quotes in string default: ", str);
+  } else {
+    TORCH_CHECK(str.front() == '\'' && str.back() == '\'',
+                "Invalid quotes in string default: ", str)
+  }
+
+  std::string parsed;
+  parsed.reserve(str.size());
+  for (size_t i = 1; i < str.size() - 1;) {
+    if (str[i] != '\\') {
+      parsed.push_back(str[i]);
+      ++i;
+      continue;
+    }
+
+    // Handle escape sequences
+    TORCH_CHECK(i < str.size() - 2, "String ends with escaped final quote: ", str)
+    char c = str[i + 1];
+    switch (c) {
+      case '\\':
+      case '\'':
+      case '\"':
+        break;
+      case 'a':
+        c = '\a';
+        break;
+      case 'b':
+        c = '\b';
+        break;
+      case 'f':
+        c = '\f';
+        break;
+      case 'n':
+        c = '\n';
+        break;
+      case 'v':
+        c = '\v';
+        break;
+      case 't':
+        c = '\t';
+        break;
+      default:
+        TORCH_CHECK(false, "Unsupported escape sequence in string default: \\", str[i + 1]);
+    }
+    parsed.push_back(c);
+    i += 2;
+  }
+  return parsed;
 }
 
 void FunctionParameter::set_default_str(const std::string& str) {
@@ -557,9 +685,13 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (str != "None") {
       throw std::runtime_error("invalid device: " + str);
     }
+  } else if (type_ == ParameterType::STREAM) {
+    if (str != "None") {
+      throw std::runtime_error("invalid stream: " + str);
+    }
   } else if (type_ == ParameterType::STRING) {
-    if (str != "None" && str != "") {
-      throw std::runtime_error("invalid default string: " + str);
+    if (str != "None") {
+      default_string = parse_string_literal(str);
     }
   }
 }
@@ -761,7 +893,7 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
   }
 
   int i = 0;
-  if (self != nullptr && !THPVariable_CheckExact(self) && check_has_torch_function(self)) {
+  if (self != nullptr && check_has_torch_function(self)) {
     append_overloaded_arg(&this->overloaded_args, self);
   }
   for (auto& param : params) {
@@ -975,24 +1107,28 @@ at::Scalar PythonArgs::scalar_slow(int i) {
         signature.params[i].name, idx, var, jit::NumberType::get());
   }
 
+  return scalar_slow(args[i]);
+}
+
+at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
-  if (THPVariable_Check(args[i])) {
-    return ((THPVariable*)args[i])->cdata.item();
+  if (THPVariable_Check(arg)) {
+    return ((THPVariable*)arg)->cdata.item();
   }
 
-  if (THPUtils_checkLong(args[i])) {
-    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  if (THPUtils_checkLong(arg)) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(arg)));
   }
 
-  if (PyBool_Check(args[i])) {
-    return at::Scalar(THPUtils_unpackBool(args[i]));
+  if (PyBool_Check(arg)) {
+    return at::Scalar(THPUtils_unpackBool(arg));
   }
 
-  if (PyComplex_Check(args[i])) {
-    return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
+  if (PyComplex_Check(arg)) {
+    return at::Scalar(THPUtils_unpackComplexDouble(arg));
   }
-  return at::Scalar(THPUtils_unpackDouble(args[i]));
+  return at::Scalar(THPUtils_unpackDouble(arg));
 }
 
 } // namespace torch

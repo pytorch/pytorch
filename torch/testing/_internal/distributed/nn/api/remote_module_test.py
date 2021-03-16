@@ -78,7 +78,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
         return 2
 
     @staticmethod
-    def _create_remote_module_iter(dst_worker_name, device="cpu", modes=None):
+    def _create_remote_module_iter(remote_device, modes=None):
         if modes is None:
             modes = ModuleCreationMode.__members__.values()
 
@@ -86,15 +86,12 @@ class RemoteModuleTest(RpcAgentTestFixture):
         kwargs = dict(first_kwarg=2)
 
         if ModuleCreationMode.MODULE_CTOR in modes:
-            remote_module = RemoteModule(
-                dst_worker_name, device, MyModule, args, kwargs
-            )
+            remote_module = RemoteModule(remote_device, MyModule, args, kwargs)
             yield remote_module
 
         if ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE in modes:
             remote_module = _RemoteModule(
-                dst_worker_name,
-                device,
+                remote_device,
                 create_scripted_module,
                 args,
                 kwargs,
@@ -108,6 +105,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
         if self.rank != 0:
             return
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+        remote_device = "{}/cpu".format(dst_worker_name)
         args = (1,)
         kwargs = dict(first_kwarg=2)
 
@@ -115,13 +113,13 @@ class RemoteModuleTest(RpcAgentTestFixture):
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(dst_worker_name, "cpu", BadModule, args, kwargs)
+            RemoteModule(remote_device, BadModule, args, kwargs)
 
         with self.assertRaisesRegex(
             ValueError,
             r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
-            RemoteModule(dst_worker_name, "cpu", BadModule, args, kwargs)
+            RemoteModule(remote_device, BadModule, args, kwargs)
 
     @dist_utils.dist_init
     def test_forward_async(self):
@@ -219,6 +217,21 @@ class RemoteModuleTest(RpcAgentTestFixture):
             self.assertEqual(len(param_rrefs), 1)
             self.assertTrue(torch.equal(param_rrefs[0].to_here(), _PARAM_VAL))
 
+    @dist_utils.dist_init
+    def test_get_module_rref(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        # Only test Python nn.Module, because script module methods don't support ``get_module_rref``.
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            rref = remote_module.get_module_rref()
+            self.assertEqual(rref, remote_module.module_rref)
+            for param in rref.to_here().parameters():
+                self.assertTrue(torch.equal(param, _PARAM_VAL))
+
     @skip_if_lt_x_gpu(1)
     @dist_utils.dist_init
     def test_valid_device(self):
@@ -227,7 +240,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
         dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
 
         for remote_module in self._create_remote_module_iter(
-            dst_worker_name, device="cuda:0", modes=[ModuleCreationMode.MODULE_CTOR]
+            "{}/cuda:0".format(dst_worker_name), modes=[ModuleCreationMode.MODULE_CTOR]
         ):
             device = rpc.rpc_sync(
                 dst_worker_name, remote_device, (remote_module.module_rref,)
@@ -244,12 +257,11 @@ class RemoteModuleTest(RpcAgentTestFixture):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, hip, msnpu, xla device type at start of device string",
+            r"Expected one of .+ device type at start of device string",
         ):
             list(
                 self._create_remote_module_iter(
-                    dst_worker_name,
-                    device="foo",
+                    "{}/foo".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
             )
@@ -259,8 +271,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
         ):
             list(
                 self._create_remote_module_iter(
-                    dst_worker_name,
-                    device="cuda:100",
+                    "{}/cuda:100".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
             )
@@ -268,19 +279,48 @@ class RemoteModuleTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(RuntimeError, r"Invalid device string: 'cpu2'"):
             list(
                 self._create_remote_module_iter(
-                    dst_worker_name,
+                    "{}/cpu2".format(dst_worker_name),
                     modes=[ModuleCreationMode.MODULE_CTOR],
-                    device="cpu2",
+                )
+            )
+
+        with self.assertRaisesRegex(RuntimeError, r"Device string must not be empty"):
+            list(
+                self._create_remote_module_iter(
+                    "{}/".format(dst_worker_name),
+                    modes=[ModuleCreationMode.MODULE_CTOR],
                 )
             )
 
         with self.assertRaisesRegex(
-            RuntimeError, r"CPU device index must be -1 or zero, got 2"
+            RuntimeError,
+            r"Could not parse remote_device: worker1/cuda:0/cuda:1. The valid format is '<workername>/<device>'",
         ):
             list(
                 self._create_remote_module_iter(
-                    dst_worker_name,
-                    device="cpu:2",
+                    "{}/cuda:0/cuda:1".format(dst_worker_name),
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"The workername in remote_device '/' cannot be empty. The valid format is '<workername>/<device>'",
+        ):
+            list(
+                self._create_remote_module_iter(
+                    "/",
+                    modes=[ModuleCreationMode.MODULE_CTOR],
+                )
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"The workername in remote_device '/cuda:0' cannot be empty. The valid format is '<workername>/<device>'",
+        ):
+            list(
+                self._create_remote_module_iter(
+                    "/cuda:0",
                     modes=[ModuleCreationMode.MODULE_CTOR],
                 )
             )

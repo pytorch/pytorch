@@ -1,5 +1,6 @@
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
@@ -45,7 +46,7 @@ class AsyncTest {
   }
 
   void start(int rank, int size) {
-    auto store = std::make_shared<::c10d::FileStore>(path_, size);
+    auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
@@ -93,7 +94,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     }
   }
 
-  void wait(std::shared_ptr<ProcessGroup::Work>& work) {
+  void wait(c10::intrusive_ptr<ProcessGroup::Work>& work) {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait();
   }
@@ -130,7 +131,7 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
   AsyncAllreduceTest(const std::string& path, int numTensors)
       : AsyncInputIsOutputTest(path, numTensors) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -156,7 +157,7 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
   AsyncBroadcastTest(const std::string& path, int numTensors)
       : AsyncInputIsOutputTest(path, numTensors) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -185,7 +186,7 @@ void runAsyncAllreduceTest(
     size_t numProcesses = 4,
     size_t numTensors = 2) {
   auto tests = initialize<AsyncAllreduceTest>(path, numProcesses, numTensors);
-  std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
+  std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
   for (size_t i = 0; i < numProcesses; i++) {
     work[i] = tests[i].run();
   }
@@ -229,7 +230,7 @@ void runAsyncBroadcastTest(
   // Try every permutation of root rank and root tensor
   for (size_t rootRank = 0; rootRank < numProcesses; rootRank++) {
     for (size_t rootTensor = 0; rootTensor < numTensors; rootTensor++) {
-      std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
+      std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
       for (size_t i = 0; i < numProcesses; i++) {
         work[i] = tests[i].run(rootRank, rootTensor);
       }
@@ -243,10 +244,9 @@ void runAsyncBroadcastTest(
       const auto expected = (rootRank * numTensors + rootTensor);
       for (size_t i = 0; i < numProcesses; i++) {
         auto tensors = tests[i].getTensors();
-        for (size_t j = 0; j < tensors.size(); j++) {
-          auto& tensor = tensors[j];
-          auto data = tensor.data_ptr<float>();
-          for (auto k = 0; k < tensor.numel(); k++) {
+        for (const auto & tensor : tensors) {
+          const auto *const data = tensor.data_ptr<float>();
+          for (const auto k : c10::irange(tensor.numel())) {
             EXPECT_EQ(data[k], expected);
           }
         }

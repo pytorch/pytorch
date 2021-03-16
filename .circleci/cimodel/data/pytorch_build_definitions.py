@@ -272,6 +272,8 @@ def instantiate_configs():
         compiler_version = fc.find_prop("compiler_version")
         is_xla = fc.find_prop("is_xla") or False
         is_asan = fc.find_prop("is_asan") or False
+        is_coverage = fc.find_prop("is_coverage") or False
+        is_noarch = fc.find_prop("is_noarch") or False
         is_onnx = fc.find_prop("is_onnx") or False
         is_pure_torch = fc.find_prop("is_pure_torch") or False
         is_vulkan = fc.find_prop("is_vulkan") or False
@@ -310,7 +312,13 @@ def instantiate_configs():
             parms_list.append("asan")
             python_version = fc.find_prop("pyver")
             parms_list[0] = fc.find_prop("abbreviated_pyver")
-            restrict_phases = ["build", "test1", "test2"]
+
+        if is_coverage:
+            parms_list_ignored_for_docker_image.append("coverage")
+            python_version = fc.find_prop("pyver")
+
+        if is_noarch:
+            parms_list_ignored_for_docker_image.append("noarch")
 
         if is_onnx:
             parms_list.append("onnx")
@@ -326,13 +334,13 @@ def instantiate_configs():
         is_important = fc.find_prop("is_important") or False
         parallel_backend = fc.find_prop("parallel_backend") or None
         build_only = fc.find_prop("build_only") or False
-        is_coverage = fc.find_prop("is_coverage") or False
+        shard_test = fc.find_prop("shard_test") or False
         # TODO: fix pure_torch python test packaging issue.
+        if shard_test:
+            restrict_phases = ["build"] if restrict_phases is None else restrict_phases
+            restrict_phases.extend(["test1", "test2"])
         if build_only or is_pure_torch:
             restrict_phases = ["build"]
-        if is_coverage and restrict_phases is None:
-            restrict_phases = ["build", "coverage_test"]
-
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":

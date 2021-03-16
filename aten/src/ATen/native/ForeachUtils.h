@@ -4,17 +4,22 @@
 namespace at {
 namespace native {
 namespace {
-
-// Set of foreach API restrictions
-// - All tensors must be of the same dtype
-// - All corresponding tensors must be of the same size
+// Check foreach API restrictions
+// - Tensor lists must be non-empty.
+// - All tensors in all lists must have the same dtype.
+// - All TensorLists and ScalarLists must have the same number of elements.
+// - Corresponding tensors must have the same size.
 void check_foreach_api_restrictions(TensorList tensors) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_dtype = tensors[0].dtype();
-
   for (const auto& t : tensors) {
     TORCH_CHECK(t.dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
   }
+}
+
+void check_foreach_api_restrictions(TensorList tensors, ArrayRef<Scalar> scalars) {
+  check_foreach_api_restrictions(tensors);
+  TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
 }
 
 void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
@@ -31,119 +36,121 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
   }
 }
 
-void check_foreach_api_restrictions(TensorList tensors, ArrayRef<double> scalars) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(scalars.size() > 0, "Scalars list must have at least one value.");
-  TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
+void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3) {
+  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors3.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
+  TORCH_CHECK(tensors1.size() == tensors3.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors3.size());
+
+  auto expected_dtype = tensors1[0].dtype();
+
+  for (int i = 0; i < tensors1.size(); i++) {
+    TORCH_CHECK(tensors1[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
+    TORCH_CHECK(tensors2[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
+    TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
+    TORCH_CHECK(tensors1[i].sizes() == tensors3[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors3[i].sizes());
+  }
+}
+
+void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<Scalar> scalars) {
+  check_foreach_api_restrictions(tensors1, tensors2, tensors3);
+  TORCH_CHECK(tensors1.size() == scalars.size(), "Tensor list must have same number of elements as scalar list, got ", tensors1.size(), " and ", scalars.size());
 }
 
 // To go via 'fast' path, several conditions must be satisfied
 // - All tensors must be on the same device
 // - All tensors must have strided layout
 // - All tensors must be non-overlapping and dense
-// - All tensors must be on the same device
 // - Resulting tensor must have the same dtype as the input one
-bool can_use_fast_route(TensorList tensors, Scalar scalar) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-  auto expected_device = tensors[0].device();
 
-  for (auto t : tensors) {
-    if (t.device() != expected_device) {
-      return false;
-    }
-
-    if (t.layout() != at::kStrided) {
-      return false;
-    }
-
-    if (t.device() != expected_device) {
-      return false;
-    }
-
-    if (!t.is_non_overlapping_and_dense()) {
-      return false;
-    }
-
-    // complex scalar + integral or boolean tensor will result in complex tensor
-    if (scalar.isComplex() && at::isIntegralType(t.scalar_type(), /*includeBool*/ true)) {
-      return false;
-    }
-
-    // float scalar + integral or boolean tensor will result in float tensor
-    if (scalar.isFloatingPoint() && at::isIntegralType(t.scalar_type(), /*includeBool*/ true)) {
-      return false;
-    }
-
-    // integral scalar + boolean tensor will result in integral tensor
-    if (scalar.isIntegral(/*includeBool*/ false) && t.dtype() == at::kBool) {
-      return false;
+bool will_promote_tensor(const Tensor& tensor, const Scalar& scalar, bool does_op_promote_integer_inputs_to_float = false) {
+  // In case of division, integer inputs will result in float
+  if (does_op_promote_integer_inputs_to_float) {
+    if (at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
+      return true;
     }
   }
-
-  return true;
+  auto result_dtype = at::result_type(tensor, scalar);
+  return result_dtype != tensor.scalar_type();
 }
 
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
-  auto expected_device = tensors1[0].device();
+// Please, make sure to call check_foreach_api_restrictions before calling this method.
+// There is a set of preconditions that have to be satisfied.
+bool check_fast_path_restrictions(
+  ArrayRef<TensorList> tensorLists,
+  ArrayRef<Scalar> scalarList = {},
+  bool does_op_promote_integer_inputs_to_float = false) {
+    auto expected_device = tensorLists[0][0].device();
 
-  for (int64_t i = 0; i < tensors1.size(); i++) {
-    TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors from tensor lists have different size.");
+    auto is_tensor_okay = [&](const Tensor& tensor) {
+      return tensor.device() == expected_device &&
+             tensor.layout() == at::kStrided &&
+             tensor.is_non_overlapping_and_dense();
+    };
 
-    if (tensors1[i].device() != expected_device ||
-        tensors2[i].device() != expected_device) {
-      return false;
+    for (const auto& tensorList : tensorLists) {
+      for (const auto& tensor : tensorList) {
+        if (!is_tensor_okay(tensor)) {
+          return false;
+        }
+      }
     }
 
-    if (tensors1[i].layout() != at::kStrided ||
-        tensors2[i].layout() != at::kStrided) {
-      return false;
+    // Check if corresponding tensors in tensor lists have the same strides.
+    for (int i=0; i < tensorLists.size(); i++) {
+      for (int j=0; j < tensorLists[0].size(); j++) {
+        if (tensorLists[0][j].strides() != tensorLists[i][j].strides()) {
+          return false;
+        }
+      }
     }
 
-    if (tensors1[i].device() != expected_device ||
-        tensors2[i].device() != expected_device) {
-      return false;
+    // For all j, tensorList[j][0] have the same shape and dtype. (this was a precondition
+    // checked by `check_foreach_api_restrictions`). This means we only need to check if
+    // {tensorList[0][0], tensorList[0][1], tensorList[0][2], ...} do type promotion with scalarLIst.
+    for (int i=0; i < tensorLists[0].size(); i++) {
+      if (does_op_promote_integer_inputs_to_float) {
+        if (at::isIntegralType(tensorLists[0][i].scalar_type(), /*includeBool*/ true)) {
+          return false;
+        }
+      }
+
+      if (scalarList.size() == 1) {
+        if (will_promote_tensor(tensorLists[0][i], scalarList[0])) {
+          return false;
+        }
+      } else if (scalarList.size() > 1) {
+        // Complex scalar list is not supported due to the limit for kernel launch argument (4KB)
+        if (scalarList[i].isComplex()) {
+          return false;
+        }
+
+        if (will_promote_tensor(tensorLists[0][i], scalarList[i])) {
+          return false;
+        }
+      }
     }
 
-    if (tensors1[i].strides() != tensors2[i].strides()) {
-      return false;
-    }
-
-    if (!tensors1[i].is_non_overlapping_and_dense() ||
-        !tensors2[i].is_non_overlapping_and_dense()) {
-      return false;
-    }
-  }
-
-  return true;
+    return true;
 }
 
-bool can_use_fast_route(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-  auto expected_device = tensors[0].device();
-
-   for (auto t : tensors) {
-    if (t.layout() != at::kStrided) {
-      return false;
-    }
-
-    if (!t.is_non_overlapping_and_dense()) {
-      return false;
-    }
-
-    if (t.device() != expected_device) {
-      return false;
-    }
-  }
-
-  return true;
+bool can_use_fast_route(ArrayRef<TensorList> tensorLists,
+                        ArrayRef<Scalar> scalarList = {},
+                        bool does_op_promote_integer_inputs_to_float = false) {
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
+  return check_fast_path_restrictions(tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
+#endif
 }
 
-bool can_use_fast_route(TensorList tensors, ArrayRef<double> scalars) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(scalars.size() > 0, "Scalars list must have at least one value.");
-  TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
-
-  return can_use_fast_route(tensors);
+bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool does_op_promote_integer_inputs_to_float = false) {
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
+  return can_use_fast_route({tensors1, tensors2}, {}, does_op_promote_integer_inputs_to_float);
+#endif
 }
 
 }

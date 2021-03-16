@@ -18,7 +18,7 @@
 #define not_inline __attribute__((noinline))
 #elif defined(_WIN32)
 #define CACHE_ALIGN __declspec(align(CACHE_LINE))
-#define not_inline __declspec(noinline) 
+#define not_inline __declspec(noinline)
 #else
 CACHE_ALIGN #define
 #define not_inline
@@ -41,7 +41,7 @@ CACHE_ALIGN #define
   }
 
 #if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_AVX2) && (defined(__GNUC__) || defined(__GNUG__))
-#undef CHECK_DEQUANT_WITH_LOW_PRECISION 
+#undef CHECK_DEQUANT_WITH_LOW_PRECISION
 #define CHECK_WITH_FMA 1
 #elif !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_AVX2)
 #undef CHECK_DEQUANT_WITH_LOW_PRECISION
@@ -352,6 +352,11 @@ T rsqrt(T x) {
     return 1 / std::sqrt(x);
 }
 
+template <typename T>
+T frac(T x) {
+  return x - std::trunc(x);
+}
+
 template <class T>
 T maximum(const T& a, const T& b) {
     return (a > b) ? a : b;
@@ -406,12 +411,35 @@ void filter_clamp(T& f, T& s, T& t) {
 }
 
 template <typename T>
+std::enable_if_t<std::is_floating_point<T>::value, void> filter_fmod(T& a, T& b) {
+    // This is to make sure fmod won't cause overflow when doing the div
+    if (std::abs(b) < (T)1) {
+      b = b < (T)0 ? (T)-1 : T(1);
+    }
+}
+
+template <typename T>
+std::enable_if_t<std::is_floating_point<T>::value, void> filter_fmadd(T& a, T& b, T& c) {
+    // This is to setup a limit to make sure fmadd (a * b + c) won't overflow
+    T max = std::sqrt(std::numeric_limits<T>::max()) / T(2.0);
+    T min = ((T)0 - max);
+
+    if (a > max) a = max;
+    else if (a < min) a = min;
+
+    if (b > max) b = max;
+    else if (b < min) b = min;
+
+    if (c > max) c = max;
+    else if (c < min) c = min;
+}
+
+template <typename T>
 void filter_zero(T& val) {
     val = is_zero(val) ? (T)1 : val;
 }
 template <typename T>
-std::enable_if_t<is_complex<Complex<T>>::value, void> filter_zero(Complex<T>& val)
-{
+std::enable_if_t<is_complex<Complex<T>>::value, void> filter_zero(Complex<T>& val) {
     T rr = val.real();
     T ii = val.imag();
     rr = is_zero(rr) ? (T)1 : rr;
@@ -445,7 +473,7 @@ std::enable_if_t < !is_complex<T>::value, void> filter_add_overflow(T& a, T& b) 
     T max = std::numeric_limits<T>::max();
     T min = std::numeric_limits<T>::min();
     // min <= (a +b) <= max;
-    // min - b <= a  <= max - b 
+    // min - b <= a  <= max - b
     if (b < 0) {
         if (a < min - b) {
             a = min - b;
@@ -464,7 +492,7 @@ std::enable_if_t < !is_complex<T>::value, void> filter_sub_overflow(T& a, T& b) 
     T max = std::numeric_limits<T>::max();
     T min = std::numeric_limits<T>::min();
     // min <= (a-b) <= max;
-    // min + b <= a  <= max +b 
+    // min + b <= a  <= max +b
     if (b < 0) {
         if (a > max + b) {
             a = max + b;
@@ -504,7 +532,7 @@ filter_mult_overflow(T& val1, T& val2) {
             // correct first;
             val1 = c;
         }
-    }  // is_zero 
+    }  // is_zero
 }
 
 template <typename T>
@@ -929,8 +957,8 @@ void test_unary(
             AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
             if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
 
-        }// trial 
-        //inrease Seed 
+        }// trial
+        //inrease Seed
         changeSeedBy += 1;
     }
     for (auto& custom : testCase.getCustomChecks()) {
@@ -1056,7 +1084,7 @@ void test_ternary(
             auto vec_expected = vec_type::loadu(expected);
             AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1, input2);
             if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
-        }// trial 
+        }// trial
         changeSeedBy += 1;
     }
 }
@@ -1171,7 +1199,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
     return x / y;
 #else
     //re = (ac + bd)/abs_2()
-    //im = (bc - ad)/abs_2() 
+    //im = (bc - ad)/abs_2()
     T x_real = x.real();
     T x_imag = x.imag();
     T y_real = y.real();
@@ -1205,28 +1233,20 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
 
 
 template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
+    PreventFma noFma;
+    T ab = a * b;
+    return noFma.add(ab, c);
+}
+
+template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_sqrt(T x) {
     return std::sqrt(x);
 }
 
 template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_sqrt(Complex<T> x) {
-#if defined(TEST_AGAINST_DEFAULT)
     return std::sqrt(x);
-#else 
-    PreventFma noFma;
-    // sqrt(2) / 2 * [sqrt(abs() + a) + sgn(b) * sqrt(abs() - a)i]
-    T real = x.real();
-    T imag = x.imag();
-    T abs = local_abs(x).real();
-    T sqrt2_2 = std::sqrt(static_cast<T>(2)) / static_cast<T>(2);
-    T abs_r = noFma.add(abs, real);
-    T abs_i = noFma.sub(abs, real);
-    T res_r = sqrt2_2 * std::sqrt(abs_r);
-    T res_i = sqrt2_2 * std::sqrt(abs_i);
-    if (std::signbit(imag)) res_i = -res_i;
-    return Complex<T>(res_r, res_i);
-#endif
 }
 
 template <typename T>
@@ -1236,26 +1256,7 @@ std::enable_if_t<!is_complex<T>::value, T> local_asin(T x) {
 
 template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_asin(Complex<T> x) {
-#if defined(TEST_AGAINST_DEFAULT)
     return std::asin(x);
-#else
-    // asin(x)
-    // = -i*ln(iz + sqrt(1 -z^2))
-    // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
-    // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
-    PreventFma noFma;
-    T a = x.real();
-    T b = x.imag();
-    T aa = a * a;
-    T bb = b * b;
-    T _ab = a * (-b);
-    T _2ab = noFma.add(_ab, _ab);
-    T aa_bb = static_cast<T>(1) - noFma.sub(aa, bb); // 1 - (a*a-b*b)
-    Complex<T> temp = Complex<T>(-b, a) + local_sqrt(Complex<T>(aa_bb, _2ab));
-    auto ln = std::log(temp);
-    //-i*ln() => -i * ln => (ln.imag, -ln.real)
-    return Complex<T>(ln.imag(), -ln.real());
-#endif
 }
 
 template <typename T>
@@ -1265,13 +1266,7 @@ std::enable_if_t<!is_complex<T>::value, T> local_acos(T x) {
 
 template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_acos(Complex<T> x) {
-#if defined(TEST_AGAINST_DEFAULT)
     return std::acos(x);
-#else
-    // pi/2 - asin(x) 
-    auto half_pi = static_cast<T>(M_PI) / static_cast<T>(2);
-    return Complex<T>(half_pi, 0) - local_asin(x);
-#endif
 }
 
 template<typename T>
@@ -1373,9 +1368,9 @@ float dequantize_val(float scale, int64_t zero_point, T value) {
     float neg_p = -(zero_point * scale);
     float v = static_cast<float>(value);
     float ret = fma(v, scale, neg_p);
-#else 
+#else
     float ret = (static_cast<float>(value) - zero_point) * scale;
-#endif   
+#endif
     return ret;
 }
 
@@ -1415,7 +1410,7 @@ TestingCase<T> createDefaultUnaryTestCase(TestSeed seed = TestSeed(), bool bitwi
     using UVT = UvalueType<T>;
     TestingCase<T> testCase;
     if (!bitwise && std::is_floating_point<UVT>::value) {
-        //for float types lets add manual ranges  
+        //for float types lets add manual ranges
         UVT tolerance = getDefaultTolerance<UVT>();
         testCase = TestingCase<T>::getBuilder()
             .set(bitwise, false)
@@ -1443,7 +1438,7 @@ TestingCase<T> createDefaultBinaryTestCase(TestSeed seed = TestSeed(), bool bitw
     using UVT = UvalueType<T>;
     TestingCase<T> testCase;
     if (!bitwise && std::is_floating_point<UVT>::value) {
-        //for float types lets add manual ranges  
+        //for float types lets add manual ranges
         UVT tolerance = getDefaultTolerance<UVT>();
         testCase = TestingCase<T>::getBuilder()
             .set(bitwise, false)

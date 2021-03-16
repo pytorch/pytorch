@@ -20,23 +20,26 @@ class QGroupNormBenchmark(op_bench.TorchBenchmarkBase):
 
     def init(self, dims, num_groups, dtype):
         X = (torch.rand(*dims) - 0.5) * 256
-        self.num_groups = num_groups
         num_channels = dims[1]
         scale = 1.0
         zero_point = 0
-        self.qX = torch.quantize_per_tensor(
-            X, scale=scale, zero_point=zero_point, dtype=dtype)
-        self.weight = torch.rand(num_channels, dtype=torch.float)
-        self.bias = torch.rand(num_channels, dtype=torch.float)
-        self.eps = 1e-5
-        self.Y_scale = 0.1
-        self.Y_zero_point = 0
 
-    def forward(self):
+        self.inputs = {
+            "qX": torch.quantize_per_tensor(
+                X, scale=scale, zero_point=zero_point, dtype=dtype),
+            "num_groups": num_groups,
+            "weight": torch.rand(num_channels, dtype=torch.float),
+            "bias": torch.rand(num_channels, dtype=torch.float),
+            "eps": 1e-5,
+            "Y_scale": 0.1,
+            "Y_zero_point": 0
+        }
+
+    def forward(self, qX, num_groups: int, weight, bias, eps: float, Y_scale: float, Y_zero_point: int):
         return torch.ops.quantized.group_norm(
-            self.qX, self.num_groups, weight=self.weight, bias=self.bias,
-            eps=self.eps, output_scale=self.Y_scale,
-            output_zero_point=self.Y_zero_point)
+            qX, num_groups, weight=weight, bias=bias,
+            eps=eps, output_scale=Y_scale,
+            output_zero_point=Y_zero_point)
 
 
 op_bench.generate_pt_test(groupnorm_configs_short, QGroupNormBenchmark)

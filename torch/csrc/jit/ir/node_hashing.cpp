@@ -16,6 +16,12 @@ namespace jit {
 namespace {
 
 bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
+  // type_equal doesnt distinguish between mkldnn/pytorch cpu tensors,
+  // and we dont want to coalesce mkldnn tensors bc they do layout
+  // transformations based on usage
+  if (lhs.is_mkldnn() || rhs.is_mkldnn()) {
+    return false;
+  }
   return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
 }
 
@@ -114,7 +120,7 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
       const auto& e_a1 = *it_a1;
       const auto& e_a2 = *it_a2;
 
-      if (!ivaluesEqual(e_a1.key(), e_a2.key()) &&
+      if (!ivaluesEqual(e_a1.key(), e_a2.key()) ||
           !ivaluesEqual(e_a1.value(), e_a2.value())) {
         return false;
       }
@@ -125,6 +131,9 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
   }
   if (a1.isEnum()) {
     return a1.toEnumHolder() == a2.toEnumHolder();
+  }
+  if (a1.isObject()) {
+    return &a1.toObjectRef() == &a2.toObjectRef();
   }
   TORCH_INTERNAL_ASSERT(false);
 }

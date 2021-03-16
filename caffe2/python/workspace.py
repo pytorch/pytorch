@@ -63,12 +63,16 @@ if has_cuda_support:
     GetDeviceProperties = C.get_device_properties
     GetGPUMemoryInfo = C.get_gpu_memory_info
 else:
+    # pyre-fixme[9]: incompatible type assignment
     NumCudaDevices = lambda: 0 # noqa
+    # pyre-fixme[9]: incompatible type assignment
     GetCUDAVersion = lambda: 0 # noqa
+    # pyre-fixme[9]: incompatible type assignment
     GetCuDNNVersion = lambda: 0 # noqa
 
 if has_hip_support:
     GpuDeviceType = caffe2_pb2.HIP
+    # pyre-fixme[9]: incompatible type assignment
     NumGpuDevices = C.num_hip_devices
     GetHIPVersion = C.get_hip_version
 
@@ -81,9 +85,11 @@ if not has_gpu_support:
     # setting cuda as the default GpuDeviceType as some tests
     # like core, scope tests use GpuDeviceType even without gpu support
     GpuDeviceType = caffe2_pb2.CUDA
+    # pyre-fixme[9]: incompatible type assignment
     NumGpuDevices = lambda: 0 # noqa
     GetDeviceProperties = lambda x: None # noqa
     GetGpuPeerAccessPattern = lambda: np.array([]) # noqa
+    # pyre-fixme[9]: incompatible type assignment
     GetGPUMemoryInfo = lambda: None # noqa
 
 IsNUMAEnabled = C.is_numa_enabled
@@ -335,7 +341,7 @@ def StringifyNetName(name):
 def GetNetName(net):
     if isinstance(net, basestring):
         return net
-    if type(net).__name__ == "Net":
+    if type(net).__name__ == "Net" or type(net).__name__ == "NetWithShapeInference":
         return net.Name()
     if isinstance(net, caffe2_pb2.NetDef):
         return net.name

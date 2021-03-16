@@ -15,7 +15,7 @@ namespace jit {
  */
 class TORCH_API ScriptTypeParser {
  public:
-  explicit ScriptTypeParser() {}
+  explicit ScriptTypeParser() = default;
   explicit ScriptTypeParser(ResolverPtr resolver)
       : resolver_(std::move(resolver)) {}
 

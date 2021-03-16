@@ -17,6 +17,8 @@ import torch
 import torch.distributed.rpc as rpc
 from torch import Tensor, device, dtype, nn
 from torch.distributed.nn.jit import instantiator
+from torch.distributed.rpc.utils import _parse_remote_device
+from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
 
@@ -51,7 +53,7 @@ def _create_module(module_cls, args, kwargs, device="cpu", module_interface_cls=
 
 
 def _param_rrefs(module_rref, recurse):
-    ret = []
+    ret: List[rpc.RRef[Parameter]] = []
     for param in module_rref.local_value().parameters(recurse):
         ret.append(rpc.RRef(param))
     return ret
@@ -64,8 +66,7 @@ def _raise_not_supported(name):
 class _RemoteModule(nn.Module):
     def __init__(
         self,
-        on: str,
-        device: torch.device,
+        remote_device: str,
         module_cls: nn.Module,
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
@@ -99,9 +100,11 @@ class _RemoteModule(nn.Module):
         ``def forward(input: Tensor) -> Tensor:`` and
         ``def forward_async(input: Tensor) -> Future[Tensor]:``.
 
-        Arguments:
-            on (str or WorkerInfo): id or name of the destination worker.
-            device (torch.device): Device on the destination worker where we‘d like to place this module.
+        Args:
+            remote_device (str): Device on the destination worker where we‘d like to place this module.
+                The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
+                E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".
+                In addition, the device field can be optional and the default value is "cpu".
             module_cls (nn.Module): For example,
                 >>> class MyModule(nn.Module):
                 >>>     def forward(input):
@@ -132,7 +135,7 @@ class _RemoteModule(nn.Module):
             >>>
             >>> rpc.init_rpc("worker0", rank=0, world_size=2)
             >>> remote_linear_module = RemoteModule(
-            >>>     "worker1", "cpu", nn.Linear, args=(20, 30),
+            >>>     "worker1/cpu", nn.Linear, args=(20, 30),
             >>> )
             >>> input = torch.randn(128, 20)
             >>> ret_fut = remote_linear_module.forward_async(input)
@@ -155,18 +158,22 @@ class _RemoteModule(nn.Module):
         args = args if args is not None else ()
         kwargs = kwargs if kwargs is not None else {}
 
-        self.on = on
+        self.on, self.device = _parse_remote_device(remote_device)
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
             self.is_scriptable = True
 
             # Instantiate template on remote side.
-            fut = rpc.rpc_async(on, _instantiate_template, (_module_interface_cls,))
+            fut = rpc.rpc_async(
+                self.on, _instantiate_template, (_module_interface_cls,)
+            )
 
             # Instantiate template on local side.
-            generated_module = instantiator.instantiate_scriptable_remote_module_template(
-                _module_interface_cls
+            generated_module = (
+                instantiator.instantiate_scriptable_remote_module_template(
+                    _module_interface_cls
+                )
             )
             generated_methods = generated_module._generated_methods
 
@@ -178,9 +185,9 @@ class _RemoteModule(nn.Module):
 
         # Create the module on the remote side.
         self.module_rref = rpc.rpc_sync(
-            on,
+            self.on,
             _create_module,
-            (module_cls, args, kwargs, device, _module_interface_cls),
+            (module_cls, args, kwargs, self.device, _module_interface_cls),
         )
 
         # Install generated methods.
@@ -202,6 +209,10 @@ class _RemoteModule(nn.Module):
         """
         return rpc.rpc_sync(self.on, _param_rrefs, args=(self.module_rref, recurse))
 
+    def get_module_rref(self) -> rpc.RRef[nn.Module]:
+        """Returns the RRef to remote module."""
+        return self.module_rref
+
     def register_buffer(
         self, name: str, tensor: Optional[Tensor], persistent: bool = True
     ) -> None:
@@ -210,45 +221,48 @@ class _RemoteModule(nn.Module):
     def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
         _raise_not_supported(self.register_parameter.__name__)
 
-    def add_module(self, name: str, module: Optional["Module"]) -> None:
+    def add_module(self, name: str, module: Optional[Module]) -> None:
         _raise_not_supported(self.add_module.__name__)
 
-    def apply(self: T, fn: Callable[["Module"], None]) -> T:
+    def apply(self: T, fn: Callable[[Module], None]) -> T:  # type: ignore[return]
         _raise_not_supported(self.apply.__name__)
 
-    def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:
+    def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
         _raise_not_supported(self.cuda.__name__)
 
-    def cpu(self: T) -> T:
+    def xpu(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
+        _raise_not_supported(self.xpu.__name__)
+
+    def cpu(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.cpu.__name__)
 
-    def type(self: T, dst_type: Union[dtype, str]) -> T:
+    def type(self: T, dst_type: Union[dtype, str]) -> T:  # type: ignore[return]
         _raise_not_supported(self.type.__name__)
 
-    def float(self: T) -> T:
+    def float(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.float.__name__)
 
-    def double(self: T) -> T:
+    def double(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.double.__name__)
 
-    def half(self: T) -> T:
+    def half(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.half.__name__)
 
-    def bfloat16(self: T) -> T:
+    def bfloat16(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.bfloat16.__name__)
 
-    def to(self, *args, **kwargs):
+    def to(self, *args, **kwargs) -> T:  # type: ignore[return]
         _raise_not_supported(self.to.__name__)
 
-    def register_backward_hook(
-        self, hook: Callable[["Module", _grad_t, _grad_t], Union[None, Tensor]]
+    def register_backward_hook(  # type: ignore[return]
+        self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, Tensor]]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)
 
-    def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+    def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
         _raise_not_supported(self.register_forward_pre_hook.__name__)
 
-    def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+    def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
         _raise_not_supported(self.register_forward_hook.__name__)
 
     def state_dict(self, destination=None, prefix="", keep_vars=False):
@@ -266,47 +280,47 @@ class _RemoteModule(nn.Module):
             "Method ``parameters`` not supported for RemoteModule. Please use ``remote_parameters`` instead."
         )
 
-    def named_parameters(
+    def named_parameters(  # type: ignore[return]
         self, prefix: str = "", recurse: bool = True
-    ) -> Iterator[Tuple[str, Tensor]]:
+    ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
-    def buffers(self, recurse: bool = True) -> Iterator[Tensor]:
+    def buffers(self, recurse: bool = True) -> Iterator[Tensor]:  # type: ignore[return]
         _raise_not_supported(self.buffers.__name__)
 
-    def named_buffers(
+    def named_buffers(  # type: ignore[return]
         self, prefix: str = "", recurse: bool = True
     ) -> Iterator[Tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 
-    def children(self) -> Iterator["Module"]:
+    def children(self) -> Iterator[Module]:  # type: ignore[return]
         _raise_not_supported(self.children.__name__)
 
-    def named_children(self) -> Iterator[Tuple[str, "Module"]]:
+    def named_children(self) -> Iterator[Tuple[str, Module]]:  # type: ignore[return]
         _raise_not_supported(self.named_children.__name__)
 
-    def modules(self) -> Iterator["Module"]:
+    def modules(self) -> Iterator[Module]:  # type: ignore[return]
         _raise_not_supported(self.modules.__name__)
 
-    def named_modules(self, memo: Optional[Set["Module"]] = None, prefix: str = ""):
+    def named_modules(self, memo: Optional[Set[Module]] = None, prefix: str = ""):
         _raise_not_supported(self.named_modules.__name__)
 
-    def train(self: T, mode: bool = True) -> T:
+    def train(self: T, mode: bool = True) -> T:  # type: ignore[return]
         _raise_not_supported(self.train.__name__)
 
-    def eval(self: T) -> T:
+    def eval(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.eval.__name__)
 
-    def requires_grad_(self: T, requires_grad: bool = True) -> T:
+    def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
         _raise_not_supported(self.requires_grad_.__name__)
 
-    def zero_grad(self) -> None:
+    def zero_grad(self, set_to_none: bool = False) -> None:
         _raise_not_supported(self.zero_grad.__name__)
 
-    def share_memory(self: T) -> T:
+    def share_memory(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.share_memory.__name__)
 
-    def extra_repr(self) -> str:
+    def extra_repr(self) -> str:  # type: ignore[return]
         _raise_not_supported(self.extra_repr.__name__)
 
 
@@ -319,24 +333,32 @@ class RemoteModule(_RemoteModule):
         It takes care of autograd recording to ensure the backward pass propogates
         gradients back to the corresponding remote module.
 
-        The arguments of ``forward_async`` and ``forward`` are the same as
-        the ``forward`` method of the module returned by the ``module_cls``.
+        It generates two methods ``forward_async`` and ``forward`` based on the
+        signature of the ``forward`` method of ``module_cls``. ``forward_async``
+        runs asynchronously and returns a Future. The arguments of ``forward_async``
+        and ``forward`` are the same as the ``forward`` method of the module
+        returned by the ``module_cls``.
 
         For example, if ``module_cls`` returns an instance of ``nn.Linear``,
-        that has ``forward`` method signature, ``def forward(input: Tensor) -> Tensor:``,
-        the generated ``RemoteModule`` will have 2 methods in signature of
-        ``def forward(input: Tensor) -> Tensor:`` and
-        ``def forward_async(input: Tensor) -> Future[Tensor]:``.
+        that has ``forward`` method signature: ``def forward(input: Tensor) -> Tensor:``,
+        the generated ``RemoteModule`` will have 2 methods with the signatures:
 
-    Arguments:
-        to (str or WorkerInfo): id or name of the destination worker.
-        device (torch.device): Device on the destination worker where we‘d like to place this module.
-        module_cls (nn.Module): For example,
+        | ``def forward(input: Tensor) -> Tensor:``
+        | ``def forward_async(input: Tensor) -> Future[Tensor]:``
+
+    Args:
+        remote_device (str): Device on the destination worker where we‘d like to place this module.
+            The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
+            E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".
+            In addition, the device field can be optional and the default value is "cpu".
+        module_cls (nn.Module): Class for the module to be created remotely. For example,
+
             >>> class MyModule(nn.Module):
             >>>     def forward(input):
             >>>         return input + 1
             >>>
             >>> module_cls = MyModule
+
         args (Sequence, optional): args to be passed to ``module_cls``.
         kwargs (Dict, optional): kwargs to be passed to ``module_cls``.
 
@@ -357,7 +379,7 @@ class RemoteModule(_RemoteModule):
         >>>
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> remote_linear_module = RemoteModule(
-        >>>     "worker1", nn.Linear, args=(20, 30),
+        >>>     "worker1/cpu", nn.Linear, args=(20, 30),
         >>> )
         >>> input = torch.randn(128, 20)
         >>> ret_fut = remote_linear_module.forward_async(input)
@@ -374,10 +396,9 @@ class RemoteModule(_RemoteModule):
 
     def __init__(
         self,
-        on: str,
-        device: torch.device,
+        remote_device: str,
         module_cls: nn.Module,
         args: Tuple = None,
         kwargs: Dict[str, Any] = None,
     ):
-        super().__init__(on, device, module_cls, args, kwargs)
+        super().__init__(remote_device, module_cls, args, kwargs)

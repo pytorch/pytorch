@@ -18,8 +18,8 @@ from .gradcheck import gradcheck, gradgradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function
-from . import profiler
 from . import functional
+from . import forward_ad
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
@@ -71,6 +71,7 @@ def backward(
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
     grad_variables: Optional[_TensorOrTensors] = None,
+    inputs: Optional[_TensorOrTensors] = None,
 ) -> None:
     r"""Computes the sum of gradients of given tensors w.r.t. graph leaves.
 
@@ -95,14 +96,20 @@ def backward(
         If you have to use this function, make sure to reset the ``.grad`` fields of your
         parameters to ``None`` after use to break the cycle and avoid the leak.
 
-    Arguments:
-        tensors (sequence of Tensor): Tensors of which the derivative will be
+    .. note::
+
+        If you run any forward ops, create ``grad_tensors``, and/or call ``backward``
+        in a user-specified CUDA stream context, see
+        :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
+
+    Args:
+        tensors (Sequence[Tensor] or Tensor): Tensors of which the derivative will be
             computed.
-        grad_tensors (sequence of (Tensor or None)): The "vector" in the Jacobian-vector
-            product, usually gradients w.r.t. each element of corresponding tensors.
-            None values can be specified for scalar Tensors or ones that don't require
-            grad. If a None value would be acceptable for all grad_tensors, then this
-            argument is optional.
+        grad_tensors (Sequence[Tensor or None] or Tensor, optional): The "vector" in
+            the Jacobian-vector product, usually gradients w.r.t. each element of
+            corresponding tensors. None values can be specified for scalar Tensors or
+            ones that don't require grad. If a None value would be acceptable for all
+            grad_tensors, then this argument is optional.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient
@@ -110,6 +117,11 @@ def backward(
         create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
             Defaults to ``False``.
+        inputs (Sequence[Tensor] or Tensor, optional): Inputs w.r.t. which the gradient
+            be will accumulated into ``.grad``. All other Tensors will be ignored. If
+            not provided, the gradient is accumulated into all the leaf Tensors that
+            were used to compute the attr::tensors. All the provided inputs must be leaf
+            Tensors.
     """
     if grad_variables is not None:
         warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")
@@ -119,8 +131,12 @@ def backward(
             raise RuntimeError("'grad_tensors' and 'grad_variables' (deprecated) "
                                "arguments both passed to backward(). Please only "
                                "use 'grad_tensors'.")
+    if inputs is not None and len(inputs) == 0:
+        raise RuntimeError("'inputs' argument to backward() cannot be empty.")
 
     tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
+    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else \
+        tuple(inputs) if inputs is not None else tuple()
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_)
@@ -128,8 +144,8 @@ def backward(
         retain_graph = create_graph
 
     Variable._execution_engine.run_backward(
-        tensors, grad_tensors_, retain_graph, create_graph,
-        allow_unreachable=True)  # allow_unreachable flag
+        tensors, grad_tensors_, retain_graph, create_graph, inputs,
+        allow_unreachable=True, accumulate_grad=True)  # allow_unreachable flag
 
 
 def grad(
@@ -153,7 +169,13 @@ def grad(
     leaves will still be computed, and will be accumulated into their ``.grad``
     attribute.
 
-    Arguments:
+    .. note::
+
+        If you run any forward ops, create ``grad_outputs``, and/or call ``grad``
+        in a user-specified CUDA stream context, see
+        :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
+
+    Args:
         outputs (sequence of Tensor): outputs of the differentiated function.
         inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
             returned (and not accumulated into ``.grad``).
@@ -184,7 +206,7 @@ def grad(
             grad_outputs=grad_outputs,
             retain_graph=retain_graph,
             create_graph=create_graph,
-            only_inputs=only_inputs, 
+            only_inputs=only_inputs,
             allow_unused=allow_unused,
         )
 
@@ -201,16 +223,15 @@ def grad(
 
     return Variable._execution_engine.run_backward(
         outputs, grad_outputs_, retain_graph, create_graph,
-        inputs, allow_unused)
+        inputs, allow_unused, accumulate_grad=False)
 
 
 # This function applies in case of gradient checkpointing for memory
-# optimization. Currently, for gradient checkpointing, we only support imperative
-# backwards call i.e. torch.autograd.backward() and the torch.autograd.grad() won't
-# work. The reason being that: torch.autograd.grad() only calculates the grads
-# for the inputs that are passed by user but it doesn't calculate grad for
-# anything else e.g. model parameters like weights, bias etc. However, for
-# torch.autograd.backward(), we would actually compute the grad for the weights as well.
+# optimization. Currently, gradient checkpointing is supported only if the
+# execution engine is invoked through torch.autograd.backward() and its
+# inputs argument is not passed. It is not supported for torch.autograd.grad().
+# This is because if inputs are specified, the gradient won't be calculated for
+# anything else e.g. model parameters like weights, bias etc.
 #
 # This function returns whether the checkpointing is valid i.e. torch.autograd.backward
 # or not i.e. torch.autograd.grad. The implementation works by maintaining a thread
@@ -230,6 +251,12 @@ if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")
 
 # Import all native method/classes
-from torch._C._autograd import (ProfilerState, ProfilerConfig, ProfilerEvent,
-                                _enable_profiler, _disable_profiler, _profiler_enabled,
-                                _enable_record_function, _set_empty_test_observer)
+from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, ProfilerConfig, ProfilerEvent,
+                                _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
+                                _enable_record_function, _set_empty_test_observer, kineto_available)
+
+if kineto_available():
+    from torch._C._autograd import (ProfilerResult, KinetoEvent,
+                                    _prepare_profiler, _enable_profiler, _disable_profiler)
+
+from . import profiler

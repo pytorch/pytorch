@@ -108,12 +108,12 @@ Tensor& relu_quantized_cpu_(Tensor& qx) {
 }
 
 Tensor& leaky_relu_out_quantized_cpu(Tensor& result, const Tensor& self,
-                                 Scalar negval) {
+                                 const Scalar& negval) {
   qrelu_leaky_stub(self.device().type(), result, self, negval);
   return result;
 }
 
-Tensor heaky_relu_quantized_cpu(const Tensor& self, Scalar negval) {
+Tensor leaky_relu_quantized_cpu(const Tensor& self, const Scalar& negval) {
   const auto qx = self.contiguous(self.suggest_memory_format());
   auto qy = at::_empty_affine_quantized(qx.sizes(),
       at::device(kCPU).dtype(self.scalar_type()),
@@ -124,7 +124,7 @@ Tensor heaky_relu_quantized_cpu(const Tensor& self, Scalar negval) {
   return qy;
 }
 
-Tensor& leaky_relu_quantized_cpu_(Tensor& self, Scalar negval) {
+Tensor& leaky_relu_quantized_cpu_(Tensor& self, const Scalar& negval) {
   qrelu_leaky_stub(self.device().type(), self, self, negval);
   return self;
 }
@@ -170,8 +170,27 @@ class QRelu6 final {
   }
 };
 
+class QLeakyRelu final {
+ public:
+  static Tensor run(Tensor self, const Scalar& negative_slope, bool inplace, double output_scale, int64_t output_zero_point) {
+    // inplace argument is ignored now, TODO:support inplace
+    if (inplace) {
+      TORCH_WARN("inplace=True is not supported for quantized::leaky_relu yet");
+    }
+    const auto qx = self.contiguous(self.suggest_memory_format());
+    auto qy = at::_empty_affine_quantized(qx.sizes(),
+      at::device(kCPU).dtype(self.scalar_type()),
+      output_scale,
+      output_zero_point,
+      self.suggest_memory_format());
+    qrelu_leaky_stub(self.device().type(), qy, qx, negative_slope);
+    return qy;
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::relu6"), TORCH_FN(QRelu6::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::leaky_relu"), TORCH_FN(QLeakyRelu::run));
 }
 
 } // namespace

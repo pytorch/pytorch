@@ -1,6 +1,7 @@
 ---
 # NOTE there must be no spaces before the '-', so put the comma last.
-Checks: '-*,
+InheritParentConfig: true
+Checks: '
 bugprone-*,
 -bugprone-forward-declaration-namespace,
 -bugprone-macro-parentheses,
@@ -17,9 +18,11 @@ cppcoreguidelines-*,
 -cppcoreguidelines-pro-type-union-access,
 -cppcoreguidelines-pro-type-vararg,
 -cppcoreguidelines-special-member-functions,
+-facebook-hte-RelativeInclude,
 hicpp-exception-baseclass,
 hicpp-avoid-goto,
 modernize-*,
+-modernize-concat-nested-namespaces,
 -modernize-return-braced-init-list,
 -modernize-use-auto,
 -modernize-use-default-member-init,
@@ -27,7 +30,7 @@ modernize-*,
 -modernize-use-trailing-return-type,
 performance-*,
 -performance-noexcept-move-constructor,
-  '
+'
 HeaderFilterRegex: 'torch/csrc/.*'
 AnalyzeTemporaryDtors: false
 CheckOptions:

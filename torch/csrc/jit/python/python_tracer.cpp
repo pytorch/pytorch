@@ -74,7 +74,8 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& var_name_lookup_fn,
     bool strict,
     bool force_outplace,
-    Module* self) {
+    Module* self,
+    const std::vector<std::string>& argument_names) {
   C10_LOG_API_USAGE_ONCE("torch.tracer");
 
   auto lookup_fn_adapter =
@@ -102,7 +103,8 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
       lookup_fn_adapter,
       strict,
       force_outplace,
-      self);
+      self,
+      argument_names);
   return std::make_pair(std::get<0>(outs)->graph, std::get<1>(outs));
 }
 
@@ -176,7 +178,9 @@ void initPythonTracerBindings(PyObject* module) {
           })
       .def(
           "set_graph",
-          [](TracingState& s, std::shared_ptr<Graph> g) { s.graph = g; })
+          [](TracingState& s, std::shared_ptr<Graph> g) {
+            s.graph = std::move(g);
+          })
       .def("graph", [](TracingState& s) { return s.graph; });
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
@@ -188,10 +192,11 @@ void initPythonTracerBindings(PyObject* module) {
       py::arg("var_name_lookup_fn"),
       py::arg("strict"),
       py::arg("force_outplace"),
-      py::arg("self") = nullptr);
+      py::arg("self") = nullptr,
+      py::arg("argument_names") = std::vector<std::string>());
   m.def("_get_tracing_state", []() { return getTracingState(); });
   m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
-    return setTracingState(state);
+    return setTracingState(std::move(state));
   });
   m.def("_get_value_trace", [](const Variable& var) {
     return getValueTrace(var);
@@ -199,7 +204,7 @@ void initPythonTracerBindings(PyObject* module) {
   m.def("_set_value_trace", [](const Variable& var, Value* value) {
     return setValueTrace(var, value);
   });
-  m.def("_tracer_set_get_unique_name_fn", [](py::function func) {
+  m.def("_tracer_set_get_unique_name_fn", [](const py::function& func) {
     const auto& tracing_state = getTracingState();
     AT_ASSERT(tracing_state);
     tracing_state->lookup_var_name_fn =

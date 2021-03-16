@@ -1,10 +1,11 @@
-
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
@@ -13,7 +14,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
-
+namespace cuda {
 namespace scope_utils {
 
 // START SCOPE HELPER SYSTEMS
@@ -488,12 +489,13 @@ bool isUnrolledFor(const Expr* expr) {
 }
 
 const std::unordered_map<ParallelType, int, TypeHash>
-    ParallelTypeBitmap::pt_to_offset_{{ParallelType::BIDx, 0},
-                                      {ParallelType::BIDy, 1},
-                                      {ParallelType::BIDz, 2},
-                                      {ParallelType::TIDx, 3},
-                                      {ParallelType::TIDy, 4},
-                                      {ParallelType::TIDz, 5}};
+    ParallelTypeBitmap::pt_to_offset_{
+        {ParallelType::BIDx, 0},
+        {ParallelType::BIDy, 1},
+        {ParallelType::BIDz, 2},
+        {ParallelType::TIDx, 3},
+        {ParallelType::TIDy, 4},
+        {ParallelType::TIDz, 5}};
 
 const std::unordered_map<int, ParallelType> ParallelTypeBitmap::offset_to_pt_ =
     {{0, ParallelType::BIDx},
@@ -659,7 +661,7 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
 
     if (loops_it == loops.end()) {
       for (auto loop : loops) {
-        std::cout << loop->iter_domain() << "  ";
+        std::cout << kir::toString(loop->iter_domain()) << "  ";
       }
       std::cout << std::endl;
     }
@@ -717,7 +719,7 @@ IterDomain* getTermIDInMap(
 }
 
 } // namespace loop_utils
-
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

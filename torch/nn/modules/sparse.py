@@ -19,8 +19,11 @@ class Embedding(Module):
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
-        padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
-                                         (initialized to zeros) whenever it encounters the index.
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
+                                     therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
+                                     i.e. it remains as a fixed "pad". For a newly constructed Embedding,
+                                     the embedding vector at :attr:`padding_idx` will default to all zeros,
+                                     but can be updated to another value to be used as the padding vector.
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
         norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
@@ -34,7 +37,7 @@ class Embedding(Module):
                          initialized from :math:`\mathcal{N}(0, 1)`
 
     Shape:
-        - Input: :math:`(*)`, LongTensor of arbitrary shape containing the indices to extract
+        - Input: :math:`(*)`, IntTensor or LongTensor of arbitrary shape containing the indices to extract
         - Output: :math:`(*, H)`, where `*` is the input shape and :math:`H=\text{embedding\_dim}`
 
     .. note::
@@ -43,12 +46,21 @@ class Embedding(Module):
         :class:`optim.SparseAdam` (`CUDA` and `CPU`) and :class:`optim.Adagrad` (`CPU`)
 
     .. note::
-        With :attr:`padding_idx` set, the embedding vector at
-        :attr:`padding_idx` is initialized to all zeros. However, note that this
-        vector can be modified afterwards, e.g., using a customized
-        initialization method, and thus changing the vector used to pad the
-        output. The gradient for this vector from :class:`~torch.nn.Embedding`
-        is always zero.
+        When :attr:`max_norm` is not ``None``, :class:`Embedding`'s forward method will modify the
+        :attr:`weight` tensor in-place. Since tensors needed for gradient computations cannot be
+        modified in-place, performing a differentiable operation on ``Embedding.weight`` before
+        calling :class:`Embedding`'s forward method requires cloning ``Embedding.weight`` when
+        :attr:`max_norm` is not ``None``. For example::
+
+            n, d, m = 3, 5, 7
+            embedding = nn.Embedding(n, d, max_norm=True)
+            W = torch.randn((m, d), requires_grad=True)
+            idx = torch.tensor([1, 2])
+            a = embedding.weight.clone() @ W.t()  # weight must be cloned for this to be differentiable
+            b = embedding(idx) @ W.t()  # modifies weight in-place
+            out = (a.unsqueeze(0) + b.unsqueeze(1))
+            loss = out.sigmoid().prod()
+            loss.backward()
 
     Examples::
 
@@ -76,14 +88,30 @@ class Embedding(Module):
                  [ 0.1535, -2.0309,  0.9315],
                  [ 0.0000,  0.0000,  0.0000],
                  [-0.1655,  0.9897,  0.0635]]])
+
+        >>> # example of changing `pad` vector
+        >>> padding_idx = 0
+        >>> embedding = nn.Embedding(3, 3, padding_idx=padding_idx)
+        >>> embedding.weight
+        Parameter containing:
+        tensor([[ 0.0000,  0.0000,  0.0000],
+                [-0.7895, -0.7089, -0.0364],
+                [ 0.6778,  0.5803,  0.2678]], requires_grad=True)
+        >>> with torch.no_grad():
+        ...     embedding.weight[padding_idx] = torch.ones(3)
+        >>> embedding.weight
+        Parameter containing:
+        tensor([[ 1.0000,  1.0000,  1.0000],
+                [-0.7895, -0.7089, -0.0364],
+                [ 0.6778,  0.5803,  0.2678]], requires_grad=True)
     """
     __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
                      'norm_type', 'scale_grad_by_freq', 'sparse']
 
     num_embeddings: int
     embedding_dim: int
-    padding_idx: int
-    max_norm: float
+    padding_idx: Optional[int]
+    max_norm: Optional[float]
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor
@@ -112,10 +140,14 @@ class Embedding(Module):
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
             self.weight = Parameter(_weight)
+
         self.sparse = sparse
 
     def reset_parameters(self) -> None:
         init.normal_(self.weight)
+        self._fill_padding_idx_with_zero()
+
+    def _fill_padding_idx_with_zero(self) -> None:
         if self.padding_idx is not None:
             with torch.no_grad():
                 self.weight[self.padding_idx].fill_(0)
@@ -150,7 +182,9 @@ class Embedding(Module):
                 First dimension is being passed to Embedding as ``num_embeddings``, second as ``embedding_dim``.
             freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
-            padding_idx (int, optional): See module initialization documentation.
+            padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
+                                         therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
+                                         i.e. it remains as a fixed "pad".
             max_norm (float, optional): See module initialization documentation.
             norm_type (float, optional): See module initialization documentation. Default ``2``.
             scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
@@ -186,11 +220,11 @@ class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
 
-    For bags of constant length and no :attr:`per_sample_weights`, this class
+    For bags of constant length and no :attr:`per_sample_weights` and 2D inputs, this class
 
-        * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=0)``,
-        * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=0)``,
-        * with ``mode="max"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.max(dim=0)``.
+        * with ``mode="sum"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.sum(dim=1)``,
+        * with ``mode="mean"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.mean(dim=1)``,
+        * with ``mode="max"`` is equivalent to :class:`~torch.nn.Embedding` followed by ``torch.max(dim=1)``.
 
     However, :class:`~torch.nn.EmbeddingBag` is much more time and memory efficient than using a chain of these
     operations.
@@ -225,8 +259,10 @@ class EmbeddingBag(Module):
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
                          initialized from :math:`\mathcal{N}(0, 1)`.
 
-    Inputs: :attr:`input` (LongTensor), :attr:`offsets` (LongTensor, optional), and
+    Inputs: :attr:`input` (IntTensor or LongTensor), :attr:`offsets` (IntTensor or LongTensor, optional), and
         :attr:`per_index_weights` (Tensor, optional)
+
+        - :attr:`input` and :attr:`offsets` have to be of the same type, either int or long
 
         - If :attr:`input` is 2D of shape `(B, N)`,
 
@@ -267,7 +303,7 @@ class EmbeddingBag(Module):
 
     num_embeddings: int
     embedding_dim: int
-    max_norm: float
+    max_norm: Optional[float]
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor

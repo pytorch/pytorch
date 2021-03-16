@@ -71,9 +71,11 @@ void replication_pad1d_out_cpu_template(
   int pad_l = paddingSize[0];
   int pad_r = paddingSize[1];
 
-  TORCH_CHECK(input_.numel() > 0
-      && (input_.ndimension() == 2 || input_.ndimension() == 3),
-      "non-empty 2D or 3D (batch mode) tensor expected for input");
+  // allow empty batch size but not other dimensions.
+  TORCH_CHECK((input_.dim() == 2 && input_.size(0) != 0 && input_.size(1) != 0) ||
+              (input_.dim() == 3 && input_.size(1) != 0 && input_.size(2) != 0),
+              "Expected 2D or 3D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+              input_.sizes());
 
   if (input_.ndimension() == 3)
   {
@@ -91,7 +93,6 @@ void replication_pad1d_out_cpu_template(
       "input (W: ", iwidth, ") is too small."
       " Calculated output W: ", owidth);
 
-
   /* get contiguous input */
   auto input = input_.contiguous();
 
@@ -99,7 +100,7 @@ void replication_pad1d_out_cpu_template(
   if (input.ndimension() == 2)
   {
     output.resize_({nslices, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
       auto input_data = input.data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
       replication_pad1d_out_frame<scalar_t>(
@@ -115,7 +116,7 @@ void replication_pad1d_out_cpu_template(
   else
   {
     output.resize_({nbatch, nslices, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad1d_cpu", [&] {
       auto input_data = input.data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
       replication_pad1d_out_batch<scalar_t>(
@@ -216,12 +217,15 @@ Tensor& replication_pad1d_backward_out_cpu_template(
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return gradInput;
+  }
   gradInput.zero_();
 
   /* backprop */
   if (input.ndimension() == 2)
   {
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       input.scalar_type(), "replication_pad1d_backward_cpu", [&] {
       scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
       scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
@@ -238,7 +242,7 @@ Tensor& replication_pad1d_backward_out_cpu_template(
   }
   else
   {
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       input.scalar_type(), "replication_pad1d_backward_cpu", [&] {
       scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
       scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
@@ -339,8 +343,13 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   int dimslices = 0;
   int64_t nbatch = 1;
 
-  TORCH_CHECK(input_.numel() > 0 && (input_.dim() == 3 || input_.dim() == 4),
-      "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
+  // allow 0 dim batch size and nothing else.
+  bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
+  TORCH_CHECK(
+      (input_.dim() == 3 && input_.size(0) != 0 && valid_dims) ||
+      (input_.dim() == 4 && valid_dims && input_.size(3) != 0),
+      "Expected 3D or 4D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+      input_.sizes());
 
   if (input_.dim() == 4)
   {
@@ -369,7 +378,7 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   if (input.dim() == 3)
   {
     output.resize_({nslices, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
       auto input_data = input.data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
       replication_pad2d_out_frame<scalar_t> (input_data, output_data,
@@ -384,7 +393,7 @@ void replication_pad2d_out_cpu_template(Tensor& output,
   else
   {
     output.resize_({nbatch, nslices, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad2d_cpu", [&] {
       auto input_data = input.data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
       replication_pad2d_out_batch<scalar_t> (input_data, output_data,
@@ -510,12 +519,16 @@ Tensor& replication_pad2d_backward_out_cpu_template(
 
   /* resize */
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return gradInput;
+  }
+
   gradInput.zero_();
 
   /* backprop */
   if (input.dim() == 3)
   {
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       input.scalar_type(), "replication_pad2d_backward_cpu", [&] {
       replication_pad2d_backward_out_frame<scalar_t>(
         gradInput.data_ptr<scalar_t>(),
@@ -530,7 +543,7 @@ Tensor& replication_pad2d_backward_out_cpu_template(
   }
   else
   {
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       input.scalar_type(), "replication_pad2d_backward_cpu", [&] {
       replication_pad2d_backward_out_batch<scalar_t>(
         gradInput.data_ptr<scalar_t>(),
@@ -557,8 +570,13 @@ static inline void shapeCheck3d(
   int dimd = 1;
   int dimslices = 0;
 
-  TORCH_CHECK(input.numel() > 0 && (input.dim() == 4 || input.dim() == 5),
-      "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ", input);
+  // allow batch size of 0-dim.
+  bool valid_dims = input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
+  TORCH_CHECK(
+      (input.dim() == 4 && input.size(0) != 0 && valid_dims) ||
+      (input.dim() == 5 && valid_dims && input.size(4) != 0),
+      "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
+      input.sizes());
 
   if (input.dim() == 5)
   {
@@ -715,7 +733,7 @@ void replication_pad3d_out_cpu_template(
   if (input.dim() == 4)
   {
     output.resize_({nslices, odepth, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
       auto input_data = input.data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
       replication_pad3d_out_frame<scalar_t>(
@@ -728,7 +746,7 @@ void replication_pad3d_out_cpu_template(
   else
   {
     output.resize_({nbatch, nslices, odepth, oheight, owidth});
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d_cpu", [&] {
       auto input_data = input.data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
       replication_pad3d_out_batch<scalar_t>(
@@ -872,12 +890,15 @@ Tensor& replication_pad3d_backward_out_cpu_template(
 
   /* resize */
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return gradInput;
+  }
   gradInput.zero_();
 
   /* backprop */
   if (input.dim() == 4)
   {
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
       replication_pad3d_backward_out_frame<scalar_t> (
         gradInput.data_ptr<scalar_t>(),
@@ -893,7 +914,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   }
   else
   {
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       input.scalar_type(), "replication_pad3d_backward_cpu", [&] {
       replication_pad3d_backward_out_batch<scalar_t> (
         gradInput.data_ptr<scalar_t>(),

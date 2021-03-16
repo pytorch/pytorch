@@ -24,6 +24,10 @@
 #error You need C++14 to compile PyTorch
 #endif
 
+#if defined(_WIN32) && (defined(min) || defined(max))
+#  error Macro clash with min and max -- define NOMINMAX when compiling your program on Windows
+#endif
+
 /*
  * This header adds some polyfills with C++17 functionality
  */
@@ -258,6 +262,11 @@ struct _if_constexpr<false> final {
  * Note: In Example 3, both branches return int, so func() returns int. This is not necessary.
  *       If func() had a return type of "auto", then both branches could return different
  *       types, say func<MyClass1>() could return int and func<MyClass2>() could return string.
+ *
+ * Note: if_constexpr<cond, t, f> is *eager* w.r.t. template expansion - meaning this
+ *       polyfill does not behave like a true "if statement at compilation time".
+ *       The `_` trick above only defers typechecking, which happens after templates
+ *       have been expanded. (Of course this is all that's necessary for many use cases).
  */
 template<bool Condition, class ThenCallback, class ElseCallback>
 decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
@@ -266,21 +275,21 @@ decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCall
   // This will give us better error messages.
   if constexpr(Condition) {
     if constexpr (detail::function_takes_identity_argument<ThenCallback>::value) {
-      return std::forward<ThenCallback>(thenCallback)(detail::_identity());
+      return ::std::forward<ThenCallback>(thenCallback)(detail::_identity());
     } else {
-      return std::forward<ThenCallback>(thenCallback)();
+      return ::std::forward<ThenCallback>(thenCallback)();
     }
   } else {
     if constexpr (detail::function_takes_identity_argument<ElseCallback>::value) {
-      return std::forward<ElseCallback>(elseCallback)(detail::_identity());
+      return ::std::forward<ElseCallback>(elseCallback)(detail::_identity());
     } else {
-      return std::forward<ElseCallback>(elseCallback)();
+      return ::std::forward<ElseCallback>(elseCallback)();
     }
   }
 #else
   // C++14 implementation of if constexpr
-  return detail::_if_constexpr<Condition>::call(std::forward<ThenCallback>(thenCallback),
-                                                 std::forward<ElseCallback>(elseCallback));
+  return detail::_if_constexpr<Condition>::call(::std::forward<ThenCallback>(thenCallback),
+                                                 ::std::forward<ElseCallback>(elseCallback));
 #endif
 }
 
@@ -291,14 +300,14 @@ decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
   // This will give us better error messages.
   if constexpr(Condition) {
     if constexpr (detail::function_takes_identity_argument<ThenCallback>::value) {
-      return std::forward<ThenCallback>(thenCallback)(detail::_identity());
+      return ::std::forward<ThenCallback>(thenCallback)(detail::_identity());
     } else {
-      return std::forward<ThenCallback>(thenCallback)();
+      return ::std::forward<ThenCallback>(thenCallback)();
     }
   }
 #else
   // C++14 implementation of if constexpr
-  return if_constexpr<Condition>(std::forward<ThenCallback>(thenCallback), [] (auto) {});
+  return if_constexpr<Condition>(::std::forward<ThenCallback>(thenCallback), [] (auto) {});
 #endif
 }
 

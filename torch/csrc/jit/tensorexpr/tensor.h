@@ -12,136 +12,31 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Function : public KernelScopedObject {
+class TORCH_API Tensor : KernelScopedObject {
  public:
-  Function(
-      const std::string& func_name,
-      const std::vector<const Expr*>& dims,
+  Tensor(const Buf* buf, const std::vector<const Var*>& args, const Expr* body)
+      : buf_(buf) {
+    stmt_ = constructStmt(args, body, {}, {});
+  }
+
+  Tensor(
+      const Buf* buf,
       const std::vector<const Var*>& args,
+      const std::vector<const Expr*>& reduce_dims,
+      const std::vector<const Var*>& reduce_args,
       const Expr* body)
-      // TODO: Function should not create buffers, they should be created
-      // manually before constructing a function.
-      : func_vars_({new Buf(func_name, dims, body->dtype())}),
-        dims_(dims),
-        args_(args),
-        bodies_({body}) {}
-  Function(
-      const std::vector<std::string>& func_names,
-      const std::vector<const Expr*>& dims,
-      const std::vector<const Var*>& args,
-      const std::vector<const Expr*>& bodies)
-      : func_vars_(func_names.size()),
-        dims_(dims),
-        args_(args),
-        bodies_(bodies) {
-    for (size_t i = 0; i < func_names.size(); i++) {
-      func_vars_[i] = new Buf(func_names[i], dims, bodies[i]->dtype());
-    }
-  }
-  Function(
-      const std::string& func_name,
-      Buf* func_var,
-      const std::vector<const Expr*>& dims,
-      const std::vector<const Var*>& args,
-      const Expr* body)
-      : func_vars_({func_var}), dims_(dims), args_(args), bodies_({body}) {}
-
-  size_t ndim() const {
-    return dims_.size();
+      : buf_(buf) {
+    stmt_ = constructStmt(args, body, reduce_dims, reduce_args);
   }
 
-  const Expr* dim(size_t index) const {
-    if (index < 0 || index >= dims_.size()) {
-      throw out_of_range_index();
-    }
+  Tensor(const Buf* buf, Stmt* stmt) : buf_(buf), stmt_(stmt) {}
 
-    return dims_[index];
-  }
-  const std::vector<const Expr*>& dims() const {
-    return dims_;
-  }
-
-  const Var* arg(size_t index) const {
-    if (index < 0 || index >= args_.size()) {
-      throw out_of_range_index();
-    }
-
-    return args_[index];
-  }
-  const std::vector<const Var*>& args() const {
-    return args_;
-  }
-
-  std::vector<const Expr*> bodies() const {
-    return bodies_;
-  }
-  const Expr* body(size_t index) const {
-    if (index >= bodies_.size()) {
-      throw out_of_range_index();
-    }
-
-    return bodies_[index];
-  }
-
-  std::vector<const Buf*> func_vars() const {
-    return func_vars_;
-  }
-  const Buf* func_var(size_t index) const {
-    if (index >= func_vars_.size()) {
-      throw out_of_range_index();
-    }
-    return func_vars_[index];
-  }
-
-  Stmt* ElementStmt(size_t index);
-
- private:
-  std::vector<const Buf*> func_vars_;
-  std::vector<const Expr*> dims_;
-  std::vector<const Var*> args_;
-  std::vector<const Expr*> bodies_;
-};
-
-class Tensor : KernelScopedObject {
- public:
-  Tensor(Function* function, int output_index)
-      : function_(function), output_index_(output_index) {}
-
-  Function* function() const {
-    return function_;
-  }
-  int output_index() const {
-    return output_index_;
-  }
-
-  // Wrappers over accessors to fields of the underlying function
-  const Expr* body() const {
-    return function()->body(output_index());
-  }
   const Buf* buf() const {
-    return function()->func_var(output_index());
-  }
-  int ndim() const {
-    return buf()->dims().size();
-  }
-  const Expr* dim(int index) const {
-    return buf()->dim(index);
-  }
-  std::vector<const Expr*> dims() const {
-    return buf()->dims();
-  }
-  const Var* arg(int index) const {
-    return function()->arg(index);
-  }
-  const std::vector<const Var*>& args() const {
-    return function()->args();
+    return buf_;
   }
 
-  void initializeTo(const Expr* initializer) {
-    initializer_ = initializer;
-  }
-  const Expr* initializer() const {
-    return initializer_;
+  Stmt* stmt() const {
+    return stmt_;
   }
 
   template <typename... Ts>
@@ -152,9 +47,14 @@ class Tensor : KernelScopedObject {
   inline ExprHandle call(const Ts&... ts);
 
  private:
-  Function* function_;
-  int output_index_;
-  const Expr* initializer_{nullptr};
+  Stmt* constructStmt(
+      const std::vector<const Var*>& args,
+      const Expr* body,
+      const std::vector<const Expr*>& reduce_dims,
+      const std::vector<const Var*>& reduce_args) const;
+
+  const Buf* buf_;
+  Stmt* stmt_;
 };
 
 class Placeholder {
@@ -182,6 +82,9 @@ class Placeholder {
 
   const Buf* data() const {
     return data_;
+  }
+  BufHandle handle() const {
+    return BufHandle(data());
   }
   Dtype dtype() const {
     return data_->dtype();
@@ -270,11 +173,12 @@ inline void unpack_dim_args(
 }
 
 // Handle reductions over a Reducer and a body_func which produces values.
-template <typename BodyFunc>
+template <typename InitFunc, typename BodyFunc>
 Tensor* Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
+    const InitFunc& init_func,
     const BodyFunc& body_func,
     const std::vector<DimArg>& reduce_args) {
   std::vector<const Expr*> dims;
@@ -292,15 +196,30 @@ Tensor* Reduce(
   ExprHandle body =
       Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(all_vars));
   std::vector<const Expr*> output_args(vars.begin(), vars.end());
-  Buf* func_result = new Buf(func_name, dims, body.dtype());
+  const Expr* init_expr = new Cast(
+      body.dtype(), init_func(VarVectorToVarHandleVector(vars)).node());
+  Buf* func_result = new Buf(func_name, dims, body.dtype(), init_expr);
   const ReduceOp* reduce_op =
       reducer(func_result, body, output_args, reduce_vars);
-  dims.insert(dims.end(), reduce_dims.begin(), reduce_dims.end());
-  Function* func =
-      new Function(func_name, func_result, dims, all_vars, reduce_op);
-  Tensor* t = new Tensor(func, 0);
-  t->initializeTo(new Cast(body.dtype(), reducer.initializer()));
+  Tensor* t =
+      new Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
   return t;
+}
+
+template <typename BodyFunc>
+Tensor* Reduce(
+    const std::string& func_name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    const BodyFunc& body_func,
+    const std::vector<DimArg>& reduce_args) {
+  return Reduce(
+      func_name,
+      dim_args,
+      reducer,
+      [&](ParameterList p) { return ExprHandle(reducer.initializer()); },
+      body_func,
+      reduce_args);
 }
 
 // Overload which allows inline lambda functions for the body_func.
@@ -320,6 +239,13 @@ TORCH_API Tensor* Reduce(
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
     const Placeholder& buffer,
+    const std::vector<DimArg>& reduce_args);
+
+TORCH_API Tensor* Reduce(
+    const std::string& name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    const BufHandle& buffer,
     const std::vector<DimArg>& reduce_args);
 
 // Overload for the common case of all dimensions of a prevously Computed
@@ -352,10 +278,7 @@ class FunctionCall : public CallNode<FunctionCall> {
   }
 
   FunctionCall(Tensor* tensor, const std::vector<const Expr*>& params)
-      : BaseClass(
-            tensor->function()->body(tensor->output_index())->dtype(),
-            kFunctionCall,
-            params),
+      : BaseClass(tensor->buf()->dtype(), kFunctionCall, params),
         tensor_(tensor) {}
 
  private:
@@ -400,6 +323,18 @@ inline ExprHandle Placeholder::load(const std::vector<T>& args) const {
   std::vector<ExprHandle> params(args.begin(), args.end());
   return ExprHandle(
       new Load(data(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+}
+
+template <typename... Ts>
+inline ExprHandle BufHandle::load(const Ts&... ts) const {
+  std::vector<ExprHandle> params({ExprHandle(ts)...});
+  return Load::make(*this, params);
+}
+
+template <typename T>
+inline ExprHandle BufHandle::load(const std::vector<T>& args) const {
+  std::vector<ExprHandle> params(args.begin(), args.end());
+  return Load::make(*this, params);
 }
 
 } // namespace tensorexpr

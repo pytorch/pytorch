@@ -21,11 +21,15 @@
 #endif
 
 #ifdef USE_MAGMA
-#include <magma.h>
+#include <magma_v2.h>
 #endif
 
 #ifdef __HIP_PLATFORM_HCC__
 #include <miopen/version.h>
+#endif
+
+#ifndef USE_ROCM
+#include <ATen/cuda/detail/LazyNVRTC.h>
 #endif
 
 #include <cuda.h>
@@ -116,9 +120,13 @@ bool CUDAHooks::hasCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
 
-#ifdef USE_DIRECT_NVRTC
+#if defined(USE_DIRECT_NVRTC)
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
   return std::make_pair(nullptr, at::cuda::load_nvrtc());
+}
+#elif !defined(USE_ROCM)
+static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
+  return std::make_pair(nullptr, &at::cuda::detail::lazyNVRTC);
 }
 #else
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
@@ -155,7 +163,9 @@ bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
               "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
   unsigned int ctx_flags;
-  int ctx_is_active;
+  // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
+  // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
+  int ctx_is_active = 0;
   AT_CUDA_DRIVER_CHECK(CUDAHooks::nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
   return ctx_is_active == 1;
 }
@@ -357,6 +367,11 @@ void CUDAHooks::cuFFTClearPlanCache(int64_t device_index) const {
 
 int CUDAHooks::getNumGPUs() const {
   return at::cuda::device_count();
+}
+
+void CUDAHooks::deviceSynchronize(int64_t device_index) const {
+  at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));
+  c10::cuda::device_synchronize();
 }
 
 // Sigh, the registry doesn't support namespaces :(

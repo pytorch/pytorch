@@ -18,6 +18,23 @@ void HashStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   cv_.notify_all();
 }
 
+std::vector<uint8_t> HashStore::compareSet(
+    const std::string& key,
+    const std::vector<uint8_t>& currentValue,
+    const std::vector<uint8_t>& newValue) {
+  std::unique_lock<std::mutex> lock(m_);
+  auto it = map_.find(key);
+  if (it == map_.end()){
+    return currentValue;
+  }
+  else if (it->second == currentValue){
+    map_[key] = newValue;
+    cv_.notify_all();
+    return newValue;
+  }
+  return it->second;
+}
+
 std::vector<uint8_t> HashStore::get(const std::string& key) {
   std::unique_lock<std::mutex> lock(m_);
   auto it = map_.find(key);
@@ -80,11 +97,14 @@ int64_t HashStore::add(const std::string& key, int64_t i) {
 }
 
 int64_t HashStore::getNumKeys() {
-  TORCH_CHECK(false, "getNumKeys not implemented for HashStore");
+  std::unique_lock<std::mutex> lock(m_);
+  return map_.size();
 }
 
-bool HashStore::deleteKey(const std::string& /* unused */) {
-  TORCH_CHECK(false, "deleteKey not implemented for HashStore");
+bool HashStore::deleteKey(const std::string& key) {
+  std::unique_lock<std::mutex> lock(m_);
+  auto numDeleted = map_.erase(key);
+  return (numDeleted == 1);
 }
 
 bool HashStore::check(const std::vector<std::string>& keys) {

@@ -73,6 +73,12 @@ using std::vector;
 #define NOMINMAX
 #endif
 
+#if defined(__has_cpp_attribute) && __has_cpp_attribute(nodiscard)
+#define CAFFE2_NODISCARD [[nodiscard]]
+#else
+#define CAFFE2_NODISCARD
+#endif
+
 using std::make_unique;
 
 #if defined(__ANDROID__) && !defined(__NDK_MAJOR__)
@@ -124,18 +130,18 @@ class SkipIndices<> {
 // linked. This function should not be used in static initialization functions
 // as the underlying boolean variable is going to be switched on when one
 // loads libtorch_gpu.so.
-CAFFE2_API bool HasCudaRuntime();
-CAFFE2_API bool HasHipRuntime();
+TORCH_API bool HasCudaRuntime();
+TORCH_API bool HasHipRuntime();
 namespace internal {
 // Sets the Cuda Runtime flag that is used by HasCudaRuntime(). You should
 // never use this function - it is only used by the Caffe2 gpu code to notify
 // Caffe2 core that cuda runtime has been loaded.
-CAFFE2_API void SetCudaRuntimeFlag();
-CAFFE2_API void SetHipRuntimeFlag();
+TORCH_API void SetCudaRuntimeFlag();
+TORCH_API void SetHipRuntimeFlag();
 } // namespace internal
 // Returns which setting Caffe2 was configured and built with (exported from
 // CMake)
-CAFFE2_API const std::map<string, string>& GetBuildOptions();
+TORCH_API const std::map<string, string>& GetBuildOptions();
 
 } // namespace caffe2
 

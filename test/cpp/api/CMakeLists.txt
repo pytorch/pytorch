@@ -14,6 +14,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/memory.cpp
   ${TORCH_API_TEST_DIR}/misc.cpp
   ${TORCH_API_TEST_DIR}/module.cpp
+  ${TORCH_API_TEST_DIR}/moduledict.cpp
   ${TORCH_API_TEST_DIR}/modulelist.cpp
   ${TORCH_API_TEST_DIR}/modules.cpp
   ${TORCH_API_TEST_DIR}/parameterdict.cpp
@@ -26,6 +27,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/sequential.cpp
   ${TORCH_API_TEST_DIR}/transformer.cpp
   ${TORCH_API_TEST_DIR}/serialize.cpp
+  ${TORCH_API_TEST_DIR}/special.cpp
   ${TORCH_API_TEST_DIR}/static.cpp
   ${TORCH_API_TEST_DIR}/support.cpp
   ${TORCH_API_TEST_DIR}/tensor_cuda.cpp

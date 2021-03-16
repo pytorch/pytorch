@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
@@ -11,6 +12,7 @@
 using c10::AliasInfo;
 using c10::BoolType;
 using c10::CapsuleType;
+using c10::ComplexType;
 using c10::DeviceObjType;
 using c10::DictType;
 using c10::FloatType;
@@ -24,6 +26,8 @@ using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
+using c10::StorageType;
+using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
 using c10::TensorType;
@@ -40,7 +44,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
-      {"Storage", IntType::get()},
+      {"Storage", StorageType::get()},
       {"QScheme", QSchemeType::get()},
       {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",
@@ -48,9 +52,11 @@ TypePtr SchemaTypeParser::parseBaseType() {
                         // parser, it should use the custom class mechanism
                         // instead. @jerryzh
       {"Device", DeviceObjType::get()},
+      {"Stream", StreamObjType::get()},
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
       {"float", FloatType::get()},
+      {"complex", ComplexType::get()},
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
@@ -148,7 +154,6 @@ c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
 }
 
 c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
-  c10::optional<c10::Device> device;
   L.expect('=');
   const std::string& dev = L.expect(TK_IDENT).text();
 
@@ -190,7 +195,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   // unknown sizes, a mix of ranks with known and unknown sizes, or ranks with
   // known sizes and strides. The type might also have requires_grad and/or
   // device option. Examples of types we're handling here:
-  //   Long(10:48,8:6,6:1, requires_grad=0, device=cuda:1)
+  //   Long(10, 8, 6, strides=[48, 6, 1], requires_grad=0, device=cuda:1)
   //   Float(10, *, 20, device=cuda:1)
   //   Float(requires_grad=1)
   std::vector<c10::optional<int64_t>> dims;
@@ -220,6 +225,17 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         }
         return;
       }
+      if (field == "strides") {
+        seen_strides = true;
+        L.expect('=');
+        parseList('[', ',', ']', [&] {
+          const std::string& num = L.expect(TK_NUMBER).text();
+          std::string::size_type num_len;
+          size_t stride = c10::stoi(num, &num_len);
+          strides.push_back(stride);
+        });
+        return;
+      }
       throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
     }
     if (device.has_value() || requires_grad.has_value()) {
@@ -241,14 +257,6 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     std::string::size_type num_len;
     size_t dim = c10::stoi(num, &num_len);
     dims.emplace_back(dim);
-    if (seen_strides || L.cur().kind == ':') {
-      L.expect(':');
-      seen_strides = true;
-      const std::string& num = L.expect(TK_NUMBER).text();
-      std::string::size_type num_len;
-      size_t stride = c10::stoi(num, &num_len);
-      strides.push_back(stride);
-    }
   });
   if (seen_strides) {
     at::IntArrayRef strides_ref(strides);

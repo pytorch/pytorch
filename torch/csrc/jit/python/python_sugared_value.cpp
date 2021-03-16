@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/python/python_sugared_value.h>
+
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -91,12 +92,12 @@ FunctionSchema PythonValue::getSchema(
 
     auto types_it = arg_types.begin();
     for (; types_it != arg_types.end(); ++types_it, ++names_it) {
-      args.push_back(Argument(
+      args.emplace_back(
           /*name=*/*names_it,
           /*type=*/std::move(*types_it),
           /*N=*/c10::nullopt,
           /*default_value=*/c10::nullopt,
-          /*kwarg_only=*/false));
+          /*kwarg_only=*/false);
     }
     rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
   }
@@ -114,21 +115,20 @@ FunctionSchema PythonValue::getSchema(
 std::shared_ptr<SugaredValue> PythonValue::call(
     const SourceRange& loc,
     Function& m,
-    at::ArrayRef<NamedValue> inputs_,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
-  std::vector<NamedValue> inputsWithSelf;
+  std::vector<NamedValue> argsWithSelf;
   if (moduleSelf_) {
-    inputsWithSelf.emplace_back(NamedValue("self", moduleSelf_));
+    argsWithSelf.emplace_back(NamedValue("self", moduleSelf_));
   }
-  inputsWithSelf.insert(inputsWithSelf.end(), inputs_.begin(), inputs_.end());
-  inputs_ = inputsWithSelf;
+  argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
 
-  auto schema = getSchema(inputs_.size(), n_binders, loc);
-  auto inputs = toValues(*m.graph(), inputs_);
+  auto schema = getSchema(argsWithSelf.size(), n_binders, loc);
+  auto inputs = toValues(*m.graph(), argsWithSelf);
 
   MatchedSchema matched_schema =
-      matchSchema(schema, loc, *m.graph(), inputs_, attributes);
+      matchSchema(schema, loc, *m.graph(), argsWithSelf, kwargs);
 
   // If if a function is marked as dropped,
   // we throw an exception if it is invoked.
@@ -217,6 +217,42 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
+#ifndef __HIP_PLATFORM_HCC__
+std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  // List of all the cuda operators which are supported in JIT
+  const std::unordered_set<std::string> cuda_ops = {
+      "current_stream",
+      "default_stream",
+      "current_device",
+      "set_device",
+      "device_index",
+      "device_count",
+      "set_stream"};
+
+  if (cuda_ops.find(field) != cuda_ops.end()) {
+    // Both current_device and set_device API's are a part of c10::cuda
+    // namespace. Hence, to resolve the conflict for jit, we append _ to both
+    // these APIs.
+    if (field == "current_device" || field == "set_device") {
+      return std::make_shared<BuiltinFunction>(
+          Symbol::cuda("_" + field), c10::nullopt);
+    } else {
+      return std::make_shared<BuiltinFunction>(
+          Symbol::cuda(field), c10::nullopt);
+    }
+  }
+
+  py::object member = getattr(loc, field);
+  // note: is_constant = true because we consider that global properties
+  // on modules like math.pi or torch.float to be constants
+  // even though it is possible, though rare, for someone to mutate them
+  return toSugaredValue(member, m, loc, /*is_constant=*/true);
+}
+#endif
+
 Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
@@ -231,12 +267,55 @@ SugaredValuePtr ModuleValue::asTupleValue(const SourceRange& loc, Function& m) {
       << "Only ModuleList or Sequential modules can be used as tuple";
 }
 
+bool ModuleValue::areAllSubmodulesSubtypeOf(
+    const TypePtr& ty,
+    std::ostream* why_not) const {
+  const auto& self_type = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < self_type->numAttributes(); ++i) {
+    const auto& attr_type = self_type->getAttribute(i);
+    if (attr_type->is_module()) {
+      std::stringstream ss;
+      if (!attr_type->isSubtypeOfExt(ty, &ss)) {
+        if (why_not) {
+          *why_not << "Attribute " << self_type->getAttributeName(i)
+                   << " is not of annotated type " << ty->annotation_str()
+                   << ": " << ss.str();
+        }
+
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 SugaredValuePtr ModuleValue::getitem(
     const SourceRange& loc,
     Function& m,
-    Value* idx) {
+    Value* idx,
+    TypePtr type_hint) {
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
-    return getSugaredDict(loc, m)->getModules()->getitem(loc, m, idx);
+    if (type_hint) {
+      // Check that all submodules comply with the type hint.
+      std::stringstream ss;
+      if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
+        throw ErrorReport(loc) << ss.str();
+      }
+
+      // Emit a prim::ModuleContainerIndex operator. This is needed because
+      // it's difficult to construct a list in the graph representing the
+      // ModuleList and use aten::__getitem__ ops to index into it because
+      // any call to ModuleList.setitem would invalidate that emitted list.
+      auto graph = m.graph();
+      auto* getitem_node = graph->insertNode(
+          graph->create(prim::ModuleContainerIndex, {self_, idx}));
+      getitem_node->output(0)->setType(type_hint);
+      return std::make_shared<SimpleValue>(getitem_node->output(0));
+    } else {
+      return getSugaredDict(loc, m)->getModules()->getitem(
+          loc, m, idx, type_hint);
+    }
   } else if (
       concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (auto ivalue = toIValue(idx)) {
@@ -252,6 +331,22 @@ SugaredValuePtr ModuleValue::getitem(
         }
       }
       throw ErrorReport(loc) << "Key Error, " << idx_str;
+    } else if (type_hint) {
+      // Check that all submodules comply with the type hint.
+      std::stringstream ss;
+      if (!areAllSubmodulesSubtypeOf(type_hint, &ss)) {
+        throw ErrorReport(loc) << ss.str();
+      }
+
+      // Emit a prim::ModuleContainerIndex operator. This is needed because
+      // it's difficult to construct a dict in the graph representing the
+      // ModuleDict and use aten::__getitem__ ops to index into it because
+      // any call to ModuleDict.setAttr would invalidate that emitted dict.
+      auto graph = m.graph();
+      auto* getitem_node = graph->insertNode(
+          graph->create(prim::ModuleContainerIndex, {self_, idx}));
+      getitem_node->output(0)->setType(type_hint);
+      return std::make_shared<SimpleValue>(getitem_node->output(0));
     }
     throw ErrorReport(loc)
         << "Unable to extract string literal index. "
@@ -265,7 +360,7 @@ SugaredValuePtr ModuleValue::getitem(
 void checkInterface(
     const SourceRange& loc,
     Function& m,
-    std::shared_ptr<ModuleValue> self,
+    const std::shared_ptr<ModuleValue>& self,
     const std::string& field) {
   if (self->asValue(loc, m)->type()->cast<InterfaceType>()) {
     throw ErrorReport(loc)
@@ -279,7 +374,7 @@ void recurseThroughNestedModules(
     Function& m,
     std::vector<SugaredValuePtr>& keys,
     std::vector<SugaredValuePtr>& values,
-    std::shared_ptr<ModuleValue> self,
+    std::shared_ptr<ModuleValue>& self,
     const std::string& prefix,
     const std::string& field) {
   auto prefix_value =
@@ -304,7 +399,7 @@ void recurseThroughNestedModules(
     if (prefix != "") {
       submodule_prefix = prefix + ".";
     }
-    submodule_prefix = submodule_prefix + key_string;
+    submodule_prefix += key_string;
     recurseThroughNestedModules(
         loc, m, keys, values, module_value, submodule_prefix, field);
   };
@@ -327,7 +422,7 @@ std::shared_ptr<SugaredDict> ModuleValue::getSugaredNamedBufferDict(
   for (const auto& name : paramNames) {
     auto name_v =
         std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
-    Value* tensor_v = m.graph()->insertGetAttr(self_, name);
+    m.graph()->insertGetAttr(self_, name);
     values.push_back(tryGetAttr(loc, m, name));
     keys.push_back(name_v);
   }
@@ -565,6 +660,96 @@ bool ModuleValue::hasAttr(
   return tryGetAttr(loc, m, field) != nullptr;
 }
 
+std::shared_ptr<SugaredValue> ModuleValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  c10::ClassTypePtr class_type = concreteType_->getJitType()->cast<ClassType>();
+  bool have_pre_hooks =
+      class_type && class_type->getForwardPreHooks().size() != 0;
+  bool have_hooks = class_type && class_type->getForwardHooks().size() != 0;
+
+  std::vector<Value*> arg_values;
+  std::vector<NamedValue> pre_hook_result;
+  Value* forward_input = nullptr;
+  std::shared_ptr<Graph> calling_graph = caller.graph();
+
+  if (have_pre_hooks || have_hooks) {
+    // convert forward args into tuple for forward hooks
+    // (the input of eager hooks are always tuples)
+    for (const auto& sv : args) {
+      arg_values.push_back(sv.value(*calling_graph));
+    }
+    forward_input =
+        calling_graph->insertNode(calling_graph->createTuple(arg_values))
+            ->output();
+  }
+
+  // call pre_hooks
+  if (have_pre_hooks) {
+    for (const auto& hook : class_type->getForwardPreHooks()) {
+      TORCH_INTERNAL_ASSERT(forward_input != nullptr);
+      Value* pre_hook_output =
+          FunctionValue(hook)
+              .call(
+                  loc,
+                  caller,
+                  {NamedValue(self_), NamedValue(forward_input)},
+                  kwargs,
+                  n_binders)
+              ->asValue(loc, caller);
+      if (pre_hook_output->type() != NoneType::get()) {
+        if (pre_hook_output->type()->kind() != TypeKind::TupleType) {
+          pre_hook_output =
+              calling_graph
+                  ->insertNode(calling_graph->createTuple({pre_hook_output}))
+                  ->output();
+        }
+        forward_input = pre_hook_output;
+      }
+    }
+    // de-tuple pre_hook output for forward
+    at::ArrayRef<Value*> output_nodes =
+        calling_graph
+            ->insertNode(calling_graph->createTupleUnpack(forward_input))
+            ->outputs();
+    for (auto& output_node : output_nodes) {
+      pre_hook_result.emplace_back(NamedValue(output_node));
+    }
+    if (args.size() != 0) { // only replace input if it existed
+      args = pre_hook_result;
+    }
+  }
+
+  // call forward
+  std::shared_ptr<SugaredValue> forwardSV =
+      attr(loc, caller, "forward")->call(loc, caller, args, kwargs, n_binders);
+  Value* forward_output = forwardSV->asValue(loc, caller);
+
+  // call hooks
+  if (have_hooks) {
+    for (const auto& hook : class_type->getForwardHooks()) {
+      Value* forward_hook_output = FunctionValue(hook)
+                                       .call(
+                                           loc,
+                                           caller,
+                                           {NamedValue(self_),
+                                            NamedValue(forward_input),
+                                            NamedValue(forward_output)},
+                                           kwargs,
+                                           n_binders)
+                                       ->asValue(loc, caller);
+      if (forward_hook_output->type() != NoneType::get()) {
+        forward_output = forward_hook_output;
+      }
+    }
+  }
+
+  return std::make_shared<SimpleValue>(forward_output);
+}
+
 // This method controls how we desugar attribute lookups on ScriptModules.
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
@@ -576,7 +761,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // Check if it's a property.
   auto prop =
-      concreteType_->getJitType()->expect<ClassType>()->getProperty(field);
+      concreteType_->getJitType()->expectRef<ClassType>().getProperty(field);
   if (prop) {
     return MethodValue(self_, prop->getter->name())
         .call(loc, m, {}, {}, /*n_binders=*/1);
@@ -586,11 +771,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   std::string hint;
   if (auto failureReason = concreteType_->findFailedAttribute(field)) {
     hint = *failureReason;
+  } else if (concreteType_->isIgnoredAttribute(field)) {
+    hint = "attribute was ignored during compilation";
   }
 
   throw ErrorReport(loc)
       << "Module '"
-      << concreteType_->getJitType()->expect<ClassType>()->name()->name() << "'"
+      << concreteType_->getJitType()->expectRef<ClassType>().name()->name()
+      << "'"
       << " has no attribute '" << field << "' " << hint;
 }
 
@@ -617,6 +805,9 @@ std::shared_ptr<SugaredValue> PythonClassValue::attr(
     const std::string& field) {
   // Resolve values from the Python object first (e.g. for static methods on
   // this type, resolve them as functions)
+  if (auto* fn = type_->findStaticMethod(field)) {
+    return std::make_shared<FunctionValue>(fn);
+  }
   auto py_attr = py::getattr(py_type_, field.c_str(), py::none());
   if (!py_attr.is_none()) {
     return toSugaredValue(py_attr, m, loc);
@@ -650,8 +841,8 @@ void ModuleValue::setAttr(
 std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     const SourceRange& loc,
     Function& caller,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
   c10::optional<bool> result;
   Graph& graph = *(caller.graph());
@@ -660,14 +851,14 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   auto arg_name = py::str(dispatched_fn_["arg_name"]);
 
   ErrorReport error(loc);
-  if (index < inputs.size()) {
+  if (index < args.size()) {
     // Dispatch flag is in arg list
-    result = constant_as<bool>(inputs.at(index).value(graph));
+    result = constant_as<bool>(args.at(index).value(graph));
     error << "Argument for boolean dispatch at position " << index
           << " was not constant";
-  } else if (auto i = findInputWithName(arg_name, attributes)) {
+  } else if (auto i = findInputWithName(arg_name, kwargs)) {
     // Dispatch flag is in kwargs
-    result = constant_as<bool>(attributes[*i].value(graph));
+    result = constant_as<bool>(kwargs[*i].value(graph));
     error << "Keyword argument '" << arg_name
           << "' for boolean dispatch at position was not constant";
   } else {
@@ -686,28 +877,28 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   } else {
     value = toSugaredValue(dispatched_fn_["if_false"], caller, loc);
   }
-  return value->call(loc, caller, inputs, attributes, n_binders);
+  return value->call(loc, caller, args, kwargs, n_binders);
 }
 
 std::shared_ptr<SugaredValue> PythonExceptionValue::call(
     const SourceRange& loc,
     Function& caller,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t /*n_binders*/) {
   Value* error_message = nullptr;
-  if (inputs.size() == 0) {
+  if (args.size() == 0) {
     error_message = insertConstant(*caller.graph(), "", loc);
-  } else if (inputs.size() == 1) {
-    error_message = inputs.at(0).value(*caller.graph());
+  } else if (args.size() == 1) {
+    error_message = args.at(0).value(*caller.graph());
   } else {
     std::vector<Value*> message_values;
-    message_values.reserve(inputs.size() + attributes.size());
+    message_values.reserve(args.size() + kwargs.size());
 
-    for (auto inp : inputs) {
+    for (const auto& inp : args) {
       message_values.push_back(inp.value(*caller.graph()));
     }
-    for (auto kwarg_inp : attributes) {
+    for (const auto& kwarg_inp : kwargs) {
       message_values.push_back(kwarg_inp.value(*caller.graph()));
     }
     error_message =
@@ -800,10 +991,10 @@ std::shared_ptr<SugaredValue> createSimpleEnumValue(
 std::shared_ptr<SugaredValue> PythonSliceClass::call(
     const SourceRange& loc,
     Function& caller,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     size_t /*n_binders*/) {
-  if (!attributes.empty()) {
+  if (!kwargs.empty()) {
     throw ErrorReport(loc) << "Slice does not accept any keyword arguments";
   }
 
@@ -819,26 +1010,26 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
     return given;
   };
 
-  Value* start;
-  Value* stop;
-  Value* step;
-  size_t n = inputs.size();
+  Value* start = nullptr;
+  Value* stop = nullptr;
+  Value* step = nullptr;
+  size_t n = args.size();
   // Slice's constructor signature is Slice(start=None, stop, step=None)
   if (n == 1) {
     // Case where only `stop` is specified.
     start = ValOr(nullptr, default_start);
-    stop = ValOr(inputs[0].value(graph), default_stop);
+    stop = ValOr(args[0].value(graph), default_stop);
     step = ValOr(nullptr, default_step);
   } else if (n == 2) {
     // Case where `start` and `stop` are specified.
-    start = ValOr(inputs[0].value(graph), default_start);
-    stop = ValOr(inputs[1].value(graph), default_stop);
+    start = ValOr(args[0].value(graph), default_start);
+    stop = ValOr(args[1].value(graph), default_stop);
     step = ValOr(nullptr, default_step);
   } else if (n == 3) {
     // Case where `start`, `stop` and `step` are all specified.
-    start = ValOr(inputs[0].value(graph), default_start);
-    stop = ValOr(inputs[1].value(graph), default_stop);
-    step = ValOr(inputs[2].value(graph), default_step);
+    start = ValOr(args[0].value(graph), default_start);
+    stop = ValOr(args[1].value(graph), default_stop);
+    step = ValOr(args[2].value(graph), default_step);
   } else {
     throw ErrorReport(loc) << "slice accepts exactly 1, 2 or 3 arguments, got: "
                            << n;
@@ -850,7 +1041,7 @@ std::shared_ptr<SugaredValue> PythonSliceClass::call(
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
-    SourceRange loc,
+    const SourceRange& loc,
     bool is_constant) {
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
@@ -888,10 +1079,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
       const auto v = static_cast<uint8_t>(qscheme->qscheme);
       return toSimple(g.insertConstant(v, loc));
-    } else if (THPLayout_Check(obj.ptr())) {
-      auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
-      const auto l = static_cast<int8_t>(layout->layout);
-      return toSimple(g.insertConstant(l, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       py::tuple tup = obj;
       std::vector<Value*> values;
@@ -908,6 +1095,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (auto callee = as_function(obj)) {
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
+#ifndef USE_ROCM
+    std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
+    if (obj_name.compare("torch.cuda") == 0) {
+      return std::make_shared<CUDAPythonModuleValue>(obj);
+    }
+#endif
     return std::make_shared<PythonModuleValue>(obj);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
@@ -916,6 +1109,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("isinstance").ptr()) {
+    return SpecialFormValue::create(prim::isinstance);
 #ifdef USE_RPC
     // RPC module is only avaialble when build flag "USE_DISTRIBUTED" is on.
   } else if (

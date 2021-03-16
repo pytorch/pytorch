@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 
 #ifdef _WIN32
-#include <windows.h>
+#include <c10/util/win32-headers.h>
 #include <fileapi.h>
 #include <io.h>
 #else
@@ -298,6 +298,29 @@ void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
   file.write(value);
 }
 
+std::vector<uint8_t> FileStore::compareSet(
+    const std::string& key,
+    const std::vector<uint8_t>& currentValue,
+    const std::vector<uint8_t>& newValue) {
+  std::string regKey = regularPrefix_ + key;
+  std::unique_lock<std::mutex> l(activeFileOpLock_);
+  File file(path_, O_RDWR | O_CREAT, timeout_);
+  auto lock = file.lockExclusive();
+  // Always refresh since even though the key exists in the cache,
+  // it might be outdated
+  pos_ = refresh(file, pos_, cache_);
+  if (cache_.count(regKey) == 0) {
+    return currentValue;
+  }
+  else if (cache_[regKey] == currentValue){
+    file.seek(0, SEEK_END);
+    file.write(regKey);
+    file.write(newValue);
+    return newValue;
+  }
+  return cache_[regKey];
+}
+
 std::vector<uint8_t> FileStore::get(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
   const auto start = std::chrono::steady_clock::now();
@@ -355,7 +378,11 @@ int64_t FileStore::add(const std::string& key, int64_t value) {
 }
 
 int64_t FileStore::getNumKeys() {
-  TORCH_CHECK(false, "getNumKeys not implemented for FileStore");
+  std::unique_lock<std::mutex> l(activeFileOpLock_);
+  File file(path_, O_RDONLY, timeout_);
+  auto lock = file.lockShared();
+  pos_ = refresh(file, pos_, cache_);
+  return cache_.size();
 }
 
 bool FileStore::deleteKey(const std::string& /* unused */) {

@@ -1,36 +1,37 @@
 #include <ATen/ATen.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/TensorFactories.h>
+#include <ATen/InitialTensorOptions.h>
 #include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/TensorFactories.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
-
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
+
 #include <thrust/device_ptr.h>
-#include <thrust/sort.h>
 #include <thrust/execution_policy.h>
 #include <thrust/sequence.h>
+#include <thrust/sort.h>
+#include <cub/cub.cuh>
 
 #include <algorithm>
-#include <cstddef>
 #include <cmath>
+#include <cstddef>
+#include <limits>
 
 namespace at {
 namespace native {
 
 Tensor& eye_out_cuda(Tensor& result, int64_t n) {
-  return at::native::eye_out_cuda(result, n, /*m=*/-1);
+  // the default value of `m` equals to `n`
+  return at::native::eye_out_cuda(result, n, n);
 }
 
 Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
-
-  if(m < 0) {
-    m = n;
-  }
+  TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
   result.resize_({n, m});
   result.zero_();
@@ -43,16 +44,16 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
-Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
-  AT_ASSERT(options.device().type() == at::DeviceType::CUDA);
-  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
+Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+  AT_ASSERT(device_or_default(device_opt).is_cuda());
+  TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 
   auto* allocator = at::cuda::getCUDADeviceAllocator();
-  int64_t nelements = prod_intlist(size);
-  auto dtype = options.dtype();
-  int64_t size_bytes = nelements * dtype.itemsize();
+  int64_t nelements = c10::multiply_integers(size);
+  auto dtype = dtype_or_default(dtype_opt);
+  auto dtype_meta = scalarTypeToTypeMeta(dtype);
+  int64_t size_bytes = nelements * dtype_meta.itemsize();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,
@@ -61,29 +62,26 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
       /*resizeable=*/true);
 
   auto tensor =
-      detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA, dtype);
+      detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDA, dtype_meta);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  TORCH_CHECK(
-    !(options.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
-  auto memory_format = options.memory_format_opt().value_or(optional_memory_format.value_or(MemoryFormat::Contiguous));
+  auto memory_format = memory_format_opt.value_or(MemoryFormat::Contiguous);
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
 
-Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
-  auto t = at::native::empty_cuda({0}, options);
+Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  auto t = at::native::empty_cuda({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   at::native::resize_impl_cuda_(t.unsafeGetTensorImpl(), size, stride);
   return t;
 }
 
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
+  TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
   check_supported_max_int_with_precision(n, result);
 
   result.resize_({n});
@@ -107,28 +105,40 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
   // Generate random values for the keys array
   AT_DISPATCH_ALL_TYPES(
     result.scalar_type(), "randperm_out_cuda", [&] {
+      TORCH_CHECK(n <= std::numeric_limits<int>::max(),
+        "randperm of tensors larger than INT_MAX is not supported yet in pytorch");
+
       auto keys = at::empty(result.sizes(), result.options()).random_(generator);
-      auto keys_data = thrust::device_ptr<scalar_t>(keys.data_ptr<scalar_t>());
+      auto range = at::arange(n, result.options());
+      auto keys_tmp = at::empty_like(keys);
 
       // shuffled_data points to the underlying data of the output tensor if the tensor is contiguous; otherwise it
       // points to a new tensor.
       Tensor shuffled;
-      thrust::device_ptr<scalar_t> shuffled_data;
+      scalar_t *shuffled_data;
       if (result.is_contiguous()) {
-        shuffled_data = thrust::device_ptr<scalar_t>(result.data_ptr<scalar_t>());
+        shuffled_data = result.data_ptr<scalar_t>();
       } else {
         shuffled = at::empty(n, result.options());
-        shuffled_data = thrust::device_ptr<scalar_t>(shuffled.data_ptr<scalar_t>());
+        shuffled_data = shuffled.data_ptr<scalar_t>();
       }
 
-      auto state = globalContext().getTHCState();
-      THCThrustAllocator thrustAlloc(state);
-      auto policy = thrust::cuda::par(thrustAlloc).on(at::cuda::getCurrentCUDAStream());
-
-      thrust::sequence(policy, shuffled_data, shuffled_data + n);
-
       // Use the sorted order of keys to rearrange the result array
-      thrust::sort_by_key(policy, keys_data, keys_data + n, shuffled_data);
+      void *d_temp_storage = nullptr;
+      size_t temp_storage_bytes = 0;
+
+      cub::DeviceRadixSort::SortPairs(
+        nullptr, temp_storage_bytes,
+        keys.data_ptr<scalar_t>(), keys_tmp.data_ptr<scalar_t>(),
+        range.data_ptr<scalar_t>(), shuffled_data, n,
+        0, sizeof(scalar_t) * 8, at::cuda::getCurrentCUDAStream());
+      auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+      auto dataPtr = allocator.allocate(temp_storage_bytes);
+      cub::DeviceRadixSort::SortPairs(
+        dataPtr.get(), temp_storage_bytes,
+        keys.data_ptr<scalar_t>(), keys_tmp.data_ptr<scalar_t>(),
+        range.data_ptr<scalar_t>(), shuffled_data, n,
+        0, sizeof(scalar_t) * 8, at::cuda::getCurrentCUDAStream());
 
       if (!result.is_contiguous()) {
         result.copy_(shuffled);
@@ -327,11 +337,12 @@ void tril_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor tril_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  check_args(row, col, layout_opt);
 
   auto tril_size = get_tril_size(row, col, offset);
-  auto tensor = empty_cuda({2, tril_size}, options);
+  auto tensor = empty_cuda({2, tril_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   if (tril_size > 0) {
     auto m_first_row = offset > 0 ?
@@ -361,6 +372,7 @@ Tensor tril_indices_cuda(
         col,
         tril_size - rectangle_size,
         tril_size);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
 
@@ -401,11 +413,12 @@ void triu_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor triu_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  check_args(row, col, layout_opt);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
-  auto tensor = empty_cuda({2, triu_size}, options);
+  auto tensor = empty_cuda({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   if (triu_size > 0) {
     // # of triu elements in the first row
@@ -437,6 +450,7 @@ Tensor triu_indices_cuda(
         col,
         rectangle_size,
         triu_size);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
 

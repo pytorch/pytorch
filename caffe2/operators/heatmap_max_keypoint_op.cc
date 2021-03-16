@@ -172,12 +172,4 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     ") -> Tensor keypoints",
     HeatmapMaxKeypointOpFloatCPU);
 
-C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
-    HeatmapMaxKeypoint2,
-    "__caffe2::HeatmapMaxKeypoint("
-      "Tensor heatmaps, "
-      "Tensor bboxes_in, "
-      "bool should_output_softmax = True"
-    ") -> Tensor keypoints",
-    HeatmapMaxKeypointOpFloatCPU);
 // clang-format on

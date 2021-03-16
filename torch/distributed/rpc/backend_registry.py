@@ -3,8 +3,10 @@ import collections
 from datetime import timedelta
 import enum
 
+import torch
 import torch.distributed as dist
 
+from . import api
 from . import constants as rpc_constants
 
 
@@ -26,15 +28,17 @@ _backend_type_doc = """
 """
 
 # Create an enum type, `BackendType`, with empty members.
-BackendType = enum.Enum(value="BackendType", names={})
-BackendType.__repr__ = _backend_type_repr
+# Can't handle Function Enum API (mypy bug #9079)
+BackendType = enum.Enum(value="BackendType", names=dict())  # type: ignore[misc]
+# Unable to assign a function a method (mypy bug #2427)
+BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
 BackendType.__doc__ = _backend_type_doc
 
 def backend_registered(backend_name):
     """
     Checks if backend_name is registered as an RPC backend.
 
-    Arguments:
+    Args:
         backend_name (str): string to identify the RPC backend.
     Returns:
         True if the backend has been registered with ``register_backend``, else
@@ -48,7 +52,7 @@ def register_backend(
 ):
     """Registers a new RPC backend.
 
-    Arguments:
+    Args:
         backend_name (str): backend string to identify the handler.
         construct_rpc_backend_options_handler (function):
             Handler that is invoked when
@@ -71,8 +75,10 @@ def register_backend(
         },
         **existing_enum_dict
     )
-    BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)
-    BackendType.__repr__ = _backend_type_repr
+    # Can't handle Function Enum API (mypy bug #9079)
+    BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)  # type: ignore[misc]
+    # Unable to assign a function a method (mypy bug #2427)
+    BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
     BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 
@@ -151,6 +157,7 @@ def _process_group_init_backend_handler(
 
     # TODO: add try-except and destroy _agent in all processes if any fails.
     return ProcessGroupAgent(
+        store,
         name,
         group,
         rpc_backend_options.num_send_recv_threads,
@@ -183,6 +190,57 @@ def _tensorpipe_construct_rpc_backend_options_handler(
     )
 
 
+# detect if any worker has invalid device_map configurations, and return
+# names of failed workers
+def _tensorpipe_check_device_maps(agent, device_maps):
+    if device_maps is None:
+        device_maps = {}
+
+    def check_one_worker(name, device_maps, all_device_counts):
+        device_count = all_device_counts[name]
+        wrong_worker_names = set(device_maps) - set(all_device_counts)
+        if wrong_worker_names:
+            raise ValueError(f"Wrong worker names: {wrong_worker_names}")
+        for worker_name in all_device_counts:
+            remote_device_count = all_device_counts[worker_name]
+            if worker_name in device_maps:
+                device_map = device_maps[worker_name]
+                key_set = set(device_map.keys())
+                val_set = set(device_map.values())
+                if not all([
+                    len(device_map) == len(key_set),
+                    len(device_map) == len(val_set),  # check 1-to-1 mapping
+                    min(key_set) >= 0,
+                    max(key_set) < device_count,  # check local range
+                    min(val_set) >= 0,
+                    max(val_set) < remote_device_count  # check remote range
+                ]):
+                    raise ValueError(
+                        f"Invalid device_map configuration on {name}:\n"
+                        f"device_maps = {device_maps}"
+                    )
+
+    gathered = api._all_gather([torch.cuda.device_count(), device_maps])
+    all_device_counts = {name: gathered[name][0] for name in gathered}
+    all_device_maps = {name: gathered[name][1] for name in gathered}
+    for worker_name in all_device_maps:
+        worker_device_maps = all_device_maps[worker_name]
+        check_one_worker(worker_name, worker_device_maps, all_device_counts)
+
+    # passed all checked, construct reverse mapping for return values
+    reverse_device_maps = {}
+    local_name = api.get_worker_info().name
+    for worker_name in all_device_maps:
+        remote_device_maps = all_device_maps[worker_name]
+        if local_name in remote_device_maps:
+            remote_device_map = remote_device_maps[local_name]
+            reverse_device_maps[worker_name] = {
+                remote_device_map[k]: k for k in remote_device_map
+            }
+
+    agent._set_reverse_device_maps(reverse_device_maps)
+
+
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
     from . import TensorPipeRpcBackendOptions
     from . import TensorPipeAgent
@@ -199,6 +257,14 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             )
         )
 
+    if torch.cuda.is_available():
+        # It's necessary to initialize PyTorch CUDA states here (e.g.,
+        # CUDACachingAllocator). If this is missing, we could hit errors like
+        # "allocator not initialized", because other processes might send
+        # CUDA-related RPC request to this process before user code in this
+        # process initializes its PyTorch CUDA states.
+        torch.cuda.init()
+
     # The agent's join method is required to behave like a barrier and perform
     # collective operations, for which it relies on a process group, instead of
     # re-implementing this on top of RPCs.
@@ -206,9 +272,20 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     group = _init_process_group(store, rank, world_size)
 
     # TODO: add try-except and destroy _agent in all processes if any fails.
-    return TensorPipeAgent(
+    agent = TensorPipeAgent(
         store, name, rank, world_size, group, rpc_backend_options
     )
+
+    api._init_rpc_states(agent)
+
+    try:
+        _tensorpipe_check_device_maps(agent, rpc_backend_options.device_maps)
+        agent.join()
+    except Exception:
+        api.shutdown()
+        raise
+
+    return agent
 
 
 register_backend(

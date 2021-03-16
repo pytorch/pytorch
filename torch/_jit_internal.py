@@ -8,15 +8,17 @@ import contextlib
 import collections
 import enum
 import inspect
+import ast
 import weakref
 import warnings
+from textwrap import dedent
 import torch
 import sys
+import builtins
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
-from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
@@ -78,7 +80,7 @@ def createResolutionCallbackFromEnv(lookup_base):
             value, len_parsed = parseNestedExpr(expr, module)
             assert len_parsed == len(expr), "whole expression was not parsed, falling back to c++ parser"
             return value
-        except Exception as e:
+        except Exception:
             """
             The python resolver fails in several cases in known unit tests, and is intended
             to fall back gracefully to the c++ resolver in general.  For example, python 2 style
@@ -192,6 +194,9 @@ def get_closure(fn):
 # functions will be defined at a global scope like MyGlobalClass. In cases
 # where they are not, it is possible to work around issues by declaring the
 # values global in the function.
+# In Python 3.9 declaring class as global will make it invisible to
+# `inspect.getsource`, see https://bugs.python.org/issue42666 .
+# This could be worked around by manualy adding it to `global()` dictionary.
 
 
 
@@ -226,6 +231,129 @@ def can_compile_class(cls):
     return all(has_code)
 
 
+def get_callable_argument_names(fn):
+    """
+    Gets names of all POSITIONAL_OR_KEYWORD arguments for callable `fn`.
+    Returns an empty list when other types of arguments are present.
+
+    This is used by `torch.jit.trace` to assign meaningful argument names to
+    traced functions and modules.
+
+    Args:
+        fn: A callable.
+    Returns:
+        Argument names: List[str]
+    """
+    # inspect.signature may fail, give up in that case.
+    try:
+        callable_signature = inspect.signature(fn)
+    except Exception:
+        return []
+
+    argument_names = []
+    for name, param in callable_signature.parameters.items():
+        # All four other types of arguments do not map to individual values
+        # with a keyword as name.
+        if not param.kind == param.POSITIONAL_OR_KEYWORD:
+            return []
+
+        argument_names.append(name)
+
+    return argument_names
+
+
+def get_annotation_str(annotation):
+    """
+    Convert an AST node containing a type annotation to the string present in the source
+    that represents the same annotation.
+    """
+    if isinstance(annotation, ast.Name):
+        return annotation.id
+    elif isinstance(annotation, ast.Attribute):
+        return '.'.join([get_annotation_str(annotation.value), annotation.attr])
+    elif isinstance(annotation, ast.Subscript):
+        # In Python3.9+ subscript indicies are not wrapped in ast.Index
+        subscript_slice = annotation.slice if sys.version_info >= (3, 9) else annotation.slice.value  # type: ignore
+        return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
+    elif isinstance(annotation, ast.Tuple):
+        return ','.join([get_annotation_str(elt) for elt in annotation.elts])
+    elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
+        return f"{annotation.value}"
+
+    # If an AST node is not handled here, it's probably handled in ScriptTypeParser.
+    return None
+
+
+def get_type_hint_captures(fn):
+    """
+    Get a dictionary containing type resolution mappings necessary to resolve types
+    for the literal annotations on 'fn'. These are not considered to be closed-over by fn
+    and must be obtained separately (e.g. using this function).
+
+    Args:
+        fn: A callable.
+    Returns:
+        A Dict[str, Any] containing a mapping from the literal annotations used on
+        fn to the Python objects they refer to.
+    """
+    # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
+    # types are strings. These are only understood by TorchScript in the context of a type annotation
+    # that refers to a class in its own definition, but trying to include a mapping for this in the result
+    # function would cause infinite recursion because the class is currently being compiled.
+    # In addition, there is logic in ScriptTypeParser to handle this.
+    signature = inspect.signature(fn)
+    name_to_type = {
+        name: parameter.annotation
+        for name, parameter in signature.parameters.items()
+        if parameter.annotation is not inspect.Parameter.empty and not isinstance(parameter.annotation, str)
+    }
+
+    # Then, get the literal type annotations from the function declaration
+    # by source inspection. This accounts for the case in which aliases are used
+    # to annotate the arguments (e.g device_t = torch.device, and then d: device_t).
+    src = inspect.getsource(fn)
+
+    # frontend.py cannot be used here because it includes _jit_internal, so use ast instead.
+    a = ast.parse(dedent(src))
+    if len(a.body) != 1 or not isinstance(a.body[0], ast.FunctionDef):
+        raise RuntimeError(f"Expected {fn} to be a function")
+    f = a.body[0]
+
+    # Prepare a dictionary of source annotation -> type, which will be the final result of this function,
+    # by using the parsed AST (f) to reconstruct source annotations as strings for each parameter and mapping
+    # them to the type object corresponding to the annotation via name_to_type using the parameter name.
+    annotation_to_type = {}
+
+    for arg in f.args.args:
+        # Get the source type annotation string for this argument if possible.
+        arg_annotation_str = get_annotation_str(arg.annotation) if arg.annotation else None
+
+        # If the argument has no annotation or get_annotation_str cannot convert it to a string,
+        # arg_annotation_str will be None. Skip this arg; ScriptTypeParser will probably handle
+        # this in the latter case.
+        if arg_annotation_str is None:
+            continue
+
+        # Insert {arg_annotation_str: type} into annotation_to_type if possible. One reason arg_name may not
+        # be present in name_to_type is that the annotation itself is a string and not a type object
+        # (common for self-refential annotations in classes). Once again, let ScriptTypeParser handle this.
+        arg_name = arg.arg
+        if arg_name in name_to_type:
+            annotation_to_type[arg_annotation_str] = name_to_type[arg_name]
+
+    # If there is a valid return annotation, include it in annotation_to_type. As with argument annotations,
+    # the literal annotation has to be convertible to a string by get_annotation_str, and the actual type
+    # of the annotation cannot be a string.
+    literal_return_annotation = get_annotation_str(f.returns)
+    valid_literal_annotation = literal_return_annotation is not None
+    return_annotation = signature.return_annotation
+    valid_return_annotation_type = return_annotation is not inspect.Parameter.empty and not isinstance(return_annotation, str)
+    if valid_literal_annotation and valid_return_annotation_type:
+        annotation_to_type[literal_return_annotation] = return_annotation
+
+    return annotation_to_type
+
+
 def createResolutionCallbackForClassMethods(cls):
     """
     This looks at all the methods defined in a class and pulls their closed-over
@@ -238,6 +366,7 @@ def createResolutionCallbackForClassMethods(cls):
 
     for fn in fns:
         captures.update(get_closure(fn))
+        captures.update(get_type_hint_captures(fn))
 
     def lookup_in_class(key):
         if key in captures:
@@ -366,9 +495,9 @@ def unused(fn):
             import torch.nn as nn
 
             class MyModule(nn.Module):
-                def __init__(self, use_memory_efficent):
+                def __init__(self, use_memory_efficient):
                     super(MyModule, self).__init__()
-                    self.use_memory_efficent = use_memory_efficent
+                    self.use_memory_efficient = use_memory_efficient
 
                 @torch.jit.unused
                 def memory_efficient(self, x):
@@ -383,7 +512,7 @@ def unused(fn):
                     else:
                         return x + 10
 
-            m = torch.jit.script(MyModule(use_memory_efficent=False))
+            m = torch.jit.script(MyModule(use_memory_efficient=False))
             m.save("m.pt")
 
             m = torch.jit.script(MyModule(use_memory_efficient=True))
@@ -502,10 +631,11 @@ def _copy_to_script_wrapper(fn):
 
 def module_has_exports(mod):
     for name in dir(mod):
-        item = getattr(mod, name)
-        if callable(item):
-            if get_torchscript_modifier(item) is FunctionModifiers.EXPORT:
-                return True
+        if hasattr(mod, name):
+            item = getattr(mod, name)
+            if callable(item):
+                if get_torchscript_modifier(item) is FunctionModifiers.EXPORT:
+                    return True
     return False
 
 def should_drop(fn):
@@ -637,11 +767,7 @@ def _get_overloaded_methods(method, mod_class):
 
 def is_tuple(ann):
     if ann is Tuple:
-        raise RuntimeError(
-            "Attempted to use Tuple without a "
-            "contained type. Please add a contained type, e.g. "
-            "Tuple[int]"
-        )
+        raise_error_container_parameter_missing("Tuple")
 
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
     if not hasattr(ann, '__module__'):
@@ -652,11 +778,7 @@ def is_tuple(ann):
 
 def is_list(ann):
     if ann is List:
-        raise RuntimeError(
-            "Attempted to use List without a "
-            "contained type. Please add a contained type, e.g. "
-            "List[int]"
-        )
+        raise_error_container_parameter_missing("List")
 
     if not hasattr(ann, '__module__'):
         return False
@@ -666,11 +788,7 @@ def is_list(ann):
 
 def is_dict(ann):
     if ann is Dict:
-        raise RuntimeError(
-            "Attempted to use Dict without "
-            "contained types. Please add contained type, e.g. "
-            "Dict[int, int]"
-        )
+        raise_error_container_parameter_missing("Dict")
 
     if not hasattr(ann, '__module__'):
         return False
@@ -680,11 +798,7 @@ def is_dict(ann):
 
 def is_optional(ann):
     if ann is Optional:
-        raise RuntimeError(
-            "Attempted to use Optional without a "
-            "contained type. Please add a contained type, e.g. "
-            "Optional[int]"
-        )
+        raise_error_container_parameter_missing("Optional")
 
     # Optional[T] is just shorthand for Union[T, None], so check for both
     def safe_is_subclass(the_type, super_type):
@@ -733,7 +847,7 @@ if torch.distributed.rpc.is_available():
 
 def is_final(ann):
     return ann.__module__ in {'typing', 'typing_extensions'} and \
-        (getattr(ann, '__origin__', None) is Final)
+        (getattr(ann, '__origin__', None) is Final or isinstance(ann, type(Final)))
 
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
@@ -761,7 +875,7 @@ def is_scripting():
             return x
 
         def linear(x):
-           if not torch.jit.is_scripting():
+           if torch.jit.is_scripting():
               return torch.linear(x)
            else:
               return unsupported_linear_op(x)
@@ -855,7 +969,7 @@ def _get_named_tuple_properties(obj):
             the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
             annotations.append(the_type)
         else:
-            annotations.append(torch._C.TensorType.get())
+            annotations.append(torch._C.TensorType.getInferred())
     return type(obj).__name__, fields, annotations
 
 
@@ -885,3 +999,111 @@ def _is_exception(obj):
     if not inspect.isclass(obj):
         return False
     return issubclass(obj, Exception)
+
+def raise_error_container_parameter_missing(target_type):
+    if target_type == 'Dict':
+        raise RuntimeError(
+            "Attempted to use Dict without "
+            "contained types. Please add contained type, e.g. "
+            "Dict[int, int]"
+        )
+    raise RuntimeError(
+        f"Attempted to use {target_type} without a "
+        "contained type. Please add a contained type, e.g. "
+        f"{target_type}[int]"
+    )
+
+
+def get_origin(target_type):
+    return getattr(target_type, "__origin__", None)
+
+
+def get_args(target_type):
+    return getattr(target_type, "__args__", None)
+
+
+def check_args_exist(target_type):
+    if target_type is List or target_type is list:
+        raise_error_container_parameter_missing("List")
+    elif target_type is Tuple or target_type is tuple:
+        raise_error_container_parameter_missing("Tuple")
+    elif target_type is Dict or target_type is dict:
+        raise_error_container_parameter_missing("Dict")
+    elif target_type is None or target_type is Optional:
+        raise_error_container_parameter_missing("Optional")
+
+
+# supports List/Dict/Tuple and Optional types
+# TODO support future
+def container_checker(obj, target_type):
+    origin_type = get_origin(target_type)
+    check_args_exist(target_type)
+    if origin_type is list or origin_type is List:
+        if not isinstance(obj, list):
+            return False
+        arg_type = get_args(target_type)[0]
+        arg_origin = get_origin(arg_type)
+        for el in obj:
+            # check if nested container, ex: List[List[str]]
+            if arg_origin:  # processes nested container, ex: List[List[str]]
+                if not container_checker(el, arg_type):
+                    return False
+            elif not isinstance(el, arg_type):
+                return False
+        return True
+    elif origin_type is Dict or origin_type is dict:
+        if not isinstance(obj, dict):
+            return False
+        key_type = get_args(target_type)[0]
+        val_type = get_args(target_type)[1]
+        for key, val in obj.items():
+            # check if keys are of right type
+            if not isinstance(key, key_type):
+                return False
+            val_origin = get_origin(val_type)
+            if val_origin:
+                if not container_checker(val, val_type):
+                    return False
+            elif not isinstance(val, val_type):
+                return False
+        return True
+    elif origin_type is Tuple or origin_type is tuple:
+        if not isinstance(obj, tuple):
+            return False
+        arg_types = get_args(target_type)
+        if len(obj) != len(arg_types):
+            return False
+        for el, el_type in zip(obj, arg_types):
+            el_origin = get_origin(el_type)
+            if el_origin:
+                if not container_checker(el, el_type):
+                    return False
+            elif not isinstance(el, el_type):
+                return False
+        return True
+    elif origin_type is Union:  # actually handles Optional Case
+        if obj is None:  # check before recursion because None is always fine
+            return True
+        optional_type = get_args(target_type)[0]
+        optional_origin = get_origin(optional_type)
+        if optional_origin:
+            return container_checker(obj, optional_type)
+        elif isinstance(obj, optional_type):
+            return True
+    return False
+
+
+def _isinstance(obj, target_type) -> bool:
+    origin_type = get_origin(target_type)
+    if origin_type:
+        return container_checker(obj, target_type)
+
+    # Check to handle weird python type behaviors
+    # 1. python 3.6 returns None for origin of containers without
+    #    contained type (intead of returning outer container type)
+    # 2. non-typed optional origin returns as none instead
+    #    of as optional in 3.6-3.8
+    check_args_exist(target_type)
+
+    # handle non-containers
+    return isinstance(obj, target_type)
