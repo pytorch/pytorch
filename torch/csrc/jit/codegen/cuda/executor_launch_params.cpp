@@ -10,7 +10,7 @@ namespace cuda {
 void LaunchParams::assertValid() {
   TORCH_INTERNAL_ASSERT(
       bdimx() * bdimz() * bdimz() > 0 &&
-          bdimx() * bdimz() * bdimz() <
+          bdimx() * bdimz() * bdimz() <=
               (int64_t)at::cuda::getCurrentDeviceProperties()
                   ->maxThreadsPerMultiProcessor,
       "Selected invalid number of threads for cuda: ",
