@@ -1,4 +1,5 @@
 import math
+import cmath
 import warnings
 
 import torch
@@ -66,6 +67,17 @@ _builtin_ops = [
     (math.isinf, "aten::isinf"),
     (math.degrees, "aten::degrees"),
     (math.radians, "aten::radians"),
+    (cmath.log, "aten::log"),
+    (cmath.exp, "aten::exp"),
+    (cmath.cos, "aten::cos"),
+    (cmath.sin, "aten::sin"),
+    (cmath.tan, "aten::tan"),
+    (cmath.asinh, "aten::asinh"),
+    (cmath.acosh, "aten::acosh"),
+    (cmath.atanh, "aten::atanh"),
+    (math.asinh, "aten::sinh"),
+    (math.acosh, "aten::cosh"),
+    (math.atanh, "aten::tanh"),
     (math.ldexp, "aten::ldexp"),
     (torch._assert, "aten::_assert"),
     (torch.autograd.grad, "aten::grad"),
