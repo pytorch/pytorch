@@ -46,7 +46,7 @@ def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
         names.append(name)
 
     # Make params regular Tensors instead of nn.Parameter
-    params = tuple(p.detach().requires_grad_() for p in orig_params)
+    params = tuple(p for p in orig_params)
     return params, names
 
 def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], as_params=False) -> None:

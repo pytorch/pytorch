@@ -134,7 +134,6 @@ if __name__ == '__main__':
         weight.grad = grad_weight.detach()
     # f()
     with CudaMemoryLeakCheck('simple_check'):
-        print("start")
         f()
 
     def f(x):
