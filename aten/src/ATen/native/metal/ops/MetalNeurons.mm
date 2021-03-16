@@ -19,10 +19,6 @@ Tensor neuronKernel(const Tensor& input, MPSCNNNeuron* neuron) {
   MPSImage* X = imageFromTensor(input);
   std::vector<int64_t> outputSize = input.sizes().vec();
   std::vector<int64_t> textureSize = outputSize;
-  //TODO: [T86657222] Remove this once we have fully implemented reshape
-  if (input.dim() == 2) {
-    textureSize = {outputSize[0], outputSize[1], 1, 1};
-  }
   MetalTensorImplStorage mt{outputSize};
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(textureSize, commandBuffer);
@@ -38,10 +34,6 @@ Tensor& neuronKernel_(Tensor& input, MPSCNNNeuron* neuron) {
   MPSImage* X = imageFromTensor(input);
   std::vector<int64_t> outputSize = input.sizes().vec();
   std::vector<int64_t> textureSize = outputSize;
-  //TODO: [T86657222] Remove this once we have fully implemented reshape
-  if (input.dim() == 2) {
-    textureSize = {outputSize[0], outputSize[1], 1, 1};
-  }
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   MPSImage* Y = createTemporaryImage(commandBuffer, input.sizes().vec());
   [neuron encodeToCommandBuffer:commandBuffer.buffer

@@ -306,7 +306,7 @@ bool test_addmm() {
       auto B1 =
           at::rand({1, OC}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
       auto Y1 = at::addmm(B1, X1, W1);
-      auto X2 = X1.view({N, IC, 1, 1}).contiguous().metal();
+      auto X2 = X1.metal();
       auto Y2 = at::addmm(B1, X2, W1).cpu();
       return almostEqual(Y1, Y2);
     });
