@@ -277,32 +277,32 @@ class TestViewOps(TestCase):
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes())
     def test_view_tensor_hsplit(self, device, dtype):
-        a = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
-        a_hsplit = a.hsplit(2)
-        for a_hsplit_tensor in a_hsplit:
-            self.assertTrue(self.is_view_of(a, a_hsplit_tensor))
-        a[2, 2, 2] = 7
-        self.assertEqual(a_hsplit[1][2, 0, 2], a[2, 2, 2])
+        t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        t_hsplit = t.hsplit(2)
+        for t_hsplit_tensor in t_hsplit:
+            self.assertTrue(self.is_view_of(t, t_hsplit_tensor))
+        t[2, 2, 2] = 7
+        self.assertEqual(t_hsplit[1][2, 0, 2], t[2, 2, 2])
 
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes())
     def test_view_tensor_vsplit(self, device, dtype):
-        a = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
-        a_vsplit = a.vsplit(2)
-        for a_vsplit_tensor in a_vsplit:
-            self.assertTrue(self.is_view_of(a, a_vsplit_tensor))
-        a[2, 2, 2] = 7
-        self.assertEqual(a_hsplit[1][0, 2, 2], a[2, 2, 2])
+        t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        t_vsplit = t.vsplit(2)
+        for t_vsplit_tensor in t_vsplit:
+            self.assertTrue(self.is_view_of(t, t_vsplit_tensor))
+        t[2, 2, 2] = 7
+        self.assertEqual(t_vsplit[1][0, 2, 2], t[2, 2, 2])
 
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes())
     def test_view_tensor_dsplit(self, device, dtype):
-        a = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
-        a_dsplit = a.dsplit(2)
-        for a_dsplit_tensor in a_dsplit:
-            self.assertTrue(self.is_view_of(a, a_dsplit_tensor))
-        a[2, 2, 2] = 7
-        self.assertEqual(a_hsplit[1][2, 2, 0], a[2, 2, 2])
+        t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        t_dsplit = t.dsplit(2)
+        for t_dsplit_tensor in t_dsplit:
+            self.assertTrue(self.is_view_of(t, t_dsplit_tensor))
+        t[2, 2, 2] = 7
+        self.assertEqual(t_dsplit[1][2, 2, 0], t[2, 2, 2])
 
     @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))

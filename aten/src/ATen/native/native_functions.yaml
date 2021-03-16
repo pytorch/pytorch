@@ -3318,22 +3318,24 @@
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
 
-- func: hsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+# sentinel argument added to make sure hsplit,vsplit and dsplit are able to be called with integer
+# argument. This will guarantee integer argument not be interpreted as int list of size 1.
+- func: hsplit.int(Tensor(a) self, int sections, int? sentinel=None) -> Tensor(a)[]
   variants: function, method
 
-- func: hsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+- func: hsplit.array(Tensor(a) self, int[] indices, int? sentinel=None) -> Tensor(a)[]
   variants: function, method
 
-- func: vsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+- func: vsplit.int(Tensor(a) self, int sections, int? sentinel=None) -> Tensor(a)[]
   variants: function, method
 
-- func: vsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+- func: vsplit.array(Tensor(a) self, int[] indices, int? sentinel=None) -> Tensor(a)[]
   variants: function, method
 
-- func: dsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
+- func: dsplit.int(Tensor(a) self, int sections, int? sentinel=None) -> Tensor(a)[]
   variants: function, method
 
-- func: dsplit.array(Tensor(a) self, int[] indices) -> Tensor(a)[]
+- func: dsplit.array(Tensor(a) self, int[] indices, int? sentinel=None) -> Tensor(a)[]
   variants: function, method
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)

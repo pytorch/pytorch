@@ -459,33 +459,34 @@ def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad):
     return inputs
 
 def sample_inputs_hsplit(op_info, device, dtype, requires_grad):
-    return (SampleInput(make_tensor((), device, dtype,
+    return (SampleInput(make_tensor((6,), device, dtype,
                                     low=None, high=None,
                                     requires_grad=requires_grad),
-                        args=(2),),
-            SampleInput(make_tensor((M), device, dtype,
-                                    low=None, high=None,
-                                    requires_grad=requires_grad),
-                        args=(2),),
+                        args=(2,),),
             SampleInput(make_tensor((S, S, S), device, dtype,
                                     low=None, high=None,
                                     requires_grad=requires_grad),
-                        args=([1, 2, 3],),)
+                        args=([1, 2, 3],),),)
 
 def sample_inputs_vsplit(op_info, device, dtype, requires_grad):
-    return (SampleInput(make_tensor((M, S), device, dtype,
+    return (SampleInput(make_tensor((6, S), device, dtype,
                                     low=None, high=None,
                                     requires_grad=requires_grad),
-                        args=(2),),
+                        args=(2,),),
             SampleInput(make_tensor((S, S, S), device, dtype,
                                     low=None, high=None,
-                                    requires_grad=requires_grad),),)
+                                    requires_grad=requires_grad),
+                        args=([1, 2, 3],),),)
 
 def sample_inputs_dsplit(op_info, device, dtype, requires_grad):
     return (SampleInput(make_tensor((S, S, S), device, dtype,
                                     low=None, high=None,
                                     requires_grad=requires_grad),
-                        args=([1, 2, 3],),)
+                        args=([1, 2, 3],),),
+            SampleInput(make_tensor((S, S, 6), device, dtype,
+                                    low=None, high=None,
+                                    requires_grad=requires_grad),
+                        args=(2,),),)
 
 def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
     # Each test case consists of the sizes in the chain of multiplications
@@ -781,22 +782,6 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad):
                         low=None, high=None,
                         requires_grad=requires_grad)
         samples.append(SampleInput(t, args=(dim, keepdim)))
-
-    return tuple(samples)
-
-def sample_inputs_logcumsumexp(self, device, dtype, requires_grad):
-    inputs = (
-        ((S, S, S), 0),
-        ((S, S, S), 1),
-        ((), 0),
-    )
-    samples = []
-
-    for shape, dim in inputs:
-        t = make_tensor(shape, device, dtype,
-                        low=None, high=None,
-                        requires_grad=requires_grad)
-        samples.append(SampleInput(t, args=(dim,)))
 
     return tuple(samples)
 
@@ -2661,20 +2646,6 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
 
     return samples
 
-def sample_inputs_tensordot(self, device, dtype, requires_grad, **kwargs):
-    cases = (
-        ((2, 2, 2), (2, 2, 2), (2)),
-        ((2, 2, 1), (2, 1, 2), ([0, 1], [2, 0])),
-    )
-    samples = []
-    for first_shape, second_shape, dims in cases:
-        samples.append(SampleInput(make_tensor(first_shape, device, dtype,
-                                   requires_grad=requires_grad),
-                       args=(make_tensor(second_shape, device, dtype,
-                             requires_grad=requires_grad),),
-                       kwargs=dict(dims=dims,)))
-    return tuple(samples)
-
 def sample_inputs_kron(op_info, device, dtype, requires_grad):
     test_cases = (
         ((S, S), (M, L)),
@@ -4213,28 +4184,16 @@ op_db: List[OpInfo] = [
            skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            sample_inputs_func=sample_inputs_tensor_split,),
     OpInfo('hsplit',
-           dtypes=all_types_and_complex_and(torch.bool),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
-           test_inplace_grad=False,
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            sample_inputs_func=sample_inputs_hsplit,),
-    OpInfo('tensor_vsplit',
-           dtypes=all_types_and_complex_and(torch.bool),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+    OpInfo('vsplit',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
-           test_inplace_grad=False,
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            sample_inputs_func=sample_inputs_vsplit,),
-    OpInfo('tensor_dsplit',
-           dtypes=all_types_and_complex_and(torch.bool),
-           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+    OpInfo('dsplit',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
-           test_inplace_grad=False,
-           skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            sample_inputs_func=sample_inputs_dsplit,),
     OpInfo('triangular_solve',
            op=torch.triangular_solve,
@@ -4649,37 +4608,19 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_kron),
     OpInfo('inner',
-           dtypes=floating_and_complex_types_and(torch.half),
-           dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
-           dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_inner),
-    OpInfo('tensordot',
-           dtypes=floating_and_complex_types_and(torch.half),
-           dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
-           dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           safe_casts_outputs=True,
-           sample_inputs_func=sample_inputs_tensordot,
+           dtypes=floating_types(),
+           dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           # BFloat16 support on CUDA requires CUDA 11 and SM53
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
+                                           *[torch.bfloat16] if CUDA11OrLater else []),
+           dtypesIfROCM=floating_types_and(torch.half),
+           supports_out=True,
+           sample_inputs_func=sample_inputs_inner,
            skips=(
-               # Currently failing due to an INTERNAL_ASSERT_FAILED error.
-               # Reference: https://github.com/pytorch/pytorch/issues/56314
-               SkipInfo("TestCommon", "test_variant_consistency_jit", dtypes=[torch.float32]),
-               # Skip operator schema test because this is a functional and not an operator.
-               # Reference: https://github.com/pytorch/pytorch/issues/54574
-               SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
-           )
-           ),
-    OpInfo('logcumsumexp',
-           dtypes=floating_types_and(),
-           dtypesIfCUDA=floating_types_and(torch.half),
-           skips=(
+               # Reference Issue: https://github.com/pytorch/pytorch/issues/56022
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               SkipInfo('TestCommon', 'test_out', dtypes=(torch.float32,), device_type='cuda'),
-               # logcumsumexp_backward not implemented for 'Half
-               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16,), device_type='cuda'),
-           ),
-           sample_inputs_func=sample_inputs_logcumsumexp),
+               SkipInfo('TestCommon', 'test_out', dtypes=[torch.float32]),
+           )),
     UnaryUfuncInfo('sigmoid',
                    aliases=('special.expit', ),
                    ref=reference_sigmoid if TEST_SCIPY else _NOTHING,
@@ -5134,6 +5075,9 @@ def method_tests():
         ('renorm', (S, S, S), (2, 1, 0.5), 'dim', (), [1]),
         ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
         ('renorm', (S, S, S), (inf, 2, 0.5), 'norm_inf'),
+        ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
+        ('logcumsumexp', (S, S, S), (1,), 'dim1', (), [0]),
+        ('logcumsumexp', (), (0,), 'dim0_scalar', (), [0]),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
         ('addmm', (S, M), ((S, S), (S, M)), '', (True, ['aten::add', 'aten::mm'])),
         ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs', (True, ['aten::add', 'aten::mm'])),
