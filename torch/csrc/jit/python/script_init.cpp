@@ -422,20 +422,21 @@ static TypePtr getTensorType(const at::Tensor& t, bool complete) {
 }
 
 static TupleTypePtr getTupleTensorType(
-    const Stack::const_iterator& s_iter,
+    Stack::const_iterator& s_iter,
     const Stack::const_iterator& s_iter_end,
     const TypePtr& tupleType,
     bool complete) {
   AT_ASSERT(tupleType->kind() == TupleType::Kind);
-  AT_ASSERT(s_iter != s_iter_end);
 
   std::vector<TypePtr> types;
   for (const auto& subType : tupleType->containedTypes()) {
+    AT_ASSERT(s_iter != s_iter_end);
     if (subType->kind() == TupleType::Kind) {
       types.push_back(
-          getTupleTensorType(s_iter + 1, s_iter_end, subType, complete));
+          getTupleTensorType(s_iter, s_iter_end, subType, complete));
     } else {
       types.push_back(getTensorType(s_iter->toTensor(), complete));
+      s_iter++;
     }
   }
   return TupleType::create(types);

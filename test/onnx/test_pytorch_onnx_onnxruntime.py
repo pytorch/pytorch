@@ -727,6 +727,23 @@ class TestONNXRuntime(unittest.TestCase):
         d = torch.randn(2, 3)
         self.run_test(MyModel(), (a, b, c, d))
 
+    def test_tuple_input(self):
+        class TupleModel(torch.nn.Module):
+            def forward(self, a: Tuple[torch.Tensor, torch.Tensor]):
+                return a
+
+        x = (torch.randn(3, 4), torch.randn(4, 3))
+        self.run_test(TupleModel(), input=(x,))
+
+    def test_nested_tuple_input(self):
+        class NestedTupleModel(torch.nn.Module):
+            def forward(self, a, b: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]):
+                return a + b[0] + b[1][0] + b[1][1]
+
+        x = torch.randn(4, 5)
+        y = (torch.randn(4, 5), (torch.randn(1, 5), torch.randn(4, 1)))
+        self.run_test(NestedTupleModel(), input=(x, y))
+
     @disableScriptTest()
     def test_optional_inputs_with_no_optionals(self):
         class NoOptionalModel(torch.nn.Module):
