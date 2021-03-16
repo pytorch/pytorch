@@ -696,8 +696,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
                   oss.str(),
                   "which is not yet supported. Please file a feature request "
                   "issue in PyTorch GitHub repo."),
-              messageId
-          );
+              messageId);
           break;
         }
       }
