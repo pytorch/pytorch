@@ -842,6 +842,10 @@ IValue IValue::deepcopy(
   return copy;
 }
 
+void IValue::reportToTensorTypeError() const {
+  TORCH_CHECK(false, "Expected Tensor but got ", tagKind());
+}
+
 std::string ivalue::Object::name() const {
   return type()->name()->qualifiedName();
 }

@@ -1326,7 +1326,7 @@ jobs:
           command: |
             set -e
             export IN_CI=1
-            export CROSS_COMPILE_ARM=1
+            export CROSS_COMPILE_ARM64=1
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
@@ -7133,16 +7133,16 @@ workflows:
           build_environment: "pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7"
       - pytorch_linux_build:
-          name: pytorch_linux_bionic_py3_6_clang9_build
+          name: pytorch_linux_bionic_py3_6_clang9_noarch_build
           requires:
             - "docker-pytorch-linux-bionic-py3.6-clang9"
-          build_environment: "pytorch-linux-bionic-py3.6-clang9-build"
+          build_environment: "pytorch-linux-bionic-py3.6-clang9-noarch-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
       - pytorch_linux_test:
-          name: pytorch_linux_bionic_py3_6_clang9_test
+          name: pytorch_linux_bionic_py3_6_clang9_noarch_test
           requires:
-            - pytorch_linux_bionic_py3_6_clang9_build
-          build_environment: "pytorch-linux-bionic-py3.6-clang9-test"
+            - pytorch_linux_bionic_py3_6_clang9_noarch_build
+          build_environment: "pytorch-linux-bionic-py3.6-clang9-noarch-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
           resource_class: large
       - pytorch_linux_build:
