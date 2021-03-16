@@ -1461,10 +1461,13 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
         samples = (SampleInput((_make_tensor_helper((S, S)), 0.5)),
                    SampleInput((_make_tensor_helper(()), 0.5)),
                    SampleInput((_make_tensor_helper((S, S)), 1.5j)),
-                   SampleInput((_make_tensor_helper(()), 1.5j)),)  # type: ignore
+                   SampleInput((_make_tensor_helper(()), 1.5j)),
+                   SampleInput((_make_tensor_helper((S, S)), 0.4 + 1.2j)),
+                   SampleInput((_make_tensor_helper(()), 1.2 + 1.76j)))  # type: ignore
 
         scalar_args = [(_make_tensor_helper((S, S)), 0.5), (_make_tensor_helper(()), 0.5),
-                       (_make_tensor_helper((S, S)), 2.7j), (_make_tensor_helper(()), 2.7j)]  # type: ignore
+                       (_make_tensor_helper((S, S)), 2.7j), (_make_tensor_helper(()), 2.7j),
+                       (_make_tensor_helper((S, S)), 1 - 2.7j), (_make_tensor_helper(()), 1 + 2.7j)]  # type: ignore
 
         alphas = [int_alpha, float_alpha]
         if dtype.is_complex:
