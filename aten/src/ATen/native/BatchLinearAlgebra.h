@@ -23,13 +23,11 @@ void lapackEig(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *w,
 template<class scalar_t>
 void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
-<<<<<<< HEAD
 template <class scalar_t, class value_t = scalar_t>
 void lapackSyevd(char jobz, char uplo, int n, scalar_t* a, int lda, value_t* w, scalar_t* work, int lwork, value_t* rwork, int lrwork, int* iwork, int liwork, int* info);
-=======
+
 template <class scalar_t>
 void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t* a, int lda, scalar_t* b, int ldb, int* info);
->>>>>>> upstream/master
 
 #endif
 
