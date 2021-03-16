@@ -9,12 +9,20 @@ from torch.testing._internal.common_utils import get_comparison_dtype as _get_co
 
 __all__ = ["assert_tensors_equal", "assert_tensors_allclose"]
 
-try:
+
+# The module 'pytest' will be imported if the 'pytest' runner is used. This will only give false-positives in case
+# the test directly or indirectly imports 'pytest', but is run by another runner such as 'unittest'.
+_RUN_BY_PYTEST = "pytest" in sys.modules
+
+
+# The Usage(Error|Warning) should be raised in case the test function is not used correctly. With this the user is able
+# to differentiate between a test failure (there is a bug in the tested code) and a test error (there is a bug in the
+# test). If pytest is the test runner, we use the built-in UsageError instead our custom one.
+if _RUN_BY_PYTEST:
     import pytest
 
     UsageError = pytest.UsageError
-except ImportError:
-
+else:
     class UsageError(Exception):
         pass
 
@@ -38,11 +46,9 @@ def _hide_internal_traceback_pytest(fn):
 
     This is a :mod:`pytest`
     `feature <https://docs.pytest.org/en/stable/example/simple.html#writing-well-integrated-assertion-helpers>`_
-    and thus this is a no-op if it is not present.
+    and thus this is a no-op if :mod:`pytest` is not present.
     """
-    # The module 'pytest' will be imported if the 'pytest' runner is used. This will only give false-positives in case
-    # the test directly or indirectly imports 'pytest', but is run by another runner such as 'unittest'.
-    if "pytest" not in sys.modules:
+    if not _RUN_BY_PYTEST:
         return fn
 
     @functools.wraps(fn)
