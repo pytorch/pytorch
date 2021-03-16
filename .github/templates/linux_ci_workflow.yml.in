@@ -41,6 +41,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          submodules: recursive
       - name: Log in to ECR
         run: |
           $(aws ecr get-login --no-include-email --region us-east-1)
