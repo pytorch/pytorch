@@ -391,6 +391,77 @@ struct TORCH_API {name} : public {parent_class} {{
 }};
 """
 
+refactor_count = 0
+
+@with_native_function
+def compute_out_convention_refactor(g: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
+    if isinstance(g, StructuredNativeFunctions) or local.use_c10_dispatcher() is UseC10Dispatcher.full:
+        return []
+
+    returns_type = native.returns_type(g.func.returns)
+    args = native.arguments(g.func)
+
+    if not g.func.is_out_fn():
+        # only handles out convention refactor in this one
+        return []
+
+    for arg in args:
+        # TensorOptions
+        if isinstance(arg.argument, TensorOptionsArguments):
+            print('quit because of ', arg.argument)
+            return []
+
+        # Alternative way would be to see if a.argument.type is an OptionalType and under the hood is a Tensor type?? 
+        # String matching seems to be easier 
+        if isinstance(arg.argument, Argument) and 'Tensor?' in str(arg.argument.type):
+            print('quit because of ', arg.argument)
+            return []
+
+    global refactor_count
+    refactor_count += 1
+    if refactor_count > 100:
+        return []
+
+    f = g
+    ns = list(f.dispatch.values())
+
+    rs = []
+    # Sometimes a function name shows up multiple times; only generate
+    # it once!
+    seen = set()
+    for n in ns:
+        if n in seen:
+            continue
+        if "legacy::" in n:
+            continue
+        seen.add(n)
+
+        if n == 'math_addr_out':
+            print(f)
+
+        current_signature = "([\s&\*]+{}\\s*\\()([^T(){{}}]*Tensor\s*&[^,]*),\\s*({}[^,)]*)\\)(\\s*\\{{)".format(
+#                re.escape(returns_type).replace("\\&", "&").replace("\\ ", "\\s*"),
+            re.escape(n),
+            "[^,]*,\\s*".join(re.escape(a.type).replace("\\&", "&").replace("\\ ", "\\s*") for a in args[1:])
+#                "\\s*,\\s*".join(re.escape(a.no_default().decl()).replace("\\ ", "\\s*") for a in args)
+        )
+
+        current_signature = current_signature.replace('Tensor', '(?:Tensor|SparseTensor)')
+        current_signature = current_signature.replace('c10::optional', '(?:c10::)?optional')
+        current_signature = current_signature.replace('MemoryFormat', '(?:c10::)?MemoryFormat')
+
+#        with local.parametrize(
+#            use_c10_dispatcher=UseC10Dispatcher.full,
+#        ):
+#            returns_type = native.returns_type(f.func.returns)
+#            args = native.arguments(f.func)
+#            c10full_signature = "{} {}({}) {{".format(returns_type, n, ', '.join(a.no_default().decl() for a in args))
+        rs.append(f"""\
+  - fastmod '{current_signature}' '${{1}}${{3}}, ${{2}})${{4}}' aten/src/ATen/native/
+""")
+
+    return rs
+
 # Generates RegisterBackendSelect.cpp, a series of kernels which provide
 # specialized computation of dispatch key for operator signatures which cannot
 # be easily done automatically using templating.
@@ -1028,6 +1099,10 @@ def main() -> None:
     })
     cpu_fm.write('NativeFunctions.h', lambda: {
         'native_function_declarations': list(concatMap(compute_native_function_declaration, grouped_native_functions)),
+    })
+
+    cpu_fm.write('Refactors.yaml', lambda: {
+        'refactors': list(concatMap(compute_out_convention_refactor, grouped_native_functions)),
     })
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
