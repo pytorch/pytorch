@@ -7,7 +7,7 @@ namespace at { namespace native {
 template<template<class> class Op>
 std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, 
                                            TensorList tensors2, 
-                                           Scalar alpha = 1, 
+                                           const Scalar& = 1, 
                                            bool promote_integer_float = false) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     auto result_type = get_result_type(tensors1[0], tensors2[0], promote_integer_float);
@@ -43,7 +43,7 @@ std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1,
 }
 
 template<template<class> class Op>
-void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2, Scalar alpha = 1) {
+void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2, const Scalar& alpha = 1) {
     std::vector<std::vector<at::Tensor>> tensor_lists;
     tensor_lists.emplace_back(tensors1.vec());
     tensor_lists.emplace_back(tensors2.vec());
@@ -80,7 +80,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1
 }
 
 #define FOREACH_BINARY_OP_LIST_ALPHA(NAME, OP)                                                                          \
-void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList tensors2, Scalar alpha) {                \
+void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList tensors2, const Scalar& alpha) {                \
     check_foreach_api_restrictions(tensors1, tensors2);                                                                 \
     if (!can_use_fast_route({tensors1, tensors2}, alpha)) {                                                             \
         return at::native::foreach_tensor_##NAME##_list_kernel_slow_(tensors1, tensors2, alpha);                        \
@@ -89,7 +89,7 @@ void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList t
     foreach_tensor_list_op_<OP>(tensors1, tensors2, alpha);                                                             \
 }                                                                                                                       \
                                                                                                                         \
-std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1, TensorList tensors2, Scalar alpha) {  \
+std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1, TensorList tensors2, const Scalar& alpha) {  \
     check_foreach_api_restrictions(tensors1, tensors2);                                                                 \
     if (!can_use_fast_route({tensors1, tensors2}, alpha)) {                                                             \
         return at::native::foreach_tensor_##NAME##_list_kernel_slow(tensors1, tensors2, alpha);                         \

@@ -70,11 +70,19 @@ class Adam(Optimizer):
             amsgrad = group['amsgrad']
 
             grads = []
+<<<<<<< HEAD
+            exp_avgs = []
+            exp_avg_sqs = []
+            max_exp_avg_sqs = []
+            state_steps = []
+            beta1, beta2 = group['betas']
+=======
             states = []
             exp_avg = []
             exp_avg_sq = []
             max_exp_avg_sq = []
             params_with_grad = []
+>>>>>>> b52f6560b1 (Swap optimizers)
 
             for p in group['params']:
                 if p.grad is not None:
