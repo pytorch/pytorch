@@ -4605,6 +4605,21 @@ class TestNN(NNTestCase):
         self.assertIn('buf', l.state_dict())
         self.assertEqual(l.state_dict()['buf'], buf)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_thnn_conv2d_strided(self):
+        inputs = torch.randn(1, 4, 8, 8, dtype=torch.double, device="cuda", requires_grad=True)
+        weight = torch.randn(8, 4, 1, 1, dtype=torch.double, device="cuda", requires_grad=True)
+        bias = torch.randn(8, dtype=torch.double, device="cuda", requires_grad=True)
+        with torch.backends.cudnn.flags(enabled=False):
+            res = torch.nn.functional.conv2d(inputs, weight, bias, stride=2)
+        res_cpu = torch.nn.functional.conv2d(inputs.cpu(), weight.cpu(), bias.cpu(), stride=2)
+        self.assertEqual(res, res_cpu)
+        with torch.backends.cudnn.flags(enabled=False):
+            torch.autograd.gradcheck(
+                lambda x, w, b: torch.nn.functional.conv2d(x, w, b, stride=2),
+                (inputs, weight, bias)
+            )
+
     def test_Conv2d_inconsistent_types(self):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float)
         weights = torch.randn(1, 1, 3, 3, dtype=torch.double)
