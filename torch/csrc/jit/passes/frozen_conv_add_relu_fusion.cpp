@@ -46,7 +46,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
         %res = aten::cudnn_convolution_add_relu(%input, %weight, %z, %alpha, %bias, %stride, %padding, %dilation, %groups)
         return (%res))";
 
-  for (auto conv : conv_operators) {
+  for (const auto& conv : conv_operators) {
     TemplateEnv env;
     env.s("conv", conv);
     rewriter.RegisterRewritePattern(
