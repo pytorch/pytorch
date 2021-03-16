@@ -135,6 +135,7 @@ at::Tensor embedding_dense_double_backward(const at::Tensor & grad, const at::Te
 at::Tensor index_backward(at::Tensor zeros_like_self, const torch::List<c10::optional<Tensor>>& indices, const at::Tensor& grad);
 at::Tensor _cudnn_ctc_loss_backward(const at::Tensor& grad_out, const at::Tensor& loss, const at::Tensor& raw_grad, bool zero_infinity);
 at::Tensor elu_double_backward(const Tensor& grad, const Tensor& grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, const Tensor& self_or_result);
+at::Tensor sinc_backward(const at::Tensor& grad, const at::Tensor& self);
 
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v);

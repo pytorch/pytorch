@@ -1970,6 +1970,17 @@ Tensor elu_double_backward(
     }
 }
 
+Tensor sinc_backward(const Tensor& grad, const Tensor& self) {
+  Tensor self_scaled = at::ones_like(self);
+  Tensor scale_v;
+  Tensor pi = wrapped_scalar_tensor(Scalar(M_PI));
+  scale_v = grad *
+      ((pi * self * (pi * self).cos() - (pi * self).sin()) / (pi * self * self))
+          .conj();
+  scale_v.masked_fill_(self == 0, 0);
+  return self_scaled * scale_v;
+}
+
 Tensor slice_backward_wrapper(
     const at::Tensor& grad,
     const c10::IntArrayRef& input_sizes,

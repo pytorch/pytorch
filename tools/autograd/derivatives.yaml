@@ -984,7 +984,7 @@
   self: grad * self.cos().conj()
 
 - name: sinc(Tensor self) -> Tensor
-  self: grad * ((M_PI * self * (M_PI * self).cos() - (M_PI * self).sin()) / (M_PI * self * self)).conj()
+  self: sinc_backward(grad, self)
 
 - name: sinh(Tensor self) -> Tensor
   self: grad * self.cosh().conj()
