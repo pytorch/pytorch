@@ -186,7 +186,7 @@ bool InterpreterState::run(Stack& stack) {
         ++pc;
       } break;
       case DICT_CONSTRUCT: {
-        auto type = code_->types_[inst.X]->expect<at::DictType>();
+        const auto& type = code_->types_[inst.X]->expect<at::DictType>();
         dictConstruct(stack, type, inst.N);
         ++pc;
       } break;
