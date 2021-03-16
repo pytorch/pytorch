@@ -1057,6 +1057,9 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad):
     The first argument should be a square matrix or batch of square matrices, the second argument is a vector or batch of vectors.
     Empty, square, rectangular, batched square and batched rectangular input is generated.
     """
+    # Each column of the matrix is getting multiplied many times leading to very large values for
+    # the Jacobian matrix entries and making the finite-difference result of grad check less accurate.
+    # That's why gradcheck with the default range [-9, 9] fails and [-2, 2] is used here.
     samples = (
         SampleInput((make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
                     make_tensor((S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
