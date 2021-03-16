@@ -102,7 +102,7 @@ c10::ArrayRef<T> GetTensorDataRange(
       start + numElements,
       ") with total tensor size ",
       tensor.numel());
-  return c10::ArrayRef(tensor.template data<T>() + start, numElements);
+  return c10::ArrayRef<T>(tensor.template data<T>() + start, numElements);
 }
 
 } // namespace
