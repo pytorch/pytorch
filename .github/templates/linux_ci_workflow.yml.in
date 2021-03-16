@@ -14,6 +14,7 @@ on:
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
   DOCKER_IMAGE_BASE: !{{ docker_image_base }}
+  IN_CI: 1
 
 jobs:
   calculate-docker-image:
@@ -46,7 +47,18 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      # TODO: Add build step here
+      - name: Build PyTorch
+        run: |
+          # TODO: Find some way to make this not rely on the "jenkins" user
+          #       and to rely on some other named user
+          docker run \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --user jenkins \
+            -v ${GITHUB_WORKSPACE}:/var/lib/jenkins \
+            -w /var/lib/jenkins \
+            ${DOCKER_IMAGE} \
+            .jenkins/build.sh
       # TODO: Add step to archive built artifacts
       - name: Clean up workspace
         if: always()
