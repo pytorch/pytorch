@@ -12,6 +12,8 @@ each image as the `BUILD_ENVIRONMENT` environment variable.
 
 See `build.sh` for valid build environments (it's the giant switch).
 
+Docker builds are now defined with `.circleci/cimodel/data/simple/docker_definitions.py`
+
 ## Contents
 
 * `build.sh` -- dispatch script to launch all builds
