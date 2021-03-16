@@ -1887,6 +1887,8 @@ Tensor linalg_householder_product(const Tensor& input, const Tensor& tau) {
   return result;
 }
 
+// torch.orgqr is an alias of torch.linalg.householder_product
+// torch.linalg.householder_product is the preferred new function
 Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   return at::linalg_householder_product_outf(input, tau, result);
 }
