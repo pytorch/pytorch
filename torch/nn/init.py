@@ -80,6 +80,10 @@ def calculate_gain(nonlinearity, param=None):
     SELU              :math:`\frac{3}{4}`
     ================= ====================================================
 
+    .. warning::
+        In order to implement SNNs, you should use `nonlinearity='linear'`
+        instead of `nonlinearity='selu'`.
+
     Args:
         nonlinearity: the non-linear function (`nn.functional` name)
         param: optional parameter for the non-linear function
