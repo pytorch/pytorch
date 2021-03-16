@@ -109,6 +109,10 @@ namespace impl {
   // a materialized structure, use materialize_autograd_meta instead.
   TORCH_API AutogradMeta* get_autograd_meta(const Variable&);
 
+  // WARNING: This function should only be called for view Tensors.
+  // This function always returns a valid DifferentiableViewMeta.
+  TORCH_API DifferentiableViewMeta* get_view_autograd_meta(const Variable&);
+
   // Returns the current autograd meta, materializing it if it was previously
   // none.  This counts as a *mutating* operation, so do not call it on
   // "read-only" operators; in particular, this is NOT thread safe
