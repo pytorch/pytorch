@@ -2152,17 +2152,17 @@ static void linalg_eig_make_complex_eigenvectors_impl(Tensor& result, const Tens
 
 static Tensor& linalg_eig_make_complex_eigenvectors(Tensor& complex_vectors, const Tensor& complex_values, const Tensor& real_vectors) {
   // These asserts make explicit the requirements on tensors for 'linalg_eig_make_complex_eigenvectors_impl'
-  TORCH_INTERNAL_ASSERT(complex_vectors.device() == at::kCPU);
-  TORCH_INTERNAL_ASSERT(complex_values.device() == at::kCPU);
-  TORCH_INTERNAL_ASSERT(real_vectors.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.device() == at::kCPU);
 
-  TORCH_INTERNAL_ASSERT(complex_vectors.is_complex());
-  TORCH_INTERNAL_ASSERT(complex_values.is_complex());
-  TORCH_INTERNAL_ASSERT(real_vectors.is_floating_point());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.is_complex());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.is_complex());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.is_floating_point());
 
-  TORCH_INTERNAL_ASSERT(complex_vectors.transpose(-2, -1).is_contiguous());
-  TORCH_INTERNAL_ASSERT(complex_values.is_contiguous());
-  TORCH_INTERNAL_ASSERT(real_vectors.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.transpose(-2, -1).is_contiguous());
 
   AT_DISPATCH_FLOATING_TYPES(real_vectors.scalar_type(), "linalg_eig_make_complex_vector", [&]{
     linalg_eig_make_complex_eigenvectors_impl<scalar_t>(complex_vectors, complex_values, real_vectors);
@@ -2179,23 +2179,23 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
 
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of the hierarchy of calls
-  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
-  TORCH_INTERNAL_ASSERT(input.size(-2) == input.size(-1));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.size(-2) == input.size(-1));
 
   // for real-valued 'input', eigenvalues can be real-valued or complex-valued
-  TORCH_INTERNAL_ASSERT((toComplexType(input.scalar_type()) == values.scalar_type()) || (input.scalar_type() == values.scalar_type()));
-  TORCH_INTERNAL_ASSERT(values.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY((toComplexType(input.scalar_type()) == values.scalar_type()) || (input.scalar_type() == values.scalar_type()));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == at::kCPU);
 
   // for real-valued 'input', eigenvectors can be real-valued or complex-valued
   if (compute_eigenvectors) {
-    TORCH_INTERNAL_ASSERT((toComplexType(input.scalar_type()) == vectors.scalar_type()) || (input.scalar_type() == vectors.scalar_type()));
-    TORCH_INTERNAL_ASSERT(vectors.device() == at::kCPU);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY((toComplexType(input.scalar_type()) == vectors.scalar_type()) || (input.scalar_type() == vectors.scalar_type()));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.device() == at::kCPU);
   }
 
-  TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
-  TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
-  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
-  TORCH_INTERNAL_ASSERT(infos.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.numel() == std::max<int64_t>(1, batchCount(input)));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_contiguous());
 
   // if 'vectors' has no elements we can modify it
   if (vectors.numel() == 0 && compute_eigenvectors) {
@@ -2211,13 +2211,13 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
 
   // 'vectors' must be in batched column major order (Fortran contiguous)
   if (compute_eigenvectors) {
-    TORCH_INTERNAL_ASSERT(vectors.transpose(-2, -1).is_contiguous());
-    TORCH_INTERNAL_ASSERT(vectors.sizes().equals(input.sizes()));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.transpose(-2, -1).is_contiguous());
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.sizes().equals(input.sizes()));
   }
 
   // 'values' must be contiguous
-  TORCH_INTERNAL_ASSERT(values.is_contiguous());
-  TORCH_INTERNAL_ASSERT(values.sizes().equals(values_shape));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.sizes().equals(values_shape));
 
   // if 'input' is complex then use 'values' directly else create a temporary to hold the real and imaginary parts
   // and then use at::complex_out

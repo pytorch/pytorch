@@ -2238,11 +2238,11 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
 TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling PyTorch with MAGMA. "
                    "Either transfer the tensor to the CPU before calling torch.linalg.eig or recompile with MAGMA.");
 #else
-  TORCH_INTERNAL_ASSERT(input.device() == at::kCPU);
-  TORCH_INTERNAL_ASSERT(values.device() == at::kCPU);
-  TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == at::kCPU);
   if (compute_eigenvectors) {
-    TORCH_INTERNAL_ASSERT(vectors.device() == at::kCPU);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.device() == at::kCPU);
   }
 
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -2298,7 +2298,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
 
   // apply_linalg_eig modifies the provided input matrix in-place, therefore we need a copy
   // MAGMA doesn't have GPU interface for the eigendecomposition and it forces us to transfer 'input' to CPU
-  TORCH_INTERNAL_ASSERT(input.is_cuda());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
   Tensor input_working_copy = at::empty(input.sizes(), input.options().device(kCPU));
   input_working_copy.transpose_(-2, -1);  // make input_working_copy to have Fortran contiguous memory layout
   input_working_copy.copy_(input);
