@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import unittest
-from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
+from torch.testing._internal.jit_utils import JitTestCase, TEST_CUDNN
 
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantized import override_quantized_engine
@@ -1762,7 +1762,7 @@ class TestFrozenOptimizations(JitTestCase):
             inp = torch.rand([4, 3, 4, 4])
             self.assertEqual(frozen(inp), mod(inp))
 
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(not TEST_CUDNN, "requires CUDNN")
     def test_freeze_conv_relu_fusion(self):
         conv_bias = [True, False]
         conv_ops = [nn.Conv2d, nn.Conv3d]
@@ -1804,7 +1804,7 @@ class TestFrozenOptimizations(JitTestCase):
             FileCheck().check("aten::relu").run(scripted_mod.graph)
 
             self.run_pass("fuse_frozen_conv_add_relu", scripted_mod.graph)
-            print(scripted_mod.graph)
+
             if add_z:
                 FileCheck().check("aten::cudnn_convolution_add_relu").run(scripted_mod.graph)
             else:

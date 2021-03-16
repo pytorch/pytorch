@@ -437,6 +437,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
+    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
 ]
 
 libtorch_cuda_sources = libtorch_cuda_core_sources + [
@@ -573,7 +574,6 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.cpp",
-    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/python/python_arg_flatten.cpp",
     "torch/csrc/jit/python/python_custom_class.cpp",
     "torch/csrc/jit/python/python_interpreter.cpp",
@@ -974,7 +974,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/TH/THTensorLapack.cpp",
     "aten/src/TH/THTensorMath.cpp",
     "aten/src/TH/THTensorMoreMath.cpp",
-    "aten/src/TH/THTensorRandom.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",
