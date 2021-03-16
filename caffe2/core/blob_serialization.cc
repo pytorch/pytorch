@@ -427,7 +427,7 @@ void TensorSerializer::Serialize(
       proto.mutable_string_data()->Reserve(chunkSize);
       if (chunkSize > 0) {
         const char* raw_data = static_cast<const char*>(input.raw_data());
-        for (size_t i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
+        for (const auto i : c10::irange(chunkBegin, chunkBegin + chunkSize)) {
           proto.add_string_data(SerializeBlob(
               raw_data + i * input.itemsize(), input.dtype(), ""));
         }
