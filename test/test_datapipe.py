@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import IterDataPipe, RandomSampler, DataLoader
-from typing import List, Tuple, Dict, Any, Type
+from typing import Any, Dict, Iterator, List, Tuple, Type, TypeVar
 
 import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
@@ -26,6 +26,9 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
+
+
+T_co = TypeVar('T_co', covariant=True)
 
 
 def create_temp_dir_and_files():
@@ -555,6 +558,76 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(zipped_dp), exp)
         # Reset
         self.assertEqual(list(zipped_dp), exp)
+
+
+class TestDataPipeTyping(TestCase):
+    def test_compile_time(self):
+        # Static checking annotation
+        with self.assertRaisesRegex(TypeError, r"No return annotation"):
+            class InvalidDP1(IterDataPipe[int]):
+                def __iter__(self):
+                    yield 0
+
+        with self.assertRaisesRegex(TypeError, r"Iterator is required as"):
+            class InvalidDP2(IterDataPipe[int]):
+                def __iter__(self) -> str:
+                    yield 0
+
+        with self.assertRaisesRegex(TypeError, r"Unmatched type annotation"):
+            class InvalidDP3(IterDataPipe[int]):
+                def __iter__(self) -> Iterator[Tuple]:
+                    yield 0
+
+
+        class ValidDP1(IterDataPipe[Tuple[int, str]]):
+            r""" DataPipe with fixed type"""
+            def __init__(self, length):
+                self.length = length
+
+            def __iter__(self) -> Iterator[Tuple[int, str]]:
+                for d in range(self.length):
+                    yield d, str(d)
+
+        dp1 = ValidDP1(10)
+        self.assertEqual(ValidDP1.type, dp1.type)
+        # Fixed type share one type instance
+        self.assertEqual(id(ValidDP1.type), id(dp1.type))
+        dp2 = ValidDP1(5)
+        self.assertEqual(dp1.type, dp2.type)
+        self.assertEqual(id(dp1.type), id(dp2.type))
+
+
+        class ValidDP2(IterDataPipe[T_co]):
+            r""" DataPipe without fixed type"""
+            def __iter__(self) -> Iterator[T_co]:
+                for d in range(10):
+                    yield d
+
+        dp1 = ValidDP2()
+        self.assertEqual(ValidDP2.type, dp1.type)
+        # DataPipe instance with non-fixed type has own type instance
+        self.assertNotEqual(id(ValidDP2.type), id(dp1.type))
+        dp2 = ValidDP2()
+        self.assertEqual(dp1.type, dp2.type)
+        self.assertNotEqual(id(dp1.type), id(dp2.type))
+
+
+        class ValidDP3(IterDataPipe[Tuple[T_co, str]]):
+            r""" DataPipe without fixed type with __init__ function"""
+            def __init__(self, datasource):
+                self.datasource = datasource
+
+            def __iter__(self) -> Iterator[Tuple[T_co, str]]:
+                for d in self.datasource:
+                    yield d, str(d)
+
+        dp1 = ValidDP3(range(10))
+        self.assertEqual(ValidDP3.type, dp1.type)
+        # DataPipe instance with non-fixed type has own type instance
+        self.assertNotEqual(id(ValidDP3.type), id(dp1.type))
+        dp2 = ValidDP3(5)
+        self.assertEqual(dp1.type, dp2.type)
+        self.assertNotEqual(id(dp1.type), id(dp2.type))
 
 
 if __name__ == '__main__':

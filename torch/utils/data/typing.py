@@ -7,7 +7,7 @@ from typing import get_type_hints, Any, TypeVar
 from typing import _type_repr  # type: ignore
 
 
-def _fixed_type(param):
+def _fixed_type(param) -> bool:
     if isinstance(param, TypeVar) or param in (Any, ...):  # type: ignore
         return False
     if hasattr(param, '__args__'):
@@ -28,8 +28,6 @@ class _DataPipeType:
     def __eq__(self, other):
         if isinstance(other, _DataPipeType):
             return self.param == other.param
-        if isinstance(other, (type, TypeVar)):  # type: ignore
-            return self.param == other
         return NotImplementedError
 
 
