@@ -74,8 +74,11 @@ def _get_differentiable_graph_node(node, diff_node):
                 _get_differentiable_graph_node(n, diff_node)
 
 def _graph_for(self, *args, **kwargs):
+    _script_method_graph_for(self, self, *args, **kwargs)
+
+def _script_method_graph_for(self, parent, *args, **kwargs):
     try:
-        dbs = self.get_debug_state()
+        dbs = parent.get_debug_state()
         eps = list(dbs.execution_plans.values())
         assert(len(eps) == 1)
         graph = eps[0].graph.copy()

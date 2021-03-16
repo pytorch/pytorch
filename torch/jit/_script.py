@@ -26,7 +26,7 @@ from torch.jit._builtins import _register_builtin
 from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
-from torch.jit._fuser import _graph_for
+from torch.jit._fuser import _graph_for, _script_method_graph_for
 from torch.jit._state import (
     _try_get_jit_cached_function,
     _try_get_jit_cached_overloads,
@@ -36,7 +36,7 @@ from torch.jit._state import (
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic)
 
-torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
+torch._C.ScriptMethod.graph_for = _script_method_graph_for  # type: ignore
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
 ScriptFunction = torch._C.ScriptFunction
 ScriptFunction.__doc__ = """
@@ -521,7 +521,7 @@ if _enabled:
             return "original_name={}".format(self.original_name)
 
         def graph_for(self, *args, **kwargs):
-            return self.forward.graph_for(*args, **kwargs)
+            return self.forward.graph_for(self, *args, **kwargs)
 
         @property
         def original_name(self):
