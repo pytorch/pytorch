@@ -95,10 +95,9 @@ Tensor new_with_storage(c10::TensorOptions options, at::ScalarType scalar_type, 
 }
 
 Tensor new_with_tensor(c10::TensorOptions options, at::ScalarType scalar_type, const Tensor& other) {
+  options = options.dtype(scalar_type);
   TORCH_CHECK_TYPE(other.options().type_equal(options), "expected ",
                    options, " (got ", other.options(), ")");
-  TORCH_CHECK_TYPE(other.scalar_type() == scalar_type, "expected ",
-                   toString(scalar_type), " (got ", toString(other.scalar_type()), ")");
   return other.slice();
 }
 
@@ -603,6 +602,27 @@ Tensor indexing_tensor_from_data(
   }
 }
 
+// Note [Ensuring sparse values and indices match devices]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// In all places where we construct indices, we read out options from values
+// (rather than use inferred_options).  Why?  This handles the case when
+// values is a CUDA tensor, but indices is a non-Tensor value (and the device
+// argument is not set).  Example:
+//
+//  torch.sparse_coo_tensor(([0, 1],), self.empty(2, 0).cuda(), (4, 0))
+//
+// Sparse tensors require both indices and values to live on the same device.
+// If values lives on CUDA, we can infer where the indices should live, and
+// should accept even ordinary index sequences (and just make sure we write them
+// into the correct device).  values is the ONLY way we know that the index
+// tensor should go to CUDA, so we have to get the information in somehow.
+//
+// This code is kind of jank.  For one, the dtype in options is silently ignored
+// by internal_new_from_data.  Also, in classic janky code style, it used to
+// not work quite right: if values lives on "cuda:1", before all we said was
+// "this needs to be CUDA" and indices would be allocated on the wrong tensor.
+// Options is more right and gets this correct.
+
 Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
@@ -621,7 +641,8 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(3), r.pyobject(1),
                                            /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
-    Tensor indices = internal_new_from_data(inferred_options, kLong, r.deviceOptional(3), r.pyobject(0),
+    // See Note [Ensuring sparse values and indices match devices]
+    Tensor indices = internal_new_from_data(values.options(), kLong, r.deviceOptional(3), r.pyobject(0),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
                                             /*type_inference=*/false);
     return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
@@ -633,7 +654,8 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(4), r.pyobject(1),
                                            /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
-    Tensor indices = internal_new_from_data(inferred_options, kLong, r.deviceOptional(4), r.pyobject(0),
+    // See Note [Ensuring sparse values and indices match devices]
+    Tensor indices = internal_new_from_data(values.options(), kLong, r.deviceOptional(4), r.pyobject(0),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
                                             /*type_inference=*/false);
     return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
@@ -669,7 +691,8 @@ Tensor _sparse_coo_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarT
   Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES),
                                          /*copy_variables=*/false, /*copy_numpy=*/true,
                                          /*type_inference=*/type_inference);
-  Tensor indices = internal_new_from_data(inferred_options, kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES),
+  // See Note [Ensuring sparse values and indices match devices]
+  Tensor indices = internal_new_from_data(values.options(), kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES),
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
                                           /*type_inference=*/false);
   return at::_sparse_coo_tensor_unsafe(indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
@@ -686,8 +709,9 @@ void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
   Tensor values = internal_new_from_data(
       options, scalar_type, c10::nullopt, r.pyobject(1),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
+  // See Note [Ensuring sparse values and indices match devices]
   Tensor indices = internal_new_from_data(
-      options, kLong, c10::nullopt, r.pyobject(0),
+      values.options(), kLong, c10::nullopt, r.pyobject(0),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/false);
   at::native::_validate_sparse_coo_tensor_args(indices, values, r.intlist(2));
 }
