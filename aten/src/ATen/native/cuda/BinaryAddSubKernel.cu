@@ -18,15 +18,19 @@ struct AddFunctor {
     scalar_t alpha;
 };
 
+<<<<<<< HEAD
+void add_kernel_cuda(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
+=======
 void add_kernel_cuda(TensorIteratorBase& iter, Scalar alpha_scalar) {
   std::cout << "we are here" << std::endl;
+>>>>>>> 480a4c8eb4 (wip)
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, iter.common_dtype(), "add_cuda/sub_cuda", [&]() {
     AddFunctor<scalar_t> f(alpha_scalar.to<scalar_t>());
     gpu_kernel_with_scalars(iter, f);
   });
 }
 
-static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
+static void sub_kernel_cuda(TensorIterator& iter, const Scalar& alpha_scalar) {
   add_kernel_cuda(iter, -alpha_scalar);
 }
 
