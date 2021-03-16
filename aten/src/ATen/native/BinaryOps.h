@@ -25,6 +25,15 @@ inline void sub_check(const Tensor& self, const Tensor& other) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
+inline void sub_check(const Tensor& self, const Scalar& scalar) {
+  TORCH_CHECK(self.scalar_type() != kBool || !scalar.isBoolean(),
+              "Subtraction, the `-` operator, with two bool tensors is not supported."
+              "Use the `^` or `logical_xor()` operator instead.")
+  TORCH_CHECK(self.scalar_type() != kBool && !scalar.isBoolean(),
+              "Subtraction, the `-` operator, with a bool tensor is not supported. "
+              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+}
+
 using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, Scalar alpha);
 
 using binary_fn_alpha = void(*)(TensorIterator&, Scalar alpha);
