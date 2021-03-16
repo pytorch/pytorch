@@ -133,7 +133,7 @@ Tensor& arccos_out(const Tensor& self, Tensor& result) { return at::acos_out(res
 Tensor arccos(const Tensor& self) { return self.acos(); }
 Tensor& arccos_(Tensor& self) { return self.acos_(); }
 
-static Tensor wrapped_scalar_tensor(Scalar scalar) {
+static Tensor wrapped_scalar_tensor(const Scalar& scalar) {
   auto tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
@@ -567,7 +567,7 @@ Tensor signbit(const Tensor& self) {
   return at::signbit_out(result, self);
 }
 
-Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+Tensor& clamp_out(Tensor& result, const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
   if (min && max) {
     TORCH_CHECK(self.layout() == Layout::Strided,
                 "clamp only supports strided layout, got: ", self.layout());
@@ -583,16 +583,16 @@ Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, opti
   return result;
 }
 
-Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+Tensor clamp(const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
   Tensor result = at::empty({0}, self.options());
   return at::clamp_out(result, self, min, max);
 }
 
-Tensor& clamp_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+Tensor& clamp_(Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
   return at::clamp_out(self, self, min, max);
 }
 
-Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
+Tensor& clamp_max_out(Tensor& result, const Tensor& self, const Scalar& max) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_max only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self);
@@ -600,16 +600,16 @@ Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
   return result;
 }
 
-Tensor clamp_max(const Tensor& self, Scalar max) {
+Tensor clamp_max(const Tensor& self, const Scalar& max) {
   Tensor result = at::empty({0}, self.options());
   return at::clamp_max_out(result, self, max);
 }
 
-Tensor& clamp_max_(Tensor& self, Scalar max) {
+Tensor& clamp_max_(Tensor& self, const Scalar& max) {
   return at::clamp_max_out(self, self, max);
 }
 
-Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
+Tensor& clamp_min_out(Tensor& result, const Tensor& self, const Scalar& min) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_min only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self);
@@ -617,25 +617,25 @@ Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
   return result;
 }
 
-Tensor clamp_min(const Tensor& self, Scalar min) {
+Tensor clamp_min(const Tensor& self, const Scalar& min) {
   Tensor result = at::empty({0}, self.options());
   return at::clamp_min_out(result, self, min);
 }
 
-Tensor& clamp_min_(Tensor& self, Scalar min) {
+Tensor& clamp_min_(Tensor& self, const Scalar& min) {
   return at::clamp_min_out(self, self, min);
 }
 
 // Implements the "clip" alias for clamp
-Tensor& clip_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+Tensor& clip_out(Tensor& result, const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
   return at::clamp_out(result, self, min, max);
 }
 
-Tensor clip(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+Tensor clip(const Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
   return at::clamp(self, min, max);
 }
 
-Tensor& clip_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+Tensor& clip_(Tensor& self, const optional<Scalar>& min, const optional<Scalar>& max) {
   return at::clamp_(self, min, max);
 }
 
@@ -680,6 +680,40 @@ Tensor& lgamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_fl
 Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub); }
 Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
 
+std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
+  Tensor mantissa = at::empty_like(self);
+  Tensor exponent = at::empty_like(self, self.options().dtype(at::kInt));
+
+  at::frexp_out(mantissa, exponent, self);
+  return std::tuple<Tensor, Tensor>(mantissa, exponent);
+}
+
+std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
+                                       Tensor& mantissa, Tensor& exponent) {
+  // torch.frexp is implemented for floating-point dtypes for now,
+  // should add support for integral dtypes in the future.
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+              "torch.frexp() only supports floating-point dtypes");
+
+  TORCH_CHECK(mantissa.dtype() == self.dtype(),
+              "torch.frexp() expects mantissa to have dtype ", self.dtype(),
+              " but got ", mantissa.dtype());
+  TORCH_CHECK(exponent.dtype() == at::kInt,
+              "torch.frexp() expects exponent to have int dtype "
+              "but got ", exponent.dtype());
+
+  auto iter = TensorIteratorConfig()
+    .add_output(mantissa)
+    .add_output(exponent)
+    .add_input(self)
+    .check_all_same_dtype(false)
+    .set_check_mem_overlap(true)
+    .build();
+  frexp_stub(iter.device_type(), iter);
+
+  return std::tuple<Tensor&, Tensor&>(mantissa, exponent);
+}
+
 // alias for lgamma, implements special.gammanln equivalent to
 // scipy.special.gammaln
 Tensor special_gammaln(const Tensor& self) { return self.lgamma(); }
@@ -712,6 +746,7 @@ DEFINE_DISPATCH(exp2_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
 DEFINE_DISPATCH(frac_stub);
+DEFINE_DISPATCH(frexp_stub);
 DEFINE_DISPATCH(i0_stub);
 DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
