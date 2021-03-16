@@ -1,5 +1,5 @@
 #include <ATen/Utils.h>
-#include <ATen/cuda/CUDAConfig.h>
+
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -102,7 +102,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 } // namespace
 
 void FuseFrozenConvAddRelu(std::shared_ptr<Graph>& graph) {
-#if AT_CUDNN_ENABLED()
+#if USE_CUDNN
   fuseFrozenConvAddReluImpl(graph);
 #endif
 }
