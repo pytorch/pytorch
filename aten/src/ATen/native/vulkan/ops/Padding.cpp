@@ -9,14 +9,14 @@ namespace {
 
 using namespace api::utils;
 
-Tensor reflection_pad2d(
-    const Tensor& self_arg,
-    IntArrayRef padding) {
+Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
   const int pad_dim = padding.size();
   const IntArrayRef input_size = self_arg.sizes();
   const int input_dim = input_size.size();
 
-  TORCH_CHECK(pad_dim == 1 || pad_dim == 4, "Padding sizes must be a 1-tuple or 4-tuple!");
+  TORCH_CHECK(
+      pad_dim == 1 || pad_dim == 4,
+      "Padding sizes must be a 1-tuple or 4-tuple!");
   TORCH_CHECK(input_dim >= 2, "Input tensor must have dim >= 2!");
 
   api::Context* const context = api::context();
@@ -38,66 +38,54 @@ Tensor reflection_pad2d(
   for (size_t d = 0; d < input_dim; ++d) {
     if (d == input_dim - 1) {
       output_size[d] = input_size[d] + pad_right + pad_left;
-    }
-    else if (d == input_dim - 2) {
+    } else if (d == input_dim - 2) {
       output_size[d] = input_size[d] + pad_top + pad_bottom;
-    }
-    else {
+    } else {
       output_size[d] = input_size[d];
     }
   }
 
   vTensor v_output{
-    context,
-    output_size,
-    v_self.options(),
+      context,
+      output_size,
+      v_self.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
         uvec4 padding;
-      } block {
-        v_output.extents(),
-        0u,
-        {
-          pad_left,
-          pad_right,
-          pad_top,
-          pad_bottom
-        },
+      } block{
+          v_output.extents(),
+          0u,
+          {pad_left, pad_right, pad_top, pad_bottom},
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
-          VK_KERNEL(reflection_padding2d),
+          VK_KERNEL(reflection_pad2d),
           v_output.extents(),
           context->gpu().adapter->local_work_group_size(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
+          v_self.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
