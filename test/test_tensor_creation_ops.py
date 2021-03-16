@@ -832,75 +832,138 @@ class TestTensorCreation(TestCase):
                     tp = t.permute(p)
                     compare_helper_(like_fn, tp)
 
-    def _test_special_splits(self, torch_fn, np_fn, dim_range, dim, device, dtype):
-        def get_valid_index_list(sizes, target):
-            ind_list = []
-            curr = 0
-            for i in range(sizes):
-                ind_list += [random.randint(curr, target)]
-                curr = ind_list[-1]
-            return ind_list
-
-        input_sizes = (
-            (0,),
-            (10,),
-            (10, 0),
-            (0, 10),
-            (4, 10),
-            (12, 3),
-            (1, 2, 4),
-            (3, 7, 8),
-            (0, 7, 0),
-            (8, 0, 1),
-            (1, 3, 5, 13),
-            (2, 4, 6, 8),
-            (3, 0, 1, 2),
-            (6, 0, 0, 6),
-            (0, 5, 1, 0)
-        )
-        for input_size in input_sizes:
-            if dim_range[0] <= len(input_size) and len(input_size) <= dim_range[1]:
-                a_base = make_tensor(input_size, dtype, device)
-                for a in [a_base, a_base.t()] if a_base.dim() < 2 else [a_base]:
-                    a_n = a.cpu().numpy()
-                    for sections in range(1, a.size(dim) + 1):
-                        if a.size(dim) % sections == 0:
-                            result = torch_fn(a, sections)
-                            result_n = np_fn(a_n, sections)
-                            self.assertEqual(result, result_n)
-                        else:
-                            with self.assertRaisesRegex(RuntimeError, "tensor split does not result in an equal division"):
-                                torch_fn(a, sections)
-                            with self.assertRaises(ValueError):
-                                np_fn(a_n, sections)
-
-                    for size in range(1, 5):
-                        index_list = get_valid_index_list(size, a.size(dim))
-                        result = torch_fn(a, index_list)
-                        result_n = np_fn(a_n, index_list)
-                        self.assertEqual(result, result_n)
-            elif torch_fn is not torch.hsplit:
-                a_base = make_tensor(input_size, dtype, device)
-                with self.assertRaises(RuntimeError):
-                    torch_fn(a_base, random.randint(1, 10))
-                with self.assertRaises(ValueError):
-                    np_fn(a_base.cpu().numpy(), random.randint(1, 10))
-
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
     def test_hsplit(self, device, dtype):
-        self._test_special_splits(torch.hsplit, np.hsplit, (1, 1), 0, device, dtype)
-        self._test_special_splits(torch.hsplit, np.hsplit, (2, 4), 1, device, dtype)
+        inputs = (
+            ((), 3),
+            ((), [2, 4, 6]),
+            ((6), 2),
+            ((6), 4),
+            ((6), [2, 5]),
+            ((6), [7, 9]),
+            ((3, 8), 4),
+            ((3, 8), 5),
+            ((3, 8), [1, 5]),
+            ((3, 8), [3, 8]),
+            ((S, S, S), 2),
+            ((S, S, S), [1, 4]),
+            ((S, 0, S), 3),
+            ((S, S, 0), [2, 6]),
+        )
+
+        for shape, arg in inputs:
+            t = make_tensor(shape, dtype, device)
+            t_n = t.cpu().numpy()
+
+            if len(shape) < 1:
+                with self.assertRaisesRegex(RuntimeError, "torch.hsplit requires a tensor with at least 1 dimension"):
+                    torch.hsplit(t, arg)
+                with self.assertRaises(ValueError):
+                    np.hsplit(t_n, arg)
+
+            if isinstance(arg, list) or len(shape) == 0:
+                result = torch.hsplit(t, arg)
+                result_n = np.hsplit(t_n, arg)
+                self.assertEqual(result, result_n)
+            else:
+                dim = 1 if len(shape) > 1 else 0
+                if shape[dim] % arg == 0:
+                    result = torch.hsplit(t, arg)
+                    result_n = np.hsplit(t_n, arg)
+                    self.assertEqual(result, result_n)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, f"torch.hsplit's input axis : {dim}  dimension size :
+                                                                { self.sizes()[dim] } is not divisible by split_size=
+                                                                {split_size}"):
+                        torch.hsplit(t, arg)
+                    with self.assertRaises(ValueError):
+                        np.hsplit(t_n, arg)
 
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
     def test_vsplit(self, device, dtype):
-        self._test_special_splits(torch.vsplit, np.vsplit, (2, 4), 0, device, dtype)
+        inputs = (
+            ((6), 2),
+            ((6), 4),
+            ((6, S), 2),
+            ((6, S), 4),
+            ((6, S), [1, 2, 3]),
+            ((6, S), [1, 5, 9]),
+            ((6, S, S), 2),
+            ((6, 0, S), 2),
+            ((S, 0, S), [1, 5]),
+        )
+
+        for shape, arg in inputs:
+            t = make_tensor(shape, dtype, device)
+            t_n = t.cpu().numpy()
+
+            if len(shape) < 2:
+                with self.assertRaisesRegex(RuntimeError, "torch.vsplit requires a tensor with at least 2 dimension"):
+                    torch.hsplit(t, arg)
+                with self.assertRaises(ValueError):
+                    np.hsplit(t_n, arg)
+
+            if isinstance(arg, list) or len(shape) == 0:
+                result = torch.vsplit(t, arg)
+                result_n = np.vsplit(t_n, arg)
+                self.assertEqual(result, result_n)
+            else:
+                if shape[0] % arg == 0:
+                    result = torch.vsplit(t, arg)
+                    result_n = np.vsplit(t_n, arg)
+                    self.assertEqual(result, result_n)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, f"torch.hsplit's input axis : 0  dimension size :
+                                                                { self.sizes()[0] } is not divisible by split_size=
+                                                                {split_size}"):
+                        torch.vsplit(t, arg)
+                    with self.assertRaises(ValueError):
+                        np.vsplit(t_n, arg)
 
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_bool=False))
     def test_dsplit(self, device, dtype):
-        self._test_special_splits(torch.dsplit, np.dsplit, (3, 4), 2, device, dtype)
+        inputs = (
+            ((6), 4),
+            ((6, 6), 3),
+            ((S, S, 6), 2),
+            ((S, S, 6), 4),
+            ((S, S, 6), [1, 2, 3]),
+            ((S, S, 6), [1, 5, 9]),
+            ((S, S, 0), 2),
+            ((S, 0, 6), 4),
+            ((S, 0, 6), [1, 2, 3]),
+            ((0, S, 6), [1, 5, 9]),
+        )
+
+        for shape, arg in inputs:
+            t = make_tensor(shape, dtype, device)
+            t_n = t.cpu().numpy()
+
+            if len(shape) < 2:
+                with self.assertRaisesRegex(RuntimeError, "torch.dsplit requires a tensor with at least 3 dimension"):
+                    torch.hsplit(t, arg)
+                with self.assertRaises(ValueError):
+                    np.hsplit(t_n, arg)
+
+            if isinstance(arg, list) or len(shape) == 0:
+                result = torch.dsplit(t, arg)
+                result_n = np.dsplit(t_n, arg)
+                self.assertEqual(result, result_n)
+            else:
+                if shape[2] % arg == 0:
+                    result = torch.dsplit(t, arg)
+                    result_n = np.dsplit(t_n, arg)
+                    self.assertEqual(result, result_n)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, f"torch.dsplit's input axis : 2  dimension size :
+                                                                { self.sizes()[2] } is not divisible by split_size=
+                                                                {split_size}"):
+                        torch.dsplit(t, arg)
+                    with self.assertRaises(ValueError):
+                        np.dsplit(t_n, arg)
 
     def _test_special_stacks(self, dim, at_least_dim, torch_fn, np_fn, device, dtype):
         # Test error for non-tuple argument

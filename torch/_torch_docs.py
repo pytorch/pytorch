@@ -1536,8 +1536,8 @@ Splits :attr:`input`, a tensor with two or more dimensions, into multiple tensor
 vertically (row wise) according to :attr:`indices_or_sections`. Each split
 is a view of :attr:`input`.
 
-This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=1)
-(the split dimension is 1), except that if :attr:`indices_or_sections` is an integer
+This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=0)
+(the split dimension is 0), except that if :attr:`indices_or_sections` is an integer
 it must evenly divide the split dimension or a runtime error will be thrown.
 
 This function is based on NumPy's :func:`numpy.vsplit`.
