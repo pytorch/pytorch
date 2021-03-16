@@ -679,7 +679,8 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     std::vector<c10::DeviceIndex> devices;
     try {
       devices = getDevicesForRemote(pipe->getRemoteName(), responseMessage);
-      for (auto& device : devices) {
+      for (const auto& tensor : responseMessage.tensors()) {
+        const auto device = tensor.device().index();
         if (device != -1 && !ctx->hasDevice(device)) {
           std::ostringstream oss;
           std::copy(
