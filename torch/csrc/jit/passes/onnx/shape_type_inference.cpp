@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/onnx.h>
+#include <torch/csrc/utils/python_strings.h>
 
 #include <onnx/shape_inference/implementation.h>
 
@@ -604,122 +605,122 @@ void ONNXUpdateTypeFromTensor(
   }
 }
 
+// Recursively look into elements in `output_obj`, and assign shape/type info
+// into flattened graph outputs. `outputs_index` is passed in to point to the
+// current index in flattened graph outputs. The updated `outputs_index` is
+// returned at the end of the function.
+size_t ONNXAssignOutputShape(
+    std::shared_ptr<Graph>& graph,
+    size_t outputs_index,
+    PyObject* output_obj,
+    bool onnx_shape_inference) {
+  auto index_check = [&]() {
+    TORCH_INTERNAL_ASSERT(
+        outputs_index >= 0 && outputs_index <= graph->outputs().size(),
+        "Incorrect number of elements provided as example outputs.");
+  };
+
+  index_check();
+
+  if (THPVariable_Check(output_obj)) {
+    at::Tensor var = reinterpret_cast<THPVariable*>(output_obj)->cdata;
+    ONNXUpdateTypeFromTensor(
+        graph->outputs().at(outputs_index), var, onnx_shape_inference);
+    outputs_index++;
+  } else if (PyTuple_Check(output_obj)) {
+    size_t tuple_len = PyTuple_GET_SIZE(output_obj);
+    for (size_t i = 0; i < tuple_len; ++i) {
+      outputs_index = ONNXAssignOutputShape(
+          graph,
+          outputs_index,
+          PyTuple_GET_ITEM(output_obj, i),
+          onnx_shape_inference);
+    }
+  } else if (PyList_Check(output_obj)) {
+    size_t list_len = PyList_GET_SIZE(output_obj);
+    if (HasSequenceTypeOutput(graph->outputs().at(outputs_index)->node())) {
+      if (list_len > 0) {
+        auto list_elem = PyList_GET_ITEM(output_obj, 0);
+        TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
+        auto& var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+        for (size_t i = 1; i < list_len; ++i) {
+          list_elem = PyList_GET_ITEM(output_obj, i);
+          TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
+          auto& new_var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
+          TORCH_CHECK(
+              var.scalar_type() == new_var.scalar_type(),
+              "Unsupported sequence type in model outputs. ONNX supports sequences of elements of the same data type.");
+        }
+        auto elem_type = graph->outputs()
+                             .at(outputs_index)
+                             ->type()
+                             ->castRaw<ListType>()
+                             ->getElementType()
+                             ->cast<TensorType>();
+        elem_type = elem_type->withScalarType(var.scalar_type());
+        graph->outputs()
+            .at(outputs_index)
+            ->setType(MergeInferredType(
+                graph->outputs().at(outputs_index)->type(),
+                ListType::create(elem_type)));
+      } else {
+        graph->outputs()
+            .at(outputs_index)
+            ->setType(graph->outputs().at(outputs_index)->type());
+      }
+      outputs_index++;
+    } else {
+      // When torch output is a list type, but ONNX node is not a
+      // sequence type. Like prim::ListConstruct
+      for (size_t i = 0; i < list_len; ++i) {
+        outputs_index = ONNXAssignOutputShape(
+            graph,
+            outputs_index,
+            PyList_GET_ITEM(output_obj, i),
+            onnx_shape_inference);
+      }
+    }
+  } else if (PyDict_Check(output_obj)) {
+    // Support for dict data type is limited to fixed size dictionaries in
+    // ONNX.
+    // Dictionary values are unrolled and keys are not preserved.
+    auto unrolled_dict =
+        py::reinterpret_borrow<py::list>(PyDict_Items(output_obj));
+    TORCH_INTERNAL_ASSERT(PyList_Check(unrolled_dict.ptr()));
+    for (size_t i = 0; i < unrolled_dict.size(); ++i) {
+      outputs_index = ONNXAssignOutputShape(
+          graph,
+          outputs_index,
+          PyList_GET_ITEM(unrolled_dict.ptr(), i),
+          onnx_shape_inference);
+    }
+  } else if (THPUtils_checkString(output_obj)) {
+    // Ignore string, since they are not supported as output in ONNX.
+  } else {
+    std::string msg =
+        "Only tuples, lists and Variables are supported as JIT inputs/outputs. "
+        "Dictionaries and strings are also accepted, but their usage is not "
+        "recommended. Here, received an input of unsupported type: ";
+    msg += THPUtils_typename(output_obj);
+    throw std::runtime_error(msg);
+  }
+
+  index_check();
+
+  return outputs_index;
+}
+
 void ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     at::ArrayRef<at::Tensor> outputs,
     const python::IODescriptor& desc,
     bool onnx_shape_inference) {
   size_t outputs_index = 0;
-
   PyObject* py_obj = unflatten(outputs, desc);
   TORCH_INTERNAL_ASSERT(PyTuple_Check(py_obj));
 
-  for (size_t i = 0; i < PyTuple_GET_SIZE(py_obj); ++i) {
-    PyObject* elem = PyTuple_GET_ITEM(py_obj, i);
-
-    if (PyList_Check(elem)) {
-      size_t list_len = PyList_GET_SIZE(elem);
-      if (HasSequenceTypeOutput(graph->outputs().at(outputs_index)->node())) {
-        if (list_len > 0) {
-          auto& var =
-              reinterpret_cast<THPVariable*>(PyList_GET_ITEM(elem, 0))->cdata;
-          for (size_t j = 1; j < list_len; ++j) {
-            PyObject* list_elem = PyList_GET_ITEM(elem, j);
-            TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
-            auto& new_var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
-            TORCH_CHECK(
-                var.scalar_type() == new_var.scalar_type(),
-                "Unsupported sequence type in model outputs. ONNX supports sequences of elements of the same data type.");
-          }
-          auto elem_type = graph->outputs()
-                               .at(outputs_index)
-                               ->type()
-                               ->castRaw<ListType>()
-                               ->getElementType()
-                               ->cast<TensorType>();
-          elem_type = elem_type->withScalarType(var.scalar_type());
-          graph->outputs()
-              .at(outputs_index)
-              ->setType(MergeInferredType(
-                  graph->outputs().at(outputs_index)->type(),
-                  ListType::create(elem_type)));
-          outputs_index++;
-          TORCH_INTERNAL_ASSERT(
-              outputs_index <= graph->outputs().size(),
-              "Incorrect number of elements provided as example outputs.");
-        }
-      } else { // When torch output is a list type, but ONNX node is not a
-               // sequence type. Like prim::ListConstruct
-        size_t list_len = PyList_GET_SIZE(elem);
-        if (list_len > 0) {
-          for (size_t j = 0; j < list_len; ++j) {
-            PyObject* list_elem = PyList_GET_ITEM(elem, j);
-            TORCH_INTERNAL_ASSERT(THPVariable_Check(list_elem));
-            auto& var = reinterpret_cast<THPVariable*>(list_elem)->cdata;
-            graph->outputs()
-                .at(outputs_index + j)
-                ->setType(MergeInferredType(
-                    graph->outputs().at(outputs_index + j)->type(),
-                    TensorType::create(var)));
-          }
-          outputs_index += list_len;
-          TORCH_INTERNAL_ASSERT(
-              outputs_index <= graph->outputs().size(),
-              "Incorrect number of elements provided as example outputs.");
-        }
-      }
-    } else if (PyTuple_Check(elem)) {
-      size_t tuple_len = PyTuple_GET_SIZE(elem);
-      if (tuple_len > 0) {
-        for (size_t j = 0; j < tuple_len; ++j) {
-          PyObject* tuple_elem = PyTuple_GET_ITEM(elem, j);
-          TORCH_INTERNAL_ASSERT(THPVariable_Check(tuple_elem));
-          auto& var = reinterpret_cast<THPVariable*>(tuple_elem)->cdata;
-          graph->outputs()
-              .at(outputs_index + j)
-              ->setType(MergeInferredType(
-                  graph->outputs().at(outputs_index + j)->type(),
-                  TensorType::create(var)));
-        }
-        outputs_index += tuple_len;
-        TORCH_INTERNAL_ASSERT(
-            outputs_index <= graph->outputs().size(),
-            "Incorrect number of elements provided as example outputs.");
-      }
-    } else if (THPVariable_Check(elem)) {
-      at::Tensor var = reinterpret_cast<THPVariable*>(elem)->cdata;
-      ONNXUpdateTypeFromTensor(
-          graph->outputs().at(outputs_index), var, onnx_shape_inference);
-      outputs_index++;
-      TORCH_INTERNAL_ASSERT(
-          outputs_index <= graph->outputs().size(),
-          "Incorrect number of elements provided as example outputs.");
-    } else { // Dict
-      // Support for dict data type is limited to fixed size dictionaries in
-      // ONNX.
-      // Dictionary values are unrolled and keys are not preserved.
-      TORCH_INTERNAL_ASSERT(PyDict_Check(elem));
-      auto unrolled_dict = py::reinterpret_borrow<py::list>(PyDict_Items(elem));
-      TORCH_INTERNAL_ASSERT(PyList_Check(unrolled_dict.ptr()));
-      for (size_t j = 0; j < unrolled_dict.size(); ++j) {
-        PyObject* tuple_elem = PyList_GET_ITEM(unrolled_dict.ptr(), j);
-        TORCH_INTERNAL_ASSERT(PyTuple_Check(tuple_elem));
-        TORCH_INTERNAL_ASSERT(PyTuple_GET_SIZE(tuple_elem) == 2);
-        auto& var =
-            reinterpret_cast<THPVariable*>(PyTuple_GET_ITEM(tuple_elem, 1))
-                ->cdata;
-        graph->outputs()
-            .at(outputs_index + j)
-            ->setType(MergeInferredType(
-                graph->outputs().at(outputs_index + j)->type(),
-                TensorType::create(var)));
-      }
-      outputs_index += unrolled_dict.size();
-      TORCH_INTERNAL_ASSERT(
-          outputs_index <= graph->outputs().size(),
-          "Incorrect number of elements provided as example outputs.");
-    }
-  }
+  outputs_index =
+      ONNXAssignOutputShape(graph, outputs_index, py_obj, onnx_shape_inference);
 
   TORCH_INTERNAL_ASSERT(
       outputs_index == graph->outputs().size(),
