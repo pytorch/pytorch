@@ -16,10 +16,10 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   if (all(lessThan(pos, uBlock.size.xyz))) {
-    vec4 inval = imageLoad(uOutput, pos);
-    vec4 mask1 = vec4(lessThan(inval, vec4(3.0)));
-    vec4 mask2 = vec4(greaterThan(inval, vec4(-3.0)));
-    vec4 outval = mask2*(mask1*(inval*(inval + 3.0)/6.0) + (1 - mask1)*inval);
+    const vec4 inval = imageLoad(uOutput, pos);
+    const vec4 mask1 = vec4(lessThan(inval, vec4(3.0)));
+    const vec4 mask2 = vec4(greaterThan(inval, vec4(-3.0)));
+    const vec4 outval = mask2*(mask1*(inval*(inval + 3.0)/6.0) + (1 - mask1)*inval);
     imageStore(uOutput, pos, outval);
   }
 }

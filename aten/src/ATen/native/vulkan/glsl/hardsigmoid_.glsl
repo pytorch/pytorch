@@ -16,7 +16,7 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   if (all(lessThan(pos, uBlock.size.xyz))) {
-    vec4 outval = imageLoad(uOutput, pos)/6.0 + 0.5;
+    const vec4 outval = imageLoad(uOutput, pos)/6.0 + 0.5;
     imageStore(uOutput, pos, clamp(outval, 0.0, 1.0));
   }
 }
