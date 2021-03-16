@@ -220,7 +220,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v1
         with:
-          python-version: 3.x
+          python-version: 3.8
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
