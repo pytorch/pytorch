@@ -117,7 +117,7 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
     int info;
     lapackEig<scalar_t, value_t>('N', jobvr, n, self_data, n, wr,
       nullptr, 1, vecs_data, ldvr, &wkopt, -1, rwork_data, &info);
-    int lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
+    int lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
 
     // call again to do the actual work
     Tensor work = at::empty({lwork}, self.dtype());
@@ -265,6 +265,62 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int6
   return result;
 }
 
+/*
+Solves the matrix equation op(A) X = B
+X and B are n-by-nrhs matrices, A is a unit, or non-unit, upper or lower triangular matrix
+and op(A) is one of op(A) = A or op(A) = A^T or op(A) = A^H.
+This is an in-place routine, content of 'B' is overwritten.
+'upper' controls the portion of input matrix to consider in computations,
+'transpose' if true then op(A) = A^T,
+'unitriangular' if true then the diagonal elements of A are assumed to be 1
+and the actual diagonal values are not used.
+'infos' is an int Tensor containing error codes for each matrix in the batched input.
+For more information see LAPACK's documentation for TRTRS routine.
+*/
+template<typename scalar_t>
+void apply_triangular_solve(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+#ifndef USE_LAPACK
+  TORCH_CHECK(
+      false,
+      "Calling torch.triangular_solve on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  char uplo = upper ? 'U' : 'L';
+  char trans = transpose ? 'T' : 'N';
+  trans = conjugate_transpose ? 'C' : trans;
+  char diag = unitriangular ? 'U' : 'N';
+
+  auto A_data = A.data_ptr<scalar_t>();
+  auto B_data = B.data_ptr<scalar_t>();
+  auto A_mat_stride = matrixStride(A);
+  auto B_mat_stride = matrixStride(B);
+  auto batch_size = batchCount(A);
+  auto n = A.size(-2);
+  auto nrhs = B.size(-1);
+  auto lda = std::max<int64_t>(1, n);
+  auto infos_data = infos.data_ptr<int>();
+
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+    scalar_t* B_working_ptr = &B_data[i * B_mat_stride];
+    int* info_working_ptr = &infos_data[i];
+    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, lda, B_working_ptr, lda, info_working_ptr);
+    // The current behaviour for linear algebra functions to raise an error if something goes wrong
+    // or input doesn't satisfy some requirement
+    // therefore return early since further computations will be wasted anyway
+    if (*info_working_ptr != 0) {
+      return;
+    }
+  }
+#endif
+}
+
+void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cpu", [&]{
+    apply_triangular_solve<scalar_t>(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_ARCH_DISPATCH(cholesky_inverse_stub, DEFAULT, &cholesky_inverse_kernel_impl);
@@ -287,5 +343,9 @@ REGISTER_AVX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_VSX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 
+REGISTER_ARCH_DISPATCH(triangular_solve_stub, DEFAULT, &triangular_solve_kernel);
+REGISTER_AVX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
+REGISTER_AVX2_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
+REGISTER_VSX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
 }} // namespace at::native

@@ -14,10 +14,99 @@
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/cuda/BatchLinearAlgebraLib.h>
 
-#ifdef USE_CUSOLVER
-
 namespace at {
 namespace native {
+
+// Some cuBLAS and cuSOLVER batched routines require input to be a device array of pointers to device individual matrices
+// 'input' must be a contiguous tensor
+template <typename scalar_t>
+static Tensor get_device_pointers(const Tensor& input) {
+  auto input_data = input.data_ptr<scalar_t>();
+  int64_t input_mat_stride = matrixStride(input);
+
+  // cublas/cusolver interface requires 'int'
+  int batch_size = cuda_int_cast(batchCount(input), "batch_size");
+
+  // if batch_size==0, then start=0 and end=0
+  // if input_mat_stride==0, then step=sizeof(scalar_t)
+  return at::arange(
+      /*start=*/reinterpret_cast<int64_t>(input_data),
+      /*end=*/reinterpret_cast<int64_t>(input_data + batch_size * input_mat_stride),
+      /*step=*/static_cast<int64_t>(std::max<int64_t>(input_mat_stride, 1) * sizeof(scalar_t)),
+      input.options().dtype(at::kLong));
+}
+
+template <typename scalar_t>
+static void apply_triangular_solve(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+  cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  cublasOperation_t trans = transpose ? CUBLAS_OP_T : CUBLAS_OP_N;
+  trans = conjugate_transpose ? CUBLAS_OP_C : trans;
+  cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
+  cublasSideMode_t side = CUBLAS_SIDE_LEFT;
+
+  auto A_data = A.data_ptr<scalar_t>();
+  auto B_data = B.data_ptr<scalar_t>();
+  auto A_mat_stride = matrixStride(A);
+  auto B_mat_stride = matrixStride(B);
+  auto batch_size = batchCount(A);
+  auto n = cuda_int_cast(A.size(-2), "n");
+  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
+  auto lda = std::max<int>(1, n);
+
+  auto alpha = scalar_t{1};
+
+  for (decltype(batch_size) i = 0; i < batch_size; i++) {
+    scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
+    scalar_t* B_working_ptr = &B_data[i * B_mat_stride];
+    auto handle = at::cuda::getCurrentCUDABlasHandle();
+    at::cuda::blas::trsm(handle, side, uplo, trans, diag, n, nrhs, &alpha, A_working_ptr, lda, B_working_ptr, lda);
+  }
+}
+
+void triangular_solve_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+  (void)infos; // unused
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
+    apply_triangular_solve<scalar_t>(A, B, upper, transpose, conjugate_transpose, unitriangular);
+  });
+}
+
+template <typename scalar_t>
+static void apply_triangular_solve_batched(Tensor& A, Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+  cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  cublasOperation_t trans = transpose ? CUBLAS_OP_T : CUBLAS_OP_N;
+  trans = conjugate_transpose ? CUBLAS_OP_C : trans;
+  cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
+  cublasSideMode_t side = CUBLAS_SIDE_LEFT;
+
+  auto A_data = A.data_ptr<scalar_t>();
+  auto B_data = B.data_ptr<scalar_t>();
+  auto A_mat_stride = matrixStride(A);
+  auto B_mat_stride = matrixStride(B);
+  auto batch_size = cuda_int_cast(batchCount(A), "batch_size");
+  auto n = cuda_int_cast(A.size(-2), "n");
+  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
+  auto lda = std::max<int>(1, n);
+
+  auto alpha = scalar_t{1};
+
+  // cuBLAS batched trsm requires input to be the device array of pointers to device single matrices
+  Tensor A_ptr_array = get_device_pointers<scalar_t>(A);
+  Tensor B_ptr_array = get_device_pointers<scalar_t>(B);
+  auto A_ptr_array_data = reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr());
+  auto B_ptr_array_data = reinterpret_cast<scalar_t**>(B_ptr_array.data_ptr());
+
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  at::cuda::blas::trsmBatched(handle, side, uplo, trans, diag, n, nrhs, &alpha, A_ptr_array_data, lda, B_ptr_array_data, lda, batch_size);
+}
+
+void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+  (void)infos; // unused
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
+    apply_triangular_solve_batched<scalar_t>(A, B, upper, transpose, conjugate_transpose, unitriangular);
+  });
+}
+
+#ifdef USE_CUSOLVER
 
 inline static Tensor column_major_identity_matrix_like(const Tensor& self) {
   auto size = self.sizes();
@@ -592,6 +681,6 @@ void linalg_eigh_cusolver(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& inf
   }
 }
 
-}} // namespace at::native
-
 #endif  // USE_CUSOLVER
+
+}} // namespace at::native
