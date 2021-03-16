@@ -2082,15 +2082,15 @@ static void apply_magma_eigh(Tensor& values, Tensor& vectors, Tensor& infos, boo
 
   scalar_t* work;
   magma_int_t* iwork;
-  lwork = std::max<magma_int_t>(1, magma_int_cast(real_impl<scalar_t, value_t>(wkopt), "work_size"));
-  liwork = std::max<magma_int_t>(1, magma_int_cast(iwkopt, "iwork_size"));
+  lwork = magma_int_cast(std::max<int64_t>(1, real_impl<scalar_t, value_t>(wkopt)), "work_size");
+  liwork = magma_int_cast(std::max<int64_t>(1, iwkopt), "iwork_size");
   ALLOCATE_ARRAY(work, scalar_t, lwork);
   ALLOCATE_ARRAY(iwork, magma_int_t, liwork);
 
   value_t* rwork = nullptr;
   c10::Storage storage_rwork;
   if (vectors.is_complex()) {
-    lrwork = std::max<magma_int_t>(1, magma_int_cast(rwkopt, "rwork_size"));
+    lrwork = magma_int_cast(std::max<int64_t>(1, rwkopt), "rwork_size");
     storage_rwork = pin_memory<value_t>(lrwork);
     rwork = static_cast<value_t*>(storage_rwork.data());
   }
