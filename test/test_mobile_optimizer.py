@@ -195,9 +195,6 @@ class TestOptimizer(TestCase):
         m.eval()
         initial_result = m.foo(input_data)
 
-        FileCheck().check_count("__torch__.torch.nn.modules.dropout.Dropout", 1, exactly=True) \
-            .run(m.foo.graph)
-
         optimized_scripted_model = optimize_for_mobile(m, methods_to_optimize=['foo'])
         optimized_result = optimized_scripted_model.foo(input_data)
 
