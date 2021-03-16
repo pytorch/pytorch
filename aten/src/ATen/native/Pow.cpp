@@ -23,7 +23,7 @@ TORCH_META_FUNC2(pow, Tensor_Scalar) (const Tensor& base, const Scalar& exp) {
   build_unary_op(maybe_get_output(), base.to(common_dtype));
 }
 
-TORCH_META_FUNC2(pow, Scalar) (const Scalar base, const Tensor& exp) {
+TORCH_META_FUNC2(pow, Scalar) (const Scalar& base, const Tensor& exp) {
     // This overload doesn't directly use TensorIterator. It attempts to short-circuit,
     // but otherwise redispatches to the Tensor_Tensor overload.
     auto dtype = at::result_type(base, exp);
@@ -51,7 +51,7 @@ TORCH_IMPL_FUNC(pow_Tensor_Tensor_out) (const Tensor& base, const Tensor& exp, c
   }
 }
 
-TORCH_IMPL_FUNC(pow_Tensor_Scalar_out) (const Tensor& base, const Scalar exp, const Tensor& out) {
+TORCH_IMPL_FUNC(pow_Tensor_Scalar_out) (const Tensor& base, const Scalar& exp, const Tensor& out) {
   auto common_dtype = at::result_type(base, exp);
   if (exp.equal(0.0)) {
     out.fill_(1);
