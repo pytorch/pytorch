@@ -1,3 +1,4 @@
+import inspect
 from functools import wraps
 from typing import Any, Callable, Optional, Type, Union
 from torch.utils.data import IterDataPipe
@@ -115,12 +116,12 @@ def force_typing(f):
         for argument_name, value in bound.arguments.items():
             if argument_name == 'self':
                 continue
-            if isinstance(arg, IterDataPipe):
-                if not hasattr(arg, 'type'):
+            if isinstance(value, IterDataPipe):
+                if not hasattr(value, 'type'):
                     raise TypeError("Argument '{}' must have attribute 'type'".format(argument_name))
-                if not isinstance(arg.type, _DataPipeType):
+                if not isinstance(value.type, _DataPipeType):
                     raise TypeError("Type of argument '{}' must be _DataPipeType, but {} is found"
-                                    .format(argument_name, type(arg.type)))
+                                    .format(argument_name, type(value.type)))
 
         return f(*args, **kwargs)
 
