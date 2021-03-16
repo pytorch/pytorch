@@ -695,8 +695,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
                   ". This device is not one of the input tensor devices: ",
                   oss.str(),
                   "which is not yet supported. Please file a feature request "
-                  "issue in PyTorch GitHub repo."
-              ),
+                  "issue in PyTorch GitHub repo."),
               messageId
           );
           break;
