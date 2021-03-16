@@ -9,6 +9,8 @@ from itertools import chain
 import torch
 from torch._C import ScriptObject  # type: ignore
 
+import sys
+from .patch import patch_function
 from .node import Argument, map_aggregate
 from .graph import Graph
 from .graph_module import GraphModule
@@ -602,6 +604,40 @@ def wrap(fn_or_name : Union[str, Callable]):
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
 
+
+
+
+class CPatchManager(object):
+    def __init__(self, tracer):
+        self.tracer = tracer
+
+        def patched_impl(to_patch, args, kwargs):
+            return tracer.create_proxy('call_function', torch.randn, args, kwargs)
+
+        c_patch_enabled = True
+
+        def patched_in(to_patch, args, kwargs):
+            global c_patch_enabled
+            try:
+                c_patch_enabled = False
+                r = patched_impl(to_patch, args, kwargs)
+            finally:
+                c_patch_enabled = True
+            return r
+
+        def trace_func(frame, action, arg):
+            if action == 'c_call':
+                if c_patch_enabled:
+                    if arg == torch.randn:
+                        patch_function(arg, patched_in)
+        self.func = trace_func
+
+    def __enter__(self):
+        sys.setprofile(self.func)
+
+    def __exit__(self, type, value, tb):
+        sys.setprofile(None)
+
 def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> GraphModule:
     """Symbolic tracing API
 
@@ -618,6 +654,7 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
 
     """
     tracer = Tracer()
-    graph = tracer.trace(root, concrete_args)
+    with CPatchManager(tracer):
+        graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     return GraphModule(tracer.root, graph, name)
