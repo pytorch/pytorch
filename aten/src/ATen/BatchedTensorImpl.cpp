@@ -84,6 +84,33 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   refresh_contiguous();
 }
 
+BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, BatchDims bdims)
+  : TensorImpl(
+      key_set.add(DispatchKey::Batched),
+      value.dtype(),
+      value.device()
+    )
+  , value_(std::move(value))
+  , bdims_(std::move(bdims))
+{
+  TORCH_INTERNAL_ASSERT(value_.defined());
+  checkInvariants();
+
+  TORCH_INTERNAL_ASSERT(bdims_.size() == 1);
+
+  const auto public_dims = value_.dim() - bdims_.size();
+  const auto value_sizes = value_.sizes();
+  const auto value_strides = value_.strides();
+  sizes_and_strides_.resize(public_dims);
+  for (int64_t dim = 0; dim < public_dims; dim++) {
+    auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
+    sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
+    sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
+  }
+  refresh_numel();
+  refresh_contiguous();
+}
+
 int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   if (wrap_dim) {
     const auto ndim = sizes_and_strides_.size();
@@ -172,7 +199,13 @@ Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
   //     std::all_of(bdims.begin(), bdims.end(),
   //         [](const BatchDim& bdim) { return bdim.level() < kVmapNumLevels; }),
   //     "We only support up to ", kVmapNumLevels, " nested vmaps");
-  return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
+  // propagate the CUDA key for the is_cuda check.
+  // TODO: probably need to propagate other backend keys as well...
+  DispatchKeySet key_set;
+  if (tensor.is_cuda()) {
+    key_set = key_set.add(DispatchKey::CUDA);
+  }
+  return at::detail::make_tensor<BatchedTensorImpl>(key_set, tensor, std::move(bdims));
 }
 
 Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
