@@ -16,8 +16,8 @@ def bench(t1, t2):
             torch.add(t1, t2)
         bench_times.append(time.time() - time_start)
 
-    bench_time = float(torch.min(torch.Tensor(bench_times))) / 1000
-    bench_std = float(torch.std(torch.Tensor(bench_times))) / 1000
+    bench_time = float(torch.min(torch.tensor(bench_times))) / 1000
+    bench_std = float(torch.std(torch.tensor(bench_times))) / 1000
 
     return bench_time, bench_std
 
