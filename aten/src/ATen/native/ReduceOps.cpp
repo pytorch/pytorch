@@ -382,7 +382,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
       // At this point omitted_products is the same size
       // as input, except on the dimension dim where it's
       // dim_size - k
-      AT_ASSERT(omitted_products.size(dim) == dim_size - k);
+      TORCH_CHECK(omitted_products.size(dim) == dim_size - k);
 
       grad_input.select(dim, k).copy_(
           at::sum(grad.slice(dim, k) * omitted_products,dim));
