@@ -509,7 +509,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
     for metric_key, metric_name, formatter in metrics_to_display:
         lines.append("-" * 75)
 
-        prefix = metric_key + "." 
+        prefix = metric_key + "."
 
         current = stats[prefix + "current"]
         peak = stats[prefix + "peak"]

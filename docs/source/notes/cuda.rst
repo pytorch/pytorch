@@ -265,7 +265,7 @@ The behavior of caching allocator can be controlled via environment variable
 The format is ''PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2><value2>...''
 Available options:
 * ''max_split_size_mb'' prevents the allocator from splitting blocks larger than
-  this size (in MB). This can help prevent fragmentation and may allow some 
+  this size (in MB). This can help prevent fragmentation and may allow some
   borderline workloads to complete without running out of memory. Performance
   cost can range from 'zero' to 'substatial' depending on allocation patterns.
   Default value is unlimited, i.e. all blocks can be split. The
