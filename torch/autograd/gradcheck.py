@@ -161,13 +161,53 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
     return jacobian
 
 
-def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out, check_grad_dtypes,
-                                         raise_exception):
-    jacobian, reentrant, correct_grad_sizes, correct_grad_types = \
-        get_analytical_jacobian(inputs, output, nondet_tol, grad_out)
+def check_jacobians_equal(j1, j2, atol):
+    # Check whether the max diff betwen two jacobians are within some tolerance `atol`
+    for j1_x, j2_x in zip(j1, j2):
+        if j1_x.numel() != 0 and (j1_x - j2_x).abs().max() > atol:
+            return False
+    return True
+
+
+def combine_jacobian_rows(jacobians_rows, inputs, output):
+    out_jacobians = make_jacobian(inputs, output.numel())
+    diff_input_list = list(iter_tensors(inputs, True))
+    correct_grad_sizes = True
+    correct_grad_types = True
+    for i, rows in jacobians_rows.items():
+        inp = diff_input_list[i]
+        out_jacobian = out_jacobians[i]
+        for j, row in enumerate(rows):
+            if row is not None and row.size() != inp.size():
+                correct_grad_sizes = False
+            elif row is not None and row.dtype != inp.dtype:
+                correct_grad_types = False
+            if row is None:
+                out_jacobian[:, j].zero_()
+            else:
+                row_dense = row.to_dense() if not row.layout == torch.strided else row
+                assert out_jacobian[:, j].numel() == row_dense.numel()
+                out_jacobian[:, j] = row_dense.contiguous().view(-1)
+    return out_jacobians, correct_grad_sizes, correct_grad_types
+
+
+def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_scale, check_grad_dtypes,
+                                         raise_exception, custom_backward_fn=None):
+    diff_input_list = list(iter_tensors(inputs, True))
+    def backward_fn(grad_output):
+        return torch.autograd.grad(output, diff_input_list, grad_output,
+                                    retain_graph=True, allow_unused=True)
+    fn = custom_backward_fn if custom_backward_fn is not None else backward_fn
+    jacobians_rows = get_analytical_jacobian(fn, output.clone(), grad_out_scale)
+    jacobians_rows_reentrant =  get_analytical_jacobian(fn, output.clone(), grad_out_scale)
+
+    jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, output)
+    jacobians_reentrant, _, _ = combine_jacobian_rows(jacobians_rows_reentrant, inputs, output)
+
+    reentrant = check_jacobians_equal(jacobians, jacobians_reentrant, nondet_tol)
 
     complex_str = '(calculated using complex valued grad output) ' \
-        if isinstance(grad_out, complex) else ''
+        if isinstance(grad_out_scale, complex) else ''
 
     def fail_test(msg):
         if raise_exception:
@@ -183,43 +223,25 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out, c
                   'although analytical gradient matches numerical gradient. '
                   f'The tolerance for nondeterminism was {nondet_tol}.')
     failed = not (reentrant and correct_grad_sizes and correct_grad_types)
-    return jacobian, failed
+    return jacobians, failed
 
 
-def get_analytical_jacobian(inputs, output, nondet_tol, grad_out):
-    diff_input_list = list(iter_tensors(inputs, True))
-    jacobian = make_jacobian(inputs, output.numel())
-    jacobian_reentrant = make_jacobian(inputs, output.numel())
-    grad_output = torch.zeros_like(output, memory_format=torch.legacy_contiguous_format)
-    flat_grad_output = grad_output.view(-1)
-    reentrant = True
-    correct_grad_sizes = True
-    correct_grad_types = True
+def get_analytical_jacobian(fn, sample_output, grad_out_scale):
+    # Computes Jacobian row-by-row using backward function `fn` = v^T J
+    # NB: we can't combine the rows into a single jacobian tensor because fn(v) for
+    # different v may return tensors with different number of elements
+    grad_out_base = torch.zeros_like(sample_output, memory_format=torch.legacy_contiguous_format)
+    flat_grad_out= grad_out_base.view(-1)
+    # jacobians_rows[i][j] represents the jth row of the ith input
+    jacobians_rows: Dict[int, List[Optional[torch.Tensor]]] = {}
 
-    for i in range(flat_grad_output.numel()):
-        flat_grad_output.zero_()
-        flat_grad_output[i] = grad_out
-        for jacobian_c in (jacobian, jacobian_reentrant):
-            grads_input = torch.autograd.grad(output, diff_input_list, grad_output,
-                                              retain_graph=True, allow_unused=True)
-            for jacobian_x, d_x, x in zip(jacobian_c, grads_input, diff_input_list):
-                if d_x is not None and d_x.size() != x.size():
-                    correct_grad_sizes = False
-                elif d_x is not None and d_x.dtype != x.dtype:
-                    correct_grad_types = False
-                elif jacobian_x.numel() != 0:
-                    if d_x is None:
-                        jacobian_x[:, i].zero_()
-                    else:
-                        d_x_dense = d_x.to_dense() if not d_x.layout == torch.strided else d_x
-                        assert jacobian_x[:, i].numel() == d_x_dense.numel()
-                        jacobian_x[:, i] = d_x_dense.contiguous().view(-1)
-
-    for jacobian_x, jacobian_reentrant_x in zip(jacobian, jacobian_reentrant):
-        if jacobian_x.numel() != 0 and (jacobian_x - jacobian_reentrant_x).abs().max() > nondet_tol:
-            reentrant = False
-
-    return jacobian, reentrant, correct_grad_sizes, correct_grad_types
+    for j in range(flat_grad_out.numel()):
+        flat_grad_out.zero_()
+        flat_grad_out[j] = grad_out_scale
+        grad_inputs = fn(grad_out_base)
+        for i, d_x in enumerate(grad_inputs):
+            jacobians_rows[i] = jacobians_rows.get(i, []) + [d_x.clone() if isinstance(d_x, torch.Tensor) else None]
+    return jacobians_rows
 
 
 def check_inputs(fail_test, tupled_inputs, check_sparse_nnz) -> bool:
