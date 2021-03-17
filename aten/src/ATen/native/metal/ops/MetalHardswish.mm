@@ -20,10 +20,6 @@ Tensor& hardswish_(Tensor& input) {
   MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
   std::vector<int64_t> outputSize = input.sizes().vec();
   std::vector<int64_t> textureSize = computeTextureSize(outputSize);
-  //TODO: [T86657222] Remove this once we have fully implemented reshape
-  if (input.dim() == 2) {
-    textureSize = {outputSize[0], outputSize[1], 1, 1};
-  }
   MPSImage* Y = createTemporaryImage(commandBuffer, textureSize);
   id<MTLComputeCommandEncoder> encoder =
       [commandBuffer.buffer computeCommandEncoder];
