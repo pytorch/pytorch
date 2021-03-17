@@ -622,7 +622,12 @@ def regression_info(
             f'    job: {job_name}',
             f'    commit: {head_sha}',
         ]),
-        anomalies(analysis),
+
+        # don't print anomalies, because sometimes due to sharding, the
+        # output from this would be very long and obscure better signal
+
+        # anomalies(analysis),
+
         graph(
             head_sha=head_sha,
             head_seconds=head_report['total_seconds'],
@@ -670,6 +675,17 @@ class TestSuite:
         self.skipped_count += 1 if test_case.skipped else 0
         self.errored_count += 1 if test_case.errored else 0
 
+    def replace(self, test_case: TestCase) -> float:
+        name = test_case.name
+        assert name in self.test_cases, f'Error: attempting to replace nonexistent test case {name}'
+        old_time = self.test_cases[name].time
+        # We don't replace anything if the old test case was not shorter.
+        if old_time >= test_case.time:
+            return 0.0
+        self.total_time = self.total_time + test_case.time - old_time
+        self.test_cases[name] = test_case
+        return test_case.time - old_time
+
     def print_report(self, num_longest: int = 3) -> None:
         sorted_tests = sorted(self.test_cases.values(), key=lambda x: x.time)
         test_count = len(sorted_tests)
@@ -697,17 +713,21 @@ class TestFile:
         if suite_name not in self.test_suites:
             self.test_suites[suite_name] = TestSuite(suite_name)
         if test_case.name in self.test_suites[suite_name].test_cases:
-            # This behaviour is expected for test_cpp_extensions_aot, distributed/test_distributed_fork, 
-            # and distributed/test_distributed_spawn. In these cases, we just lump the duplicate tests together--
-            # which is admittedly inaccurate for test_cpp_extensions_aot, though this is negligible as the test is short.
+            # We expect duplicate tests for test_cpp_extensions_aot, distributed/test_distributed_fork,
+            # and distributed/test_distributed_spawn. In these cases, we store the test case that took the longest,
+            # as in these jobs, the duplicate tests are run in parallel.
             # For other unexpected cases, we should raise a warning.
-            if self.name != 'test_cpp_extensions_aot' and \
-               self.name != 'distributed/test_distributed_fork' and \
-               self.name != 'distributed/test_distributed_spawn' and \
-               self.name != 'cpp':  # Also allow this cpp one as it run twice in caffe2 ort jobs
+            if self.name == 'test_cpp_extensions_aot' or \
+               self.name == 'distributed/test_distributed_fork' or \
+               self.name == 'distributed/test_distributed_spawn' or \
+               self.name == 'cpp':  # The caffe2 cpp tests spawn duplicate test cases as well.
+                time_difference = self.test_suites[suite_name].replace(test_case)
+                self.total_time += time_difference
+            else:
                 raise RuntimeWarning(f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
-        self.test_suites[suite_name].append(test_case)
-        self.total_time += test_case.time
+        else:
+            self.test_suites[suite_name].append(test_case)
+            self.total_time += test_case.time
 
 
 def parse_report(path: str) -> Iterator[TestCase]:
@@ -797,15 +817,14 @@ def assemble_s3_object(
         'files' : {
             name: {
                 'total_seconds': test_file.total_time,
-                'filename': test_file.name,
                 'suites': {
                     name: {
                         'total_seconds': suite.total_time,
                         'cases': {
                             name: {
                                 'seconds': case.time,
-                                'status': 'skipped' if case.skipped else 
-                                          'errored' if case.errored else 
+                                'status': 'skipped' if case.skipped else
+                                          'errored' if case.errored else
                                           'failed' if case.failed else None
                             }
                             for name, case in suite.test_cases.items()
@@ -984,7 +1003,7 @@ if __name__ == '__main__':
 
     send_report_to_scribe(reports_by_file)
 
-    # longest_tests can contain duplicatesas the same tests can be spawned from different files
+    # longest_tests can contain duplicates as the same tests can be spawned from different files
     longest_tests : List[TestCase] = []
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():

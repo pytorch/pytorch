@@ -147,14 +147,14 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
          (weight.size(0) % input.size(1) == 0) &&
          (weight.size(2) == 3) &&
          (weight.size(3) == 3) &&
-         (input.device().type() == c10::DeviceType::CPU) &&
+         (input.device().is_cpu()) &&
          (input.scalar_type() == at::kFloat) &&
          input.is_contiguous() &&
-         (weight.device().type() == c10::DeviceType::CPU) &&
+         (weight.device().is_cpu()) &&
          (weight.scalar_type() == at::kFloat) &&
          weight.is_contiguous() &&
          (!bias.defined() ||
-            ((bias.device().type() == c10::DeviceType::CPU) &&
+            ((bias.device().is_cpu()) &&
              (bias.scalar_type() == at::kFloat))) &&
          !is_strided() &&
          !is_dilated() &&
@@ -246,7 +246,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
       || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480) // for some case, native is faster
       // OneDNN < 1.8.1 produce incorrect results in this case (see #50042)
       // TODO(VitalyFedyunin): Remove this patch after OneDNN 1.8.1 merged in
-      && !(groups == 24 && weight.size(0) == 24 && weight.size(1) == 1)
+      && !(groups > 0 && groups % 24 == 0 && weight.size(0) == groups && weight.size(1) == 1)
       );
 
 #endif
@@ -793,7 +793,7 @@ at::Tensor _convolution(
         params.groups);
   } else if (
         !params.transposed && (input.ndimension() == 5) &&
-        (input.device().type() == c10::DeviceType::CPU) &&
+        (input.device().is_cpu()) &&
         !params.is_dilated()) {
       // fast path for grouped conv3d
       output = at::slow_conv3d(
@@ -803,7 +803,7 @@ at::Tensor _convolution(
           bias,
           params.stride,
           params.padding);
-  } else if (input.device().type() == c10::DeviceType::CPU || input.device().type() == c10::DeviceType::CUDA) {
+  } else if (input.device().is_cpu() || input.is_cuda()) {
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
           input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);

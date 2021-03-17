@@ -292,6 +292,7 @@ _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, fill_diagonal_) \
 _(aten, diff) \
+_(aten, frexp) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
@@ -423,7 +424,6 @@ _(aten, leaky_relu) \
 _(aten, leaky_relu_backward) \
 _(aten, leaky_relu_forward) \
 _(aten, lerp) \
-_(aten, lgamma) \
 _(aten, linear) \
 _(aten, linspace) \
 _(aten, log) \
