@@ -310,6 +310,10 @@ void SimpleValue::setAttr(
         return;
       }
 
+      if (prop && !prop->setter) {
+        throw ErrorReport(loc) << "Tried to set read-only attribute: " << field;
+      }
+
       throw ErrorReport(loc)
           << "Tried to set nonexistent attribute: " << field
           << ". Did you forget to initialize it in __init__()?";
@@ -409,7 +413,7 @@ SugaredValuePtr SimpleValue::getitem(
     // sure its contents implement the module interface referred to by
     // type_hint.
     if (class_type->is_module() && type_hint) {
-      auto res = g.insert(prim::ModuleDictIndex, {val, idx}, {}, loc);
+      auto res = g.insert(prim::ModuleContainerIndex, {val, idx}, {}, loc);
       res->setType(type_hint);
       return std::make_shared<SimpleValue>(res);
     }

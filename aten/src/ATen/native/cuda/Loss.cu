@@ -58,7 +58,7 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
         });
     });
   }
-  else { 
+  else {
     grad_input = -at::exp(target) * grad;
     if (reduction == at::Reduction::Mean) {
       grad_input /= input.numel();

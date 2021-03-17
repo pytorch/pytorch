@@ -156,13 +156,13 @@ bool available(
          (2 == weight.ndimension()) &&
          (weight.size(Layout::Parameter::height) > 0) &&
          (weight.size(Layout::Parameter::width) > 0) &&
-         ((c10::DeviceType::CPU == weight.device().type()) ||
+         ((weight.device().is_cpu()) ||
           (c10::DeviceType::Vulkan == weight.device().type())) &&
          (kFloat == weight.scalar_type()) &&
          !weight.requires_grad() &&
          // Bias
          ((bias && bias->defined()) ? ((bias->ndimension() > 0) &&
-                                       ((c10::DeviceType::CPU == bias->device().type()) ||
+                                       ((bias->device().is_cpu()) ||
                                         (c10::DeviceType::Vulkan == bias->device().type())) &&
                                        (kFloat == bias->scalar_type()) &&
                                        ((bias->ndimension() > 1) ?
@@ -191,8 +191,8 @@ Tensor addmm(
     const Tensor& bias,
     const Tensor& input,
     const Tensor& weight,
-    const Scalar beta,
-    const Scalar alpha) {
+    const Scalar& beta,
+    const Scalar& alpha) {
   return LinearOpContext::create(
       api::context()->resource().pool,
       weight,

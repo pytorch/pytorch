@@ -7,7 +7,7 @@ namespace at { struct TensorIterator; }
 
 namespace at { namespace native {
 
-inline void alpha_check(const ScalarType dtype, Scalar alpha) {
+inline void alpha_check(const ScalarType dtype, const Scalar& alpha) {
   TORCH_CHECK(! alpha.isBoolean() || dtype == ScalarType::Bool,
               "Boolean alpha only supported for Boolean results.");
   TORCH_CHECK(isFloatingType(dtype) || isComplexType(dtype)
@@ -25,13 +25,22 @@ inline void sub_check(const Tensor& self, const Tensor& other) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
-using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, Scalar alpha);
+inline void sub_check(const Tensor& self, const Scalar& scalar) {
+  TORCH_CHECK(self.scalar_type() != kBool || !scalar.isBoolean(),
+              "Subtraction, the `-` operator, with two bool tensors is not supported."
+              "Use the `^` or `logical_xor()` operator instead.")
+  TORCH_CHECK(self.scalar_type() != kBool && !scalar.isBoolean(),
+              "Subtraction, the `-` operator, with a bool tensor is not supported. "
+              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+}
 
-using binary_fn_alpha = void(*)(TensorIterator&, Scalar alpha);
-using binary_fn_beta = void(*)(TensorIterator&, double beta);
+using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
+
+using binary_fn_alpha = void(*)(TensorIterator&, const Scalar& alpha);
+using binary_fn_double = void(*)(TensorIterator&, double);
 using binary_fn = void(*)(TensorIterator&);
 using binary_clamp_fn_alpha =
-    void(*)(TensorIterator&, Scalar alpha, Scalar min_val, Scalar max_val);
+    void(*)(TensorIterator&, const Scalar& alpha, const Scalar& min_val, const Scalar& max_val);
 
 DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
 DECLARE_DISPATCH(binary_clamp_fn_alpha, add_clamp_stub);
@@ -62,7 +71,8 @@ DECLARE_DISPATCH(binary_fn, maximum_stub);
 DECLARE_DISPATCH(binary_fn, minimum_stub);
 DECLARE_DISPATCH(binary_fn, fmax_stub);
 DECLARE_DISPATCH(binary_fn, fmin_stub);
-DECLARE_DISPATCH(binary_fn_beta, smooth_l1_stub);
+DECLARE_DISPATCH(binary_fn_double, smooth_l1_stub);
+DECLARE_DISPATCH(binary_fn_double, huber_stub);
 DECLARE_DISPATCH(binary_fn, sigmoid_backward_stub);
 DECLARE_DISPATCH(binary_fn_alpha, logit_backward_stub);
 DECLARE_DISPATCH(binary_fn, tanh_backward_stub);
