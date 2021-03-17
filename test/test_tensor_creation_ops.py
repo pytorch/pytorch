@@ -3149,6 +3149,7 @@ class TestRandomTensorCreation(TestCase):
                 res2 = torch.empty(0, dtype=dtype, device=device)
                 torch.randperm(n, out=res2, dtype=dtype, device=device)
                 self.assertEqual(res1, res2, atol=0, rtol=0)
+                self.assertEqual(res1.sort().values.long(), torch.arange(n, device=device))
 
         # Default type is long
         for n in (100, 10000):
