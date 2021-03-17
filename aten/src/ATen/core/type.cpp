@@ -903,7 +903,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
   // Warning: A tensor that has more than one dimension of size 1 has
   // insufficient information to recreate the contiguous order of its indices.
   // Ties are broken based on whether one of the dimensions is of size
-  // one.  When two dimensions have the same stride, the stride 
+  // one.  When two dimensions have the same stride, the stride
   // associated with a dimension of size 1 is considered "smaller"
   // as it created the condition for the second stride of the same size.
   // Example:
@@ -925,7 +925,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
           // In this case of uncertainty, default to descending index order.
           if (sizes[a] == sizes[b]) {
             return a > b;
-          } else { 
+          } else {
             return sizes[a] == 1;
           }
         }
@@ -1128,7 +1128,7 @@ torch::jit::Function* ClassType::findForwardHook(const std::string& name) const 
 std::string getSchemaInputTypesString(const FunctionSchema& schema) {
   std::stringstream input_types;
   const std::vector<Argument>& forward_args = schema.arguments();
-  for (int i = 1; i < forward_args.size(); ++i) {
+  for (size_t i = 1; i < forward_args.size(); ++i) {
     input_types << forward_args[i].type()->annotation_str();
     if (forward_args.size() - 1 != i) {
       input_types << ", ";
@@ -1234,7 +1234,7 @@ void checkForwardHookInputArguments(
         hook_err_msg
     );
 
-    for (int i = 1; i < forward_args.size(); ++i) {
+    for (size_t i = 1; i < forward_args.size(); ++i) {
       if (*forward_args[i].type() != *input_tuple_types[i - 1]) {
         TORCH_CHECK(
             false,
@@ -1334,7 +1334,7 @@ void ClassType::checkForwardPreHookSchema(
       pre_hook_err_msg
   );
   // check that contained types match forward types
-  for (int i = 1; i < forward_args.size(); ++i) {
+  for (size_t i = 1; i < forward_args.size(); ++i) {
     if (*forward_args[i].type() != *return_tuple_types[i - 1]) {
       TORCH_CHECK(
           false,

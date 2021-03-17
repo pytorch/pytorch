@@ -29,7 +29,7 @@ taking advantage of the storage and performance benefits of narrow types
 float32.
 
 The JIT support for autocast is subject to different constraints compared to the
-eager mode implementation (mostly related to the fact that TorchScript is 
+eager mode implementation (mostly related to the fact that TorchScript is
 statically typed) and this document attempts to list the known limitations.
 
 ## Usage
@@ -61,9 +61,9 @@ to change.
 
 > One important goal is to avoid surprises (ex. autocast annotations
 > silently ignored) and to report sensible diagnostics when something deviates
-> from eager mode behavior. 
+> from eager mode behavior.
 >
-> Please [report](https://github.com/csarofeen/pytorch/issues/new/choose) any 
+> Please [report](https://github.com/csarofeen/pytorch/issues/new/choose) any
 > issues not covered here.
 
 #### Diagnostics

@@ -1221,7 +1221,7 @@ const std::vector<std::string> functions = {
                 # Conditional prevents an extra kernel in trivial cases.
                 # This was noticed with bias backward fusions.
                 if float(alpha) != 1.0 :
-                    temp *= alpha 
+                    temp *= alpha
                 grad_other = (temp)._grad_sum_to_size(other_size)
                 grad_self = (grad_output)._grad_sum_to_size(self_size)
                 return grad_self, grad_other, None

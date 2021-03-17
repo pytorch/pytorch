@@ -79,7 +79,7 @@ static void MagicScheduler_Reduction(benchmark::State& benchmark_state,
       getReductionHeuristics(&fusion, {aten_input}, reduction_tv);
 
   TORCH_CHECK(reduction_params.has_value(), "Reduction is not found!");
-  
+
   std::vector<TensorView*> outputs_of_reduction;
   if(out_of_reduction != nullptr){
     outputs_of_reduction.push_back(out_of_reduction);
@@ -116,7 +116,7 @@ static void MagicScheduler_Reduction(benchmark::State& benchmark_state,
      << ", " << lparams.bdimy() << ", " << lparams.bdimx() << ")";
 
   benchmark_state.SetLabel(ss.str());
-  
+
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
