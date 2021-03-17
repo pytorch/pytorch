@@ -5707,13 +5707,13 @@
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    CPU: legacy::cpu::_th_nonzero_out
+    CPU: nonzero_out_cpu
     CUDA: nonzero_out_cuda
 
 - func: nonzero(Tensor self) -> Tensor
   variants: method, function
   dispatch:
-    CPU: nonzero_cpu
+    CPU: legacy::cpu::_th_nonzero
     CUDA: nonzero_cuda
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
