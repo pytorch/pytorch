@@ -172,6 +172,26 @@ _Trace = namedtuple("Trace", ("total", "abs", "rel", "idx", "diff", "a", "b"))
 
 
 def _trace_mismatches(a: torch.Tensor, b: torch.Tensor, /, mismatches: torch.Tensor) -> _Trace:
+    """Traces mismatches and returns the found information.
+
+    The returned named tuple has the following fields:
+    - total (int): Total number of values in :attr:`a` and :attr:`b`.
+    - abs (int): Absolute number of mismatches.
+    - rel (float): Relative number of mismatches.
+    - idx (Union[int, Tuple[int, ...]]): Index of greatest absolute difference.
+    - diff (Union[int, float]): Greatest absolute difference.
+    - a (Union[int, float]): Value of :attr:`a` at the greatest absolute difference.
+    - b (Union[int, float]): Value of :attr:`a` at the greatest absolute difference.
+
+    For ``diff``, ``a``, and ``b`` the returned type depends on the :attr:`~torch.Tensor.dtype` of :attr:`a` and
+    :attr:`b`.
+
+    Args:
+        a (torch.Tensor): First tensor.
+        b (torch.Tensor): Second tensor.
+        mismatches (torch.Tensor): Boolean mask of the same shape as :attr:`a` and :attr:`b` that indicates the
+            location of mismatches.
+    """
     total = mismatches.numel()
     abs = torch.sum(mismatches).item()
     rel = abs / total
