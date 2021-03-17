@@ -196,23 +196,27 @@ Tensor pinverse(const Tensor& self, double rcond) {
   return at::linalg_pinv(self, rcond, /*hermitian=*/false);
 }
 
-Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
-  checkSameDevice("linalg_matrix_rank", result, self);
+Tensor& linalg_matrix_rank_out(const Tensor& input, const Tensor& tol, bool hermitian, Tensor& result) {
+  checkSameDevice("torch.linalg.matrix_rank", result, input);
+  checkSameDevice("torch.linalg.matrix_rank", tol, input, "tol");
   ScalarType output_type = ScalarType::Long;
-  checkLinalgCompatibleDtype("linalg_matrix_rank", result.scalar_type(), output_type);
+  checkLinalgCompatibleDtype("torch.linalg.matrix_rank", result.scalar_type(), output_type);
 
   // Matrices or batch of matrices are allowed
-  TORCH_CHECK(self.dim() >= 2, "linalg_matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", self.sizes());
+  TORCH_CHECK(input.dim() >= 2, "torch.linalg.matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", input.sizes());
+
+  TORCH_CHECK(!at::isComplexType(tol.scalar_type()),
+              "torch.linalg.matrix_rank: tol tensor of complex type is not supported.");
 
   // matrix_rank assigns a scalar value for each matrix in the batch so
-  // result's shape is equal to self.shape[0:self.ndim-2]
+  // result's shape is equal to input.shape[0:input.ndim-2]
   // for single matrix result_shape = {}
-  auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
+  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend()-2);
   at::native::resize_output(result, result_shape);
 
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
   // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
-  if (self.numel() == 0) {
+  if (input.numel() == 0) {
     result.fill_(0);
     return result;
   }
@@ -221,28 +225,40 @@ Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<doub
   Tensor S;
   if (!hermitian) {
     Tensor U, V;
-    // TODO: replace self.svd with linalg_svd
-    std::tie(U, S, V) = self.svd(/*some=*/true, /*compute_uv=*/false);
+    // TODO: replace input.svd with linalg_svd
+    std::tie(U, S, V) = input.svd(/*some=*/true, /*compute_uv=*/false);
   } else {
-    S = at::linalg_eigvalsh(self);
+    S = at::linalg_eigvalsh(input);
     S = S.abs();
   }
 
-  if (tol.has_value()) {
-    double tol_value = tol.value();
-    at::sum_out(result, S > tol_value, /*dim=*/-1);
-  } else {
-    ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-    double tol_value = _get_epsilon(real_dtype) * std::max(self.size(-1), self.size(-2));
-    Tensor max_S = S.amax(/*dim=*/-1);
-    at::sum_out(result, S > max_S.mul_(tol_value).unsqueeze_(-1), /*dim=*/-1);
-  }
+  Tensor max_S = S.amax(/*dim=*/-1, /*keepdim=*/true);
+  at::sum_out(result, S > (tol.unsqueeze(-1) * max_S), /*dim=*/-1);
   return result;
 }
 
-Tensor linalg_matrix_rank(const Tensor& self, optional<double> tol, bool hermitian) {
-  Tensor result = at::empty({0}, self.options().dtype(ScalarType::Long));
-  result = at::linalg_matrix_rank_out(result, self, tol, hermitian);
+Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> tol, bool hermitian, Tensor& result) {
+  double tol_value;
+  if (tol.has_value()) {
+    tol_value = tol.value();
+  } else {
+    ScalarType real_dtype = toValueType(input.scalar_type());
+    tol_value = _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
+  }
+  Tensor tol_tensor = at::full({}, tol_value, input.options().dtype(ScalarType::Double));
+  result = at::linalg_matrix_rank_outf(input, tol_tensor, hermitian, result);
+  return result;
+}
+
+Tensor linalg_matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
+  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
+  return result;
+}
+
+Tensor linalg_matrix_rank(const Tensor& input, optional<double> tol, bool hermitian) {
+  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
   return result;
 }
 

@@ -9266,8 +9266,19 @@
   dispatch:
     Math: linalg_matrix_rank
 
+- func: linalg_matrix_rank.tol_tensor(Tensor self, Tensor tol, bool hermitian=False) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_matrix_rank
+
 - func: linalg_matrix_rank.out(Tensor self, float? tol=None, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  python_module: linalg
+  variants: function
+  dispatch:
+    Math: linalg_matrix_rank_out
+
+- func: linalg_matrix_rank.out_tol_tensor(Tensor self, Tensor tol, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
   dispatch:
