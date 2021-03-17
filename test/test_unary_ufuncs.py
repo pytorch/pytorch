@@ -25,6 +25,12 @@ from torch.testing import (
 if TEST_SCIPY:
     import scipy
 
+def scipy_filter(op):
+    # Refer [scipy reference filter]
+    return op.ref is not None
+
+unary_ufuncs = list(filter(scipy_filter, unary_ufuncs))
+
 # Tests for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
 #   - they are elementwise functions
