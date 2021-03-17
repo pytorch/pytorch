@@ -27,8 +27,9 @@ if __name__ == '__main__':
                        "instead.")
 
 TEST_CUDA = torch.cuda.is_available()
+TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
 TEST_CUDNN = False
-if TEST_CUDA:
+if TEST_CUDA and not TEST_ROCM:  # Skip ROCM
     torch.ones(1).cuda()  # initialize cuda context
     TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0')))
 
@@ -1771,7 +1772,7 @@ class TestFrozenOptimizations(JitTestCase):
     @unittest.skipIf(not TEST_CUDNN, "requires CUDNN")
     def test_freeze_conv_relu_fusion(self):
         conv_bias = [True, False]
-        conv_ops = [nn.Conv2d, nn.Conv3d]
+        conv_ops = [nn.Conv2d]
         add_z = [True, False]
         use_tracing = [True, False]
         for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, add_z, use_tracing):
