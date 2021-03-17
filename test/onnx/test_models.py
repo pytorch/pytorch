@@ -166,14 +166,14 @@ class TestModels(TestCase):
     def test_dcgan_netD(self):
         netD = _netD(1)
         netD.apply(weights_init)
-        input = Variable(torch.Tensor(bsz, 3, imgsz, imgsz).normal_(0, 1))
+        input = Variable(torch.empty(bsz, 3, imgsz, imgsz).normal_(0, 1))
         self.exportTest(toC(netD), toC(input))
 
     @disableScriptTest()
     def test_dcgan_netG(self):
         netG = _netG(1)
         netG.apply(weights_init)
-        input = Variable(torch.Tensor(bsz, nz, 1, 1).normal_(0, 1))
+        input = Variable(torch.empty(bsz, nz, 1, 1).normal_(0, 1))
         self.exportTest(toC(netG), toC(input))
 
     @skipIfUnsupportedMinOpsetVersion(10)
