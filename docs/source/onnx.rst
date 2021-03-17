@@ -585,6 +585,7 @@ The following operators are supported:
 * glu
 * group_norm
 * gt
+* hardsigmoid
 * hardswish
 * hardtanh
 * im2col
