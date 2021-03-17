@@ -76,6 +76,11 @@ integer_range<Integer> irange_torch(Integer end) {
     return {Integer(), std::max(Integer(), end)};
 }
 
+template <typename Integer, typename std::enable_if<std::is_integral<Integer>::value, T>::type* = nullptr>
+integer_range do_stuff(Integer& t) {
+  return {Integer(), std::max(Integer(), t)};
+}
+
 // TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
 // away, we can delete this function
 static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const char * name, int pos, const char * api, bool allowNull, DeviceType device_type, ScalarType scalar_type) {
@@ -107,6 +112,9 @@ static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef
 
   int64_t test_end = 10;
   int64_t test_result = 0;
+  for (const auto i : do_stuff(test_end)) {
+    test_result += i;
+  }
   for (const auto i : irange_torch(test_end)) {
     test_result += i;
   }
