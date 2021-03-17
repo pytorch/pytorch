@@ -54,6 +54,9 @@ class NormalizeArgs(Transformer):
             assert callable(target)
             torch_op_schemas = get_signature_for_torch_op(target)
             if torch_op_schemas:
+                # Iterate through all of the schema until we find one that matches
+                # If one matches, populate `new_kwargs` with the combined args/kwargs
+                # values. If none matches, `new_kwargs` will be None
                 for candidate_signature in torch_op_schemas:
                     try:
                         candidate_signature.bind(args, kwargs)

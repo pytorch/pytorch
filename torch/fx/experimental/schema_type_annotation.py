@@ -88,26 +88,23 @@ class AnnotateTypesWithSchema(Transformer):
 
         return attr_proxy
 
-    def _extract_python_return_type(self, target : Target) -> Optional[Dict[str, Any]]:
+    def _extract_python_return_type(self, target : Target) -> Optional[Any]:
         """
-        Given a call target, args, and kwargs, return the arguments normalized into
-        a single kwargs dict, or None if the type signature is not supported by
-        this normalization.
+        Given a Python call target, try to extract the Python return annotation
+        if it is available, otherwise return None
 
         Args:
 
-            target (Callable): Python callable to normalize arguments for
-            args (Tuple): Arguments that appear at the callsite for `target`
-            kwargs (Dict): Keyword arugments that appear at the callsite for `target`
+            target (Callable): Python callable to get return annotation for
 
         Returns:
 
-            Optional[Dict]: Normalized kwargs for `target`, or `None` if this target is not
-                supported
+            Optional[Any]: Return annotation from the `target`, or None if it was
+                not available.
         """
-        assert not isinstance(target, str)
+        assert callable(target)
         try:
-            sig = inspect.signature(inspect.unwrap(target))
+            sig = inspect.signature(target)
         except (ValueError, TypeError):
             return None
 
