@@ -4606,21 +4606,33 @@ class TestNN(NNTestCase):
         self.assertEqual(l.state_dict()['buf'], buf)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_thnn_conv2d_strided_padded(self):
-        for stride, padding in ((2, 0), (1, 1), (2, 1)):
-            kwargs = {"stride": stride, "padding": padding}
-            inputs = torch.randn(1, 4, 8, 8, dtype=torch.double, device="cuda", requires_grad=True)
-            weight = torch.randn(8, 4, 1, 1, dtype=torch.double, device="cuda", requires_grad=True)
-            bias = torch.randn(8, dtype=torch.double, device="cuda", requires_grad=True)
-            with torch.backends.cudnn.flags(enabled=False):
-                res = torch.nn.functional.conv2d(inputs, weight, bias, **kwargs)
-            res_cpu = torch.nn.functional.conv2d(inputs.cpu(), weight.cpu(), bias.cpu(), **kwargs)
-            self.assertEqual(res, res_cpu)
-            with torch.backends.cudnn.flags(enabled=False):
-                torch.autograd.gradcheck(
-                    lambda x, w, b: torch.nn.functional.conv2d(x, w, b, **kwargs),
-                    (inputs, weight, bias)
-                )
+    def test_thnn_conv_strided_padded_dilated(self):
+        for convfn, dims, transposed in (
+                (torch.nn.functional.conv2d, 2, False),
+                (torch.nn.functional.conv_transpose2d, 2, True),
+                (torch.nn.functional.conv3d, 3, False),
+                (torch.nn.functional.conv_transpose3d, 3, True)):
+            for stride, padding, dilation in (
+                    (2, 0, 1), (1, 1, 1), (2, 1, 1), (1, 0, 2)):
+                kwargs = {"stride": stride, "padding": padding, "dilation": dilation}
+                inp_shape = (1, 2) + dims * (4,)
+                weight_shape = (2, 2) + dims * (1,)
+                inputs = torch.randn(inp_shape, dtype=torch.double, device="cuda", requires_grad=True)
+                weight = torch.randn(weight_shape, dtype=torch.double, device="cuda", requires_grad=True)
+                bias = torch.randn(2, dtype=torch.double, device="cuda", requires_grad=True)
+                with torch.backends.cudnn.flags(enabled=False):
+                    res = convfn(inputs, weight, bias, **kwargs)
+                res_cpu = convfn(inputs.cpu(), weight.cpu(), bias.cpu(), **kwargs)
+                self.assertEqual(res, res_cpu)
+                with torch.backends.cudnn.flags(enabled=False):
+                    torch.autograd.gradcheck(
+                        lambda x, w, b: convfn(x, w, b, **kwargs),
+                        (inputs, weight, bias)
+                    )
+                    torch.autograd.gradcheck(
+                        lambda x, w, b: convfn(x, w, b, **kwargs),
+                        (inputs.cpu(), weight.cpu(), bias.cpu())
+                    )
 
     def test_Conv2d_inconsistent_types(self):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float)

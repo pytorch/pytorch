@@ -453,7 +453,9 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
-          if (kernel_height != 1 || kernel_width != 1) {
+          if (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+              stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+              dilation_height != 1 || dilation_width != 1) {
             // Extract columns:
             im2col<scalar_t>(
                   grad_output_n.data_ptr<scalar_t>(),
@@ -481,8 +483,12 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
-              grad_columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+          auto gemm_in_ptr =
+              (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+               stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+               dilation_height != 1 || dilation_width != 1)
+              ? grad_columns.data_ptr<scalar_t>()
+              : grad_output_n.data_ptr<scalar_t>();
           cpublas::gemm(
               cpublas::NoTranspose,
               cpublas::NoTranspose,
@@ -648,7 +654,9 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
             // Matrix mulitply per output:
             input_n = input.select(0, elt);
 
-            if (kernel_height != 1 || kernel_width != 1) {
+            if (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+                stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+                dilation_height != 1 || dilation_width != 1) {
               // Extract columns:
               im2col<scalar_t>(
                   grad_output_n.data_ptr<scalar_t>(),
@@ -676,8 +684,12 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            auto gemm_in_ptr = (kernel_height != 1 || kernel_width != 1) ?
-                columns.data_ptr<scalar_t>() : grad_output_n.data_ptr<scalar_t>();
+            auto gemm_in_ptr =
+                (kernel_height != 1 || kernel_width != 1 ||
+                 stride_height != 1 || stride_width != 1 || pad_height != 0 ||
+                 pad_width != 0 || dilation_height != 1 || dilation_width != 1)
+                ? columns.data_ptr<scalar_t>()
+                : grad_output_n.data_ptr<scalar_t>();
             cpublas::gemm(
                 cpublas::Transpose,
                 cpublas::NoTranspose,
