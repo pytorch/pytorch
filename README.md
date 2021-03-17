@@ -238,6 +238,8 @@ Build with CPU
 
 It's fairly easy to build with CPU. Visual Studio 2019 version 16.7.6 (MSVC toolchain version 14.27) or higher is recommended.
 
+Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against Intel OpenMP, you'll need to follow the steps [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) to manually set up the buliding environment. Otherwise, Microsoft Visual C OpenMP runtime (vcomp) may be used.
+
 Build with CUDA
 
 [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.

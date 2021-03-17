@@ -101,7 +101,7 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
       set(OMP_FLAG_Intel "-qopenmp")
     endif()
     set(OMP_FLAG_MIPSpro "-mp")
-    set(OMP_FLAG_MSVC "-openmp:experimental" "-openmp:experimental -I${__header_dir}" "-openmp" "-openmp -I${__header_dir}")
+    set(OMP_FLAG_MSVC "-openmp:experimental" "-openmp:experimental -I\"${__header_dir}\"" "-openmp" "-openmp -I\"${__header_dir}\"")
     set(OMP_FLAG_PathScale "-openmp")
     set(OMP_FLAG_NAG "-openmp")
     set(OMP_FLAG_Absoft "-openmp")
@@ -132,7 +132,6 @@ set(OpenMP_C_CXX_TEST_SOURCE
 int main(void) {
 #ifdef _OPENMP
   omp_get_max_threads();
-  omp_get_level();
   return 0;
 #else
   breaks_on_purpose
