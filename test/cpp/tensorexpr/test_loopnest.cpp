@@ -4030,7 +4030,7 @@ const char* int64Loop = R"IR(
 TEST(LoopNest, DISABLED_Int64Direct) {
   KernelScope kernel_scope;
 
-  int64_t N = 12;
+  constexpr int64_t N = 12;
   Placeholder a("a", kLong, {N});
   Placeholder b("b", kLong, {N});
   VarHandle n("n", kLong);
@@ -4044,7 +4044,7 @@ TEST(LoopNest, DISABLED_Int64Direct) {
 TEST(LoopNest, DISABLED_Int64Compute) {
   KernelScope kernel_scope;
 
-  int64_t N = 12;
+  constexpr int64_t N = 12;
   Placeholder a("a", kLong, {N});
   Tensor* b = Compute("b", {{N, "n"}}, [&](const VarHandle& n) {
     return a.load(n) + LongImm::make(1l);

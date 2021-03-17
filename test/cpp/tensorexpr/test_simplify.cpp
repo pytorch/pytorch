@@ -4643,7 +4643,7 @@ TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
   //     b[n] = 1.f;
   //   }
   KernelScope kernel_scope;
-  int N = 8;
+  constexpr int N = 8;
   Placeholder b("b", kFloat, {N});
   VarHandle n("n", kInt);
   Stmt* s = For::make(
@@ -4668,7 +4668,7 @@ TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
   //     b[n] = 1.f;
   //   }
   KernelScope kernel_scope;
-  int N = 8;
+  constexpr int N = 8;
   Placeholder b("b", kFloat, {N});
   VarHandle n("n", kInt);
   Stmt* s =
@@ -4697,7 +4697,7 @@ TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
   //     for (int j = 1; j < 7; j++) {
   //       b[i, j] = 1.f;
   KernelScope kernel_scope;
-  int N = 8;
+  constexpr int N = 8;
   Placeholder b("b", kFloat, {N, N});
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
@@ -4733,8 +4733,8 @@ TEST(Simplify, DISABLED_SimplifyLoopBounds) {
   //     for (int j = 1; j < 3; j++) {
   //       b[i, j] = (b[i, j]) + 1.f;
   KernelScope kernel_scope;
-  int N = 8;
-  int K = 3;
+  constexpr int N = 8;
+  constexpr int K = 3;
   Placeholder a("a", kFloat, {N, N});
   Placeholder b("b", kFloat, {N, N});
   VarHandle i("i", kInt);
