@@ -3193,6 +3193,14 @@ class TestCudaSparse(TestSparse):
         self.device = 'cuda'
         self.legacy_sparse_tensor = torch.cuda.sparse.DoubleTensor
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    def test_mixed_device_constructor(self):
+        # https://github.com/pytorch/pytorch/issues/54075
+        v = torch.empty(2, 0).cuda()
+        torch.sparse_coo_tensor(([0, 1],), v, (4, 0))
+        v = torch.empty(2, 0).cuda(1)
+        torch.sparse_coo_tensor(([0, 1],), v, (4, 0))
+       
 
 @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
 class TestCudaUncoalescedSparse(TestCudaSparse):
