@@ -4768,7 +4768,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             x_from=1,
             y_from=1,
             z_to=0,
-            device_map={1 : 0}
+            device_map={0 : 0, 1 : 1}
         )
 
     @skip_if_lt_x_gpu(2)
@@ -4777,7 +4777,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             x_from=0,
             y_from=0,
             z_to=1,
-            device_map={0 : 1}
+            device_map={0 : 0, 1 : 1}
         )
 
     def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map, dst=None):
@@ -4831,7 +4831,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             device_map={1 : 1}
         )
 
-    @unittest.skip("Disallow new devices in user-function output tensors. See https://github.com/pytorch/pytorch/issues/54017")
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_default_to_non_default(self):
         self._test_device_maps_gpu(
@@ -4841,7 +4840,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             device_map={0 : 1}
         )
 
-    @unittest.skip("Disallow new devices in user-function output tensors. See https://github.com/pytorch/pytorch/issues/54017")
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_non_default_to_default(self):
         self._test_device_maps_gpu(

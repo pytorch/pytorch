@@ -677,6 +677,13 @@ void TensorPipeAgent::sendCompletedResponseMessage(
         std::move(*futureResponseMessage->value().toCustomClass<Message>());
     responseMessage.setId(messageId);
 
+    std::vector<c10::DeviceIndex> devices;
+    try {
+      devices = getDevicesForRemote(pipe->getRemoteName(), responseMessage);
+    } catch (const std::exception& e) {
+      responseMessage = createExceptionResponse(e.what(), messageId);
+    }
+
     auto ctxDevices = ctx->devices();
     if (!ctxDevices.empty()) {
       // FIXME: skipping this check when ctxDevices is empty to allow
@@ -703,13 +710,6 @@ void TensorPipeAgent::sendCompletedResponseMessage(
           break;
         }
       }
-    }
-
-    std::vector<c10::DeviceIndex> devices;
-    try {
-      devices = getDevicesForRemote(pipe->getRemoteName(), responseMessage);
-    } catch (const std::exception& e) {
-      responseMessage = createExceptionResponse(e.what(), messageId);
     }
 
     pipeWrite(
