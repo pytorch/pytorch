@@ -98,37 +98,45 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
 
   auto opt = TensorOptions().device(result.device());
 
-  if (n < 100) {
+  int bits = static_cast<int>(std::ceil(std::log2(static_cast<double>(n)))) + 1;
+
+  if (n == 0) {
+    return result;
+  } else if (n < (1L << 7)) {
     auto keys = at::empty(result.sizes(), opt.dtype(kChar)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       at::cuda::cub::sort_pairs<int8_t, scalar_t>(
         keys.data_ptr<int8_t>(), keys_tmp.data_ptr<int8_t>(),
-        range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
+        range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data),
+        n, 0, bits);
     });
-  } else if (n < 30000) {
+  } else if (n < (1L << 15)) {
     auto keys = at::empty(result.sizes(), opt.dtype(kShort)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       at::cuda::cub::sort_pairs<short, scalar_t>(
         keys.data_ptr<short>(), keys_tmp.data_ptr<short>(),
-        range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
+        range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data),
+        n, 0, bits);
     });
-  } else if (n < 2000000000) {
+  } else if (n < (1L << 31)) {
     auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm_out_cuda", [&] {
       at::cuda::cub::sort_pairs<int, scalar_t>(
         keys.data_ptr<int>(), keys_tmp.data_ptr<int>(),
-        range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
+        range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data),
+        n, 0, bits);
     });
   } else {
     auto keys = at::empty(result.sizes(), opt.dtype(kLong)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm_out_cuda", [&] {
       at::cuda::cub::sort_pairs<int64_t, scalar_t>(
         keys.data_ptr<int64_t>(), keys_tmp.data_ptr<int64_t>(),
-        range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
+        range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data),
+        n, 0, bits);
     });
   }
 

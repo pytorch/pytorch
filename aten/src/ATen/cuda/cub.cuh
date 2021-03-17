@@ -14,7 +14,11 @@ struct cuda_type<c10::Half> {
 };
 
 template<typename key_t, typename value_t>
-static inline void sort_pairs(key_t *keys_in, key_t *keys_out, value_t *values_in, value_t *values_out, int64_t n) {
+static inline void sort_pairs(
+    key_t *keys_in, key_t *keys_out,
+    value_t *values_in, value_t *values_out,
+    int64_t n, int64_t start_bit=0, int64_t end_bit=sizeof(key_t)*8
+) {
   using key_t_ = typename cuda_type<key_t>::type;
   using value_t_ = typename cuda_type<value_t>::type;
   key_t_ *keys_in_ = reinterpret_cast<key_t_*>(keys_in);
@@ -28,12 +32,12 @@ static inline void sort_pairs(key_t *keys_in, key_t *keys_out, value_t *values_i
   ::cub::DeviceRadixSort::SortPairs(
     nullptr, temp_storage_bytes,
     keys_in_, keys_out_, values_in_, values_out_, n,
-    0, sizeof(key_t) * 8, at::cuda::getCurrentCUDAStream());
+    start_bit, end_bit, at::cuda::getCurrentCUDAStream());
   auto tmpDataPtr = allocator.allocate(temp_storage_bytes);
   ::cub::DeviceRadixSort::SortPairs(
     tmpDataPtr.get(), temp_storage_bytes,
     keys_in_, keys_out_, values_in_, values_out_, n,
-    0, sizeof(key_t) * 8, at::cuda::getCurrentCUDAStream());
+    start_bit, end_bit, at::cuda::getCurrentCUDAStream());
 }
 
 }}}
