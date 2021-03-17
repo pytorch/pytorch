@@ -32,12 +32,10 @@ void SetStackTraceFetcher(std::function<string(void)> fetcher) {
 }
 
 void ThrowEnforceNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
+    const detail::ThrowEnforceArg& arg,
     const std::string& msg,
     const void* caller) {
-  c10::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+  c10::Error e(arg.file, arg.line, arg.condition, msg, (*GetFetchStackTrace())(), caller);
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << e.msg();
   }
@@ -45,32 +43,26 @@ void ThrowEnforceNotMet(
 }
 
 void ThrowEnforceNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
+    const detail::ThrowEnforceArg& arg,
     const char* msg,
     const void* caller) {
-  ThrowEnforceNotMet(file, line, condition, std::string(msg), caller);
+  ThrowEnforceNotMet(arg, std::string(msg), caller);
 }
 
 void ThrowEnforceFiniteNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
+    const detail::ThrowEnforceArg& arg,
     const std::string& msg,
     const void* caller) {
   throw c10::EnforceFiniteError(
-      file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+      arg.file, arg.line, arg.condition, msg, (*GetFetchStackTrace())(), caller);
 }
 
 void ThrowEnforceFiniteNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
+    const detail::ThrowEnforceArg& arg,
     const char* msg,
     const void* caller) {
 
-  ThrowEnforceFiniteNotMet(file, line, condition, std::string(msg), caller);
+  ThrowEnforceFiniteNotMet(arg, std::string(msg), caller);
 }
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)

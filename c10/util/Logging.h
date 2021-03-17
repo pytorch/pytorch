@@ -62,50 +62,46 @@ using std::string;
 C10_API bool InitCaffeLogging(int* argc, char** argv);
 C10_API void UpdateLoggingLevelsFromFlags();
 
+namespace detail {
+struct ThrowEnforceArg {
+  const char* file;
+  int line;
+  const char* condition;
+};
+} // namespace detail
+
 [[noreturn]] C10_API void ThrowEnforceNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
+    const detail::ThrowEnforceArg& arg,
     const std::string& msg,
     const void* caller = nullptr);
 
 [[noreturn]] C10_API void ThrowEnforceNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
+    const detail::ThrowEnforceArg& arg,
     const char* msg,
     const void* caller = nullptr);
 
 [[noreturn]] C10_API inline void ThrowEnforceNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
+    const detail::ThrowEnforceArg& arg,
     detail::CompileTimeEmptyString msg,
     const void* caller = nullptr) {
-  ThrowEnforceNotMet(file, line, condition, "", caller);
+  ThrowEnforceNotMet(arg, "", caller);
 }
 
 [[noreturn]] C10_API void ThrowEnforceFiniteNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
+    const detail::ThrowEnforceArg& arg,
     const std::string& msg,
     const void* caller = nullptr);
 
 [[noreturn]] C10_API void ThrowEnforceFiniteNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
+    const detail::ThrowEnforceArg& arg,
     const char* msg,
     const void* caller = nullptr);
 
 [[noreturn]] C10_API inline void ThrowEnforceFiniteNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
+    const detail::ThrowEnforceArg& arg,
     detail::CompileTimeEmptyString msg,
     const void* caller = nullptr) {
-  ThrowEnforceFiniteNotMet(file, line, condition, "", caller);
+  ThrowEnforceFiniteNotMet(arg, "", caller);
 }
 
 constexpr bool IsUsingGoogleLogging() {
@@ -130,32 +126,54 @@ C10_API void SetStackTraceFetcher(std::function<string(void)> fetcher);
 
 using EnforceNotMet = ::c10::Error;
 
-#define CAFFE_ENFORCE(condition, ...)                               \
-  do {                                                              \
-    if (C10_UNLIKELY(!(condition))) {                               \
-      ::c10::ThrowEnforceNotMet(                                    \
-          __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__)); \
-    }                                                               \
+#define CAFFE_ENFORCE(condition, ...)                                   \
+  do {                                                                  \
+    if (C10_UNLIKELY(!(condition))) {                                   \
+      static constexpr ::c10::detail::ThrowEnforceArg __caffe_enforce_arg{ \
+        __FILE__,                                                       \
+        __LINE__,                                                       \
+        #condition,                                                     \
+      };                                                                \
+      ::c10::ThrowEnforceNotMet(                                        \
+          __caffe_enforce_arg, ::c10::str(__VA_ARGS__));                \
+    }                                                                   \
   } while (false)
 
-#define CAFFE_ENFORCE_FINITE(condition, ...)                        \
-    do {                                                            \
-      if (C10_UNLIKELY(!(condition))) {                             \
-        ::c10::ThrowEnforceFiniteNotMet(                            \
-          __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__)); \
-      }                                                             \
-    } while (false)
-
-#define CAFFE_ENFORCE_WITH_CALLER(condition, ...)                         \
-  do {                                                                    \
-    if (C10_UNLIKELY(!(condition))) {                                     \
-      ::c10::ThrowEnforceNotMet(                                          \
-          __FILE__, __LINE__, #condition, ::c10::str(__VA_ARGS__), this); \
-    }                                                                     \
+#define CAFFE_ENFORCE_FINITE(condition, ...)                            \
+  do {                                                                  \
+    if (C10_UNLIKELY(!(condition))) {                                   \
+      static constexpr ::c10::detail::ThrowEnforceArg __caffe_enforce_arg{ \
+        __FILE__,                                                       \
+        __LINE__,                                                       \
+        #condition,                                                     \
+      };                                                                \
+      ::c10::ThrowEnforceFiniteNotMet(                                  \
+          __caffe_enforce_arg, ::c10::str(__VA_ARGS__));                \
+    }                                                                   \
   } while (false)
 
-#define CAFFE_THROW(...) \
-  ::c10::ThrowEnforceNotMet(__FILE__, __LINE__, "", ::c10::str(__VA_ARGS__))
+#define CAFFE_ENFORCE_WITH_CALLER(condition, ...)                       \
+  do {                                                                  \
+    if (C10_UNLIKELY(!(condition))) {                                   \
+      static constexpr ::c10::detail::ThrowEnforceArg __caffe_enforce_arg{ \
+        __FILE__,                                                       \
+        __LINE__,                                                       \
+        #condition,                                                     \
+      };                                                                \
+      ::c10::ThrowEnforceNotMet(                                        \
+          __caffe_enforce_arg, ::c10::str(__VA_ARGS__), this);          \
+    }                                                                   \
+  } while (false)
+
+#define CAFFE_THROW(...)                                                \
+  do {                                                                  \
+    static constexpr ::c10::detail::ThrowEnforceArg __caffe_enforce_arg{ \
+      __FILE__,                                                         \
+      __LINE__,                                                         \
+      "",                                                               \
+    };                                                                  \
+    ::c10::ThrowEnforceNotMet(__caffe_enforce_arg, ::c10::str(__VA_ARGS__)); \
+  } while (false)
 
 /**
  * Rich logging messages
@@ -197,14 +215,11 @@ std::string enforceFailMsgImpl(const T1& x, const T2& y, const Args&... args) {
 }
 
 template <typename Pred, typename T1, typename T2, typename... Args>
-void enforceThatImpl(Pred p, const T1& lhs, const T2& rhs, const char* file,
-                     int line, const char* expr, const void* caller,
+void enforceThatImpl(Pred p, const T1& lhs, const T2& rhs, const detail::ThrowEnforceArg& arg, const void* caller,
                      const Args&... args) {
   if (C10_UNLIKELY(!(p(lhs, rhs)))) {
     ::c10::ThrowEnforceNotMet(
-        file,
-        line,
-        expr,
+        arg,
         ::c10::enforce_detail::enforceFailMsgImpl(
             lhs,
             rhs,
@@ -212,27 +227,37 @@ void enforceThatImpl(Pred p, const T1& lhs, const T2& rhs, const char* file,
         caller);
   }
 }
-#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...)        \
-  ::c10::enforce_detail::enforceThatImpl(                       \
-      op,                                                       \
-      lhs,                                                      \
-      rhs,                                                      \
-      __FILE__,                                                 \
-      __LINE__,                                                 \
-      expr,                                                     \
-      nullptr,                                                  \
-      ##__VA_ARGS__)
-
-#define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...)    \
-  ::c10::enforce_detail::enforceThatImpl(                               \
-      op,                                                               \
-      (lhs),                                                            \
-      (rhs),                                                            \
+#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...)                \
+  do {                                                                  \
+    static constexpr ::c10::detail::ThrowEnforceArg __caffe_enforce_arg{ \
       __FILE__,                                                         \
       __LINE__,                                                         \
       expr,                                                             \
-      this,                                                             \
-      ##__VA_ARGS__)
+    };                                                                  \
+    ::c10::enforce_detail::enforceThatImpl(                             \
+        op,                                                             \
+        lhs,                                                            \
+        rhs,                                                            \
+        __caffe_enforce_arg,                                            \
+        nullptr,                                                        \
+        ##__VA_ARGS__);                                                 \
+  } while (false)
+
+#define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...)    \
+  do {                                                                  \
+    static constexpr ::c10::detail::ThrowEnforceArg __caffe_enforce_arg{ \
+      __FILE__,                                                         \
+      __LINE__,                                                         \
+      expr,                                                             \
+    };                                                                  \
+    ::c10::enforce_detail::enforceThatImpl(                             \
+        op,                                                             \
+        (lhs),                                                          \
+        (rhs),                                                          \
+        __caffe_enforce_arg,                                            \
+        this,                                                           \
+        ##__VA_ARGS__);                                                 \
+  } while (false)
 
 } // namespace enforce_detail
 
