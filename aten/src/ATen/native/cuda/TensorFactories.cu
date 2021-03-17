@@ -96,9 +96,10 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
     shuffled_data = shuffled.data_ptr();
   }
 
+  auto opt = TensorOptions().device(result.device());
+
   if (n < 50) {
-    auto keys = at::randint(-100, 100,
-      result.sizes(), generator, result.options().dtype(kChar));
+    auto keys = at::empty(result.sizes(), opt.dtype(kChar)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       at::cuda::cub::sort_pairs<int8_t, scalar_t>(
@@ -106,8 +107,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
         range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
     });
   } else if (n < 15000) {
-    auto keys = at::randint(-30000, 30000,
-      result.sizes(), generator, result.options().dtype(kShort));
+    auto keys = at::empty(result.sizes(), opt.dtype(kShort)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       at::cuda::cub::sort_pairs<short, scalar_t>(
@@ -115,8 +115,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
         range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
     });
   } else if (n < 1000000000) {
-    auto keys = at::randint(-2000000000, 2000000000, result.sizes(),
-      generator, TensorOptions().device(result.device()).dtype(kInt));
+    auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       at::cuda::cub::sort_pairs<int, scalar_t>(
@@ -124,11 +123,11 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
         range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
     });
   } else {
-    auto keys = at::empty_like(result).random_(generator);
+    auto keys = at::empty(result.sizes(), opt.dtype(kLong)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-      at::cuda::cub::sort_pairs<scalar_t, scalar_t>(
-        keys.data_ptr<scalar_t>(), keys_tmp.data_ptr<scalar_t>(),
+      at::cuda::cub::sort_pairs<int64_t, scalar_t>(
+        keys.data_ptr<int64_t>(), keys_tmp.data_ptr<int64_t>(),
         range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
     });
   }
