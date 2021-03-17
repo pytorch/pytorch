@@ -16,6 +16,7 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
+from torch.testing._internal.framework_utils import calculate_shards
 import torch.distributed as dist
 from typing import Dict, Optional, Tuple, List, Any
 
@@ -421,25 +422,7 @@ def calculate_job_times(reports: List[Dict[str, Any]]) -> Dict[str, Tuple[float,
     return jobs_to_times
 
 
-def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, Tuple[float, int]]) -> List[Tuple[float, List[str]]]:
-    filtered_job_times: Dict[str, float] = dict()
-    for test in tests:
-        if test in job_times:
-            avg_time, _ = job_times[test]
-            filtered_job_times[test] = avg_time
-        else:
-            filtered_job_times[test] = 0.0
 
-    # The following attempts to implement a partition approximation greedy algorithm
-    # See more at https://en.wikipedia.org/wiki/Greedy_number_partitioning
-    sorted_jobs = sorted(filtered_job_times, key=lambda j: filtered_job_times[j], reverse=True)
-    sharded_jobs: List[Tuple[float, List[str]]] = [(0.0, []) for _ in range(num_shards)]
-    for job in sorted_jobs:
-        min_shard_index = sorted(range(num_shards), key=lambda i: sharded_jobs[i][0])[0]
-        curr_shard_time, curr_shard_jobs = sharded_jobs[min_shard_index]
-        curr_shard_jobs.append(job)
-        sharded_jobs[min_shard_index] = (curr_shard_time + filtered_job_times[job], curr_shard_jobs)
-    return sharded_jobs
 
 
 def pull_job_times_from_S3() -> Dict[str, Tuple[float, int]]:
@@ -992,7 +975,7 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 
     # Printing the date here can help diagnose which tests are slow
     print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
-    handler = CUSTOM_HANDLERS.get(test, run_test)
+    handler = CUSTOM_HANDLERS.get(test_module, run_test)
     return_code = handler(test_module, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool), 'Return code should be an integer'
