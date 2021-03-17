@@ -22,7 +22,7 @@ void main() {
     const ivec2 off_pre  = 2*max(uBlock.pad.xz - pos.xy, zeros);
     const ivec2 off_post = 2*max(pos.xy - (uBlock.size.xy - ivec2(1, 1) - uBlock.pad.yw), zeros);
 
-    ivec3 inpos = ivec3(pos.xy - uBlock.pad.xz + off_pre - off_post, pos.z);
+    const ivec3 inpos = ivec3(pos.xy - uBlock.pad.xz + off_pre - off_post, pos.z);
     imageStore(uOutput, pos, texelFetch(uInput, inpos, 0));
   }
 }
