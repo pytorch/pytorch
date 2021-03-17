@@ -46,7 +46,9 @@ def compute_norms(sample_grads):
     norms = torch.stack(norms, dim=0).norm(2, dim=0)
     return norms
 
-def clip_and_accumulate_and_add_noise(sample_grads, max_per_sample_grad_norm=1.0, noise_multiplier=1.0):
+def clip_and_accumulate_and_add_noise(model, max_per_sample_grad_norm=1.0, noise_multiplier=1.0):
+    sample_grads = tuple(param.grad_sample for param in model.parameters())
+
     # step 0: compute the norms
     sample_norms = compute_norms(sample_grads)
 
@@ -64,10 +66,12 @@ def clip_and_accumulate_and_add_noise(sample_grads, max_per_sample_grad_norm=1.0
                    for grad_param in grads)
     grads = tuple(noise + grad_param for noise, grad_param in zip(noises, grads))
 
-    return grads
+    # step 4: assign the new grads, delete the sample grads
+    for param, param_grad in zip(model.parameters(), grads):
+        param.grad = param_grad
+        del param.grad_sample
 
 def train(args, model, train_loader, optimizer, epoch, device):
-    use_prototype = False
     model.train()
     criterion = nn.CrossEntropyLoss()
 
@@ -80,8 +84,15 @@ def train(args, model, train_loader, optimizer, epoch, device):
         target = target.to(device)
 
         # Step 1: compute per-sample-grads
+
+        # In order to use functional vmap+grad, we need to be able to
+        # pass the weights to a model.
         weights, func_model, descriptors = make_functional(model)
 
+        # To use vmap+grad to compute per-sample-grads, the forward pass
+        # must be re-formulated on a single example.
+        # We use the `grad` operator to compute forward+backward on a single example,
+        # and finally `vmap` to do forward+backward on multiple examples.
         def compute_loss_and_output(weights, image, target):
             images = image.unsqueeze(0)
             targets = target.unsqueeze(0)
@@ -89,29 +100,32 @@ def train(args, model, train_loader, optimizer, epoch, device):
             loss = criterion(output, targets)
             return loss, output.squeeze(0)
 
-        # grad_with_value(f) returns a function that returns (1) the grad and
-        # (2) the output. `has_aux=True` means that `f` returns a tuple of two values,
-        # where the first is to be differentiated and the second is not to be
-        # differentiated and further adds a 3rd output.
-        #
-        # We need to use `grad_with_value(..., has_aux=True)` because we do
-        # some analyses on the returned loss and output.
+        # `grad(f)` is a functional API that returns a function `f'` that
+        # computes gradients by running both the forward and backward pass.
+        # We want to extract some intermediate
+        # values from the computation (i.e. the loss and output).
+        # 
+        # To extract the loss, we use the `grad_with_value` API, that returns the
+        # gradient of the weights w.r.t. the loss and the loss.
+        # 
+        # To extract the output, we use the `has_aux=True` flag.
+        # `has_aux=True` assumes that `f` returns a tuple of two values,
+        # where the first is to be differentiated and the second "auxiliary value"
+        # is not to be differentiated. `f'` returns the gradient w.r.t. the loss,
+        # the loss, and the auxiliary value.
         grads_loss_output = grad_with_value(compute_loss_and_output, has_aux=True)
         sample_grads, sample_loss, output = vmap(partial(grads_loss_output, weights))(images, target)
         loss = sample_loss.mean()
 
+        # `load_weights` is the inverse operation of make_functional. We put
+        # things back into a model so that they're easier to manipulate
+        load_weights(model, descriptors, weights)
+        for grad_sample, weight in zip(sample_grads, model.parameters()):
+            weight.grad_sample = grad_sample.detach()
+
         # Step 2: Clip the per-sample-grads, sum them to form grads, and add noise
         grads = clip_and_accumulate_and_add_noise(
-            sample_grads, args.max_per_sample_grad_norm, args.sigma)
-
-        # `load_weights` is the inverse operation of make_functional. We put
-        # things back into a model so that we can directly apply optimizers.
-        # TODO(rzou): this might not be necessary, optimizers just take
-        # the params straight up.
-        load_weights(model, descriptors, weights)
-
-        for weight_grad, weight in zip(grads, model.parameters()):
-            weight.grad = weight_grad.detach()
+            model, args.max_per_sample_grad_norm, args.sigma)
 
         preds = np.argmax(output.detach().cpu().numpy(), axis=1)
         labels = target.detach().cpu().numpy()
