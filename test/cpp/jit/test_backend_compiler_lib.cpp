@@ -49,6 +49,10 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   explicit BackendWithCompiler() {}
   virtual ~BackendWithCompiler() = default;
 
+  bool is_available() override {
+    return true;
+  }
+
   // Since the actual compilation is done AOT,
   c10::impl::GenericDict compile(
       c10::IValue processed,
@@ -85,9 +89,9 @@ class BackendWithCompiler : public PyTorchBackendInterface {
         auto sub = instruction.substr(15);
         const_val = stod(sub);
       } else if (token == "aten::add") {
-        output_list.emplace_back(x.add_(h, const_val));
+        output_list.emplace_back(x.add(h, const_val));
       } else if (token == "aten::sub") {
-        output_list.emplace_back(x.sub_(h, const_val));
+        output_list.emplace_back(x.sub(h, const_val));
       } else {
         TORCH_CHECK(
             false,

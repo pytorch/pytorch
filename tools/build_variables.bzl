@@ -12,10 +12,13 @@ GENERATED_CPP = [
     "autograd/generated/TraceType_2.cpp",
     "autograd/generated/TraceType_3.cpp",
     "autograd/generated/TraceType_4.cpp",
+    "autograd/generated/InplaceOrViewType_0.cpp",
+    "autograd/generated/InplaceOrViewType_1.cpp",
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_linalg_functions.cpp",
+    "autograd/generated/python_special_functions.cpp",
     "autograd/generated/python_torch_functions.cpp",
     "autograd/generated/python_variable_methods.cpp",
 ]
@@ -30,9 +33,11 @@ libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",
     "torch/csrc/jit/codegen/cuda/runtime/welford.cu",
+    "aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh",
+    "aten/src/ATen/cuda/detail/UnpackRaw.cuh",
 ]
 
-libtorch_nvfuser_generated_headers = ["{}.h".format(name[36:-3]) for name in libtorch_nvfuser_runtime_sources]
+libtorch_nvfuser_generated_headers = ["{}.h".format(name.split("/")[-1].split(".")[0]) for name in libtorch_nvfuser_runtime_sources]
 
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
@@ -47,6 +52,8 @@ def libtorch_generated_sources(gencode_pattern):
         "autograd/generated/TraceType_2.cpp",
         "autograd/generated/TraceType_3.cpp",
         "autograd/generated/TraceType_4.cpp",
+        "autograd/generated/InplaceOrViewType_0.cpp",
+        "autograd/generated/InplaceOrViewType_1.cpp",
     ]]
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
@@ -204,6 +211,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
     "torch/csrc/jit/passes/frozen_conv_folding.cpp",
+    "torch/csrc/jit/passes/frozen_ops_to_mkldnn.cpp",
     "torch/csrc/jit/passes/frozen_graph_optimizations.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
     "torch/csrc/jit/passes/remove_dropout.cpp",
@@ -255,6 +263,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
     "torch/csrc/jit/tensorexpr/ir_simplifier.cpp",
+    "torch/csrc/jit/tensorexpr/ir_verifier.cpp",
     "torch/csrc/jit/tensorexpr/ir_visitor.cpp",
     "torch/csrc/jit/tensorexpr/kernel.cpp",
     "torch/csrc/jit/tensorexpr/llvm_codegen.cpp",
@@ -505,6 +514,8 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/rmsprop.cpp",
     "torch/csrc/api/src/optim/serialize.cpp",
     "torch/csrc/api/src/optim/sgd.cpp",
+    "torch/csrc/api/src/optim/schedulers/lr_scheduler.cpp",
+    "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
 ]
@@ -561,6 +572,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
     "torch/csrc/jit/passes/onnx/eval_peephole.cpp",
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
+    "torch/csrc/jit/passes/onnx/constant_map.cpp",
     "torch/csrc/jit/passes/onnx/eliminate_unused_items.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.cpp",
     "torch/csrc/jit/passes/onnx/list_model_parameters.cpp",
@@ -575,6 +587,9 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
     "torch/csrc/jit/python/pybind_utils.cpp",
+    "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp",
+    "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.cpp",
+    "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.cpp",
     "torch/csrc/jit/python/python_arg_flatten.cpp",
     "torch/csrc/jit/python/python_custom_class.cpp",
     "torch/csrc/jit/python/python_interpreter.cpp",
@@ -623,6 +638,7 @@ libtorch_python_distributed_core_sources = [
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
     "torch/csrc/distributed/autograd/init.cpp",
+    "torch/csrc/distributed/rpc/agent_utils.cpp",
     "torch/csrc/distributed/rpc/init.cpp",
     "torch/csrc/distributed/rpc/process_group_agent.cpp",
     "torch/csrc/distributed/rpc/py_rref.cpp",
@@ -644,6 +660,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "autograd/generated/python_nn_functions.cpp",
         "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_linalg_functions.cpp",
+        "autograd/generated/python_special_functions.cpp",
         "autograd/generated/python_torch_functions.cpp",
         "autograd/generated/python_variable_methods.cpp",
     ]]
@@ -653,7 +670,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
 
     return _libtorch_python_sources
 
-aten_cpu_source_list = [
+aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/BatchedTensorImpl.cpp",
     "aten/src/ATen/CPUGeneratorImpl.cpp",
     "aten/src/ATen/Context.cpp",
@@ -716,7 +733,6 @@ aten_cpu_source_list = [
     "aten/src/ATen/native/BatchLinearAlgebraKernel.cpp",
     "aten/src/ATen/native/DispatchStub.cpp",
     "aten/src/ATen/native/UpSample.cpp",
-    "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
     "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
     "aten/src/ATen/native/mkl/SpectralOps.cpp",
     "aten/src/ATen/native/mkldnn/BinaryOps.cpp",
@@ -739,10 +755,60 @@ aten_cpu_source_list = [
     "aten/src/ATen/vulkan/Context.cpp",
 ]
 
-# Files in ATen/native with a few exceptions
-# TODO: move the exceptions to proper locations
-aten_native_source_list = [
-    "aten/src/ATen/native/RNN.cpp",
+aten_cpu_source_codegen_list = [
+    "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
+]
+
+# When buliding lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
+# codegen process. The codegen version of this file, like Activation.cpp.DEFAULT.cpp, will be included
+# in ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt. As a result, in aten/src/ATen/CMakeLists.txt,
+# only aten_cpu_source_non_codegen_list need to be added to ${all_cpu_cpp}.
+aten_cpu_source_list = sorted(aten_cpu_source_non_codegen_list + aten_cpu_source_codegen_list)
+
+# Same as ${aten_cpu_source_codegen_list}, this list will go through aten codegen, and be included in
+# ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt.
+aten_native_source_codegen_list = [
+    "aten/src/ATen/native/cpu/Activation.cpp",
+    "aten/src/ATen/native/cpu/BinaryOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/BlasKernel.cpp",
+    "aten/src/ATen/native/cpu/CatKernel.cpp",
+    "aten/src/ATen/native/cpu/ComplexKernel.cpp",
+    "aten/src/ATen/native/cpu/CopyKernel.cpp",
+    "aten/src/ATen/native/cpu/CrossKernel.cpp",
+    "aten/src/ATen/native/cpu/DepthwiseConvKernel.cpp",
+    "aten/src/ATen/native/cpu/DistanceOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/FillKernel.cpp",
+    "aten/src/ATen/native/cpu/FunctionOfAMatrixUtilsKernel.cpp",
+    "aten/src/ATen/native/cpu/GridSamplerKernel.cpp",
+    "aten/src/ATen/native/cpu/IndexKernel.cpp",
+    "aten/src/ATen/native/cpu/LerpKernel.cpp",
+    "aten/src/ATen/native/cpu/LinearAlgebraKernel.cpp",
+    "aten/src/ATen/native/cpu/MaxPooling.cpp",
+    "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
+    "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/PowKernel.cpp",
+    "aten/src/ATen/native/cpu/RangeFactoriesKernel.cpp",
+    "aten/src/ATen/native/cpu/ReduceAllOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/ReduceOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/ScatterGatherKernel.cpp",
+    "aten/src/ATen/native/cpu/SoftMaxKernel.cpp",
+    "aten/src/ATen/native/cpu/SortingKernel.cpp",
+    "aten/src/ATen/native/cpu/StackKernel.cpp",
+    "aten/src/ATen/native/cpu/SumKernel.cpp",
+    "aten/src/ATen/native/cpu/TensorCompareKernel.cpp",
+    "aten/src/ATen/native/cpu/UnaryOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/Unfold2d.cpp",
+    "aten/src/ATen/native/cpu/UnfoldBackwardKernel.cpp",
+    "aten/src/ATen/native/cpu/UpSampleKernel.cpp",
+    "aten/src/ATen/native/cpu/UpSampleMoreKernel.cpp",
+    "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
+    "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
+    "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
+    "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
+]
+
+# This aten native source file list will not go through aten codegen process
+aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/fbgemm_utils.cpp",
     "aten/src/ATen/native/quantized/cpu/int_repr_quant.cpp",
     "aten/src/ATen/native/quantized/cpu/make_per_tensor_quantized_tensor.cpp",
@@ -909,43 +975,6 @@ aten_native_source_list = [
     "aten/src/ATen/native/WeightNorm.cpp",
     "aten/src/ATen/native/group_norm.cpp",
     "aten/src/ATen/native/layer_norm.cpp",
-    "aten/src/ATen/native/cpu/Activation.cpp",
-    "aten/src/ATen/native/cpu/BinaryOpsKernel.cpp",
-    "aten/src/ATen/native/cpu/BlasKernel.cpp",
-    "aten/src/ATen/native/cpu/CatKernel.cpp",
-    "aten/src/ATen/native/cpu/ComplexKernel.cpp",
-    "aten/src/ATen/native/cpu/CopyKernel.cpp",
-    "aten/src/ATen/native/cpu/CrossKernel.cpp",
-    "aten/src/ATen/native/cpu/DepthwiseConvKernel.cpp",
-    "aten/src/ATen/native/cpu/DistanceOpsKernel.cpp",
-    "aten/src/ATen/native/cpu/FillKernel.cpp",
-    "aten/src/ATen/native/cpu/FunctionOfAMatrixUtilsKernel.cpp",
-    "aten/src/ATen/native/cpu/GridSamplerKernel.cpp",
-    "aten/src/ATen/native/cpu/IndexKernel.cpp",
-    "aten/src/ATen/native/cpu/LerpKernel.cpp",
-    "aten/src/ATen/native/cpu/LinearAlgebraKernel.cpp",
-    "aten/src/ATen/native/cpu/MaxPooling.cpp",
-    "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
-    "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
-    "aten/src/ATen/native/cpu/PowKernel.cpp",
-    "aten/src/ATen/native/cpu/RangeFactoriesKernel.cpp",
-    "aten/src/ATen/native/cpu/ReduceAllOpsKernel.cpp",
-    "aten/src/ATen/native/cpu/ReduceOpsKernel.cpp",
-    "aten/src/ATen/native/cpu/ScatterGatherKernel.cpp",
-    "aten/src/ATen/native/cpu/SoftMaxKernel.cpp",
-    "aten/src/ATen/native/cpu/SortingKernel.cpp",
-    "aten/src/ATen/native/cpu/StackKernel.cpp",
-    "aten/src/ATen/native/cpu/SumKernel.cpp",
-    "aten/src/ATen/native/cpu/TensorCompareKernel.cpp",
-    "aten/src/ATen/native/cpu/UnaryOpsKernel.cpp",
-    "aten/src/ATen/native/cpu/Unfold2d.cpp",
-    "aten/src/ATen/native/cpu/UnfoldBackwardKernel.cpp",
-    "aten/src/ATen/native/cpu/UpSampleKernel.cpp",
-    "aten/src/ATen/native/cpu/UpSampleMoreKernel.cpp",
-    "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
-    "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
-    "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
-    "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
     "aten/src/ATen/native/sparse/ParamUtils.cpp",
     "aten/src/ATen/native/sparse/SoftMax.cpp",
     "aten/src/ATen/native/sparse/SparseMatMul.cpp",
@@ -961,8 +990,6 @@ aten_native_source_list = [
     "aten/src/TH/THTensorLapack.cpp",
     "aten/src/TH/THTensorMath.cpp",
     "aten/src/TH/THTensorMoreMath.cpp",
-    "aten/src/TH/THTensorRandom.cpp",
-    "aten/src/TH/THVector.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",
@@ -977,3 +1004,8 @@ aten_native_source_list = [
     "aten/src/ATen/TensorIterator.cpp",
     "aten/src/ATen/LegacyTHFunctionsCPU.cpp",
 ]
+
+# 1. Files in ATen/native with a few exceptions
+# TODO: move the exceptions to proper locations
+# 2. The whole aten native source list includes the list with and without aten codegen process.
+aten_native_source_list = sorted(aten_native_source_non_codegen_list + aten_native_source_codegen_list)

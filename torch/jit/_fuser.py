@@ -74,7 +74,7 @@ def _get_differentiable_graph_node(node, diff_node):
                 _get_differentiable_graph_node(n, diff_node)
 
 def _graph_for(self, *args, **kwargs):
-    _script_method_graph_for(self, self, *args, **kwargs)
+    return _script_method_graph_for(self, self, *args, **kwargs)
 
 def _script_method_graph_for(self, parent, *args, **kwargs):
     try:
