@@ -118,9 +118,13 @@ class TestComplex(JitTestCase):
                            .format(func_name=func_name, a=a, res_python=res_python, res_script=res_script))
                     self.assertEqual(res_python, res_script, msg=msg)
 
-        unary_ops = ['log', 'exp', 'cos', 'sin', 'cos', 'sin', 'tan', 'asinh', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh']
+        unary_ops = ['log', 'log10', 'sqrt', 'exp', 'sin', 'cos', 'asin','acos', 'atan', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'phase']
         for op in unary_ops:
             checkMath(op, 1)
-        # ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
-        #                    "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
-        #                    "asinh", "atanh", "acosh", "sinh", "cosh", "tanh", "degrees", "radians"]
+
+        # ---- Test abs -----
+        def fn(x: complex):
+            return abs(x)
+
+        for val in complex_vals:
+            self.checkScript(fn, (val, ))
