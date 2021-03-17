@@ -416,7 +416,7 @@ Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const 
 }
 
 
-Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, Scalar alpha) {
+Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   auto numel = index.numel();
