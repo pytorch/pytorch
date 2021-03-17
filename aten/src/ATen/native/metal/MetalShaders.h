@@ -574,7 +574,6 @@ kernel void reshape1(texture2d_array<half, access::read> in[[texture(0)]],
     const ushort C1 = ushort_arg_5;
     const ushort N1 = ushort_arg_6;
     const int numel1 = H1 * W1 * C1 * N1;
-    
     const ushort slices2 = divRoundUp(C2, 4);
     const ushort slices1 = divRoundUp(C1, 4);
     const ushort n2 = gid.z / slices2; //image index
@@ -607,7 +606,6 @@ kernel void reshape2(texture2d_array<half, access::read> in[[texture(0)]],
                      ushort2 gid[[thread_position_in_grid]]) {
     const ushort H2 = ushort_arg_0;
     const ushort W2 = ushort_arg_1;
-    //    const ushort C2 = ushort_arg_2;
     if (gid.x >= W2 || gid.y >= H2) {
         return;
     }
@@ -616,7 +614,6 @@ kernel void reshape2(texture2d_array<half, access::read> in[[texture(0)]],
     const ushort C1 = ushort_arg_5;
     const ushort N1 = ushort_arg_6;
     const int numel1 = H1 * W1 * C1 * N1;
-    
     const ushort slices1 = divRoundUp(C1, 4);
     half4 value;
     for (int idx = 0; idx < 4; ++idx){
@@ -654,7 +651,6 @@ kernel void reshape3(texture2d_array<half, access::write> out[[texture(1)]],
     const ushort C1 = ushort_arg_5;
     const ushort N1 = ushort_arg_6;
     const int numel1 = H1 * W1 * C1 * N1;
-    
     const ushort slices2 = divRoundUp(C2, 4);
     const ushort n2 = gid.z / slices2; //image index
     const ushort s2 = gid.z - n2 * slices2; // slice offest
@@ -691,7 +687,6 @@ kernel void reshape4(texture2d<half, access::write> out[[texture(1)]],
     const ushort C1 = ushort_arg_5;
     const ushort N1 = ushort_arg_6;
     const int numel1 = H1 * W1 * C1 * N1;
-    
     half4 value;
     for (int idx = 0; idx < 4; ++idx){
         // we compute the "linear index" of the output element,
