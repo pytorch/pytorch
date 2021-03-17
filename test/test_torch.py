@@ -528,10 +528,10 @@ class AbstractTestCases:
         @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
         def test_multinomial_invalid_probs(self):
             test_method = AbstractTestCases._TestTorchMixin._test_multinomial_invalid_probs
-            self._spawn_method(test_method, torch.tensor([1, -1, 1]))
-            self._spawn_method(test_method, torch.tensor([1, inf, 1]))
-            self._spawn_method(test_method, torch.tensor([1, -inf, 1]))
-            self._spawn_method(test_method, torch.tensor([1, 1, nan]))
+            self._spawn_method(test_method, torch.tensor([1., -1., 1.]))
+            self._spawn_method(test_method, torch.tensor([1., inf, 1.]))
+            self._spawn_method(test_method, torch.tensor([1., -inf, 1.]))
+            self._spawn_method(test_method, torch.tensor([1., 1., nan]))
 
         def test_copy_broadcast(self):
             torch.zeros(5, 6).copy_(torch.zeros(6))
@@ -1272,10 +1272,10 @@ class AbstractTestCases:
 
         def test_equal(self):
             # Contiguous, 1D
-            t1 = torch.tensor((3, 4, 9, 10))
+            t1 = torch.tensor((3., 4., 9., 10.))
             t2 = t1.contiguous()
-            t3 = torch.tensor((1, 9, 3, 10))
-            t4 = torch.tensor((3, 4, 9))
+            t3 = torch.tensor((1., 9., 3., 10.))
+            t4 = torch.tensor((3., 4., 9.))
             t5 = torch.tensor([])
             self.assertTrue(t1.equal(t2))
             self.assertFalse(t1.equal(t3))

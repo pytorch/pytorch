@@ -2171,11 +2171,11 @@ class TestTensorCreation(TestCase):
         # Check arange for non-contiguous tensors.
         x = torch.zeros(2, 3)
         torch.arange(0, 4, out=x.narrow(1, 1, 2))
-        res2 = torch.tensor(((0, 0, 1), (0, 2, 3)))
+        res2 = torch.tensor(((0., 0., 1.), (0., 2., 3.)))
         self.assertEqual(x, res2, atol=1e-16, rtol=0)
 
         # Check negative
-        res1 = torch.tensor((1, 0))
+        res1 = torch.tensor((1., 0.))
         res2 = torch.tensor([])
         torch.arange(1, -1, -1, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
