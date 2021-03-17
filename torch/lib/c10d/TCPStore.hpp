@@ -15,6 +15,7 @@
 namespace c10d {
 
 class TCPStoreDaemon {
+
  public:
   explicit TCPStoreDaemon(int storeListenSocket);
   ~TCPStoreDaemon();
@@ -36,6 +37,7 @@ class TCPStoreDaemon {
   void getNumKeysHandler(int socket) const;
   void deleteHandler(int socket);
   void waitHandler(int socket);
+  void watchHandler(int socket);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
   void wakeupWaitingClients(const std::string& key);
@@ -50,6 +52,9 @@ class TCPStoreDaemon {
   // From socket -> number of keys awaited
   std::unordered_map<int, size_t> keysAwaited_;
 
+  // From key -> the list of sockets waiting on it
+  std::unordered_map<std::string, std::vector<int>> watchedSockets_;
+
   std::vector<int> sockets_;
   int storeListenSocket_;
 #ifdef _WIN32
@@ -61,8 +66,26 @@ class TCPStoreDaemon {
 #endif
 };
 
+class ListenThread {
+  public:
+    typedef void (*CallbackFunction)(const std::string&, const std::string&);
+    explicit ListenThread(int listenSocket);
+    ~ListenThread();
+    void addCallback(std::string key, CallbackFunction cb);
+
+  protected:
+    void run();
+    std::thread listenerThread_;
+    int storeListenSocket_;
+    std::unordered_map<std::string, CallbackFunction> keyToCallbacks_;
+    std::vector<int> controlPipeFd_{-1, -1};
+};
+
 class TCPStore : public Store {
+
  public:
+  typedef void (*CallbackFunction)(const std::string&, const std::string&);
+
   explicit TCPStore(
       const std::string& masterAddr,
       PortType masterPort,
@@ -86,6 +109,8 @@ class TCPStore : public Store {
 
   bool deleteKey(const std::string& key) override;
 
+  void watchKey(const std::string& key, CallbackFunction callback);
+
   bool check(const std::vector<std::string>& keys) override;
 
   int64_t getNumKeys() override;
@@ -106,6 +131,7 @@ class TCPStore : public Store {
   PortType getPort() const noexcept;
 
  protected:
+
   int64_t addHelper_(const std::string& key, int64_t value);
   std::vector<uint8_t> getHelper_(const std::string& key);
   void waitHelper_(
@@ -114,7 +140,9 @@ class TCPStore : public Store {
 
   bool isServer_;
   int storeSocket_ = -1;
+  int listenSocket_ = -1;
   int masterListenSocket_ = -1;
+  std::thread listenThread_;
 
   std::string tcpStoreAddr_;
   PortType tcpStorePort_;
@@ -122,9 +150,14 @@ class TCPStore : public Store {
   c10::optional<int> numWorkers_;
   const std::string initKey_;
   const std::string regularPrefix_;
+  
+  std::unordered_map<std::string, CallbackFunction> keyToCallbacks_;
 
   // Only needs to be launched as the server
   std::unique_ptr<TCPStoreDaemon> tcpStoreDaemon_ = nullptr;
+
+  // Launched from all clients
+  std::unique_ptr<ListenThread> tcpStoreListener_ = nullptr;
 };
 
 } // namespace c10d

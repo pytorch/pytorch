@@ -136,10 +136,52 @@ void testHelper(const std::string& prefix = "") {
   }
 }
 
-TEST(TCPStoreTest, testHelper) {
-  testHelper();
+void simpleCallback(const std::string& old_value, const std::string& new_value) {
+  std::cout << "I am in callback " << old_value << " " << new_value <<  std::endl;
 }
 
+void testCallback(const std::string& prefix = "") {
+  std::cout << "hello ! " << "its me " << std::endl;
+
+  auto serverTCPStore = c10::make_intrusive<c10d::TCPStore>(
+      "127.0.0.1",
+      0,
+      /* numWorkers */ -1,
+      true,
+      std::chrono::seconds(15),
+      /* wait */ false);
+
+  // auto serverStore =
+  //   c10::make_intrusive<c10d::PrefixStore>(prefix, serverTCPStore);
+  // c10d::test::set(*serverStore, "key0", "value0");
+  // c10d::test::set(*serverStore, "key1", "value1");
+  // c10d::test::set(*serverStore, "key2", "value2");
+  // c10d::test::check(*serverStore, "key0", "value0");
+  // c10d::test::check(*serverStore, "key1", "value1");
+  // c10d::test::check(*serverStore, "key2", "value2");
+
+  c10d::test::set(*serverTCPStore, "hi", "old value");
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+  c10d::TCPStore::CallbackFunction cb = simpleCallback;
+  // std::string test = "hello";
+  // cb(test, test);
+  serverTCPStore->watchKey("hi", cb);
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+  std::cout << "in test - after watch key" << std::endl;
+  c10d::test::set(*serverTCPStore, "hi", "new value");
+  c10d::test::set(*serverTCPStore, "hi", "new value 2");
+  c10d::test::set(*serverTCPStore, "hi", "new value 3");
+  std::this_thread::sleep_for(std::chrono::seconds(4));
+}
+
+// TEST(TCPStoreTest, testHelper) {
+//   testHelper();
+// }
+
+// TEST(TCPStoreTest, testHelperPrefix) {
+//   testHelper("testPrefix");
+// }
+
 TEST(TCPStoreTest, testHelperPrefix) {
-  testHelper("testPrefix");
+  testCallback();
 }
