@@ -188,13 +188,12 @@ class EmbeddingBag(Embedding):
     def __init__(self, num_embeddings: int, embedding_dim: int,
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
                  mode: str = 'sum', sparse: bool = False, _weight: Optional[Tensor] = None,
-                 include_last_offset: bool = False, padding_idx: Optional[int] = None, dtype=torch.quint8) -> None:
+                 include_last_offset: bool = False, dtype=torch.quint8) -> None:
         super(EmbeddingBag, self).__init__(num_embeddings, embedding_dim, _weight=_weight, dtype=dtype)
 
         self.mode = mode
         self.pruned_weights = False
         self.include_last_offset = include_last_offset
-        self.padding_idx = padding_idx
         self.dtype = dtype
 
     def forward(self, indices: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None,
@@ -202,11 +201,11 @@ class EmbeddingBag(Embedding):
         if self.dtype == torch.quint4x2:
             return torch.ops.quantized.embedding_bag_4bit(self._packed_params._packed_weight, indices, offsets, False, 0,
                                                           self.pruned_weights, per_sample_weights, compressed_indices_mapping,
-                                                          self.include_last_offset, self.padding_idx)
+                                                          self.include_last_offset)
         else:
             return torch.ops.quantized.embedding_bag_byte(self._packed_params._packed_weight, indices, offsets, False, 0,
                                                           self.pruned_weights, per_sample_weights, compressed_indices_mapping,
-                                                          self.include_last_offset, self.padding_idx)
+                                                          self.include_last_offset)
 
     def _get_name(self):
         return 'QuantizedEmbeddingBag'

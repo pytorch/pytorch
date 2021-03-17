@@ -275,8 +275,7 @@ bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
       // ate::embedding_bag(%weight, %input, %offsets, %scale_grad_by_freq,
-      // %mode_enum, %sparse, %per_sample_weights, %include_last_offset,
-      // %padding_idx)
+      // %mode_enum, %sparse, %per_sample_weights, %include_last_offset)
       AtenFuncArgs(
           {{"conv1d", 1},
            {"conv2d", 1},
@@ -287,7 +286,7 @@ bool isWeight(Value* v) {
            {"embedding_bag", 0}}),
       // embedding_bag - prim::CallFunction(%func, %input.1, %weight,
       // %offsets.1, %max_norm, %norm_type, %scale_grad_by_freq, %mode, %sparse,
-      // %per_sample_weights.1, %include_last_offset, %padding_idx)
+      // %per_sample_weights.1, %include_last_offset)
       CallFuncArgs({{"linear", 2}, {"embedding_bag", 2}}));
   return result;
 }
