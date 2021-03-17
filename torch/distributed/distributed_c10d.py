@@ -459,9 +459,11 @@ def init_process_group(backend,
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams.
 
+    .. note:: Note that if passing in pg_options and set the ``pg_options.timeout``,
+        it will override the default timeout of the ``timeout`` argument.
 
-    To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
-    on a system that supports MPI.
+    .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
+        on a system that supports MPI.
 
     """
     global _pg_group_ranks
@@ -500,7 +502,6 @@ def init_process_group(backend,
             [],
             Backend.MPI,
             None,
-            pg_options=pg_options,
             group_name=group_name,
             timeout=timeout))
     else:

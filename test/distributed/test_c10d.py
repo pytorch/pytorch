@@ -16,6 +16,7 @@ from datetime import timedelta
 from functools import reduce
 from itertools import groupby, product
 from sys import platform
+import numpy
 
 import torch
 import torch.distributed as c10d
@@ -33,6 +34,7 @@ import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._six import string_classes
 from torch.nn.parallel import DistributedDataParallel
+from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_gloo,
@@ -4191,6 +4193,125 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                                      "set_to_none = {}, use_bucket_view = {}".format(try_set_to_none,
                                                                                      use_bucket_view))
 
+    # A list of tests for ddp with activation checkpointing
+    # when gradient_as_bucket_view=True, False.
+    # Most of the tests are referred to
+    # https://github.com/facebookresearch/fairscale/blob/master/tests/nn/pipe/test_checkpoint_ddp.py
+    class CheckpointOnceModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.l1 = nn.Linear(2000, 2000)
+            self.l2 = nn.Linear(2000, 2000)
+
+        def forward(self, inp):
+            x = self.l1(inp)
+            x = checkpoint(self.l2, x)
+            return x
+
+    class CheckpointTwiceModule(CheckpointOnceModule):
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, inp):
+            x = self.l1(inp)
+            x = checkpoint(self.l2, x)
+            x = checkpoint(self.l2, x)
+            return x
+
+    def _test_ddp_checkpointing(self, checkpoint_once, process_group, use_bucket_view, find_unused_parameters=False):
+        # to reprodce the same training results
+        torch.cuda.set_device(self.rank)
+        torch.manual_seed(31415)
+        if checkpoint_once:
+            model = self.CheckpointOnceModule().cuda()
+        else:
+            model = self.CheckpointTwiceModule().cuda()
+        model = nn.parallel.DistributedDataParallel(model,
+                                                    bucket_cap_mb=1,
+                                                    gradient_as_bucket_view=use_bucket_view,
+                                                    device_ids=[self.rank],
+                                                    process_group=process_group,
+                                                    find_unused_parameters=find_unused_parameters)
+        input_tensor = torch.rand((64, 2000), device="cuda", requires_grad=True)
+        output_tensor = model(input_tensor)
+        output_tensor.sum().backward()
+        return model
+
+    # DDP works as expect when layer is checkpointed only once
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_ddp_checkpointing_once(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        for use_bucket_view in (True, False):
+            model = self._test_ddp_checkpointing(checkpoint_once=True,
+                                                 process_group=process_group,
+                                                 use_bucket_view=use_bucket_view)
+            norm = 0.0
+            for p in model.parameters():
+                self.assertTrue(p.grad is not None)
+                norm += p.grad.norm().item()
+            assert numpy.allclose(norm, 78053), norm
+
+    # DDP will fail when there are unused_parameters in the model
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_ddp_checkpointing_unused_params(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        for use_bucket_view in (True, False):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected to mark a variable ready only once.",
+            ):
+                model = self._test_ddp_checkpointing(checkpoint_once=True,
+                                                     process_group=process_group,
+                                                     use_bucket_view=use_bucket_view,
+                                                     find_unused_parameters=True)
+
+    # DDP will fail when the same layer is checkponted twice
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_ddp_checkpointing_twice(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        for use_bucket_view in (True, False):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Expected to mark a variable ready only once.",
+            ):
+                model = self._test_ddp_checkpointing(checkpoint_once=False,
+                                                     process_group=process_group,
+                                                     use_bucket_view=use_bucket_view,
+                                                     find_unused_parameters=True)
+
+    # DDP works as expected if there is weight sharing among layers
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_ddp_checkpointing_weight_sharing(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        torch.cuda.set_device(self.rank)
+        for use_bucket_view in (True, False):
+            torch.manual_seed(31415)
+            l1 = nn.Linear(2000, 2000)
+            l2 = nn.Linear(2000, 2000)
+            l1.weight = l2.weight
+            model = nn.Sequential(l1, l2).cuda()
+            model = nn.parallel.DistributedDataParallel(model,
+                                                        bucket_cap_mb=1,
+                                                        gradient_as_bucket_view=use_bucket_view,
+                                                        device_ids=[self.rank],
+                                                        process_group=process_group)
+            input_tensor = torch.rand((64, 2000), device="cuda", requires_grad=True)
+            output_tensor = checkpoint(model, input_tensor)
+            output_tensor.sum().backward()
+            norm = 0.0
+            for p in model.parameters():
+                self.assertTrue(p.grad is not None)
+                norm += p.grad.norm().item()
+            assert numpy.allclose(norm, 57004), norm
+
 
 class ReducerModule(nn.Module):
     def __init__(self):
@@ -4714,6 +4835,8 @@ class CommTest(MultiProcessTestCase):
         no_device_thread_pg_opts = c10d.ProcessGroupGloo.Options(timeout=timedelta(seconds=10))
         no_device_thread_pg = dist.new_group([0, 1], pg_options=no_device_thread_pg_opts)
         self.assertTrue(len(no_device_thread_pg.options._devices) != 0)
+        # ensure created pg have the correct timeout set instead of default time out
+        self.assertEqual(no_device_thread_pg.options.timeout, timedelta(seconds=10))
 
         # Test if user pass in Options, set threads, but not set devices, should error out
         no_device_pg_opts = c10d.ProcessGroupGloo.Options(timeout=timedelta(seconds=10))
@@ -4748,9 +4871,9 @@ class CommTest(MultiProcessTestCase):
             )
 
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(2)
     def test_pass_nccl_options_high_priority_stream(self):
-        pg_opts = ProcessGroupNCCL.Options()
+        pg_opts = c10d.ProcessGroupNCCL.Options()
         pg_opts.is_high_priority_stream = True
 
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -4760,17 +4883,17 @@ class CommTest(MultiProcessTestCase):
             world_size=self.world_size,
             rank=self.rank,
             store=store,
-            pg_options=pg
+            pg_options=pg_opts
         )
 
         # Test with new_group
         pg = c10d.new_group([0, 1], pg_options=pg_opts)
         # test if the process group constructed with high priority stream
-        self.assertEqual(pg.options.is_high_priority_stream, True)
+        self.assertTrue(pg.options.is_high_priority_stream)
         # test the process group works as expected
-        t = torch.tensor([self.rank + 1] * 10).cuda(2 * self.rank)
-        pg.allreduce(t).wait()
-        expected_tensor = torch.tensor([3] * 10).cuda(2 * self.rank)
+        t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
+        pg.allreduce(t)
+        expected_tensor = torch.tensor([3] * 10).cuda(self.rank)
         self.assertEqual(expected_tensor, t)
 
     @requires_nccl()
