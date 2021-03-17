@@ -451,7 +451,7 @@ Tensor& logit_(Tensor& self, c10::optional<double> eps) {
 Tensor& nan_to_num_out(const Tensor& self,
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
-    c10::optional<double> neg_inf, 
+    c10::optional<double> neg_inf,
     Tensor& result) {
   TORCH_CHECK(
       self.scalar_type() == result.scalar_type(),
