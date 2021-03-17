@@ -56,8 +56,6 @@ struct integer_iterator : std::iterator<std::input_iterator_tag, I> {
     I value;
 };
 
-} // namespace detail
-
 template <typename I, std::enable_if_t<std::is_integral<I>{}, bool> = true>
 struct integer_range {
  public:
