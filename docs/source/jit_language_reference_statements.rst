@@ -228,6 +228,7 @@ Example
 
 The ``while`` statement:
 ^^^^^^^^^^^^^^^^^^^^^^^^
+
 ::
 
     while_stmt ::=  "while" assignment_expression ":" suite
@@ -235,7 +236,8 @@ The ``while`` statement:
 * `while...else` statements are not supported in Torchscript. It results in a `RuntimeError`
 
 The ``for-in`` statement:
-^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
 ::
 
     for_stmt ::=  "for" target_list "in" expression_list ":" suite
