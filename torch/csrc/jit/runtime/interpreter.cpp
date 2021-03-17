@@ -1220,7 +1220,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         Instruction inst = frame.function->instructions_[pc];
         switch (inst.op) {
           case ENTER: {
-            const auto& obj = peek(stack, 0, 1);
+            const auto& obj = stack.back();
             TORCH_INTERNAL_ASSERT(obj.isObject());
             entered_objects.push_back(obj);
             ++pc;
@@ -1230,9 +1230,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto& f = obj->type()->getMethod("__exit__");
             push(stack, std::move(obj));
             entered_objects.pop_back();
-            push(stack, IValue());
-            push(stack, IValue());
-            push(stack, IValue());
+            // Push 3 empty IValues.
+            stack.resize(stack.size() + 3);
             pc = runGraphFunction(stack, &f, pc);
           } break;
           case OP:
@@ -1253,17 +1252,19 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++pc;
             break;
           case STORE:
-            reg(inst.X) = pop(stack);
+            reg(inst.X) = std::move(stack.back());
+            stack.pop_back();
             ++pc;
             break;
           case STOREN:
             for (size_t i = inst.N; i > 0; --i) {
-              reg(inst.X + i - 1) = pop(stack);
+              reg(inst.X + i - 1) = std::move(*(stack.end() - (inst.N - i + 1)));
             }
+            drop(stack, inst.N);
             ++pc;
             break;
           case DROP:
-            pop(stack);
+            stack.pop_back();
             ++pc;
             break;
           case DROPR:
@@ -1275,19 +1276,21 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++pc;
             break;
           case GET_ATTR: {
-            auto userObj = pop(stack).toObject();
-            auto value = userObj->getSlot(inst.X);
-            push(stack, std::move(value));
+            auto userObj = std::move(stack.back()).toObject();
+            stack.back() = userObj->getSlot(inst.X);
             ++pc;
           } break;
           case SET_ATTR: {
-            auto v = pop(stack);
-            auto userObj = pop(stack).toObject();
-            userObj->setSlot(inst.X, std::move(v));
+            // Stack top: object to set
+            // Stack one below top: userObj
+            auto userObj = std::move(*(stack.end() - 2)).toObject();
+            userObj->setSlot(inst.X, std::move(stack.back()));
+            drop(stack, 2);
             ++pc;
           } break;
           case JF:
-            pc += (pop(stack).toBool()) ? 1 : inst.X;
+            pc += stack.back().toBool() ? 1 : inst.X;
+            stack.pop_back();
             break;
           case JMP:
             pc += inst.X;
@@ -1416,8 +1419,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               saved_pc_ = pc;
               return true;
             }
-            stack.pop_back();
-            stack.emplace_back(future->value());
+            stack.back() = future->value();
             ++pc;
           } break;
           case PROFILE_OP: {
