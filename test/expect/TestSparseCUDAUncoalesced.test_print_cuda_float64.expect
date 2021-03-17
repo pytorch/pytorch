@@ -49,26 +49,25 @@ tensor(indices=tensor([], size=(0, 10)),
 tensor([], device='cuda:0', size=(0, 10), dtype=torch.int64)
 # _values
 tensor([], device='cuda:0', size=(10, 0), dtype=torch.int32)
-########## torch.float32 ##########
+########## torch.float64 ##########
 # sparse tensor
 tensor(indices=tensor([], size=(0, 10)),
        values=tensor([], size=(10, 0)),
-       device='cuda:0', size=(0,), nnz=10, dtype=torch.float32,
-       layout=torch.sparse_coo)
+       device='cuda:0', size=(0,), nnz=10, layout=torch.sparse_coo)
 # after requires_grad_
 tensor(indices=tensor([], size=(0, 10)),
        values=tensor([], size=(10, 0)),
-       device='cuda:0', size=(0,), nnz=10, dtype=torch.float32,
-       layout=torch.sparse_coo, requires_grad=True)
+       device='cuda:0', size=(0,), nnz=10, layout=torch.sparse_coo,
+       requires_grad=True)
 # after addition
 tensor(indices=tensor([], size=(0, 1)),
        values=tensor([], size=(1, 0)),
-       device='cuda:0', size=(0,), nnz=1, dtype=torch.float32,
-       layout=torch.sparse_coo, grad_fn=<AddBackward0>)
+       device='cuda:0', size=(0,), nnz=1, layout=torch.sparse_coo,
+       grad_fn=<AddBackward0>)
 # _indices
 tensor([], device='cuda:0', size=(0, 10), dtype=torch.int64)
 # _values
-tensor([], device='cuda:0', size=(10, 0), dtype=torch.float32)
+tensor([], device='cuda:0', size=(10, 0))
 
 # shape: torch.Size([2])
 # nnz: 3
@@ -135,21 +134,20 @@ tensor([[0, 1, 0]], device='cuda:0')
 tensor([[0, 0, 0],
         [0, 0, 1],
         [1, 1, 1]], device='cuda:0', dtype=torch.int32)
-########## torch.float32 ##########
+########## torch.float64 ##########
 # sparse tensor
 tensor(indices=tensor([[0, 1, 0]]),
        values=tensor([[0.0000, 0.2222, 0.4444],
                       [0.6667, 0.8889, 1.1111],
                       [1.3333, 1.5556, 1.7778]]),
-       device='cuda:0', size=(100, 3), nnz=3, dtype=torch.float32,
-       layout=torch.sparse_coo)
+       device='cuda:0', size=(100, 3), nnz=3, layout=torch.sparse_coo)
 # after requires_grad_
 tensor(indices=tensor([[0, 1, 0]]),
        values=tensor([[0.0000, 0.2222, 0.4444],
                       [0.6667, 0.8889, 1.1111],
                       [1.3333, 1.5556, 1.7778]]),
-       device='cuda:0', size=(100, 3), nnz=3, dtype=torch.float32,
-       layout=torch.sparse_coo, requires_grad=True)
+       device='cuda:0', size=(100, 3), nnz=3, layout=torch.sparse_coo,
+       requires_grad=True)
 # after addition
 tensor(indices=tensor([[0, 1, 0, 0, 1, 0]]),
        values=tensor([[0.0000, 0.2222, 0.4444],
@@ -158,14 +156,14 @@ tensor(indices=tensor([[0, 1, 0, 0, 1, 0]]),
                       [0.0000, 0.2222, 0.4444],
                       [0.6667, 0.8889, 1.1111],
                       [1.3333, 1.5556, 1.7778]]),
-       device='cuda:0', size=(100, 3), nnz=6, dtype=torch.float32,
-       layout=torch.sparse_coo, grad_fn=<AddBackward0>)
+       device='cuda:0', size=(100, 3), nnz=6, layout=torch.sparse_coo,
+       grad_fn=<AddBackward0>)
 # _indices
 tensor([[0, 1, 0]], device='cuda:0')
 # _values
 tensor([[0.0000, 0.2222, 0.4444],
         [0.6667, 0.8889, 1.1111],
-        [1.3333, 1.5556, 1.7778]], device='cuda:0', dtype=torch.float32)
+        [1.3333, 1.5556, 1.7778]], device='cuda:0')
 
 # shape: torch.Size([100, 20, 3])
 # nnz: 0
@@ -218,26 +216,25 @@ tensor(indices=tensor([], size=(0, 3)),
 tensor([], device='cuda:0', size=(0, 3), dtype=torch.int64)
 # _values
 tensor([], device='cuda:0', size=(3, 10, 0, 3), dtype=torch.int32)
-########## torch.float32 ##########
+########## torch.float64 ##########
 # sparse tensor
 tensor(indices=tensor([], size=(0, 3)),
        values=tensor([], size=(3, 10, 0, 3)),
-       device='cuda:0', size=(10, 0, 3), nnz=3, dtype=torch.float32,
-       layout=torch.sparse_coo)
+       device='cuda:0', size=(10, 0, 3), nnz=3, layout=torch.sparse_coo)
 # after requires_grad_
 tensor(indices=tensor([], size=(0, 3)),
        values=tensor([], size=(3, 10, 0, 3)),
-       device='cuda:0', size=(10, 0, 3), nnz=3, dtype=torch.float32,
-       layout=torch.sparse_coo, requires_grad=True)
+       device='cuda:0', size=(10, 0, 3), nnz=3, layout=torch.sparse_coo,
+       requires_grad=True)
 # after addition
 tensor(indices=tensor([], size=(0, 1)),
        values=tensor([], size=(1, 10, 0, 3)),
-       device='cuda:0', size=(10, 0, 3), nnz=1, dtype=torch.float32,
-       layout=torch.sparse_coo, grad_fn=<AddBackward0>)
+       device='cuda:0', size=(10, 0, 3), nnz=1, layout=torch.sparse_coo,
+       grad_fn=<AddBackward0>)
 # _indices
 tensor([], device='cuda:0', size=(0, 3), dtype=torch.int64)
 # _values
-tensor([], device='cuda:0', size=(3, 10, 0, 3), dtype=torch.float32)
+tensor([], device='cuda:0', size=(3, 10, 0, 3))
 
 # shape: torch.Size([10, 0, 3])
 # nnz: 0

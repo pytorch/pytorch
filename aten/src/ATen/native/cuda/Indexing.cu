@@ -924,7 +924,7 @@ Tensor& nonzero_out_cuda(Tensor& out, const Tensor& self){
   TORCH_CHECK(out.dtype() == at::kLong, "Expected object of scalar type ", at::kLong, " as out, but got ", out.dtype());
   TORCH_CHECK(self.device() == out.device(), "expected self and out to be on the same device, but got out on ",
   out.device(), " and self on ", self.device());
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
     self.scalar_type(), "nonzero_cuda",
     [&] {nonzero_cuda_out_impl<scalar_t>(self, out);});
   return out;
