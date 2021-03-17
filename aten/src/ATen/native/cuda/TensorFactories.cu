@@ -98,7 +98,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
 
   auto opt = TensorOptions().device(result.device());
 
-  if (n < 50) {
+  if (n < 100) {
     auto keys = at::empty(result.sizes(), opt.dtype(kChar)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
@@ -106,7 +106,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
         keys.data_ptr<int8_t>(), keys_tmp.data_ptr<int8_t>(),
         range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
     });
-  } else if (n < 15000) {
+  } else if (n < 30000) {
     auto keys = at::empty(result.sizes(), opt.dtype(kShort)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
@@ -114,7 +114,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
         keys.data_ptr<short>(), keys_tmp.data_ptr<short>(),
         range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
     });
-  } else if (n < 1000000000) {
+  } else if (n < 2000000000) {
     auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
