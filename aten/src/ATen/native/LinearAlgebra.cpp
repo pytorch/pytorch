@@ -196,41 +196,30 @@ Tensor pinverse(const Tensor& self, double rcond) {
   return at::linalg_pinv(self, rcond, /*hermitian=*/false);
 }
 
-static Tensor compute_singular_values(const Tensor& input, bool hermitian) {
-  Tensor S;
-  if (!hermitian) {
-    Tensor U, V;
-    // TODO: replace input.svd with linalg_svd
-    std::tie(U, S, V) = input.svd(/*some=*/true, /*compute_uv=*/false);
-  } else {
-    S = at::linalg_eigvalsh(input);
-    S = S.abs();
-  }
-  return S;
-}
-
-static Tensor& linalg_matrix_rank_out_error_checks(const Tensor& input, const Tensor& tol, bool hermitian, Tensor& result) {
+// Computes the rank of 'input' and saves the result in-place in 'result'
+// 'hermitian' controls whether SVD or eigendecomposition is used for computing the singular values
+// 'atol' and 'rtol' are the absolute and relative tolerances, respectively.
+// TODO: this function can be made public, see: https://github.com/pytorch/pytorch/issues/54151
+static Tensor& linalg_matrix_rank_out_helper(const Tensor& input, const Tensor& atol, const Tensor& rtol, bool hermitian, Tensor& result) {
   checkSameDevice("torch.linalg.matrix_rank", result, input);
-  checkSameDevice("torch.linalg.matrix_rank", tol, input, "tol");
+  checkSameDevice("torch.linalg.matrix_rank", atol, input, "atol");
+  checkSameDevice("torch.linalg.matrix_rank", rtol, input, "rtol");
   ScalarType output_type = ScalarType::Long;
   checkLinalgCompatibleDtype("torch.linalg.matrix_rank", result.scalar_type(), output_type);
 
   // Matrices or batch of matrices are allowed
   TORCH_CHECK(input.dim() >= 2, "torch.linalg.matrix_rank: Expected as input a matrix or a batch of matrices, but got a tensor of size: ", input.sizes());
 
-  TORCH_CHECK(!at::isComplexType(tol.scalar_type()),
-              "torch.linalg.matrix_rank: tol tensor of complex type is not supported.");
+  TORCH_CHECK(!at::isComplexType(atol.scalar_type()),
+              "torch.linalg.matrix_rank: atol tensor of complex type is not supported.");
+  TORCH_CHECK(!at::isComplexType(rtol.scalar_type()),
+              "torch.linalg.matrix_rank: rtol tensor of complex type is not supported.");
 
   // matrix_rank assigns a scalar value for each matrix in the batch so
   // result's shape is equal to input.shape[0:input.ndim-2]
   // for single matrix result_shape = {}
-  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend()-2);
+  auto result_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
   at::native::resize_output(result, result_shape);
-  return result;
-}
-
-Tensor& linalg_matrix_rank_out(const Tensor& input, const Tensor& tol, bool hermitian, Tensor& result) {
-  result = linalg_matrix_rank_out_error_checks(input, tol, hermitian, result);
 
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
   // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
@@ -239,44 +228,55 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, const Tensor& tol, bool herm
     return result;
   }
 
-  // We compute matrix rank as the number of singular or absolute eigen values above 'tol' threshold
-  Tensor S = compute_singular_values(input, hermitian);
+  // We compute matrix rank as the number of singular or absolute eigen values
+  // that are above max(atol, rtol * max(S)) threshold
+  Tensor S, max_S;
+  if (!hermitian) {
+    Tensor U, V;
+    // TODO: replace input.svd with linalg_svd
+    std::tie(U, S, V) = input.svd(/*some=*/true, /*compute_uv=*/false);
+    // singular values are sorted in descending order
+    max_S = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
+  } else {
+    S = at::linalg_eigvalsh(input);
+    S = S.abs();
+    // eigenvalues are sorted in ascending order starting with negative values, we need a maximum value of abs(eigenvalues)
+    max_S = S.amax(/*dim=*/-1, /*keepdim=*/true);
+  }
 
-  // For NumPy compatibility tol is not scaled with max(S) if the value is provided
-  // Tensor max_S = S.amax(/*dim=*/-1, /*keepdim=*/true);
-  at::sum_out(result, S > tol.unsqueeze(-1), /*dim=*/-1);
+  Tensor tol = at::max(atol.unsqueeze(-1), rtol * max_S);
+
+  result = at::sum_out(result, S > tol, /*dim=*/-1);
+  return result;
+}
+
+Tensor& linalg_matrix_rank_out(const Tensor& input, const Tensor& tol, bool hermitian, Tensor& result) {
+  // For NumPy compatibility tol is not scaled with max(singular_value) if the value for tol is provided
+  // It is assumed that the provided value is the absolute tolerance
+  Tensor rtol = at::zeros({}, tol.options());
+  result = linalg_matrix_rank_out_helper(input, tol, rtol, hermitian, result);
   return result;
 }
 
 Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> tol, bool hermitian, Tensor& result) {
   double tol_value;
+  Tensor atol, rtol;
   if (tol.has_value()) {
     tol_value = tol.value();
+    // For NumPy compatibility tol is not scaled with max(singular_value) if the value for tol is provided
+    // It is assumed that the provided value is the absolute tolerance
+    atol = at::full({}, tol_value, input.options().dtype(ScalarType::Double));
+    rtol = at::zeros({}, input.options().dtype(ScalarType::Double));
   } else {
     ScalarType real_dtype = toValueType(input.scalar_type());
+    // This is NumPy compatible default value
     tol_value = _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
-  }
-  Tensor tol_tensor = at::full({}, tol_value, input.options().dtype(ScalarType::Double));
-
-  result = linalg_matrix_rank_out_error_checks(input, tol_tensor, hermitian, result);
-
-  // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
-  // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
-  if (input.numel() == 0) {
-    result.fill_(0);
-    return result;
+    // It is assumed that the default tolerance is the relative tolerance
+    atol = at::zeros({}, input.options().dtype(ScalarType::Double));
+    rtol = at::full({}, tol_value, input.options().dtype(ScalarType::Double));
   }
 
-  // We compute matrix rank as the number of singular or absolute eigen values above 'tol' threshold
-  Tensor S = compute_singular_values(input, hermitian);
-
-  // For NumPy compatibility tol is not scaled with max(S) if the value is provided
-  if (tol.has_value()) {
-    at::sum_out(result, S > tol_tensor.unsqueeze(-1), /*dim=*/-1);
-  } else {
-    Tensor max_S = S.amax(/*dim=*/-1, /*keepdim=*/true);
-    at::sum_out(result, S > (tol_tensor.unsqueeze(-1) * max_S), /*dim=*/-1);
-  }
+  result = linalg_matrix_rank_out_helper(input, atol, rtol, hermitian, result);
   return result;
 }
 
