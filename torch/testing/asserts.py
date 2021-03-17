@@ -175,21 +175,23 @@ def _compare_tensors(
     check_dtype: bool = True,
     check_stride: bool = True,
 ) -> None:
-    """Compare values and attributes and values.
+    """Compare values and attributes of two tensors.
 
     Args:
         a (torch.Tensor): First tensor.
         b (torch.Tensor): Second tensor.
         values_asserter (Callable[[torch.Tensor, torch.Tensor], None]): Will be called with :attr:`a` and :attr:`b`
-            after the attribute checks. Must raise an :class:`AssertionError` if the values do not match.
+            after the attribute checks. At invocation, the tensors will live in the same memory
+            :attr:`~torch.Tensor.device` and have the same :attr:`~torch.Tensor.dtype`. Must raise an
+            :class:`AssertionError` if the values do not match.
         check_device (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` live in the same
             :attr:`~torch.Tensor.device` memory. If this check is disabled **and** :attr:`a` and :attr:`b` do not live
-            in the same memory :attr:`~torch.Tensor.device`, they are moved CPU memory before their values are
-            compared.
+            in the same memory :attr:`~torch.Tensor.device`, they are moved CPU memory before :attr:`values_asserter`
+            is called.
         check_dtype (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
             :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`a` and :attr:`b` do not have the same
             :attr:`~torch.Tensor.dtype`, they are copied to the :class:`~torch.dtype` returned by
-            :func:`torch.promote_types` before their values are compared.
+            :func:`torch.promote_types` before :attr:`values_asserter` is called.
         check_stride (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same stride.
 
     Raises:
