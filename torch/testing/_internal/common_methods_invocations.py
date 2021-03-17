@@ -1430,8 +1430,9 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
-    def _samples_with_alpha_helper(args, alphas):
-        return (SampleInput(arg, kwargs=dict(alpha=alpha))for arg, alpha in product(args, alphas))
+    def _samples_with_alpha_helper(args, alphas, filter_fn=lambda arg_alpha: True):
+        return (SampleInput(arg, kwargs=dict(alpha=alpha))
+                for arg, alpha in filter(filter_fn, product(args, alphas)))
 
     int_alpha, float_alpha, complex_alpha = 2, 0.1, 1 + 0.6j
 
@@ -1469,10 +1470,24 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
                        (_make_tensor_helper((S, S)), 2.7j), (_make_tensor_helper(()), 2.7j),
                        (_make_tensor_helper((S, S)), 1 - 2.7j), (_make_tensor_helper(()), 1 + 2.7j)]  # type: ignore
 
-        alphas = [int_alpha, float_alpha]
-        if dtype.is_complex:
-            alphas += [complex_alpha]
-        samples += tuple(_samples_with_alpha_helper(scalar_args, alphas))  # type: ignore
+        alphas = [int_alpha, float_alpha, complex_alpha]
+
+        def filter_fn(arg_alpha):
+            arg, alpha = arg_alpha
+            if isinstance(alpha, complex):
+                if dtype.is_complex or isinstance(arg[1], complex):
+                    return True
+                else:
+                    # complex alpha is valid only if either `self` or `other` is complex
+                    # x = torch.randn(2, requires_grad=True, dtype=torch.float64)
+                    # torch.rsub(x, 1, alpha=1. + 1.6j)
+                    # RuntimeError: value cannot be converted to type double without overflow: (-1,-1.6)
+                    return False
+
+            # Non-Complex Alpha
+            return True
+
+        samples += tuple(_samples_with_alpha_helper(scalar_args, alphas, filter_fn=filter_fn))
     else:
         raise Exception("Invalid variant!")
 
