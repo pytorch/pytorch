@@ -18,14 +18,11 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
   if (all(lessThan(pos, uBlock.size.xyz))) {
-    const int xoff_pre  = 2*max(uBlock.pad.x - pos.x, 0);
-    const int xoff_post = 2*max(pos.x - (uBlock.size.x - 1 - uBlock.pad.y), 0);
-    const int yoff_pre  = 2*max(uBlock.pad.z - pos.y, 0);
-    const int yoff_post = 2*max(pos.y - (uBlock.size.y - 1 - uBlock.pad.w), 0);
-    ivec3 inpos = ivec3(
-        pos.x - uBlock.pad.x + xoff_pre - xoff_post,
-        pos.y - uBlock.pad.z + yoff_pre - yoff_post,
-        pos.z);
+    const ivec2 zeros = ivec2(0, 0);
+    const ivec2 off_pre  = 2*max(uBlock.pad.xz - pos.xy, zeros);
+    const ivec2 off_post = 2*max(pos.xy - (uBlock.size.xy - ivec2(1, 1) - uBlock.pad.yw), zeros);
+
+    ivec3 inpos = ivec3(pos.xy - uBlock.pad.xz + off_pre - off_post, pos.z);
     imageStore(uOutput, pos, texelFetch(uInput, inpos, 0));
   }
 }
