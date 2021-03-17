@@ -9,6 +9,8 @@ from functional_utils import make_functional, grad_with_value
 # GOAL: Demonstrate that it is possible to use eager-mode vmap
 # to parallelize training over models.
 
+# NB: this code runs off of a branch on zou3519/pytorch:dynlayer
+
 DEVICE = 'cpu'
 
 # Step 1: Make some spirals
