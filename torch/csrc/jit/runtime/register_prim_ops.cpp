@@ -397,14 +397,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Complex.Tensor(Tensor a) -> complex"),
-         [](Stack* stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.item<c10::complex<double>>());
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::Complex.Scalar(Scalar a) -> complex"),
          [](Stack* stack) {
            IValue scalar;
@@ -416,6 +408,14 @@ RegisterOperators reg(
            } else {
              push(stack, c10::complex<double>(scalar.toInt(), 0));
            }
+         },
+         aliasAnalysisFromSchema()),
+      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Complex.Tensor_Tensor(Tensor a, Tensor b) -> complex"),
+         [](Stack* stack) {
+           at::Tensor a, b;
+           pop(stack, a, b);
+           push(stack, c10::complex<double>(a.item<double>(), b.item<double>()));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(

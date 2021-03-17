@@ -1137,7 +1137,7 @@ class TestJit(JitTestCase):
         out = torch.empty([2, 5], dtype=torch.complex128)
         self.checkScript(fn_out, (real, img, out, ))
 
-    def test_torch_complex_scalar(self):
+    def test_complex_constructor(self):
         # Test all scalar types
         def fn_int(real: int, img: int):
             return complex(real, img)
@@ -1211,45 +1211,41 @@ class TestJit(JitTestCase):
         self.checkScript(fn_int_float, (-3, 0.0, ))
         self.checkScript(fn_int_float, (2, -8.9, ))
 
-    def test_torch_complex_fails(self):
-        # The following operations are not allowed
-        # in Torchscript
+    def test_torch_complex_constructor_with_tensor(self):
+        tensors = ([torch.rand(1), torch.randint(-5, 5, (1, )), torch.tensor([False])])
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_tensor_float(real, img: float):
-                return complex(real, img)
-            fn_tensor_float(torch.rand(1), 1.2)
+        def fn_tensor_float(real, img: float):
+            return complex(real, img)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_tensor_float(real: float, img):
-                return complex(real, img)
-            fn_tensor_float(2.4, torch.rand(1))
+        def fn_tensor_int(real, img: int):
+            return complex(real, img)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_int_tensor(real: int, img):
-                return complex(real, img)
-            fn_int_tensor(6, torch.rand(1))
+        def fn_tensor_bool(real, img: bool):
+            return complex(real, img)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_bool_tensor(real: bool, img):
-                return complex(real, img)
-            fn_bool_tensor(True, torch.rand(1))
+        def fn_float_tensor(real: float, img):
+            return complex(real, img)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_int_tensor(real: int, img):
-                return complex(real, img)
-            fn_int_tensor(4, torch.rand(1))
+        def fn_int_tensor(real: int, img):
+            return complex(real, img)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_bool_tensor(real, img: bool):
-                return complex(real, img)
-            fn_bool_tensor(torch.rand(1), False)
+        def fn_bool_tensor(real: bool, img):
+            return complex(real, img)
+
+        for tensor in tensors:
+            self.checkScript(fn_tensor_float, (tensor, 1.2))
+            self.checkScript(fn_tensor_int, (tensor, 3))
+            self.checkScript(fn_tensor_bool, (tensor, True))
+
+            self.checkScript(fn_float_tensor, (1.2, tensor))
+            self.checkScript(fn_int_tensor, (3, tensor))
+            self.checkScript(fn_bool_tensor, (True, tensor))
+
+        def fn_tensor_tensor(real, img):
+            return complex(real, img) + complex(2)
+
+        for x, y in product(tensors, tensors):
+            self.checkScript(fn_tensor_tensor, (x, y, ))
 
     def test_torch_sum(self):
         def fn(x):
