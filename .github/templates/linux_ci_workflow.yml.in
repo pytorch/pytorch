@@ -77,6 +77,7 @@ jobs:
       - name: Clean up docker images
         if: always()
         run: |
+          cat ${GITHUB_WORKSPACE}/sccache_error.log
           # Prune all of the docker images
           docker system prune -af
   # TODO: Add test step here
