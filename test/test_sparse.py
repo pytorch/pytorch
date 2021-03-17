@@ -3200,7 +3200,7 @@ class TestCudaSparse(TestSparse):
         torch.sparse_coo_tensor(([0, 1],), v, (4, 0))
         v = torch.empty(2, 0).cuda(1)
         torch.sparse_coo_tensor(([0, 1],), v, (4, 0))
-       
+
 
 @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
 class TestCudaUncoalescedSparse(TestCudaSparse):

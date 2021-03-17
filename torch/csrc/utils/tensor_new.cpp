@@ -64,22 +64,10 @@ void maybe_initialize_cuda(const Device device) {
 // options.
 // TODO: Refactor this so we just pass everything in via options
 
-Tensor dispatch_zeros(c10::TensorOptions options, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
-  maybe_initialize_cuda(options.device());
-  pybind11::gil_scoped_release no_gil;
-  return torch::zeros(sizes, build_options(options, scalar_type, device));
-}
-
 Tensor dispatch_ones(c10::TensorOptions options, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
   maybe_initialize_cuda(options.device());
   pybind11::gil_scoped_release no_gil;
   return torch::ones(sizes, build_options(options, scalar_type, device));
-}
-
-Tensor dispatch_full(c10::TensorOptions options, at::ScalarType scalar_type, Scalar fill_value, const optional<Device>& device, IntArrayRef sizes) {
-  maybe_initialize_cuda(options.device());
-  pybind11::gil_scoped_release no_gil;
-  return torch::full(sizes, fill_value, build_options(options, scalar_type, device));
 }
 
 Tensor new_with_sizes(c10::TensorOptions options, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
@@ -291,7 +279,7 @@ Tensor new_from_data_copy(
     at::ScalarType scalar_type,
     c10::optional<Device> device,
     PyObject* data) {
-  return internal_new_from_data(options, scalar_type, std::move(device), data,
+  return internal_new_from_data(options, scalar_type, device, data,
                                 /*copy_variables=*/true, /*copy_numpy=*/true,
                                 /*type_inference=*/false);
 }
@@ -304,7 +292,7 @@ Tensor legacy_new_from_sequence(
   if (!PySequence_Check(data)) {
     throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
   }
-  return internal_new_from_data(options, scalar_type, std::move(device), data,
+  return internal_new_from_data(options, scalar_type, device, data,
                                 /*copy_variables=*/false, /*copy_numpy=*/false,
                                 /*type_inference=*/false);
 }
@@ -459,7 +447,8 @@ Tensor legacy_sparse_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType sc
 c10::TensorOptions typeIdWithDefault(PythonArgs& r, int64_t device_idx, c10::DispatchKey dispatch_key) {
   auto options = dispatchKeyToTensorOptions(dispatch_key);
   if (!r.isNone(device_idx)) {
-    options.device(r.device(device_idx).type());
+    // TODO: This line doesn't seem to be exercised at all in tests
+    options = options.device(r.device(device_idx).type());
   }
   return options;
 }
@@ -592,11 +581,11 @@ Tensor indexing_tensor_from_data(
   // indexing tensor (type Byte or Long)
   ScalarType inferred_scalar_type = infer_scalar_type(data);
   if (inferred_scalar_type == ScalarType::Byte || inferred_scalar_type == ScalarType::Bool) {
-    return internal_new_from_data(options, inferred_scalar_type, std::move(device), data,
+    return internal_new_from_data(options, inferred_scalar_type, device, data,
                                   /*copy_variables=*/false, /*copy_numpy=*/false,
                                   /*type_inference=*/false);
   } else {
-    return internal_new_from_data(options, scalar_type, std::move(device), data,
+    return internal_new_from_data(options, scalar_type, device, data,
                                   /*copy_variables=*/false, /*copy_numpy=*/false,
                                   /*type_inference=*/false);
   }
@@ -624,6 +613,7 @@ Tensor indexing_tensor_from_data(
 // Options is more right and gets this correct.
 
 Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
   static PythonArgParser parser({
     "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
     "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
@@ -669,6 +659,7 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
 }
 
 Tensor _sparse_coo_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
   enum {
     ARG_INDICES = 0,
     ARG_VALUES,
