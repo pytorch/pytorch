@@ -76,6 +76,7 @@ struct ParsedLiteral {
   std::vector<int64_t> is;
   std::vector<std::string> ss;
   std::vector<double> fs;
+  std::vector<c10::complex<double>> cs;
   std::vector<TypePtr> tys;
 };
 
@@ -166,7 +167,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         auto imag = c10::stod(str.substr(0, str.size() - 1));
         r.c = c10::complex<double>(0, imag);
       }
-      if (str.find('.') != std::string::npos ||
+      else if (str.find('.') != std::string::npos ||
           str.find('e') != std::string::npos) {
         r.k = AttributeKind::f;
         r.f = c10::stod(str);
@@ -206,6 +207,7 @@ void IRParser::parseAttr(Node* n) {
     c10::List<int64_t> is;
     c10::List<std::string> ss;
     c10::List<double> fs;
+    c10::List<c10::complex<double>> cs;
     std::vector<TypePtr> tys;
     int elem_num = 0;
     parseList('[', ',', ']', [&] {
@@ -226,6 +228,11 @@ void IRParser::parseAttr(Node* n) {
           AT_ASSERT(!elem_num++ || k == AttributeKind::fs);
           k = AttributeKind::fs;
           break;
+        case AttributeKind::c:
+          cs.push_back(r.c);
+          AT_ASSERT(!elem_num++ || k == AttributeKind::cs);
+          k = AttributeKind::cs;
+          break;
         case AttributeKind::ty:
           tys.push_back(r.ty);
           AT_ASSERT(!elem_num++ || k == AttributeKind::tys);
@@ -244,6 +251,9 @@ void IRParser::parseAttr(Node* n) {
         break;
       case AttributeKind::fs:
         n->ival_(Symbol::attr(attrname), IValue(fs));
+        break;
+      case AttributeKind::cs:
+        n->ival_(Symbol::attr(attrname), IValue(cs));
         break;
       case AttributeKind::is:
         n->ival_(Symbol::attr(attrname), IValue(is));

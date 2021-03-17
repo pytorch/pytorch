@@ -23,6 +23,7 @@ enum class AttributeKind {
   f,
   fs,
   c,
+  cs,
   i,
   is,
   s,
@@ -39,6 +40,7 @@ static inline const char* toString(AttributeKind kind) {
   static const char* names[] = {
       "f",
       "c",
+      "cs",
       "fs",
       "i",
       "is",
@@ -107,6 +109,8 @@ struct VectorAttributeValue : public AttributeValue {
 
 using ComplexAttr =
     ScalarAttributeValue<c10::complex<double>, AttributeKind::c>;
+using ComplexValsAttr =
+    VectorAttributeValue<c10::complex<double>, AttributeKind::cs>;
 using FloatAttr = ScalarAttributeValue<double, AttributeKind::f>;
 using FloatsAttr = VectorAttributeValue<double, AttributeKind::fs>;
 using IntAttr = ScalarAttributeValue<int64_t, AttributeKind::i>;

@@ -214,6 +214,7 @@ def _get_global_builtins():
         'bool': 'aten::Bool',
         'int': 'aten::Int',
         'float': 'aten::Float',
+        'float': 'aten::Complex',
         'abs': 'prim::abs',
         'max': 'prim::max',
         'min': 'prim::min',

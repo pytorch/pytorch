@@ -500,8 +500,6 @@ struct Environment {
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
           {"pow", std::make_shared<BuiltinFunction>(aten::pow, at::nullopt)},
-          {"complex",
-           std::make_shared<BuiltinFunction>(aten::complex, at::nullopt)},
           {"range", SpecialFormValue::create(prim::range)},
           {"zip", SpecialFormValue::create(prim::zip)},
           {"enumerate", SpecialFormValue::create(prim::enumerate)},
