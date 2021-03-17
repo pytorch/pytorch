@@ -1258,12 +1258,12 @@ TORCH_CHECK(
   };
 
   // +1 faster than additional condition check inside loop
-  int64_t* sizes = new int64_t[dimensions + 1];
-  int64_t* idx = new int64_t[dimensions + 1];
+  std::vector<int64_t> sizes(dimensions + 1);
+  std::vector<int64_t> idx(dimensions + 1, 0);
   auto self_sizes = self.sizes();
 
   // Initialize `idx` to first index i.e. 0, 0, ..
-  std::fill(idx, idx + dimensions + 1, 0);
+  // std::fill(idx, idx + dimensions + 1, 0);
   for (int64_t i = 0; i < dimensions; ++i) {
     sizes[dimensions - i - 1] = self_sizes[i]; // reverse order important
   }
@@ -1280,7 +1280,7 @@ TORCH_CHECK(
             scalar_t self_data_i = *(scalar_t*)(self_data + self_stride * i);
             if (self_data_i != 0) {
               // `ii` is read-only pointer.
-              auto const* ii = idx + dimensions;
+              auto const* ii = idx.data() + dimensions;
               for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
                 --ii;
                 *out_data = *ii;
@@ -1288,25 +1288,29 @@ TORCH_CHECK(
               }
               out_data += out_strides_0;
             }
-            increment_idx(idx, sizes);
+            increment_idx((int64_t*)idx.data(), sizes.data());
           }
         };
 
         iter.serial_for_each(loop, {0, self.numel()});
       });
-  delete[] sizes;
-  delete[] idx;
+  // delete[] sizes;
+  // delete[] idx;
   return out;
 }
 
 Tensor nonzero_cpu(const Tensor& self) {
-  Tensor out = at::native::empty_cpu(
-      {0},
-      kLong,
-      self.options().layout_opt(),
-      self.options().device_opt(),
-      self.options().pinned_memory_opt());
-  return nonzero_out_cpu(out, self);
+  // Tensor out = at::native::empty_cpu(
+  //     {0},
+  //     kLong,
+  //     self.options().layout_opt(),
+  //     self.options().device_opt(),
+  //     self.options().pinned_memory_opt());
+
+  Tensor out = at::empty({0}, self.options().dtype(kLong));
+      // self.clone(at::MemoryFormat::Preserve)
+  nonzero_out_cpu(out, self);
+  return out;
 }
 
 
