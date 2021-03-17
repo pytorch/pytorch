@@ -11,19 +11,16 @@ from torch.testing._internal.common_utils import get_comparison_dtype as _get_co
 __all__ = ["assert_tensors_equal", "assert_tensors_allclose"]
 
 
-# The module 'pytest' will be imported if the 'pytest' runner is used. This will only give false-positives in case
-# the test directly or indirectly imports 'pytest', but is run by another runner such as 'unittest'.
-_RUN_BY_PYTEST = "pytest" in sys.modules
-
-
 # The UsageError should be raised in case the test function is not used correctly. With this the user is able to
 # differentiate between a test failure (there is a bug in the tested code) and a test error (there is a bug in the
 # test). If pytest is the test runner, we use the built-in UsageError instead our custom one.
-if _RUN_BY_PYTEST:
-    import pytest
-
+try:
+    # The module 'pytest' will be imported if the 'pytest' runner is used. This will only give false-positives in case
+    # a previously imported module already directly or indirectly imported 'pytest', but the test is run by another
+    # runner such as 'unittest'.
+    pytest = sys.modules["pytest"]
     UsageError = pytest.UsageError
-else:
+except KeyError:
 
     class UsageError(Exception):
         pass
