@@ -153,3 +153,22 @@ def optimize_frozen_module(mod, optimize_numerics: bool = True):
             torch._C._jit_pass_fold_frozen_conv_bn(mod.graph)
             torch._C._jit_pass_fold_frozen_conv_add_or_sub(mod.graph)
             torch._C._jit_pass_fold_frozen_conv_mul_or_div(mod.graph)
+
+def _optimize_for_training(mod, preserved_attrs: Optional[List[str]] = None):
+    if not isinstance(mod, ScriptModule):
+        raise RuntimeError(
+        "Optimize for Training expects a ScriptModule as input. "
+            "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'."
+        )
+
+    if not mod.training:
+        raise RuntimeError(
+            "Optimizing for training only supports modules in train mode."
+        )
+
+    preserved_attrs = preserved_attrs if preserved_attrs is not None else []
+
+    out = RecursiveScriptModule(torch._C._freeze_module(mod._c, preserved_attrs, preserveParameters=True))
+    RecursiveScriptModule._finalize_scriptmodule(out)
+
+    return out

@@ -441,6 +441,9 @@ class AttributePropagator {
             if (iter2 != iter->second.end())
               paramConst = iter2->second;
           }
+          if (preserveParameters_ && name == "training") {
+            continue;
+          }
           if (!paramConst) {
             auto attr = attrModule.attr(name);
             if (!isEval || preserveParameters_) {
@@ -452,9 +455,6 @@ class AttributePropagator {
                 continue;
               } else {
                 attr = overrideGradient(attr);
-              }
-              if (!isEval && name == "training") {
-                continue;
               }
             } else {
               attr = overrideGradient(attr);
