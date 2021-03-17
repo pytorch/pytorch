@@ -3083,7 +3083,7 @@ class TestSparse(TestCase):
         test_op(4, 100, [3, 4, 2, 3, 5, 2])
 
     @onlyCPU
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_sparse_matmul(self, device, dtype):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
