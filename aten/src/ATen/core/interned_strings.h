@@ -361,6 +361,11 @@ namespace c10 {
   _(onnx, Conv)                      \
   _(onnx, BatchNormalization)        \
   _(onnx, ReduceProd)                \
+  _(onnx, Neg)                       \
+  _(onnx, NonZero)                   \
+  _(onnx, Range)                     \
+  _(onnx, Tile)                      \
+  _(onnx, Where)                     \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
