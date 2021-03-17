@@ -199,7 +199,7 @@ def _assert_values_equal(a: torch.Tensor, b: torch.Tensor):
 
     trace = _trace_mismatches(a, b, mismatches)
     msg = (
-        f"Found {trace.abs} different elements out of {trace.total} ({trace.rel:.1%}). "
+        f"Found {trace.abs} different element(s) out of {trace.total} ({trace.rel:.1%}). "
         f"The greatest difference of {trace.diff} ({trace.a} vs. {trace.b}) occurred at index {trace.idx}"
     )
     raise AssertionError(msg)
@@ -218,20 +218,20 @@ def _assert_values_allclose(
     Args:
         a (torch.Tensor): First tensor.
         b (torch.Tensor): Second tensor.
-        rtol (Optional[float]): Relative tolerance.
-        atol (Optional[float]): Absolute tolerance.
+        rtol (float): Relative tolerance.
+        atol (float): Absolute tolerance.
 
     Raises:
          AssertionError: If the values of :attr:`a` and :attr:`b` are close up to a desired tolerance.
     """
     mismatches = ~torch.isclose(a, b, rtol=rtol, atol=atol)
-    if not any(mismatches):
+    if not torch.any(mismatches):
         return
 
     trace = _trace_mismatches(a, b, mismatches)
     msg = (
         f"With rtol={rtol} and atol={atol}, "
-        f"found {trace.abs} different elements out of {trace.total} ({trace.rel:.1%}). "
+        f"found {trace.abs} different element(s) out of {trace.total} ({trace.rel:.1%}). "
         f"The greatest difference of {trace.diff} ({trace.a} vs. {trace.b}) occurred at index {trace.idx}"
     )
     raise AssertionError(msg)
