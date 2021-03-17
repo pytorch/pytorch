@@ -4035,6 +4035,7 @@ TEST(LoopNest, DISABLED_Int64Direct) {
   Placeholder b("b", kLong, {N});
   VarHandle n("n", kLong);
   Stmt* s = For::make(n, 0, N, b.store({n}, a.load({n}) + 1l));
+  s = IRSimplifier::simplify(s);
   std::ostringstream oss;
   oss << *s;
   ASSERT_EQ(oss.str(), int64Loop);
