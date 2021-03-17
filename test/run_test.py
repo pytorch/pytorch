@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd,
 from torch.testing._internal.framework_utils import calculate_shards
 import torch.distributed as dist
 from typing import Dict, Optional, Tuple, List, Any
+from typing_extensions import TypedDict
 
 try:
     import boto3  # type: ignore[import]
@@ -27,6 +28,7 @@ try:
     HAVE_BOTO3 = True
 except ImportError:
     HAVE_BOTO3 = False
+
 
 TESTS = [
     'test_public_bindings',
@@ -439,6 +441,18 @@ def pull_job_times_from_S3() -> Dict[str, Tuple[float, int]]:
     return calculate_job_times(s3_reports)
 
 
+class JobTimeJSON(TypedDict):
+    commit: str
+    job_times: Dict[str, float]
+
+
+def get_job_times_json(job_times: Dict[str, Tuple[float, int]]) -> JobTimeJSON:
+    return {
+        'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip(),
+        'job_times': {job: time for job, (time, _) in job_times.items()},
+    }
+
+
 def get_shard(which_shard: int, num_shards: int, tests: List[str]) -> List[str]:
     jobs_to_times = pull_job_times_from_S3()
 
@@ -730,6 +744,13 @@ def parse_args():
         help='additional arguments passed through to unittest, e.g., '
              'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
     parser.add_argument(
+        '--export-historic-test-times',
+        nargs='?',
+        type=str,
+        const='.pytorch-test-times',
+        help='dumps test times from previous S3 stats into a file, format JSON',
+    )
+    parser.add_argument(
         '--shard',
         nargs=2,
         type=int,
@@ -990,8 +1011,22 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
         message += f' Received signal: {signal_name}'
     return message
 
+def export_S3_test_times(test_times_filename: str, test_times: Dict[str, Tuple[float, int]]) -> None:
+    if os.path.exists(test_times_filename):
+        print(f'Overwriting existent file: {test_times_filename}')
+    with open(test_times_filename, 'w+') as file:
+        job_times_json = get_job_times_json(test_times)
+        json.dump(job_times_json, file)
+
 def main():
     options = parse_args()
+
+    test_times_filename = options.export_historic_test_times
+    if test_times_filename:
+        print(f'Exporting historic test times from S3 to {test_times_filename}, no tests will be run.')
+        export_S3_test_times(test_times_filename, pull_job_times_from_S3())
+        return
+
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
 
