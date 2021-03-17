@@ -1133,7 +1133,10 @@ endif()
 
 if(BUILD_LITE_INTERPRETER)
   target_compile_definitions(torch_cpu PRIVATE BUILD_LITE_INTERPRETER)
-  target_compile_definitions(torch_cpu PRIVATE XPLAT_MOBILE_BUILD)
+  # Enable template selective build only when SELECTED_OP_LIST is provided.
+  if(SELECTED_OP_LIST)
+    target_compile_definitions(torch_cpu PRIVATE XPLAT_MOBILE_BUILD)
+  endif()
 endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
