@@ -479,7 +479,7 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
     auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
     auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
 
-    AT_DISPATCH_ALL_TYPES(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
         commonDtype, "cadd_sparse", [&] {
           scalar_t* t_values_ptr = t_values.data_ptr<scalar_t>();
           scalar_t* s_values_ptr = s_values.data_ptr<scalar_t>();
@@ -549,7 +549,7 @@ SparseTensor& add_out_sparse_non_contiguous(SparseTensor& r, const SparseTensor&
 
     // If `t` or `src` contains non-contiguous `values`, `at::native::cpublas::axpy` doesn't work
     // and we concat the indices and values tensors instead.
-    AT_DISPATCH_ALL_TYPES(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
       commonDtype, "add_out_sparse_cpu", [&] {
           if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
             s_values = s_values.mul(value);
@@ -678,7 +678,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
       dstBuffer.add_(srcBuffer, value);
     }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool,
         commonDtype, "add_dense_sparse", [&] {
           add_dense_sparse_worker_cpu<scalar_t>(resultBuffer, value, sparse, indices, valuesBuffer);
         });
