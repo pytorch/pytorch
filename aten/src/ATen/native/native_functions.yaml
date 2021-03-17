@@ -1633,7 +1633,7 @@
 - func: erf(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: erf
+    CPU, CUDA: erf
 
 - func: erf_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -1648,7 +1648,7 @@
 - func: erfc(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: erfc
+    CPU, CUDA: erfc
 
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -2466,7 +2466,7 @@
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
-    CPU, CUDA: max
+    CPU, CUDA, QuantizedCPU, QuantizedCUDA: max
 
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -2601,7 +2601,7 @@
 - func: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
-    CPU, CUDA: min
+    CPU, CUDA, QuantizedCPU, QuantizedCUDA: min
 
 - func: min.dim_min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -4172,22 +4172,22 @@
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: norm
+    CPU, CUDA, SparseCPU, SparseCUDA: norm
 
 - func: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: norm
+    CPU, CUDA, SparseCPU, SparseCUDA: norm
 
 - func: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: norm
+    CPU, CUDA, SparseCPU, SparseCUDA: norm
 
 - func: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: norm
+    CPU, CUDA, SparseCPU, SparseCUDA: norm
 
 - func: norm.dtype_out(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
