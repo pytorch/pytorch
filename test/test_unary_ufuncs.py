@@ -29,7 +29,7 @@ def scipy_filter(op):
     # Refer [scipy reference filter]
     return op.ref is not None
 
-unary_ufuncs = list(filter(scipy_filter, unary_ufuncs))
+scipy_filtered_ufuncs = list(filter(scipy_filter, unary_ufuncs))
 
 # Tests for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -343,14 +343,14 @@ class TestUnaryUfuncs(TestCase):
     #   1D tensors and a large 2D tensor with interesting and extremal values
     #   and discontiguities.
     @suppress_warnings
-    @ops(unary_ufuncs)
+    @ops(scipy_filtered_ufuncs)
     def test_reference_numerics_normal(self, device, dtype, op):
         tensors = generate_numeric_tensors(device, dtype,
                                            domain=op.domain)
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @ops(unary_ufuncs, allowed_dtypes=floating_and_complex_types_and(
+    @ops(scipy_filtered_ufuncs, allowed_dtypes=floating_and_complex_types_and(
         torch.bfloat16, torch.half, torch.int8, torch.int16, torch.int32, torch.int64
     ))
     def test_reference_numerics_hard(self, device, dtype, op):
@@ -362,7 +362,8 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @ops(unary_ufuncs, allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half))
+    @ops(scipy_filtered_ufuncs,
+         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half))
     def test_reference_numerics_extremal(self, device, dtype, op):
         handles_extremals = (op.handles_complex_extremals if
                              dtype in (torch.cfloat, torch.cdouble) else op.handles_extremals)
