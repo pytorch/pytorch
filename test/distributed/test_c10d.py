@@ -4711,12 +4711,22 @@ class CommTest(MultiProcessTestCase):
         default_pg = c10d.distributed_c10d._get_default_group()
 
         # Test properly set devices on options if user don't set devices
+        no_device_thread_pg_opts = c10d.ProcessGroupGloo.Options(timeout=timedelta(seconds=10))
+        no_device_thread_pg = dist.new_group([0, 1], pg_options=no_device_thread_pg_opts)
+        self.assertTrue(len(no_device_thread_pg.options._devices) != 0)
+
+        # Test if user pass in Options, set threads, but not set devices, should error out
         no_device_pg_opts = c10d.ProcessGroupGloo.Options(timeout=timedelta(seconds=10))
-        no_device_pg = dist.new_group([0, 1], pg_options=no_device_pg_opts)
-        self.assertTrue(len(no_device_pg.options._devices) != 0)
+        no_device_pg_opts._threads = 4
+
+        with self.assertRaisesRegex(
+            RuntimeError, "threads and devices must be passed in together"
+        ):
+            no_device_pg = dist.new_group([0, 1], pg_options=no_device_pg_opts)
 
         dist.destroy_process_group(default_pg)
         self.assertFalse(dist.is_initialized())
+
 
     @requires_gloo()
     def test_pass_gloo_options_and_timeout(self):
