@@ -94,6 +94,8 @@ def insert_observer(
          node: Node
          observer: observer/fake_quantize module instance
     """
+    # In eval mode fixed qparams node are the same as CopyNode and we
+    # won't insert observer for them
     if not model.training and isinstance(observer, torch.quantization.FixedQParamsFakeQuantize):
         return
     # respect device affinity when adding observers
@@ -887,13 +889,15 @@ class Quantizer:
                     root_module = self.modules[""]
                     assert isinstance(prev_node, Node)
                     observer_dtype: torch.dtype = observer_module.dtype  # type: ignore
-                    quant_env[node.name] = (quantize_node(self, load_non_quantized(prev_node), observer_module, node, is_input=True), observer_dtype)  # type: ignore
+                    quant_env[node.name] = (quantize_node(self, load_non_quantized(prev_node),
+                        observer_module, node, is_input=True), observer_dtype)  # type: ignore
             else:
                 # replace activation post process with quantization ops
                 root_module = self.modules[""]
                 assert isinstance(node.args[0], Node)
                 dtype: torch.dtype = observer_module.dtype  # type: ignore
-                quant_env[node.name] = (quantize_node(self, load_non_quantized(node.args[0]), observer_module, node, is_input=True), dtype)  # type: ignore
+                quant_env[node.name] = (quantize_node(self, load_non_quantized(node.args[0]),
+                    observer_module, node, is_input=True), dtype)  # type: ignore
 
         # additional state to override inputs to be quantized, if specified
         # by the user
