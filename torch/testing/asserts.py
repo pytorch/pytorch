@@ -1,5 +1,3 @@
-import functools
-import inspect
 import sys
 from collections import namedtuple
 from typing import Any, Optional, Tuple
