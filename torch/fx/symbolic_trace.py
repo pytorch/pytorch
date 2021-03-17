@@ -7,10 +7,10 @@ from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 from itertools import chain
 import torch
+import torch.fx.patch
 from torch._C import ScriptObject  # type: ignore
 
 import sys
-from .patch import patch_function
 from .node import Argument, map_aggregate
 from .graph import Graph
 from .graph_module import GraphModule
@@ -629,7 +629,8 @@ class CPatchManager(object):
             if action == 'c_call':
                 if c_patch_enabled:
                     if arg == torch.randn:
-                        patch_function(arg, patched_in)
+                        torch.fx.patch.patch_function(arg, patched_in)
+
         self.func = trace_func
 
     def __enter__(self):
