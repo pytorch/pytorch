@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
@@ -197,7 +197,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64

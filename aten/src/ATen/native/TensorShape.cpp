@@ -277,7 +277,7 @@ static void check_cat_no_zero_dim(TensorList tensors) {
   }
 }
 
-Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
+Tensor & cat_out(TensorList tensors, int64_t dim, Tensor & result) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
@@ -289,7 +289,7 @@ Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   return result;
 }
 
-Tensor& cat_out(Tensor& result, TensorList tensors, Dimname dim) {
+Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
   TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
 }
@@ -1532,7 +1532,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
 }
 
 // torch.row_stack, alias for torch.vstack
-Tensor& row_stack_out(Tensor& result, TensorList tensors) {
+Tensor& row_stack_out(TensorList tensors, Tensor& result) {
   return at::vstack_out(result, tensors);
 }
 

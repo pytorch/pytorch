@@ -177,14 +177,10 @@ Reducer::Reducer(
         at::TensorOptions options;
         options = options.dtype(at::kInt);
 
-        if (replicas_[i][0].is_cuda()) {
-          at::DeviceGuard g(replicas_[i][0].device());
-          local_used_maps_[i] = at::zeros(
-              {static_cast<long>(variable_count)}, options.pinned_memory(true));
-        } else {
-          local_used_maps_[i] =
-              at::zeros({static_cast<long>(variable_count)}, options);
-        }
+        // Deliberately don't pin the memory even if local_used_maps_dev_ will
+        // be cuda. See Note [local_used_maps_ -> local_used_maps_dev copying]
+        local_used_maps_[i] =
+            at::zeros({static_cast<long>(variable_count)}, options);
 
         // This tensor needs to be on the same device as replica because backend
         // such as NCCL may not support CPU tensors, and hence it might not work
@@ -561,9 +557,31 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     if (find_unused_parameters_) {
       // H2D from local_used_maps_ to local_used_maps_dev_
       for (size_t i = 0; i < local_used_maps_.size(); i++) {
-        // We do async H2D to avoid the blocking overhead. The async copy and
-        // allreduce respect the current stream, so will be sequenced correctly.
-        local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
+        if (local_used_maps_dev_[i].is_cuda()) {
+          // Note [local_used_maps_ -> local_used_maps_dev copying]
+          // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+          // We do async H2D to avoid the blocking overhead. The async copy and
+          // allreduce respect the current stream, so will be sequenced correctly.
+          //
+          // Correct sequencing with respect to host operations is also essential.
+          // The H2D copy_ is stream ordered, while the host's changes to local_used_maps_
+          // are host ordered. If a large backlog of cuda-stream work pushes the copy_ far
+          // into the future, and if no blocking calls occur between now and finalize_backward()**
+          // such that finalize_backward() re-zeroes local_used_maps_ on the host
+          // before the stream executes the copy_, copy_ will read those zeros instead of the
+          // values we thought we told it to read here.
+          // Copying local_used_maps_[i] to a pinned temporary (which the pinned caching
+          // allocator should supply asynchronously) avoids this nasty, rare race condition.
+          //
+          // ** In the hoped-for case where all params are used, DDP itself won't do any
+          // blocking work between now and the re-zeroing, so the danger is real.
+          auto local_used_maps_tmp = local_used_maps_[i].pin_memory();
+          // Defensively ensures a deep copy to a pinned temporary
+          TORCH_INTERNAL_ASSERT(local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr())
+          local_used_maps_dev_[i].copy_(local_used_maps_tmp, true);
+        } else {
+          local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
+        }
       }
       local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
     }
@@ -1045,6 +1063,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
           local_used_work_->wait();
           // D2H from local_used_maps_dev_ to local_used_maps_
           for (size_t i = 0; i < local_used_maps_.size(); i++) {
+            // Blocking copy, if local_used_maps_dev_ is cuda
             local_used_maps_[i].copy_(local_used_maps_dev_[i]);
           }
           global_unused =
@@ -1164,6 +1183,7 @@ void Reducer::finalize_backward() {
   // See Note [Skip allreducing local_used_maps_dev]
   if (find_unused_parameters_) {
     // Reset unused parameter accounting.
+    // See Note [local_used_maps_ -> local_used_maps_dev copying]
     for (auto& local_used : local_used_maps_) {
       local_used.fill_(0);
     }
