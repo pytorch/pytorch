@@ -307,7 +307,7 @@ The ``tuple`` statement:
 * Cannot convert a List to Tuple by using this built-in function.
 * Unpacking all outputs into a tuple is covered by:
 
-..testcode::
+.. testcode::
 
     abc = func() # Function that returns a tuple
     a,b = func()
@@ -346,7 +346,7 @@ The ``zip`` statement:
 
 Example
 
-..testcode::
+.. testcode::
 
     a = [1, 2] # List
     b = [2, 3, 4] # List
@@ -356,13 +356,13 @@ Example
 
 Example
 
-..testcode::
+.. testcode::
 
     a = (1, 2) # Tuple
     b = [2, 3, 4] # List
     zip(a, b) # Runtime error
 
-..testoutput::
+.. testoutput::
 
     >> RuntimeError: Can not iterate over a module list or
         tuple with a value that does not have a statically determinable length.
@@ -371,7 +371,7 @@ Example
 
 Example
 
-..testcode::
+.. testcode::
 
     a = [1.3, 2.4]
     b = [2, 3, 4]
