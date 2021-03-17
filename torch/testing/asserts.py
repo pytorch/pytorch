@@ -269,7 +269,8 @@ def assert_tensors_equal(
 
     .. seealso::
 
-        To compare tensors for value proximity, :func:`assert_tensors_allclose` can be used.
+        To compare tensors that values are close but are not require to be bitwise equivalent,
+        :func:`assert_tensors_allclose` can be used.
     """
     _assert_are_tensors(a, b)
 
@@ -362,7 +363,7 @@ def assert_tensors_allclose(
 
     .. seealso::
 
-        To compare tensors for bitwise equality, :func:`assert_tensors_equal` can be used.
+        To assert that the values in two tensors are bitwise equivalent use :func:`assert_tensors_equal`, instead.
     """
     _assert_are_tensors(a, b)
 
