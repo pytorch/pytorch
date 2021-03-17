@@ -26,14 +26,14 @@ namespace at {
 
 TORCH_API int _crash_if_asan(int);
 
-template <class Integer_torch, std::enable_if_t<std::is_integral<Integer_torch>::value, bool> = true>
+template <typename Integer_torch, std::enable_if_t<std::is_integral<Integer_torch>::value, bool> = true>
 Integer_torch add_one(Integer_torch end) {
     //If end<=begin then the range is empty; we can achieve this effect by
     //choosing the larger of {0, end} as the loop terminator
     return end + 1;
 }
 
-template <class I, std::enable_if_t<std::is_integral<I>{}, int> = 0>
+template <class I, class = typename std::enable_if<std::is_integral<I>::value>::type>
 struct integer_iterator : std::iterator<std::input_iterator_tag, I> {
     explicit integer_iterator(I value) : value(value) {}
 
@@ -64,7 +64,7 @@ struct integer_iterator : std::iterator<std::input_iterator_tag, I> {
     I value;
 };
 
-template <class I, std::enable_if_t<std::is_integral<I>{}, bool> = true>
+template <class I, class = typename std::enable_if<std::is_integral<I>::value>::type>
 struct integer_range {
  public:
     integer_range(I begin, I end) : begin_(begin), end_(end) {}
@@ -78,7 +78,7 @@ struct integer_range {
 
 /// Creates an integer range for the half-open interval [0, end)
 /// If end<=begin, then the range is empty
-template <class Integer, std::enable_if_t<std::is_integral<Integer>::value, bool> = true>
+template <class Integer, class = typename std::enable_if<std::is_integral<Integer>::value>::type>
 integer_range<Integer> irange_torch(Integer end) {
     //If end<=begin then the range is empty; we can achieve this effect by
     //choosing the larger of {0, end} as the loop terminator
