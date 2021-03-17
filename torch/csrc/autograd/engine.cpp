@@ -144,18 +144,30 @@ static thread_local std::shared_ptr<ReadyQueue> local_ready_queue = nullptr;
 // stream used to run the function OR the inputs are on different devices
 // and the function is responsible for properly acquiring them.
 //
-// Historically, the autograd engine ran all CUDA operations on their
-// device's DEFAULT stream. This meant that syncing (implicitly or
-// explicitly) with the default streams was required before and after
-// calling backward(). It also meant, however, that syncing with
-// the default streams after backward() was sufficient to ensure
-// that backward() had finished running. To preserve this historic
-// behavior the engine records "leaf streams," the streams of the
-// leaf variables, and syncs them with their device's default stream
-// at the end of backward. All other streams are already synchronized
-// to happen before at least one leaf stream (per the above), so syncing
-// the leaf streams with the default streams is sufficient to implement
-// the historic behavior.
+// The stream semantics of a backward() (or torch.autograd.grad()) call
+// with respect to surrounding ops are the same as for any other call:
+//
+// Safe
+//   with torch.cuda.stream(s):
+//       loss.backward()
+//       use grads populated by backward
+//
+// Not safe
+//   with torch.cuda.stream(s):
+//       loss.backward()
+//   use grads populated by backward
+//
+// Safe
+//   with torch.cuda.stream(s):
+//       loss.backward()
+//   torch.cuda.current_stream.wait_stream(s)
+//   use grads populated by backward
+//
+// Internally, backward() runs ops (including leaf nodes) on side threads.
+// And streams are thread local. So the engine achieves the above semantics
+// by having GraphTask remember streams leaf nodes ran on. Then, after the
+// GraphTask finishes, execute() (which runs on the thread that called
+// backward() or grad()) syncs the current stream with the leaf streams.
 
 int NodeTask::getReentrantDepth() const {
   std::shared_ptr<GraphTask> graph_task = base_.lock();
@@ -521,18 +533,6 @@ void GraphTask::exec_post_processing() {
     final_callbacks_[i]();
     cb_lock.lock();
   }
-
-  // Syncs leaf streams with default streams (if necessary)
-  // See note "Streaming backwards"
-  for (const auto& leaf_stream : leaf_streams) {
-    const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-    const auto default_stream = guard.getDefaultStream(leaf_stream.device());
-    if (leaf_stream != default_stream) {
-      auto event = c10::Event{c10::DeviceType::CUDA};
-      event.record(leaf_stream);
-      default_stream.wait(event);
-    }
-  }
 }
 
 void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
@@ -880,6 +880,8 @@ auto Engine::execute(const edge_list& roots,
                      bool create_graph,
                      bool accumulate_grad,
                      const edge_list& outputs) -> variable_list {
+  const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+  // std::cout << "current stream " << guard.getStream(*at::device_of(inputs[0])) << std::endl;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
@@ -933,6 +935,21 @@ auto Engine::execute(const edge_list& roots,
   // in dist_engine.cpp).
   auto& fut = graph_task->future_result_;
   fut->wait();
+
+  // Syncs leaf streams with ambient (current) streams of the thread that called execute().
+  // See note "Streaming backwards". leaf_streams is an unordered_set so it should only
+  // hold a small number of streams to sync with.
+  for (const auto& leaf_stream : graph_task->leaf_streams) {
+    const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+    const auto current_stream = guard.getStream(leaf_stream.device());
+    // std::cout << "current stream " << guard.getStream(leaf_stream.device()) << std::endl;
+    if (leaf_stream != current_stream) {
+      auto event = c10::Event{c10::DeviceType::CUDA};
+      event.record(leaf_stream);
+      current_stream.wait(event);
+    }
+  }
+
   return fut->value().toTensorVector();
 }
 

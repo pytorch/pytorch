@@ -201,20 +201,42 @@ ensure proper synchronization.
 Stream semantics of backward passes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Internally, each backward CUDA op runs on the same stream that was used for its corresponding forward op.
+A. Each backward CUDA op runs on the same stream that was used for its corresponding forward op.
 
-When manually supplying CUDA tensor(s) as a backward pass's initial gradient(s) (e.g.,
+B. The stream semantics of a backward call with respect to surrounding ops are the same
+as for any other call. More concretely, when calling
+:func:`autograd.backward<torch.autograd.backward>`,
+:func:`autograd.grad<torch.autograd.grad>`, or
+:meth:`tensor.backward<torch.Tensor.backward>`,
+and optionally supplying CUDA tensor(s) as the  initial gradient(s) (e.g.,
 :func:`autograd.backward(..., grad_tensors=initial_grads)<torch.autograd.backward>`,
 :func:`autograd.grad(..., grad_outputs=initial_grads)<torch.autograd.grad>`, or
 :meth:`tensor.backward(..., gradient=initial_grad)<torch.Tensor.backward>`),
 the acts of
 
-1. populating the initial gradient(s) and
-2. invoking the backward pass
+1. optionally populating initial gradient(s),
+2. invoking the backward pass, and
+3. using the gradients
 
-have the same stream-semantics relationship as any pair of ops::
+have the same stream-semantics relationship as any group of ops::
 
-    # Safe, populating initial_grad and invoking backward are in the same stream context
+    # Safe, grads are used in the same stream context as backward()
+    with torch.cuda.stream(strm):
+        loss.backward()
+        use grads
+
+    # Unsafe
+    with torch.cuda.stream(strm):
+        loss.backward()
+    use grads
+
+    # Safe, with synchronization
+    with torch.cuda.stream(strm):
+        loss.backward()
+    torch.cuda.current_stream().wait_stream(strem)
+    use grads
+
+    # Safe, populating initial grad and invoking backward are in the same stream context
     with torch.cuda.stream(strm):
         loss.backward(gradient=torch.ones_like(loss))
 
@@ -230,6 +252,12 @@ have the same stream-semantics relationship as any pair of ops::
     with torch.cuda.stream(strm):
         initial_grad.record_stream(strm)
         loss.backward(gradient=initial_grad)
+
+If your forward pass runs some independent ops in parallel on different streams,
+A. helps the backward pass exploit that same parallelism.
+
+The backward call inserts internal syncs as needed to ensure B. holds true even if A.
+makes some backward ops run on assorted side streams.
 
 .. _CUDA stream: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
 
