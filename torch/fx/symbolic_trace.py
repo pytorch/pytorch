@@ -7,7 +7,7 @@ from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 from itertools import chain
 import torch
-import torch.fx.patch
+import torch._C._fx
 from torch._C import ScriptObject  # type: ignore
 
 import sys
@@ -629,7 +629,7 @@ class CPatchManager(object):
             if action == 'c_call':
                 if c_patch_enabled:
                     if arg == torch.randn:
-                        torch.fx.patch.patch_function(arg, patched_in)
+                        torch._C._fx.patch_function(arg, patched_in)
 
         self.func = trace_func
 
