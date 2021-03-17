@@ -177,7 +177,7 @@ def _assert_values_allclose(
     rtol: float = 1e-5,
     atol: float = 1e-8,
 ) -> None:
-    """Asserts that the values of two tensors are equal up to a desired precision.
+    """Asserts that the values of two tensors are close up to a desired tolerance.
 
     Args:
         a (torch.Tensor): First tensor.
@@ -186,7 +186,7 @@ def _assert_values_allclose(
         atol (Optional[float]): Absolute tolerance.
 
     Raises:
-         AssertionError: If the values of :attr:`a` and :attr:`b` are equal up to the desired precision.
+         AssertionError: If the values of :attr:`a` and :attr:`b` are close up to a desired tolerance.
     """
     if not torch.allclose(a, b, rtol=rtol, atol=atol):
         raise AssertionError("ADDME")
@@ -256,7 +256,7 @@ def assert_tensors_allclose(
     check_dtype: bool = True,
     check_stride: bool = True,
 ) -> None:
-    """Asserts that the values of two tensors are equal up to a desired precision.
+    """Asserts that the values of two tensors are close up to a desired tolerance.
 
     If both tolerances, :attr:`rtol` and :attr:`rtol`, are ``0``, asserts that :attr:`a` and :attr:`b` are bitwise
     equal. Optionally, checks that some attributes of both tensors are equal.
@@ -287,7 +287,7 @@ def assert_tensors_allclose(
         AssertionError: If :attr:`check_dtype`, but :attr:`a` and :attr:`b` do not have the same
             :attr:`~torch.Tensor.dtype`.
         AssertionError: If :attr:`check_stride`, but :attr:`a` and :attr:`b` do not have the same stride.
-        AssertionError: If the values of :attr:`a` and :attr:`b` are equal up to the desired precision.
+        AssertionError: If the values of :attr:`a` and :attr:`b` are close up to a desired tolerance.
 
 
 
