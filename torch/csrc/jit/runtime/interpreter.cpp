@@ -1258,7 +1258,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             break;
           case STOREN:
             for (size_t i = inst.N; i > 0; --i) {
-              reg(inst.X + i - 1) = std::move(*(stack.end() - (inst.N - i + 1)));
+              reg(inst.X + i - 1) =
+                  std::move(*(stack.end() - (inst.N - i + 1)));
             }
             drop(stack, inst.N);
             ++pc;
