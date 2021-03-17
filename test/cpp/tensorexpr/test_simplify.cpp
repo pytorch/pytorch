@@ -4634,6 +4634,14 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
 }
 
 TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
+  // Before:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = n < 1 ? 0.f : 1.f;
+  //   }
+  // After:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = 1.f;
+  //   }
   KernelScope kernel_scope;
   int N = 8;
   Placeholder b("b", kFloat, {N});
@@ -4651,6 +4659,14 @@ TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
 }
 
 TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
+  // Before:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = IfThenElse(n < 1 ? 1 : 0, 0.f, 1.f);
+  //   }
+  // After:
+  //   for (int n = 1; n < N; n++) {
+  //     b[n] = 1.f;
+  //   }
   KernelScope kernel_scope;
   int N = 8;
   Placeholder b("b", kFloat, {N});
@@ -4671,6 +4687,15 @@ TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
   // This test mimics the unpadded region of a conv2d.  We want to remove any
   // conditional that is provably satisfied (or unsatisfied) by the entire loop
   // range.
+  // Before:
+  //   for (int i = 1; i < 7; i++) {
+  //     for (int j = 1; j < 7; j++) {
+  //       b[i, j] = IfThenElse(
+  //         j>=7 ? 1 : (i>=7 ? 1 : (j<1 ? 1 : (i<1 ? 1 : 0))), 0.f, 1.f);
+  // After:
+  //   for (int i = 1; i < 7; i++) {
+  //     for (int j = 1; j < 7; j++) {
+  //       b[i, j] = 1.f;
   KernelScope kernel_scope;
   int N = 8;
   Placeholder b("b", kFloat, {N, N});
@@ -4698,6 +4723,15 @@ TEST(Simplify, DISABLED_SimplifyLoopBounds) {
   // loop bounds such that the condition will be always met.  Note that this
   // could be solved by peeling, and applying the range-based conditional
   // simplification in the previous tests.
+  // Before:
+  //   for (int i = 0; i < 3; i++) {
+  //     for (int j = 0; j < 3; j++) {
+  //       b[i, j] = (b[i, j]) + (IfThenElse(
+  //         j>=7 ? 1 : (i>=7 ? 1 : (j<1 ? 1 : (i<1 ? 1 : 0))), 0.f, a[i, j]));
+  // After:
+  //   for (int i = 1; i < 3; i++) {
+  //     for (int j = 1; j < 3; j++) {
+  //       b[i, j] = (b[i, j]) + 1.f;
   KernelScope kernel_scope;
   int N = 8;
   int K = 3;
