@@ -46,7 +46,8 @@ def _hide_internal_traceback_pytest(fn):
 
     This is a :mod:`pytest`
     `feature <https://docs.pytest.org/en/stable/example/simple.html#writing-well-integrated-assertion-helpers>`_
-    and thus this is a no-op if :mod:`pytest` is not present.
+    and thus this is a no-op if :mod:`pytest` is not present. If the :mod:`pytest` detection gives a false-positive,
+    this decorator will add a layer to the traceback, but otherwise is still a no-op.
     """
     if not _RUN_BY_PYTEST:
         return fn
