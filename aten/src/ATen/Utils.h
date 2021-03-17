@@ -25,60 +25,11 @@ namespace at {
 
 TORCH_API int _crash_if_asan(int);
 
-template <typename I, std::enable_if_t<std::is_integral<I>{}, int> = 0>
-struct integer_iterator : std::iterator<std::input_iterator_tag, I> {
-    explicit integer_iterator(I value) : value(value) {}
-
-    I operator*() const { return value; }
-
-    I const* operator->() const { return &value; }
-
-    integer_iterator& operator++() {
-        ++value;
-        return *this;
-    }
-
-    integer_iterator operator++(int) {
-        const auto copy = *this;
-        ++*this;
-        return copy;
-    }
-
-    bool operator==(const integer_iterator& other) const {
-        return value == other.value;
-    }
-
-    bool operator!=(const integer_iterator& other) const {
-        return value != other.value;
-    }
-
- protected:
-    I value;
-};
-
-template <typename I, std::enable_if_t<std::is_integral<I>{}, bool> = true>
-struct integer_range {
- public:
-    integer_range(I begin, I end) : begin_(begin), end_(end) {}
-    integer_iterator<I> begin() const { return begin_; }
-    integer_iterator<I> end() const { return end_; }
-
- private:
-    integer_iterator<I> begin_;
-    integer_iterator<I> end_;
-};
-
-/// Only for test, see if irange function been override somehow
-template <typename Integer>
-integer_range<Integer> irange_torch(Integer end) {
+template <class Integer_torch, std::enable_if_t<std::is_integral<Integer_torch>::value, bool> = true>
+Integer_torch add_one(Integer_torch end) {
     //If end<=begin then the range is empty; we can achieve this effect by
     //choosing the larger of {0, end} as the loop terminator
-    return {Integer(), std::max(Integer(), end)};
-}
-
-template <typename Integer>
-integer_range<Integer> do_stuff(Integer t) {
-  return {Integer(), std::max(Integer(), t)};
+    return end + 1;
 }
 
 // TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
@@ -112,9 +63,8 @@ static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef
 
   int64_t test_end = 10;
   int64_t test_result = 0;
-  for (const auto i : do_stuff(test_end)) {
-    test_result += i;
-  }
+  int64_t test_add_result = add_one(test_end);
+
   for (const auto i : irange_torch(test_end)) {
     test_result += i;
   }
