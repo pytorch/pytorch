@@ -322,8 +322,9 @@ namespace impl {
 
   DifferentiableViewMeta* get_view_autograd_meta(const Variable& self) {
     // NB: is_view() ==> get_autograd_meta() so this function always returns a valid pointer
-    TORCH_CHECK(self.is_view(), "cannot access view autograd meta for a non view tensor");
-    return static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
+    AutogradMeta* meta = get_autograd_meta(self);
+    TORCH_CHECK(meta->is_view_, "cannot access view autograd meta for a non view tensor");
+    return static_cast<DifferentiableViewMeta*>(meta);
   }
 
 } // namespace impl

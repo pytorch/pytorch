@@ -177,12 +177,11 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
   if (is_fw_differentiable) {
     // Check if base is a forward differentiable view
     auto base_meta = torch::autograd::impl::get_autograd_meta(base);
-    if (base_meta && base_meta->is_view_) {
+    auto is_view = base_meta && base_meta->is_view_;
+    if (is_view && torch::autograd::impl::get_view_autograd_meta(base)->has_fw_view()) {
       auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
-      if (diff_view_meta->has_fw_view()) {
-        const auto& base_fw_info = diff_view_meta->get_forward_view();
-        new_fw_info = base_fw_info.chain(base, tensor, view_func);
-      }
+      const auto& base_fw_info = diff_view_meta->get_forward_view();
+      new_fw_info = base_fw_info.chain(base, tensor, view_func);
     } else {
       new_fw_info = ViewInfo(base, view_func);
     }
@@ -225,16 +224,15 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
   if (isForwardADEnabled() && is_fw_differentiable) {
     // Check if base is a forward differentiabble view
     auto base_meta = torch::autograd::impl::get_autograd_meta(base);
-    if (base_meta && base_meta->is_view_) {
+    auto is_view = base_meta && base_meta->is_view_;
+    if (is_view && torch::autograd::impl::get_view_autograd_meta(base)->has_fw_view()) {
       auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
-      if (diff_view_meta->has_fw_view()) {
-        const auto& base_fw_info = diff_view_meta->get_forward_view();
-        TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
-                              "Functions that result multiple view must have a creation meta reflecting this behavior.");
-        // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
-        // not allowed
-        new_fw_info = ViewInfo(base_fw_info.base_, /* view_func */ nullptr);
-      }
+      const auto& base_fw_info = diff_view_meta->get_forward_view();
+      TORCH_INTERNAL_ASSERT(creation_meta == CreationMeta::MULTI_OUTPUT_NODE || creation_meta == CreationMeta::MULTI_OUTPUT_SAFE,
+                            "Functions that result multiple view must have a creation meta reflecting this behavior.");
+      // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
+      // not allowed
+      new_fw_info = ViewInfo(base_fw_info.base_, /* view_func */ nullptr);
     } else {
       new_fw_info = ViewInfo(base, /* view_func */ nullptr);
     }
