@@ -5048,7 +5048,9 @@ class DistributedTest:
                         else self.assertRaisesRegex(RuntimeError, "Connection closed by peer")
                     )
                 else:
-                    rank_0_ctx = self.assertRaisesRegex(RuntimeError, "Rank")
+                    max_rank = dist.get_world_size() - 1
+                    regex = "Rank 1" if max_rank == 1 else f"Rank [1-{max_rank}"
+                    rank_0_ctx = self.assertRaisesRegex(RuntimeError, regex)
                 with rank_0_ctx:
                     net = torch.nn.parallel.DistributedDataParallel(
                         net.to(self.rank),
