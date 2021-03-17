@@ -80,6 +80,7 @@ allow_list = [
     ("aten::empty_meta", datetime.date(2021, 4, 1)),
     ("aten::batch_norm_backward_elemt", datetime.date(2021, 5, 1)),
     ("aten::assert_async", datetime.date(2021, 5, 1)),
+    ("aten::cumprod_backward", datetime.date(2021, 5, 1)),
     ("aten::_triangular_solve_helper", datetime.date(9999, 1, 1)),
 ]
 
