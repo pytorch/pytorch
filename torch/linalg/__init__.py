@@ -384,6 +384,7 @@ to explitly form the `Q` matrix of the QR decomposition.
 See `Representation of Orthogonal or Unitary Matrices`_ for further details.
 
 .. note:: LAPACK's `orgqr` is used for the computations.
+          For CUDA inputs, cuSOLVER's `orgqr` routine is used if CUDA version >= 10.1.243.
 
 .. note:: Only values below the main diagonal of :attr:`input` are used in the computations
           and other values are ignored.
