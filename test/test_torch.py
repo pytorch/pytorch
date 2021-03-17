@@ -6543,10 +6543,10 @@ class TestTorchDeviceType(TestCase):
                 torch.multinomial(probs.to(device), 2)
                 torch.cuda.synchronize()
 
-        test(torch.tensor([1, -1, 1]))
-        test(torch.tensor([1, inf, 1]))
-        test(torch.tensor([1, -inf, 1]))
-        test(torch.tensor([1, 1, nan]))
+        test(torch.tensor([1., -1., 1.]))
+        test(torch.tensor([1., inf, 1.]))
+        test(torch.tensor([1., -inf, 1.]))
+        test(torch.tensor([1., 1., nan]))
 
     def test_multinomial_invalid_distribution(self, device):
         def test(probs, replacement):
