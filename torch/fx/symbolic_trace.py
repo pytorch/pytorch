@@ -50,6 +50,38 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normal variables
 
+class CPatchManager(object):
+    def __init__(self, tracer):
+        self.tracer = tracer
+
+        def patched_impl(to_patch, args, kwargs):
+            return tracer.create_proxy('call_function', torch.randn, args, kwargs)
+
+        c_patch_enabled = True
+
+        def patched_in(to_patch, args, kwargs):
+            global c_patch_enabled
+            try:
+                c_patch_enabled = False
+                r = patched_impl(to_patch, args, kwargs)
+            finally:
+                c_patch_enabled = True
+            return r
+
+        def trace_func(frame, action, arg):
+            if action == 'c_call':
+                if c_patch_enabled:
+                    if arg == torch.randn:
+                        torch._C._fx.patch_function(arg, patched_in)
+
+        self.func = trace_func
+
+    def __enter__(self):
+        sys.setprofile(self.func)
+
+    def __exit__(self, type, value, tb):
+        sys.setprofile(None)
+
 class Tracer(TracerBase):
     """
     ``Tracer`` is the class that implements the symbolic tracing functionality
@@ -358,17 +390,18 @@ class Tracer(TracerBase):
                             self._autowrap_function_ids)
             return self.call_module(mod, forward, args, kwargs)
 
-        with _Patcher() as patcher:
-            # allow duplicate patches to support the case of nested calls
-            patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
-            patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
-            _patch_wrapped_functions(patcher)
-            _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
-            for module in self._autowrap_search:
-                _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
+        with CPatchManager(self):
+            with _Patcher() as patcher:
+                # allow duplicate patches to support the case of nested calls
+                patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
+                patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
+                _patch_wrapped_functions(patcher)
+                _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
+                for module in self._autowrap_search:
+                    _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
 
-            self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
-                             type_expr=fn.__annotations__.get('return', None))
+                self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
+                                 type_expr=fn.__annotations__.get('return', None))
 
         self.submodule_paths = None
 
@@ -607,37 +640,6 @@ def wrap(fn_or_name : Union[str, Callable]):
 
 
 
-class CPatchManager(object):
-    def __init__(self, tracer):
-        self.tracer = tracer
-
-        def patched_impl(to_patch, args, kwargs):
-            return tracer.create_proxy('call_function', torch.randn, args, kwargs)
-
-        c_patch_enabled = True
-
-        def patched_in(to_patch, args, kwargs):
-            global c_patch_enabled
-            try:
-                c_patch_enabled = False
-                r = patched_impl(to_patch, args, kwargs)
-            finally:
-                c_patch_enabled = True
-            return r
-
-        def trace_func(frame, action, arg):
-            if action == 'c_call':
-                if c_patch_enabled:
-                    if arg == torch.randn:
-                        torch._C._fx.patch_function(arg, patched_in)
-
-        self.func = trace_func
-
-    def __enter__(self):
-        sys.setprofile(self.func)
-
-    def __exit__(self, type, value, tb):
-        sys.setprofile(None)
 
 def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> GraphModule:
     """Symbolic tracing API
@@ -655,7 +657,6 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
 
     """
     tracer = Tracer()
-    with CPatchManager(tracer):
-        graph = tracer.trace(root, concrete_args)
+    graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     return GraphModule(tracer.root, graph, name)

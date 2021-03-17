@@ -7,7 +7,7 @@ namespace fx {
 struct ToRestore {
   PyObject* m_self;
   PyMethodDef* m_ml;
-//   vectorcallfunc vectorcall;
+  //   vectorcallfunc vectorcall;
   PyObject* patched_method;
   PyObject* patch_fn;
 };
@@ -20,7 +20,7 @@ PyObject* replacement_method(PyObject* self, PyObject* args, PyObject* kwargs) {
       ((PyCFunctionObject*)to_restore->patched_method);
   patch_method_c->m_self = to_restore->m_self;
   patch_method_c->m_ml = to_restore->m_ml;
-//   patch_method_c->vectorcall = to_restore->vectorcall;
+  //   patch_method_c->vectorcall = to_restore->vectorcall;
 
   if (kwargs) {
     Py_INCREF(kwargs);
@@ -71,12 +71,12 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
 
   to_restore.m_self = patch_method_c->m_self;
   to_restore.m_ml = patch_method_c->m_ml;
-//   to_restore.vectorcall = patch_method_c->vectorcall;
+  //   to_restore.vectorcall = patch_method_c->vectorcall;
 
   patch_method_c->m_self =
       PyBytes_FromStringAndSize((const char*)&to_restore, sizeof(ToRestore));
   patch_method_c->m_ml = &ReplacementMethod;
-//   patch_method_c->vectorcall = NULL;
+  //   patch_method_c->vectorcall = NULL;
   return Py_None;
 }
 
@@ -103,5 +103,5 @@ void initFx(PyObject* module) {
     throw python_error();
   }
 }
-}
-}
+} // namespace fx
+} // namespace torch
