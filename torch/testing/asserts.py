@@ -34,32 +34,6 @@ def _get_default_rtol_and_atol(a: torch.Tensor, b: torch.Tensor) -> Tuple[float,
     return _TestCase.dtype_precisions.get(dtype, (0.0, 0.0))
 
 
-def _hide_internal_traceback_pytest(fn):
-    """Decorator for user-facing function that hides the internal traceback for :mod:`pytest`.
-
-    The decorator works by assigning ``__tracebackhide__ = True`` in each previous frame in case an
-    :class:`AssertionError` is encountered. If it is set manually, ``__tracebackhide__`` is not overwritten.
-
-    This is a :mod:`pytest`
-    `feature <https://docs.pytest.org/en/stable/example/simple.html#writing-well-integrated-assertion-helpers>`_
-    and thus this is a no-op if :mod:`pytest` is not present. If the :mod:`pytest` detection gives a false-positive,
-    this decorator will add a layer to the traceback, but otherwise is still a no-op.
-    """
-    if not _RUN_BY_PYTEST:
-        return fn
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        try:
-            return fn(*args, **kwargs)
-        except AssertionError:
-            for frame_info in inspect.trace():
-                frame_info.frame.f_locals.setdefault("__tracebackhide__", True)
-            raise
-
-    return wrapper
-
-
 def _assert_are_tensors(a: Any, b: Any) -> None:
     """Asserts that both inputs are tensors.
 
@@ -70,6 +44,9 @@ def _assert_are_tensors(a: Any, b: Any) -> None:
     Raises:
         AssertionError: If :attr:`a` or :attr:`b` is not a :class:`~torch.Tensor`.
     """
+    # Hide this function from the pytest traceback
+    __tracebackhide__ = True
+
     if not (isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor)):
         raise AssertionError(f"Both inputs have to be tensors, but got {type(a)} and {type(b)} instead.")
 
@@ -86,6 +63,9 @@ def _check_supported(a: torch.Tensor, b: torch.Tensor) -> None:
     Raises:
         UsageError: If :attr:`a` or :attr:`b` is complex, quantized, or sparse.
     """
+    # Hide this function from the pytest traceback
+    __tracebackhide__ = True
+
     if any(t.dtype in (torch.complex32, torch.complex64, torch.complex128) for t in (a, b)):
         raise UsageError("Comparison for complex tensors is not supported yet.")
     if any(t.is_quantized for t in (a, b)):
@@ -126,6 +106,9 @@ def _assert_attributes_equal(
         AssertionError: If :attr:`check_stride`, but :attr:`a` and :attr:`b` do not have the same
             :meth:`~torch.Tensor.stride`.
     """
+    # Hide this function from the pytest traceback
+    __tracebackhide__ = True
+
     msg_fmtstr = "The values for attribute '{}' do not match: {} != {}."
 
     if a.shape != b.shape:
@@ -224,6 +207,9 @@ def _assert_values_equal(a: torch.Tensor, b: torch.Tensor):
     Raises:
          AssertionError: If the values of :attr:`a` and :attr:`b` are not bitwise equal.
     """
+    # Hide this function from the pytest traceback
+    __tracebackhide__ = True
+
     mismatches = torch.ne(a, b)
     if not torch.any(mismatches):
         return
@@ -255,6 +241,9 @@ def _assert_values_allclose(
     Raises:
          AssertionError: If the values of :attr:`a` and :attr:`b` are close up to a desired tolerance.
     """
+    # Hide this function from the pytest traceback
+    __tracebackhide__ = True
+
     mismatches = ~torch.isclose(a, b, rtol=rtol, atol=atol)
     if not torch.any(mismatches):
         return
@@ -268,7 +257,6 @@ def _assert_values_allclose(
     raise AssertionError(msg)
 
 
-@_hide_internal_traceback_pytest
 def assert_tensors_equal(
     a: torch.Tensor,
     b: torch.Tensor,
@@ -320,7 +308,6 @@ def assert_tensors_equal(
     _assert_values_equal(a, b)
 
 
-@_hide_internal_traceback_pytest
 def assert_tensors_allclose(
     a: torch.Tensor,
     b: torch.Tensor,
