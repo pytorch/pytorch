@@ -7,7 +7,7 @@
 namespace at { namespace native { namespace {
 
 void addr_kernel(TensorIterator &iter,
-                 Scalar beta, Scalar alpha) {
+                 const Scalar& beta, const Scalar& alpha) {
   if (iter.dtype() == ScalarType::Bool) {
     using scalar_t = bool;
     auto beta_val = beta.to<scalar_t>();
