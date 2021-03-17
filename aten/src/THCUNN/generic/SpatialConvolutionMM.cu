@@ -203,7 +203,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
       THCTensor_(zero)(state, output_n);
     }
 
-    if (kW != 1 || kH != 1 || dW != 1 || dH != 1) {
+    if (kW != 1 || kH != 1 || dW != 1 || dH != 1 || padH != 0 || padW != 0) {
       // Extract columns:
       at::native::im2col<scalar_t>(
         c10::cuda::getCurrentCUDAStream(),
@@ -223,7 +223,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     int64_t k = nInputPlane*kH*kW;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    auto gemm_in_ptr = (kW != 1 || kH != 1 || dW != 1 || dH != 1)
+    auto gemm_in_ptr =
+        (kW != 1 || kH != 1 || dW != 1 || dH != 1 || padH != 0 || padW != 0)
         ? THCTensor_(data)(state, columns)
         : THCTensor_(data)(state, input_n);
     at::cuda::blas::gemm<scalar_t>(
@@ -423,7 +424,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       // Matrix mulitply per output:
       THCTensor_(select)(state, input_n, input, 0, elt);
 
-      if (kW != 1 || kH != 1 || dW != 1 || dH != 1) {
+      if (kW != 1 || kH != 1 || dW != 1 || dH != 1 || padH != 0 || padW != 0) {
         // Extract columns:
         at::native::im2col<scalar_t>(
           c10::cuda::getCurrentCUDAStream(),
@@ -443,7 +444,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       int64_t k = columns->size(1);
 
       // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-      auto gemm_in_ptr = (kW != 1 || kH != 1 || dW != 1 || dH != 1)
+      auto gemm_in_ptr =
+          (kW != 1 || kH != 1 || dW != 1 || dH != 1 || padH != 0 || padW != 0)
           ? THCTensor_(data)(state, columns)
           : THCTensor_(data)(state, input_n);
       at::cuda::blas::gemm<scalar_t>(
