@@ -32,8 +32,8 @@ from torch.testing._internal.common_utils import \
 from distutils.version import LooseVersion
 
 if TEST_SCIPY:
-    import scipy
     import scipy.special
+
 
 class DecorateInfo(object):
     """Describes which test, or type of tests, should be wrapped in the given
