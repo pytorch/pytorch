@@ -1509,13 +1509,24 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
                     return True
                 else:
                     # complex alpha is valid only if either `self` or `other` is complex
-                    # x = torch.randn(2, requires_grad=True, dtype=torch.float64)
-                    # torch.rsub(x, 1, alpha=1. + 1.6j)
-                    # RuntimeError: value cannot be converted to type double without overflow: (-1,-1.6)
                     return False
 
             # Non-Complex Alpha
             return True
+
+        # Samples with alpha (scalar version) covers the following cases
+        # self    | other   | alpha
+        # -----------------------------------------
+        # real    | real    | real (int and float)
+        # real    | complex | real and complex
+        # complex | real    | real and complex
+        # complex | complex | real and complex
+        #
+        # It does not cover
+        # real    | real    | complex
+        # x = torch.randn(2, requires_grad=True, dtype=torch.float64)
+        # torch.rsub(x, 1, alpha=1. + 1.6j)
+        # RuntimeError: value cannot be converted to type double without overflow: (-1,-1.6)
 
         samples += tuple(_samples_with_alpha_helper(scalar_args, alphas, filter_fn=filter_fn))  # type: ignore
     else:
