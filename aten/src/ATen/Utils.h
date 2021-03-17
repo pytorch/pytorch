@@ -60,12 +60,12 @@ template <typename I, std::enable_if_t<std::is_integral<I>{}, bool> = true>
 struct integer_range {
  public:
     integer_range(I begin, I end) : begin_(begin), end_(end) {}
-    detail::integer_iterator<I> begin() const { return begin_; }
-    detail::integer_iterator<I> end() const { return end_; }
+    integer_iterator<I> begin() const { return begin_; }
+    integer_iterator<I> end() const { return end_; }
 
  private:
-    detail::integer_iterator<I> begin_;
-    detail::integer_iterator<I> end_;
+    integer_iterator<I> begin_;
+    integer_iterator<I> end_;
 };
 
 /// Only for test, see if irange function been override somehow
