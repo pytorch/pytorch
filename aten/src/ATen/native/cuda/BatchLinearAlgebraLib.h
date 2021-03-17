@@ -12,10 +12,13 @@
 #define USE_CUSOLVER
 #endif
 
-#ifdef USE_CUSOLVER
-
 namespace at {
 namespace native {
+
+void triangular_solve_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
+void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular);
+
+#ifdef USE_CUSOLVER
 
 // entrance of calculations of `inverse` using cusolver getrf + getrs, cublas getrfBatched + getriBatched
 Tensor _inverse_helper_cuda_lib(const Tensor& self);
@@ -26,6 +29,6 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
 
 Tensor& orgqr_helper_cuda_lib(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns);
 
-}}  // namespace at::native
-
 #endif  // USE_CUSOLVER
+
+}}  // namespace at::native
