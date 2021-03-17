@@ -188,8 +188,8 @@ def _compare_tensors(
             compared.
         check_dtype (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
             :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`a` and :attr:`b` do not have the same
-            :attr:`~torch.Tensor.dtype`, the comparison :attr:`~torch.Tensor.dtype` is determined by
-            :func:`torch.promote_types`.
+            :attr:`~torch.Tensor.dtype`, they are copied to the :class:`~torch.dtype` returned by
+            :func:`torch.promote_types` before their values are compared.
         check_stride (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same stride.
 
     Raises:
@@ -250,8 +250,8 @@ def assert_tensors_equal(
             compared.
         check_dtype (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
             :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`a` and :attr:`b` do not have the same
-            :attr:`~torch.Tensor.dtype`, the comparison :attr:`~torch.Tensor.dtype` is determined by
-            :func:`torch.promote_types`.
+            :attr:`~torch.Tensor.dtype`, they are copied to the :class:`~torch.dtype` returned by
+            :func:`torch.promote_types` before their values are compared.
         check_stride (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same stride.
 
     Raises:
@@ -321,8 +321,8 @@ def assert_tensors_allclose(
             compared.
         check_dtype (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
             :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`a` and :attr:`b` do not have the same
-            :attr:`~torch.Tensor.dtype`, the comparison :attr:`~torch.Tensor.dtype` is determined by
-            :func:`torch.promote_types`.
+            :attr:`~torch.Tensor.dtype`, they are copied to the :class:`~torch.dtype` returned by
+            :func:`torch.promote_types` before their values are compared.
         check_stride (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same stride.
 
     Raises:
