@@ -9,7 +9,7 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
+//#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <sstream>
@@ -31,6 +31,58 @@ Integer_torch add_one(Integer_torch end) {
     //If end<=begin then the range is empty; we can achieve this effect by
     //choosing the larger of {0, end} as the loop terminator
     return end + 1;
+}
+
+template <class I, std::enable_if_t<std::is_integral<I>{}, int> = 0>
+struct integer_iterator : std::iterator<std::input_iterator_tag, I> {
+    explicit integer_iterator(I value) : value(value) {}
+
+    I operator*() const { return value; }
+
+    I const* operator->() const { return &value; }
+
+    integer_iterator& operator++() {
+        ++value;
+        return *this;
+    }
+
+    integer_iterator operator++(int) {
+        const auto copy = *this;
+        ++*this;
+        return copy;
+    }
+
+    bool operator==(const integer_iterator& other) const {
+        return value == other.value;
+    }
+
+    bool operator!=(const integer_iterator& other) const {
+        return value != other.value;
+    }
+
+ protected:
+    I value;
+};
+
+template <class I, std::enable_if_t<std::is_integral<I>{}, bool> = true>
+struct integer_range {
+ public:
+    integer_range(I begin, I end) : begin_(begin), end_(end) {}
+    integer_iterator<I> begin() const { return begin_; }
+    integer_iterator<I> end() const { return end_; }
+
+ private:
+    integer_iterator<I> begin_;
+    integer_iterator<I> end_;
+};
+
+/// Creates an integer range for the half-open interval [0, end)
+/// If end<=begin, then the range is empty
+template <class Integer, std::enable_if_t<std::is_integral<Integer>::value, bool> = true>
+integer_range<Integer> irange_torch(Integer end) {
+    //If end<=begin then the range is empty; we can achieve this effect by
+    //choosing the larger of {0, end} as the loop terminator
+    return {Integer(), std::max(Integer(), end)};
 }
 
 // TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
@@ -66,11 +118,11 @@ static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef
   int64_t test_result = 0;
   int64_t test_add_result = add_one(test_end);
 
-  for (const auto i : c10::irange(test_end)) {
+  for (const auto i : irange_torch(test_end)) {
     test_result += i;
   }
 
-  for (const auto i : c10::irange(tensors.size())) {
+  for (const auto i : irange_torch(tensors.size())) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {
       AT_ERROR("Expected dense tensor but got ", expr.layout(),
