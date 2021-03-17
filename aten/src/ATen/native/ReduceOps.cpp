@@ -435,7 +435,7 @@ void cummax_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int6
     });
 }
 
-std::tuple<Tensor&, Tensor&> cummax_out(Tensor& indices, const Tensor& self, int64_t dim, Tensor& values) {
+std::tuple<Tensor&, Tensor&> cummax_out(const Tensor& self, int64_t dim, Tensor& values, Tensor& indices) {
   check_scalar_type_device_layout_equal(values, self);
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
@@ -470,7 +470,7 @@ void cummin_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int6
     });
 }
 
-std::tuple<Tensor&, Tensor&> cummin_out(Tensor& indices, const Tensor& self, int64_t dim, Tensor& values) {
+std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, int64_t dim, Tensor& values, Tensor& indices) {
   check_scalar_type_device_layout_equal(values, self);
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
@@ -1455,13 +1455,13 @@ Tensor& cumprod_out(const Tensor& self, Dimname dim, c10::optional<ScalarType> d
 std::tuple<Tensor, Tensor> cummax(const Tensor& self, Dimname dim) {
   return at::cummax(self, dimname_to_position(self, dim));
 }
-std::tuple<Tensor&, Tensor&> cummax_out(Tensor& indices, const Tensor& self, Dimname dim, Tensor& values) {
+std::tuple<Tensor&, Tensor&> cummax_out(const Tensor& self, Dimname dim, Tensor& values, Tensor& indices) {
   return at::cummax_out(values, indices, self, dimname_to_position(self, dim));
 }
 std::tuple<Tensor, Tensor> cummin(const Tensor& self, Dimname dim) {
   return at::cummin(self, dimname_to_position(self, dim));
 }
-std::tuple<Tensor&, Tensor&> cummin_out(Tensor& indices, const Tensor& self, Dimname dim, Tensor& values) {
+std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, Dimname dim, Tensor& values, Tensor& indices) {
   return at::cummin_out(values, indices, self, dimname_to_position(self, dim));
 }
 

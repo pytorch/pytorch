@@ -295,8 +295,7 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
   return at::native::mode_out(self, dim, keepdim, values, indices);
 }
 
-std::tuple<Tensor &,Tensor &> mode_out(Tensor& indices,
-                                       const Tensor& self, int64_t dim, bool keepdim, Tensor& values) {
+std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool keepdim, Tensor& values, Tensor& indices) {
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "mode only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -354,8 +353,7 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
   }
 }
 
-std::tuple<Tensor&,Tensor&> max_out(Tensor& max_indices,
-                                      const Tensor& self, int64_t dim, bool keepdim, Tensor& max) {
+std::tuple<Tensor&,Tensor&> max_out(const Tensor& self, int64_t dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   auto result = [&]() {
     NoNamesGuard guard;
     return max_out_impl(max, max_indices, self, dim, keepdim);
@@ -454,19 +452,13 @@ std::tuple<Tensor&, Tensor&> min_out(
 std::tuple<Tensor, Tensor> min(const Tensor& self, Dimname dim, bool keepdim) {
   return at::min(self, dimname_to_position(self, dim), keepdim);
 }
-std::tuple<Tensor &,Tensor &> min_out(Tensor& min_indices,
-                                      const Tensor& self, Dimname dim, bool keepdim, Tensor& min) {
+std::tuple<Tensor &,Tensor &> min_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& min, Tensor& min_indices) {
   return at::min_out(min, min_indices, self, dimname_to_position(self, dim), keepdim);
 }
 std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
   return at::max(self, dimname_to_position(self, dim), keepdim);
 }
-std::tuple<Tensor&, Tensor&> max_out(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim,
-    Tensor& max,
-    Tensor& max_indices) {
+std::tuple<Tensor&, Tensor&> max_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
 }
 Tensor argmax(const Tensor& self, Dimname dim, bool keepdim) {
@@ -481,8 +473,7 @@ Tensor argsort(const Tensor& self, Dimname dim, bool keepdim) {
 std::tuple<Tensor, Tensor> mode(const Tensor& self, Dimname dim, bool keepdim) {
   return at::mode(self, dimname_to_position(self, dim), keepdim);
 }
-std::tuple<Tensor &,Tensor &> mode_out(Tensor& indices,
-                                       const Tensor& self, Dimname dim, bool keepdim, Tensor& values) {
+std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {
   return at::mode_out(values, indices, self, dimname_to_position(self, dim), keepdim);
 }
 
