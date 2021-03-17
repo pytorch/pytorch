@@ -50,9 +50,6 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      - name: Test ability to ls s3 bucket
-        run: |
-          aws s3 ls "s3://${SCCACHE_BUCKET}"
       - name: Build PyTorch
         run: |
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
@@ -63,7 +60,9 @@ jobs:
           docker run \
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS \
+            -e SCCACHE_MAX_JOBS \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_LOG=debug \
             -e TORCH_CUDA_ARCH_LIST \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -78,6 +77,7 @@ jobs:
       - name: Clean up docker images
         if: always()
         run: |
+          cat ${GITHUB_WORKSPACE}/sccache
           # Prune all of the docker images
           docker system prune -af
   # TODO: Add test step here
