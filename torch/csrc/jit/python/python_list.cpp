@@ -131,7 +131,7 @@ void initScriptListBindings(PyObject* module) {
       .def(
           "__getitem__",
           [](const std::shared_ptr<ScriptList>& self, const py::slice& slice) {
-            size_t start, stop, step, slicelength;
+            size_t start = 0, stop = 0, step = 0, slicelength = 0;
 
             if (!slice.compute(
                     self->len(), &start, &stop, &step, &slicelength)) {
@@ -167,7 +167,7 @@ void initScriptListBindings(PyObject* module) {
           [](const std::shared_ptr<ScriptList>& self,
              const py::slice& slice,
              const py::list& value) {
-            size_t start, stop, step, slicelength;
+            size_t start = 0, stop = 0, step = 0, slicelength = 0;
 
             if (!slice.compute(
                     self->len(), &start, &stop, &step, &slicelength)) {
@@ -249,7 +249,8 @@ void initScriptListBindings(PyObject* module) {
           })
       .def(
           "extend",
-          [](const std::shared_ptr<ScriptList>& self, py::iterable iter) {
+          [](const std::shared_ptr<ScriptList>& self,
+             const py::iterable& iter) {
             ScriptList iter_list(self->type());
 
             try {
