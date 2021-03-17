@@ -149,7 +149,7 @@ private:
     return s.toDouble();
   }
 
-  void assignTo(Tensor* dst, at::ScalarType scalar_type, at::Scalar scalar) {
+  void assignTo(Tensor* dst, at::ScalarType scalar_type, const at::Scalar& scalar) {
     switch(scalar_type) {
       #define DEFINE_CASE(ctype,aten_name) \
         case at::k##aten_name: { \

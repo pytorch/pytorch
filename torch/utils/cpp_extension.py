@@ -1114,7 +1114,7 @@ def load_inline(name,
     identical to :func:`load`.
 
     See `the
-    tests <https://github.com/pytorch/pytorch/blob/master/test/test_cpp_extensions.py>`_
+    tests <https://github.com/pytorch/pytorch/blob/master/test/test_cpp_extensions_jit.py>`_
     for good examples of using this function.
 
     Sources may omit two required parts of a typical non-inline C++ extension:

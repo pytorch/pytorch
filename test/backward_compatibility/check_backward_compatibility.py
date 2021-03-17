@@ -29,6 +29,7 @@ allow_list = [
     ("c10_experimental", datetime.date(2222, 1, 1)),
     # Internal
     ("static", datetime.date(9999, 1, 1)),
+    ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
@@ -78,6 +79,8 @@ allow_list = [
     ("aten::empty_meta", datetime.date(2021, 4, 1)),
     ("aten::batch_norm_backward_elemt", datetime.date(2021, 5, 1)),
     ("aten::assert_async", datetime.date(2021, 5, 1)),
+    ("aten::cumprod_backward", datetime.date(2021, 5, 1)),
+    ("aten::_triangular_solve_helper", datetime.date(9999, 1, 1)),
 ]
 
 def allow_listed(schema, allow_list):
