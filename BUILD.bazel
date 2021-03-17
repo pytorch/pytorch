@@ -194,6 +194,9 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/TraceType_3.cpp",
         "torch/csrc/autograd/generated/TraceType_4.cpp",
         # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
+        "torch/csrc/autograd/generated/InplaceOrViewType_0.cpp",
+        "torch/csrc/autograd/generated/InplaceOrViewType_1.cpp",
+        # "torch/csrc/autograd/generated/InplaceOrViewTypeEverything.cpp",
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
@@ -329,9 +332,6 @@ filegroup(
         "aten/src/TH/THTensorLapack.cpp",
         "aten/src/TH/THTensorMath.cpp",
         "aten/src/TH/THTensorMoreMath.cpp",
-        "aten/src/TH/THTensorRandom.cpp",
-        "aten/src/TH/THVector.cpp",
-        "aten/src/TH/vector/AVX.cpp",
     ],
 )
 
@@ -388,7 +388,6 @@ filegroup(
         "aten/src/THC/THCTensorMathReduce.cu.cc",
         "aten/src/THC/THCTensorMathScan.cu.cc",
         "aten/src/THC/THCTensorMode.cu.cc",
-        "aten/src/THC/THCTensorRandom.cu.cc",
         "aten/src/THC/THCTensorScatterGather.cu.cc",
         "aten/src/THC/THCTensorSort.cu.cc",
         "aten/src/THC/THCTensorTopK.cu.cc",
