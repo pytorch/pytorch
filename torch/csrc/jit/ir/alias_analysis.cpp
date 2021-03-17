@@ -1407,9 +1407,8 @@ class AliasDb::WorkingSet {
     if (mover_ && users.count(mover_)) {
       return true;
     }
-
-    return std::any_of(users.begin(), users.end(), [&](Node* node) {
-      return node_to_index_.find(node) != node_to_index_.end();
+    return std::any_of(users.begin(), users.end(), [&](Node* user) {
+      return node_to_index_.find(user) != node_to_index_.end();
     });
   }
 
