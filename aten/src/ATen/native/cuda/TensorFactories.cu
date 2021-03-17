@@ -9,7 +9,7 @@
 #include <c10/util/Exception.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
-#include <cub/cub.cuh>
+#include <ATen/cuda/cub.cuh>
 
 #include <algorithm>
 #include <cmath>
@@ -74,31 +74,6 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<Sc
   return t;
 }
 
-template<typename key_t, typename value_t>
-static inline void cub_sort(key_t *keys_in, key_t *keys_out, value_t *values_in, value_t *values_out, int64_t n) {
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  // Use the sorted order of keys to rearrange the result array
-  size_t temp_storage_bytes = 0;
-  cub::DeviceRadixSort::SortPairs(
-    nullptr, temp_storage_bytes,
-    keys_in, keys_out, values_in, values_out, n,
-    0, sizeof(key_t) * 8, at::cuda::getCurrentCUDAStream());
-  auto tmpDataPtr = allocator.allocate(temp_storage_bytes);
-  cub::DeviceRadixSort::SortPairs(
-    tmpDataPtr.get(), temp_storage_bytes,
-    keys_in, keys_out, values_in, values_out, n,
-    0, sizeof(key_t) * 8, at::cuda::getCurrentCUDAStream());
-}
-
-template<typename T>
-struct wrap_half {
-  using type = T;
-};
-template<>
-struct wrap_half<c10::Half> {
-  using type = __half;
-};
-
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
@@ -107,9 +82,8 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
   check_supported_max_int_with_precision(n, result);
 
   result.resize_({n});
-  auto keys = at::empty(result.sizes(), result.options()).random_(generator);
+
   auto range = at::arange(n, result.options());
-  auto keys_tmp = at::empty_like(keys);
 
   // shuffled_data points to the underlying data of the output tensor if the tensor is contiguous; otherwise it
   // points to a new tensor.
@@ -122,19 +96,25 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
     shuffled_data = shuffled.data_ptr();
   }
 
-  if (n < 30000) {
-
+  if (n < 1000000) {
+    // auto keys = at::randint(-30000, 30000, result.sizes(), generator, result.options().dtype(kShort));
+    auto keys = at::randint(-2000000000, 2000000000, result.sizes(),
+      generator, TensorOptions().device(result.device()).dtype(kInt));
+    auto keys_tmp = at::empty_like(keys);
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
+      at::cuda::cub::sort_pairs<int, scalar_t>(
+        keys.data_ptr<int>(), keys_tmp.data_ptr<int>(),
+        range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
+    });
+  } else {
+    auto keys = at::empty_like(result).random_(generator);
+    auto keys_tmp = at::empty_like(keys);
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
+      at::cuda::cub::sort_pairs<scalar_t, scalar_t>(
+        keys.data_ptr<scalar_t>(), keys_tmp.data_ptr<scalar_t>(),
+        range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data), n);
+    });
   }
-
-  // Generate random values for the keys array
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
-    using scalar_t_ = wrap_half<scalar_t>::type;
-    cub_sort<scalar_t_, scalar_t_>(
-      reinterpret_cast<scalar_t_*>(keys.data_ptr<scalar_t>()),
-      reinterpret_cast<scalar_t_*>(keys_tmp.data_ptr<scalar_t>()),
-      reinterpret_cast<scalar_t_*>(range.data_ptr<scalar_t>()),
-      reinterpret_cast<scalar_t_*>(shuffled_data), n);
-  });
 
   if (!result.is_contiguous()) {
     result.copy_(shuffled);

@@ -3129,7 +3129,6 @@ class TestRandomTensorCreation(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @slowTest
     def test_randperm(self, device):
         if device == 'cpu':
             rng_device = None
@@ -3178,7 +3177,9 @@ class TestRandomTensorCreation(TestCase):
             with torch.random.fork_rng(devices=rng_device):
                 res = torch.randperm(n, dtype=torch.long, device=device)
             torch.randperm(n, out=non_contiguous_tensor)
+            print(non_contiguous_tensor, res)
             self.assertEqual(non_contiguous_tensor, res)
+            self.assertEqual(res.sort().values.long(), torch.arange(n, device=device))
 
     # Test exceptions when device and generator types are incompatible
     @onlyCUDA
