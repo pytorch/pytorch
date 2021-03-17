@@ -262,6 +262,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::batch_norm:
     case aten::isnan:
     case aten::log:
     case aten::log10:
@@ -1060,6 +1061,77 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
         auto zero = Cast::make(a.dtype(), 0);
         return CompareSelect::make(a, zero, zero, a, kLT);
       });
+    } break;
+
+    case aten::batch_norm: {
+      bool noWeight = false;
+      bool noBias = false;
+
+      if (v->node()->input(1)->node()->kind() == prim::Constant) {
+        const auto val = toIValue(v->node()->input(1)).value();
+        if (val.isNone()) {
+          noWeight = true;
+        }
+      }
+
+      if (v->node()->input(2)->node()->kind() == prim::Constant) {
+        const auto val = toIValue(v->node()->input(2)).value();
+        if (val.isNone()) {
+          noBias = true;
+        }
+      }
+
+      auto const& shape = valueShape(v->node()->inputs()[0]);
+      return Compute(
+          "aten_batch_norm",
+          c10::fmap<DimArg>(shape),
+          [this, v, noWeight, noBias](const std::vector<VarHandle>& axes) {
+            TORCH_INTERNAL_ASSERT(axes.size() >= 2);
+            auto const& n = v->node();
+
+            // parameter list: input, weight, bias, mean, var, training,
+            // momentum, eps, cudnn_enabled
+            Tensor* input = tensors_.at(n->inputs()[0]->unique());
+            Tensor* mean = tensors_.at(n->inputs()[3]->unique());
+            Tensor* var = tensors_.at(n->inputs()[4]->unique());
+            ExprHandle eps = constant(n->inputs()[7]);
+
+            // axes: N, C, H, W
+            std::vector<VarHandle> c(axes.begin() + 1, axes.begin() + 2);
+            if (noWeight && noBias) {
+              auto inv_var = rsqrt(var->call(c) + eps);
+              auto output =
+                  input->call(axes) * inv_var - mean->call(c) * inv_var;
+              return demoteOutput(output, n->output());
+            } else if (noWeight) {
+              Tensor* bias = tensors_.at(n->inputs()[2]->unique());
+
+              auto inv_var = rsqrt(var->call(c) + eps);
+              auto bias_v = bias->call(c);
+              auto beta = bias_v - mean->call(c) * inv_var;
+              auto output = input->call(axes) * inv_var + beta;
+              return demoteOutput(output, n->output());
+            } else if (noBias) {
+              Tensor* weight = tensors_.at(n->inputs()[1]->unique());
+
+              auto inv_var = rsqrt(var->call(c) + eps);
+              auto weight_v = weight->call(c);
+              auto alpha = inv_var * weight_v;
+              auto output = input->call(axes) * alpha - mean->call(c) * alpha;
+              return demoteOutput(output, n->output());
+            } else {
+              Tensor* weight = tensors_.at(n->inputs()[1]->unique());
+              Tensor* bias = tensors_.at(n->inputs()[2]->unique());
+
+              auto inv_var = rsqrt(var->call(c) + eps);
+              auto weight_v = weight->call(c);
+              auto bias_v = bias->call(c);
+              auto alpha = inv_var * weight_v;
+              auto beta = bias_v - mean->call(c) * alpha;
+              auto output = input->call(axes) * alpha + beta;
+              return demoteOutput(output, n->output());
+            }
+          });
     } break;
 
     case aten::log: {
