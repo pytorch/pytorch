@@ -76,23 +76,24 @@ bool TEST(const std::vector<int64_t>& sizes, std::string name, Func block) {
   return b;
 }
 
-void PRINT_TENSOR(std::string name, const at::Tensor& tensor){
-    std::string str = name + ": ";
-    auto print = [&](const at::Tensor& t){
-        for(int i=0; i<t.numel(); ++i){
-            NSString* sf = [NSString stringWithFormat:@"%.2f",t.data_ptr<float>()[i]];
-            str += sf.UTF8String;
-            str += ", ";
-        }
-        std::cout<<str<<std::endl;
-    };
-    if(tensor.is_metal()){
-        MPSImage* image = at::native::metal::imageFromTensor(tensor);
-        auto t = at::native::metal::staticImageToTensor(image);
-        print(t);
-    } else {
-        print(tensor);
+void PRINT_TENSOR(std::string name, const at::Tensor& tensor) {
+  std::string str = name + ": ";
+  auto print = [&](const at::Tensor& t) {
+    for (int i = 0; i < t.numel(); ++i) {
+      NSString* sf =
+          [NSString stringWithFormat:@"%.2f", t.data_ptr<float>()[i]];
+      str += sf.UTF8String;
+      str += ", ";
     }
+    std::cout << str << std::endl;
+  };
+  if (tensor.is_metal()) {
+    MPSImage* image = at::native::metal::imageFromTensor(tensor);
+    auto t = at::native::metal::staticImageToTensor(image);
+    print(t);
+  } else {
+    print(tensor);
+  }
 }
 
 }
@@ -357,7 +358,6 @@ bool test_add_broadcast2() {
   });
 }
 
-
 bool test_sub() {
   __block std::vector<int64_t> x{5, 3, 167, 222};
   return TEST(x, __PRETTY_FUNCTION__, ^bool {
@@ -372,8 +372,8 @@ bool test_sub() {
 }
 
 bool test_sub_broadcast() {
-  __block std::vector<int64_t> x1{1, 3, 1, 1};
-  __block std::vector<int64_t> x2{1, 3, 192, 192};
+  __block std::vector<int64_t> x1{3, 1, 1};
+  __block std::vector<int64_t> x2{3, 192, 192};
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -386,8 +386,8 @@ bool test_sub_broadcast() {
 }
 
 bool test_sub_broadcast2() {
-  __block std::vector<int64_t> x1{3, 3, 192, 192};
-  __block std::vector<int64_t> x2{3, 3, 1, 192};
+  __block std::vector<int64_t> x1{2, 3, 3, 192, 192};
+  __block std::vector<int64_t> x2{2, 3, 3, 1, 192};
   return TEST(x1, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -441,44 +441,44 @@ bool test_mul_broadcast2() {
 }
 
 bool test_div() {
-    __block std::vector<int64_t> x{1, 3, 24, 24};
-    return TEST(x, __PRETTY_FUNCTION__, ^bool {
-      auto X1 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      auto X2 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      auto Y1 = at::div(X1, X2);
-      auto MX1 = X1.metal();
-      auto MX2 = X2.metal();
-      auto Y2 = at::div(MX1, MX2).cpu();
-      return almostEqual(Y1, Y2);
-    });
+  __block std::vector<int64_t> x{1, 3, 24, 24};
+  return TEST(x, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto X2 = at::rand(x, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::div(X1, X2);
+    auto MX1 = X1.metal();
+    auto MX2 = X2.metal();
+    auto Y2 = at::div(MX1, MX2).cpu();
+    return almostEqual(Y1, Y2);
+  });
 }
 
 bool test_div_broadcast() {
-    __block std::vector<int64_t> x1{4, 3, 24, 24};
-    __block std::vector<int64_t> x2{4, 3, 1, 1};
-    return TEST(x1, __PRETTY_FUNCTION__, ^bool {
-      auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      auto Y1 = at::div(X1, X2);
-      auto MX1 = X1.metal();
-      auto MX2 = X2.metal();
-      auto Y2 = at::div(MX1, MX2).cpu();
-      return almostEqual(Y1, Y2);
-    });
+  __block std::vector<int64_t> x1{4, 3, 24, 24};
+  __block std::vector<int64_t> x2{4, 3, 1, 1};
+  return TEST(x1, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::div(X1, X2);
+    auto MX1 = X1.metal();
+    auto MX2 = X2.metal();
+    auto Y2 = at::div(MX1, MX2).cpu();
+    return almostEqual(Y1, Y2);
+  });
 }
 
 bool test_div_broadcast2() {
-    __block std::vector<int64_t> x2{1, 3, 24, 1};
-    __block std::vector<int64_t> x1{1, 3, 24, 24};
-    return TEST(x1, __PRETTY_FUNCTION__, ^bool {
-      auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      auto Y1 = at::div(X1, X2);
-      auto MX1 = X1.metal();
-      auto MX2 = X2.metal();
-      auto Y2 = at::div(MX1, MX2).cpu();
-      return almostEqual(Y1, Y2);
-    });
+  __block std::vector<int64_t> x2{1, 3, 24, 1};
+  __block std::vector<int64_t> x1{1, 3, 24, 24};
+  return TEST(x1, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(x1, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto X2 = at::rand(x2, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::div(X1, X2);
+    auto MX1 = X1.metal();
+    auto MX2 = X2.metal();
+    auto Y2 = at::div(MX1, MX2).cpu();
+    return almostEqual(Y1, Y2);
+  });
 }
 
 bool test_t() {
