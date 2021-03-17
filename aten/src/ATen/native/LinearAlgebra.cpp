@@ -327,10 +327,9 @@ Tensor& addr_(Tensor& self,
   return at::addr_out(self, self, vec1, vec2, beta, alpha);
 }
 
-Tensor& addr_out(Tensor &result,
-                 const Tensor& self,
+Tensor& addr_out(const Tensor& self,
                  const Tensor& vec1, const Tensor& vec2,
-                 const Scalar& beta, const Scalar& alpha) {
+                 const Scalar& beta, const Scalar& alpha, Tensor &result) {
   auto iter = build_addr_iter(result, self, vec1, vec2);
 
   check_addr_scalar(iter.dtype(), beta, "beta");
@@ -368,10 +367,9 @@ Tensor math_addr(const Tensor& self,
   return beta * self + alpha * at::outer(vec1, vec2);
 }
 
-Tensor& math_addr_out(Tensor &result,
-                      const Tensor& self,
+Tensor& math_addr_out(const Tensor& self,
                       const Tensor& vec1, const Tensor& vec2,
-                      const Scalar& beta, const Scalar& alpha) {
+                      const Scalar& beta, const Scalar& alpha, Tensor &result) {
   auto addr_result = at::addr(self, vec1, vec2, beta, alpha);
 
   // Validates safe casting
@@ -649,7 +647,7 @@ Tensor &addmm_cpu_(Tensor& self, const Tensor& mat1, const Tensor& mat2, const S
   return addmm_cpu_out(self, self, mat1, mat2, beta, alpha);
 }
 
-Tensor& mm_cpu_out(Tensor & result, const Tensor & self, const Tensor & mat2) {
+Tensor& mm_cpu_out(const Tensor & self, const Tensor & mat2, Tensor & result) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
@@ -793,7 +791,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     if (is_bmm_out) {
       for (int64_t b = 0; b < bs; b++) {
         auto r = self_or_result.select(0, b);
-        native::mm_cpu_out(r, batch1.select(0, b), batch2.select(0, b));
+        native::mm_cpu_out(batch1.select(0, b), batch2.select(0, b), r);
       }
     } else {
       for (int64_t b = 0; b < bs; b++) {
@@ -807,10 +805,10 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
 
 Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   Tensor result = at::empty({0}, self.options());
-  return at::native::baddbmm_out_cpu(result, self, batch1, batch2, beta, alpha);
+  return at::native::baddbmm_out_cpu(self, batch1, batch2, beta, alpha, result);
 }
 
-Tensor& baddbmm_out_cpu(Tensor &result, const Tensor& self_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+Tensor& baddbmm_out_cpu(const Tensor& self_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
   Tensor self;
   std::tie(self) = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
   result.resize_(self.sizes());
@@ -824,10 +822,10 @@ Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, c
 
 Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({0}, self.options());
-  return at::native::bmm_out_cpu(result, self, mat2);
+  return at::native::bmm_out_cpu(self, mat2, result);
 }
 
-Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
+Tensor& bmm_out_cpu(const Tensor& batch1, const Tensor& batch2, Tensor &result) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
   {
@@ -840,14 +838,14 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
   return result;
 }
 
-Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
+Tensor& dot_out(const Tensor& self, const Tensor& tensor, Tensor& result) {
   at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
            "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
   return result.fill_(self.dot(tensor));
 }
 
-Tensor& vdot_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
            "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
@@ -884,7 +882,7 @@ Tensor matmul(
   Tensor out = out_opt.value_or(Tensor());
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
-    return has_out ? at::native::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
+    return has_out ? at::native::dot_out(tensor1, tensor2, out) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
     return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
@@ -991,7 +989,7 @@ Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
   return result;
 }
 
-Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
+Tensor& matmul_out(const Tensor & tensor1, const Tensor & tensor2, Tensor &result) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
@@ -2219,7 +2217,7 @@ Tensor chain_matmul(TensorList matrices) {
 /*
 Calculates the Kronecker product between two Tensors.
 */
-Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& kron_out(const Tensor& self, const Tensor& other, Tensor& result) {
   int64_t maxdim = std::max(self.dim(), other.dim());
   int64_t pad_self = maxdim - self.dim();
   int64_t pad_other = maxdim - other.dim();
