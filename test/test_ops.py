@@ -8,9 +8,9 @@ from torch.testing import \
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor, is_iterable_of_tensors)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db)
+    (op_db, method_tests)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.autograd.gradcheck import gradcheck, gradgradcheck
 
@@ -18,6 +18,9 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 
+
+# Get names of all the operators which have entry in `method_tests` (legacy testing infra)
+method_tested_operators = set(map(lambda test_details: test_details[0], method_tests()))
 
 # Tests that apply to all operators
 
@@ -56,6 +59,12 @@ class TestOpInfo(TestCase):
         sample = samples[0]
         op(*sample.input, *sample.args, **sample.kwargs)
 
+    # Verifies that ops do not have an entry in
+    # `method_tests` (legacy testing infra).
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=[torch.float32])
+    def test_duplicate_method_tests(self, device, dtype, op):
+        self.assertFalse(op.name in method_tested_operators)
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,

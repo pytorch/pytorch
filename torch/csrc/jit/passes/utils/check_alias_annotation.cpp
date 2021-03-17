@@ -67,6 +67,18 @@ Stack deepCopy(const Stack& stack) {
 bool deepEquals(const IValue& lhs, const IValue& rhs) {
   if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
+  } else if (lhs.isTensorList() && rhs.isTensorList()) {
+    const auto a = lhs.toTensorList();
+    const auto b = rhs.toTensorList();
+    if (a.size() != b.size()) {
+      return false;
+    }
+    for (std::size_t i = 0; i < a.size(); ++i) {
+      if (!a[i].equal(b[i])) {
+        return false;
+      }
+    }
+    return true;
   }
 
   return lhs == rhs;
