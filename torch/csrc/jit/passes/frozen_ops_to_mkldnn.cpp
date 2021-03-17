@@ -24,7 +24,7 @@
 // clang-format off
 // moving ConvUtils include induces import cycle
 #include <ATen/native/ConvUtils.h>
-#include <algorithm> 
+#include <algorithm>
 #include <memory>
 // clang-format on
 
@@ -54,6 +54,31 @@ Node* getLastUse(Value* v) {
   return last_use_node;
 }
 
+void merge_sets(
+    std::unordered_map<Value*, ValueSetPtr>& alias_mapping,
+    Value* existing,
+    Value* new_v) {
+  if (alias_mapping[existing] == alias_mapping[new_v]) {
+    return;
+  }
+  auto existing_set = alias_mapping[existing];
+  auto set_to_remove = alias_mapping[new_v];
+  for (auto it = set_to_remove->begin(); it != set_to_remove->end(); it++) {
+    existing_set->insert(*it);
+    alias_mapping[*it] = existing_set;
+  }
+}
+
+// no uses of tensors in container types
+void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
+  if (type->cast<TensorType>()) {
+    return;
+  }
+  for (auto t : type->containedTypes()) {
+    TORCH_INTERNAL_ASSERT(!t->cast<TensorType>());
+  }
+}
+
 void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   // This function first calculates aliasing sets,
   // then calculates the last node each aliasing set is alive for.
@@ -65,8 +90,14 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   // already done, and prove that the output size is the same as the input size,
   // which is achieved by explicit Broadcast nodes (which we inserted for other
   // reasons).
+  // The graphs here are simple subgraphs without uses of Tensors in
+  // containers (Lists, GetAttrs, etc)
+
+  // CALCULATE ALIASING SETS
 
   auto aliasDb = torch::make_unique<AliasDb>(graph);
+
+  // map from Value to its Aliasing Set
   std::unordered_map<Value*, ValueSetPtr> alias_mapping;
   ValueSet set;
   ValueSetPtr input_set = std::make_shared<ValueSet>(set);
@@ -74,24 +105,15 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     if (v->type()->cast<TensorType>()) {
       input_set->insert(v);
       alias_mapping[v] = input_set;
+    } else {
+      assertNonTensorTypeDoesNotContainTensors(v->type());
     }
   }
-
-  auto merge_sets = [&](Value* existing, Value* new_v) {
-    if (alias_mapping[existing] == alias_mapping[new_v]) {
-      return;
-    }
-    auto existing_set = alias_mapping[existing];
-    auto set_to_remove = alias_mapping[new_v];
-    for (auto it = set_to_remove->begin(); it != set_to_remove->end(); it++) {
-      existing_set->insert(*it);
-      alias_mapping[*it] = existing_set;
-    }
-  };
 
   for (Node* n : graph->nodes()) {
     for (Value* output : n->outputs()) {
       if (!output->type()->cast<TensorType>()) {
+        assertNonTensorTypeDoesNotContainTensors(output->type());
         continue;
       }
 
@@ -99,12 +121,15 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
       alias_mapping[output] = std::make_shared<ValueSet>(new_set);
       for (Value* input : n->inputs()) {
         if (aliasDb->mayAlias(input, output)) {
-          merge_sets(input, output);
+          merge_sets(alias_mapping, input, output);
         }
       }
     }
   }
 
+  // CALCULATE ALIASING SET LIVENESS
+
+  // map from aliased set -> last use of set
   std::unordered_map<ValueSetPtr, Node*> set_liveness;
   for (auto& set : alias_mapping) {
     if (set_liveness.count(set.second)) {
@@ -128,14 +153,17 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     set_liveness[set.second] = last;
   }
 
+  // REUSING MEMORY BY REINPLACING NODES
   std::vector<Node*> nodes_to_inplace;
+
   auto add_to_inplace_set = [&](Node* node) {
     // defer making the inplacing change because that would invalidate the old
     // Node output Value*
     nodes_to_inplace.push_back(node);
+    TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
     auto output_liveness_end =
         set_liveness[alias_mapping[node->outputs().at(0)]];
-    merge_sets(node->inputs().at(0), node->output());
+    merge_sets(alias_mapping, node->inputs().at(0), node->output());
     set_liveness[alias_mapping[node->output()]] = output_liveness_end;
   };
 

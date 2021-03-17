@@ -49,6 +49,42 @@ class TORCH_API LoopNest {
   Stmt* getLoopBodyFor(const Buf*) const;
   bool hasLoopBodyFor(Tensor*) const;
 
+  // Returns the For stmt that is immediately enclosing the given stmt.
+  static For* getParentLoop(const Stmt* st);
+
+  // Returns the list of For stmts corresponding to the loopnest that is
+  // enclosing the given stmt.
+  static std::vector<For*> getEnclosingLoopNest(const Stmt* st);
+
+  // Returns a list of all Stmts that write to the given buf.
+  std::vector<const Stmt*> getAllWritesToBuf(const Buf*) const;
+
+  // The following methods return the For loops that contain writes to
+  // the given buf.
+  //
+  // For example, consider the following code:
+  //   for i1
+  //     for j1
+  //       a[i1,j1] =
+  //   for i2
+  //     for j2
+  //       for k2
+  //         a[i2,j2] =
+  //     for j3
+  //       a[i2,j3] =
+
+  // Returns a list of For loops which directly contain a Stmt that writes
+  // to buf.
+  // For the above example:
+  //   getAllInnermostLoopsWritingToBuf(a) => {j1, k2, j3}
+  std::vector<For*> getAllInnermostLoopsWritingToBuf(const Buf*) const;
+
+  // Returns a list of For loopnests which contain a Stmt that writes to
+  // the given buf. Each loopnest here is a vector For loops.
+  // For the above example:
+  //   getAllLoopNestsWritingToBuf(a) => {{i1,j1}, {i2,j2,k2}, {i2,j3}}
+  std::vector<std::vector<For*>> getAllLoopNestsWritingToBuf(const Buf*) const;
+
   static void vectorize(For*);
   Stmt* simplify();
 
