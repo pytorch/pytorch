@@ -391,6 +391,126 @@ struct TORCH_API {name} : public {parent_class} {{
 }};
 """
 
+refactor_count = 0
+
+@with_native_function
+def compute_out_convention_refactor(g: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
+    if isinstance(g, StructuredNativeFunctions) or local.use_c10_dispatcher() is UseC10Dispatcher.full:
+        return []
+
+    returns_type = native.returns_type(g.func.returns)
+    args = native.arguments(g.func)
+
+    has_optional_tensor = False
+    for arg in args:
+        # Alternative way would be to see if a.argument.type is an OptionalType and under the hood is a Tensor type?? 
+        # String matching seems to be easier 
+        if isinstance(arg.argument, Argument) and 'Tensor?' in str(arg.argument.type):
+            has_optional_tensor = True
+            break
+    if not has_optional_tensor:
+        return []
+
+    if g.func.is_out_fn():
+        # don't want to handle out case
+        print('quit because of out_fn')
+        return []
+
+    for arg in args:
+        # TensorOptions
+        if isinstance(arg.argument, TensorOptionsArguments):
+            print('quit because of ', arg.argument)
+            return []
+
+
+    global refactor_count
+    refactor_count += 1
+    if refactor_count > 10000:
+        return []
+
+    f = g
+    ns = list(f.dispatch.values())
+
+    rs = []
+    # Sometimes a function name shows up multiple times; only generate
+    # it once!
+    seen = set()
+    for n in ns:
+        if n in seen:
+            continue
+        if "legacy::" in n:
+            continue
+        seen.add(n)
+
+        opt_tensor_index = []
+
+        method_match = "[\s&\*]+"        # avoid wilden match (e.g. 'add' may match 'mul_add')
+        method_match += re.escape(n)     # do we really need to escape method name??
+        method_match += '\\s*\\('        # match spaces/enter, until seeing (
+        # create capture group
+        method_match = '(' + method_match + ')'     
+
+        params_match = ''
+
+        output_header_pattern = '${1}'       # append method name in output
+        output_body_pattern = ''
+
+        for i in range(len(args)):
+            arg = args[i]
+
+            # pre_name: spaces/enter + type + spaces/enter
+            pre_name_match = re.escape(arg.type) 
+            pre_name_match = pre_name_match.replace("\\&", "&")                              # Don't need to escape &  
+            pre_name_match = pre_name_match.replace("\\ ", "\\s*")                           # match any whitespaces                             
+            pre_name_match = pre_name_match.replace('Tensor', '(?:Tensor|SparseTensor)')
+            pre_name_match = pre_name_match.replace('c10::optional', '(?:c10::)?optional')
+            pre_name_match = pre_name_match.replace('MemoryFormat', '(?:c10::)?MemoryFormat')
+            pre_name_match = pre_name_match.replace('std::array<bool,', 'std::array<bool\\s*,\\s*')
+            pre_name_match = '(' + '\\s*' + pre_name_match + '\\s*)'
+
+            # name
+            name_match = '(\\w*)'
+
+            # post_name: space/enter, followed by either , or )
+            if i == len(args) - 1:
+                post_name_match = '[^,)]*'   # excluding ',' in this case as well in case the method contains more parameters...
+                post_name_match += '\\)\\s*\\{'    # since in this use case we don't need to reorder parameters, just match the ) and { for conveneience
+                post_name_match = '(' + post_name_match + ')' # construct capture group
+            else:
+                post_name_match = '([^,]*,)'  
+            
+            # Construct everything together for this argument
+            params_match += pre_name_match + name_match + post_name_match
+
+            if isinstance(arg.argument, Argument) and 'Tensor?' in str(arg.argument.type):
+                opt_tensor_index.append(i)
+                # in output, append variable name with '_opt'
+                output_header_pattern += ' %s ${%d}_opt${%d}' % ("const c10::optional<Tensor>&", 3 * i + 3, 3 * i + 4)
+                output_body_pattern += '  const Tensor& ${%d} = c10::value_or_else(${%d}_opt, [] {return Tensor();});\n' % (3 * i + 3, 3 * i + 3)
+            else:
+                output_header_pattern += '${%d}${%d}${%d}' % (3 * i + 2, 3 * i + 3, 3 * i + 4)
+        rs.append(f"""\
+    
+    {g.loc}
+    fastmod '{method_match}{params_match}' '{output_header_pattern}
+{output_body_pattern}' aten/src/ATen/native/
+""")
+
+
+    return rs
+
+
+
+"""
+        current_signature = "([\s&\*]+{}\\s*\\()([^T(){{}}]*Tensor\s*&[^,]*),\\s*({}[^,)]*)\\)(\\s*\\{{)".format(
+#                re.escape(returns_type).replace("\\&", "&").replace("\\ ", "\\s*"),
+            re.escape(n),
+            "[^,]*,\\s*".join(re.escape(a.type).replace("\\&", "&").replace("\\ ", "\\s*") for a in args[1:])
+#                "\\s*,\\s*".join(re.escape(a.no_default().decl()).replace("\\ ", "\\s*") for a in args)
+        )
+"""
+
+
 # Generates RegisterBackendSelect.cpp, a series of kernels which provide
 # specialized computation of dispatch key for operator signatures which cannot
 # be easily done automatically using templating.
@@ -1028,6 +1148,10 @@ def main() -> None:
     })
     cpu_fm.write('NativeFunctions.h', lambda: {
         'native_function_declarations': list(concatMap(compute_native_function_declaration, grouped_native_functions)),
+    })
+
+    cpu_fm.write('Refactors.yaml', lambda: {
+        'refactors': list(concatMap(compute_out_convention_refactor, grouped_native_functions)),
     })
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
