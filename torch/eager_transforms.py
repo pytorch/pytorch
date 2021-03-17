@@ -3,7 +3,7 @@ from torch import vmap
 from functools import partial
 import torch.nn as nn
 import torch.nn.functional as F
-from make_functional import make_functional
+from torch.make_functional import make_functional
 import gc
 
 # x = torch.ones(2, 3)
