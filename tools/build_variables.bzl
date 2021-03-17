@@ -973,7 +973,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/TH/THTensorLapack.cpp",
     "aten/src/TH/THTensorMath.cpp",
     "aten/src/TH/THTensorMoreMath.cpp",
-    "aten/src/TH/THTensorRandom.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",

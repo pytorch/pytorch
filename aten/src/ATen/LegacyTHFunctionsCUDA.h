@@ -21,8 +21,6 @@ namespace cuda {
 Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, const Scalar& value);
 Tensor & _th_masked_fill_bool_(Tensor & self, const Tensor & mask, const Scalar& value);
 Tensor & _th_index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source);
-Tensor & _th_take_out(Tensor & result, const Tensor & self, const Tensor & index);
-Tensor _th_take(const Tensor & self, const Tensor & index);
 Tensor & _th_put_(Tensor & self, const Tensor & index, const Tensor & source, bool accumulate);
 std::tuple<Tensor &,Tensor &> _th_mode_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool keepdim);
 std::tuple<Tensor,Tensor> _th_mode(const Tensor & self, int64_t dim, bool keepdim);
