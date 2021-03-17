@@ -98,11 +98,12 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
 
   auto opt = TensorOptions().device(result.device());
 
-  int bits = static_cast<int>(std::ceil(std::log2(static_cast<double>(n)))) + 1;
+  int bits = std::min(64,
+    static_cast<int>(std::ceil(std::log2(static_cast<double>(n)))) + 1);
 
   if (n == 0) {
     return result;
-  } else if (n < (1L << 7)) {
+  } else if (bits <= 7) {
     auto keys = at::empty(result.sizes(), opt.dtype(kChar)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
@@ -111,7 +112,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
         range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data),
         n, 0, bits);
     });
-  } else if (n < (1L << 15)) {
+  } else if (bits <= 15) {
     auto keys = at::empty(result.sizes(), opt.dtype(kShort)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
@@ -120,7 +121,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
         range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data),
         n, 0, bits);
     });
-  } else if (n < (1L << 31)) {
+  } else if (bits <= 31) {
     auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(generator);
     auto keys_tmp = at::empty_like(keys);
     AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm_out_cuda", [&] {
