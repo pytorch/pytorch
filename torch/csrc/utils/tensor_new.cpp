@@ -234,15 +234,42 @@ Tensor internal_new_from_data(
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
-
-  if (is_numpy_available() && PyArray_Check(data)) {
-    TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
-    auto tensor = tensor_from_numpy(data, /*warn_if_not_writeable=*/!copy_numpy);
-    const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : options.device();
-    pybind11::gil_scoped_release no_gil;
-    maybe_initialize_cuda(device);
-    return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
+  if (is_numpy_available()) {
+    Tensor tensor;
+    if (PyArray_Check(data)) {
+      TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
+      tensor = tensor_from_numpy(data, /*warn_if_not_writeable=*/!copy_numpy);
+    } else if (PyObject_HasAttrString(data, "__array_interface__")) {
+      TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from __array_interface__");
+      tensor = tensor_from_cpu_array_interface(data);
+    } else if (PyObject_HasAttrString(data, "__array__")) {
+      PyObject* arr = PyObject_CallMethod(data, "__array__", "");
+      PyObject* exc = PyErr_Occurred();
+      if (exc == NULL) {
+        TORCH_INTERNAL_ASSERT(arr != NULL, "unexpected NULL result from __array__()");
+        if (PyArray_Check(arr)) {
+          TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from __array__()");
+          tensor = tensor_from_numpy(arr, /*warn_if_not_writeable=*/!copy_numpy);
+          // arr is already a new reference and tensor_from_numpy
+          // increments the refcount unnecessarily, so a refcount
+          // correction is required:
+          Py_DECREF(arr);
+        } else {
+          Py_DECREF(arr);
+          // TODO: raise ValueError("object __array__ method not producing an array") for numpy compatibility
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT(arr == NULL, "expected NULL");
+        throw python_error();
+      }
+    }
+    if (tensor.defined()) {
+      const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
+      auto device = device_opt.has_value() ? *device_opt : options.device();
+      pybind11::gil_scoped_release no_gil;
+      maybe_initialize_cuda(device);
+      return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
+    }
   }
 #endif
 
@@ -766,7 +793,7 @@ Tensor as_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyOb
         /*copy_numpy=*/false,
         /*type_inference=*/type_inference);
   }
-  throw std::runtime_error("tensor(): invalid arguments");
+  throw std::runtime_error("as_tensor(): invalid arguments");
 }
 
 Tensor new_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {

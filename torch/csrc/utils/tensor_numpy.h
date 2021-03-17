@@ -16,5 +16,6 @@ bool is_numpy_int(PyObject* obj);
 bool is_numpy_scalar(PyObject* obj);
 
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj);
+at::Tensor tensor_from_cpu_array_interface(PyObject* obj);
 
 }} // namespace torch::utils

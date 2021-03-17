@@ -25,6 +25,9 @@ bool is_numpy_scalar(PyObject* obj) {
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
+at::Tensor tensor_from_cpu_array_interface(PyObject* obj) {
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
+}
 }}
 #else
 
@@ -289,32 +292,27 @@ bool is_numpy_scalar(PyObject* obj) {
          PyArray_IsScalar(obj, Floating) || PyArray_IsScalar(obj, ComplexFloating));
 }
 
-at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
+static at::Tensor tensor_from_generic_array_interface(PyObject* obj, THPObjectPtr& ai_dict, DeviceType device_type) {
   if (!is_numpy_available()) {
+    // numpy is required for parsing type descriptor string
     throw std::runtime_error("Numpy is not available");
   }
-  auto cuda_dict = THPObjectPtr(PyObject_GetAttrString(obj, "__cuda_array_interface__"));
-  TORCH_INTERNAL_ASSERT(cuda_dict);
 
-  if (!PyDict_Check(cuda_dict)) {
-    throw TypeError("`__cuda_array_interface__` must be a dict");
-  }
-
-  // Extract the `obj.__cuda_array_interface__['shape']` attribute
+  // Extract the `ai_dict['shape']` attribute
   std::vector<int64_t> sizes;
   {
-    PyObject *py_shape = PyDict_GetItemString(cuda_dict, "shape");
+    PyObject *py_shape = PyDict_GetItemString(ai_dict, "shape");
     if (py_shape == nullptr) {
       throw TypeError("attribute `shape` must exist");
     }
     sizes = seq_to_aten_shape(py_shape);
   }
 
-  // Extract the `obj.__cuda_array_interface__['typestr']` attribute
+  // Extract the `ai_dict['typestr']` attribute
   ScalarType dtype;
   int dtype_size_in_bytes;
   {
-    PyObject *py_typestr = PyDict_GetItemString(cuda_dict, "typestr");
+    PyObject *py_typestr = PyDict_GetItemString(ai_dict, "typestr");
     if (py_typestr == nullptr) {
       throw TypeError("attribute `typestr` must exist");
     }
@@ -327,10 +325,10 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     TORCH_INTERNAL_ASSERT(dtype_size_in_bytes > 0);
   }
 
-  // Extract the `obj.__cuda_array_interface__['data']` attribute
+  // Extract the `ai_dict['data']` attribute
   void *data_ptr;
   {
-    PyObject *py_data = PyDict_GetItemString(cuda_dict, "data");
+    PyObject *py_data = PyDict_GetItemString(ai_dict, "data");
     if (py_data == nullptr) {
       throw TypeError("attribute `shape` data exist");
     }
@@ -350,17 +348,17 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     }
   }
 
-  // Extract the `obj.__cuda_array_interface__['strides']` attribute
+  // Extract the `ai_dict['strides']` attribute
   std::vector<int64_t> strides;
   {
-    PyObject *py_strides = PyDict_GetItemString(cuda_dict, "strides");
+    PyObject *py_strides = PyDict_GetItemString(ai_dict, "strides");
     if (py_strides != nullptr && py_strides != Py_None) {
       if (PySequence_Length(py_strides) == -1 || PySequence_Length(py_strides) != sizes.size()) {
         throw TypeError("strides must be a sequence of the same length as shape");
       }
       strides = seq_to_aten_shape(py_strides);
 
-      // __cuda_array_interface__ strides use bytes. Torch strides use element counts.
+      // array interface strides use bytes. Torch strides use element counts.
       for (auto& stride : strides) {
         if (stride%dtype_size_in_bytes != 0) {
           throw ValueError(
@@ -383,9 +381,30 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
         pybind11::gil_scoped_acquire gil;
         Py_DECREF(obj);
       },
-      at::device(kCUDA).dtype(dtype)
+      at::device(device_type).dtype(dtype)
   );
 }
+
+at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
+  PyObject *dict = PyObject_GetAttrString(obj, "__cuda_array_interface__");
+  auto ai_dict = THPObjectPtr(dict);
+  TORCH_INTERNAL_ASSERT(ai_dict);
+  if (!PyDict_Check(ai_dict)) {
+    throw TypeError("`__cuda_array_interface__` must be a dict");
+  }
+  return tensor_from_generic_array_interface(obj, ai_dict, kCUDA);
+}
+
+at::Tensor tensor_from_cpu_array_interface(PyObject* obj) {
+  PyObject *dict = PyObject_GetAttrString(obj, "__array_interface__");
+  auto ai_dict = THPObjectPtr(dict);
+  TORCH_INTERNAL_ASSERT(ai_dict);
+  if (!PyDict_Check(ai_dict)) {
+    throw TypeError("`__array_interface__` must be a dict");
+  }
+  return tensor_from_generic_array_interface(obj, ai_dict, kCPU);
+}
+
 }} // namespace torch::utils
 
 #endif  // USE_NUMPY
