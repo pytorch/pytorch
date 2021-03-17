@@ -334,14 +334,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::layout(Tensor a) -> int",
-         [](Stack* stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.layout());
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::index(Device self) -> int?",
          [](Stack* stack) {
            auto d = pop(stack).toDevice();
@@ -623,11 +615,25 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      // This operator is generated inside the compiler for indexing into
+     // ModuleList without a statically determinable key. Accordingly,
+     // self must be a ModuleType and the output must be an InterfaceType.
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "prim::ModuleContainerIndex.list(Any self, int ind) -> Any"),
+         [](Stack* stack) {
+           IValue ind = pop(stack);
+           IValue module_dict = pop(stack);
+           std::stringstream ss;
+           ss << ind.toInt();
+           push(stack, module_dict.toModule().attr(ss.str()));
+         },
+         aliasAnalysisFromSchema()),
+     // This operator is generated inside the compiler for indexing into
      // ModuleDict without a statically determinable key. Accordingly,
      // self must be a ModuleType and the output must be an InterfaceType.
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "prim::ModuleDictIndex(Any self, str ind) -> Any"),
+             "prim::ModuleContainerIndex.dict(Any self, str ind) -> Any"),
          [](Stack* stack) {
            IValue ind = pop(stack);
            IValue module_dict = pop(stack);
@@ -1216,6 +1222,29 @@ RegisterOperators reg2({
         "aten::hash.generic(t value) -> int",
         hashValue,
         aliasAnalysisFromSchema()),
+
+#define DEFINE_COMPLEX_OP(type_a, type_b, actual_type_a, actual_type_b) \
+  Operator(                                                             \
+      "aten::complex." #type_a "_" #type_b "(" #type_a " x," #type_b    \
+      " y) -> complex",                                                 \
+      [](Stack* stack) {                                                \
+        actual_type_a a;                                                \
+        actual_type_b b;                                                \
+        pop(stack, a, b);                                               \
+        auto comp = c10::complex<double>(a, b);                         \
+        push(stack, comp);                                              \
+      },                                                                \
+      aliasAnalysisFromSchema())
+
+    DEFINE_COMPLEX_OP(int, bool, int, bool),
+    DEFINE_COMPLEX_OP(bool, int, bool, int),
+    DEFINE_COMPLEX_OP(float, bool, double, bool),
+    DEFINE_COMPLEX_OP(bool, float, bool, double),
+    DEFINE_COMPLEX_OP(float, int, double, int),
+    DEFINE_COMPLEX_OP(int, float, int, double),
+    DEFINE_COMPLEX_OP(int, int, int, int),
+    DEFINE_COMPLEX_OP(bool, bool, bool, bool),
+    DEFINE_COMPLEX_OP(float, float, double, double),
 });
 
 bool isSortableTupleType(

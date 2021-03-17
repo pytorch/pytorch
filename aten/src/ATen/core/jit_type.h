@@ -2054,6 +2054,10 @@ struct TORCH_API ClassType : public NamedType {
     return properties_;
   }
 
+  const std::vector<Property> properties() const {
+    return properties_;
+  }
+
   bool hasConstant(const std::string& name) const {
     return std::find_if(
                constantNames_.cbegin(),

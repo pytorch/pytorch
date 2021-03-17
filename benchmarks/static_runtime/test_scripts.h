@@ -131,3 +131,58 @@ const auto aten_sum_1_true = R"JIT(
   def forward(self, input):
       return torch.sum(input, 1, True)
 )JIT";
+
+const auto pow_script_ten_sca = R"JIT(
+  def forward(self, input : Tensor, exponent : int):
+      return torch.pow(input, exponent)
+)JIT";
+
+const auto pow_script_ten_ten = R"JIT(
+  def forward(self, input : Tensor, exponent : Tensor):
+      return torch.pow(input, exponent)
+)JIT";
+
+const auto pow_script_sca_ten = R"JIT(
+  def forward(self, input : int, exponent : Tensor):
+      return torch.pow(input, exponent)
+)JIT";
+
+const auto to_script_0 = R"JIT(
+  def forward(self, input: Tensor, dtype: int, non_blocking: bool, copy: bool, memory_format: int):
+      return torch.to(input, dtype, non_blocking, copy, memory_format)
+)JIT";
+
+const auto to_script_1 = R"JIT(
+  def forward(self, input:Tensor, dtype: int, non_blocking: bool, copy: bool):
+      return torch.to(input, dtype, non_blocking, copy)
+)JIT";
+
+const std::string embedding_bag_default = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c)
+)JIT";
+
+const std::string embedding_bag_mean = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c, False, 1)
+)JIT";
+
+const std::string embedding_bag_max = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c, False, 2)
+)JIT";
+
+const std::string embedding_bag_sum_last_offset = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c, False, 0, False, None, True)
+)JIT";
+
+const std::string embedding_bag_mean_last_offset = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c, False, 1, False, None, True)
+)JIT";
+
+const std::string embedding_bag_max_last_offset = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c, False, 2, False, None, True)
+)JIT";

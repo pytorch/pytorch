@@ -21,6 +21,11 @@
 namespace torch {
 namespace jit {
 
+// Controls whether graph source ranges are printed by default
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+bool global_print_source_ranges = true;
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
 using c10::Type;
@@ -212,8 +217,16 @@ void initPythonIRBindings(PyObject* module_) {
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
       .def(py::init<>())
-      .def("__repr__", [](Graph& g) { return g.toString(); })
+      .def(
+          "__repr__",
+          [&](Graph& g) { return g.toString(global_print_source_ranges); })
       .def("str", &Graph::toString, py::arg("print_source_ranges") = true)
+      .def_readonly_static(
+          "global_print_source_ranges", &global_print_source_ranges)
+      .def_static(
+          "set_global_print_source_ranges",
+          [&](const bool enabled) { global_print_source_ranges = enabled; },
+          py::arg("enabled") = true)
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
