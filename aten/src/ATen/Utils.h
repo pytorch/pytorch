@@ -54,7 +54,7 @@ static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef
   std::vector<TensorImpl*> unwrapped;
   unwrapped.reserve(tensors.size());
   static_assert(std::is_integral<size_t>::value, "size_t is not integral.");
-  for (const auto i : c10::irange(tensors.size())) {
+  for (const auto i : c10::irange_torch(tensors.size())) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {
       AT_ERROR("Expected dense tensor but got ", expr.layout(),
