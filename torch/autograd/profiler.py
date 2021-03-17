@@ -244,11 +244,7 @@ class EventList(list):
                             '"cat": "cpu_to_cuda", '
                             '"args": {}}, ' % (evt.trace_name, evt.time_range.start,
                                                evt.thread, next_id))
-                    # cudaEventElapsedTime works for the events on the same device.
-                    # Since we don't want to emit cuda start events on multiple devices from
-                    # the same process, we skip kernel visualization in the legacy profiler.
-                    # Note: a newer torch.profiler does not depend on CUDA events and uses CUPTI
-                    # to get the device kernel trace
+                    # Note: use torch.profiler to get device kernel trace
                     next_id += 1
 
             # remove trailing whitespace and comma
