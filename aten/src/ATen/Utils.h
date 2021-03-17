@@ -9,7 +9,6 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <sstream>
@@ -25,6 +24,59 @@
 namespace at {
 
 TORCH_API int _crash_if_asan(int);
+
+template <typename I, std::enable_if_t<std::is_integral<I>{}, int> = 0>
+struct integer_iterator : std::iterator<std::input_iterator_tag, I> {
+    explicit integer_iterator(I value) : value(value) {}
+
+    I operator*() const { return value; }
+
+    I const* operator->() const { return &value; }
+
+    integer_iterator& operator++() {
+        ++value;
+        return *this;
+    }
+
+    integer_iterator operator++(int) {
+        const auto copy = *this;
+        ++*this;
+        return copy;
+    }
+
+    bool operator==(const integer_iterator& other) const {
+        return value == other.value;
+    }
+
+    bool operator!=(const integer_iterator& other) const {
+        return value != other.value;
+    }
+
+ protected:
+    I value;
+};
+
+} // namespace detail
+
+template <typename I, std::enable_if_t<std::is_integral<I>{}, bool> = true>
+struct integer_range {
+ public:
+    integer_range(I begin, I end) : begin_(begin), end_(end) {}
+    detail::integer_iterator<I> begin() const { return begin_; }
+    detail::integer_iterator<I> end() const { return end_; }
+
+ private:
+    detail::integer_iterator<I> begin_;
+    detail::integer_iterator<I> end_;
+};
+
+/// Only for test, see if irange function been override somehow
+template <typename Integer, std::enable_if_t<std::is_integral<Integer>::value, bool> = true>
+integer_range<Integer> irange_torch(Integer end) {
+    //If end<=begin then the range is empty; we can achieve this effect by
+    //choosing the larger of {0, end} as the loop terminator
+    return {Integer(), std::max(Integer(), end)};
+}
 
 // TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
 // away, we can delete this function
@@ -54,7 +106,7 @@ static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef
   std::vector<TensorImpl*> unwrapped;
   unwrapped.reserve(tensors.size());
   static_assert(std::is_integral<size_t>::value, "size_t is not integral.");
-  for (const auto i : c10::irange_torch(tensors.size())) {
+  for (const auto i : irange_torch(tensors.size())) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {
       AT_ERROR("Expected dense tensor but got ", expr.layout(),

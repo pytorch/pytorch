@@ -82,12 +82,4 @@ integer_range<Integer> irange(Integer end) {
     return {Integer(), std::max(Integer(), end)};
 }
 
-/// Only for test, see if irange function been override somehow
-template <typename Integer, std::enable_if_t<std::is_integral<Integer>::value, bool> = true>
-integer_range<Integer> irange_torch(Integer end) {
-    //If end<=begin then the range is empty; we can achieve this effect by
-    //choosing the larger of {0, end} as the loop terminator
-    return {Integer(), std::max(Integer(), end)};
-}
-
 } // namespace torch
