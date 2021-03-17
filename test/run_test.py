@@ -744,7 +744,7 @@ def parse_args():
         help='additional arguments passed through to unittest, e.g., '
              'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
     parser.add_argument(
-        '--dump-test-times',
+        '--export-historic-test-times',
         nargs='?',
         type=str,
         const='.pytorch-test-times',
@@ -1011,20 +1011,20 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
         message += f' Received signal: {signal_name}'
     return message
 
-def dump_test_times(test_times_filename: str, test_times: Dict[str, Tuple[float, int]]) -> None:
+def export_S3_test_times(test_times_filename: str, test_times: Dict[str, Tuple[float, int]]) -> None:
     if os.path.exists(test_times_filename):
         print(f'Overwriting existent file: {test_times_filename}')
-    file = open(test_times_filename, 'w+')
-    job_times_json = get_job_times_json(test_times)
-    json.dump(job_times_json, file)
-    file.close()
+    with open(test_times_filename, 'w+') as file:
+        job_times_json = get_job_times_json(test_times)
+        json.dump(job_times_json, file)
 
 def main():
     options = parse_args()
 
-    test_times_filename = options.dump_test_times
+    test_times_filename = options.export_historic_test_times
     if test_times_filename:
-        dump_test_times(test_times_filename, pull_job_times_from_S3())
+        print(f'Exporting historic test times from S3 to {test_times_filename}, no tests will be run.')
+        export_S3_test_times(test_times_filename, pull_job_times_from_S3())
         return
 
     test_directory = os.path.dirname(os.path.abspath(__file__))
