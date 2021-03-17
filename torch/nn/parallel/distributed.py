@@ -12,6 +12,12 @@ import torch
 from . import comm
 import torch.distributed as dist
 
+_GLOO_AVAILABLE = True
+try:
+    from torch._C._distributed_c10d import ProcessGroupGloo  # noqa: F401
+except ImportError:
+    _GLOO_AVAILABLE = False
+
 RPC_AVAILABLE = False
 if dist.is_available():
     from torch.distributed.distributed_c10d import _get_default_group
@@ -453,6 +459,9 @@ class DistributedDataParallel(Module):
         # Whether to perform input tensor CPU to GPU copies on a side-stream
         self.use_side_stream_for_tensor_copies = os.environ.get("PYTORCH_DDP_USE_SIDE_STREAM", "1") == "1"
 
+        # CPU-only process group used for debug synchronization in DDP when
+        # debug mode is enabled.
+        self._cpu_pg = self._create_gloo_pg()
         # Module replication within process (single-process multi device)
         self._module_copies = self._replicate_modules_within_process()
         # Build parameters for reducer.
@@ -464,6 +473,11 @@ class DistributedDataParallel(Module):
         if self.device_ids is not None and len(self.device_ids) > 1:
             dist._verify_replicas_within_process(parameters, expect_sparse_gradient)
         dist._verify_model_across_ranks(self.process_group, parameters)
+        if _GLOO_AVAILABLE and dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
+            # Run monitored barrier in debug mode. This will ensure all ranks
+            # have same model shapes before continuing with init/training.
+            dist.monitored_barrier(group=self._cpu_pg, timeout=30)
+
         # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
         # Builds reducer.
@@ -528,6 +542,7 @@ class DistributedDataParallel(Module):
         self._check_default_group()
         attrs = copy.copy(self.__dict__)
         del attrs['process_group']
+        del attrs['_cpu_pg']
         del attrs['reducer']
         del attrs['logger']
         return attrs
@@ -535,6 +550,7 @@ class DistributedDataParallel(Module):
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
+        self._cpu_pg = self._create_gloo_pg()
         super(DistributedDataParallel, self).__setstate__(state)
         self.__dict__.setdefault('require_forward_param_sync', True)
         self.__dict__.setdefault('require_backward_grad_sync', True)
@@ -1312,6 +1328,22 @@ class DistributedDataParallel(Module):
     @property
     def _distributed_rank(self):
         return dist.get_rank(self.process_group)
+
+    def _create_gloo_pg(self):
+        """
+        Creates a gloo process group with same ranks as self.process_group to be
+        used for debugability such as monitored_barrier().
+        """
+        if _GLOO_AVAILABLE and dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
+            ranks = list(range(dist.get_world_size(self.process_group)))
+            cpu_pg = dist.new_group(
+                ranks=ranks,
+                backend=dist.Backend.GLOO,
+            )
+        else:
+            cpu_pg = None
+
+        return cpu_pg
 
     @staticmethod
     def _set_params_and_buffers_to_ignore_for_model(
