@@ -758,6 +758,18 @@ def configure_extension_build():
             extra_compile_args += ['-g']
             extra_link_args += ['-g']
 
+    # Cross-compile for M1
+    if IS_DARWIN:
+        macos_target_arch = os.getenv('CMAKE_OSX_ARCHITECTURES', '')
+        if macos_target_arch in ['arm64', 'x86_64']:
+            macos_sysroot_path = os.getenv('CMAKE_OSX_SYSROOT')
+            if macos_sysroot_path is None:
+                macos_sysroot_path = subprocess.check_output([
+                    'xcrun', '--show-sdk-path', '--sdk', 'macosx'
+                ]).decode('utf-8').strip()
+            extra_compile_args += ['-arch', macos_target_arch, '-isysroot', macos_sysroot_path]
+            extra_link_args += ['-arch', macos_target_arch]
+
 
     def make_relative_rpath_args(path):
         if IS_DARWIN:

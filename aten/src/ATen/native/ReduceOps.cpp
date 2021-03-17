@@ -11,6 +11,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorDimApply.h>
 #include <ATen/native/SharedReduceOps.h>
+#include <ATen/core/grad_mode.h>
 
 #include <c10/util/irange.h>
 
@@ -170,32 +171,27 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
   return result;
 }
 
-static Tensor sum_scan_exclusive(const Tensor& x, int64_t dim) {
-  Tensor ret = at::cumsum(-x, dim);
-
-  int64_t end_idx = ret.size(dim) - 1;
-  Tensor ret_sum = ret.narrow(dim, end_idx, 1).clone(at::MemoryFormat::Preserve);
-  ret -= ret_sum.expand_as(ret);
-  ret += x;
-  return ret;
+Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
+  /* Logically implements w.flip(dim).cumsum(dim).flip(dim) without copying. */
+  const auto w_cumsum = w.cumsum(dim);
+  const auto w_sum = w_cumsum.narrow(dim, -1, 1);
+  return w_sum - w_cumsum + w;
 }
 
-Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
+Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, const Tensor& output) {
   /*
-    There are two algorithms to do this. The first one
-    is very efficient, but works only when there are no
-    nonzero elements in the input.
+    We show here how to derive an O(n) gradient formula for
+    abitrary inputs. It follows via a basic application of the
+    chain rule together with a number of observations for different
+    cases. We assume that x is an n-dimensional vector and y = cumprod(x).
+    In the actual implementation we will need to play a bit with masks
+    to be able to implement the formulas deduced here for tensors.
 
-    The second one is much more complex, but it doesn't
-    assume anything on the input. The main downside is
-    that it takes time O(n^2), where n = input.size(self.dim)
-    (i.e. the length of the cumulative product). This is in
-    contrast to the forward pass and the efficient algorithm,
-    which are both O(n).
+    We will first deduce the formula for the case when
+    x[i] != 0 for 1 <= i <= n.
 
-    The second algorithm is a simple application of the chain
-    rule. If x is an n-dimensional vector, and y = cumprod(x),
-    and F is the final cost, then
+    For F : R^n -> R the cost function (we will look at the complex case later),
+    we have
 
     dF / dx_k = sum_j (dF / dy_j) * (dy_j / dx_k)   (1)
 
@@ -211,10 +207,10 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
 
     Note that the indicator (j>=k) can be taken out
     by replacing the sum in (1) with a sum from
-    j = k to n.
+    k <= j <= n.
 
     Thus,
-    df / dx_k = sum_{k <= j <= n} grad_output[j] * (dy_j / dx_k)
+    dF / dx_k = sum_{k <= j <= n} grad_output[j] * (dy_j / dx_k)
 
     with
     dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i     (2)
@@ -228,12 +224,124 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
 
     So therefore,
 
-    df / dx_k = sum_{k <= j <= n} grad_output[j] * y_j / x_k
+    dF / dx_k = sum_{k <= j <= n} grad_output[j] * y_j / x_k
 
-    so
+    This formula just makes sense when input[i] != 0 for every i.
 
-    grad_output = sum_scan_exclusiv(grad_output * output) / input
+    Assume now that there exists at least a zero in the input.
+    Denote by z1 the first element 1 <= z1 <= n with input[z1] = 0
+    and z2 the second element z1 < z2 <= n with input[z2] = 0,
+    (or z2 = n if there is just one zero in input)
 
+    We have three cases.
+
+    k > z1:
+    Looking at (2), we see that dy_j / dx_k = 0, for j >= k, as these terms
+    all include a x_{z1} which is zero. As such, dF / dx_k = 0 in this case
+
+    k < z1:
+    Reasoning as in the previous case, we see that for these elements we have that
+
+    dF / dx_k = sum_{k <= j < z1} grad_output[j] * (dy_j / dx_k)
+
+    as the terms of the sum for j in z1 <= j <= n are all zero
+
+    k = z1:
+    Similar to the case k < z1, we have that
+
+    dF / dx_z1 = sum_{z1 <= j < z2} grad_output[j] * (dy_j / dx_z1)
+
+    This case has a subtlety though. To compute (dy_j / dx_z1), we cannot use the formula
+
+    dy_j / dx_z1 = y_j / x_z1
+
+    as, y_j = x_z1 = 0 for j >= z1. We need to compute it with the formula for its derivative,
+    that is:
+
+    dy_j / dx_z1 = prod(x[:z1]) * (grad_output[z1] + sum(grad_output[z1+1:z2] * cumprod(x[z1+1:z2])))
+
+    When the imputs are complex, this is map is holomorphic. As such, to compute
+    its backwards is just the conjugate of the usual backwards. This simplifies to
+    conjugating the input. We may also reuse the output as, since the map is holomorphic,
+    cumprod(input.conj()) = cumprod(input).conj()
+  */
+
+  if (input.numel() <= 1) {
+    return grad;
+  }
+  dim = at::maybe_wrap_dim(dim, input.dim());
+  const int64_t dim_size = input.size(dim);
+  if (dim_size == 1) {
+    return grad;
+  }
+
+  const auto w = output * grad;
+  const auto is_zero = input == 0;
+  if (!(is_zero.any().item<uint8_t>())) {
+    return reversed_cumsum(w, dim).div(input);
+  }
+
+  // If we are not computing a second order gradient, we can use an
+  // O(n) implementation. The derivative of this implementation is _not_
+  // the second derivative of cumprod. As such, we fallback to a less efficient
+  // O(n^2) implementation when at::GradMode::is_enabled().
+  Tensor grad_input = at::zeros(input.sizes(), grad.options());
+  if (!at::GradMode::is_enabled()) {
+    // n.b. This could probably be implemented much faster with a kernel
+
+    // From here on we need to use some mask gymnastics to
+    // account for the tensorial dimensions
+    // We do a cumsum of the zeros along the dimension.
+    // For a vector is_zero = [False, True, False, True, False]
+    // we would have cumsum = [0, 1, 1, 2, 2]
+    // As such we have (in python code for simplicity)
+    // The mask for the range [0, z1):
+    // cumsum == 0
+    // The indices of the first zero z1 and zeros when
+    // there is no first zero:
+    // indices = (cumsum == 1).max(dim, keepdim=True).indices
+    // The mask for the first zero:
+    // zeros_like(indices).scatter_(dim, indices, 1.) & cumsum == 1
+    // Note that the logic_and with cumsum == 1 accounts
+    // for the case when there is no first zero
+    const auto cumsum = is_zero.cumsum(dim);
+
+    // case k < z1
+    // select everything before the first zero [0, z1)
+    auto mask = cumsum == 0;
+    // equiv to grad_input[mask] = deriv[grad]
+    grad_input.masked_scatter_(mask,
+        reversed_cumsum(w.masked_fill(~mask, 0.), dim).div_(input).masked_select(mask));
+    // select everything from the first zero to the second zero [z1, z2)
+    mask = cumsum == 1;
+
+    // case k = z1
+    // We start by select the first zero [z1]
+    // We locate the indices of the first zero using the max function
+    // We then go from the indices to a mask index_fill_
+    // When there is no zero in the slice, max will return the index 0.
+    // To account for this, we need to do an intersection with mask,
+    // which is true in the range [z1, z2)
+    const auto first_zero_index = std::get<1>(mask.max(dim, /*keepdim*/ true));
+    const auto first_zero_mask = at::zeros_like(mask)
+                                  .scatter_(dim, first_zero_index, /*src*/ 1)
+                                  .logical_and_(mask);
+
+    // select everything between the first zero and the second zero (z1, z2)
+    mask &= ~first_zero_mask;
+    // here we compute
+    // dy_j / dx_z1 = sum(cumprod(input[z1+1:z2] * grad[z1+1:z2])) * prod(output[z1-1])
+    // relu_() necessary as gather does not support negative indices
+    // finally, we do grad_input[z1] = dy_j / dx_z1
+    grad_input.masked_scatter_(first_zero_mask,
+                               input.masked_fill(~mask, 1.).cumprod(dim)
+                                    .mul_(grad.masked_fill(cumsum != 1, 0.))
+                                    .sum(dim, /*keepdim*/true)
+                                    .mul_(at::gather(output, dim, (first_zero_index - 1).relu_())
+                                          .masked_fill_(first_zero_index == 0, 1.))
+                                    .masked_select(first_zero_mask));
+  } else { // GradMode::enabled()
+    /*
     If the input is nonzero, we need to calculate the dy_j / dx_k
     by using the formula (2), called in the code omitted_products.
 
@@ -252,52 +360,36 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
     In order to vectorize this properly, we need to add to
     omitted_products the dimensions where k > j, and therefore
     dy_j / dx_k = 0, which is done right after the assert.
-  */
+    */
 
-  if (input.dim() == 0 || input.numel() == 0) {
-    return grad;
-  }
-  dim = at::maybe_wrap_dim(dim, input.sizes().size());
-  int64_t dim_size = input.size(dim);
-  if (dim_size == 1) {
-    return grad;
-  }
+    auto ones_size = input.sizes().vec();
+    ones_size[dim] = 1;
+    const Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
+    Tensor prods_from_k_plus_1;
+    Tensor omitted_products;
+    for (const auto k : c10::irange(dim_size)) {
+      if (k == 0) {
+        prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
+        omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
+      } else if (k == dim_size - 1) {
+        const Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+        omitted_products = prods_until_k;
+      } else {
+        const Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+        prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
+        omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
+        omitted_products = at::cat({prods_until_k, omitted_products}, dim);
+      }
 
-  // Simple case with nonzero elements in the input
-  if ((input != 0).all().item<uint8_t>()) {
-    Tensor result = at::cumprod(input, dim);
-    return sum_scan_exclusive(result * grad, dim) / input;
-  }
+      // At this point omitted_products is the same size
+      // as input, except on the dimension dim where it's
+      // dim_size - k
+      TORCH_CHECK(omitted_products.size(dim) == dim_size - k);
 
-  auto ones_size = input.sizes().vec();
-  ones_size[dim] = 1;
-  Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
-  Tensor grad_input = at::zeros(input.sizes(), grad.options());
-  Tensor prods_from_k_plus_1;
-  Tensor omitted_products;
-  for (const auto k : c10::irange(dim_size)) {
-    if (k == 0) {
-      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
-      omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
-    } else if (k == dim_size - 1) {
-      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
-      omitted_products = prods_until_k;
-    } else {
-      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
-      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
-      omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
-      omitted_products = at::cat({prods_until_k, omitted_products}, dim);
+      grad_input.select(dim, k).copy_(
+          at::sum(grad.slice(dim, k) * omitted_products,dim));
     }
-
-    // At this point omitted_products is the same size
-    // as input, except on the dimension dim where it's
-    // dim_size - k
-    AT_ASSERT(omitted_products.size(dim) == dim_size - k);
-
-    grad_input.select(dim, k).copy_(
-        at::sum(grad.slice(dim, k) * omitted_products,dim));
   }
-
   return grad_input;
 }
 
@@ -746,7 +838,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool
   return at::logsumexp_out(result, self, dimnames_to_positions(self, dims), keepdim);
 }
 
-static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
+static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scalar>& opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0).to<double>();
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
@@ -773,7 +865,7 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt
   return result;
 }
 
-static inline Tensor _norm(const Tensor &self, Scalar p) {
+static inline Tensor _norm(const Tensor &self, const Scalar& p) {
   if (self.is_sparse()) {
     // Sparse tensors need a different implementation because their values
     // are accessed with a different API than strided tensors
@@ -791,15 +883,15 @@ static inline Tensor _norm(const Tensor &self, Scalar p) {
   }
 }
 
-Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
+Tensor &norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::norm_out(result, self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
 
-Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim) {
+Tensor &norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim) {
   return at::native::norm_out(result, self, p, dim, keepdim, c10::nullopt);
 }
 
-static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim,
+static Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim,
             optional<ScalarType> opt_dtype) {
   if (self.is_sparse()) {
     // Sparse tensors need a different implementation because their values
@@ -811,20 +903,20 @@ static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool
   }
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::norm(self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, ScalarType dtype) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, ScalarType dtype) {
   return at::native::norm(self, p, IntArrayRef{}, false, optional<ScalarType>(dtype));
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim) {
   return at::native::norm(self, p, dim, keepdim, c10::nullopt);
 }
 
 // leave it so we support sparse tensors
-Tensor norm(const Tensor& self, Scalar p) {
+Tensor norm(const Tensor& self, const Scalar& p) {
   return at::native::_norm(self, p);
 }
 
@@ -1310,19 +1402,19 @@ std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim, bool unb
   return at::std_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
-Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {
+Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype) {
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
+Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim) {
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim);
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype) {
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim) {
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim);
 }
 
@@ -1375,7 +1467,7 @@ std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const T
   return at::cummin_out(values, indices, self, dimname_to_position(self, dim));
 }
 
-Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
+Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
 }
 
