@@ -452,7 +452,7 @@ PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, add_uncoalesced_tests=False):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -484,42 +484,48 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
-        # type set to Any and suppressed due to unsupport runtime class:
-        # https://github.com/python/mypy/wiki/Unsupported-Python-Features
-        device_type_test_class: Any = type(class_name, (base, empty_class), {})
 
-        for name in generic_members:
-            if name in generic_tests:  # Instantiates test member
-                # Requires tests be a function for Python2 compat
-                # (In Python2 tests are type checked methods wrapping functions)
-                test = getattr(generic_test_class, name)
-                if hasattr(test, '__func__'):
-                    test = test.__func__
-                assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
+        for is_uncoalesced in set([add_uncoalesced_tests, False]):
+            class_name += ('Uncoalesced' if is_uncoalesced else '')
+            # type set to Any and suppressed due to unsupport runtime class:
+            # https://github.com/python/mypy/wiki/Unsupported-Python-Features
+            device_type_test_class: Any = type(class_name, (base, empty_class), {})
 
-                # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
-                sig = inspect.signature(device_type_test_class.instantiate_test)
-                if len(sig.parameters) == 3:
-                    # Instantiates the device-specific tests
-                    device_type_test_class.instantiate_test(name, copy.deepcopy(test), generic_cls=generic_test_class)
-                else:
-                    device_type_test_class.instantiate_test(name, copy.deepcopy(test))
-            else:  # Ports non-test member
-                assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
+            for name in generic_members:
+                if name in generic_tests:  # Instantiates test member
+                    # Requires tests be a function for Python2 compat
+                    # (In Python2 tests are type checked methods wrapping functions)
+                    test = getattr(generic_test_class, name)
+                    if hasattr(test, '__func__'):
+                        test = test.__func__
+                    assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
 
-                # Unwraps to functions (when available) for Python2 compat
-                nontest = getattr(generic_test_class, name)
-                if hasattr(nontest, '__func__'):
-                    nontest = nontest.__func__
+                    # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
+                    sig = inspect.signature(device_type_test_class.instantiate_test)
+                    if len(sig.parameters) == 3:
+                        # Instantiates the device-specific tests
+                        device_type_test_class.instantiate_test(name, copy.deepcopy(test), generic_cls=generic_test_class)
+                    else:
+                        device_type_test_class.instantiate_test(name, copy.deepcopy(test))
+                else:  # Ports non-test member
+                    assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
 
-                setattr(device_type_test_class, name, nontest)
+                    # Unwraps to functions (when available) for Python2 compat
+                    nontest = getattr(generic_test_class, name)
+                    if hasattr(nontest, '__func__'):
+                        nontest = nontest.__func__
 
-        # Mimics defining the instantiated class in the caller's file
-        # by setting its module to the given class's and adding
-        # the module to the given scope.
-        # This lets the instantiated class be discovered by unittest.
-        device_type_test_class.__module__ = generic_test_class.__module__
-        scope[class_name] = device_type_test_class
+                    setattr(device_type_test_class, name, nontest)
+
+            attr_name = "is_uncoalesced"
+            setattr(device_type_test_class, attr_name, is_uncoalesced)
+
+            # Mimics defining the instantiated class in the caller's file
+            # by setting its module to the given class's and adding
+            # the module to the given scope.
+            # This lets the instantiated class be discovered by unittest.
+            device_type_test_class.__module__ = generic_test_class.__module__
+            scope[class_name] = device_type_test_class
 
 
 # Category of dtypes to run an OpInfo-based test for

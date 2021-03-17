@@ -14,3 +14,6 @@
 
 #include <TH/generic/THTensorEvenMoreMath.cpp>
 #include <TH/THGenerateBFloat16Type.h>
+
+#include <TH/generic/THTensorEvenMoreMath.cpp>
+#include <TH/THGenerateComplexTypes.h>

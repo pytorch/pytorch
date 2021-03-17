@@ -782,46 +782,6 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, y_grad * grad_output)
         self.assertEqual(z.grad, z_grad * grad_output)
 
-    def test_sparse_backward(self):
-        class FixedGradientFunction(Function):
-            @staticmethod
-            def forward(ctx, x, grad_x):
-                ctx.save_for_backward(grad_x)
-                return x
-
-            @staticmethod
-            def backward(ctx, grad_x):
-                saved_grad_x, = ctx.saved_tensors
-                return saved_grad_x, None
-
-        size = torch.Size([6, 3, 2])
-        i1 = torch.LongTensor([
-            [0, 3, 4],
-            [0, 2, 2],
-        ])
-        v1 = torch.DoubleTensor([[1, 2], [4, 5], [7, 8]])
-        sparse_grad1 = torch.sparse.DoubleTensor(i1, v1, size)
-        i2 = torch.LongTensor([
-            [0, 1, 3, 4],
-            [0, 1, 2, 2],
-        ])
-        v2 = torch.DoubleTensor([[1, 2], [4, 3], [4, 5], [7, 8]])
-        sparse_grad2 = torch.sparse.DoubleTensor(i2, v2, size)
-        dense_grad = torch.rand(size).double()
-        fn = FixedGradientFunction
-
-        # sparse first
-        x = torch.randn(size, requires_grad=True)
-        (fn.apply(x, sparse_grad1) + fn.apply(x, dense_grad) + fn.apply(x, sparse_grad2)).sum().backward()
-        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
-        # dense first
-        x = torch.randn(size, requires_grad=True)
-        (fn.apply(x, dense_grad) + fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
-        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
-        # sparse only
-        x = torch.randn(size, requires_grad=True)
-        (fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
-        self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
     def test_sparse_mm_backward(self):
         size = (3, 3)
@@ -6861,7 +6821,8 @@ class TestAutogradDeviceType(TestCase):
             m = torch.cat((asd, asd))
             m.sum().backward()
 
-    def test_sparse_ctor_getter_backward(self, device):
+    @dtypes(torch.double, torch.cdouble)
+    def test_sparse_ctor_getter_backward(self, device, dtype):
         # See NOTE [ Sparse: autograd and API ] on the expected behavior of this test
         def _test(size, sparse_dim, nnz, device):
             v_size = [nnz] + list(size[sparse_dim:])
@@ -6871,10 +6832,10 @@ class TestAutogradDeviceType(TestCase):
 
             inp = torch.randn(v_size, requires_grad=True)
             other = self.genSparseTensor(size, sparse_dim, nnz, is_uncoalesced=True)[0]
-            other = other.to(device)
+            other = other.to(device, dtype=dtype)
 
             def fn(v):
-                x = torch.sparse_coo_tensor(i, v, size, device=device)
+                x = torch.sparse_coo_tensor(i, v, size, device=device, dtype=dtype)
                 y = (x + other).coalesce()
                 yv = y.values()
                 new_v = yv.tanh()
@@ -6894,6 +6855,49 @@ class TestAutogradDeviceType(TestCase):
             dense_size = [1, 0, 2] if empty_v else [1, 2]
             nnz = 0 if empty_nnz else 5
             _test(sparse_size + dense_size, len(sparse_size), nnz, device)
+
+
+    @dtypes(*torch.testing.floating_and_complex_types())
+    def test_sparse_backward(self, device, dtype):
+        class FixedGradientFunction(Function):
+            @staticmethod
+            def forward(ctx, x, grad_x):
+                ctx.save_for_backward(grad_x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_x):
+                saved_grad_x, = ctx.saved_tensors
+                return saved_grad_x, None
+
+        size = torch.Size([6, 3, 2])
+        i1 = torch.tensor([
+            [0, 3, 4],
+            [0, 2, 2],
+        ], dtype=torch.long)
+        v1 = torch.tensor([[1, 2], [4, 5], [7, 8]], dtype=dtype)
+        sparse_grad1 = torch.sparse_coo_tensor(i1, v1, size, dtype=dtype)
+        i2 = torch.tensor([
+            [0, 1, 3, 4],
+            [0, 1, 2, 2],
+        ], dtype=torch.long)
+        v2 = torch.tensor([[1, 2], [4, 3], [4, 5], [7, 8]], dtype=dtype)
+        sparse_grad2 = torch.sparse_coo_tensor(i2, v2, size, dtype=dtype)
+        dense_grad = torch.rand(size).to(dtype)
+        fn = FixedGradientFunction
+
+        # sparse first
+        x = torch.randn(size, requires_grad=True, dtype=dtype)
+        (fn.apply(x, sparse_grad1) + fn.apply(x, dense_grad) + fn.apply(x, sparse_grad2)).sum().backward()
+        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
+        # dense first
+        x = torch.randn(size, requires_grad=True, dtype=dtype)
+        (fn.apply(x, dense_grad) + fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
+        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
+        # sparse only
+        x = torch.randn(size, requires_grad=True, dtype=dtype)
+        (fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().backward()
+        self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
     # autograd tests via common_method_invocations don't allow input tensors to
     # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when

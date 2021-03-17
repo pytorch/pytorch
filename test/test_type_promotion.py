@@ -518,10 +518,6 @@ class TestTypePromotion(TestCase):
                         v = torch.tensor([2], dtype=dt2, device=device)
                         self.assertRaises(RuntimeError, lambda: torch.tensor([op["compare_op"](u, v)], dtype=torch.bool))
 
-        for dtype in [torch.complex64, torch.complex128]:
-            t = self._get_test_tensor(device, dtype, False)
-            self.assertRaises(RuntimeError, lambda: t.to_sparse())
-
     @float_double_default_dtype
     def test_lt_with_type_promotion(self, device):
         for dt in torch.testing.get_all_math_dtypes(device):
