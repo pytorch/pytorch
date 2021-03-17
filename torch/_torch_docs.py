@@ -7820,7 +7820,8 @@ Returns a new tensor with the signs (definition below) of the elements of :attr:
 
 .. note::
     For complex tensors, this function returns a new tensor whose elements
-    have the same angle as that of the elements of :attr:`input` and absolute value 1.
+    have the same angles as the corresponding elements of :attr:`input`
+    and absolute values (i.e. magnitudes) of one.
 
 """ + r"""
 Args:
