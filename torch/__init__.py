@@ -156,8 +156,8 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     #
     #   1. You're in a build environment (e.g., fbcode) where
     #      libtorch_global_deps is not available, but you still need
-    #      to get mkl to link in with RTLD_GLOBAL or it will just
-    #      not work.
+    #      to get mkl to link in with RTLD_GLOBAL or it won't just work.
+    # 
     #
     #   2. You're trying to run PyTorch under UBSAN and you need
     #      to ensure that only one copy of libtorch is loaded, so
