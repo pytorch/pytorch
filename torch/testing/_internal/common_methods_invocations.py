@@ -1460,8 +1460,9 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
     def _samples_with_alpha_helper(args, alphas, filter_fn=lambda arg_alpha: True):
+        filtered_product = filter(filter_fn, product(args, alphas)) # type: ignore
         return (SampleInput(arg, kwargs=dict(alpha=alpha))
-                for arg, alpha in filter(filter_fn, product(args, alphas)))
+                for arg, alpha in filtered_product)  # type: ignore
 
     int_alpha, float_alpha, complex_alpha = 2, 0.1, 1 + 0.6j
 
@@ -1516,7 +1517,7 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
             # Non-Complex Alpha
             return True
 
-        samples += tuple(_samples_with_alpha_helper(scalar_args, alphas, filter_fn=filter_fn))
+        samples += tuple(_samples_with_alpha_helper(scalar_args, alphas, filter_fn=filter_fn))  # type: ignore
     else:
         raise Exception("Invalid variant!")
 
