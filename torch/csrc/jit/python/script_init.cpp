@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/python/script_init.h>
+#include "jit/api/object.h"
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/api/module.h>
@@ -927,8 +928,17 @@ void initJitScriptBindings(PyObject* module) {
                 throw std::runtime_error(err.str());
               }));
 
-  // Special case __str__ to make sure we can print Objects/Modules regardless
-  // of if the user defined a __str__
+  py::class_<Object::Property>(m, "ScriptObjectProperty")
+      .def("name", [](const Object::Property& self) { return self.name; })
+      .def(
+          "getter",
+          [](const Object::Property& self) { return self.getter_func; })
+      .def("setter", [](const Object::Property& self) {
+        return self.setter_func;
+      });
+
+  // Special case __str__ to make sure we can print Objects/Modules
+  // regardless of if the user defined a __str__
   using MagicMethodImplType = std::function<py::object(
       const Object& self, py::args args, py::kwargs kwargs)>;
   std::unordered_map<std::string, MagicMethodImplType> special_magic_methods{

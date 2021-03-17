@@ -109,7 +109,6 @@ struct TORCH_API Object {
     });
   }
 
-<<<<<<< HEAD
   bool has_property(const std::string& name) const {
     for (const auto& prop : type()->properties()) {
       if (prop.name == name) {
@@ -138,7 +137,7 @@ struct TORCH_API Object {
       if (prop.setter) {
         setter = Method(_ivalue(), prop.setter);
       }
-      return Property{prop.name, Method(_ivalue(), prop.getter), setter}
+      return Property{prop.name, Method(_ivalue(), prop.getter), setter};
     });
   }
 

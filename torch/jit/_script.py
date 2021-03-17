@@ -281,7 +281,7 @@ if _enabled:
             self._c = cpp_class
 
             # Add wrapped object's properties to this class instance.
-            self._props = {prop[0]: property(prop[1], prop[2]) for prop in self._c._properties()}
+            self._props = {prop.name(): property(prop.getter(), prop.setter()) for prop in self._c._properties()}
 
             self.__dict__["_initializing"] = False
 
