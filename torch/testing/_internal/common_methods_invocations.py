@@ -2676,30 +2676,24 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.bfloat16])),
                    safe_casts_outputs=True,
                    handles_complex_extremals=False),
-<<<<<<< HEAD
     UnaryUfuncInfo('square',
                    ref=np.square,
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
+
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/52549
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 dtypes=[torch.cfloat, torch.cdouble]),
                        # Reference: https://github.com/pytorch/pytorch/pull/52551#issuecomment-782596181
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                 device_type='cuda', dtypes=[torch.bfloat16]),
-                       # Following error in Windows CI
-                       # File "test_unary_ufuncs.py", line 289, in test_reference_numerics
-                       #  if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
-                       # KeyError: <class 'numpy.intc'>
-                       # Note: numpy.intc is platform defined int.
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.int],
-                                active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                device_type='cuda', dtypes=[torch.bfloat16]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                device_type='cuda', dtypes=[torch.bfloat16]),
                    ),
-                   decorators=(precisionOverride({torch.bfloat16: 7e-2}),)),
-=======
     OpInfo('lerp',
            dtypes=floating_and_complex_types(),
            # Reference: https://github.com/pytorch/pytorch/issues/54048
@@ -2715,7 +2709,6 @@ op_db: List[OpInfo] = [
                SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
            ),
            assert_autodiffed=True),
->>>>>>> 0c8f16622bf6f410b67adec08c15692d5c404225
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
            op=torch.linalg.inv,
