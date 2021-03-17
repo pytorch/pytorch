@@ -1052,7 +1052,7 @@ struct CodeImpl {
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code& code, TaskLauncher taskLauncher)
       : taskLauncher_(std::move(taskLauncher)) {
-    enterFrame(code, 0);
+    enterFrame(code, 0, 0);
   }
 
  private:
@@ -1070,6 +1070,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     std::unordered_set<int32_t> warned_nodes_;
   };
 
+  // program counter corresponds to the index
+  // of the currently executed instruction in frames.back().
+  size_t pc = 0;
   WarnedNodes warned_nodes_;
 
   // if we need to suspend, where do we reset the stack?
@@ -1094,16 +1097,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   std::vector<IValue> entered_objects;
 
   // A Frame captures function's state
-  // (e.g. `pc` and `base_pointer`)
+  // (e.g. `base_pointer`)
   // Each Frame corresponds to a call to a `Frame::function`
   // which has not yet returned
   // The arguments for `Frame::function`
   // are located at [base_pointer + arg_number]
   struct Frame {
     std::shared_ptr<CodeImpl> function;
-    // program counter corresponds to the index
-    // of the currently executed instruction
-    size_t pc;
+    // PC in the calling function to return to.
+    size_t return_pc;
     // marks the start index of the frame
     // base_pointer is used by TAIL_CALL
     // to replace the current frame
@@ -1128,13 +1130,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     return c10::intrusive_ptr<InterpreterStateImpl>::reclaim(this);
   }
 
-  void enterFrame(const Code& code, size_t base_pointer) {
-    frames.emplace_back(Frame{code.pImpl, 0, base_pointer, c10::nullopt});
+  void enterFrame(const Code& code, size_t return_pc, size_t base_pointer) {
+    frames.emplace_back(
+        Frame{code.pImpl, return_pc, base_pointer, c10::nullopt});
+    pc = 0;
     registers.resize(registers.size() + code.pImpl->register_size_);
   }
 
   void leaveFrame() {
     registers.resize(registers.size() - frames.back().function->register_size_);
+    pc = frames.back().return_pc;
     frames.pop_back();
   }
 
@@ -1159,7 +1164,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     // get the results from that C++ method back in the stack. Advance
     // the PC by 1 without adding any new frame.
     fn->run(stack);
-    ++frames.back().pc;
+    ++pc;
   }
 
   void runGraphFunction(Stack& stack, Function* fn) {
@@ -1174,8 +1179,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         fn->get_executor()
             .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
             .code;
-    ++frames.back().pc;
-    enterFrame(code, stack.size() - code.num_inputs());
+    enterFrame(code, pc + 1, stack.size() - code.num_inputs());
     checkAndStartRecordFunction(frames.back(), stack);
   }
 
@@ -1193,21 +1197,21 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
 
     TLSCurrentInterpreterGuard g(this);
-    if (frames.back().pc == 0 && stack_start_ == 0) {
+    if (pc == 0 && stack_start_ == 0) {
       checkAndStartRecordFunction(frames.back(), stack);
     }
     try {
       while (true) {
         Frame& frame = frames.back();
         // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, frame.pc);
-        Instruction inst = frame.function->instructions_[frame.pc];
+        // frames.back().function->dump(std::cout, pc);
+        Instruction inst = frame.function->instructions_[pc];
         switch (inst.op) {
           case ENTER: {
             const auto& obj = peek(stack, 0, 1);
             TORCH_INTERNAL_ASSERT(obj.isObject());
             entered_objects.push_back(obj);
-            ++frame.pc;
+            ++pc;
           } break;
           case EXIT: {
             auto obj = entered_objects.back().toObject();
@@ -1221,60 +1225,60 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case OP:
             frame.function->operator_table_[inst.X](&stack);
-            ++frame.pc;
+            ++pc;
             break;
           case OPN:
             stack.push_back(inst.N);
             frame.function->operator_table_[inst.X](&stack);
-            ++frame.pc;
+            ++pc;
             break;
           case LOAD:
             stack.emplace_back(reg(inst.X));
-            ++frame.pc;
+            ++pc;
             break;
           case MOVE:
             stack.emplace_back(std::move(reg(inst.X)));
-            ++frame.pc;
+            ++pc;
             break;
           case STORE:
             reg(inst.X) = pop(stack);
-            ++frame.pc;
+            ++pc;
             break;
           case STOREN:
             for (size_t i = inst.N; i > 0; --i) {
               reg(inst.X + i - 1) = pop(stack);
             }
-            ++frame.pc;
+            ++pc;
             break;
           case DROP:
             pop(stack);
-            ++frame.pc;
+            ++pc;
             break;
           case DROPR:
             reg(inst.X) = IValue();
-            ++frame.pc;
+            ++pc;
             break;
           case LOADC:
             stack.emplace_back(frame.function->constant_table_[inst.X]);
-            ++frame.pc;
+            ++pc;
             break;
           case GET_ATTR: {
             auto userObj = pop(stack).toObject();
             auto value = userObj->getSlot(inst.X);
             push(stack, std::move(value));
-            ++frame.pc;
+            ++pc;
           } break;
           case SET_ATTR: {
             auto v = pop(stack);
             auto userObj = pop(stack).toObject();
             userObj->setSlot(inst.X, std::move(v));
-            ++frame.pc;
+            ++pc;
           } break;
           case JF:
-            frame.pc += (pop(stack).toBool()) ? 1 : inst.X;
+            pc += (pop(stack).toBool()) ? 1 : inst.X;
             break;
           case JMP:
-            frame.pc += inst.X;
+            pc += inst.X;
             break;
           case LOOP: {
             // stack: iteration_count, max_iter, cond, loop_carried_deps...
@@ -1285,14 +1289,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             if (trip_count < max_trip_count && cond) {
               fr[2] = trip_count;
               fr[0] = trip_count + 1;
-              ++frame.pc;
+              ++pc;
             } else {
               size_t n_loop_carried = inst.N - 2;
               for (size_t i = 0; i < n_loop_carried; ++i) {
                 fr[i] = std::move(fr[i + 3]);
               }
               drop(stack, 3); // iteration_count, max_iter, cond
-              frame.pc += inst.X;
+              pc += inst.X;
             }
           } break;
           case CALL: {
@@ -1400,7 +1404,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             }
             stack.pop_back();
             stack.emplace_back(future->value());
-            ++frame.pc;
+            ++pc;
           } break;
           case PROFILE_OP: {
             auto& frame_id_ref = frame.id;
@@ -1411,16 +1415,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 frame.function->profile_function_table_[inst.X];
             push(stack, c10::IValue{static_cast<int64_t>(*frame_id_ref)});
             callback(stack);
-            ++frame.pc;
+            ++pc;
             break;
           }
           case FAIL_GUARD: {
             // patch FAIL_GUARD back to GUARD
             GRAPH_DEBUG(
                 "Bailout ", inst.X, " triggered via bailout_requests_!");
-            frame.function->instructions_[frame.pc].op = GUARD;
+            frame.function->instructions_[pc].op = GUARD;
             push(stack, false);
-            ++frame.pc;
+            ++pc;
             break;
           }
           case TYPECHECK: {
@@ -1440,7 +1444,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             if (i == num_inputs) {
               push(stack, true);
             }
-            ++frame.pc;
+            ++pc;
             break;
           }
           case GUARD: {
@@ -1461,7 +1465,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 push(stack, expected_type->matchTensor(t));
               }
             }
-            ++frame.pc;
+            ++pc;
           } break;
           case TAIL_CALL: {
             GRAPH_DEBUG("running TAIL_CALL for ", inst.X);
@@ -1484,52 +1488,52 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             }
             stack.resize(base_pointer + num_inputs);
             leaveFrame();
-            enterFrame(code, base_pointer);
+            enterFrame(code, pc, base_pointer);
             checkAndStartRecordFunction(frames.back(), stack);
           } break;
           case LIST_UNPACK: {
             listUnpack(stack, inst.X);
-            ++frame.pc;
+            ++pc;
           } break;
           case TUPLE_CONSTRUCT: {
             tupleConstruct(stack, inst.X);
-            ++frame.pc;
+            ++pc;
           } break;
           case TUPLE_SLICE: {
             tupleSlice(stack, inst.X, inst.X + inst.N);
-            ++frame.pc;
+            ++pc;
           } break;
           case NAMED_TUPLE_CONSTRUCT: {
             namedTupleConstruct(
                 stack,
                 frame.function->type_table_[inst.X]->expect<TupleType>(),
                 inst.N);
-            ++frame.pc;
+            ++pc;
           } break;
           case LIST_CONSTRUCT: {
             const auto& type =
                 frame.function->type_table_[inst.X]->expectRef<ListType>();
             listConstruct(stack, type, inst.N);
-            ++frame.pc;
+            ++pc;
           } break;
           case DICT_CONSTRUCT: {
             const auto& type =
                 frame.function->type_table_[inst.X]->expectRef<DictType>();
             dictConstruct(stack, type, inst.N);
-            ++frame.pc;
+            ++pc;
           } break;
           case CREATE_OBJECT: {
             auto type =
                 frame.function->type_table_[inst.X]->expect<ClassType>();
             createObject(stack, type);
-            ++frame.pc;
+            ++pc;
           } break;
           case ISINSTANCE: {
             at::ArrayRef<TypePtr> types(
                 &(frame.function->type_table_[inst.X]),
                 &(frame.function->type_table_[inst.X + inst.N]));
             isinstance(stack, types);
-            ++frame.pc;
+            ++pc;
           } break;
           case FORK: {
             // Move inputs to a separate stack
@@ -1546,7 +1550,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             taskLauncher_(std::move(continuation));
-            ++frame.pc;
+            ++pc;
           } break;
           case WARN: {
             // Keeps track of which WARN instruction has been executed before,
@@ -1557,8 +1561,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               need_warn = warned_nodes_.insert(inst.X);
             }
 
-            Node* node =
-                frames.back().function->instructions_source_.at(frame.pc);
+            Node* node = frames.back().function->instructions_source_.at(pc);
             auto range = node->sourceRange().source();
             if (range->filename()) {
               drop(stack, 1);
@@ -1579,7 +1582,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 TORCH_WARN(msg);
               }
             }
-            ++frame.pc;
+            ++pc;
           } break;
         }
       }
@@ -1651,9 +1654,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     for (size_t i = 0; i < frames.size(); ++i) {
       const Frame& frame = frames[i];
       std::string previous_fn_name = frame.function->function_name_;
-      size_t pc = frame.pc;
-      // CALL nodes have already advanced the pc, so
-      // undo that to report the call node
+      size_t pc = (i + 1 < frames.size())
+          // CALL nodes have already advanced the pc, so
+          // undo that to report the call node
+          ? frames[i + 1].return_pc - 1
+          : this->pc;
       if (i + 1 < frames.size()) {
         --pc;
       }
