@@ -61,6 +61,7 @@ jobs:
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_LOG=debug \
             -e TORCH_CUDA_ARCH_LIST \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -75,7 +76,7 @@ jobs:
       - name: Clean up docker images
         if: always()
         run: |
-          cat ${GITHUB_WORKSPACE}/sccache
+          cat ${GITHUB_WORKSPACE}/sccache*
           # Prune all of the docker images
           docker system prune -af
   # TODO: Add test step here
