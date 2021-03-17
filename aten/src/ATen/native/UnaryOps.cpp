@@ -133,12 +133,6 @@ Tensor& arccos_out(const Tensor& self, Tensor& result) { return at::acos_out(res
 Tensor arccos(const Tensor& self) { return self.acos(); }
 Tensor& arccos_(Tensor& self) { return self.acos_(); }
 
-static Tensor wrapped_scalar_tensor(const Scalar& scalar) {
-  auto tensor = scalar_to_tensor(scalar);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
 Tensor& rad2deg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "rad2deg is not supported for complex tensors.");
   constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;

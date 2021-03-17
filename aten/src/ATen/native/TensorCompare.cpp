@@ -217,26 +217,21 @@ at::Tensor scalar_to_tensor_default_dtype(
   }
 }
 
-// TLDR: Don't call with `use_default_dtype` true -- this is only necessary to support the partial
+// TLDR: Don't call `wrapped_scalar_tensor_default_dtype` -- this function is only necessary to support the partial
 // type-promotion that torch.where supports.  Once torch.where fully supports type promotion, we
 // won't need this function.
 //
 // Longer explanation:
-// `use_default_dtype` is a bit of a hack because torch.where doesn't support type promotion, but
+// `wrapped_scalar_tensor_default_dtype` is a bit of a hack because torch.where doesn't support type promotion, but
 // does support `torch.where(tensor, scalar1, scalar2)` with default scalar types.  The trickiness is we
 // usually convert double scalars to doubles, and `set_wrapped_number` defines type promotion priority
 // as being below tensor types rather than as the default dtype (perhaps we should?).  This wouldn't matter
 // if we just supported type normal type promotion on torch.where, however.
-Tensor wrapped_scalar_tensor(
+Tensor wrapped_scalar_tensor_default_dtype(
     const Scalar& scalar,
-    Device device,
-    bool use_default_dtype = false) {
+    Device device) {
   at::Tensor tensor;
-  if (use_default_dtype) {
-    tensor = scalar_to_tensor_default_dtype(scalar, device);
-  } else {
-    tensor = scalar_to_tensor(scalar, device);
-  }
+  tensor = scalar_to_tensor_default_dtype(scalar, device);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
@@ -266,8 +261,8 @@ Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
 
 Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
   const auto device = condition.device();
-  const Tensor& other_t = wrapped_scalar_tensor(other, device, /*use_default_dtype=*/true);
-  const Tensor& self_t = wrapped_scalar_tensor(self, device, /*use_default_dtype=*/true);
+  const Tensor& other_t = wrapped_scalar_tensor_default_dtype(other, device);
+  const Tensor& self_t = wrapped_scalar_tensor_default_dtype(self, device);
   return at::where(condition, self_t, other_t);
 }
 

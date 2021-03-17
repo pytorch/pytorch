@@ -47,12 +47,6 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // mul(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
-static Tensor wrapped_scalar_tensor(const Scalar& s) {
-  auto tensor = scalar_to_tensor(s);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
 SparseTensor& mul_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());

@@ -118,12 +118,6 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
-static Tensor wrapped_scalar_tensor(const Scalar& scalar) {
-  auto tensor = scalar_to_tensor(scalar);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
 Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
   if (!at::isComplexType(self_st) && gradient_result.is_complex()) {
     // R -> C
@@ -344,12 +338,12 @@ Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
 
 Tensor rad2deg_backward(const Tensor& grad) {
   constexpr double M_180_PI = 57.295779513082320876798154814105170332405472466564;
-  return at::mul(grad, wrapped_scalar_tensor(Scalar(M_180_PI)));
+  return at::mul(grad, at::native::wrapped_scalar_tensor(Scalar(M_180_PI)));
 }
 
 Tensor deg2rad_backward(const Tensor& grad) {
   constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
-  return at::mul(grad, wrapped_scalar_tensor(Scalar(M_PI_180)));
+  return at::mul(grad, at::native::wrapped_scalar_tensor(Scalar(M_PI_180)));
 }
 
 Tensor unsqueeze_multiple(const Tensor & t, IntArrayRef dim, size_t n_dims) {
