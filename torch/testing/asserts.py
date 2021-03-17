@@ -75,6 +75,17 @@ def _assert_are_tensors(a: Any, b: Any) -> None:
 
 
 def _check_supported(a: torch.Tensor, b: torch.Tensor) -> None:
+    """Checks if the tensors are supported by the current infrastructure.
+
+    All checks are temporary and will be relaxed in the future.
+
+    Args:
+        a (torch.Tensor): First tensor.
+        b (torch.Tensor): Second tensor.
+
+    Raises:
+        UsageError: If :attr:`a` or :attr:`b` is complex, quantized, or sparse.
+    """
     if any(t.dtype in (torch.complex32, torch.complex64, torch.complex128) for t in (a, b)):
         raise UsageError("Comparison for complex tensors is not supported yet.")
     if any(t.is_quantized for t in (a, b)):
