@@ -2692,7 +2692,7 @@ op_db: List[OpInfo] = [
                                 device_type='cuda', dtypes=[torch.bfloat16]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cuda', dtypes=[torch.bfloat16]),
-                   ),
+                   ),),
     OpInfo('lerp',
            dtypes=floating_and_complex_types(),
            # Reference: https://github.com/pytorch/pytorch/issues/54048
