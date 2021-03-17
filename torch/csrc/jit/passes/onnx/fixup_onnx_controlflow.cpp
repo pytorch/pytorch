@@ -347,8 +347,8 @@ void ONNXFixupUninitializedOutput(Node* node) {
     auto else_tensor_type =
         else_block->outputs().at(i)->type()->castRaw<TensorType>();
     if (then_tensor_type && else_tensor_type) {
-      const auto then_shape = then_tensor_type->symbolic_sizes();
-      const auto else_shape = else_tensor_type->symbolic_sizes();
+      const auto& then_shape = then_tensor_type->symbolic_sizes();
+      const auto& else_shape = else_tensor_type->symbolic_sizes();
       std::vector<::c10::ShapeSymbol> dims;
       if (then_shape.rank() && else_shape.rank()) {
         TORCH_CHECK(
