@@ -76,8 +76,8 @@ integer_range<Integer> irange_torch(Integer end) {
     return {Integer(), std::max(Integer(), end)};
 }
 
-template <typename Integer, typename std::enable_if<std::is_integral<Integer>::value, T>::type* = nullptr>
-integer_range do_stuff(Integer& t) {
+template <typename Integer, typename std::enable_if<std::is_integral<Integer>::value, Integer>::type* = nullptr>
+integer_range<Integer> do_stuff(Integer t) {
   return {Integer(), std::max(Integer(), t)};
 }
 
