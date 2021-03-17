@@ -38,7 +38,7 @@ import json
 from urllib.request import urlopen
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Tuple
+from typing import cast, Any, Dict, Iterable, Iterator, Optional
 
 from torch.testing._internal import expecttest
 from torch.testing import \
@@ -816,32 +816,6 @@ def get_comparison_dtype(a, b):
 
     return compare_dtype
 
-
-# Some analysis of tolerance by logging tests from test_torch.py can be found
-# in https://github.com/pytorch/pytorch/pull/32538.
-# dtype name : (rtol, atol)
-DTYPE_PRECISIONS = {
-    torch.float16    : (0.001, 1e-5),
-    torch.bfloat16   : (0.016, 1e-5),
-    torch.float32    : (1.3e-6, 1e-5),
-    torch.float64    : (1e-7, 1e-7),
-    torch.complex32  : (0.001, 1e-5),
-    torch.complex64  : (1.3e-6, 1e-5),
-    torch.complex128 : (1e-7, 1e-7),
-}
-
-
-# Returns the "default" rtol and atol for comparing scalars or
-# tensors of the given dtypes.
-def get_default_rtol_and_atol(dtype0: torch.dtype, dtype1: torch.dtype) -> Tuple[float, float]:
-    rtol = max(DTYPE_PRECISIONS.get(dtype0, (0, 0))[0],
-               DTYPE_PRECISIONS.get(dtype1, (0, 0))[0])
-    atol = max(DTYPE_PRECISIONS.get(dtype0, (0, 0))[1],
-               DTYPE_PRECISIONS.get(dtype1, (0, 0))[1])
-
-    return rtol, atol
-
-
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
     # atol values when comparing tensors. Used by @precisionOverride, for
@@ -1004,11 +978,28 @@ class TestCase(expecttest.TestCase):
 
         self.assertEqual(np_result, torch_result, **kwargs)
 
-    # For BC
-    dtype_precisions = DTYPE_PRECISIONS
+    # Some analysis of tolerance by logging tests from test_torch.py can be found
+    # in https://github.com/pytorch/pytorch/pull/32538.
+    # dtype name : (rtol, atol)
+    dtype_precisions = {
+        torch.float16    : (0.001, 1e-5),
+        torch.bfloat16   : (0.016, 1e-5),
+        torch.float32    : (1.3e-6, 1e-5),
+        torch.float64    : (1e-7, 1e-7),
+        torch.complex32  : (0.001, 1e-5),
+        torch.complex64  : (1.3e-6, 1e-5),
+        torch.complex128 : (1e-7, 1e-7),
+    }
 
+    # Returns the "default" rtol and atol for comparing scalars or
+    # tensors of the given dtypes.
     def _getDefaultRtolAndAtol(self, dtype0, dtype1):
-        return get_default_rtol_and_atol(dtype0, dtype1)
+        rtol = max(self.dtype_precisions.get(dtype0, (0, 0))[0],
+                   self.dtype_precisions.get(dtype1, (0, 0))[0])
+        atol = max(self.dtype_precisions.get(dtype0, (0, 0))[1],
+                   self.dtype_precisions.get(dtype1, (0, 0))[1])
+
+        return rtol, atol
 
     # Checks if two dense tensors are equal(-ish), returning (True, None)
     #   when they are and (False, debug_msg) when they are not.
