@@ -242,7 +242,7 @@ struct HelperInterpNearest : public HelperInterpBase<scalar_t> {
     for (int j=0; j<interp_size; j++) {
       output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
       // Defines weights for consistency, but not used
-      output.emplace_back(at::ones({1, }, CPU(c10::CppTypeToScalarType<scalar_t>())));
+      output.emplace_back(at::ones(new_shape, CPU(c10::CppTypeToScalarType<scalar_t>())));
     }
   }
 
