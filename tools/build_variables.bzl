@@ -12,6 +12,8 @@ GENERATED_CPP = [
     "autograd/generated/TraceType_2.cpp",
     "autograd/generated/TraceType_3.cpp",
     "autograd/generated/TraceType_4.cpp",
+    "autograd/generated/InplaceOrViewType_0.cpp",
+    "autograd/generated/InplaceOrViewType_1.cpp",
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
@@ -49,6 +51,8 @@ def libtorch_generated_sources(gencode_pattern):
         "autograd/generated/TraceType_2.cpp",
         "autograd/generated/TraceType_3.cpp",
         "autograd/generated/TraceType_4.cpp",
+        "autograd/generated/InplaceOrViewType_0.cpp",
+        "autograd/generated/InplaceOrViewType_1.cpp",
     ]]
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
@@ -551,6 +555,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
     "torch/csrc/jit/passes/onnx/eval_peephole.cpp",
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
+    "torch/csrc/jit/passes/onnx/constant_map.cpp",
     "torch/csrc/jit/passes/onnx/eliminate_unused_items.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.cpp",
     "torch/csrc/jit/passes/onnx/list_model_parameters.cpp",
@@ -565,6 +570,9 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
     "torch/csrc/jit/python/pybind_utils.cpp",
+    "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp",
+    "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.cpp",
+    "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.cpp",
     "torch/csrc/jit/python/python_arg_flatten.cpp",
     "torch/csrc/jit/python/python_custom_class.cpp",
     "torch/csrc/jit/python/python_interpreter.cpp",
@@ -966,7 +974,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/TH/THTensorMath.cpp",
     "aten/src/TH/THTensorMoreMath.cpp",
     "aten/src/TH/THTensorRandom.cpp",
-    "aten/src/TH/THVector.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",

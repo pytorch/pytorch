@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, Union, Sequence, Set, List, Dict, Tuple
 
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 from tools.codegen.gen import pythonify_default
 from tools.codegen.model import *
 

@@ -1031,6 +1031,11 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad, torch.zeros(2, 2))
 
         reset_grad()
+        torch.autograd.backward(fn(), gradient, inputs=y)
+        self.assertEqual(y.grad, y_grad_expected)
+        self.assertEqual(x.grad, torch.zeros(2, 2))
+
+        reset_grad()
         self.assertRaisesRegex(RuntimeError, 'cannot be empty',
                                lambda: torch.autograd.backward(fn(), gradient, inputs=[]))
 

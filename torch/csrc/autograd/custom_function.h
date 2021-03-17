@@ -196,7 +196,7 @@ inline void extract_vars(std::vector<bool> &is_var, variable_list& list, Args&&.
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, variable_list>::value, T&>::type to_output_type(
+typename std::enable_if<std::is_same<T, variable_list>::value, T>::type to_output_type(
   std::vector<c10::optional<Variable>>& output_list) {
     variable_list result;
     std::transform(output_list.begin(), output_list.end(), std::back_inserter(result),

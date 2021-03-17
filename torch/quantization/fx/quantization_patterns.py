@@ -17,6 +17,7 @@ from ..quantization_mappings import (
 from ..utils import (
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
+    activation_is_int8_quantized,
     weight_is_statically_quantized,
     get_qconfig_dtypes,
 )
@@ -28,6 +29,7 @@ from .pattern_utils import (
 
 from .utils import (
     _parent_name,
+    all_node_args_have_no_tensors,
     quantize_node,
     get_per_tensor_qparams,
     get_linear_prepack_op_for_dtype,
@@ -61,8 +63,8 @@ class QuantizeHandler(ABC):
         # this is an indicator of whether all the inputs are Node or not
         # since some op might be quantized differently depending on whether
         # all inputs are tensors or not, e.g. add/mul
-        self.num_node_args = len(node.args)
-        self.all_node_args = True
+        self.num_tensor_args = len(node.args)
+        self.all_node_args_are_tensors = True
 
     @abstractmethod
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
@@ -72,6 +74,36 @@ class QuantizeHandler(ABC):
         it to the quantized graph
         """
         return NotImplemented
+
+
+# Binary op configs
+
+# Supported combinations are:
+# quant_type | activation (compute_type) | weight
+#  static       quint8                      qint8
+
+# tuple (activation_dtype, weight_dtype, compute_dtype)
+# these are supported types for common binary ops like add/mul etc.
+binary_op_all_dtypes = [
+    (torch.quint8, torch.qint8, None),
+    (torch.float16, torch.float16, None),
+]
+binary_op_float16_dtypes = [
+    (torch.float16, torch.float16, None)
+]
+binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
+    operator.add: binary_op_all_dtypes,
+    torch.add: binary_op_all_dtypes,
+    operator.mul: binary_op_all_dtypes,
+    torch.mul: binary_op_all_dtypes,
+    torch.bmm: binary_op_float16_dtypes,
+    torch.sub: binary_op_float16_dtypes,
+    operator.sub: binary_op_float16_dtypes,
+    torch.div: binary_op_float16_dtypes,
+    operator.truediv: binary_op_float16_dtypes,
+    torch.sum: binary_op_float16_dtypes
+}
+
 
 @register_quant_pattern(operator.add)
 @register_quant_pattern(operator.sub)
@@ -91,7 +123,7 @@ class QuantizeHandler(ABC):
 @register_quant_pattern((torch.nn.functional.relu, operator.mul))
 @register_quant_pattern((torch.nn.functional.relu, torch.add))
 @register_quant_pattern((torch.nn.functional.relu, torch.mul))
-class BinaryOp(QuantizeHandler):
+class BinaryOpQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
         self.relu_node = None
@@ -101,7 +133,17 @@ class BinaryOp(QuantizeHandler):
             node = node.args[0]  # type: ignore
         self.binary_op_node = node
         self.binary_op = node.target
-        self.num_node_args = len([a for a in self.binary_op_node.args[:2] if isinstance(a, Node)])
+
+        # determine how many of the first two args are Tensors (versus scalars)
+        # this distinguishes things like "x + y" from "x + 2" or "2 + x"
+        self.num_tensor_args = 0
+        for arg_idx in range(len(self.binary_op_node.args)):
+            arg = self.binary_op_node.args[arg_idx]
+            if isinstance(arg, Node) and (not all_node_args_have_no_tensors(arg)):
+                self.num_tensor_args += 1
+        self.all_node_args_are_tensors = \
+            (self.num_tensor_args == len(self.binary_op_node.args))
+
         qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
             operator.add: torch.ops.quantized.add,
             torch.add: torch.ops.quantized.add,
@@ -124,40 +166,15 @@ class BinaryOp(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        # Supported combinations are:
-        # quant_type | activation (compute_type) | weight
-        #  static       quint8                      qint8
-
-        # tuple (activation_dtype, weight_dtype, compute_dtype)
-        # these are supported types for common binary ops like add/mul etc.
-        all_bop_dtypes = [
-            (torch.quint8, torch.qint8, None),
-            (torch.float16, torch.float16, None),
-        ]
-        float16_dtypes = [
-            (torch.float16, torch.float16, None)
-        ]
-        supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
-            operator.add: all_bop_dtypes,
-            torch.add: all_bop_dtypes,
-            operator.mul: all_bop_dtypes,
-            torch.mul: all_bop_dtypes,
-            torch.bmm: float16_dtypes,
-            torch.sub: float16_dtypes,
-            operator.sub: float16_dtypes,
-            torch.div: float16_dtypes,
-            operator.truediv: float16_dtypes,
-            torch.sum: float16_dtypes
-        }
 
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         # leave the op unquantized if the dtype combination is not supported
-        if dtypes not in supported_dtypes[self.binary_op]:
+        if dtypes not in binary_op_supported_dtypes[self.binary_op]:
             warnings.warn(
                 "dtype combination: {} is not "
                 "supported by {} "
-                "supported dtype combinations are: {}".format(dtypes, self.binary_op, supported_dtypes[self.binary_op]))
+                "supported dtype combinations are: {}".format(dtypes, self.binary_op, binary_op_supported_dtypes[self.binary_op]))
             if self.relu_node:
                 op_out = quantizer.quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=False))
                 relu_args = [op_out]
@@ -170,9 +187,10 @@ class BinaryOp(QuantizeHandler):
 
         if dtypes in [(torch.quint8, torch.qint8, None)]:
             assert self.quantized_binary_op is not None
-            if self.num_node_args == 1:
+            if self.num_tensor_args == 1:
                 # add/mul scalar
-                if isinstance(self.binary_op_node.args[0], Node):
+                first_arg = self.binary_op_node.args[0]
+                if isinstance(first_arg, Node) and (not all_node_args_have_no_tensors(first_arg)):
                     quantized_index = 0
                 else:
                     quantized_index = 1
@@ -210,11 +228,11 @@ class BinaryOp(QuantizeHandler):
                 return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
 @register_quant_pattern(torch.cat)
-class Cat(QuantizeHandler):
+class CatQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        if not self.all_node_args:
+        if not self.all_node_args_are_tensors:
             return NotImplemented
         activation_post_process = quantizer.activation_post_process_map[node.name]
         scale, zero_point = activation_post_process.calculate_qparams()
@@ -260,7 +278,7 @@ class Cat(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv3d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
-class ConvRelu(QuantizeHandler):
+class ConvReluQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
         self.relu_node = None
@@ -305,7 +323,7 @@ class ConvRelu(QuantizeHandler):
             else:
                 return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
 
-        activation_statically_quantized = activation_is_statically_quantized(qconfig)
+        activation_int8_quantized = activation_is_int8_quantized(qconfig)
 
         if self.conv_node.op == 'call_module':
             # note that relu should already be fused into conv module in the fusion step
@@ -342,7 +360,7 @@ class ConvRelu(QuantizeHandler):
                     op_out = quantizer.quantized_graph.create_node(
                         "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
 
-                if activation_statically_quantized:
+                if activation_int8_quantized:
                     root_module = quantizer.modules['']
                     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
                     act_post_process_node = self.relu_node if self.relu_node else self.conv_node
@@ -363,10 +381,10 @@ class ConvRelu(QuantizeHandler):
                 prepack_op = get_qconv_prepack_op(self.conv)
                 packed_weight = quantizer.quantized_graph.create_node(
                     "call_function", prepack_op, prepack_args, {})
-                assert activation_statically_quantized, \
+                assert activation_int8_quantized, \
                     "currently only static quantization is supported for conv"
                 # construct conv input
-                if activation_statically_quantized:
+                if activation_int8_quantized:
                     qconv_op = get_qconv_op(self.conv, self.relu_node is not None)
                     conv_input = load_arg(quantized=True)(self.conv_node.args[0])
                     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
@@ -444,7 +462,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             else:
                 return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
-        activation_statically_quantized = activation_is_statically_quantized(qconfig)
+        activation_int8_quantized = activation_is_int8_quantized(qconfig)
         weight_dtype = dtypes[1]
         # TODO: reference_model option for linear module
         if self.linear_node.op == 'call_module':
@@ -463,9 +481,9 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 
             # 2. select corresponding quantized linear class for the float linear class
             if type(self.linear) in [torch.nn.Linear, torch.nn.qat.Linear]:
-                qlinear = nnq.Linear if activation_statically_quantized else nnqd.Linear
+                qlinear = nnq.Linear if activation_int8_quantized else nnqd.Linear
             elif type(self.linear) in [torch.nn.intrinsic.LinearReLU, torch.nn.intrinsic.qat.LinearReLU]:
-                assert activation_statically_quantized, \
+                assert activation_int8_quantized, \
                     'Only static quantization is supported for LinearReLU'
                 qlinear = torch.nn.intrinsic.quantized.LinearReLU
             else:
@@ -477,12 +495,12 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             return quantizer.quantized_graph.create_node(
                 'call_module',
                 self.linear_node.target,
-                (load_arg(quantized=activation_statically_quantized)(self.linear_node.args[0]),), {})
+                (load_arg(quantized=activation_int8_quantized)(self.linear_node.args[0]),), {})
         else:  # call_function
             assert self.linear_node.op == 'call_function'
             if is_reference:
                 quantized_input_idxs = []
-                if activation_statically_quantized:
+                if activation_int8_quantized:
                     quantized_input_idxs.append(0)
                 if weight_is_statically_quantized(qconfig):
                     quantized_input_idxs.append(1)
@@ -498,7 +516,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     op_out = quantizer.quantized_graph.create_node(
                         "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
 
-                if activation_statically_quantized:
+                if activation_int8_quantized:
                     # quantize output for statically quantized linear op
                     root_module = quantizer.modules['']
                     act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
@@ -539,7 +557,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     packed_weight = quantizer.quantized_graph.create_node(
                         'call_function', prepack_op, prepack_args, {})
                 # construct linear input
-                if activation_statically_quantized:
+                if activation_int8_quantized:
                     qlinear_op = torch.ops.quantized.linear_relu if self.relu_node else torch.ops.quantized.linear
                     linear_input = load_arg(quantized=True)(self.linear_node.args[0])
                     act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
@@ -591,7 +609,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.BatchNorm3d)
 @register_quant_pattern(torch.nn.intrinsic.BNReLU2d)
 @register_quant_pattern(torch.nn.intrinsic.BNReLU3d)
-class BatchNorm(QuantizeHandler):
+class BatchNormQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
         assert node.op == 'call_module'
@@ -619,7 +637,7 @@ class BatchNorm(QuantizeHandler):
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
 @mark_input_output_not_observed()
-class Embedding(QuantizeHandler):
+class EmbeddingQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
 
@@ -664,7 +682,7 @@ class Embedding(QuantizeHandler):
 @register_quant_pattern(torch.nn.RNNCell)
 @register_quant_pattern(torch.nn.LSTM)
 @mark_input_output_not_observed()
-class RNNDynamic(QuantizeHandler):
+class RNNDynamicQuantizeHandler(QuantizeHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
 
@@ -722,7 +740,7 @@ ARGS_TO_SKIP = {
 @register_quant_pattern(torch.nn.functional.layer_norm)
 @register_quant_pattern(torch.nn.functional.leaky_relu)
 @register_quant_pattern(torch.nn.functional.silu)
-class DefaultNode(QuantizeHandler):
+class DefaultNodeQuantizeHandler(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
     def __init__(self, quantizer: QuantizerCls, node: Node):
@@ -735,7 +753,7 @@ class DefaultNode(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        if not self.all_node_args:
+        if not self.all_node_args_are_tensors:
             return NotImplemented
         assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
             'call_function are handled in DefaultNode'
@@ -822,7 +840,7 @@ class DefaultNode(QuantizeHandler):
 
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
 @register_quant_pattern(torch.nn.functional.elu)
-class ELU(QuantizeHandler):
+class ELUQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -929,7 +947,7 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('unsqueeze')
 @register_quant_pattern('unsqueeze_')
 @register_quant_pattern('view')
-class CopyNode(QuantizeHandler):
+class CopyNodeQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
@@ -941,7 +959,7 @@ class DefaultQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        assert self.all_node_args
+        assert self.all_node_args_are_tensors
         root_module = quantizer.modules['']
         return quantize_node(
             quantizer,
