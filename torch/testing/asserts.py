@@ -190,8 +190,7 @@ def _compare_tensors(
             :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`a` and :attr:`b` do not have the same
             :attr:`~torch.Tensor.dtype`, the comparison :attr:`~torch.Tensor.dtype` is determined by
             :func:`torch.promote_types`.
-        check_stride (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
-            :meth:`~torch.Tensor.stride`.
+        check_stride (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same stride.
 
     Raises:
         AssertionError: If :attr:`a` and :attr:`b` do not have the same :attr:`~torch.Tensor.shape`.
@@ -199,8 +198,7 @@ def _compare_tensors(
             :attr:`~torch.Tensor.device` memory.
         AssertionError: If :attr:`check_dtype`, but :attr:`a` and :attr:`b` do not have the same
             :attr:`~torch.Tensor.dtype`.
-        AssertionError: If :attr:`check_stride`, but :attr:`a` and :attr:`b` do not have the same
-            :meth:`~torch.Tensor.stride`.
+        AssertionError: If :attr:`check_stride`, but :attr:`a` and :attr:`b` do not have the same stride.
         AssertionError: If the values of :attr:`a` and :attr:`b` do not match according to :attr:`values_asserter`.
         UsageError: If :attr:`a` or :attr:`b` is complex, quantized, or sparse. This is a temporary restriction and
             will be relaxed in the future.
@@ -254,8 +252,7 @@ def assert_tensors_equal(
             :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`a` and :attr:`b` do not have the same
             :attr:`~torch.Tensor.dtype`, the comparison :attr:`~torch.Tensor.dtype` is determined by
             :func:`torch.promote_types`.
-        check_stride (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
-            :meth:`~torch.Tensor.stride`.
+        check_stride (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same stride.
 
     Raises:
         AssertionError: If :attr:`a` and :attr:`b` do not have the same :attr:`~torch.Tensor.shape`.
@@ -263,8 +260,7 @@ def assert_tensors_equal(
             :attr:`~torch.Tensor.device` memory.
         AssertionError: If :attr:`check_dtype`, but :attr:`a` and :attr:`b` do not have the same
             :attr:`~torch.Tensor.dtype`.
-        AssertionError: If :attr:`check_stride`, but :attr:`a` and :attr:`b` do not have the same
-            :meth:`~torch.Tensor.stride`.
+        AssertionError: If :attr:`check_stride`, but :attr:`a` and :attr:`b` do not have the same stride.
         AssertionError: If the values of :attr:`a` and :attr:`b` are not bitwise equal.
         UsageError: If :attr:`a` or :attr:`b` is complex, quantized, or sparse. This is a temporary restriction and
             will be relaxed in the future.
@@ -327,8 +323,7 @@ def assert_tensors_allclose(
             :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`a` and :attr:`b` do not have the same
             :attr:`~torch.Tensor.dtype`, the comparison :attr:`~torch.Tensor.dtype` is determined by
             :func:`torch.promote_types`.
-        check_stride (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
-            :meth:`~torch.Tensor.stride`.
+        check_stride (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same stride.
 
     Raises:
         AssertionError: If :attr:`a` and :attr:`b` do not have the same :attr:`~torch.Tensor.shape`.
@@ -336,8 +331,7 @@ def assert_tensors_allclose(
             :attr:`~torch.Tensor.device` memory.
         AssertionError: If :attr:`check_dtype`, but :attr:`a` and :attr:`b` do not have the same
             :attr:`~torch.Tensor.dtype`.
-        AssertionError: If :attr:`check_stride`, but :attr:`a` and :attr:`b` do not have the same
-            :meth:`~torch.Tensor.stride`.
+        AssertionError: If :attr:`check_stride`, but :attr:`a` and :attr:`b` do not have the same stride.
         AssertionError: If the values of :attr:`a` and :attr:`b` are equal up to the desired precision.
         UsageError: If :attr:`a` or :attr:`b` is complex, quantized, or sparse. This is a temporary restriction and
             will be relaxed in the future.
