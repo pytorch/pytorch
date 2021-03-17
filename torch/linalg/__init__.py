@@ -485,8 +485,8 @@ Args:
     input (Tensor): the input matrix of size `(m, n)` or the batch of matrices of size `(*, m, n)`
                     where `*` is one or more batch dimensions.
     tol (float, Tensor, optional): the tolerance value to determine the cutoff for small singular values.
-                                     Must be broadcastable to the singular values of :attr:`input` as returned
-                                     by :func:`torch.svd`. Default is ``None``.
+                                   Must be broadcastable to the singular values of :attr:`input` as returned
+                                   by :func:`torch.svd`. Default is ``None``.
     hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default is ``False``.
 
 Keyword args:
