@@ -192,8 +192,7 @@ THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
   const int L = TH_DESC_BUFF_LEN;
   THDescBuff buf;
   char *str = buf.str;
-  int64_t i;
-  int64_t n = 0;
+  int i, n = 0;
   n += snprintf(str, L-n, "[");
 
   for (i = 0; i < ndim; i++) {

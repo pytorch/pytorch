@@ -83,10 +83,10 @@ void quantize_and_compress__avx2(
   uint8_t max_q = (1 << bitwidth) - 1;
   uint64_t bit_start = 0;
   if (random) {
-    for (uint64_t start = 0; start < input_size; start += segment_size) {
+    for (int start = 0; start < input_size; start += segment_size) {
       uint64_t stride = start + segment_size <= input_size ? segment_size
                                                            : input_size - start;
-      uint64_t i = 0;
+      int i = 0;
       constexpr int VLEN = 8;
       for (; i < stride / VLEN * VLEN; i += VLEN) {
         __m256 r_v = _mm256_loadu_ps(&random_buffer[start + i]);
@@ -125,10 +125,10 @@ void quantize_and_compress__avx2(
     }
   } else {
     // !random
-    for (uint64_t start = 0; start < input_size; start += segment_size) {
+    for (int start = 0; start < input_size; start += segment_size) {
       uint64_t stride = start + segment_size <= input_size ? segment_size
                                                            : input_size - start;
-      uint64_t i = 0;
+      int i = 0;
       constexpr int VLEN = 8;
       for (; i < stride / VLEN * VLEN; i += VLEN) {
         __m256 fval_v = _mm256_loadu_ps(input_data + start + i);
@@ -186,11 +186,11 @@ void decompress_and_dequantize__avx2(
   // decoding
   uint64_t bit_start = 0;
   const uint64_t segment_size = input_size - 10;
-  for (uint64_t start = 0; start < output_size; start += segment_size) {
+  for (int start = 0; start < output_size; start += segment_size) {
     uint64_t stride = start + segment_size <= output_size ? segment_size
                                                           : output_size - start;
     uint8_t mask = (1 << bitwidth) - 1;
-    uint64_t i = 0;
+    int i = 0;
     // Can process 8 elements at a time because we need to expand uint8_t
     // to int32_t to use epi32 vector instructions.
     constexpr int VLEN = 8;

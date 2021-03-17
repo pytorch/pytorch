@@ -1406,7 +1406,7 @@ bool DimCounter::is_done() const {
 
 void DimCounter::increment(const std::array<int64_t, 2>& step) {
   offset += step[0] * step[1];
-  int64_t ndim = values.size();
+  int ndim = values.size();
   int64_t overflow = step[0];
   int64_t i = 0;
   if (step[1] != 1) {

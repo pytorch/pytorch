@@ -300,7 +300,7 @@ void slow_conv_transpose3d_out_cpu_template(
         Tensor input_n;
         Tensor output_n;
 
-        int64_t elt;
+        int elt;
         // For each elt in batch, do:
         for (elt = 0; elt < batch_size; ++elt) {
           // Matrix mulitply per output:
@@ -524,7 +524,7 @@ void slow_conv_transpose3d_backward_out_cpu_template(
         Tensor grad_input_n;
         Tensor grad_output_n;
 
-        int64_t elt;
+        int elt;
         // For each elt in batch, do:
         for (elt = 0; elt < batch_size; ++elt) {
           // Matrix mulitply per sample:
@@ -750,7 +750,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
 
         scalar_t scale = static_cast<scalar_t>(scale_);
 
-        int64_t elt;
+        int elt;
         // For each elt in batch, do:
         for (elt = 0; elt < batch_size; ++elt) {
           // Matrix mulitply per output:

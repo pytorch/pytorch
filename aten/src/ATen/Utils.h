@@ -9,7 +9,6 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <sstream>
@@ -52,7 +51,7 @@ static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const 
 static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef<Tensor> tensors, const char * name, int pos, DeviceType device_type, ScalarType scalar_type) {
   std::vector<TensorImpl*> unwrapped;
   unwrapped.reserve(tensors.size());
-  for (const auto i : c10::irange(tensors.size())) {
+  for (unsigned int i = 0; i < tensors.size(); ++i) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {
       AT_ERROR("Expected dense tensor but got ", expr.layout(),
