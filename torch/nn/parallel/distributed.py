@@ -438,7 +438,6 @@ class DistributedDataParallel(Module):
                 "The `check_reduction` argument in `DistributedDataParallel` "
                 "module is deprecated. Please avoid using it."
             )
-            pass
 
         # Check that a module does not have Uninitialized parameters
         for param in module.parameters():
