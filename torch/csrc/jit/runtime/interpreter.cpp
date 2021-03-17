@@ -1052,7 +1052,7 @@ struct CodeImpl {
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code& code, TaskLauncher taskLauncher)
       : taskLauncher_(std::move(taskLauncher)) {
-    enterFrame(code, 0, 0);
+    saved_pc_ = enterFrame(code, 0, 0);
   }
 
  private:
@@ -1070,9 +1070,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     std::unordered_set<int32_t> warned_nodes_;
   };
 
-  // program counter corresponds to the index
-  // of the currently executed instruction in frames.back().
-  size_t pc = 0;
+  size_t saved_pc_;
   WarnedNodes warned_nodes_;
 
   // if we need to suspend, where do we reset the stack?
@@ -1130,17 +1128,21 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     return c10::intrusive_ptr<InterpreterStateImpl>::reclaim(this);
   }
 
-  void enterFrame(const Code& code, size_t return_pc, size_t base_pointer) {
+  // Returns the new pc.
+  C10_NODISCARD size_t
+  enterFrame(const Code& code, size_t return_pc, size_t base_pointer) {
     frames.emplace_back(
         Frame{code.pImpl, return_pc, base_pointer, c10::nullopt});
-    pc = 0;
     registers.resize(registers.size() + code.pImpl->register_size_);
+    return 0;
   }
 
-  void leaveFrame() {
+  // Returns the new pc.
+  C10_NODISCARD size_t leaveFrame() {
     registers.resize(registers.size() - frames.back().function->register_size_);
-    pc = frames.back().return_pc;
+    auto pc = frames.back().return_pc;
     frames.pop_back();
+    return pc;
   }
 
   // relative to the end of the register list so that when we call
@@ -1158,16 +1160,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
   }
 
-  void runBuiltinFunction(Stack& stack, Function* fn) {
-    // BuiltinOpFunction directly invokes a void(Stack&) to implement
-    // custom C++ classes. Call run() here with the stack, and we will
-    // get the results from that C++ method back in the stack. Advance
-    // the PC by 1 without adding any new frame.
-    fn->run(stack);
-    ++pc;
-  }
+  // BuiltinOpFunction directly invokes a void(Stack&) to implement
+  // custom C++ classes. Call run() here with the stack, and we will
+  // get the results from that C++ method back in the stack. Advance
+  // the PC by 1 without adding any new frame.
+#define RUN_BUILTIN_FUNCTION(stack, fn) \
+  (fn).run(stack);                      \
+  ++pc;
 
-  void runGraphFunction(Stack& stack, Function* fn) {
+  // Returns the new pc.
+  C10_NODISCARD size_t
+  runGraphFunction(Stack& stack, Function* fn, size_t current_pc) {
     const Code& code =
         // consider passing
         // `frames.back().function->remaining_bailout_depth_` into
@@ -1179,8 +1182,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         fn->get_executor()
             .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
             .code;
-    enterFrame(code, pc + 1, stack.size() - code.num_inputs());
+    auto pc =
+        enterFrame(code, current_pc + 1, stack.size() - code.num_inputs());
     checkAndStartRecordFunction(frames.back(), stack);
+    return pc;
   }
 
   bool runImpl(Stack& stack) {
@@ -1196,10 +1201,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       stack_start_ = 0;
     }
 
+    // We put pc in a local so that (hopefully) it can live in a
+    // register.
+    // program counter corresponds to the index
+    // of the currently executed instruction in frames.back().
+    size_t pc = saved_pc_;
+
     TLSCurrentInterpreterGuard g(this);
     if (pc == 0 && stack_start_ == 0) {
       checkAndStartRecordFunction(frames.back(), stack);
     }
+
     try {
       while (true) {
         Frame& frame = frames.back();
@@ -1221,7 +1233,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             push(stack, IValue());
             push(stack, IValue());
             push(stack, IValue());
-            runGraphFunction(stack, &f);
+            pc = runGraphFunction(stack, &f, pc);
           } break;
           case OP:
             frame.function->operator_table_[inst.X](&stack);
@@ -1302,9 +1314,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case CALL: {
             Function* fn = frame.function->function_table_[inst.X];
             if (!fn->isGraphFunction()) {
-              runBuiltinFunction(stack, fn);
+              RUN_BUILTIN_FUNCTION(stack, *fn);
+              ++pc;
             } else {
-              runGraphFunction(stack, fn);
+              pc = runGraphFunction(stack, fn, pc);
             }
           } break;
           case INTERFACE_CALL: {
@@ -1327,14 +1340,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     ->getMethod(
                         frame.function->constant_table_[inst.X].toStringRef());
             if (!function.isGraphFunction()) {
-              runBuiltinFunction(stack, &function);
+              RUN_BUILTIN_FUNCTION(stack, function);
             } else {
-              runGraphFunction(stack, &function);
+              pc = runGraphFunction(stack, &function, pc);
             }
           } break;
           case RET:
             if (frames.size() > 1) {
-              leaveFrame();
+              pc = leaveFrame();
               break;
             }
             if (future_) {
@@ -1347,7 +1360,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               }
             }
             // destroy the last frame and call RecordFunction's end callbacks
-            leaveFrame();
+            pc = leaveFrame();
             return false;
           case WAIT: {
             auto future = stack.back().toFuture();
@@ -1400,6 +1413,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               future->addCallback(
                   Callback(intrusive_from_this(), std::move(copied)));
 
+              saved_pc_ = pc;
               return true;
             }
             stack.pop_back();
@@ -1487,8 +1501,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   std::move(stack.at(inputs_start + i));
             }
             stack.resize(base_pointer + num_inputs);
-            leaveFrame();
-            enterFrame(code, pc, base_pointer);
+            pc = leaveFrame();
+            pc = enterFrame(code, pc, base_pointer);
             checkAndStartRecordFunction(frames.back(), stack);
           } break;
           case LIST_UNPACK: {
@@ -1607,6 +1621,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       }
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
       handleError(ExceptionMessage(e), is_jit_exception);
+      saved_pc_ = pc;
       return false;
     }
   }
@@ -1658,7 +1673,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           // CALL nodes have already advanced the pc, so
           // undo that to report the call node
           ? frames[i + 1].return_pc - 1
-          : this->pc;
+          : this->saved_pc_;
       if (i + 1 < frames.size()) {
         --pc;
       }
