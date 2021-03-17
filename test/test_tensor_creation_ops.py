@@ -3177,7 +3177,6 @@ class TestRandomTensorCreation(TestCase):
             with torch.random.fork_rng(devices=rng_device):
                 res = torch.randperm(n, dtype=torch.long, device=device)
             torch.randperm(n, out=non_contiguous_tensor)
-            print(non_contiguous_tensor, res)
             self.assertEqual(non_contiguous_tensor, res)
             self.assertEqual(res.sort().values.long(), torch.arange(n, device=device))
 
