@@ -3299,6 +3299,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: hardshrink
+    SparseCPU, SparseCUDA: hardshrink_sparse
 
 - func: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd) -> Tensor
   variants: function, method

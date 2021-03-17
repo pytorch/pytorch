@@ -225,4 +225,4 @@ def hardshrink(input: Tensor, lambd: float = 0.5) -> Tensor:
         - Input (SparseTensor): A sparse Tensor
         - Output: A sparse Tensor with the same shape as the input
     """
-    return torch._sparse_hardshrink(input, lambd)
+    return torch.hardshrink(input, lambd)

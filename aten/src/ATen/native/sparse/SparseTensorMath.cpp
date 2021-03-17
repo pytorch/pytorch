@@ -22,11 +22,38 @@ using namespace at::sparse;
 
 namespace {
 
-  inline SparseTensor get_result_tensor_for_unary_op(const SparseTensor& input) {
-    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
+  template <bool promotes_integer_to_float = false>
+  inline SparseTensor get_result_tensor_for_unary_op(const SparseTensor& input){
+    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true) && promotes_integer_to_float) {
       return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
     }
     return at::empty_like(input);
+  }
+
+  // --------------------------------------------------------------------
+  // helper function for sanity check of input and output tensors
+  // this functions also inits the output tensor
+  // this helper function is for unary ops
+  // --------------------------------------------------------------------
+  template <bool promotes_integer_to_float = false, bool is_linear_map = false>
+  inline void sparse_unary_op_check_and_init(SparseTensor& result, const SparseTensor& self){
+    TORCH_CHECK(result.is_sparse(), "Tensor should be sparse");
+    TORCH_CHECK(self.is_sparse(), "Tensor should be sparse");
+    TORCH_CHECK(self.get_device() == result.get_device(),
+        "Both tensors should be on the same device");
+
+    if (promotes_integer_to_float && c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)){
+      TORCH_CHECK(result.scalar_type() == c10::get_default_dtype(), "the result's dtype must be ", c10::get_default_dtype());
+    } else{
+      TORCH_CHECK(result.scalar_type() == self.scalar_type(), "the expected dtype is ", self.scalar_type(),
+          "found ", result.scalar_type());
+    }
+
+    if (is_same_tensor(result, self) && !is_linear_map){
+      TORCH_CHECK(self.is_coalesced(), "inplace variant on uncoalesced is not supported");
+    } else{
+      copy_sparse_to_sparse_(result, (is_linear_map ? self : self.coalesce()));
+    }
   }
 }
 
@@ -105,7 +132,7 @@ SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
 }
 
 SparseTensor log1p_sparse(const SparseTensor& t) {
-  auto result = get_result_tensor_for_unary_op(t);
+  auto result = get_result_tensor_for_unary_op<true>(t);
   return log1p_out_sparse(result, t);
 }
 
@@ -158,12 +185,42 @@ SparseTensor& asin_out_sparse(const SparseTensor& t, SparseTensor& r) {
 }
 
 SparseTensor asin_sparse(const SparseTensor& t) {
-  auto result = get_result_tensor_for_unary_op(t);
+  auto result = get_result_tensor_for_unary_op<true>(t);
   return asin_out_sparse(t, result);
 }
 
 SparseTensor& asin_sparse_(SparseTensor& t) {
   return asin_out_sparse(t, t);
+}
+
+
+// --------------------------------------------------------------------
+// hardshrink(SparseTensor)
+// --------------------------------------------------------------------
+
+// In-place hardshrink on uncoalesced tensors is not supported since the operation is
+// not a linear map.
+// This algorithm of sparse hardshrink cover the case
+// where zero values from hardshrink remain in the sparse tensor values
+// by implement the fill value removal (including removal of the corresponding indices).
+SparseTensor& hardshrink_out_sparse(SparseTensor&r , const SparseTensor& t, const Scalar& lambd) {
+  sparse_unary_op_check_and_init(r, t);
+  auto values = r._values();
+  auto indices = r._indices();
+  auto flattened_indices = values.hardshrink(lambd).nonzero().flatten();
+  auto result_values = values.index_select(0, flattened_indices);
+  auto result_indices = indices.t().index_select(0, flattened_indices);
+  at::sparse::get_sparse_impl(r)->set_indices_and_values_unsafe(result_indices.t(), result_values);
+  return r;
+}
+
+SparseTensor hardshrink_sparse(const SparseTensor & t, const Scalar& lambd/*=0.5*/) {
+  auto result = get_result_tensor_for_unary_op<true>(t);
+  return hardshrink_out_sparse(result, t, lambd);
+}
+
+SparseTensor& hardshrink_sparse_(SparseTensor& t, const Scalar& lambd/*=0.5*/) {
+  return hardshrink_out_sparse(t, t, lambd);
 }
 
 // --------------------------------------------------------------------
@@ -190,7 +247,7 @@ SparseTensor& sqrt_out_sparse(SparseTensor& r, const SparseTensor& t_) {
 }
 
 SparseTensor sqrt_sparse(const SparseTensor& t) {
-  SparseTensor r = get_result_tensor_for_unary_op(t);
+  SparseTensor r = get_result_tensor_for_unary_op<true>(t);
   sqrt_out_sparse(r, t);
   return r;
 }

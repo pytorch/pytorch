@@ -2729,6 +2729,48 @@ class TestSparse(TestCase):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
 
+    def test_hardshrink(self):
+
+        def test_hardshrink_edge_cases(device, dtype):
+            def h(values, l_expected):
+                for l, expected in l_expected.items():
+                    values_tensor = torch.tensor([float(v) for v in values], dtype=dtype, device=device).to_sparse()
+                    expected_tensor = torch.tensor([float(v) for v in expected], dtype=dtype, device=device)
+                    self.assertEqual(expected_tensor == torch.sparse.hardshrink(values_tensor, l).to_dense(),
+                                     torch.ones_like(values_tensor.to_dense(), dtype=torch.bool))
+
+            def test_helper(min, max):
+                inf = math.inf
+                h([0.0, min, -min, 0.1, -0.1, 1.0, -1.0, max, -max, inf, -inf],
+                  {0.0: [0.0, min, -min, 0.1, -0.1, 1.0, -1.0, max, -max, inf, -inf],
+                   min: [0.0, 0.0, 0.0, 0.1, -0.1, 1.0, -1.0, max, -max, inf, -inf],
+                   0.1: [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, -1.0, max, -max, inf, -inf],
+                   1.0: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, max, -max, inf, -inf],
+                   max: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, inf, -inf],
+                   inf: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]})
+
+            test_helper(torch.finfo(dtype).tiny, torch.finfo(dtype).max)
+
+        def simple_test(device, dtype):
+            data = torch.tensor([1, 0.5, 0.3, 0.6], dtype=dtype, device=device).view(2, 2).to_sparse()
+            data_typename = torch.typename(data).split('.')[-1]
+
+            self.assertEqual(torch.tensor([1, 0.5, 0, 0.6], dtype=dtype, device=device).view(2, 2),
+                             torch.sparse.hardshrink(data, 0.3).to_dense())
+            self.assertEqual(torch.tensor([1, 0, 0, 0.6], dtype=dtype, device=device).view(2, 2),
+                             torch.sparse.hardshrink(data, 0.5).to_dense())
+
+            # test default lambd=0.5
+            self.assertEqual(torch.sparse.hardshrink(data), torch.sparse.hardshrink(data, 0.5))
+
+            # test non-contiguous case
+            self.assertEqual(torch.tensor([1, 0, 0.5, 0.6], dtype=dtype, device=device).view(2, 2),
+                             torch.sparse.hardshrink(data.t(), 0.3).to_dense())
+
+        for dtype in [torch.float64]:
+            simple_test(self.device, dtype)
+            test_hardshrink_edge_cases(self.device, dtype) 
+
     def test_softmax(self):
         import torch.nn.functional as F
 
