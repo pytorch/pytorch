@@ -69,14 +69,14 @@ struct integer_range {
 };
 
 /// Only for test, see if irange function been override somehow
-template <typename Integer, std::enable_if_t<std::is_integral<Integer>::value, bool> = true>
+template <typename Integer>
 integer_range<Integer> irange_torch(Integer end) {
     //If end<=begin then the range is empty; we can achieve this effect by
     //choosing the larger of {0, end} as the loop terminator
     return {Integer(), std::max(Integer(), end)};
 }
 
-template <typename Integer, typename std::enable_if<std::is_integral<Integer>::value, Integer>::type* = nullptr>
+template <typename Integer>
 integer_range<Integer> do_stuff(Integer t) {
   return {Integer(), std::max(Integer(), t)};
 }
