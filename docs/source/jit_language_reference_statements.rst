@@ -161,6 +161,8 @@ Basic ``if/else`` statement:
              ("elif" assignment_expression ":" suite)
              ["else" ":" suite]
 
+* ``elif`` statement can repeat for arbitrary number of times, but it needs to be before ``else`` statement.
+
 Ternary ``if/else`` statement:
 """"""""""""""""""""""""""""""
 
