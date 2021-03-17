@@ -4034,7 +4034,7 @@ TEST(LoopNest, DISABLED_Int64Direct) {
   Placeholder a("a", kLong, {N});
   Placeholder b("b", kLong, {N});
   VarHandle n("n", kLong);
-  Stmt* s = For::make(n, 0, N, b.store({n}, a.load({n}) + 1l));
+  Stmt* s = For::make(n, 0, N, b.store({n}, a.load({n}) + LongImm::make(1l)));
   s = IRSimplifier::simplify(s);
   std::ostringstream oss;
   oss << *s;
@@ -4046,8 +4046,9 @@ TEST(LoopNest, DISABLED_Int64Compute) {
 
   int64_t N = 12;
   Placeholder a("a", kLong, {N});
-  Tensor* b = Compute(
-      "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1l; });
+  Tensor* b = Compute("b", {{N, "n"}}, [&](const VarHandle& n) {
+    return a.load(n) + LongImm::make(1l);
+  });
   LoopNest nest({b});
   nest.prepareForCodegen();
   nest.simplify();
