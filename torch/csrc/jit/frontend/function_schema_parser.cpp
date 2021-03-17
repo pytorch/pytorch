@@ -173,7 +173,7 @@ struct SchemaParser {
         auto text = tok.text();
         if ("float" == text) {
           return static_cast<int64_t>(at::kFloat);
-        }else if ("complex" == text) {
+        } else if ("complex" == text) {
           return static_cast<int64_t>(at::kComplexFloat);
         } else if ("long" == text) {
           return static_cast<int64_t>(at::kLong);
@@ -197,7 +197,8 @@ struct SchemaParser {
         if (kind == TypeKind::ComplexType || n.find('j') != std::string::npos) {
           auto imag = c10::stod(n.substr(0, n.size() - 1));
           return c10::complex<double>(0, imag);
-        } else if (kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
+        } else if (
+            kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
             n.find('e') != std::string::npos) {
           return c10::stod(n);
         } else {

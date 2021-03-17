@@ -154,11 +154,12 @@ RegisterOperators reg(
 
              // Check that type of the Tensor matches that of the annotation.
              // Make an exception for the case in which the annotated type is
-             // float/complex and the Tensor data type is also float/complex; the elements will
-             // be casted to double/c10::complex<double> later.
+             // float/complex and the Tensor data type is also float/complex;
+             // the elements will be casted to double/c10::complex<double>
+             // later.
              TORCH_CHECK(
                  (out_ty == FloatType::get() && t.is_floating_point()) ||
-                  (out_ty == ComplexType::get() && t.is_complex()) ||
+                     (out_ty == ComplexType::get() && t.is_complex()) ||
                      tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
                  "Output annotation element type and runtime tensor element type must match for tolist()");
 
@@ -782,7 +783,7 @@ RegisterOperators reg(
      DEFINE_COMPARISON_OP(aten::ge, a >= b),
      DEFINE_BINARY_OP_WITH_COMPLEX(aten::add, a + b),
      DEFINE_BINARY_OP_WITH_COMPLEX(aten::sub, a - b),
-     DEFINE_BINARY_OP_WITH_COMPLEX(aten::mul, a * b),
+     DEFINE_BINARY_OP_WITH_COMPLEX(aten::mul, a* b),
      DEFINE_BOOL_OP(aten::__and__, a&& b),
      DEFINE_BOOL_OP(aten::__or__, a || b),
      DEFINE_BOOL_OP(aten::__xor__, a != b),

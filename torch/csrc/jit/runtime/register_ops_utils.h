@@ -690,12 +690,9 @@ void listSetItem(Stack* stack);
           },                                                              \
           aliasAnalysisFromSchema())
 
-#define DEFINE_UNARY_OP_WITH_COMPLEX(                                     \
-    aten_op,                                                              \
-    op,                                                                   \
-    int_result,                                                           \
-    float_result)                                                         \
-  DEFINE_UNARY_OP_WITH_COMPLEX_CAST(aten_op, op, int_result, float_result, complex, c10::complex<double>)
+#define DEFINE_UNARY_OP_WITH_COMPLEX(aten_op, op, int_result, float_result) \
+  DEFINE_UNARY_OP_WITH_COMPLEX_CAST(                                        \
+      aten_op, op, int_result, float_result, complex, c10::complex<double>)
 
 #define DEFINE_GENERIC_OP_WITH_COMPLEX(                                       \
     aten_op,                                                                  \

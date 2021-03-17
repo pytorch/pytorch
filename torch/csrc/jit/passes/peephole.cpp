@@ -144,9 +144,10 @@ struct PeepholeOptimizeImpl {
       } else if (
           node->kind() == aten::Complex ||
           node->kind() == aten::ComplexImplicit) {
-        Value *inp1 = node->inputs().at(0);
-        Value *inp2 = node->inputs().at(1);
-        if (inp1->node()->kind() == prim::NumToTensor && inp2->node()->kind() == prim::NumToTensor) {
+        Value* inp1 = node->inputs().at(0);
+        Value* inp2 = node->inputs().at(1);
+        if (inp1->node()->kind() == prim::NumToTensor &&
+            inp2->node()->kind() == prim::NumToTensor) {
           GRAPH_UPDATE(
               getHeader(inp1->node()),
               " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
@@ -157,8 +158,10 @@ struct PeepholeOptimizeImpl {
               inp2->debugName());
           auto real_ival = toIValue(inp1).value();
           auto imag_ival = toIValue(inp2).value();
-          double real = real_ival.toInt() ? real_ival.toInt() : real_ival.toDouble();
-          double imag = imag_ival.toInt() ? imag_ival.toInt() : imag_ival.toDouble();
+          double real =
+              real_ival.toInt() ? real_ival.toInt() : real_ival.toDouble();
+          double imag =
+              imag_ival.toInt() ? imag_ival.toInt() : imag_ival.toDouble();
           IValue ival(c10::complex<double>(real, imag));
           auto new_constant = node->owningGraph()->insertConstant(ival);
           node->output()->replaceAllUsesWith(new_constant);
