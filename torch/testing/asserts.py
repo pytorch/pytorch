@@ -2,10 +2,11 @@ import functools
 import inspect
 import sys
 import warnings
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import torch
-from torch.testing._internal.common_utils import get_comparison_dtype as _get_comparison_dtype, TestCase as _TestCase
+from torch.testing._internal.common_utils import get_comparison_dtype as _get_comparison_dtype
+from torch.testing._internal.common_utils import get_default_rtol_and_atol as _get_default_rtol_and_atol
 
 __all__ = ["assert_tensors_equal", "assert_tensors_allclose"]
 
@@ -29,13 +30,6 @@ else:
 
 class UsageWarning(Warning):
     pass
-
-
-def _get_default_rtol_and_atol(a: torch.Tensor, b: torch.Tensor) -> Tuple[float, float]:
-    try:
-        return _TestCase()._getDefaultRtolAndAtol(a.dtype, b.dtype)
-    except KeyError:
-        return 0.0, 0.0
 
 
 def _hide_internal_traceback_pytest(fn):
