@@ -743,11 +743,7 @@ def sample_inputs_index_select(op_info, device, dtype, requires_grad):
 def sample_inputs_index_add(op_info, device, dtype, requires_grad):
     # These testa are pretty much the same as those from index_copy.
     # Perhaps merge?
-    def make_arg(shape, low=None, high=None, dtype=dtype, device=device, contiguous=True):
-        return make_tensor(shape, device=device, dtype=dtype,
-                           low=low, high=high,
-                           discontiguous=not contiguous,
-                           requires_grad=requires_grad)
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     t = make_arg((S, S))
     s = make_arg((S, S))
@@ -757,7 +753,7 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad):
     s_nonctg = s.transpose(0, 1)
 
     idx = make_arg((S,), dtype=torch.int64, low=0, high=S)
-    idx_nonctg = make_arg((S,), dtype=torch.int64, low=0, high=S, contiguous=False)
+    idx_nonctg = make_arg((S,), dtype=torch.int64, low=0, high=S, discontiguous=True)
     idx_neg = -idx - 1
     samples = [SampleInput((tensor, 1, idx, source))
                for tensor, idx, source in product([t, t_nonctg], [idx, idx_nonctg], [s, s_nonctg])]
@@ -2987,7 +2983,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            skips=(
                # index_select does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out')
+               SkipInfo('TestCommon', 'test_out'),
            ),
            sample_inputs_func=sample_inputs_index_select),
     OpInfo('index_add',

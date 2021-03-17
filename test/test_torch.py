@@ -4556,53 +4556,38 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_index_select(self, device, dtype):
-        num_src, num_dest = 3, 5
+        num_src, num_out = 3, 5
 
         def make_arg(batch_sizes, n, dim, contig):
             size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
             return make_tensor(size_arg, device, dtype, low=None, high=None, discontiguous=not contig)
 
         def ref_index_select(src, dim, idx):
-            dest_size = list(src.size())
-            dest_size[dim] = len(idx)
-            dest = torch.empty(*dest_size, dtype=src.dtype, device=src.device)
-            for i in range(len(idx)):
-                idx_dest = dim * (slice(None),) + (i,)
-                idx_src = dim * (slice(None),) + (idx[i],)
-                dest[idx_dest] = src[idx_src]
-            return dest
+            # bfloat16 is just used on GPU, so it's not supported on numpy
+            if dtype == torch.bfloat16:
+                src = src.float()
+            out = torch.from_numpy(np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim))
+            if dtype == torch.bfloat16:
+                out = out.to(device=device, dtype=dtype)
+            return out
 
-        for src_contig, idx_contig, out_contig in product([True, False], repeat=3):
+        for src_contig, idx_contig in product([True, False], repeat=2):
             for other_sizes in ((), (4, 5)):
                 for dim in range(len(other_sizes)):
                     src = make_arg(other_sizes, num_src, dim, src_contig)
-                    idx = make_tensor((num_dest,), device, dtype=torch.int64, low=0, high=num_src, discontiguous=not idx_contig)
-                    dest = torch.index_select(src, dim, idx)
-                    dest2 = ref_index_select(src, dim, idx)
-                    self.assertEqual(dest, dest2)
-
-                    # Out version points to the same tensor
-                    out_size = list(src.size())
-                    out_size[dim] = len(idx)
-                    out = make_arg(tuple(out_size), num_src, dim, out_contig)
-                    dest = torch.index_select(src, dim, idx, out=out)
-                    dest2 = ref_index_select(src, dim, idx)
-                    self.assertEqual(dest, dest2)
-                    if device.type != 'xla':
-                        self.assertEqual(out.data_ptr(), dest.data_ptr())
-                    else:
-                        # XLA does not have data_ptr()
-                        out.fill_(13)
-                        self.assertEqual(out, dest)
+                    idx = make_tensor((num_out,), device, dtype=torch.int64, low=0, high=num_src, discontiguous=not idx_contig)
+                    out = torch.index_select(src, dim, idx)
+                    out2 = ref_index_select(src, dim, idx)
+                    self.assertEqual(out, out2)
 
         for idx_type in (torch.int32, torch.int64):
             other_sizes = (3, 2)
             dim = 1
             src = make_arg(other_sizes, num_src, dim, True)
-            idx = make_tensor((num_dest,), device, dtype=idx_type, low=0, high=num_src, discontiguous=False)
-            dest = torch.index_select(src, dim, idx)
-            dest2 = ref_index_select(src, dim, idx)
-            self.assertEqual(dest, dest2)
+            idx = make_tensor((num_out,), device, dtype=idx_type, low=0, high=num_src, discontiguous=False)
+            out = torch.index_select(src, dim, idx)
+            out2 = ref_index_select(src, dim, idx)
+            self.assertEqual(out, out2)
 
         # Create the 4 possible combinations of scalar sizes for index / source
         scalars = ((make_tensor(size_s, device, dtype),
