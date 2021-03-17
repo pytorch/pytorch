@@ -1188,22 +1188,6 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
     job: foo_job
     commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
-
-  class Foo:
-      # was   42.50s ±   2.12s
-      # now    3.02s
-
-    - def test_bar: ...
-    -     # was   1.000s
-
-    ! def test_foo: ...
-    !     # was  41.500s ±  2.121s
-    !     # now   0.020s           (skipped)
-
-    + def test_baz: ...
-    +     # now   3.000s
-
-
 Commit graph (base is most recent master ancestor with at least one S3 report):
 
     : (master)
@@ -1257,17 +1241,6 @@ Added    (across    1 suite)      1 test,  totaling +   3.00s
 
     job: foo_job
     commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-
-
-+ class Foo:
-+     # now    3.02s
-+
-+     def test_baz: ...
-+         # now   3.000s
-+
-+     def test_foo: ...
-+         # now   0.020s           (skipped)
-
 
 Commit graph (base is most recent master ancestor with at least one S3 report):
 
