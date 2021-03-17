@@ -1470,6 +1470,52 @@ def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
 
     return samples
 
+
+def sample_inputs_lerp(op_info, device, dtype, requires_grad):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        # no broadcast
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 0.4)),
+        # broadcast rhs
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), 0.4)),
+        # scalar tensor
+        SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 0.4)),
+        # broadcast rhs scalar-tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 0.4)),
+        # broadcast rhs with weight tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), _make_tensor_helper((S, S)))),
+        # broadcast rhs and weight tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, 1)), _make_tensor_helper((S,)))),
+
+        # Broadcasts `self` : Issue with inplace-variants
+        # Reference: https://github.com/pytorch/pytorch/issues/50747
+        # SampleInput((_make_tensor_helper((S,)), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper(()), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
+    )  # type: ignore
+
+    if dtype.is_complex:
+        samples = samples + (  # type: ignore
+            # no broadcast
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 1.2 + 0.1j)),
+            # broadcast rhs
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 5.4 + 9j)),
+            # scalar tensor
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 0.4j)),
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 6.1 + 0.004j)),
+            # broadcast rhs scalar-tensor
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 1 + 2j)),
+        )
+
+    return samples
+
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -2630,6 +2676,21 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.bfloat16])),
                    safe_casts_outputs=True,
                    handles_complex_extremals=False),
+    OpInfo('lerp',
+           dtypes=floating_and_complex_types(),
+           # Reference: https://github.com/pytorch/pytorch/issues/54048
+           # CUDA and ROCM don't support complex inputs
+           dtypesIfCUDA=floating_types_and(torch.half),
+           dtypesIfROCM=floating_types_and(torch.half),
+           sample_inputs_func=sample_inputs_lerp,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.cfloat, torch.cdouble]),
+               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
+           ),
+           assert_autodiffed=True),
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
            op=torch.linalg.inv,
@@ -3347,12 +3408,8 @@ def method_tests():
         ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
         ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
         ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-        ('lerp', (S, S, S), ((S, S, S), 0.4), 'no_broadcast', (True,)),
-        ('lerp', (S, S, S), ((S,), 0.4), 'broadcast_rhs', (True,)),
         ('lerp', (S,), ((S, S, S), 0.4), 'broadcast_lhs', (True,)),
         ('lerp', (S, 1, S), ((S, S), 0.4), 'broadcast_all', (True,)),
-        ('lerp', (), ((), 0.4), 'scalar', (True,)),
-        ('lerp', (S, S, S), ((), 0.4), 'scalar_broadcast_rhs', (True,)),
         ('lerp', (), ((S, S, S), 0.4), 'scalar_broadcast_lhs', (True,)),
         ('lerp', (S, 1, S), ((S, S), (S, 1, 1, S)), 'tensor_broadcast_all', (True,)),
         ('mean', (S, S, S), NO_ARGS, '', (True,)),
