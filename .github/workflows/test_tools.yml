@@ -19,5 +19,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+      - name: Install dependencies
+        run: pip install -r requirements.txt
       - name: Run tests
         run: python -m unittest discover -vs tools/test -p 'test_*.py'
