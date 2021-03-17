@@ -575,11 +575,6 @@ static void _trace_post_record(
         value->inferTypeFrom(var->cdata);
         jit::tracer::setValueTrace(var->cdata, value);
       }
-    } else {
-      // Regular python type.
-      Value* value = node->outputs()[i];
-      value->setType(PyObjectType::create());
-      jit::tracer::setValueTrace(torch::jit::toIValue(py::cast(obj), PyObjectType::create()), value);
     }
   }
 }
