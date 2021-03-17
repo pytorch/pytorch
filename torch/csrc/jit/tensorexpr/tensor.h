@@ -105,6 +105,8 @@ class Placeholder {
   template <typename T>
   inline ExprHandle load(const std::vector<T>& args) const;
 
+  inline ExprHandle load(const std::vector<ExprHandle>& args) const;
+
   inline ExprHandle loadWithMask(
       const std::vector<ExprHandle>& args,
       const ExprHandle& mask) const {
@@ -323,6 +325,10 @@ inline ExprHandle Placeholder::load(const std::vector<T>& args) const {
   std::vector<ExprHandle> params(args.begin(), args.end());
   return ExprHandle(
       new Load(data(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+}
+
+inline ExprHandle Placeholder::load(const std::vector<ExprHandle>& args) const {
+  return this->template load<ExprHandle>(args);
 }
 
 template <typename... Ts>
