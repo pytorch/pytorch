@@ -636,7 +636,8 @@ jobs:
           export CIRCLE_JOB="$CIRCLE_JOB"
           export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
           cd workspace
-          python torch/testing/_internal/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          export PYTHONPATH="\${PWD}"
+          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           EOL
           echo "(cat docker_commands.sh | docker exec -u jenkins -e LANG=C.UTF-8 -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
@@ -800,8 +801,9 @@ jobs:
             export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            export PYTHONPATH="$PWD"
             pip install typing_extensions boto3
-            python torch/testing/_internal/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+            python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           when: always
       - store_test_results:
           path: test/test-reports
