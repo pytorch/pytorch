@@ -141,7 +141,7 @@ Tensor& add_relu_impl(
   return result;
 }
 
-Tensor& add_relu_out(Tensor& result, const Tensor& self, const Tensor& other, const Scalar& alpha) {
+Tensor& add_relu_out(const Tensor& self, const Tensor& other, const Scalar& alpha, Tensor& result) {
   return add_relu_impl(result, self, other, alpha);
 }
 
@@ -154,7 +154,7 @@ Tensor& add_relu_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   return add_relu_impl(self, self, other, alpha);
 }
 
-Tensor& copysign_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& copysign_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_float_op(result, self, other);
   copysign_stub(iter.device_type(), iter);
   return result;
@@ -168,7 +168,7 @@ Tensor copysign(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& copysign_(Tensor& self, const Tensor& other) {
-  return native::copysign_out(self, self, other);
+  return native::copysign_out(self, other, self);
 }
 
 Tensor copysign(const Tensor& self, const Scalar& other) {
@@ -268,7 +268,7 @@ Tensor& div_(Tensor& self, const Scalar& other, std::string rounding_mode) {
 }
 
 // divide, alias for div
-Tensor& divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::div_out(result, self, other);
 }
 
@@ -309,7 +309,7 @@ Tensor& divide_(Tensor& self, const Scalar& other, std::string rounding_mode) {
 }
 
 // true_divide, an alias for div
-Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
+Tensor& true_divide_out(const Tensor& self, const Tensor& divisor, Tensor& result) {
   return at::div_out(result, self, divisor);
 }
 
@@ -346,7 +346,7 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
   return native::remainder_out(self, self, other);
 }
 
-Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& floor_divide_out(const Tensor& self, const Tensor& other, Tensor& result) {
   TORCH_WARN_ONCE(
     "floor_divide is deprecated, and will be removed in a future version of pytorch. "
     "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
@@ -374,7 +374,7 @@ Tensor floor_divide(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& floor_divide_(Tensor& self, const Tensor& other) {
-  return native::floor_divide_out(self, self, other);
+  return native::floor_divide_out(self, other, self);
 }
 
 // TODO: Make this structured to undo the perf regression from native:: removal
@@ -877,21 +877,21 @@ Tensor& not_equal_out(Tensor& result, const Tensor& self, const Scalar& other) {
 Tensor not_equal(const Tensor& self, const Scalar& other) { return self.ne(other); }
 Tensor& not_equal_(Tensor& self, const Scalar& other) { return self.ne_(other); }
 
-Tensor& logical_and_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, logical_and_stub); }
+Tensor& logical_and_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_and_stub); }
 Tensor logical_and(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_and_out)); }
 Tensor& logical_and_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_and_out)); }
 Tensor& logical_and_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_and_out)); }
 Tensor logical_and(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_and_out)); }
 Tensor& logical_and_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_and_out)); }
 
-Tensor& logical_or_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, logical_or_stub); }
+Tensor& logical_or_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_or_stub); }
 Tensor logical_or(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_or_out)); }
 Tensor& logical_or_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_or_out)); }
 Tensor& logical_or_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_or_out)); }
 Tensor logical_or(const Tensor& self, const Scalar& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_or_out)); }
 Tensor& logical_or_(Tensor& self, const Scalar& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_or_out)); }
 
-Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, logical_xor_stub); }
+Tensor& logical_xor_out(const Tensor& self, const Tensor& other, Tensor& result) { return comparison_op_out(result, self, other, logical_xor_stub); }
 Tensor logical_xor(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 Tensor& logical_xor_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 Tensor& logical_xor_out(Tensor& result, const Tensor& self, const Scalar& other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::logical_xor_out)); }
@@ -1013,7 +1013,7 @@ Tensor& fmod_(Tensor& self, const Scalar& other) {
   return native::fmod_(self, wrapped_scalar_tensor(other));
 }
 
-Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& logaddexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   logaddexp_stub(iter.device_type(), iter);
   return result;
@@ -1024,7 +1024,7 @@ Tensor logaddexp(const Tensor& self, const Tensor& other) {
   return at::logaddexp_out(result, self, other);
 }
 
-Tensor& logaddexp2_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& logaddexp2_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   logaddexp2_stub(iter.device_type(), iter);
   return result;
@@ -1035,7 +1035,7 @@ Tensor logaddexp2(const Tensor& self, const Tensor& other) {
   return at::logaddexp2_out(result, self, other);
 }
 
-Tensor& gcd_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& gcd_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   gcd_stub(iter.device_type(), iter);
   return result;
@@ -1050,7 +1050,7 @@ Tensor& gcd_(Tensor& self, const Tensor& other) {
   return at::gcd_out(self, self, other);
 }
 
-Tensor& lcm_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& lcm_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_op(result, self, other);
   lcm_stub(iter.device_type(), iter);
   return result;
@@ -1166,7 +1166,7 @@ Tensor& heaviside_(Tensor& self, const Tensor& values) {
   return at::heaviside_out(self, self, values);
 }
 
-Tensor& ldexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return at::mul_out(result, self, at::pow(2.0, other));
 }
 
@@ -1178,17 +1178,17 @@ Tensor& ldexp_(Tensor& self, const Tensor& other) {
   return at::ldexp_out(self, self, other);
 }
 
-Tensor& xlogy_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& xlogy_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_float_op(result, self, other);
   xlogy_stub(iter.device_type(), iter);
   return result;
 }
 
-Tensor& xlogy_out(Tensor& result, const Scalar& self, const Tensor& other) {
+Tensor& xlogy_out(const Scalar& self, const Tensor& other, Tensor& result) {
   return at::xlogy_out(result, wrapped_scalar_tensor(self), other);
 }
 
-Tensor& xlogy_out(Tensor& result, const Tensor& self, const Scalar& other) {
+Tensor& xlogy_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::xlogy_out(result, self, wrapped_scalar_tensor(other));
 }
 
