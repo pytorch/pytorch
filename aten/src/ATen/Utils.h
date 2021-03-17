@@ -9,6 +9,7 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <sstream>
@@ -65,11 +66,11 @@ static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef
   int64_t test_result = 0;
   int64_t test_add_result = add_one(test_end);
 
-  for (const auto i : irange_torch(test_end)) {
+  for (const auto i : c10::irange(test_end)) {
     test_result += i;
   }
 
-  for (const auto i : irange_torch(tensors.size())) {
+  for (const auto i : c10::irange(tensors.size())) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {
       AT_ERROR("Expected dense tensor but got ", expr.layout(),
