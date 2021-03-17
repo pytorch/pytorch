@@ -475,6 +475,18 @@ std::ostream& printMaybeAnnotatedDict(
   return out;
 }
 
+std::ostream& printComplex(std::ostream & out, const IValue & v) {
+  c10::complex<double> d = v.toComplexDouble();
+  IValue real(d.real()), imag(std::abs(d.imag()));
+  auto sign = "";
+  if (d.imag() >= 0) {
+    sign = "+";
+  } else {
+    sign = "-";
+  }
+  return out << real << sign << imag << "j";
+}
+
 std::ostream& IValue::repr(
     std::ostream& out,
     std::function<bool(std::ostream&, const IValue& v)>
@@ -510,7 +522,7 @@ std::ostream& IValue::repr(
                  << d << std::setprecision(orig_prec);
     }
     case IValue::Tag::ComplexDouble: {
-      return out << v.toComplexDouble();
+      return printComplex(out, v);
     }
     case IValue::Tag::Int:
       return out << v.toInt();
@@ -697,15 +709,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
         << v.toDouble()
         << std::setprecision(orig_prec);
     } case IValue::Tag::ComplexDouble: {
-      c10::complex<double> d = v.toComplexDouble();
-      IValue real(d.real()), imag(std::abs(d.imag()));
-      auto sign = "";
-      if (d.imag() >= 0) {
-        sign = "+";
-      } else {
-        sign = "-";
-      }
-      return out << real << sign << imag << "j";
+      return printComplex(out, v);
     } case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::Bool:

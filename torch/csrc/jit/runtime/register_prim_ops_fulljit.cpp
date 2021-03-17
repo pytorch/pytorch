@@ -1225,7 +1225,7 @@ RegisterOperators reg2({
 
 #define DEFINE_COMPLEX_OP(type_a, type_b, actual_type_a, actual_type_b) \
   Operator(                                                             \
-      "aten::complex." #type_a "_" #type_b "(" #type_a " x," #type_b    \
+      "aten::Complex." #type_a "_" #type_b "(" #type_a " x," #type_b    \
       " y) -> complex",                                                 \
       [](Stack* stack) {                                                \
         actual_type_a a;                                                \

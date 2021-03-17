@@ -149,15 +149,16 @@ RegisterOperators reg(
              } else {
                TORCH_CHECK(
                    false,
-                   "Unsupported element type for tolist; only int, float and bool are supported");
+                   "Unsupported element type for tolist; only int, float, complex and bool are supported");
              }
 
              // Check that type of the Tensor matches that of the annotation.
              // Make an exception for the case in which the annotated type is
-             // float and the Tensor data type is also float; the elements will
-             // be casted to double later.
+             // float/complex and the Tensor data type is also float/complex; the elements will
+             // be casted to double/c10::complex<double> later.
              TORCH_CHECK(
                  (out_ty == FloatType::get() && t.is_floating_point()) ||
+                  (out_ty == ComplexType::get() && t.is_complex()) ||
                      tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
                  "Output annotation element type and runtime tensor element type must match for tolist()");
 
@@ -414,92 +415,6 @@ RegisterOperators reg(
            } else {
              push(stack, c10::complex<double>(scalar.toInt(), 0));
            }
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Complex.int(int a=0, int b=0) -> complex"),
-         [](Stack* stack) {
-           int a = 0, b = 0;
-           pop(stack, a, b);
-           push(stack, c10::complex<double>(a, b));
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.int_float(int a, float b) -> complex"),
-         [](Stack* stack) {
-           int a = 0;
-           double b = 0;
-           pop(stack, a, b);
-           push(stack, c10::complex<double>(static_cast<double>(a), b));
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.int_bool(int a, bool b) -> complex"),
-         [](Stack* stack) {
-           int a = 0;
-           bool b = false;
-           pop(stack, a, b);
-           push(stack, c10::complex<double>(static_cast<double>(a), static_cast<double>(b)));
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.float(float a=0, float b=0) -> complex"),
-         [](Stack* stack) {
-           double a = 0, b = 0;
-           pop(stack, a, b);
-           push(stack, c10::complex<double>(a, b));
-         },
-         aliasAnalysisFromSchema()),
-      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.float_int(float a, int b) -> complex"),
-         [](Stack* stack) {
-           double a = 0;
-           int b = 0;
-           pop(stack, a, b);
-           push(stack, c10::complex<double>(a, static_cast<double>(b)));
-         },
-         aliasAnalysisFromSchema()),
-      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.float_bool(float a, bool b) -> complex"),
-         [](Stack* stack) {
-           double a = 0;
-           bool b = false;
-           pop(stack, a, b);
-           push(stack, c10::complex<double>(a, static_cast<double>(b)));
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.bool(bool a=False, bool b=False) -> complex"),
-         [](Stack* stack) {
-           bool a = false, b = false;
-           pop(stack, a, b);
-           push(stack, c10::complex<double>(static_cast<double>(a), static_cast<double>(b)));
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.bool_int(bool a=False, int b=0) -> complex"),
-         [](Stack* stack) {
-           bool a = false;
-           int b = 0;
-           pop(stack, a, b);
-           push(stack, c10::complex<double>(static_cast<double>(a), static_cast<double>(b)));
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA(
-             "aten::Complex.bool_float(bool a=False, float b=0) -> complex"),
-         [](Stack* stack) {
-           bool a = false;
-           double b = 0;
-           pop(stack, a, b);
-           push(stack, c10::complex<double>(static_cast<double>(a), b));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
