@@ -509,7 +509,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     const Tensor& self,
     int64_t k,
     int64_t dim,
-    bool keepdim, 
+    bool keepdim,
     Tensor& values,
     Tensor& indices) {
   auto result = [&]() {
@@ -525,7 +525,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out(
     const Tensor& self,
     int64_t k,
     Dimname dim,
-    bool keepdim, 
+    bool keepdim,
     Tensor& values,
     Tensor& indices) {
   return at::kthvalue_out(
@@ -591,7 +591,7 @@ std::tuple<Tensor, Tensor> topk(
 std::tuple<Tensor&, Tensor&> median_out_cpu(
     const Tensor& self,
     int64_t dim,
-    bool keepdim, 
+    bool keepdim,
     Tensor& values,
     Tensor& indices) {
   auto result = [&]() {
@@ -607,7 +607,7 @@ std::tuple<Tensor&, Tensor&> median_out_cpu(
 std::tuple<Tensor&, Tensor&> median_out(
     const Tensor& self,
     Dimname dim,
-    bool keepdim, 
+    bool keepdim,
     Tensor& values,
     Tensor& indices) {
   return at::median_out(
@@ -638,7 +638,7 @@ Tensor median_cpu(const Tensor& self) {
 std::tuple<Tensor&, Tensor&> nanmedian_out_cpu(
     const Tensor& self,
     int64_t dim,
-    bool keepdim, 
+    bool keepdim,
     Tensor& values,
     Tensor& indices) {
   auto result = [&]() {
@@ -654,7 +654,7 @@ std::tuple<Tensor&, Tensor&> nanmedian_out_cpu(
 std::tuple<Tensor&, Tensor&> nanmedian_out(
     const Tensor& self,
     Dimname dim,
-    bool keepdim, 
+    bool keepdim,
     Tensor& values,
     Tensor& indices) {
   return at::nanmedian_out(

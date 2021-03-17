@@ -408,12 +408,13 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 
 // Mark: kthvalue
 
-std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(Tensor& indices,
+std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
     const Tensor& self,
     int64_t k,
     int64_t dim,
-    bool keepdim, 
-    Tensor& values) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   // See note [Writing Nondeterministic Operations]
   // If there are duplicate elements of the kth value, the procedure for choosing which
   // of the duplicates to use for the indices output is nondeterministic.
@@ -430,11 +431,12 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(Tensor& indices,
 
 // Mark: median
 
-std::tuple<Tensor&, Tensor&> median_out_cuda(Tensor& indices,
+std::tuple<Tensor&, Tensor&> median_out_cuda(
     const Tensor& self,
     int64_t dim,
-    bool keepdim, 
-    Tensor& values) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   return median_with_indices_impl(
       values, indices, self, dim, keepdim, /*ignore_nan=*/false);
 }
@@ -443,11 +445,12 @@ Tensor median_cuda(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/false);
 }
 
-std::tuple<Tensor&, Tensor&> nanmedian_out_cuda(Tensor& indices,
+std::tuple<Tensor&, Tensor&> nanmedian_out_cuda(
     const Tensor& self,
     int64_t dim,
-    bool keepdim, 
-    Tensor& values) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   return median_with_indices_impl(
       values, indices, self, dim, keepdim, /*ignore_nan=*/true);
 }
