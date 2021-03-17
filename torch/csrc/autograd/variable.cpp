@@ -507,6 +507,10 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     if (grad_fn) {
       msg = c10::str("Output ", diff_view_meta->output_nr_, " of ", grad_fn->name(), " is a view and ",
                      modified_obj, " modified inplace.");
+    } else if (creation_meta == CreationMeta::NO_VARIABLE_TYPE_VIEW) {
+      TORCH_INTERNAL_ASSERT(indirect, "Direct inplace update to NO_VARIABLE_TYPE_VIEW tensor should've been blocked.");
+      msg = c10::str("A view of normal tensor was created in InferenceMode and ", modified_obj, " modified inplace in normal mode.");
+      TORCH_CHECK(false, msg);
     } else {
       msg = c10::str("A view was created in no_grad mode and ", modified_obj, " modified inplace with grad mode enabled.");
     }
@@ -536,8 +540,6 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
                        "version of the function that produced this view or "
                        "don't modify this view inplace.");
       } else {
-        TORCH_INTERNAL_ASSERT(creation_meta != CreationMeta::NO_VARIABLE_TYPE_VIEW,
-            "CreationMeta::NO_VARIABLE_TYPE_VIEW tensor shouldn't participate in autograd");
         TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
       }
 

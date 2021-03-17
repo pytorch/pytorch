@@ -498,6 +498,9 @@ struct TORCH_API ViewInfo {
 ///   exists. These are note considered as views for now for the view+inplace
 ///   logic! The graph won't be rewritten when an inplace is done, only a
 ///   warning will be thrown.
+/// - NO_VARIABLE_TYPE_VIEW should be set when a view of normal tensor was created in InferenceMode.
+///   Although view tensor went through as_view, it doesn't have proper grad_fn setup since VariableType
+///   kernels are skipped in InferenceMode.
 /// - DEFAULT is for all other cases
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
                                    NO_GRAD_MODE, MULTI_OUTPUT_SAFE, NO_VARIABLE_TYPE_VIEW };

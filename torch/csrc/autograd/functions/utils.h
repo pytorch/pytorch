@@ -39,7 +39,7 @@ struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
     TORCH_CHECK(!tensor.defined() || !tensor.is_view()
       || static_cast<DifferentiableViewMeta*>(tensor.unsafeGetTensorImpl()->autograd_meta())->get_creation_meta() != CreationMeta::NO_VARIABLE_TYPE_VIEW,
       "A view created in InferenceMode without proper grad_fn setup is not allowed "
-      "to participate in autograd. To work around it, please call detach() before feeding into autograd.");
+      "to participate in autograd. To work around it, please clone() it before exiting InferenceMode.");
   }
   void operator()(const c10::optional<at::Tensor>& tensor) {
     if (tensor.has_value()) {
