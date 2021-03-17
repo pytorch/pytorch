@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # shellcheck disable=SC2034
+# shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
@@ -26,7 +27,7 @@ if which sccache > /dev/null; then
   export PATH="${WORKSPACE_DIR}:$PATH"
 fi
 
-if [ -z "${CROSS_COMPILE_ARM}" ]; then
+if [ -z "${CROSS_COMPILE_ARM64}" ]; then
   USE_DISTRIBUTED=1 python setup.py install
 else
   export MACOSX_DEPLOYMENT_TARGET=11.0
