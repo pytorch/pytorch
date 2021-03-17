@@ -49,6 +49,11 @@ class GradBucket {
     return tensors_;
   }
 
+  // Overwrites tensors at a specific index.
+  void setTensor(at::Tensor& tensor, int i) {
+    tensors_[i] = tensor;
+  }
+
   // Each tensor in the list that getPerParameterTensors corresponds to a parameter.
   std::vector<at::Tensor> getPerParameterTensors() const;
 
