@@ -350,7 +350,6 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
-    c10::optional<int64_t> padding_idx,
     bool is_embedding_op) override;
 
   at::Tensor embeddingbag_4bit(
@@ -359,6 +358,5 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
     bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
-    bool include_last_offset,
-    c10::optional<int64_t> padding_idx) override;
+    bool include_last_offset) override;
 };

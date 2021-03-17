@@ -426,7 +426,6 @@ at::Tensor& embedding_bag_byte_helper(
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
-    c10::optional<int64_t> padding_idx,
     bool is_embedding_op) {
   at::Tensor offsets;
   TORCH_CHECK(
@@ -463,9 +462,6 @@ at::Tensor& embedding_bag_byte_helper(
       weight.is_contiguous() && indices.is_contiguous() &&
           offsets.is_contiguous(),
       "Expect weight, indices, and offsets to be contiguous.");
-  TORCH_CHECK(
-    padding_idx.value_or(static_cast<int64_t>(-1)) < static_cast<int64_t>(0),
-    "quantized embedding_bag does not support padding_idx yet");
 
   // Using helper function to support different type combination without the
   // need to cast, which can be additional performance overhead
@@ -527,8 +523,7 @@ at::Tensor& embedding_bag_4bit_helper(
     bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
-    bool include_last_offset,
-    c10::optional<int64_t> padding_idx) {
+    bool include_last_offset) {
   at::Tensor offsets;
   TORCH_CHECK(
       indices.dim() == 1 || indices.dim() == 2,
@@ -565,9 +560,6 @@ at::Tensor& embedding_bag_4bit_helper(
       weight.is_contiguous() && indices.is_contiguous() &&
           offsets.is_contiguous(),
       "Expect weight, indices, and offsets to be contiguous.");
-  TORCH_CHECK(
-    padding_idx.value_or(static_cast<int64_t>(-1)) < static_cast<int64_t>(0),
-    "quantized embedding_bag does not support padding_idx yet");
 
   // Using helper function to support different type combination without the
   // need to cast, which can be additional performance overhead
@@ -623,7 +615,6 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
-    c10::optional<int64_t> padding_idx,
     bool is_embedding_op) {
   auto output = at::empty({0}, packed_w.options().dtype(at::kFloat));
   return embedding_bag_byte_helper(
@@ -635,7 +626,6 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
       per_sample_weights_,
       compressed_indices_mapping,
       include_last_offset,
-      padding_idx,
       is_embedding_op);
 }
 
@@ -645,8 +635,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
     bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
-    bool include_last_offset,
-    c10::optional<int64_t> padding_idx) {
+    bool include_last_offset) {
   if (per_sample_weights_.has_value()) {
     TORCH_CHECK(
         (per_sample_weights_.value().scalar_type() == at::kFloat ||
@@ -667,8 +656,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
         ? per_sample_weights_.value().to(at::kFloat)
         : per_sample_weights_,
     compressed_indices_mapping,
-    include_last_offset,
-    padding_idx);
+    include_last_offset);
 }
 
 namespace at {
@@ -684,8 +672,7 @@ Tensor& embedding_bag_byte_rowwise_offsets_out(
     bool pruned_weights,
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
-    bool include_last_offset,
-    c10::optional<int64_t> padding_idx) {
+    bool include_last_offset) {
   return embedding_bag_byte_helper(
       output,
       weight,
@@ -695,7 +682,6 @@ Tensor& embedding_bag_byte_rowwise_offsets_out(
       per_sample_weights_,
       compressed_indices_mapping,
       include_last_offset,
-      padding_idx,
       false /* is_embedding_op */);
 }
 
@@ -710,8 +696,7 @@ Tensor embedding_bag_byte_rowwise_offsets(
     bool pruned_weights,
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
-    bool include_last_offset,
-    c10::optional<int64_t> padding_idx) {
+    bool include_last_offset) {
   auto output = at::empty({0}, weight.options().dtype(at::kFloat));
   embedding_bag_byte_rowwise_offsets_out(
       output,
@@ -723,8 +708,7 @@ Tensor embedding_bag_byte_rowwise_offsets(
       pruned_weights,
       per_sample_weights_,
       compressed_indices_mapping,
-      include_last_offset,
-      padding_idx);
+      include_last_offset);
   return output;
 }
 
@@ -738,8 +722,8 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
     bool pruned_weights,
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
-    bool include_last_offset,
-    c10::optional<int64_t> padding_idx) {
+    bool include_last_offset) {
+
   if (per_sample_weights_.has_value()) {
     TORCH_CHECK(
         (per_sample_weights_.value().scalar_type() == at::kFloat ||
@@ -758,8 +742,7 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
           ? per_sample_weights_.value().to(at::kFloat)
           : per_sample_weights_,
       compressed_indices_mapping,
-      include_last_offset,
-      padding_idx);
+      include_last_offset);
 }
 
 Tensor embedding_bag_4bit_rowwise_offsets(
@@ -771,8 +754,7 @@ Tensor embedding_bag_4bit_rowwise_offsets(
     bool pruned_weights,
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
-    bool include_last_offset,
-    c10::optional<int64_t> padding_idx) {
+    bool include_last_offset) {
 
   auto output = at::empty({0}, weight.options().dtype(at::kFloat));
   embedding_bag_4bit_rowwise_offsets_out(
@@ -785,8 +767,7 @@ Tensor embedding_bag_4bit_rowwise_offsets(
     pruned_weights,
     per_sample_weights_,
     compressed_indices_mapping,
-    include_last_offset,
-    padding_idx
+    include_last_offset
   );
   return output;
 }
@@ -803,8 +784,7 @@ class QEmbeddingBag final {
       bool pruned_weights,
       const c10::optional<Tensor>& per_sample_weights_,
       const c10::optional<Tensor>& compressed_indices_mapping,
-      bool include_last_offset,
-      c10::optional<int64_t> padding_idx) {
+      bool include_last_offset) {
     if (bit_rate == 8) {
       return packed_weight->embeddingbag_byte(
           indices,
@@ -813,7 +793,6 @@ class QEmbeddingBag final {
           per_sample_weights_,
           compressed_indices_mapping,
           include_last_offset,
-          padding_idx,
           false /* is_embedding_op */);
     } else if (bit_rate == 4) {
       return packed_weight->embeddingbag_4bit(
@@ -822,8 +801,7 @@ class QEmbeddingBag final {
           pruned_weights,
           per_sample_weights_,
           compressed_indices_mapping,
-          include_last_offset,
-          padding_idx);
+          include_last_offset);
     } else {
       TORCH_INTERNAL_ASSERT(
           "Currently only support 8-bit embedding_bag quantization");
@@ -850,7 +828,6 @@ class QEmbedding final {
           c10::nullopt,
           c10::nullopt,
           false /* include_last_offset */,
-          c10::nullopt /* padding_idx */,
           true /* is_embedding_op */);
 
     } else {
