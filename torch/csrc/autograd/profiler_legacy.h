@@ -52,9 +52,6 @@ struct TORCH_API CUDAStubs {
   virtual bool enabled() const {
     return false;
   }
-  virtual void onEachDevice(std::function<void(int)> op) const {
-    fail();
-  }
   virtual void synchronize() const {
     fail();
   }
@@ -169,6 +166,10 @@ struct TORCH_API LegacyEvent {
       case EventKind::MemoryAlloc: return "memory_alloc";
     }
     throw std::runtime_error("unknown event kind");
+  }
+
+  EventKind kind() const {
+    return kind_;
   }
 
   const char* name() const {
