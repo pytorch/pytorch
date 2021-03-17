@@ -4633,5 +4633,97 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
   }
 }
 
+TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
+  KernelScope kernel_scope;
+  int N = 8;
+  Placeholder b("b", kFloat, {N});
+  VarHandle n("n", kInt);
+  Stmt* s = For::make(
+      n, 1, N, b.store({n}, CompareSelect::make(n, 1, 0.f, 1.0f, kLT)));
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: b[n] = 1.f;
+)IR",
+      oss.str());
+}
+
+TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
+  KernelScope kernel_scope;
+  int N = 8;
+  Placeholder b("b", kFloat, {N});
+  VarHandle n("n", kInt);
+  Stmt* s =
+      For::make(n, 1, N, b.store({n}, IfThenElse::make(n < 1, 0.f, 1.0f)));
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: b[n] = 1.f;
+)IR",
+      oss.str());
+}
+
+TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
+  // This test mimics the unpadded region of a conv2d.  We want to remove any
+  // conditional that is provably satisfied (or unsatisfied) by the entire loop
+  // range.
+  KernelScope kernel_scope;
+  int N = 8;
+  Placeholder b("b", kFloat, {N, N});
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto csel = CompareSelect::make(i, 1, kLT);
+  csel = CompareSelect::make(j, 1, 1, csel, kLT);
+  csel = CompareSelect::make(i, N - 1, 1, csel, kGE);
+  csel = CompareSelect::make(j, N - 1, 1, csel, kGE);
+  Stmt* s = b.store({i, j}, IfThenElse::make(csel, 0.f, 1.0f));
+  s = For::make(j, 1, N - 1, s);
+  s = For::make(i, 1, N - 1, s);
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: b[n] = 1.f;
+)IR",
+      oss.str());
+}
+
+TEST(Simplify, DISABLED_SimplifyLoopBounds) {
+  // This test mimics the padded region of a conv2d.  We want to adjust the
+  // loop bounds such that the condition will be always met.  Note that this
+  // could be solved by peeling, and applying the range-based conditional
+  // simplification in the previous tests.
+  KernelScope kernel_scope;
+  int N = 8;
+  int K = 3;
+  Placeholder a("a", kFloat, {N, N});
+  Placeholder b("b", kFloat, {N, N});
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto csel = CompareSelect::make(i, 1, kLT);
+  csel = CompareSelect::make(j, 1, 1, csel, kLT);
+  csel = CompareSelect::make(i, N - 1, 1, csel, kGE);
+  csel = CompareSelect::make(j, N - 1, 1, csel, kGE);
+  Stmt* s = b.store(
+      {i, j}, b.load({i, j}) + IfThenElse::make(csel, 0.f, a.load({i, j})));
+  s = For::make(j, 0, K, s);
+  s = For::make(i, 0, K, s);
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: for (int i = 1; i < 3; i++) {
+# CHECK: for (int j = 1; j < 3; j++) {
+# CHECK-NOT: IfThenElse
+)IR",
+      oss.str());
+}
+
 } // namespace jit
 } // namespace torch
