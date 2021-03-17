@@ -2649,7 +2649,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # From https://github.com/pytorch/pytorch/issues/53815
             x = torch.empty(2, device='meta')
             y = x + 2
-            self.assertEqual(y.sizes(), x.sizes())
+            self.assertEqual(y.size(), x.size())
 
         def test_normal_shape(self):
             warned = False

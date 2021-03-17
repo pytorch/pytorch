@@ -403,7 +403,7 @@ def gen_trace_type_shard(
     fm: FileManager, native_functions: Sequence[NativeFunction], suffix: str
 ) -> None:
     fm.write_with_template('TraceType%s.cpp' % suffix, 'TraceType.cpp', lambda: {
-        'generated_comment': '@' + f'generated from {fm.template_dir}/TraceType.cpp',
+        'generated_comment': f'@generated from {fm.template_dir}/TraceType.cpp',
         'trace_method_definitions': list(mapMaybe(method_definition, native_functions)),
         'trace_wrapper_registrations': list(mapMaybe(method_registration, native_functions)),
     })
