@@ -1460,7 +1460,7 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
     def _samples_with_alpha_helper(args, alphas, filter_fn=lambda arg_alpha: True):
-        filtered_product = filter(filter_fn, product(args, alphas)) # type: ignore
+        filtered_product = filter(filter_fn, product(args, alphas))  # type: ignore
         return (SampleInput(arg, kwargs=dict(alpha=alpha))
                 for arg, alpha in filtered_product)  # type: ignore
 
