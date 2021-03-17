@@ -622,7 +622,12 @@ def regression_info(
             f'    job: {job_name}',
             f'    commit: {head_sha}',
         ]),
-        anomalies(analysis),
+
+        # don't print anomalies, because sometimes due to sharding, the
+        # output from this would be very long and obscure better signal
+
+        # anomalies(analysis),
+
         graph(
             head_sha=head_sha,
             head_seconds=head_report['total_seconds'],
