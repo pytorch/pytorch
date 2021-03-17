@@ -253,7 +253,7 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
 
 } // anonymous namespace
 
-Tensor& mm_out_cuda(Tensor& result, const Tensor& self, const Tensor& mat2) {
+Tensor& mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   result.resize_({ self.size(0), mat2.size(1) });
   return addmm_out_cuda_impl(result, result, self, mat2, 0, 1);
 }
@@ -287,7 +287,7 @@ Tensor& addmm__cuda(Tensor& self, const Tensor& mat1, const Tensor& mat2,
   return self;
 }
 
-Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+Tensor& baddbmm_out_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
   Tensor self_;
   if (&result != &self) {
     std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
@@ -306,14 +306,14 @@ Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch
 
 Tensor baddbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   Tensor out = at::empty({0}, self.options());
-  return baddbmm_out_cuda(out, self, batch1, batch2, beta, alpha);
+  return baddbmm_out_cuda(self, batch1, batch2, beta, alpha, out);
 }
 
 Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  return baddbmm_out_cuda(self, self, batch1, batch2, beta, alpha);
+  return baddbmm_out_cuda(self, batch1, batch2, beta, alpha, self);
 }
 
-Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
+Tensor& bmm_out_cuda(const Tensor& batch1, const Tensor& batch2, Tensor &result) {
   result.resize_({ batch1.size(0), batch1.size(1), batch2.size(2) });
   Scalar beta(0.0);
   Scalar alpha(1.0);
@@ -329,7 +329,7 @@ Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2)
 
 Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({0}, self.options());
-  return native::bmm_out_cuda(result, self, mat2);
+  return native::bmm_out_cuda(self, mat2, result);
 }
 
 namespace {
