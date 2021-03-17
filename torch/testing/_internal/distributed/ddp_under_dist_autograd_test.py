@@ -277,13 +277,13 @@ def get_training_examples():
     idx = 0
     # Every example has another one that has exactly the same features but an
     # opposite value. Therefore, their grads cancel each other in all-reduce.
-    for value in (-1.0, 1.0):
-        for x in (-1 * value, 1 * value):
-            for y in (1 * value, -1 * value):
+    for value in (-1, 1):
+        for x in (-1.0 * value, 1.0 * value):
+            for y in (1.0 * value, -1.0 * value):
                 for z in (0, 1):
                     training_examples.dense_features[idx, :] = torch.tensor((x, y))
                     training_examples.sparse_features[idx] = z
-                    training_examples.values[idx] = int(value)
+                    training_examples.values[idx] = value
                     idx += 1
 
     # Split the examples among NUM_TRAINERS trainers
