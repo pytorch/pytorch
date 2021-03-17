@@ -17,6 +17,8 @@ namespace jit {
 
 namespace {
 void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
+#ifdef USE_CUDA
+#if AT_CUDNN_ENABLED()
   SubgraphRewriter rewriter;
 
   // TODO: fix CUDNN conv1d failure
@@ -100,15 +102,13 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
   });
 
   rewriter.runOnGraph(graph, filter);
+#endif
+#endif
 }
 } // namespace
 
 void FuseFrozenConvAddRelu(std::shared_ptr<Graph>& graph) {
-#ifdef USE_CUDA
-#if AT_CUDNN_ENABLED()
   fuseFrozenConvAddReluImpl(graph);
-#endif
-#endif
 }
 
 } // namespace jit

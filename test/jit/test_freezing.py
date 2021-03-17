@@ -30,8 +30,7 @@ TEST_CUDA = torch.cuda.is_available()
 TEST_CUDNN = False
 if TEST_CUDA:
     torch.ones(1).cuda()  # initialize cuda context
-    TEST_CUDNN = (TEST_CUDA and
-        torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
+    TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0')))
 
 class TestFreezing(JitTestCase):
     def test_freeze_module(self):
