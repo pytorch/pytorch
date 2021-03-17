@@ -87,11 +87,9 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
     set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
 
     if(WIN32)
-      # Prefer Intel OpenMP which is *NOT* in the system include path.
-      find_path(__header_dir "omp.h" NO_CMAKE_SYSTEM_PATH)
-      if(NOT __header_dir)
-        find_path(__header_dir "omp.h")
-      endif()
+      # Prefer Intel OpenMP which can be provided by CMAKE_INCLUDE_PATH.
+      # Note that CMAKE_INCLUDE_PATH is searched before CMAKE_SYSTEM_INCLUDE_PATH (MSVC path in this case)
+      find_path(__header_dir "omp.h")
     else()
       # AppleClang may need a header file, search for omp.h with hints to brew
       # default include dir
@@ -109,7 +107,7 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
       set(OMP_FLAG_Intel "-qopenmp")
     endif()
     set(OMP_FLAG_MIPSpro "-mp")
-    set(OMP_FLAG_MSVC "-openmp:experimental" "-openmp:experimental -I\"${__header_dir}\"" "-openmp" "-openmp -I\"${__header_dir}\"")
+    set(OMP_FLAG_MSVC "-openmp:experimental -I\"${__header_dir}\"" "-openmp" "-openmp -I\"${__header_dir}\"")
     set(OMP_FLAG_PathScale "-openmp")
     set(OMP_FLAG_NAG "-openmp")
     set(OMP_FLAG_Absoft "-openmp")
