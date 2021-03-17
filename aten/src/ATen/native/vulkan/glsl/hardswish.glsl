@@ -18,9 +18,9 @@ void main() {
 
   if (all(lessThan(pos, uBlock.size.xyz))) {
     const vec4 inval = texelFetch(uInput, pos, 0);
-    const vec4 mask1 = vec4(lessThan(inval, vec4(3.0)));
-    const vec4 mask2 = vec4(greaterThan(inval, vec4(-3.0)));
-    const vec4 outval = mask2*(mask1*(inval*(inval + 3.0)/6.0) + (1 - mask1)*inval);
+    const vec4 mask1 = vec4(lessThan(inval, vec4(3.0f)));
+    const vec4 mask2 = vec4(greaterThan(inval, vec4(-3.0f)));
+    const vec4 outval = mask2*inval*(mask1*((inval+3.0f)/6.0f) + 1.0f - mask1);
     imageStore(uOutput, pos, outval);
   }
 }
