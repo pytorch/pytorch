@@ -7,7 +7,7 @@ from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 from itertools import chain
 import torch
-import torch._C._fx
+import torch._C._fx  # type: ignore
 from torch._C import ScriptObject  # type: ignore
 
 import sys
@@ -60,7 +60,7 @@ class CPatchManager(object):
         c_patch_enabled = True
 
         def patched_in(to_patch, args, kwargs):
-            global c_patch_enabled
+            nonlocal c_patch_enabled
             try:
                 c_patch_enabled = False
                 r = patched_impl(to_patch, args, kwargs)
