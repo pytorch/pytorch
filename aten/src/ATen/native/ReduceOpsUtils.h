@@ -153,17 +153,9 @@ static void allocate_reduction_result(
 }
 
 inline Tensor create_reduction_result(
-  const Tensor& self, IntArrayRef dim, bool keepdim, const c10::optional<ScalarType>& opt_dtype
+  const Tensor& self, IntArrayRef dim, bool keepdim, ScalarType dtype
 ) {
   DimMask mask = make_dim_mask(dim, self.dim());
-
-  ScalarType dtype = value_or_else(opt_dtype, [&] {
-    ScalarType src_type = toValueType(self.scalar_type());
-    if (at::isIntegralType(src_type, /*includeBool=*/true)) {
-      return kLong;
-    }
-    return src_type;
-  });
 
   auto shape = DimVector(self.sizes());
   for (int dim = shape.size() - 1; dim >= 0; dim--) {
