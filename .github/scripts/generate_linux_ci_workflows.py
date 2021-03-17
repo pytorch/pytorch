@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import jinja2
 
 import os.path

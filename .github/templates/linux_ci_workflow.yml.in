@@ -50,6 +50,9 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
+      - name: Test ability to ls s3 bucket
+        run: |
+          aws s3 ls "s3://${SCCACHE_BUCKET}"
       - name: Build PyTorch
         run: |
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
