@@ -9,11 +9,12 @@ import torch.jit.quantized
 # Testing utils
 from torch.testing import floating_and_complex_types_and
 from torch.testing._internal.common_utils import TestCase, \
-    freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests
+    freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, is_iterable_of_tensors
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
 # Standard library
 from itertools import chain
+from typing import List, Union
 
 import io
 
@@ -48,13 +49,28 @@ def check_against_reference(self, func, reference_func, output_func, args, kwarg
                    if v is not None and v.dtype in floating_and_complex_types_and(torch.half, torch.bfloat16))
 
     def clone_inputs(requires_grad):
-        inputs = [
-            arg.detach().clone().requires_grad_(requires_grad and arg.requires_grad)
-            if isinstance(arg, torch.Tensor) else arg for arg in args
-        ]
-        return inputs, [input for input in inputs if isinstance(input, torch.Tensor) and input.requires_grad]
+        inputs: List[Union[torch.Tensor, List[torch.Tensor]]] = []
+        recording_tensors: List[torch.Tensor] = []
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                require_grad = requires_grad and arg.requires_grad
+                inputs.append(arg.detach().clone().requires_grad_(require_grad))
+                if require_grad:
+                    recording_tensors.append(arg)
+            elif is_iterable_of_tensors(arg):
+                tensors = []
+                for t in arg:
+                    require_grad = requires_grad and t.requires_grad
+                    tensors.append(t.detach().clone().requires_grad_(require_grad))
+                    if require_grad:
+                        recording_tensors.append(t)
+                inputs.append(tensors)
+            else:
+                inputs.append(arg)
 
-    nograd_inputs, nograd_tensors = clone_inputs(False)
+        return inputs, recording_tensors
+
+    nograd_inputs, _ = clone_inputs(False)
     recording_inputs, recording_tensors = clone_inputs(True)
 
     # test no gradients case
