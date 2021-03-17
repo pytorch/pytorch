@@ -332,7 +332,6 @@ filegroup(
         "aten/src/TH/THTensorLapack.cpp",
         "aten/src/TH/THTensorMath.cpp",
         "aten/src/TH/THTensorMoreMath.cpp",
-        "aten/src/TH/THTensorRandom.cpp",
     ],
 )
 
@@ -389,7 +388,6 @@ filegroup(
         "aten/src/THC/THCTensorMathReduce.cu.cc",
         "aten/src/THC/THCTensorMathScan.cu.cc",
         "aten/src/THC/THCTensorMode.cu.cc",
-        "aten/src/THC/THCTensorRandom.cu.cc",
         "aten/src/THC/THCTensorScatterGather.cu.cc",
         "aten/src/THC/THCTensorSort.cu.cc",
         "aten/src/THC/THCTensorTopK.cu.cc",
