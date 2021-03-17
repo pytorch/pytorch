@@ -886,18 +886,14 @@ class Quantizer:
                 else:
                     root_module = self.modules[""]
                     assert isinstance(prev_node, Node)
-                    quant_env[node.name] = \
-                        (quantize_node(
-                            self, load_non_quantized(prev_node),
-                            observer_module, node, is_input=True), observer_module.dtype)  # type: ignore
+                    observer_dtype: torch.dtype = observer_module.dtype  # type: ignore
+                    quant_env[node.name] = (quantize_node(self, load_non_quantized(prev_node), observer_module, node, is_input=True), observer_dtype)  # type: ignore
             else:
                 # replace activation post process with quantization ops
                 root_module = self.modules[""]
                 assert isinstance(node.args[0], Node)
-                quant_env[node.name] = \
-                    (quantize_node(
-                        self, load_non_quantized(node.args[0]),
-                        observer_module, node, is_input=True), observer_module.dtype)  # type: ignore
+                dtype: torch.dtype = observer_module.dtype  # type: ignore
+                quant_env[node.name] = (quantize_node(self, load_non_quantized(node.args[0]), observer_module, node, is_input=True), dtype)  # type: ignore
 
         # additional state to override inputs to be quantized, if specified
         # by the user
