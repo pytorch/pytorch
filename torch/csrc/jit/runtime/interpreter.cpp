@@ -1315,7 +1315,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             Function* fn = frame.function->function_table_[inst.X];
             if (!fn->isGraphFunction()) {
               RUN_BUILTIN_FUNCTION(stack, *fn);
-              ++pc;
             } else {
               pc = runGraphFunction(stack, fn, pc);
             }
@@ -1396,6 +1395,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 at::ThreadLocalState tls_state_;
               };
 
+              saved_pc_ = pc;
+
               // we are suspending, so we need to reset the stack to where we
               // started if it started empty, except for the inputs we can avoid
               // a true copy by swapping, which leaves the original stack empty.
@@ -1413,7 +1414,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               future->addCallback(
                   Callback(intrusive_from_this(), std::move(copied)));
 
-              saved_pc_ = pc;
               return true;
             }
             stack.pop_back();
@@ -1601,6 +1601,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         }
       }
     } catch (std::exception& e) {
+      saved_pc_ = pc;
       for (auto it = entered_objects.rbegin(), end = entered_objects.rend();
            it != end;
            ++it) {
@@ -1621,7 +1622,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       }
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
       handleError(ExceptionMessage(e), is_jit_exception);
-      saved_pc_ = pc;
       return false;
     }
   }
