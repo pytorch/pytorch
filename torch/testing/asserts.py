@@ -32,10 +32,8 @@ class UsageWarning(Warning):
 
 
 def _get_default_rtol_and_atol(a: torch.Tensor, b: torch.Tensor) -> Tuple[float, float]:
-    try:
-        return _TestCase()._getDefaultRtolAndAtol(a.dtype, b.dtype)
-    except KeyError:
-        return 0.0, 0.0
+    dtype = a.dtype if a.dtype == b.dtype else _get_comparison_dtype(a, b)
+    return _TestCase.dtype_precisions.get(dtype, (0.0, 0.0))
 
 
 def _hide_internal_traceback_pytest(fn):
@@ -163,10 +161,6 @@ def _assert_values_allclose(
 
         Internally :func:`torch.allclose` is used to check for bitwise equality.
     """
-    default_rtol, default_atol = _get_default_rtol_and_atol(a, b)
-    rtol = rtol if rtol is not None else default_rtol
-    atol = atol if atol is not None else default_atol
-
     if not torch.allclose(a, b, rtol=rtol, atol=atol):
         raise AssertionError("ADDME")
 
@@ -304,7 +298,6 @@ def assert_tensors_allclose(
     b: torch.Tensor,
     /,
     *,
-    warn_integer_dtypes: bool = True,
     rtol: Optional[float] = None,
     atol: Optional[float] = None,
     check_device: bool = True,
@@ -315,15 +308,15 @@ def assert_tensors_allclose(
 
     Optionally, checks that some attributes of both tensors are equal.
 
+    If :attr:`rtol` and :attr:`rtol` are ``0``, the call is deferred to :func:`assert_tensors_equal`.
+
     Args:
         a (torch.Tensor): First tensor.
         b (torch.Tensor): Second tensor.
-        warn_integer_dtypes (bool): If ``True`` (default), emit a warning if :attr:`a` and :attr:`b` are integer
-            tensors.
-        rtol (Optional[float]): Relative tolerance. If omitted, a default value based on the
-            :attr:`~torch.Tensor.dtype` is selected with the below table.
-        atol (Optional[float]): Absolute tolerance. If omitted, a default value based on the
-            :attr:`~torch.Tensor.dtype` is selected with the below table.
+        rtol (Optional[float]): Relative tolerance. If specified :attr:`atol` must also be specified. If omitted,
+            default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
+        atol (Optional[float]): Absolute tolerance. If specified :attr:`rtol` must also be specified. If omitted,
+            default values based on the :attr:`~torch.Tensor.dtype` are selected with the below table.
         check_device (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` live in the same
             :attr:`~torch.Tensor.device` memory. If this check is disabled **and** :attr:`a` and :attr:`b` do not live
             in the same memory :attr:`~torch.Tensor.device`, they are moved CPU memory before their values are
@@ -373,17 +366,24 @@ def assert_tensors_allclose(
     """
     _assert_are_tensors(a, b)
 
-    are_integer_dtypes = not a.dtype.is_floating_point and not b.dtype.is_floating_point
-    if are_integer_dtypes and warn_integer_dtypes:
-        warnings.warn(
-            "If both tensors have an integer dtype, it is recommended to use the respective 'equal' variant instead.",
-            UsageWarning,
-        )
+    if (rtol is None) ^ (atol is None):
+        # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
+        # results. Imagine setting atol=0.0 and the tensors still match because rtol>0.0.
+        raise UsageError(f"Both 'rtol' and 'atol' must be omitted or specified, "
+                         f"but got rtol={rtol} and atol={atol} instead.")
+    elif rtol is None:
+        rtol, atol = _get_default_rtol_and_atol(a, b)
+
+    values_asserter = (
+        _assert_values_equal(a, b)
+        if (rtol == 0.0) and (atol == 0.0)
+        else functools.partial(_assert_values_allclose, rtol=rtol, atol=atol)
+    )
 
     _compare_tensors(
         a,
         b,
-        values_asserter=functools.partial(_assert_values_allclose, rtol=rtol, atol=atol),
+        values_asserter,
         check_device=check_device,
         check_dtype=check_dtype,
         check_stride=check_stride,
