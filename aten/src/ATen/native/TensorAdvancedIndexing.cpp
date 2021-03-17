@@ -495,7 +495,7 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
   return self;
 }
 
-Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, Scalar alpha) {
+Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
   return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source, alpha);
 }
 
