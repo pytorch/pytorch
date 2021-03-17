@@ -9115,7 +9115,7 @@ dedent """
                 return v
 
         with torch.jit.optimized_execution(False):
-            i = torch.Tensor(2)
+            i = torch.empty(2)
             m = M()
             o = m(i)
             v = i
@@ -9513,7 +9513,7 @@ dedent """
                 return self.mods(v)
 
         with torch.jit.optimized_execution(False):
-            i = torch.Tensor(2)
+            i = torch.empty(2)
             m = M()
             o = m(i)
             v = i
@@ -9592,7 +9592,7 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, "(Tensor, Tensor, Tensor)"):
             with torch.jit.optimized_execution(False):
                 hs = HaveSequential()
-                i = torch.Tensor(2)
+                i = torch.empty(2)
                 hs(i)
 
     @_tmp_donotuse_dont_inline_everything
@@ -11248,8 +11248,8 @@ dedent """
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
-                self.weight_0 = torch.nn.Parameter(torch.Tensor(torch.rand(weight_0_shape)))
-                self.weight_1 = torch.nn.Parameter(torch.Tensor(torch.rand(weight_1_shape)))
+                self.weight_0 = torch.nn.Parameter(torch.rand(weight_0_shape))
+                self.weight_1 = torch.nn.Parameter(torch.rand(weight_1_shape))
 
             def forward(self, x):
                 o = F.linear(x, self.weight_0)
@@ -13288,8 +13288,8 @@ dedent """
                 super(TestLinear, self).__init__()
                 self.in_features = in_features
                 self.out_features = out_features
-                self.weight = torch.nn.Parameter(torch.Tensor(out_features, in_features))
-                self.bias = torch.nn.Parameter(torch.Tensor(out_features))
+                self.weight = torch.nn.Parameter(torch.empty(out_features, in_features))
+                self.bias = torch.nn.Parameter(torch.empty(out_features))
                 self.register_buffer('counter', torch.ones(out_features))
                 self.reset_parameters()
 

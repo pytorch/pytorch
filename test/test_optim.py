@@ -30,7 +30,7 @@ def rosenbrock(tensor):
 
 def drosenbrock(tensor):
     x, y = tensor
-    return torch.Tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
+    return torch.tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
 
 class TestOptim(TestCase):
@@ -40,7 +40,7 @@ class TestOptim(TestCase):
                                 sparse_only=False):
         if scheduler_constructors is None:
             scheduler_constructors = []
-        params_t = torch.Tensor([1.5, 1.5])
+        params_t = torch.tensor([1.5, 1.5])
 
         params = Variable(params_t, requires_grad=True)
         optimizer = constructor([params])
@@ -52,7 +52,7 @@ class TestOptim(TestCase):
             params_c = Variable(params_t.clone(), requires_grad=True)
             optimizer_c = constructor([params_c])
 
-        solution = torch.Tensor([1, 1])
+        solution = torch.tensor([1, 1])
         initial_dist = params.data.dist(solution)
 
         def eval(params, sparse_grad, w):
@@ -66,11 +66,11 @@ class TestOptim(TestCase):
             if w:
                 i = torch.LongTensor([[0, 0]])
                 x = grad[0]
-                v = torch.Tensor([x / 4., x - x / 4.])
+                v = torch.tensor([x / 4., x - x / 4.])
             else:
                 i = torch.LongTensor([[1, 1]])
                 y = grad[1]
-                v = torch.Tensor([y - y / 4., y / 4.])
+                v = torch.tensor([y - y / 4., y / 4.])
             x = sparse.DoubleTensor(i, v, torch.Size([2])).to(dtype=v.dtype)
             with torch.no_grad():
                 if sparse_grad:
@@ -614,7 +614,7 @@ class TestOptim(TestCase):
         opt2 = optim.LBFGS(params, 0.01, tolerance_grad=-inf)
 
         def closure():
-            return torch.Tensor([10])
+            return torch.tensor([10])
 
         res1 = opt1.step(closure)
         res2 = opt2.step(closure)
@@ -707,7 +707,7 @@ class TestLRScheduler(TestCase):
 
     def test_no_cyclic_references(self):
         import gc
-        param = Variable(torch.Tensor(10), requires_grad=True)
+        param = Variable(torch.empty(10), requires_grad=True)
         optim = SGD([param], lr=0.5)
         scheduler = LambdaLR(optim, lambda epoch: 1.0)
         del scheduler
