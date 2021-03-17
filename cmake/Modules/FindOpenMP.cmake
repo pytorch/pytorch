@@ -86,9 +86,17 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
     set(OMP_FLAG_GNU "-fopenmp")
     set(OMP_FLAG_Clang "-fopenmp=libomp" "-fopenmp=libiomp5" "-fopenmp")
 
-    # AppleClang may need a header file, search for omp.h with hints to brew
-    # default include dir
-    find_path(__header_dir "omp.h" HINTS "/usr/local/include")
+    if(WIN32)
+      # Prefer Intel OpenMP which is *NOT* in the system include path.
+      find_path(__header_dir "omp.h" NO_CMAKE_SYSTEM_PATH)
+      if(NOT __header_dir)
+        find_path(__header_dir "omp.h")
+      endif()
+    else()
+      # AppleClang may need a header file, search for omp.h with hints to brew
+      # default include dir
+      find_path(__header_dir "omp.h" HINTS "/usr/local/include")
+    endif()
     set(OMP_FLAG_AppleClang "-Xpreprocessor -fopenmp" "-Xpreprocessor -fopenmp -I${__header_dir}")
 
     set(OMP_FLAG_HP "+Oopenmp")
