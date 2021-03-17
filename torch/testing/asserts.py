@@ -184,7 +184,8 @@ def _compare_tensors(
             after the attribute checks. Must raise an :class:`AssertionError` if the values do not match.
         check_device (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` live in the same
             :attr:`~torch.Tensor.device` memory. If this check is disabled **and** :attr:`a` and :attr:`b` do not live
-            in the same memory :attr:`~torch.Tensor.device`, they are moved to the CPU memory.
+            in the same memory :attr:`~torch.Tensor.device`, they are moved CPU memory before their values are
+            compared.
         check_dtype (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
             :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`a` and :attr:`b` do not have the same
             :attr:`~torch.Tensor.dtype`, the comparison :attr:`~torch.Tensor.dtype` is determined by
@@ -247,7 +248,8 @@ def assert_tensors_equal(
             floating point tensor.
         check_device (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` live in the same
             :attr:`~torch.Tensor.device` memory. If this check is disabled **and** :attr:`a` and :attr:`b` do not live
-            in the same memory :attr:`~torch.Tensor.device`, they are moved to the CPU memory.
+            in the same memory :attr:`~torch.Tensor.device`, they are moved CPU memory before their values are
+            compared.
         check_dtype (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
             :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`a` and :attr:`b` do not have the same
             :attr:`~torch.Tensor.dtype`, the comparison :attr:`~torch.Tensor.dtype` is determined by
@@ -319,7 +321,8 @@ def assert_tensors_allclose(
             :attr:`~torch.Tensor.dtype` is selected with the below table.
         check_device (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` live in the same
             :attr:`~torch.Tensor.device` memory. If this check is disabled **and** :attr:`a` and :attr:`b` do not live
-            in the same memory :attr:`~torch.Tensor.device`, they are moved to the CPU memory.
+            in the same memory :attr:`~torch.Tensor.device`, they are moved CPU memory before their values are
+            compared.
         check_dtype (bool): If ``True`` (default), asserts that both :attr:`a` and :attr:`b` have the same
             :attr:`~torch.Tensor.dtype`. If this check is disabled **and** :attr:`a` and :attr:`b` do not have the same
             :attr:`~torch.Tensor.dtype`, the comparison :attr:`~torch.Tensor.dtype` is determined by
