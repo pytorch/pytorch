@@ -251,7 +251,7 @@
 - func: angle(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: angle
+    CPU, CUDA: angle
 
 - func: angle.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -303,7 +303,7 @@
 - func: acos(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: acos
+    CPU, CUDA: acos
 
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -508,7 +508,7 @@
 - func: acosh(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: acosh
+    CPU, CUDA: acosh
 
 - func: acosh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -531,7 +531,7 @@
 - func: asinh(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: asinh
+    CPU, CUDA: asinh
 
 - func: asinh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -554,7 +554,7 @@
 - func: atanh(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: atanh
+    CPU, CUDA: atanh
 
 - func: atanh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -617,7 +617,7 @@
 - func: atan(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: atan
+    CPU, CUDA: atan
 
 - func: atan_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -1099,7 +1099,7 @@
 - func: cos(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: cos
+    CPU, CUDA: cos
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -1113,7 +1113,7 @@
 - func: cosh(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: cosh
+    CPU, CUDA: cosh
 
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -1663,7 +1663,7 @@
 - func: exp(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: exp
+    CPU, CUDA: exp
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -1678,7 +1678,7 @@
 - func: exp2(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: exp2
+    CPU, CUDA: exp2
 
 - func: exp2_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -1693,7 +1693,7 @@
 - func: expm1(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: expm1
+    CPU, CUDA: expm1
 
 - func: expm1_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -2223,7 +2223,7 @@
 - func: log(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: log
+    CPU, CUDA: log
 
 - func: log_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -2238,7 +2238,7 @@
 - func: log10(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: log10
+    CPU, CUDA: log10
 
 - func: log10_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -2271,7 +2271,7 @@
 - func: log2(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: log2
+    CPU, CUDA: log2
 
 - func: log2_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -2466,7 +2466,7 @@
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
-    DefaultBackend: max
+    CPU, CUDA: max
 
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -2601,7 +2601,7 @@
 - func: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
-    DefaultBackend: min
+    CPU, CUDA: min
 
 - func: min.dim_min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -3157,7 +3157,7 @@
 - func: reciprocal(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: reciprocal
+    CPU, CUDA: reciprocal
 
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -3172,7 +3172,7 @@
 - func: neg(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: neg
+    CPU, CUDA: neg
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -3308,7 +3308,7 @@
 - func: rsqrt(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: rsqrt
+    CPU, CUDA: rsqrt
 
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -3418,7 +3418,7 @@
 - func: sinc(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: sinc
+    CPU, CUDA: sinc
 
 - func: sinc_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -3432,7 +3432,7 @@
 - func: sinh(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: sinh
+    CPU, CUDA: sinh
 
 - func: sinh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -3767,7 +3767,7 @@
 - func: tan(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: tan
+    CPU, CUDA: tan
 
 - func: tan_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
@@ -4172,22 +4172,22 @@
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: norm
+    CPU, CUDA: norm
 
 - func: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: norm
+    CPU, CUDA: norm
 
 - func: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: norm
+    CPU, CUDA: norm
 
 - func: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: norm
+    CPU, CUDA: norm
 
 - func: norm.dtype_out(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -4199,6 +4199,7 @@
   dispatch:
     CPU, CUDA: norm_out
 
+# These four redispatch in their implementation, so OK to be Math
 - func: norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
