@@ -1,9 +1,11 @@
 import functools
 import inspect
 import sys
+from collections import namedtuple
 from typing import Any, Optional, Tuple
 
 import torch
+from torch.testing import _unravel_index
 from torch.testing._internal.common_utils import get_comparison_dtype as _get_comparison_dtype, TestCase as _TestCase
 
 __all__ = ["assert_tensors_equal", "assert_tensors_allclose"]
@@ -155,6 +157,32 @@ def _equalize_attributes(a: torch.Tensor, b: torch.Tensor) -> Tuple[torch.Tensor
     return a, b
 
 
+_Trace = namedtuple("Trace", ("total", "abs", "rel", "idx", "diff", "a", "b"))
+
+
+def _trace_mismatches(a: torch.Tensor, b: torch.Tensor, /, mismatches: torch.Tensor) -> _Trace:
+    total = mismatches.numel()
+    abs = torch.sum(mismatches).item()
+    rel = abs / total
+
+    dtype = torch.float64 if a.dtype.is_floating_point else torch.int64
+    a_flat = a.flatten().to(dtype)
+    b_flat = b.flatten().to(dtype)
+
+    abs_diff_flat = torch.abs(a_flat - b_flat)
+    idx_flat = torch.argmax(abs_diff_flat)
+
+    return _Trace(
+        total=total,
+        abs=abs,
+        rel=rel,
+        idx=_unravel_index(idx_flat, a.shape),
+        diff=abs_diff_flat[idx_flat].item(),
+        a=a_flat[idx_flat].item(),
+        b=b_flat[idx_flat].item(),
+    )
+
+
 def _assert_values_equal(a: torch.Tensor, b: torch.Tensor):
     """Asserts that the values of two tensors are bitwise equal.
 
@@ -165,8 +193,16 @@ def _assert_values_equal(a: torch.Tensor, b: torch.Tensor):
     Raises:
          AssertionError: If the values of :attr:`a` and :attr:`b` are not bitwise equal.
     """
-    if not torch.all(torch.eq(a, b)):
-        raise AssertionError("ADDME")
+    mismatches = torch.ne(a, b)
+    if not torch.any(mismatches):
+        return
+
+    trace = _trace_mismatches(a, b, mismatches)
+    msg = (
+        f"Found {trace.abs} different elements out of {trace.total} ({trace.rel:.1%}). "
+        f"The greatest difference of {trace.diff} ({trace.a} vs. {trace.b}) occurred at index {trace.idx}"
+    )
+    raise AssertionError(msg)
 
 
 def _assert_values_allclose(
@@ -188,8 +224,17 @@ def _assert_values_allclose(
     Raises:
          AssertionError: If the values of :attr:`a` and :attr:`b` are close up to a desired tolerance.
     """
-    if not torch.allclose(a, b, rtol=rtol, atol=atol):
-        raise AssertionError("ADDME")
+    mismatches = ~torch.isclose(a, b, rtol=rtol, atol=atol)
+    if not any(mismatches):
+        return
+
+    trace = _trace_mismatches(a, b, mismatches)
+    msg = (
+        f"With rtol={rtol} and atol={atol}, "
+        f"found {trace.abs} different elements out of {trace.total} ({trace.rel:.1%}). "
+        f"The greatest difference of {trace.diff} ({trace.a} vs. {trace.b}) occurred at index {trace.idx}"
+    )
+    raise AssertionError(msg)
 
 
 @_hide_internal_traceback_pytest
