@@ -16,6 +16,7 @@
 #include <typeinfo>
 #include <numeric>
 #include <memory>
+#include <iostream>
 
 #define AT_DISALLOW_COPY_AND_ASSIGN(TypeName) \
   TypeName(const TypeName&) = delete; \
@@ -52,6 +53,7 @@ static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const 
 static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef<Tensor> tensors, const char * name, int pos, DeviceType device_type, ScalarType scalar_type) {
   std::vector<TensorImpl*> unwrapped;
   unwrapped.reserve(tensors.size());
+  cout << "Frank Test: " << std::is_integral<size_t>::value ? "true" : "false" << "\n";
   for (const auto i : c10::irange(tensors.size())) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {
