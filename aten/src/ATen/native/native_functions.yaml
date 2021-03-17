@@ -3172,7 +3172,7 @@
 - func: neg(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    CPU, CUDA: neg
+    CPU, CUDA, SparseCPU, SparseCUDA: neg
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
