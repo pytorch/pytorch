@@ -474,9 +474,6 @@ static void check_shape_forward(const at::Tensor& input,
            "] instead");
 
   if (!transposed) {
-    std::vector<int64_t> input_shape;
-    std::vector<int64_t> kernel_shape;
-    bool kernel_size_correct = true;
 
     TORCH_CHECK(input.size(1) == (weight_sizes[1] * groups),
              "Given groups=", groups, ", weight of size ", weight_sizes,
@@ -488,27 +485,22 @@ static void check_shape_forward(const at::Tensor& input,
              ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
              ", but got bias of size ", bias.sizes(), " instead");
 
+    bool kernel_size_incorrect = false;
     for (int i = 2; i < k; ++i) {
-      input_shape.push_back(input.size(i) + 2 * padding[i-2]);
-      // log new kernel size considering dilation
-      kernel_shape.push_back(dilation[i-2] * (weight_sizes[i]-1) + 1);
-      if (input_shape.back() < kernel_shape.back()) {
-        kernel_size_correct = false;
-      }
+      auto input_shape = input.size(i) + 2 * padding[i - 2];
+      auto kernel_shape = dilation[i - 2] * (weight_sizes[i] - 1) + 1;
+      kernel_size_incorrect |= (input_shape < kernel_shape);
     }
 
-    TORCH_CHECK(input_shape.size() == kernel_shape.size(), "Inconsistent shape between Input and Kernel");
-
-    if (!kernel_size_correct) {
-      // If kernel size is incorrect
+    if (kernel_size_incorrect) {
       std::ostringstream input_ss;
       std::ostringstream kernel_ss;
       std::ostringstream output_ss;
       std::string separator = "";
 
-      for (int i = 0, len = input_shape.size(); i < len; ++i) {
-        input_ss << separator << input_shape[i];
-        kernel_ss << separator << kernel_shape[i];
+      for (int i = 2; i < k; ++i) {
+        input_ss << separator << input.size(i) + 2 * padding[i - 2];
+        kernel_ss << separator << dilation[i - 2] * (weight_sizes[i] - 1) + 1;
         separator = " x ";
       }
 
