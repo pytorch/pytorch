@@ -159,4 +159,12 @@ inline bool is_complex(const Tensor& tensor) {
   return tensor.is_complex();
 }
 
+inline bool is_floating_point(const Tensor& tensor) {
+  return tensor.is_floating_point();
+}
+
+inline bool is_signed(const Tensor& tensor) {
+  return tensor.is_signed();
+}
+
 }
