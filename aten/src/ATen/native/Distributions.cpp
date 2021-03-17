@@ -298,6 +298,15 @@ struct RandomFromToStub {
   }
 };
 
+template<typename RNG>
+struct RandomFromToMeta {
+  // No-op!
+  void operator()(TensorIterator& iter, uint64_t range, int64_t from, c10::optional<Generator> gen) {
+  }
+  void operator()(TensorIterator& iter, c10::optional<Generator> gen) {
+  }
+};
+
 Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> gen) {
   return at::native::templates::random_from_to_impl<RandomFromToStub, Generator>(self, from, to, gen);
 }
@@ -307,15 +316,16 @@ Tensor& random_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
 }
 
 Tensor& random_meta_(Tensor& self, c10::optional<Generator> gen) {
+  // No error checking yay
   return self;
 }
 
 Tensor& random_meta_(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> gen) {
-  return self;
+  return at::native::templates::random_from_to_impl<RandomFromToMeta, Generator>(self, from, to, gen);
 }
 
 Tensor& random_meta_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
-  return self;
+  return random_meta_(self, 0, to, gen);
 }
 
 // ====================================================================================================================

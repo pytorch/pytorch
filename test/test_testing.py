@@ -2,9 +2,11 @@ import torch
 
 import math
 from pathlib import PurePosixPath
+import random
 
 from torch.testing._internal.common_utils import \
     (TestCase, make_tensor, run_tests, slowTest)
+from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
 from torch.testing._internal import mypy_wrapper
@@ -1186,22 +1188,6 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
     job: foo_job
     commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
-
-  class Foo:
-      # was   42.50s ±   2.12s
-      # now    3.02s
-
-    - def test_bar: ...
-    -     # was   1.000s
-
-    ! def test_foo: ...
-    !     # was  41.500s ±  2.121s
-    !     # now   0.020s           (skipped)
-
-    + def test_baz: ...
-    +     # now   3.000s
-
-
 Commit graph (base is most recent master ancestor with at least one S3 report):
 
     : (master)
@@ -1256,17 +1242,6 @@ Added    (across    1 suite)      1 test,  totaling +   3.00s
     job: foo_job
     commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
-
-+ class Foo:
-+     # now    3.02s
-+
-+     def test_baz: ...
-+         # now   3.000s
-+
-+     def test_foo: ...
-+         # now   0.020s           (skipped)
-
-
 Commit graph (base is most recent master ancestor with at least one S3 report):
 
     : (master)
@@ -1303,6 +1278,100 @@ Added    (across    1 suite)      2 tests, totaling +   3.02s
                 other_ancestors=2,
             )
         )
+
+
+class TestFrameworkUtils(TestCase):
+    tests = [
+        'super_long_test',
+        'long_test1',
+        'long_test2',
+        'normal_test1',
+        'normal_test2',
+        'normal_test3',
+        'short_test1',
+        'short_test2',
+        'short_test3',
+        'short_test4',
+        'short_test5',
+    ]
+
+    test_times = {
+        'super_long_test': (55, 1),
+        'long_test1': (22, 2),
+        'long_test2': (18, 2),
+        'normal_test1': (9, 2),
+        'normal_test2': (7, 2),
+        'normal_test3': (5, 2),
+        'short_test1': (1, 2),
+        'short_test2': (0.6, 3),
+        'short_test3': (0.4, 5),
+        'short_test4': (0.3, 1),
+        'short_test5': (0.01, 2),
+    }
+
+    def test_calculate_2_shards_with_complete_test_times(self):
+        expected_shards = [
+            (60, ['super_long_test', 'normal_test3']),
+            (58.31, ['long_test1', 'long_test2', 'normal_test1', 'normal_test2', 'short_test1', 'short_test2',
+                     'short_test3', 'short_test4', 'short_test5'])
+        ]
+        self.assertEqual(expected_shards, calculate_shards(2, self.tests, self.test_times))
+
+
+    def test_calculate_5_shards_with_complete_test_times(self):
+        expected_shards = [
+            (55, ['super_long_test']),
+            (22, ['long_test1', ]),
+            (18, ['long_test2', ]),
+            (11.31, ['normal_test1', 'short_test1', 'short_test2', 'short_test3', 'short_test4', 'short_test5']),
+            (12, ['normal_test2', 'normal_test3']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(5, self.tests, self.test_times))
+
+
+    def test_calculate_2_shards_with_incomplete_test_times(self):
+        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
+        expected_shards = [
+            (22, ['long_test1', 'long_test2', 'normal_test3', 'short_test3', 'short_test5']),
+            (10, ['normal_test1', 'short_test1', 'super_long_test', 'normal_test2', 'short_test2', 'short_test4']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(2, self.tests, incomplete_test_times))
+
+
+    def test_calculate_5_shards_with_incomplete_test_times(self):
+        incomplete_test_times = {k: v for k, v in self.test_times.items() if 'test1' in k}
+        expected_shards = [
+            (22, ['long_test1', 'normal_test2', 'short_test5']),
+            (9, ['normal_test1', 'normal_test3']),
+            (1, ['short_test1', 'short_test2']),
+            (0, ['super_long_test', 'short_test3']),
+            (0, ['long_test2', 'short_test4']),
+        ]
+        self.assertEqual(expected_shards, calculate_shards(5, self.tests, incomplete_test_times))
+
+    def test_calculate_2_shards_against_optimal_shards(self):
+        for _ in range(100):
+            random.seed(120)
+            random_times = {k: (random.random() * 10, 1) for k in self.tests}
+            # all test times except first two
+            rest_of_tests = [i for (k, (i, _)) in random_times.items() if k != 'super_long_test' and k != 'long_test1']
+            sum_of_rest = sum(rest_of_tests)
+            random_times['super_long_test'] = (max(sum_of_rest / 2, max(rest_of_tests)), 1)
+            random_times['long_test1'] = (sum_of_rest - random_times['super_long_test'][0], 1)
+            # An optimal sharding would look like the below, but we don't need to compute this for the test:
+            # optimal_shards = [
+            #     (sum_of_rest, ['super_long_test', 'long_test1']),
+            #     (sum_of_rest, [i for i in self.tests if i != 'super_long_test' and i != 'long_test1']),
+            # ]
+            calculated_shards = calculate_shards(2, self.tests, random_times)
+            max_shard_time = max(calculated_shards[0][0], calculated_shards[1][0])
+            if sum_of_rest != 0:
+                # The calculated shard should not have a ratio worse than 7/6 for num_shards = 2
+                self.assertGreaterEqual(7.0 / 6.0, max_shard_time / sum_of_rest)
+                sorted_tests = sorted(self.tests)
+                sorted_shard_tests = sorted(calculated_shards[0][1] + calculated_shards[1][1])
+                # All the tests should be represented by some shard
+                self.assertEqual(sorted_tests, sorted_shard_tests)
 
 
 if __name__ == '__main__':

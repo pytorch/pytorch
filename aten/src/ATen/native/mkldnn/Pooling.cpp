@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <tuple>
 
@@ -249,6 +250,15 @@ static Tensor _mkldnn_pooling(
         false /*ceil_mode */);
   }
 
+  auto aprop_kind = ideep::prop_kind::forward;
+  // for max_pool, prop_kind::forward will save indices as workspace for backward use,
+  // for inference, don't need the indices, set aprop_kind to prop_kind::forward_inference
+  // can reduce the memory use.
+  if (ideep::algorithm::pooling_max == algo
+      && !(input.requires_grad() && at::GradMode::is_enabled())) {
+    aprop_kind = ideep::prop_kind::forward_inference;
+  }
+
   ideep::tensor y;
   ideep::pooling_forward::compute(
       x,
@@ -259,7 +269,7 @@ static Tensor _mkldnn_pooling(
       {padding_vec_l.cbegin(), padding_vec_l.cend()},
       {padding_vec_r.cbegin(), padding_vec_r.cend()},
       algo,
-      ideep::prop_kind::forward);
+      aprop_kind);
 
   return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()), input.options().device_opt());
 }
