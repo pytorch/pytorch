@@ -1,8 +1,10 @@
 import torch
 import os
 import sys
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 from typing import List, Dict
+from itertools import product
+from textwrap import dedent
 import cmath
 
 # Make the helper files in test/ importable
@@ -57,15 +59,68 @@ class TestComplex(JitTestCase):
 
         self.checkScript(fn, (t1, t2, 2))
 
-    def test_complex_unary_ops(self):
-        # def fn(a: complex, fn):
-        #     return [fn(a)]
+    def test_complex_math_ops(self):
+        inf = float("inf")
+        NaN = float("nan")
+        vals = ([inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
+               +  [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
+        complex_vals = tuple(complex(x, y) for x, y in product(vals, vals))
 
-        # scripted = torch.jit.script(fn)
-        # , 'abs'
-        ops = ['log', 'exp', 'cos', 'sin', 'cos', 'sin', 'tan', 'asinh', 'acosh', 'atanh', 'sinh', 'cosh', 'tanh']
-        # for elem in ops:
-        #     op = getattr(cmath, elem)
-        #     for inp in [-0.4j, -0.1+2j, 2.3 + 4j, 3.7j, 1.4 + 0j]:
-        #        print(inp, elem, op(inp))
-        #        self.assertEqual(scripted(inp, elem), op(inp))
+        def checkMath(func_name, num_args, ret_type="complex", debug=False, vals=None, args_type=None):
+            funcs_template = dedent('''
+            def func(a):
+                # type: {args_type} -> {ret_type}
+                return cmath.{func}({args})
+            ''')
+            if num_args == 1:
+                args = "a"
+            elif num_args == 2:
+                args = "a, b"
+            else:
+                raise RuntimeError("Test doesn't support more than 2 arguments")
+            if args_type is None:
+                args_type = "(complex)"
+            funcs_str = funcs_template.format(func=func_name, args=args, args_type=args_type, ret_type=ret_type)
+            scope = {}
+            execWrapper(funcs_str, globals(), scope)
+            cu = torch.jit.CompilationUnit(funcs_str)
+            f_script = cu.func
+            f = scope['func']
+
+            for a in complex_vals:
+                res_python = None
+                res_script = None
+                try:
+                    res_python = f(a)
+                except Exception as e:
+                    res_python = e
+                try:
+                    res_script = f_script(a)
+                except Exception as e:
+                    res_script = e
+                if debug:
+                    print("in: ", a)
+                    print("out: ", res_python, res_script)
+                # We can't use assertEqual because of a couple of differences:
+                # 1. nan == nan should return true
+                # 2. When python functions throw an exception, we usually want to silently ignore them.
+                # (ie: We want to return `nan` for math.sqrt(-5))
+                if res_python != res_script:
+                    if isinstance(res_python, Exception):
+                        continue
+
+                    if type(res_python) == type(res_script):
+                        if isinstance(res_python, tuple) and (cmath.isnan(res_python[0]) == cmath.isnan(res_script[0])):
+                            continue
+                        if isinstance(res_python, complex) and cmath.isnan(res_python) and cmath.isnan(res_script):
+                            continue
+                    msg = ("Failed on {func_name} with input {a}. Python: {res_python}, Script: {res_script}"
+                           .format(func_name=func_name, a=a, res_python=res_python, res_script=res_script))
+                    self.assertEqual(res_python, res_script, msg=msg)
+
+        unary_ops = ['log', 'exp', 'cos', 'sin', 'cos', 'sin', 'tan', 'asinh', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh']
+        for op in unary_ops:
+            checkMath(op, 1)
+        # ["log", "log1p", "log10", "exp", "sqrt", "gamma", "lgamma", "erf",
+        #                    "erfc", "expm1", "fabs", "acos", "asin", "atan", "cos", "sin", "tan",
+        #                    "asinh", "atanh", "acosh", "sinh", "cosh", "tanh", "degrees", "radians"]
