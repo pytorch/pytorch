@@ -13,82 +13,16 @@ from collections import defaultdict
 from glob import glob
 from pathlib import Path
 from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
-                    Set, Tuple, Union, cast)
+                    Set, Tuple, cast)
 from xml.dom import minidom  # type: ignore[import]
 
 import requests
-from typing_extensions import Literal, TypedDict
-
-try:
-    import boto3  # type: ignore[import]
-    HAVE_BOTO3 = True
-except ImportError:
-    HAVE_BOTO3 = False
-
-# TODO: consolidate these typedefs with the identical ones in
-# tools/test_history.py
-
-Commit = str  # 40-digit SHA-1 hex string
-Status = Optional[Literal['errored', 'failed', 'skipped']]
+from typing_extensions import TypedDict
+from tools.stats_utils.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_S3_bucket_readonly,
+                                              Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
+                                              Version1Report, Version2Report, ReportMetaMeta)
 
 
-class CaseMeta(TypedDict):
-    seconds: float
-
-
-class Version1Case(CaseMeta):
-    name: str
-    errored: bool
-    failed: bool
-    skipped: bool
-
-
-class Version1Suite(TypedDict):
-    total_seconds: float
-    cases: List[Version1Case]
-
-
-class ReportMetaMeta(TypedDict):
-    build_pr: str
-    build_tag: str
-    build_sha1: Commit
-    build_branch: str
-    build_job: str
-    build_workflow_id: str
-
-
-class ReportMeta(ReportMetaMeta):
-    total_seconds: float
-
-
-class Version1Report(ReportMeta):
-    suites: Dict[str, Version1Suite]
-
-
-class Version2Case(CaseMeta):
-    status: Status
-
-
-class Version2Suite(TypedDict):
-    total_seconds: float
-    cases: Dict[str, Version2Case]
-
-
-class Version2File(TypedDict):
-    total_seconds: float
-    suites: Dict[str, Version2Suite]
-
-
-class VersionedReport(ReportMeta):
-    format_version: int
-
-
-# report: Version2Report implies report['format_version'] == 2
-class Version2Report(VersionedReport):
-    files: Dict[str, Version2File]
-
-
-Report = Union[Version1Report, VersionedReport]
 
 SimplerSuite = Dict[str, Version2Case]
 SimplerFile = Dict[str, SimplerSuite]
@@ -113,24 +47,6 @@ class SuiteDiff(TypedDict):
     was: Optional[Stat]
     now: Optional[float]
     cases: List[CaseDiff]
-
-
-# TODO: consolidate this with the case_status function from
-# tools/test_history.py
-def case_status(case: Version1Case) -> Status:
-    for k in {'errored', 'failed', 'skipped'}:
-        if case[k]:  # type: ignore[misc]
-            return cast(Status, k)
-    return None
-
-
-# TODO: consolidate this with the newify_case function from
-# tools/test_history.py
-def newify_case(case: Version1Case) -> Version2Case:
-    return {
-        'seconds': case['seconds'],
-        'status': case_status(case),
-    }
 
 
 # TODO: consolidate this with the get_cases function from
@@ -848,8 +764,7 @@ def send_report_to_s3(head_report: Version2Report) -> None:
         return
     now = datetime.datetime.utcnow().isoformat()
     key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
-    s3 = boto3.resource('s3')
-    obj = s3.Object('ossci-metrics', key)
+    obj = get_S3_object_from_bucket('ossci-metrics', key)
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
     # input files of a few megabytes in size like these JSON files, and
@@ -890,8 +805,7 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
         commits = commits[:-1]
 
     job = os.environ.get("CIRCLE_JOB", "")
-    s3 = boto3.resource("s3")
-    bucket = s3.Bucket(name="ossci-metrics")
+    bucket = get_S3_bucket_readonly('ossci-metrics')
     index = {}
     for commit in commits:
         summaries = bucket.objects.filter(Prefix=f"test_time/{commit}/{job}/")
