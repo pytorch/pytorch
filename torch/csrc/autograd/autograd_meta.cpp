@@ -123,9 +123,9 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
     // TODO(alband) remove this spurious version counter bump
     auto new_grad = new_grad_;
 
-    TORCH_CHECK(self.is_same_size(new_grad_), "Trying to set a forward gradient that has a different size than the "
-                "original Tensor, this is not supported. Tensor is of size ", self.sizes(), " while the given forward "
-                "gradient is of size ", new_grad_.sizes(), ".");
+    TORCH_CHECK(self.is_same_size(new_grad_), "Trying to set a forward gradient that has a different size than that "
+                "of the original Tensor, this is not supported. Tensor is of size ", self.sizes(), " while the given "
+                "forward gradient is of size ", new_grad_.sizes(), ".");
 
     if (is_inplace_op && is_view_) {
       auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
