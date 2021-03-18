@@ -169,9 +169,8 @@ class NormalizeOperators(AnnotateTypesWithSchema):
 
             # If lhs is a Tensor, we definitely dispatch into the `torch` function
             if isinstance(lhs, torch.fx.Proxy) and lhs.node.type is torch.Tensor:
-                rv = self.binary_magic_method_remap[target](lhs, rhs)
-                rv.node.type = torch.Tensor
-                return rv
+                return super().call_function(
+                    target=self.binary_magic_method_remap[target], args=(lhs, rhs), kwargs={})
 
             # If rhs is a Tensor but lhs is not, we *may* dispatch into the `torch`
             # function. Note that this is tricky to determine, as the LHS can do one
@@ -195,13 +194,13 @@ class NormalizeOperators(AnnotateTypesWithSchema):
 
             if target not in non_commutative_operators and not isinstance(lhs, torch.fx.Proxy):
                 if not hasattr(type(lhs), '__add__'):
-                    rv = self.binary_magic_method_remap[target](lhs, rhs)
-                    rv.node.type = torch.Tensor
-                    return rv
+                    return super().call_function(
+                        target=self.binary_magic_method_remap[target], args=(lhs, rhs), kwargs={})
+
 
                 if isinstance(lhs, numbers.Number):
-                    rv = self.binary_magic_method_remap[target](lhs, rhs)
-                    rv.node.type = torch.Tensor
-                    return rv
+                    return super().call_function(
+                        target=self.binary_magic_method_remap[target], args=(lhs, rhs), kwargs={})
+
 
         return super().call_function(target, args, kwargs)
