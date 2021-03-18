@@ -1,5 +1,5 @@
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests, set_cwd
+from torch.testing._internal.common_utils import TestCase, run_tests
 import tempfile
 import torch
 import doctest
