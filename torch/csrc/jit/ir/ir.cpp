@@ -162,6 +162,10 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
     case AttributeKind::c:
       printAttribute(out, c(name));
       break;
+    case AttributeKind::cs:
+      // TODO(@anjali411): fix this
+      AT_ASSERT(false);
+      break;
     case AttributeKind::f:
       printAttribute(out, f(name));
       break;

@@ -12,7 +12,7 @@ namespace at { namespace native {
 DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, const Scalar&), arange_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const Scalar&, const Scalar&, int64_t), linspace_stub);
 
-Tensor& linspace_cpu_out(Tensor& result, const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps) {
+Tensor& linspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, Tensor& result) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -43,7 +43,7 @@ Tensor& linspace_cpu_out(Tensor& result, const Scalar& start, const Scalar& end,
   return result;
 }
 
-Tensor& logspace_cpu_out(Tensor& result, const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base) {
+Tensor& logspace_cpu_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base, Tensor& result) {
   const auto steps = optional_steps.value_or(100);
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
 
@@ -146,7 +146,7 @@ Tensor& range_cpu_out(Tensor& result, const Scalar& start, const Scalar& end, co
   return result;
 }
 
-Tensor& arange_cpu_out(Tensor& result, const Scalar& start, const Scalar& end, const Scalar& step) {
+Tensor& arange_cpu_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();

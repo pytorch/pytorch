@@ -410,12 +410,14 @@ RegisterOperators reg(
            }
          },
          aliasAnalysisFromSchema()),
-      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Complex.Tensor_Tensor(Tensor a, Tensor b) -> complex"),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::Complex.Tensor_Tensor(Tensor a, Tensor b) -> complex"),
          [](Stack* stack) {
            at::Tensor a, b;
            pop(stack, a, b);
-           push(stack, c10::complex<double>(a.item<double>(), b.item<double>()));
+           push(
+               stack, c10::complex<double>(a.item<double>(), b.item<double>()));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(

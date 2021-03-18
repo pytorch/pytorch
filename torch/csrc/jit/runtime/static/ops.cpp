@@ -284,7 +284,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::clamp_out(out_t, in0_t, in1_s, in2_s);
+    at::native::clamp_out(in0_t, in1_s, in2_s, out_t);
   };
 });
 
@@ -297,7 +297,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::bmm_out_cpu(out_t, in0_t, in1_t);
+    at::native::bmm_out_cpu(in0_t, in1_t, out_t);
   };
 });
 
@@ -320,7 +320,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
-        at::native::nan_to_num_out(out_t, in0_t, in1_d, in2_d, in3_d);
+        at::native::nan_to_num_out(in0_t, in1_d, in2_d, in3_d, out_t);
       };
     });
 REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {

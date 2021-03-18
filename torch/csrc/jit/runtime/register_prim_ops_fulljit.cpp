@@ -1236,30 +1236,30 @@ RegisterOperators reg2({
       },                                                                \
       aliasAnalysisFromSchema())
 
-#define DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(type_a, type_b, actual_type_a, actual_type_b) \
-  Operator(                                                             \
-      "aten::Complex." #type_a "_" #type_b "(" #type_a " x," #type_b    \
-      " y) -> complex",                                                 \
-      [](Stack* stack) {                                                \
-        actual_type_a a;                                                \
-        actual_type_b b;                                                \
-        pop(stack, a, b);                                               \
-        auto comp = c10::complex<double>(a.item<double>(), b);          \
-        push(stack, comp);                                              \
-      },                                                                \
-      aliasAnalysisFromSchema())                                        \
-  ,\
-  Operator(                                                             \
-      "aten::Complex." #type_b "_" #type_a "(" #type_b " x," #type_a    \
-      " y) -> complex",                                                 \
-      [](Stack* stack) {                                                \
-        actual_type_b a;                                                \
-        actual_type_a b;                                                \
-        pop(stack, a, b);                                               \
-        auto comp = c10::complex<double>(a, b.item<double>());          \
-        push(stack, comp);                                              \
-      },                                                                \
-      aliasAnalysisFromSchema())
+#define DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(                               \
+    type_a, type_b, actual_type_a, actual_type_b)                        \
+  Operator(                                                              \
+      "aten::Complex." #type_a "_" #type_b "(" #type_a " x," #type_b     \
+      " y) -> complex",                                                  \
+      [](Stack* stack) {                                                 \
+        actual_type_a a;                                                 \
+        actual_type_b b;                                                 \
+        pop(stack, a, b);                                                \
+        auto comp = c10::complex<double>(a.item<double>(), b);           \
+        push(stack, comp);                                               \
+      },                                                                 \
+      aliasAnalysisFromSchema()),                                        \
+      Operator(                                                          \
+          "aten::Complex." #type_b "_" #type_a "(" #type_b " x," #type_a \
+          " y) -> complex",                                              \
+          [](Stack* stack) {                                             \
+            actual_type_b a;                                             \
+            actual_type_a b;                                             \
+            pop(stack, a, b);                                            \
+            auto comp = c10::complex<double>(a, b.item<double>());       \
+            push(stack, comp);                                           \
+          },                                                             \
+          aliasAnalysisFromSchema())
 
     DEFINE_COMPLEX_OP(int, bool, int, bool),
     DEFINE_COMPLEX_OP(bool, int, bool, int),
