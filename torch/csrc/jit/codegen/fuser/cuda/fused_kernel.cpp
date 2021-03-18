@@ -121,7 +121,10 @@ FusedKernelCUDA::FusedKernelCUDA(
       &program, code_.c_str(), nullptr, 0, nullptr, nullptr));
 
 #ifdef __HIP_PLATFORM_HCC__
-  std::vector<const char*> args = {"--std=c++14", "-hip-pch"};
+  std::vector<const char*> args = {"--std=c++14"};
+#if ROCM_VERSION >= 402
+  args.push_back("-hip-pch");
+#endif
 #else
   const std::string compute = std::string("--gpu-architecture=") +
 #if CUDA_VERSION >= 11010
