@@ -17,10 +17,10 @@ try:
     # a previously imported module already directly or indirectly imported 'pytest', but the test is run by another
     # runner such as 'unittest'.
     pytest = sys.modules["pytest"]
-    UsageError = pytest.UsageError
+    UsageError = pytest.UsageError  # type: ignore[attr-defined]
 except KeyError:
 
-    class UsageError(Exception):
+    class UsageError(Exception):  # type: ignore[no-redef]
         pass
 
 
