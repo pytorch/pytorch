@@ -1320,7 +1320,7 @@ Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
 }
 
 Tensor cholesky(const Tensor &self, bool upper) {
-  if (self.size(-1) == 0) {
+  if (self.numel() == 0) {
     return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   squareCheckInputs(self);
@@ -1343,6 +1343,9 @@ Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
 }
 
 Tensor linalg_cholesky(const Tensor &self) {
+  if (self.numel() == 0) {
+    return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
   squareCheckInputs(self);
   return at::_cholesky_helper(self, /*upper=*/false).tril_();
 }
