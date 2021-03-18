@@ -10,17 +10,23 @@ namespace at { namespace native {
 // See Note [ATen preprocessor philosophy]
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
-    const Tensor& input, const Tensor& weight,
-    const Tensor& bias, const Tensor& running_mean, const Tensor& running_var,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     bool training, double exponential_average_factor, double epsilon) {
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
+  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+
   AT_ERROR("cudnn_batch_norm: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
-    const Tensor& input, const Tensor& grad_output, const Tensor& weight,
-    const Tensor& running_mean, const Tensor& running_var,
-    const Tensor& save_mean, const Tensor& save_var,
+    const Tensor& input, const Tensor& grad_output, const Tensor& weight, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
     double epsilon, const Tensor& reservedSpace) {
+  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
+  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
+  const Tensor& save_var = c10::value_or_else(save_var_opt, [] {return Tensor();});
+
   AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
 
@@ -50,10 +56,13 @@ Tensor expandScale(const Tensor& t, int64_t dim) {
 }  // namespace
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
-    const Tensor& input_t, const Tensor& weight_t,
-    const Tensor& bias_t, const Tensor& running_mean_t, const Tensor& running_var_t,
+    const Tensor& input_t, const Tensor& weight_t, const c10::optional<Tensor>& bias_t_opt, const c10::optional<Tensor>& running_mean_t_opt, const c10::optional<Tensor>& running_var_t_opt,
     bool training, double exponential_average_factor, double epsilon)
 {
+  const Tensor& bias_t = c10::value_or_else(bias_t_opt, [] {return Tensor();});
+  const Tensor& running_mean_t = c10::value_or_else(running_mean_t_opt, [] {return Tensor();});
+  const Tensor& running_var_t = c10::value_or_else(running_var_t_opt, [] {return Tensor();});
+
   TensorArg input{ input_t, "input", 1 },
             weight{ weight_t, "weight", 2 },
             bias{ bias_t, "bias", 3 },
@@ -215,14 +224,26 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
 // in training mode (evaluation mode batchnorm has a different algorithm),
 // which is why this doesn't accept a 'training' parameter.
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
-    const Tensor& input_t, const Tensor& grad_output_t,
+    const Tensor& input_t,
+    const Tensor& grad_output_t,
     const Tensor& weight_t,
     // Unused: but we require them to be passed so that double backwards
     // has access
-    const Tensor& running_mean, const Tensor& running_var,
-    const Tensor& save_mean_t, const Tensor& save_var_t,
-    double epsilon, const Tensor& reserveSpace)
-{
+    const c10::optional<Tensor>& running_mean_opt,
+    const c10::optional<Tensor>& running_var_opt,
+    const c10::optional<Tensor>& save_mean_t_opt,
+    const c10::optional<Tensor>& save_var_t_opt,
+    double epsilon,
+    const Tensor& reserveSpace) {
+  const Tensor& running_mean =
+      c10::value_or_else(running_mean_opt, [] { return Tensor(); });
+  const Tensor& running_var =
+      c10::value_or_else(running_var_opt, [] { return Tensor(); });
+  const Tensor& save_mean_t =
+      c10::value_or_else(save_mean_t_opt, [] { return Tensor(); });
+  const Tensor& save_var_t =
+      c10::value_or_else(save_var_t_opt, [] { return Tensor(); });
+
   // TODO: Is it worth it to have a contiguous call or maybe we should go with
   // whatever format is given here.
 
@@ -339,7 +360,6 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
 }
-
 }}  // namespace native
 
 #endif

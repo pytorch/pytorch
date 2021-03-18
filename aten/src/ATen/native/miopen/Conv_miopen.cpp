@@ -13,9 +13,11 @@ namespace at { namespace native {
 // See Note [ATen preprocessor philosophy]
 
 at::Tensor miopen_convolution(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   AT_ERROR("miopen_convolution: ATen not compiled with MIOpen support");
 }
 
@@ -46,9 +48,11 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_backward(
 }
 
 at::Tensor miopen_convolution_transpose(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   AT_ERROR("miopen_convolution_transpose: ATen not compiled with MIOpen support");
 }
 
@@ -74,9 +78,11 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backwa
 }
 
 at::Tensor miopen_depthwise_convolution(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   AT_ERROR("miopen_depthwise_convolution: ATen not compiled with MIOpen support");
 }
 
@@ -617,10 +623,12 @@ Tensor miopen_convolution_forward(
 }
 
 Tensor miopen_convolution(
-    const Tensor& input_t, const Tensor& weight_t, const Tensor& bias_t,
+    const Tensor& input_t, const Tensor& weight_t, const c10::optional<Tensor>& bias_t_opt,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
+  const Tensor& bias_t = c10::value_or_else(bias_t_opt, [] {return Tensor();});
+
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
@@ -691,10 +699,12 @@ Tensor miopen_depthwise_convolution_forward(
 }
 
 Tensor miopen_depthwise_convolution(
-    const Tensor& input_t, const Tensor& weight_t, const Tensor& bias_t,
+    const Tensor& input_t, const Tensor& weight_t, const c10::optional<Tensor>& bias_t_opt,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
+  const Tensor& bias_t = c10::value_or_else(bias_t_opt, [] {return Tensor();});
+
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
@@ -942,10 +952,12 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
 }
 
 Tensor miopen_convolution_transpose(
-    const Tensor& input_t, const Tensor& weight_t, const Tensor& bias_t,
+    const Tensor& input_t, const Tensor& weight_t, const c10::optional<Tensor>& bias_t_opt,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic)
 {
+  const Tensor& bias_t = c10::value_or_else(bias_t_opt, [] {return Tensor();});
+
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };

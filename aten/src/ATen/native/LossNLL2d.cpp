@@ -359,10 +359,11 @@ std::tuple<Tensor&, Tensor&> nll_loss2d_forward_out_cpu(
 
 std::tuple<Tensor, Tensor> nll_loss2d_forward_cpu(
     const Tensor& self,
-    const Tensor& target,
-    const Tensor& weight,
+    const Tensor& target, const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   auto output = at::empty({0}, self.options());
   auto total_weight = at::empty({0}, self.options());
   nll_loss2d_forward_out_cpu(
@@ -394,11 +395,12 @@ Tensor& nll_loss2d_backward_out_cpu(
 Tensor nll_loss2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& self,
-    const Tensor& target,
-    const Tensor& weight,
+    const Tensor& target, const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   auto grad_input = at::zeros_like(self);
   nll_loss2d_backward_out_cpu(
       grad_input,
@@ -417,7 +419,9 @@ Tensor & nll_loss2d_out(Tensor & output, const Tensor & self, const Tensor & tar
   return std::get<0>(at::nll_loss2d_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
 }
 
-Tensor nll_loss2d(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+Tensor nll_loss2d(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   return std::get<0>(at::nll_loss2d_forward(self, target, weight, reduction, ignore_index));
 }
 

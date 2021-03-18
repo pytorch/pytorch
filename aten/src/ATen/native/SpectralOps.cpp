@@ -606,9 +606,11 @@ static Stream& write_opt(Stream& SS, const optional<T>& value) {
  * in python because it uses torch.nn.functional.pad which is python-only.
  */
 Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-            const optional<int64_t> win_lengthOpt, const Tensor& window,
+            const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
             const bool normalized, const optional<bool> onesidedOpt,
             const optional<bool> return_complexOpt) {
+  const Tensor& window = c10::value_or_else(window_opt, [] {return Tensor();});
+
   #define REPR(SS) \
     SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
@@ -757,9 +759,11 @@ static Tensor as_complex(const Tensor& self) {
  * signals and complex windows.
  */
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-             const optional<int64_t> win_lengthOpt, const Tensor& window,
+             const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
              const bool center, const bool normalized, const c10::optional<bool> onesidedOpt,
              const optional<int64_t> lengthOpt, const bool return_complex) {
+  const Tensor& window = c10::value_or_else(window_opt, [] {return Tensor();});
+
   #define REPR(SS) \
     SS << "istft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \

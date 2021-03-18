@@ -633,10 +633,11 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(
 std::tuple<Tensor, Tensor, Tensor> slow_conv3d_forward_cpu(
     const Tensor& self,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding) {
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   auto output = at::empty({0}, self.options());
   auto finput = at::empty({0}, self.options());
   auto fgrad_input = at::empty({0}, self.options());
@@ -777,10 +778,11 @@ Tensor& slow_conv3d_out(
 Tensor slow_conv3d(
     const Tensor& self,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding) {
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   return std::get<0>(at::slow_conv3d_forward(
       self, weight, kernel_size, bias, stride, padding));
 }

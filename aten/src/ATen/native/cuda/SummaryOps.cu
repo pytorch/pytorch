@@ -361,9 +361,10 @@ Tensor _histc_cuda_template(
 
 namespace native {
 Tensor _bincount_cuda(
-    const Tensor& self,
-    const Tensor& weights,
+    const Tensor& self, const c10::optional<Tensor>& weights_opt,
     int64_t minlength) {
+  const Tensor& weights = c10::value_or_else(weights_opt, [] {return Tensor();});
+
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_bincount_cuda");

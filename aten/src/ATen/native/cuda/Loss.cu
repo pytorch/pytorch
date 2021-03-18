@@ -68,7 +68,9 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
   return grad_input;
 }
 
-Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     Tensor loss = at::empty_like(input);
     return at::native::binary_cross_entropy_out_cuda(loss, input, target, weight, reduction);
 }
@@ -117,7 +119,9 @@ Tensor& binary_cross_entropy_out_cuda(Tensor& loss, const Tensor& input, const T
   return loss;
 }
 
-Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
   Tensor grad_input = at::empty_like(input);
   return at::native::binary_cross_entropy_backward_out_cuda(grad_input, grad, input, target, weight, reduction);
 }
