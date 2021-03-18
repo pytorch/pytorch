@@ -9,7 +9,7 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-//#include <c10/util/irange.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <sstream>
@@ -25,65 +25,6 @@
 namespace at {
 
 TORCH_API int _crash_if_asan(int);
-
-template <typename Integer_torch, std::enable_if_t<std::is_integral<Integer_torch>::value, bool> = true>
-Integer_torch add_one(Integer_torch end) {
-    //If end<=begin then the range is empty; we can achieve this effect by
-    //choosing the larger of {0, end} as the loop terminator
-    return end + 1;
-}
-
-template <class I, class = typename std::enable_if<std::is_integral<I>::value>::type>
-struct integer_iterator : std::iterator<std::input_iterator_tag, I> {
-    explicit integer_iterator(I value) : value(value) {}
-
-    I operator*() const { return value; }
-
-    I const* operator->() const { return &value; }
-
-    integer_iterator& operator++() {
-        ++value;
-        return *this;
-    }
-
-    integer_iterator operator++(int) {
-        const auto copy = *this;
-        ++*this;
-        return copy;
-    }
-
-    bool operator==(const integer_iterator& other) const {
-        return value == other.value;
-    }
-
-    bool operator!=(const integer_iterator& other) const {
-        return value != other.value;
-    }
-
- protected:
-    I value;
-};
-
-template <class I, class = typename std::enable_if<std::is_integral<I>::value>::type>
-struct integer_range {
- public:
-    integer_range(I begin, I end) : begin_(begin), end_(end) {}
-    integer_iterator<I> begin() const { return begin_; }
-    integer_iterator<I> end() const { return end_; }
-
- private:
-    integer_iterator<I> begin_;
-    integer_iterator<I> end_;
-};
-
-/// Creates an integer range for the half-open interval [0, end)
-/// If end<=begin, then the range is empty
-template <class Integer, class = typename std::enable_if<std::is_integral<Integer>::value>::type>
-integer_range<Integer> irange_torch(Integer end) {
-    //If end<=begin then the range is empty; we can achieve this effect by
-    //choosing the larger of {0, end} as the loop terminator
-    return {Integer(), std::max(Integer(), end)};
-}
 
 // TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
 // away, we can delete this function
@@ -112,17 +53,8 @@ static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const 
 static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef<Tensor> tensors, const char * name, int pos, DeviceType device_type, ScalarType scalar_type) {
   std::vector<TensorImpl*> unwrapped;
   unwrapped.reserve(tensors.size());
-  static_assert(std::is_integral<size_t>::value, "size_t is not integral.");
 
-  int64_t test_end = 10;
-  int64_t test_result = 0;
-  int64_t test_add_result = add_one(test_end);
-
-  for (const auto i : irange_torch(test_end)) {
-    test_result += i;
-  }
-
-  for (const auto i : irange_torch(tensors.size())) {
+  for (const auto i : c10::irange(tensors.size())) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {
       AT_ERROR("Expected dense tensor but got ", expr.layout(),
