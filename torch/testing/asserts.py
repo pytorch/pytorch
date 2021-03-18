@@ -220,8 +220,8 @@ def _assert_values_allclose(
     a: torch.Tensor,
     b: torch.Tensor,
     *,
-    rtol: float = 1e-5,
-    atol: float = 1e-8,
+    rtol,
+    atol,
 ) -> None:
     """Asserts that the values of two tensors are close up to a desired tolerance.
 
