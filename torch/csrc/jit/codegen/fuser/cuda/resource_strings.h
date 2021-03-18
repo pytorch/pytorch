@@ -15,7 +15,7 @@ cases*/
 
 #ifdef __HIP_PLATFORM_HCC__
 static auto type_declarations_template = CodeTemplate(
-#if ROCM_VERSION < 402
+#if ROCM_VERSION < 40200
 R"(
 #include <hip/hip_runtime.h>
 )"
@@ -216,7 +216,7 @@ void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
 // converted to half with __float2half() when writing to a half tensor.
 #ifdef __HIP_PLATFORM_HCC__
 constexpr auto half_support_literal =
-#if ROCM_VERSION < 402
+#if ROCM_VERSION < 40200
 R"(
 #include <hip/hip_fp16.h>
 )"

@@ -281,7 +281,7 @@ NvrtcFunction nvrtcCompile(
 
 #ifdef __HIP_PLATFORM_HCC__
   std::vector<const char*> args = {"--std=c++14"};
-#if ROCM_VERSION >= 402
+#if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
 #endif
 #else
