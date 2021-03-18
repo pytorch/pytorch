@@ -210,9 +210,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
       .def(
-          "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
-          PrepareInplaceOpsForONNX)
-      .def(
           "_jit_pass_onnx_node_shape_type_inference",
           [](Node* n,
              std::map<std::string, IValue>& params_dict,
@@ -710,9 +707,13 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_optimize_for_mobile",
           [](script::Module& module,
              std::set<MobileOptimizerType>& optimization_blocklist,
-             std::vector<std::string>& preserved_methods) {
+             std::vector<std::string>& preserved_methods,
+             std::vector<std::string>& methods_to_optimize) {
             return optimizeForMobile(
-                module, optimization_blocklist, preserved_methods);
+                module,
+                optimization_blocklist,
+                preserved_methods,
+                methods_to_optimize);
           })
       .def(
           "_jit_pass_vulkan_insert_prepacked_ops",
@@ -1100,8 +1101,7 @@ void initJITBindings(PyObject* module) {
                           self_func.ptr(),
                           module_name.c_str()));
                 }
-                return invokeOperatorFromPython(
-                    operations, std::move(args), std::move(kwargs));
+                return invokeOperatorFromPython(operations, args, kwargs);
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
@@ -1169,8 +1169,13 @@ void initJITBindings(PyObject* module) {
             IValue v = *self.default_value();
             return toPyObject(std::move(v));
           })
-      .def("has_default_value", [](Argument& self) -> py::bool_ {
-        return self.default_value().has_value();
+      .def(
+          "has_default_value",
+          [](Argument& self) -> py::bool_ {
+            return self.default_value().has_value();
+          })
+      .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
+        return self.kwarg_only();
       });
   m.def("_jit_get_all_schemas", []() {
     const std::vector<std::shared_ptr<Operator>>& operations =
