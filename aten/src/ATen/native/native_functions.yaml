@@ -5713,7 +5713,7 @@
 - func: nonzero(Tensor self) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_nonzero
+    CPU: nonzero_cpu
     CUDA: nonzero_cuda
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]

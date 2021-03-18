@@ -137,7 +137,8 @@ def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, p
     mask = (Xq >= quant_min) * (Xq <= quant_max)
     res = torch.zeros_like(dY)
     res[mask] = dY[mask]
-    return res
+    print('mask={}, dY={},  res={}'.format(mask, dY, res))
+    return res, mask
 
 # Reference method for quantization.
 def _quantize_per_tensor(x, scale, zero_point, quant_min, quant_max):
@@ -151,8 +152,9 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
     - https://arxiv.org/pdf/1903.08066.pdf
     """
     per_channel_zero_point = ((per_channel_zero_point.detach() + 0.5).clamp(quant_min, quant_max)).type(torch.int64)
-    grad_X = _fake_quantize_per_channel_affine_grad_reference(
-        dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max).to(device)
+    grad_X, mask = _fake_quantize_per_channel_affine_grad_reference(
+        dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max)
+    grad_X = grad_X.to(device)
     per_channel_scale = per_channel_scale.detach().type(torch.float)
 
     grad_scale = torch.zeros([per_channel_scale.size(0)]).to(device)
@@ -201,7 +203,7 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
 
         grad_scale[i] = grad_scale_i
         grad_zero_point[i] = grad_zp_i
-    return grad_X, grad_scale, grad_zero_point
+    return grad_X, grad_scale, grad_zero_point, mask
 
 def to_tensor(X, device):
     return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)
@@ -1419,7 +1421,7 @@ class TestFakeQuantize(TestCase):
                     X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, grad_factor).to(device)
 
                 dout = torch.rand(X_curr.shape, dtype=torch.float).to(device)
-                dX, dScale, dZeroPoint = _fake_quantize_learnable_per_channel_affine_grad_reference(
+                dX, dScale, dZeroPoint, mask = _fake_quantize_learnable_per_channel_affine_grad_reference(
                     dout, X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, device)
                 Y_prime.backward(dout)
 
@@ -1433,7 +1435,7 @@ class TestFakeQuantize(TestCase):
 
                 self.assertTrue(
                     torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
-                    "Expected dX={} to match X.grad={}, X={}, s={}, z={}, axis={}, dout={}, n_bits={}".format(
+                    "Expected dX={} to match X.grad={}, X={}, s={}, z={}, axis={}, dout={}, mask={}, n_bits={}".format(
                         dX_expected, dX_actual, X_base, scale_base, zero_point_base, axis, dout, n_bits))
                 self.assertTrue(
                     torch.allclose(dScale_expected * grad_factor, dScale_actual, rtol=tolerance, atol=tolerance),
