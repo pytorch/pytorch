@@ -399,8 +399,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   // Figure out which root IDs we need:
   std::unordered_set<IterDomain*> producer_CA_root_ids;
   for (IterDomain* id : producer_root) {
-    if (std::find(all_CA_id_deps.begin(), all_CA_id_deps.end(), id) !=
-        all_CA_id_deps.end()) {
+    if (all_CA_id_deps.find(id) != all_CA_id_deps.end()) {
       producer_CA_root_ids.emplace(id);
     }
   }

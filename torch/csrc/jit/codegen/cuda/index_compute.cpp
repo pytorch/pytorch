@@ -864,13 +864,10 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
   // Global striding
   std::vector<kir::Val*> strided_inds;
   for (size_t i = 0; i < root_dom.size(); i++) {
+    // If the domain is derived from a trivial reduction, no indexing
+    // to create.
     if (root_dom[i]->isReduction() ||
-        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
-      continue;
-      // If the domain is derived from a trivial reduction, no indexing to
-      // create. Also, the domain at this branch must not be a
-      // reduction, so the stride index should be incremented.
-    } else if (
+        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
         root_dom[i]->getIterType() == IterType::BroadcastWithStride ||
         gpu_lower->trivialReductionInfo().isDerived(root_dom[i])) {
       continue;
@@ -1310,11 +1307,9 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
 
   std::vector<kir::Val*> strided_inds;
   for (size_t i = 0; i < root_dom.size(); i++) {
+    // See a comment in indexing to root domains in getGlobalProducerIndex.
     if (root_dom[i]->isReduction() ||
-        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
-      continue;
-      // See a comment in indexing to root domains in getGlobalProducerIndex.
-    } else if (
+        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
         root_dom[i]->getIterType() == IterType::BroadcastWithStride ||
         gpu_lower->trivialReductionInfo().isDerived(root_dom[i])) {
       continue;
