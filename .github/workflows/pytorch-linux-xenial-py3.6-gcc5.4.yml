@@ -73,10 +73,10 @@ jobs:
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: dist/*.whl
-      # TODO: Add step to archive built artifacts
       - name: Clean up docker images
         if: always()
         run: |
+          chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
   test:
@@ -114,10 +114,9 @@ jobs:
             -w /var/lib/jenkins/workspace \
             ${DOCKER_IMAGE} \
             sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && .jenkins/pytorch/test.sh'
-      # TODO: Add step to archive built artifacts
       - name: Clean up docker images
         if: always()
         run: |
+          chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
-  # TODO: Add test step here
