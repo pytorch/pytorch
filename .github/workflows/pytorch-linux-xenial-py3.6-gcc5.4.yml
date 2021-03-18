@@ -50,6 +50,11 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
+      - name: Test s3 capabilities
+        run: |
+          touch hello.txt
+          aws s3 cp ./hello.txt s3://${SCCACHE_BUCKET}/hello.txt
+          aws s3 rm s3://${SCCACHE_BUCKET}/hello.txt
       - name: Build PyTorch
         run: |
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
@@ -61,12 +66,10 @@ jobs:
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS \
             -e SCCACHE_BUCKET \
-            -e SCCACHE_LOG=debug \
             -e TORCH_CUDA_ARCH_LIST \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --user jenkins \
-            --net=host \
             --tty \
             -v ${GITHUB_WORKSPACE}:/var/lib/jenkins \
             -w /var/lib/jenkins \
