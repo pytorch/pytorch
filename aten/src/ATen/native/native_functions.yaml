@@ -5907,14 +5907,11 @@
     CPU: legacy::cpu::_th_geqrf
     CUDA: legacy::cuda::_th_geqrf
 
-- func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: orgqr_out
-
+# orgqr, alias for linalg_householder_product
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
   variants: method, function
-  dispatch:
-    CPU, CUDA: orgqr
+
+- func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: ormqr.out(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -8975,6 +8972,17 @@
   python_module: linalg
   dispatch:
     DefaultBackend: linalg_eigvalsh_out
+
+- func: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_householder_product
+
+- func: linalg_householder_product.out(Tensor input, Tensor tau, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_householder_product_out
 
 - func: _linalg_inv_out_helper_(Tensor(a!) self, Tensor(b!) infos_lu, Tensor(c!) infos_getri) -> Tensor(a!)
   variants: function

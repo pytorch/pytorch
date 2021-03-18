@@ -5,9 +5,10 @@
 #ifdef USE_CUDA_NOT_ROCM
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <tensorpipe/tensorpipe.h>
 #endif
 
-#include <tensorpipe/tensorpipe.h>
+#include <tensorpipe/core/message.h>
 
 namespace torch {
 namespace distributed {
@@ -172,13 +173,12 @@ TensorpipeReadBuffers tensorpipeAllocate(
   tpMessage.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
 
   for (auto& tensor : tpMessage.tensors) {
-    if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCpu) {
-      buffers.tensors.emplace_back(at::getCPUAllocator()->allocate(
-          tensor.buffer.unwrap<tensorpipe::CpuBuffer>().length));
-      tensor.buffer.unwrap<tensorpipe::CpuBuffer>().ptr =
-          buffers.tensors.back().get();
+    if (tensor.buffer.type == tensorpipe::DeviceType::kCpu) {
+      buffers.tensors.emplace_back(
+          at::getCPUAllocator()->allocate(tensor.buffer.cpu.length));
+      tensor.buffer.cpu.ptr = buffers.tensors.back().get();
 #ifdef USE_CUDA_NOT_ROCM
-    } else if (tensor.buffer.deviceType() == tensorpipe::DeviceType::kCuda) {
+    } else if (tensor.buffer.type == tensorpipe::DeviceType::kCuda) {
       auto deviceIndex = std::stoi(tensor.metadata);
       auto stream = ctx->getStream(deviceIndex);
       // CUDACachingAllocator will call recordStream accordingly on the current
@@ -186,10 +186,9 @@ TensorpipeReadBuffers tensorpipeAllocate(
       at::cuda::CUDAStreamGuard guard(stream);
       buffers.tensors.emplace_back(
           c10::cuda::CUDACachingAllocator::get()->allocate(
-              tensor.buffer.unwrap<tensorpipe::CudaBuffer>().length));
-      tensor.buffer.unwrap<tensorpipe::CudaBuffer>().ptr =
-          buffers.tensors.back().get();
-      tensor.buffer.unwrap<tensorpipe::CudaBuffer>().stream = stream.stream();
+              tensor.buffer.cuda.length));
+      tensor.buffer.cuda.ptr = buffers.tensors.back().get();
+      tensor.buffer.cuda.stream = stream.stream();
 #endif
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unrecognized TensorPipe buffer type.");

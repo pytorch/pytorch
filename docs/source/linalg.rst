@@ -32,3 +32,4 @@ Functions
 .. autofunction:: inv
 .. autofunction:: qr
 .. autofunction:: lstsq
+.. autofunction:: householder_product
