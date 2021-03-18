@@ -17,14 +17,14 @@
 
 namespace at { namespace native { namespace {
 
-template <typename scalar_t, typename scalar_t_2 = int64_t>
+template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
 static inline void compare_base_kernel_core(
     Tensor& result1,
     Tensor& result2,
     const Tensor& self,
     int64_t dim,
     bool keepdim,
-    const TensorIterator::loop_t& loop) {
+    const loop1d_t& loop) {
   auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
   self_sizes[dim] = 1;
 

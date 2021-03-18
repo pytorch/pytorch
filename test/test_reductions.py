@@ -473,14 +473,10 @@ class TestReductions(TestCase):
 
         values, indices = torch.mode(x, -1, False)
 
-        # Check whether the indices that correspond to each mode found are within
-        # one of the defined intervals
-        b = torch.empty(indices.shape, dtype = torch.bool, device = device).fill_(False)
-        for (beg, end) in intervals:
-            b = b + ((indices >= beg) * (indices < end))
-
-        self.assertEqual((values == v).sum(), values.numel())
-        self.assertEqual(b.sum(), indices.numel())
+        # Check whether the returned indices correspond to the returned values
+        self.assertTrue((x.gather(1, indices.unsqueeze(1)).t() == values).all())
+        # Check whether the returned values are the mode
+        self.assertTrue((values == v).all().item())
 
     @onlyCUDA
     def test_mode_large(self, device):
