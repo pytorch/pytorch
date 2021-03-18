@@ -1891,7 +1891,8 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const optional<Scalar
 }
 
 Tensor linalg_vector_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  Tensor result;
+  ScalarType out_dtype = opt_dtype.value_or(toValueType(self.scalar_type()));
+  Tensor result = create_reduction_result(self, opt_dim.value_or(IntArrayRef{}), keepdim, out_dtype);
   return at::native::linalg_vector_norm_impl(self, opt_ord, opt_dim, keepdim, opt_dtype, result);
 }
 
