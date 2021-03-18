@@ -197,6 +197,7 @@ namespace c10 {
   _(aten, det)                       \
   _(aten, linalg_det)                \
   _(aten, linalg_norm)               \
+  _(aten, linalg_vector_norm)        \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -248,6 +249,8 @@ namespace c10 {
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
+  _(aten, orgqr)                     \
+  _(aten, linalg_householder_product)\
   _(aten, transpose)                 \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
@@ -359,6 +362,11 @@ namespace c10 {
   _(onnx, Conv)                      \
   _(onnx, BatchNormalization)        \
   _(onnx, ReduceProd)                \
+  _(onnx, Neg)                       \
+  _(onnx, NonZero)                   \
+  _(onnx, Range)                     \
+  _(onnx, Tile)                      \
+  _(onnx, Where)                     \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
