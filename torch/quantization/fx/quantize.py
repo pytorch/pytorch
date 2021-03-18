@@ -236,11 +236,12 @@ def insert_observer_for_output_of_the_node(
                     activation_post_process_indexes,
                     env, observed_graph,
                     load_arg, observed_node_names_set, quants)
+                inserted_observer = True
             else:
                 # propagate observed property from input
                 if is_observed(node.args[0]):
                     observed_node_names_set.add(node.name)
-            inserted_observer = True
+                    inserted_observer = True
         elif (isinstance(quantize_handler, BinaryOpQuantizeHandler) and
               quantize_handler.num_tensor_args == 1):
             assert matched_nodes is not None
@@ -256,6 +257,7 @@ def insert_observer_for_output_of_the_node(
             if (input_is_observed(input_node.args[0]) or
                     input_is_observed(input_node.args[1])):
                 observed_node_names_set.add(node.name)
+                inserted_observer = True
 
             if activation_dtype(qconfig) == torch.float16:
                 # observer for outputs
@@ -266,7 +268,7 @@ def insert_observer_for_output_of_the_node(
                     activation_post_process_indexes,
                     env, observed_graph,
                     load_arg, observed_node_names_set, quants)
-            inserted_observer = True
+                inserted_observer = True
         elif isinstance(quantize_handler,
                         StandaloneModuleQuantizeHandler):
             assert node.op == "call_module"
@@ -1243,8 +1245,6 @@ class Quantizer:
                 root_node, matched_nodes, matched_pattern, quantize_handler, \
                     qconfig = matches[node.name]
                 # don't attach observer/fake_quant for CopyNodeQuantizeHandler
-                # if isinstance(quantize_handler, CopyNodeQuantizeHandler):
-                #     qconfig = None
                 if root_node is node and \
                         input_output_observed(quantize_handler):
                     # matched_nodes[-1] is the first op in the sequence and
