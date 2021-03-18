@@ -10,5 +10,5 @@ class NSSingleResultValuesType(str, enum.Enum):
 
 NSSubgraph = NamedTuple(
     'NSSubgraph',
-    [('start_node', Node), ('end_node', Node)]
+    [('start_node', Node), ('end_node', Node), ('base_op_node', Node)]
 )

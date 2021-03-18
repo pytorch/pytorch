@@ -539,6 +539,31 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             results_len=2,
             should_log_inputs=True)
 
+    @skipIfNoFBGEMM
+    def test_linear_fp16(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.Tensor(4, 4))
+                self.b1 = nn.Parameter(torch.zeros(4))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.linear(x, self.w1, self.b1)
+                x = F.relu(x)
+                return x
+
+        qconfig_dict = {'': torch.quantization.float16_static_qconfig}
+        m = M().eval()
+        expected_occurrence = {
+            ns.call_module(OutputLogger): 1,
+        }
+        self._test_match_activations(
+            m, (torch.randn(4, 4),),
+            prepared_expected_node_occurrence=expected_occurrence,
+            results_len=1,
+            qconfig_dict=qconfig_dict)
+
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
