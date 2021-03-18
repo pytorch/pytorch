@@ -11,8 +11,7 @@ class TestMypyWrapper(unittest.TestCase):
             'mypy-strict.ini',
         })
 
-    def test_glob(self):
-        # can match individual files
+    def test_glob_can_match_individual_files(self):
         self.assertTrue(mypy_wrapper.glob(
             pattern='test/test_torch.py',
             filename=PurePosixPath('test/test_torch.py'),
@@ -22,7 +21,7 @@ class TestMypyWrapper(unittest.TestCase):
             filename=PurePosixPath('test/test_testing.py'),
         ))
 
-        # dir matters
+    def test_glob_dir_matters(self):
         self.assertFalse(mypy_wrapper.glob(
             pattern='tools/codegen/utils.py',
             filename=PurePosixPath('torch/nn/modules.py'),
@@ -40,7 +39,7 @@ class TestMypyWrapper(unittest.TestCase):
             filename=PurePosixPath('foo/setup.py'),
         ))
 
-        # can match dirs
+    def test_glob_can_match_dirs(self):
         self.assertTrue(mypy_wrapper.glob(
             pattern='torch',
             filename=PurePosixPath('torch/random.py'),
@@ -54,7 +53,7 @@ class TestMypyWrapper(unittest.TestCase):
             filename=PurePosixPath('tools/fast_nvcc/fast_nvcc.py'),
         ))
 
-        # can match wildcards
+    def test_glob_can_match_wildcards(self):
         self.assertTrue(mypy_wrapper.glob(
             pattern='tools/autograd/*.py',
             filename=PurePosixPath('tools/autograd/gen_autograd.py'),
