@@ -64,8 +64,8 @@ struct integer_range {
 template <
     typename Integer1,
     typename Integer2,
-    typename std::enable_if<std::is_integral<Integer1>::value, bool>::type = true>,
-    typename std::enable_if<std::is_integral<Integer2>::value, bool>::type = true>
+    typename std::enable_if<std::is_integral<Integer1>::value, bool>::type = true,
+    typename std::enable_if<std::is_integral<Integer2>::value, bool>::type = true
 >
 integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
     //If end<=begin then the range is empty; we can achieve this effect by
