@@ -111,7 +111,7 @@ function(_OPENMP_FLAG_CANDIDATES LANG)
       # MSVC header. No need to pass it as additional include.
       set(OMP_FLAG_MSVC "-openmp:experimental" "-openmp")
     else()
-      set(OMP_FLAG_MSVC "-openmp:experimental -I${__header_dir}\"" "-openmp" "-openmp -I${__header_dir}")
+      set(OMP_FLAG_MSVC "-openmp:experimental -I${__header_dir}" "-openmp -I${__header_dir}")
     endif()
     set(OMP_FLAG_PathScale "-openmp")
     set(OMP_FLAG_NAG "-openmp")
