@@ -1421,12 +1421,12 @@ def sample_inputs_masked_fill(op_info, device, dtype, requires_grad):
         return make_tensor(shape, device, dtype, low=None, high=None, requires_grad=requires_grad)
 
     samples = (
-        SampleInput(_make_tensor_helper((M, M)), args=(torch.randn(M, M, device=device) > 0, 10)),
-        SampleInput(_make_tensor_helper((M, M)), args=(torch.randn(M, M, device=device) > 0, _make_tensor_helper(()))),
-        SampleInput(_make_tensor_helper((M, M)), args=(torch.randn(M, device=device) > 0, 10)),
+        SampleInput(_make_tensor_helper((S, S)), args=(torch.randn(S, S, device=device) > 0, 10)),
+        SampleInput(_make_tensor_helper((S, S)), args=(torch.randn(S, S, device=device) > 0, _make_tensor_helper(()))),
+        SampleInput(_make_tensor_helper((S, S)), args=(torch.randn(S, device=device) > 0, 10)),
         SampleInput(_make_tensor_helper(()), args=(torch.randn((), device=device) > 0, 10)),
         SampleInput(_make_tensor_helper(()), args=(torch.randn((), device=device) > 0, _make_tensor_helper(()))),
-        SampleInput(_make_tensor_helper((M, M)), args=(torch.randn((), device=device) > 0, 10)),
+        SampleInput(_make_tensor_helper((S, S)), args=(torch.randn((), device=device) > 0, 10)),
     )
 
     return samples
