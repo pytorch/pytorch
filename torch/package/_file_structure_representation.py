@@ -1,6 +1,6 @@
-from ._glob_group import GlobPattern, _GlobGroup
+from typing import Dict, List
 
-from typing import List, Dict
+from ._glob_group import GlobPattern, _GlobGroup
 
 
 class Folder:
