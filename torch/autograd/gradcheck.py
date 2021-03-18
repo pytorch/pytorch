@@ -559,7 +559,6 @@ def gradcheck(
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
     check_batched_grad: bool = False,
-    fast_mode: bool = False,
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -605,7 +604,6 @@ def gradcheck(
             are supported and treated as zeros, for ``Tensor`` outputs.
         check_batched_grad (bool, optional): if True, check if we can compute
             batched gradients using prototype vmap support. Defaults to False.
-        fast_mode (bool, optional): if True, utilizes a faster version of gradcheck.
 
     Returns:
         True if all differences satisfy allclose condition
@@ -693,7 +691,6 @@ def gradgradcheck(
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
     check_batched_grad: bool = False,
-    fast_mode: bool = False,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
@@ -742,7 +739,6 @@ def gradgradcheck(
             are supported and treated as zeros
         check_batched_grad (bool, optional): if True, check if we can compute
             batched gradients using prototype vmap support. Defaults to False.
-        fast_mode (bool, optional): if True, utilizes a faster version of gradcheck.
 
     Returns:
         True if all differences satisfy allclose condition
@@ -776,4 +772,4 @@ def gradgradcheck(
     return gradcheck(
         new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
         nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad,
-        check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad, fast_mode=fast_mode)
+        check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad)
