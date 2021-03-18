@@ -54,6 +54,12 @@ static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef
   std::vector<TensorImpl*> unwrapped;
   unwrapped.reserve(tensors.size());
 
+  int test_end=10;
+  int test_result=0;
+  for (const auto i : c10::irange(test_end)) {
+    test_result += i;
+  }
+
   for (const auto i : c10::irange(tensors.size())) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {

@@ -12,7 +12,7 @@ namespace c10 {
 
 namespace detail {
 
-template <typename I, std::enable_if_t<std::is_integral<I>{}, I> = 0>
+template <typename I, std::enable_if_t<std::is_integral<I>{}, int> = 0>
 struct integer_iterator : std::iterator<std::input_iterator_tag, I> {
     explicit integer_iterator(I value) : value(value) {}
 
