@@ -858,7 +858,7 @@ def get_comparison_dtype(a, b):
 # 2010, seems low risk to inherit from.
 class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
     def __exit__(self, exc_type, exc_value, tb):
-        if issubclass(exc_type, NotImplementedError):
+        if exc_type is not None and issubclass(exc_type, NotImplementedError):
             self.test_case.skipTest("not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
 
