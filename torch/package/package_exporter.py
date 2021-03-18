@@ -111,6 +111,7 @@ class PackageExporter:
         self.external: List[str] = []
         self.provided: Dict[str, bool] = {}
         self.verbose = verbose
+        self.broken_modules: Dict[str, str] = {}
 
         if isinstance(importer, Importer):
             self.importer = importer
@@ -305,21 +306,12 @@ node [shape=box];
         arg = quote(template, safe="")
         return f"https://dreampuf.github.io/GraphvizOnline/#{arg}"
 
-    def _get_source_of_module(self, module: types.ModuleType) -> str:
+    def _get_source_of_module(self, module: types.ModuleType) -> Optional[str]:
         filename = getattr(module, "__file__", None)
-        result = (
-            None
-            if filename is None or not filename.endswith(".py")
-            else linecache.getlines(filename, module.__dict__)
-        )
-        if result is None:
-            extra = ""
-            if self.verbose:
-                extra = f" See the dependency graph for more info: \n{self._write_dep_graph(module.__name__)}"
-            raise ValueError(
-                f'cannot save source for module "{module.__name__}" because '
-                f'its source file "{filename}" could not be found.{extra}'
-            )
+        if filename is None or not filename.endswith(".py"):
+            self.broken_modules[module.__name__] = filename
+            return None
+        result = linecache.getlines(filename, module.__dict__)
         return "".join(result)
 
     def require_module_if_not_provided(self, module_name: str, dependencies=True):
@@ -362,13 +354,14 @@ node [shape=box];
         """
         module = self._import_module(module_name)
         source = self._get_source_of_module(module)
-        self.save_source_string(
-            module_name,
-            source,
-            hasattr(module, "__path__"),
-            dependencies,
-            module.__file__,
-        )
+        if source is not None:
+            self.save_source_string(
+                module_name,
+                source,
+                hasattr(module, "__path__"),
+                dependencies,
+                module.__file__,
+            )
 
     def save_pickle(
         self, package: str, resource: str, obj: Any, dependencies: bool = True
@@ -589,6 +582,13 @@ node [shape=box];
             with PackageExporter("file.zip") as e:
                 ...
         """
+        if len(self.broken_modules) != 0:
+            broken_packages = set()
+            for module in self.broken_modules:
+                package = module.partition('.')[0]
+                broken_packages.add(package)
+            foo = "\n".join(broken_packages)
+            raise ValueError(f"Broken modules: {foo}")
         if self.verbose:
             print(f"Dependency graph for exported package: \n{self._write_dep_graph()}")
 
