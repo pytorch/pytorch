@@ -4,6 +4,7 @@ set -ex
 COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10-cudnn7-py3-test
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+# shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
 export IMAGE_COMMIT_ID=$(git rev-parse HEAD)

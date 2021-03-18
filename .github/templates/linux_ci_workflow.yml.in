@@ -123,6 +123,13 @@ jobs:
             -w /var/lib/jenkins/workspace \
             ${DOCKER_IMAGE} \
             sh -c 'sudo chown -R jenkins . && pip install *.whl && .jenkins/pytorch/test.sh'
+      - name: Report test results
+        uses: EnricoMi/publish-unit-test-result-action@v1
+        if: always()
+        with:
+          comment_on_pr: false
+          pull_request_build: commit
+          files: test-reports/**/*.xml
       - name: Clean up docker images
         if: always()
         run: |
