@@ -238,7 +238,7 @@ Build with CPU
 
 It's fairly easy to build with CPU. Visual Studio 2019 version 16.7.6 (MSVC toolchain version 14.27) or higher is recommended.
 
-Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against Intel OpenMP, you'll need to follow the steps [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) to manually set up the buliding environment. Otherwise, Microsoft Visual C OpenMP runtime (vcomp) may be used.
+Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the buliding environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configuraions for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
 
 Build with CUDA
 
