@@ -122,7 +122,7 @@ jobs:
             -v ${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace \
             -w /var/lib/jenkins/workspace \
             ${DOCKER_IMAGE} \
-            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && .jenkins/pytorch/test.sh'
+            sh -c 'sudo chown -R jenkins . && pip install *.whl && .jenkins/pytorch/test.sh'
       - name: Clean up docker images
         if: always()
         run: |
