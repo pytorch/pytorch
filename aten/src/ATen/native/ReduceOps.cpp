@@ -11,6 +11,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorDimApply.h>
 #include <ATen/native/SharedReduceOps.h>
+#include <ATen/core/grad_mode.h>
 
 #include <algorithm>
 #include <functional>
@@ -43,10 +44,10 @@ DEFINE_DISPATCH(logcumsumexp_stub);
 
 Tensor _logcumsumexp_cpu(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _logcumsumexp_out_cpu(result, self, dim);
+  return _logcumsumexp_out_cpu(self, dim, result);
 }
 
-Tensor& _logcumsumexp_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _logcumsumexp_out_cpu(const Tensor& self, int64_t dim, Tensor& result) {
   logcumsumexp_stub(self.device().type(), result, self, dim);
   return result;
 }
@@ -60,7 +61,7 @@ Tensor logcumsumexp(const Tensor& self, int64_t dim) {
   return result;
 }
 
-Tensor& logcumsumexp_out(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& logcumsumexp_out(const Tensor& self, int64_t dim, Tensor& result) {
   check_scalar_type_device_layout_equal(result, self);
   {
     NoNamesGuard guard;
@@ -102,7 +103,7 @@ Tensor& cumsum_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
   return at::_cumsum_out(self, self, dim);
 }
 
-Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+Tensor& cumsum_out(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, Tensor& result) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   TORCH_CHECK(
       !dtype.has_value() || (result.scalar_type() == dtype.value()),
@@ -151,7 +152,7 @@ Tensor& cumprod_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
     return at::_cumprod_out(self, self, dim);
 }
 
-Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+Tensor& cumprod_out(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, Tensor& result) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
   TORCH_CHECK(
       !dtype.has_value() || (result.scalar_type() == dtype.value()),
@@ -168,32 +169,27 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
   return result;
 }
 
-static Tensor sum_scan_exclusive(const Tensor& x, int64_t dim) {
-  Tensor ret = at::cumsum(-x, dim);
-
-  int64_t end_idx = ret.size(dim) - 1;
-  Tensor ret_sum = ret.narrow(dim, end_idx, 1).clone(at::MemoryFormat::Preserve);
-  ret -= ret_sum.expand_as(ret);
-  ret += x;
-  return ret;
+Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
+  /* Logically implements w.flip(dim).cumsum(dim).flip(dim) without copying. */
+  const auto w_cumsum = w.cumsum(dim);
+  const auto w_sum = w_cumsum.narrow(dim, -1, 1);
+  return w_sum - w_cumsum + w;
 }
 
-Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
+Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, const Tensor& output) {
   /*
-    There are two algorithms to do this. The first one
-    is very efficient, but works only when there are no
-    nonzero elements in the input.
+    We show here how to derive an O(n) gradient formula for
+    abitrary inputs. It follows via a basic application of the
+    chain rule together with a number of observations for different
+    cases. We assume that x is an n-dimensional vector and y = cumprod(x).
+    In the actual implementation we will need to play a bit with masks
+    to be able to implement the formulas deduced here for tensors.
 
-    The second one is much more complex, but it doesn't
-    assume anything on the input. The main downside is
-    that it takes time O(n^2), where n = input.size(self.dim)
-    (i.e. the length of the cumulative product). This is in
-    contrast to the forward pass and the efficient algorithm,
-    which are both O(n).
+    We will first deduce the formula for the case when
+    x[i] != 0 for 1 <= i <= n.
 
-    The second algorithm is a simple application of the chain
-    rule. If x is an n-dimensional vector, and y = cumprod(x),
-    and F is the final cost, then
+    For F : R^n -> R the cost function (we will look at the complex case later),
+    we have
 
     dF / dx_k = sum_j (dF / dy_j) * (dy_j / dx_k)   (1)
 
@@ -209,10 +205,10 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
 
     Note that the indicator (j>=k) can be taken out
     by replacing the sum in (1) with a sum from
-    j = k to n.
+    k <= j <= n.
 
     Thus,
-    df / dx_k = sum_{k <= j <= n} grad_output[j] * (dy_j / dx_k)
+    dF / dx_k = sum_{k <= j <= n} grad_output[j] * (dy_j / dx_k)
 
     with
     dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i     (2)
@@ -226,12 +222,124 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
 
     So therefore,
 
-    df / dx_k = sum_{k <= j <= n} grad_output[j] * y_j / x_k
+    dF / dx_k = sum_{k <= j <= n} grad_output[j] * y_j / x_k
 
-    so
+    This formula just makes sense when input[i] != 0 for every i.
 
-    grad_output = sum_scan_exclusiv(grad_output * output) / input
+    Assume now that there exists at least a zero in the input.
+    Denote by z1 the first element 1 <= z1 <= n with input[z1] = 0
+    and z2 the second element z1 < z2 <= n with input[z2] = 0,
+    (or z2 = n if there is just one zero in input)
 
+    We have three cases.
+
+    k > z1:
+    Looking at (2), we see that dy_j / dx_k = 0, for j >= k, as these terms
+    all include a x_{z1} which is zero. As such, dF / dx_k = 0 in this case
+
+    k < z1:
+    Reasoning as in the previous case, we see that for these elements we have that
+
+    dF / dx_k = sum_{k <= j < z1} grad_output[j] * (dy_j / dx_k)
+
+    as the terms of the sum for j in z1 <= j <= n are all zero
+
+    k = z1:
+    Similar to the case k < z1, we have that
+
+    dF / dx_z1 = sum_{z1 <= j < z2} grad_output[j] * (dy_j / dx_z1)
+
+    This case has a subtlety though. To compute (dy_j / dx_z1), we cannot use the formula
+
+    dy_j / dx_z1 = y_j / x_z1
+
+    as, y_j = x_z1 = 0 for j >= z1. We need to compute it with the formula for its derivative,
+    that is:
+
+    dy_j / dx_z1 = prod(x[:z1]) * (grad_output[z1] + sum(grad_output[z1+1:z2] * cumprod(x[z1+1:z2])))
+
+    When the imputs are complex, this is map is holomorphic. As such, to compute
+    its backwards is just the conjugate of the usual backwards. This simplifies to
+    conjugating the input. We may also reuse the output as, since the map is holomorphic,
+    cumprod(input.conj()) = cumprod(input).conj()
+  */
+
+  if (input.numel() <= 1) {
+    return grad;
+  }
+  dim = at::maybe_wrap_dim(dim, input.dim());
+  const int64_t dim_size = input.size(dim);
+  if (dim_size == 1) {
+    return grad;
+  }
+
+  const auto w = output * grad;
+  const auto is_zero = input == 0;
+  if (!(is_zero.any().item<uint8_t>())) {
+    return reversed_cumsum(w, dim).div(input);
+  }
+
+  // If we are not computing a second order gradient, we can use an
+  // O(n) implementation. The derivative of this implementation is _not_
+  // the second derivative of cumprod. As such, we fallback to a less efficient
+  // O(n^2) implementation when at::GradMode::is_enabled().
+  Tensor grad_input = at::zeros(input.sizes(), grad.options());
+  if (!at::GradMode::is_enabled()) {
+    // n.b. This could probably be implemented much faster with a kernel
+
+    // From here on we need to use some mask gymnastics to
+    // account for the tensorial dimensions
+    // We do a cumsum of the zeros along the dimension.
+    // For a vector is_zero = [False, True, False, True, False]
+    // we would have cumsum = [0, 1, 1, 2, 2]
+    // As such we have (in python code for simplicity)
+    // The mask for the range [0, z1):
+    // cumsum == 0
+    // The indices of the first zero z1 and zeros when
+    // there is no first zero:
+    // indices = (cumsum == 1).max(dim, keepdim=True).indices
+    // The mask for the first zero:
+    // zeros_like(indices).scatter_(dim, indices, 1.) & cumsum == 1
+    // Note that the logic_and with cumsum == 1 accounts
+    // for the case when there is no first zero
+    const auto cumsum = is_zero.cumsum(dim);
+
+    // case k < z1
+    // select everything before the first zero [0, z1)
+    auto mask = cumsum == 0;
+    // equiv to grad_input[mask] = deriv[grad]
+    grad_input.masked_scatter_(mask,
+        reversed_cumsum(w.masked_fill(~mask, 0.), dim).div_(input).masked_select(mask));
+    // select everything from the first zero to the second zero [z1, z2)
+    mask = cumsum == 1;
+
+    // case k = z1
+    // We start by select the first zero [z1]
+    // We locate the indices of the first zero using the max function
+    // We then go from the indices to a mask index_fill_
+    // When there is no zero in the slice, max will return the index 0.
+    // To account for this, we need to do an intersection with mask,
+    // which is true in the range [z1, z2)
+    const auto first_zero_index = std::get<1>(mask.max(dim, /*keepdim*/ true));
+    const auto first_zero_mask = at::zeros_like(mask)
+                                  .scatter_(dim, first_zero_index, /*src*/ 1)
+                                  .logical_and_(mask);
+
+    // select everything between the first zero and the second zero (z1, z2)
+    mask &= ~first_zero_mask;
+    // here we compute
+    // dy_j / dx_z1 = sum(cumprod(input[z1+1:z2] * grad[z1+1:z2])) * prod(output[z1-1])
+    // relu_() necessary as gather does not support negative indices
+    // finally, we do grad_input[z1] = dy_j / dx_z1
+    grad_input.masked_scatter_(first_zero_mask,
+                               input.masked_fill(~mask, 1.).cumprod(dim)
+                                    .mul_(grad.masked_fill(cumsum != 1, 0.))
+                                    .sum(dim, /*keepdim*/true)
+                                    .mul_(at::gather(output, dim, (first_zero_index - 1).relu_())
+                                          .masked_fill_(first_zero_index == 0, 1.))
+                                    .masked_select(first_zero_mask));
+  } else { // GradMode::enabled()
+    /*
     If the input is nonzero, we need to calculate the dy_j / dx_k
     by using the formula (2), called in the code omitted_products.
 
@@ -250,52 +358,36 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim) {
     In order to vectorize this properly, we need to add to
     omitted_products the dimensions where k > j, and therefore
     dy_j / dx_k = 0, which is done right after the assert.
-  */
+    */
 
-  if (input.dim() == 0 || input.numel() == 0) {
-    return grad;
-  }
-  dim = at::maybe_wrap_dim(dim, input.sizes().size());
-  int64_t dim_size = input.size(dim);
-  if (dim_size == 1) {
-    return grad;
-  }
+    auto ones_size = input.sizes().vec();
+    ones_size[dim] = 1;
+    const Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
+    Tensor prods_from_k_plus_1;
+    Tensor omitted_products;
+    for (int k = 0; k < dim_size; ++k) {
+      if (k == 0) {
+        prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
+        omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
+      } else if (k == dim_size - 1) {
+        const Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+        omitted_products = prods_until_k;
+      } else {
+        const Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+        prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
+        omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
+        omitted_products = at::cat({prods_until_k, omitted_products}, dim);
+      }
 
-  // Simple case with nonzero elements in the input
-  if ((input != 0).all().item<uint8_t>()) {
-    Tensor result = at::cumprod(input, dim);
-    return sum_scan_exclusive(result * grad, dim) / input;
-  }
+      // At this point omitted_products is the same size
+      // as input, except on the dimension dim where it's
+      // dim_size - k
+      TORCH_CHECK(omitted_products.size(dim) == dim_size - k);
 
-  auto ones_size = input.sizes().vec();
-  ones_size[dim] = 1;
-  Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
-  Tensor grad_input = at::zeros(input.sizes(), grad.options());
-  Tensor prods_from_k_plus_1;
-  Tensor omitted_products;
-  for (int k = 0; k < dim_size; ++k) {
-    if (k == 0) {
-      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
-      omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
-    } else if (k == dim_size - 1) {
-      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
-      omitted_products = prods_until_k;
-    } else {
-      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
-      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
-      omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
-      omitted_products = at::cat({prods_until_k, omitted_products}, dim);
+      grad_input.select(dim, k).copy_(
+          at::sum(grad.slice(dim, k) * omitted_products,dim));
     }
-
-    // At this point omitted_products is the same size
-    // as input, except on the dimension dim where it's
-    // dim_size - k
-    AT_ASSERT(omitted_products.size(dim) == dim_size - k);
-
-    grad_input.select(dim, k).copy_(
-        at::sum(grad.slice(dim, k) * omitted_products,dim));
   }
-
   return grad_input;
 }
 
@@ -343,7 +435,7 @@ void cummax_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int6
     });
 }
 
-std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
+std::tuple<Tensor&, Tensor&> cummax_out(const Tensor& self, int64_t dim, Tensor& values, Tensor& indices) {
   check_scalar_type_device_layout_equal(values, self);
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
@@ -378,7 +470,7 @@ void cummin_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int6
     });
 }
 
-std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
+std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, int64_t dim, Tensor& values, Tensor& indices) {
   check_scalar_type_device_layout_equal(values, self);
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
@@ -642,8 +734,8 @@ Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
   return at::prod_out(result, self, dimname_to_position(self, dim), keepdim, opt_dtype);
 }
 
-Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
-                 bool keepdim, c10::optional<ScalarType> opt_dtype) {
+Tensor &mean_out_cpu_gpu(const Tensor &self, IntArrayRef dim,
+                 bool keepdim, c10::optional<ScalarType> opt_dtype, Tensor &result) {
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
       at::isFloatingType(scalarType) || at::isComplexType(scalarType),
@@ -683,15 +775,15 @@ Tensor mean_cpu_gpu(const Tensor &self, optional<ScalarType> dtype) {
 
 Tensor mean_cpu_gpu(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   Tensor result;
-  return at::native::mean_out_cpu_gpu(result, self, dim, keepdim, dtype);
+  return at::native::mean_out_cpu_gpu(self, dim, keepdim, dtype, result);
 }
 
 Tensor mean(const Tensor& self, DimnameList dim, bool keepdim, optional<ScalarType> dtype) {
   return at::mean(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& mean_out(Tensor& result, const Tensor& self, DimnameList dim,
-                 bool keepdim, c10::optional<ScalarType> opt_dtype) {
+Tensor& mean_out(const Tensor& self, DimnameList dim,
+                 bool keepdim, c10::optional<ScalarType> opt_dtype, Tensor& result) {
   return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
@@ -722,7 +814,7 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
   return result;
 }
 
-Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
   {
     NoNamesGuard guard;
     logsumexp_out_impl(result, self, dims, keepdim);
@@ -733,24 +825,24 @@ Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool
 
 Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
-  return at::native::logsumexp_out(result, self, dims, keepdim);
+  return at::native::logsumexp_out(self, dims, keepdim, result);
 }
 
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
   return at::logsumexp(self, dimnames_to_positions(self, dims), keepdim);
 }
 
-Tensor& logsumexp_out(Tensor& result, const Tensor& self, DimnameList dims, bool keepdim) {
+Tensor& logsumexp_out(const Tensor& self, DimnameList dims, bool keepdim, Tensor& result) {
   return at::logsumexp_out(result, self, dimnames_to_positions(self, dims), keepdim);
 }
 
-static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt_p,
+static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scalar>& opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0).to<double>();
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "norm only supports CPU AND CUDA device type, got: ", self.device().type());
+              "norm only supports CPU and CUDA device types, but got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
-              "norm only supports strided layout, got: ", self.layout());
+              "norm only supports strided layout, but got: ", self.layout());
 
   ScalarType in_dtype = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
@@ -771,7 +863,7 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt
   return result;
 }
 
-static inline Tensor _norm(const Tensor &self, Scalar p) {
+static inline Tensor _norm(const Tensor &self, const Scalar& p) {
   if (self.is_sparse()) {
     // Sparse tensors need a different implementation because their values
     // are accessed with a different API than strided tensors
@@ -789,15 +881,15 @@ static inline Tensor _norm(const Tensor &self, Scalar p) {
   }
 }
 
-Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
+Tensor &norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::norm_out(result, self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
 
-Tensor &norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim) {
+Tensor &norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim) {
   return at::native::norm_out(result, self, p, dim, keepdim, c10::nullopt);
 }
 
-static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim,
+static Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim,
             optional<ScalarType> opt_dtype) {
   if (self.is_sparse()) {
     // Sparse tensors need a different implementation because their values
@@ -809,20 +901,20 @@ static Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool
   }
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
   return at::native::norm(self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, ScalarType dtype) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, ScalarType dtype) {
   return at::native::norm(self, p, IntArrayRef{}, false, optional<ScalarType>(dtype));
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, IntArrayRef dim, bool keepdim) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim) {
   return at::native::norm(self, p, dim, keepdim, c10::nullopt);
 }
 
 // leave it so we support sparse tensors
-Tensor norm(const Tensor& self, Scalar p) {
+Tensor norm(const Tensor& self, const Scalar& p) {
   return at::native::_norm(self, p);
 }
 
@@ -882,10 +974,10 @@ Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
     result = at::empty({0}, self.options().dtype(kBool));
   }
 
-  return at::native::all_out(result, self, dim, keepdim);
+  return at::native::all_out(self, dim, keepdim, result);
 }
 
-Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
+Tensor &all_out(const Tensor &self, int64_t dim, bool keepdim, Tensor &result) {
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "all only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -964,10 +1056,10 @@ Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
     result = at::empty({0}, self.options().dtype(kBool));
   }
 
-  return at::native::any_out(result, self, dim, keepdim);
+  return at::native::any_out(self, dim, keepdim, result);
 }
 
-Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
+Tensor &any_out(const Tensor &self, int64_t dim, bool keepdim, Tensor &result) {
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -996,7 +1088,7 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   }
 }
 
-Tensor &amin_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
   auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
   TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
@@ -1009,7 +1101,7 @@ Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
   return at::amin_out(result, self, dim, keepdim);
 }
 
-Tensor &amax_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+Tensor &amax_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
   TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
@@ -1022,7 +1114,7 @@ Tensor amax(const Tensor& self, IntArrayRef dim, bool keepdim) {
   return at::amax_out(result, self, dim, keepdim);
 }
 
-Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
+Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim, Tensor& result) {
   TORCH_CHECK(self.numel() > 0, "cannot perform reduction function argmax on a "
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
@@ -1052,10 +1144,10 @@ Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
 
 Tensor argmax(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
   Tensor result = at::empty({0}, self.options().dtype(at::kLong));
-  return at::native::argmax_out(result, self, dim, keepdims);
+  return at::native::argmax_out(self, dim, keepdims, result);
 }
 
-Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
+Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim, Tensor& result) {
   TORCH_CHECK(self.numel() > 0, "cannot perform reduction function argmin on a "
       "tensor with no elements because the operation does not have an identity");
   Tensor in;
@@ -1085,7 +1177,7 @@ Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
 
 Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
   Tensor result = at::empty({0}, self.options().dtype(at::kLong));
-  return at::native::argmin_out(result, self, dim, keepdims);
+  return at::native::argmin_out(self, dim, keepdims, result);
 }
 
 static Tensor& std_var_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
@@ -1308,38 +1400,38 @@ std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim, bool unb
   return at::std_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
-Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {
+Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype) {
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
+Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim) {
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim);
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype) {
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor norm(const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim) {
+Tensor norm(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim) {
   return at::norm(self, p, dimnames_to_positions(self, dim), keepdim);
 }
 
 Tensor any(const Tensor& self, Dimname dim, bool keepdim) {
   reportNYIDimnameOverload("any");
 }
-Tensor& any_out(Tensor& result, const Tensor &self, Dimname dim, bool keepdim) {
+Tensor& any_out(const Tensor &self, Dimname dim, bool keepdim, Tensor& result) {
   reportNYIDimnameOverload("any");
 }
 Tensor all(const Tensor& self, Dimname dim, bool keepdim) {
   reportNYIDimnameOverload("all");
 }
-Tensor& all_out(Tensor& result, const Tensor &self, Dimname dim, bool keepdim) {
+Tensor& all_out(const Tensor &self, Dimname dim, bool keepdim, Tensor& result) {
   reportNYIDimnameOverload("all");
 }
 Tensor logcumsumexp(const Tensor& self, Dimname dim) {
   return at::logcumsumexp(self, dimname_to_position(self, dim));
 }
-Tensor& logcumsumexp_out(Tensor& result, const Tensor& self, Dimname dim) {
+Tensor& logcumsumexp_out(const Tensor& self, Dimname dim, Tensor& result) {
   return at::logcumsumexp_out(result, self, dimname_to_position(self, dim));
 }
 Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
@@ -1348,7 +1440,7 @@ Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) 
 Tensor& cumsum_(Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
     return native::cumsum_(self, dimname_to_position(self, dim), dtype);
 }
-Tensor& cumsum_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+Tensor& cumsum_out(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype, Tensor& result) {
   return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype);
 }
 Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
@@ -1357,23 +1449,23 @@ Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype)
 Tensor& cumprod_(Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
     return native::cumprod_(self, dimname_to_position(self, dim), dtype);
 }
-Tensor& cumprod_out(Tensor& result, const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
+Tensor& cumprod_out(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype, Tensor& result) {
   return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype);
 }
 std::tuple<Tensor, Tensor> cummax(const Tensor& self, Dimname dim) {
   return at::cummax(self, dimname_to_position(self, dim));
 }
-std::tuple<Tensor&, Tensor&> cummax_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim) {
+std::tuple<Tensor&, Tensor&> cummax_out(const Tensor& self, Dimname dim, Tensor& values, Tensor& indices) {
   return at::cummax_out(values, indices, self, dimname_to_position(self, dim));
 }
 std::tuple<Tensor, Tensor> cummin(const Tensor& self, Dimname dim) {
   return at::cummin(self, dimname_to_position(self, dim));
 }
-std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim) {
+std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, Dimname dim, Tensor& values, Tensor& indices) {
   return at::cummin_out(values, indices, self, dimname_to_position(self, dim));
 }
 
-Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
+Tensor dist(const Tensor &self, const Tensor& other, const Scalar& p){
   return at::norm(self - other, p);
 }
 
