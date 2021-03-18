@@ -1218,7 +1218,7 @@ class DistributedTest:
             store = dist.PrefixStore(new_port, store)
 
             opts = dist.ProcessGroupNCCL.Options()
-            opts.is_high_priority = False
+            opts.is_high_priority_stream = False
             group_id = dist.ProcessGroupNCCL(store, rank, size, opts)
 
             self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU, True)
