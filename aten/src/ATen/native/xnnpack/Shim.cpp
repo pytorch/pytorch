@@ -61,7 +61,7 @@ bool use_linear(
 Tensor linear(
     const Tensor&,
     const Tensor&,
-    const c10::optional<Tensor>&) {
+    const Tensor&) {
   TORCH_CHECK(false, internal::kError);
 }
 

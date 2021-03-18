@@ -223,6 +223,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
 }
+
 }}  // namespace native
 
 #endif

@@ -187,9 +187,8 @@ bool use_linear(
 
 Tensor linear(
     const Tensor& input,
-    const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-
+    const Tensor& weight,
+    const Tensor& bias) {
   return internal::linear::create_and_run(
       input,
       weight,
