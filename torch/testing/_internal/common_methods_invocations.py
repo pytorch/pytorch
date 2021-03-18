@@ -2329,6 +2329,10 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,
            skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/52437
+               SkipInfo('TestOpInfo', 'test_variant_consistency_eager',
+                        device_type='cuda', dtypes=(torch.complex64, torch.complex128),
+                        active_if=(CUDA11OrLater and IS_WINDOWS)),
                SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
            ),
            supports_out=False),
