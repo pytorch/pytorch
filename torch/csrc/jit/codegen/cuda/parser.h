@@ -32,6 +32,7 @@ constexpr int kNonFcdReductionThreadX = 32;
 constexpr int kNonFcdReductionThreadY = 32;
 
 TORCH_CUDA_CU_API bool hasReductionNode(const Block* block);
+TORCH_CUDA_CU_API bool isReductionToSizeNode(const Node* node);
 TORCH_CUDA_CU_API bool isReductionNode(const Node* node);
 
 TORCH_CUDA_CU_API bool hasNormalizationNode(const Block* block);

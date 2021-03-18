@@ -396,6 +396,7 @@ class GraphCache {
   std::shared_ptr<Graph> graph_;
   //! TODO: poor name, we should use `eliminated_axes_` instead;
   at::DimVector reduction_axes_;
+  bool support_permutation_;
 
   //! helper function used at run-time to check whether a common permutation is
   //! present, this is used to take the short-cut to skip permutation logic.

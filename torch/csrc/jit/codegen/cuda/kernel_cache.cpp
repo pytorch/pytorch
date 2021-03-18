@@ -87,13 +87,21 @@ void debugPrint(const TensorTypePtr& type) {
 }
 #pragma clang diagnostic pop
 
-at::DimVector graphReductionAxes(const std::shared_ptr<Graph>& graph) {
+at::DimVector graphReductionAxes(
+    const std::shared_ptr<Graph>& graph,
+    bool& simple_reduction) {
   FUSER_PERF_SCOPE("graphReductionAxes");
+  simple_reduction = true;
 
   at::DimVector reduction_axes;
   // TODO: let check that we have only single reduction node in the graph.
   for (const auto& n : graph->nodes()) {
-    if (isReductionNode(n)) {
+    if (isReductionToSizeNode(n)) {
+      // TODO: we don't support permutation with ReductionToSize;
+      simple_reduction = false;
+      reduction_axes.clear();
+      return reduction_axes;
+    } else if (isReductionNode(n)) {
       // TODO: we should return empty when `keepdim` is True?
       auto dims_list = constant_as<c10::List<int64_t>>(n->input(1));
       TORCH_INTERNAL_ASSERT(
@@ -107,6 +115,7 @@ at::DimVector graphReductionAxes(const std::shared_ptr<Graph>& graph) {
       // traversal would trigger the `TORCH_INTERNAL_ASSERT`, it's not ideal but
       // at least it's not silent error.
     }
+    // TODO: this doesn't apply any more, clean it up
   }
   return reduction_axes;
 }
@@ -773,6 +782,10 @@ void FusionSegmentRuntimeCache::insertEntry(
 }
 
 bool GraphCache::requiresPermutation() {
+  if (!support_permutation_) {
+    return false;
+  }
+
   const size_t input_rank = input_permutation_.size();
   for (size_t i = 0; i < input_rank; i++) {
     if (input_permutation_[i] != (long)i) {
@@ -906,24 +919,28 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
   // 2. adjust reduction axes for the permutation;
   //    permute changes the semantics of axes, we need to update the reduction
   //    axes in the graph in order to match the behavior;
-  reduction_axes_ = graphReductionAxes(graph);
+  reduction_axes_ = graphReductionAxes(graph, support_permutation_);
 
-  // run over inputs to extract common types;
-  TensorTypePtr acc_type = TensorType::get();
-  for (const auto& input : graph->inputs()) {
-    // only check tensor types;
-    if (auto input_type = input->type()->cast<TensorType>()) {
-      if (acc_type->dim().has_value()) {
-        // TODO: I think merge cannot handle broadcast - Go verify it later;
-        // TODO: Since we are only handling permutation here, we should just
-        //       merge the stride_index_;
-        acc_type = acc_type->merge(*input_type);
-      } else {
-        acc_type = input_type;
+  // TODO: reduction with permutation is tricky now as we might support complex
+  // topology in graph with segmented fusion.
+  if (support_permutation_) {
+    // run over inputs to extract common types;
+    TensorTypePtr acc_type = TensorType::get();
+    for (const auto& input : graph->inputs()) {
+      // only check tensor types;
+      if (auto input_type = input->type()->cast<TensorType>()) {
+        if (acc_type->dim().has_value()) {
+          // TODO: I think merge cannot handle broadcast - Go verify it later;
+          // TODO: Since we are only handling permutation here, we should just
+          //       merge the stride_index_;
+          acc_type = acc_type->merge(*input_type);
+        } else {
+          acc_type = input_type;
+        }
       }
     }
+    extractPermutation(acc_type);
   }
-  extractPermutation(acc_type);
   createFusion(graph);
 }
 

@@ -183,7 +183,7 @@ class NaiveTypePropagator {
         node->output(0)->setType(out_type);
 
         auto mask_type = TensorType::create(
-            at::ScalarType::Bool, *out_type->device(), *out_type->dim(), false);
+            at::ScalarType::Bool, *out_type->device(), c10::nullopt, false);
 
         node->output(1)->setType(mask_type);
 
@@ -206,13 +206,13 @@ class NaiveTypePropagator {
       }
       case aten::native_layer_norm: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
+        TORCH_CHECK(
+            hasTypeAndDevice(out_type),
+            "Type and device propagation has failed, or was not provided enough information.");
         node->output(0)->setType(out_type);
 
         auto mean_rstd_type = TensorType::create(
-            *out_type->scalarType(),
-            *out_type->device(),
-            *out_type->dim(),
-            out_type->requires_grad());
+            *out_type->scalarType(), *out_type->device(), c10::nullopt, false);
 
         node->output(1)->setType(mean_rstd_type);
         node->output(2)->setType(mean_rstd_type);
@@ -300,7 +300,8 @@ class NaiveTypePropagator {
         const auto type0 = node->input(0)->type()->cast<TensorType>();
         const auto type1 = node->input(1)->type()->cast<TensorType>();
         TORCH_CHECK(
-            type0 != nullptr && type1 != nullptr,
+            type0 != nullptr && type1 != nullptr &&
+                type1->scalarType().has_value(),
             "input to type_as needs to be a tensor");
         node->output()->setType(type0->withScalarType(type1->scalarType()));
         break;
@@ -354,6 +355,9 @@ class NaiveTypePropagator {
         "Scalar operations on binary broadcast type, not supported yet.");
 
     if (op0 != nullptr && op1 != nullptr) {
+      TORCH_CHECK(
+          hasTypeAndDevice(op0) && hasTypeAndDevice(op1),
+          "Type and device propagation has failed, or was not provided enough information.");
       auto promoted_scalar_type = scalar_type.has_value()
           ? *scalar_type
           : c10::promoteTypes(*op0->scalarType(), *op1->scalarType());

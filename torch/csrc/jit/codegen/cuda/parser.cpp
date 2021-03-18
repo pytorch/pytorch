@@ -42,7 +42,12 @@ typedef bool (*MergeQueryFuncPtr)(const Node*);
 
 // TODO: add a mutex to make it thread safe.
 class IrParser {
-  enum class OperatorType { ElementWise, Reduction, Normalization };
+  enum class OperatorType {
+    ElementWise,
+    Reduction,
+    ReductionToSize,
+    Normalization
+  };
   typedef OperatorType (*OperatorTypeFuncPtr)(const Node*);
 
   class RegistrationEntry {
@@ -182,12 +187,21 @@ class IrParser {
     return reg_entry != nullptr && reg_entry->isCompatible(node);
   }
 
+  static bool isReductionToSizeNode(const Node* node) {
+    initRegistry();
+
+    auto reg_entry = lookupInRegistry(node);
+    return reg_entry != nullptr &&
+        reg_entry->isType(node, OperatorType::ReductionToSize);
+  }
+
   static bool isReductionNode(const Node* node) {
     initRegistry();
 
     auto reg_entry = lookupInRegistry(node);
     return reg_entry != nullptr &&
-        reg_entry->isType(node, OperatorType::Reduction);
+        (reg_entry->isType(node, OperatorType::Reduction) ||
+         reg_entry->isType(node, OperatorType::ReductionToSize));
   }
 
   static bool isNormalizationNode(const Node* node) {
@@ -1207,7 +1221,7 @@ class IrParser {
               if (size_to->empty()) {
                 return OperatorType::ElementWise;
               } else {
-                return OperatorType::Reduction;
+                return OperatorType::ReductionToSize;
               }
             });
       }
@@ -1597,6 +1611,10 @@ bool hasReductionNode(const Block* block) {
 
 bool isReductionNode(const Node* node) {
   return IrParser::isReductionNode(node);
+}
+
+bool isReductionToSizeNode(const Node* node) {
+  return IrParser::isReductionToSizeNode(node);
 }
 
 bool hasNormalizationNode(const Block* block) {
