@@ -154,8 +154,8 @@ class LayerNorm(Module):
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
-            self.weight = Parameter(torch.empty(*(self.normalized_shape or (0,))))
-            self.bias = Parameter(torch.empty(*(self.normalized_shape or (0,))))
+            self.weight = Parameter(torch.empty(self.normalized_shape))
+            self.bias = Parameter(torch.empty(self.normalized_shape))
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
