@@ -117,12 +117,14 @@ class TestComplex(JitTestCase):
 
         unary_ops = ['log', 'log10', 'sqrt', 'exp', 'sin', 'cos', 'asin', 'acos', 'atan', 'sinh', 'cosh',
                      'tanh', 'asinh', 'acosh', 'atanh']
+
+        # --- Unary ops with complex valued output ---
         for op in unary_ops:
             checkMath(op, 1)
 
+        # --- Unary ops with floating point output --- (cmath.phase(), abs())
         checkMath('phase', 1, ret_type="float")
 
-        # ---- Test abs -----
         def fn(x: complex):
             return abs(x)
 
