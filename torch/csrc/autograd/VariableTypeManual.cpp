@@ -250,8 +250,8 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
 
   if (isDifferentiableType(self.scalar_type()) &&
       (generated::details::isFwGradDefined(self) || generated::details::isFwGradDefined(src))) {
-    auto self_fw_grad = generated::details::toLegacyFwGrad(self);
-    auto src_fw_grad = generated::details::toLegacyFwGrad(src);
+    auto self_fw_grad = generated::details::toNonOptFwGrad(self);
+    auto src_fw_grad = generated::details::toNonOptFwGrad(src);
     Tensor new_fw_grad;
     if (self_fw_grad.defined()) {
       if (src_fw_grad.defined()) {
