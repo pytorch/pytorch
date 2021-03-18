@@ -561,7 +561,17 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         expected_occurrence = {
             ns.call_module(OutputLogger): 1,
         }
-        self._test_match_activations(
+        res = self._test_match_activations(
+            m, (torch.randn(4, 4),),
+            prepared_expected_node_occurrence=expected_occurrence,
+            results_len=1,
+            qconfig_dict=qconfig_dict)
+
+        m = M().eval()
+        expected_occurrence = {
+            ns.call_module(OutputLogger): 2,
+        }
+        res2 = self._test_match_shadow_activations(
             m, (torch.randn(4, 4),),
             prepared_expected_node_occurrence=expected_occurrence,
             results_len=1,

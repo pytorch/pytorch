@@ -5,10 +5,10 @@ from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.fx.utils import get_new_attr_name_with_prefix
 
 from .utils import (
-    get_node_input_type,
+    get_node_first_input_and_output_type,
     getattr_from_fqn,
     print_node,
-    NodeInputType,
+    NodeInputOrOutputType,
     return_first_non_observer_node,
     get_number_of_non_param_args,
 )
@@ -154,12 +154,19 @@ def _insert_dtype_cast_after_node(
     """
     dtype_cast_op = None
     dtype_cast_mod_cls = None
-    node_input_type_a = get_node_input_type(node_a, gm_a)
-    node_input_type_c = get_node_input_type(node_c, gm_b)
+    node_input_type_a, _node_output_type_a = \
+        get_node_first_input_and_output_type(node_a, gm_a)
+    node_input_type_c, _node_output_type_c = \
+        get_node_first_input_and_output_type(node_c, gm_b)
 
-    if node_input_type_a == NodeInputType.FP32 and node_input_type_c == NodeInputType.INT8:
+    if (
+        (node_input_type_a == NodeInputOrOutputType.FP32 and
+         node_input_type_c == NodeInputOrOutputType.INT8) or
+        (node_input_type_a == NodeInputOrOutputType.FP32 and
+         node_input_type_c == NodeInputOrOutputType.FP16)
+    ):
         dtype_cast_op = torch.dequantize
-    elif node_input_type_a == NodeInputType.FP32 and node_input_type_c == NodeInputType.FP32:
+    elif node_input_type_a == NodeInputOrOutputType.FP32 and node_input_type_c == NodeInputOrOutputType.FP32:
         dtype_cast_mod_cls = torch.nn.Identity
     else:
         raise AssertionError(
@@ -328,9 +335,10 @@ def _insert_copy_of_node_a_after_input_node_c(
     new_kwargs: Dict[str, Any] = {}
     for node_a_k, node_a_kwarg in node_a.kwargs.items():
         if isinstance(node_a_kwarg, Node):
+            kwarg_a = return_first_non_observer_node(node_a_kwarg, gm_a)
             kwarg_a_copy_name = \
-                get_new_attr_name_with_prefix(node_a_kwarg.name + '_shadow_copy_')(gm_b)  # type: ignore
-            kwarg_a_obj = getattr_from_fqn(gm_a, node_a_kwarg.target)  # type: ignore
+                get_new_attr_name_with_prefix(kwarg_a.name + '_shadow_copy_')(gm_b)  # type: ignore
+            kwarg_a_obj = getattr_from_fqn(gm_a, kwarg_a.target)  # type: ignore
             setattr(gm_b, kwarg_a_copy_name, kwarg_a_obj.detach())
             node_a_kwarg_copy = graph_c.create_node(
                 'get_attr', kwarg_a_copy_name, (), {}, kwarg_a_copy_name)
@@ -409,12 +417,15 @@ def create_a_shadows_b(
     def load_arg(a):
         return map_arg(a, lambda node: env_c[node.name])
 
-    node_b_to_matched_subgraph_a_and_name = {}
+    start_node_b_to_matched_subgraph_a_and_name = {}
+    end_node_b_to_matched_subgraph_a_and_name = {}
     for match_name, match in matched_subgraph_pairs.items():
         subgraph_a, subgraph_b = match
-        assert subgraph_b.start_node is subgraph_b.end_node, \
+        assert subgraph_b.start_node is subgraph_b.end_node or True, \
             "Shadowing subgraphs of B with multiple nodes is not yet handled."
-        node_b_to_matched_subgraph_a_and_name[subgraph_b.end_node] = \
+        start_node_b_to_matched_subgraph_a_and_name[subgraph_b.start_node] = \
+            (subgraph_a, match_name)
+        end_node_b_to_matched_subgraph_a_and_name[subgraph_b.end_node] = \
             (subgraph_a, match_name)
 
     for node_b in gm_b.graph.nodes:
@@ -426,9 +437,21 @@ def create_a_shadows_b(
             # remove activation post process node
             env_c[node_b.name] = env_c[node_b.args[0].name]  # type: ignore
 
-        elif node_b in node_b_to_matched_subgraph_a_and_name:
-            subgraph_a, ref_name = \
-                node_b_to_matched_subgraph_a_and_name[node_b]
+        elif (
+            node_b in start_node_b_to_matched_subgraph_a_and_name or
+            node_b in end_node_b_to_matched_subgraph_a_and_name
+        ):
+            node_b_is_start_node = node_b in start_node_b_to_matched_subgraph_a_and_name
+            node_b_is_end_node = node_b in end_node_b_to_matched_subgraph_a_and_name
+
+            if node_b_is_start_node:
+                subgraph_a, ref_name = \
+                    start_node_b_to_matched_subgraph_a_and_name[node_b]
+            else:
+                assert node_b_is_end_node
+                subgraph_a, ref_name = \
+                    end_node_b_to_matched_subgraph_a_and_name[node_b]
+
             if False:
                 print('b')
                 print_node(node_b)
@@ -436,158 +459,169 @@ def create_a_shadows_b(
                 print_node(subgraph_a.start_node)
                 print_node(subgraph_a.end_node)
 
-            # if necessary, log the input of node_c
-            if should_log_inputs:
-                if isinstance(node_b.args[0], Node):
-                    prev_node_c = env_c[node_b.args[0].name]
-                    env_c[prev_node_c.name] = _insert_logger_after_node(
-                        prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
-                        node_b.name, name_b, ref_name,
-                        NSSingleResultValuesType.NODE_INPUT.value,
-                        index_within_arg=0)
-                elif isinstance(node_b.args[0], list):
-                    # first, save the prev_node instances, because they
-                    # will be overwritten in the env after the first logger
-                    # is added
-                    prev_node_c_list = [env_c[arg.name] for arg in node_b.args[0]]
+            if node_b_is_start_node:
 
-                    for arg_idx, arg in enumerate(node_b.args[0]):
-                        prev_node_c = prev_node_c_list[arg_idx]
+                # if necessary, log the input of node_c
+                if should_log_inputs:
+                    if isinstance(node_b.args[0], Node):
+                        prev_node_c = env_c[node_b.args[0].name]
                         env_c[prev_node_c.name] = _insert_logger_after_node(
                             prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
                             node_b.name, name_b, ref_name,
                             NSSingleResultValuesType.NODE_INPUT.value,
-                            index_within_arg=arg_idx)
-                else:
-                    # logging of inputs which are not lists is not supported yet
-                    raise AssertionError(f"type {type(node_b.args[0])} is not handled yet")
-            # subgraph so far:
-            #
-            # (prev_node_c)+ -> (logger_c_input)?
+                            index_within_arg=0)
+                    elif isinstance(node_b.args[0], list):
+                        # first, save the prev_node instances, because they
+                        # will be overwritten in the env after the first logger
+                        # is added
+                        prev_node_c_list = [env_c[arg.name] for arg in node_b.args[0]]
 
-            # ensure env_c is populated with base node
-            env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
-            node_c = env_c[node_b.name]
-
-            # after this point,
-            #
-            # node_a is the original node from graph_a, with parent module gm_a
-            # node_b is the original node from graph_b, with parent module gm_b
-            # node_c is the copy of node_b in graph_c
-            #
-            # subgraph so far:
-            #
-            # (prev_node_c)+ -> (logger_c_input)? -> node_c
-
-            # cast dtype from the dtype of node_c's input to the dtype of
-            # node_a's input (dequant, etc)
-            dtype_cast_node = _insert_dtype_cast_after_node(
-                subgraph_a.start_node, node_c, node_c.args[0], gm_a, gm_b, graph_c,
-                node_b.name + '_dtype_cast_')
-            # note: not inserting to env_c because all nodes which use the dtype
-            #   casts are copied from graph_a
-            #
-            # subgraph so far:
-            #
-            #           (dtype_cast_node)+
-            #                  /
-            # (prev_node_c)+ -> (logger_c_input)? -> node_c
-
-            # if input logging is enabled, log the input to the subgraph
-            if should_log_inputs:
-                # TODO: explain this
-                ref_node_name = ''
-                if isinstance(dtype_cast_node, Node):
-                    dtype_cast_node = _insert_logger_after_node(
-                        dtype_cast_node, gm_b, logger_cls, '_ns_logger_a_inp_',
-                        ref_node_name, name_a, ref_name,
-                        NSSingleResultValuesType.NODE_INPUT.value,
-                        index_within_arg=0)
-                    input_logger: Union[Node, List[Node]] = dtype_cast_node
-                else:
-                    assert isinstance(dtype_cast_node, list)
-                    new_loggers = []
-                    for dtype_cast_idx, dtype_cast_node_inner in enumerate(dtype_cast_node):
-                        dtype_cast_logger = _insert_logger_after_node(
-                            dtype_cast_node_inner, gm_b, logger_cls, '_ns_logger_a_inp_',
-                            ref_node_name, name_a, ref_name,
-                            NSSingleResultValuesType.NODE_INPUT.value,
-                            index_within_arg=dtype_cast_idx)
-                        new_loggers.append(dtype_cast_logger)
-                    dtype_cast_node = new_loggers
-                    input_logger = dtype_cast_node
+                        for arg_idx, arg in enumerate(node_b.args[0]):
+                            prev_node_c = prev_node_c_list[arg_idx]
+                            env_c[prev_node_c.name] = _insert_logger_after_node(
+                                prev_node_c, gm_b, logger_cls, '_ns_logger_b_inp_',
+                                node_b.name, name_b, ref_name,
+                                NSSingleResultValuesType.NODE_INPUT.value,
+                                index_within_arg=arg_idx)
+                    else:
+                        # logging of inputs which are not lists is not supported yet
+                        raise AssertionError(f"type {type(node_b.args[0])} is not handled yet")
                 # subgraph so far:
                 #
-                #       (dtype_cast_node)+ -> (logger_a_input)?
+                # (prev_node_c)+ -> (logger_c_input)?
+
+            # Note: this if statement is always True, spelling it out to clarify code
+            # intent.
+            if node_b_is_start_node or node_b_is_end_node:
+                # ensure env_c is populated with base node
+                env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
+                node_c = env_c[node_b.name]
+
+                # after this point,
+                #
+                # node_a is the original node from graph_a, with parent module gm_a
+                # node_b is the original node from graph_b, with parent module gm_b
+                # node_c is the copy of node_b in graph_c
+                #
+                # subgraph so far:
+                #
+                # (prev_node_c)+ -> (logger_c_input)? -> node_start_c
+
+            if node_b_is_start_node:
+
+                # cast dtype from the dtype of node_c's input to the dtype of
+                # node_a's input (dequant, etc)
+                dtype_cast_node = _insert_dtype_cast_after_node(
+                    subgraph_a.start_node, node_c, node_c.args[0], gm_a, gm_b, graph_c,
+                    node_b.name + '_dtype_cast_')
+                # note: not inserting to env_c because all nodes which use the dtype
+                #   casts are copied from graph_a
+                #
+                # subgraph so far:
+                #
+                #           (dtype_cast_node)+
                 #                  /
-                # prev_node_c -> (logger_c_input)? -> node_c
+                # (prev_node_c)+ -> (logger_c_input)? -> node_start_c
 
-            # hook up the new mod_a copy to be in the graph, receiving the
-            # same inputs as mod_b does, with dtype cast to match a
-            # Some ops, such as LSTMs, have two non-param inputs. If we have
-            # such an op, pass the second param as well. Note: dtype casting
-            # for the second param is not implemented yet, it can be added
-            # later if there is a use case.
-            node_c_second_non_param_arg = None
-            num_non_param_args_node_a = get_number_of_non_param_args(subgraph_a.start_node, gm_a)
-            if num_non_param_args_node_a == 2:
-                node_c_second_non_param_arg = node_c.args[1]
-            node_a_shadows_c = _insert_copy_of_subgraph_a_after_input_node_c(
-                dtype_cast_node, node_c_second_non_param_arg,
-                subgraph_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
-            env_c[node_a_shadows_c.name] = node_a_shadows_c
-            # subgraph so far:
-            #
-            #       dtype_cast_node -> (logger_a_input)? -> subgraph_a_copy(args/kwargs not shown)
-            #                  /
-            # (prev_node_c)+ -> (logger_c_input)? -> node_c
+                # if input logging is enabled, log the input to the subgraph
+                if should_log_inputs:
+                    # TODO: explain this
+                    ref_node_name = ''
+                    if isinstance(dtype_cast_node, Node):
+                        dtype_cast_node = _insert_logger_after_node(
+                            dtype_cast_node, gm_b, logger_cls, '_ns_logger_a_inp_',
+                            ref_node_name, name_a, ref_name,
+                            NSSingleResultValuesType.NODE_INPUT.value,
+                            index_within_arg=0)
+                        input_logger: Union[Node, List[Node]] = dtype_cast_node
+                    else:
+                        assert isinstance(dtype_cast_node, list)
+                        new_loggers = []
+                        for dtype_cast_idx, dtype_cast_node_inner in enumerate(dtype_cast_node):
+                            dtype_cast_logger = _insert_logger_after_node(
+                                dtype_cast_node_inner, gm_b, logger_cls, '_ns_logger_a_inp_',
+                                ref_node_name, name_a, ref_name,
+                                NSSingleResultValuesType.NODE_INPUT.value,
+                                index_within_arg=dtype_cast_idx)
+                            new_loggers.append(dtype_cast_logger)
+                        dtype_cast_node = new_loggers
+                        input_logger = dtype_cast_node
+                    # subgraph so far:
+                    #
+                    #       (dtype_cast_node)+ -> (logger_a_input)?
+                    #                  /
+                    # prev_node_c -> (logger_c_input)? -> node_start_c
 
-            if should_log_inputs:
-                # When we created the input logger, we left the ref_node_name
-                # as an empty string, because the subgraph copy did not exist
-                # yet. Now that the subgraph copy exists, we modify this name
-                # to its true value.
-                # Note: the alternative to this is to create the input logger
-                # after creating the subgraph, which is slightly more
-                # complicated. This is the lesser of two evils.
-                # input_logger = env_c[dtype_cast_node.name]
-                # Find the first node in the subgraph
-                cur_node = node_a_shadows_c
-                while cur_node.args[0] != input_logger:
-                    cur_node = cur_node.args[0]  # type: ignore
-                if isinstance(input_logger, Node):
-                    input_logger_mod = getattr(gm_b, input_logger.name)
-                    input_logger_mod.ref_node_name = cur_node.name
-                else:
-                    assert isinstance(input_logger, list)
-                    for input_logger_inner in input_logger:
-                        input_logger_mod = getattr(gm_b, input_logger_inner.name)
+                # hook up the new mod_a copy to be in the graph, receiving the
+                # same inputs as mod_b does, with dtype cast to match a
+                # Some ops, such as LSTMs, have two non-param inputs. If we have
+                # such an op, pass the second param as well. Note: dtype casting
+                # for the second param is not implemented yet, it can be added
+                # later if there is a use case.
+                node_c_second_non_param_arg = None
+                num_non_param_args_node_a = get_number_of_non_param_args(subgraph_a.start_node, gm_a)
+                if num_non_param_args_node_a == 2:
+                    node_c_second_non_param_arg = node_c.args[1]
+                node_a_shadows_c = _insert_copy_of_subgraph_a_after_input_node_c(
+                    dtype_cast_node, node_c_second_non_param_arg,
+                    subgraph_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
+                env_c[node_a_shadows_c.name] = node_a_shadows_c
+                # subgraph so far:
+                #
+                #       dtype_cast_node -> (logger_a_input)? -> subgraph_a_copy(args/kwargs not shown)
+                #                  /
+                # (prev_node_c)+ -> (logger_c_input)? -> node_start_c
+
+                if should_log_inputs:
+                    # When we created the input logger, we left the ref_node_name
+                    # as an empty string, because the subgraph copy did not exist
+                    # yet. Now that the subgraph copy exists, we modify this name
+                    # to its true value.
+                    # Note: the alternative to this is to create the input logger
+                    # after creating the subgraph, which is slightly more
+                    # complicated. This is the lesser of two evils.
+                    # input_logger = env_c[dtype_cast_node.name]
+                    # Find the first node in the subgraph
+                    cur_node = node_a_shadows_c
+                    while cur_node.args[0] != input_logger:
+                        cur_node = cur_node.args[0]  # type: ignore
+                    if isinstance(input_logger, Node):
+                        input_logger_mod = getattr(gm_b, input_logger.name)
                         input_logger_mod.ref_node_name = cur_node.name
+                    else:
+                        assert isinstance(input_logger, list)
+                        for input_logger_inner in input_logger:
+                            input_logger_mod = getattr(gm_b, input_logger_inner.name)
+                            input_logger_mod.ref_node_name = cur_node.name
 
-            # hook up a logger to the mod_b copy
-            env_c[node_b.name] = _insert_logger_after_node(
-                env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_',
-                node_b.name, name_b, ref_name,
-                NSSingleResultValuesType.NODE_OUTPUT.value,
-                index_within_arg=0)
-            # subgraph so far:
-            #
-            #       dtype_cast_node -> (logger_a_input)? -> subgraph_a_copy
-            #                  /
-            # (prev_node_c+) -> (logger_c_input)? -> node_c -> logger_c
+                # hook up a logger to the mod_a copy
+                env_c[node_a_shadows_c.name] = _insert_logger_after_node(
+                    env_c[node_a_shadows_c.name], gm_b, logger_cls, '_ns_logger_a_',
+                    node_a_shadows_c.name, name_a, ref_name,
+                    NSSingleResultValuesType.NODE_OUTPUT.value,
+                    index_within_arg=0)
+                # subgraph so far:
+                #
+                #       dtype_cast_node -> (logger_a_input)? -> subgraph_a_copy -> logger_a
+                #                  /
+                # (prev_node_c)+ -> (logger_c_input)? -> node_start_c
 
-            # hook up a logger to the mod_a copy
-            # Note: we pass node_b.name to this logger, for easy matching later
-            env_c[node_a_shadows_c.name] = _insert_logger_after_node(
-                env_c[node_a_shadows_c.name], gm_b, logger_cls, '_ns_logger_a_',
-                node_a_shadows_c.name, name_a, ref_name,
-                NSSingleResultValuesType.NODE_OUTPUT.value,
-                index_within_arg=0)
-            # subgraph so far:
-            #
-            #       dtype_cast_node -> (logger_a_input)? -> subgraph_a_copy -> logger_a
-            #                  /
-            # (prev_node_c)+ -> (logger_c_input)? -> node_c -> logger_c
+            if node_b_is_end_node:
+
+                # hook up a logger to the mod_b copy
+                env_c[node_b.name] = _insert_logger_after_node(
+                    env_c[node_b.name], gm_b, logger_cls, '_ns_logger_b_',
+                    node_b.name, name_b, ref_name,
+                    NSSingleResultValuesType.NODE_OUTPUT.value,
+                    index_within_arg=0)
+                # subgraph so far:
+                #
+                #       dtype_cast_node -> (logger_a_input)? -> subgraph_a_copy -> logger_a
+                #                  /
+                # (prev_node_c+) -> (logger_c_input)? -> node_start_c -> ... -> node_end_c -> logger_c
+                #
+                # Note: node_start_c may be the same node as node_end_c, or they
+                # may have nodes inbetween.
 
         else:
             env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)
