@@ -218,6 +218,53 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   return self_scaled * scale_v;
 }
 
+Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const optional<Scalar>& opt_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
+  size_t ndim = self.sizes().size();
+  auto ord = opt_ord.value_or(2.0).toDouble();
+  auto dim = opt_dim.value_or(IntArrayRef({}));
+  Tensor self_scaled;
+  Tensor scale_v;
+
+  if (!keepdim && self.dim() != 0) {
+    grad = unsqueeze_multiple(grad, dim, ndim);
+    norm = unsqueeze_multiple(norm, dim, ndim);
+  }
+
+  if (ord == 0.0) {
+    return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  } else if (ord == 1.0) {
+    return self.sgn() * grad;
+  } else if (ord == 2.0) {
+    self_scaled = self;
+    scale_v = grad / norm;
+  } else if (std::isinf(ord)) {
+    // Find the elements from `self` that equal the norm result
+    Tensor is_equal_to_norm;
+
+    is_equal_to_norm = (self.abs() == norm);
+
+    // Need to explicitly check for nan in the input and output since `nan ==
+    // nan` is false
+    is_equal_to_norm = is_equal_to_norm.logical_or_(self.isnan().logical_and_(norm.isnan())).type_as(self);
+
+    self_scaled = self.sgn() * is_equal_to_norm;
+    Tensor nb_max = is_equal_to_norm.count_nonzero(dim);
+    if (self.dim() != 0) {
+      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
+    }
+    scale_v = grad / nb_max;
+  } else if (ord < 2.0) {
+    self_scaled = self.sgn() * self.abs().pow(ord - 1);
+    scale_v = grad / norm.pow(ord - 1);
+  } else {
+    self_scaled = self * self.abs().pow(ord - 2);
+    scale_v = grad / norm.pow(ord - 1);
+  }
+  // handle case at 0 where we return a subgradient containing 0
+  scale_v.masked_fill_(norm == 0, 0);
+  return self_scaled * scale_v;
+}
+
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent) {
   if (exponent.equal(0.0)) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
