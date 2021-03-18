@@ -115,7 +115,8 @@ class TestComplex(JitTestCase):
                            .format(func_name=func_name, a=a, res_python=res_python, res_script=res_script))
                     self.assertEqual(res_python, res_script, msg=msg)
 
-        unary_ops = ['log', 'log10', 'sqrt', 'exp', 'sin', 'cos', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh']
+        unary_ops = ['log', 'log10', 'sqrt', 'exp', 'sin', 'cos', 'asin', 'acos', 'atan', 'sinh', 'cosh',
+                     'tanh', 'asinh', 'acosh', 'atanh']
         for op in unary_ops:
             checkMath(op, 1)
 
