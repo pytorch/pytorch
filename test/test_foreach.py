@@ -116,10 +116,10 @@ class TestForeach(TestCase):
         scalars = [2, 2.2, True, 3 + 5j]
 
         # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-        dtype = torch.float32 if (self.device_type == 'cuda' and 
+        dtype = torch.float32 if (self.device_type == 'cuda' and
                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
         for N in N_values:
-            for scalar in scalars: 
+            for scalar in scalars:
                 # test out of place
                 foreach_exeption = False
                 torch_exeption = False
@@ -156,7 +156,7 @@ class TestForeach(TestCase):
 
                 try:
                     # get torch inplace reference function
-                    inplace_name = op.ref_name + "_"
+                    inplace_name = op.name + "_"
                     torch_inplace = getattr(torch.Tensor, inplace_name, None)
 
                     for t in tensors:
@@ -173,7 +173,7 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     def test_binary_ops_scalar_list(self, device, dtype, op):
         # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-        dtype = torch.float32 if (self.device_type == 'cuda' and 
+        dtype = torch.float32 if (self.device_type == 'cuda' and
                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
         for N in N_values:
             scalar_lists = [
@@ -183,7 +183,7 @@ class TestForeach(TestCase):
                 [3 + 5j for _ in range(N)],
             ]
 
-            for scalar_list in scalar_lists: 
+            for scalar_list in scalar_lists:
                 # test out of place
                 foreach_exeption = False
                 torch_exeption = False
@@ -220,7 +220,7 @@ class TestForeach(TestCase):
 
                 try:
                     # get torch inplace reference function
-                    inplace_name = op.ref_name + "_"
+                    inplace_name = op.name + "_"
                     torch_inplace = getattr(torch.Tensor, inplace_name, None)
 
                     for t, s in zip(tensors, scalar_list):
@@ -238,7 +238,7 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     def test_binary_ops_tensor_list(self, device, dtype, op):
         # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-        dtype = torch.float32 if (self.device_type == 'cuda' and 
+        dtype = torch.float32 if (self.device_type == 'cuda' and
                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
 
         for N in N_values:
@@ -251,14 +251,14 @@ class TestForeach(TestCase):
 
             try:
                 ref_res = [op.ref(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
-                if op.supports_alpha_param: 
+                if op.supports_alpha_param:
                     ref_res_alpha = [op.ref(t1, t2, alpha=alpha) for t1, t2 in zip(tensors1, tensors2)]
             except Exception:
                 torch_exeption = True
 
             try:
                 fe_res = method(tensors1, tensors2)
-                if op.supports_alpha_param: 
+                if op.supports_alpha_param:
                     fe_res_alpha = method(tensors1, tensors2, alpha=alpha)
             except Exception:
                 foreach_exeption = True
@@ -269,7 +269,7 @@ class TestForeach(TestCase):
                 if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
                     self.assertEqual(ref_res, fe_res, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
 
-                    if op.supports_alpha_param: 
+                    if op.supports_alpha_param:
                         self.assertEqual(ref_res_alpha, fe_res_alpha, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
                 else:
                     self.assertEqual(ref_res, fe_res)
@@ -281,7 +281,7 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     def test_binary_ops_tensor_list_inplace(self, device, dtype, op):
         # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-        dtype = torch.float32 if (self.device_type == 'cuda' and 
+        dtype = torch.float32 if (self.device_type == 'cuda' and
                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
 
         for N in N_values:
@@ -297,18 +297,18 @@ class TestForeach(TestCase):
             try:
                 inplace(tensors1, tensors2)
 
-                if op.supports_alpha_param: 
+                if op.supports_alpha_param:
                     inplace(tensors1, tensors2, alpha=alpha)
             except Exception:
                 foreach_inplace_exeption = True
 
             try:
                 # get torch inplace reference function
-                inplace_name = op.ref_name + "_"
+                inplace_name = op.name + "_"
                 torch_inplace = getattr(torch.Tensor, inplace_name, None)
                 for t1, t2 in zip(tensors1_copy, tensors2_copy):
                     torch_inplace(t1, t2)
-                    if op.supports_alpha_param: 
+                    if op.supports_alpha_param:
                         torch_inplace(t1, t2, alpha=alpha)
             except Exception:
                 torch_inplace_exeption = True
