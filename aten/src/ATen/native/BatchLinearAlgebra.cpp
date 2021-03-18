@@ -1116,7 +1116,7 @@ Tensor inverse(const Tensor &self) {
   return at::_inverse_helper(self);
 }
 
-Tensor& inverse_out(Tensor &result, const Tensor &self) {
+Tensor& inverse_out(const Tensor &self, Tensor &result) {
   checkSameDevice("inverse", result, self);
   checkLinalgCompatibleDtype("inverse", result, self);
   Tensor result_tmp = at::inverse(self);
