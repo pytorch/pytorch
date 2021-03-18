@@ -174,7 +174,16 @@ static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, co
 }
 
 static void warn_memory_formats(CheckedFrom c, MemoryFormat memory_format, ScalarType scalar_type) {
-
+  if (scalar_type == at::kFloat) {
+    if ((memory_format == at::MemoryFormat::ChannelsLast) || memory_format == at::MemoryFormat::ChannelsLast3d) {
+      TORCH_WARN_ONCE(
+        "Using torch.float data type with torch.channels_last or torch.channels_last_3d memory format "
+        "is generally not recommended in GPU convolution. "
+        "If you experience slow performance in convolution, please try "
+        "torch.float + torch.contiguous_format or torch.half (pure half or Automatic Mixed Precision) + torch.channels_last(_3d)."
+      );
+    }
+  }
 }
 
 // NOTE [ Convolution checks ]
