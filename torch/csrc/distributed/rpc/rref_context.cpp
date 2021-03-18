@@ -553,7 +553,7 @@ void RRefContext::delPendingChild(const ForkId& forkId) {
       // in which the lock is acquired again.
       // So it must be destructed with the lock released.
       // Meet this constraint by creating a temporary pointer to increase the
-      // refcount, extending its lifetime untill lock released.
+      // refcount, extending its lifetime until lock released.
       deletedUser = iter->second; // Increase refcount.
       pendingChildren_.erase(iter); // Decrease refcount.
     } else {
@@ -614,7 +614,7 @@ void RRefContext::delPendingUser(const ForkId& forkId) {
     //     acquired again. Hence, it must be destructed with the lock released.
     //     To meet this constraint, we intentionally create a temporary pointer
     //     to increase the refcount of the deleted PendingUserState, extending
-    //     its lifetime untill lock released.
+    //     its lifetime until lock released.
     // (2) Since #34497, a user function only runs after all RRefs in the
     //     arguments are confirmed by their owners, which is done by adding the
     //     RPC processing logic as a callback to the UserRRef ready future. So,
