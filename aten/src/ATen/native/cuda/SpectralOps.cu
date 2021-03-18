@@ -150,13 +150,13 @@ static void exec_cufft_plan(
         return;
       }
       case CuFFTTransformType::R2C: {
-        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(in_data),
-                                  static_cast<hipfftReal*>(out_data)));
+        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(in_data),
+                                  static_cast<hipfftComplex*>(out_data)));
         return;
       }
       case CuFFTTransformType::C2R: {
-        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(in_data),
-                                  static_cast<hipfftComplex*>(out_data)));
+        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(in_data),
+                                  static_cast<hipfftReal*>(out_data)));
         return;
       }
     }
