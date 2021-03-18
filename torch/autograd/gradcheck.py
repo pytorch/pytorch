@@ -209,8 +209,8 @@ def check_jacobians_equal(j1, j2, atol):
     return True
 
 
-def combine_jacobian_rows(jacobians_rows, inputs, height):
-    out_jacobians = make_jacobians(inputs, True, height)
+def combine_jacobian_rows(jacobians_rows, inputs, output):
+    out_jacobians = make_jacobians(inputs, True, output.numel())
     diff_input_list = list(iter_tensors(inputs, True))
     correct_grad_sizes = True
     correct_grad_types = True
@@ -232,22 +232,18 @@ def combine_jacobian_rows(jacobians_rows, inputs, height):
 
 
 def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_scale, check_grad_dtypes,
-                                         raise_exception, custom_backward_fn=None, fast_mode=None, v=None):
+                                         raise_exception, custom_backward_fn=None):
     diff_input_list = list(iter_tensors(inputs, True))
 
     def backward_fn(grad_output):
-        out = torch.autograd.grad(output, diff_input_list, grad_output, allow_unused=True, retain_graph=True)
-        return out
+        return torch.autograd.grad(output, diff_input_list, grad_output,
+                                   retain_graph=True, allow_unused=True)
     fn = custom_backward_fn if custom_backward_fn is not None else backward_fn
+    jacobians_rows = get_analytical_jacobian(fn, output.clone(), grad_out_scale)
+    jacobians_rows_reentrant = get_analytical_jacobian(fn, output.clone(), grad_out_scale)
 
-    if fast_mode:
-        raise NotImplementedError("fast gradcheck not yet implemented!")
-    else:
-        jacobians_rows = get_analytical_jacobian(fn, output.clone(), grad_out_scale)
-        jacobians_rows_reentrant = get_analytical_jacobian(fn, output.clone(), grad_out_scale)
-    height = output.numel() if not fast_mode else 1
-    jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, height)
-    jacobians_reentrant, _, _ = combine_jacobian_rows(jacobians_rows_reentrant, inputs, height)
+    jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, output)
+    jacobians_reentrant, _, _ = combine_jacobian_rows(jacobians_rows_reentrant, inputs, output)
 
     reentrant = check_jacobians_equal(jacobians, jacobians_reentrant, nondet_tol)
 
