@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/ir/irparser.h>
+
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
@@ -70,9 +71,11 @@ struct ParsedLiteral {
   int64_t i = 0;
   std::string s = "";
   double f = 0.0;
+  TypePtr ty;
   std::vector<int64_t> is;
   std::vector<std::string> ss;
   std::vector<double> fs;
+  std::vector<TypePtr> tys;
 };
 
 struct VarWithType {
@@ -139,6 +142,7 @@ void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
 ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
   auto token = L.cur();
   std::string str;
+  std::pair<TypePtr, c10::optional<c10::AliasInfo>> type_alias;
   ParsedLiteral r;
   switch (token.kind) {
     case TK_STRINGLITERAL:
@@ -167,6 +171,13 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       }
       L.next();
       return r;
+    case TK_IDENT:
+      // Type literal
+      r.k = AttributeKind::ty;
+      type_alias = type_parser.parseType();
+      AT_ASSERTM(!type_alias.second, "Parsing IR with Alias Info not handled");
+      r.ty = type_alias.first;
+      return r;
     default:
       throw ErrorReport(token.range)
           << "Could not parse literal" << token.text();
@@ -194,6 +205,7 @@ void IRParser::parseAttr(Node* n) {
     c10::List<int64_t> is;
     c10::List<std::string> ss;
     c10::List<double> fs;
+    std::vector<TypePtr> tys;
     int elem_num = 0;
     parseList('[', ',', ']', [&] {
       ParsedLiteral r = parseScalarLiteral(n);
@@ -213,6 +225,11 @@ void IRParser::parseAttr(Node* n) {
           AT_ASSERT(!elem_num++ || k == AttributeKind::fs);
           k = AttributeKind::fs;
           break;
+        case AttributeKind::ty:
+          tys.push_back(r.ty);
+          AT_ASSERT(!elem_num++ || k == AttributeKind::tys);
+          k = AttributeKind::tys;
+          break;
         default:
           throw ErrorReport(L.cur().range) << "Unexpected attr type";
       }
@@ -230,6 +247,9 @@ void IRParser::parseAttr(Node* n) {
       case AttributeKind::is:
         n->ival_(Symbol::attr(attrname), IValue(is));
         break;
+      case AttributeKind::tys:
+        n->tys_(Symbol::attr(attrname), tys);
+        break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
     }
@@ -245,6 +265,9 @@ void IRParser::parseAttr(Node* n) {
         break;
       case AttributeKind::f:
         n->f_(Symbol::attr(attrname), r.f);
+        break;
+      case AttributeKind::ty:
+        n->ty_(Symbol::attr(attrname), r.ty);
         break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";

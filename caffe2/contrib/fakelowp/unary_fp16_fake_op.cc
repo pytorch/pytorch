@@ -1,12 +1,12 @@
 #include "unary_fp16_fake_op.h"
 #include <fbgemm/FbgemmConvert.h>
-#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/contrib/fakelowp/fp16_fma.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/eigen_utils.h"
 
 C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
-namespace fake_fp16{
+namespace fake_fp16 {
 auto sig_lut = std::vector<at::Half>{
     0.0000e+00f, 0.0000e+00f, 0.0000e+00f, 0.0000e+00f, 0.0000e+00f,
     0.0000e+00f, 0.0000e+00f, 5.9605e-08f, 5.9605e-08f, 5.9605e-08f,
@@ -336,7 +336,6 @@ at::Half CalcTanhByPolynomial(at::Half input) {
   return tanhResult;
 }
 
-
 static const float swishLutKnot[] = {
     -0.000000025618f, -0.000000027492f, -0.000000029503f, -0.000000031660f,
     -0.000000033974f, -0.000000036457f, -0.000000039121f, -0.000000041979f,
@@ -442,7 +441,7 @@ at::Half CalcSwishByLUT(at::Half x) {
   const at::Half b = (at::Half)(8.0);
   const int nBins = 384;
 
-  if ((x > b) || (x==0.0)) {
+  if ((x > b) || (x == 0.0)) {
     return x;
   }
 
@@ -455,7 +454,7 @@ at::Half CalcSwishByLUT(at::Half x) {
     x = a;
   }
 
-  if (x > b){
+  if (x > b) {
     x = b;
   }
   /*
@@ -495,6 +494,115 @@ at::Half CalcSwishByLUT(at::Half x) {
 
   return at::Half(res1 + res2);
 }
+static const float swishLutKnotCub[] = {
+    -0.00000000e+00f, -0.00000000e+00f, -0.00000000e+00f, -0.00000000e+00f,
+    -0.00000000e+00f, -0.00000000e+00f, -0.00000000e+00f, -0.00000000e+00f,
+    -0.00000000e+00f, -5.96046448e-08f, -5.96046448e-08f, -5.96046448e-08f,
+    -5.96046448e-08f, -5.96046448e-08f, -5.96046448e-08f, -5.96046448e-08f,
+    -5.96046448e-08f, -5.96046448e-08f, -1.19209290e-07f, -1.19209290e-07f,
+    -1.19209290e-07f, -1.19209290e-07f, -1.78813934e-07f, -1.78813934e-07f,
+    -1.78813934e-07f, -2.38418579e-07f, -2.38418579e-07f, -2.98023224e-07f,
+    -2.98023224e-07f, -3.57627869e-07f, -4.17232513e-07f, -4.17232513e-07f,
+    -4.76837158e-07f, -5.36441803e-07f, -6.55651093e-07f, -7.15255737e-07f,
+    -7.74860382e-07f, -8.94069672e-07f, -1.01327896e-06f, -1.13248825e-06f,
+    -1.25169754e-06f, -1.43051147e-06f, -1.60932541e-06f, -1.78813934e-06f,
+    -2.02655792e-06f, -2.26497650e-06f, -2.56299973e-06f, -2.92062759e-06f,
+    -3.27825546e-06f, -3.63588333e-06f, -4.11272049e-06f, -4.58955765e-06f,
+    -5.18560410e-06f, -5.84125519e-06f, -6.55651093e-06f, -7.33137131e-06f,
+    -8.22544098e-06f, -9.23871994e-06f, -1.03712082e-05f, -1.16825104e-05f,
+    -1.31130219e-05f, -1.46627426e-05f, -1.65104866e-05f, -1.84774399e-05f,
+    -2.07424164e-05f, -2.33054161e-05f, -2.61068344e-05f, -2.93254852e-05f,
+    -3.29017639e-05f, -3.68356705e-05f, -4.13656235e-05f, -4.63724136e-05f,
+    -5.19752502e-05f, -5.82337379e-05f, -6.52670860e-05f, -7.31945038e-05f,
+    -8.19563866e-05f, -9.18507576e-05f, -1.02877617e-04f, -1.15275383e-04f,
+    -1.29103661e-04f, -1.44600868e-04f, -1.61886215e-04f, -1.81198120e-04f,
+    -2.02775002e-04f, -2.26974487e-04f, -2.53915787e-04f, -2.84194946e-04f,
+    -3.17811966e-04f, -3.55482101e-04f, -3.97443771e-04f, -4.44412231e-04f,
+    -4.96864319e-04f, -5.55038452e-04f, -6.20365143e-04f, -6.93321228e-04f,
+    -7.74383545e-04f, -8.64505768e-04f, -9.65118408e-04f, -1.07765198e-03f,
+    -1.20258331e-03f, -1.34181976e-03f, -1.49631500e-03f, -1.66797638e-03f,
+    -1.85966492e-03f, -2.07328796e-03f, -2.30979919e-03f, -2.57301331e-03f,
+    -2.86483765e-03f, -3.18908691e-03f, -3.54766846e-03f, -3.94821167e-03f,
+    -4.39071655e-03f, -4.87899780e-03f, -5.42068481e-03f, -6.01959229e-03f,
+    -6.68334961e-03f, -7.41958618e-03f, -8.22448730e-03f, -9.12475586e-03f,
+    -1.01089478e-02f, -1.11923218e-02f, -1.23901367e-02f, -1.37023926e-02f,
+    -1.51443481e-02f, -1.67388916e-02f, -1.84631348e-02f, -2.03704834e-02f,
+    -2.24456787e-02f, -2.47192383e-02f, -2.71911621e-02f, -2.98919678e-02f,
+    -3.28063965e-02f, -3.59802246e-02f, -3.93981934e-02f, -4.30908203e-02f,
+    -4.70581055e-02f, -5.13000488e-02f, -5.58471680e-02f, -6.06689453e-02f,
+    -6.57348633e-02f, -7.11669922e-02f, -7.67822266e-02f, -8.26416016e-02f,
+    -8.86840820e-02f, -9.48486328e-02f, -1.01074219e-01f, -1.07238770e-01f,
+    -1.13342285e-01f, -1.19201660e-01f, -1.24633789e-01f, -1.29516602e-01f,
+    -1.33666992e-01f, -1.36840820e-01f, -1.38793945e-01f, -1.39160156e-01f,
+    -1.37817383e-01f, -1.34521484e-01f, -1.28662109e-01f, -1.20300293e-01f,
+    -1.08947754e-01f, -9.43603516e-02f, -7.63549805e-02f, -5.47180176e-02f,
+    -2.92968750e-02f, 0.00000000e+00f,  3.32031250e-02f,  7.02514648e-02f,
+    1.11145020e-01f,  1.55639648e-01f,  2.03491211e-01f,  2.54638672e-01f,
+    3.08837891e-01f,  3.65478516e-01f,  4.24560547e-01f,  4.85839844e-01f,
+    5.48828125e-01f,  6.13281250e-01f,  6.78710938e-01f,  7.45605469e-01f,
+    8.12988281e-01f,  8.80859375e-01f,  9.49218750e-01f,  1.01757812e+00f,
+    1.08691406e+00f,  1.15527344e+00f,  1.22363281e+00f,  1.29199219e+00f,
+    1.36035156e+00f,  1.42871094e+00f,  1.49707031e+00f,  1.56445312e+00f,
+    1.63183594e+00f,  1.69824219e+00f,  1.76562500e+00f,  1.83203125e+00f,
+    1.89843750e+00f,  1.96386719e+00f,  2.02929688e+00f,  2.09570312e+00f,
+    2.16015625e+00f,  2.22460938e+00f,  2.29101562e+00f,  2.35546875e+00f,
+    2.41992188e+00f,  2.48242188e+00f,  2.54687500e+00f,  2.61132812e+00f,
+    2.67578125e+00f,  2.73828125e+00f,  2.80273438e+00f,  2.86523438e+00f,
+    2.92968750e+00f,  2.99218750e+00f,  3.05664062e+00f,  3.11914062e+00f,
+    3.18164062e+00f,  3.24609375e+00f,  3.30859375e+00f,  3.37109375e+00f,
+    3.43359375e+00f,  3.49609375e+00f,  3.56054688e+00f,  3.62304688e+00f,
+    3.68554688e+00f,  3.74804688e+00f,  3.81054688e+00f,  3.87304688e+00f,
+    3.93554688e+00f,  3.99804688e+00f,  4.06250000e+00f};
+
+at::Half CalcSwishByLUTCubic(at::Half x) {
+  const float SWISH_KNOT_RANGE_MIN = -20.5f;
+  const float SWISH_KNOT_RANGE_MAX = 8.0f;
+  const float SWISH_KNOT_LUT_DELTA = 0.125000f;
+  const int SWISH_KNOT_LUT_BIAS = 165;
+
+  at::Half x_min = (at::Half)SWISH_KNOT_RANGE_MIN;
+  at::Half x_max = (at::Half)SWISH_KNOT_RANGE_MAX;
+  at::Half delta = (at::Half)SWISH_KNOT_LUT_DELTA;
+  at::Half bias = SWISH_KNOT_LUT_BIAS;
+
+  if (x > SWISH_KNOT_RANGE_MAX) {
+    return x;
+  }
+
+  at::Half one_over_delta = at::Half(1) / delta;
+
+  // Clamp the input in the range of a to b
+  if (x < x_min) {
+    x = x_min;
+  }
+  if (x > x_max) {
+    x = x_max;
+  }
+  at::Half x_over_delta = x * one_over_delta;
+  at::Half x_over_delta_int = std::round(x_over_delta);
+  at::Half p = x_over_delta - x_over_delta_int;
+
+  x_over_delta_int = x_over_delta_int + bias;
+  uint32_t k_bin = (uint32_t)x_over_delta_int;
+
+  at::Half y_left = swishLutKnotCub[k_bin - 1];
+  at::Half y_mid = swishLutKnotCub[k_bin];
+  at::Half y_right = swishLutKnotCub[k_bin + 1];
+
+  at::Half a = y_mid + y_mid;
+  at::Half c = (y_right + y_left);
+  c = c - a;
+  at::Half b = y_right - y_left;
+
+  at::Half result = std::fma(p, c, b);
+  result = result * p;
+  result = result + a;
+
+  if (x == (at::Half)0.0f) {
+    result = x;
+  }
+  return result;
+}
 
 at::Half CalcLogit(at::Half input, float eps) {
   // Clamp the input in the range of eps to (1-eps)
@@ -524,7 +632,6 @@ at::Half CalcLogit(at::Half input, float eps) {
 
 namespace caffe2 {
 using namespace fake_fp16;
-
 
 struct SigmoidEmulatorFunctor {
   bool operator()(
@@ -849,7 +956,7 @@ struct SwishEmulatorFunctor {
 
 template <class Context>
 class LogitEmulatorFunctor final : public Operator<Context> {
-public:
+ public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   template <class... Args>
@@ -867,10 +974,7 @@ public:
     float* Y_data = Y->template mutable_data<float>();
     std::vector<float> X_rounded(N);
     fbgemm::RoundToFloat16(
-        X_data,
-        X_rounded.data(),
-        N,
-        FLAGS_caffe2_fbgemm_fake_fp16_clamp);
+        X_data, X_rounded.data(), N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
     X_data = X_rounded.data();
     for (int i = 0; i < N; i++) {
       Y_data[i] = CalcLogit((at::Half)X_data[i], eps_);
@@ -878,7 +982,7 @@ public:
     return true;
   }
 
-private:
+ private:
   const float eps_;
 };
 
@@ -908,9 +1012,7 @@ The input and output of this operator are converted to fp16 precision.
     .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
     .InheritOnnxSchema();
 
-REGISTER_CPU_OPERATOR(
-    LogitFakeFp16NNPI,
-    LogitEmulatorFunctor<CPUContext>);
+REGISTER_CPU_OPERATOR(LogitFakeFp16NNPI, LogitEmulatorFunctor<CPUContext>);
 
 OPERATOR_SCHEMA(LogitFakeFp16NNPI)
     .NumInputs(1)

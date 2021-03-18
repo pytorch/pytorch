@@ -277,10 +277,12 @@ class CallbackManager {
       bool is_start) {
     try {
       if (is_start) {
-        ctx = rfcb.start()(rf);
+        ctx = rfcb.start() ? rfcb.start()(rf) : nullptr;
       }
       else {
-        rfcb.end()(rf, ctx.get());
+        if (rfcb.end()) {
+          rfcb.end()(rf, ctx.get());
+        }
       }
       return true;
     } catch (const std::exception &e) {

@@ -13,6 +13,8 @@
 #include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+${static_dispatch_extra_headers}
+
 namespace at {
 
 using Stream = c10::Stream;
@@ -63,10 +65,6 @@ Layout Tensor::layout() const noexcept {
   return impl_->layout();
 }
 
-Device Tensor::device() const {
-  return impl_->device();
-}
-
 int64_t Tensor::get_device() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->get_device();
@@ -79,6 +77,20 @@ int64_t get_device(Tensor self) {
 bool Tensor::is_cuda() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_cuda();
+}
+
+bool Tensor::is_xpu() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_xpu();
+}
+
+bool is_xpu(Tensor self) {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return self.is_xpu();
+}
+
+bool Tensor::is_xla() const {
+    return impl_->is_xla();
 }
 
 NamedTensorMeta* Tensor::get_named_tensor_meta() {
@@ -100,6 +112,10 @@ bool Tensor::has_names() const {
 
 bool is_cuda(Tensor self) {
   return self.is_cuda();
+}
+
+bool is_xla(Tensor self) {
+    return self.is_xla();
 }
 
 bool Tensor::is_hip() const {
@@ -127,6 +143,15 @@ bool Tensor::is_mkldnn() const {
 
 bool is_mkldnn(Tensor self) {
   return self.is_mkldnn();
+}
+
+bool Tensor::is_mlc() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_mlc();
+}
+
+bool is_mlc(Tensor self) {
+  return self.is_mlc();
 }
 
 bool Tensor::is_vulkan() const {
@@ -161,16 +186,16 @@ bool is_quantized(Tensor self) {
   return self.is_quantized();
 }
 
-#define DEFINE_CAST(T, name)                     \
-  template <>                                    \
-  TORCH_API T* Tensor::data_ptr() const {           \
-    TORCH_CHECK(                                 \
-        scalar_type() == ScalarType::name,       \
-        "expected scalar type ",                 \
-        #name,                                   \
-        " but found ",                           \
-        c10::toString(scalar_type()));           \
-    return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
+#define DEFINE_CAST(T, name)                                        \
+  template <>                                                       \
+  TORCH_API T* Tensor::data_ptr() const {                           \
+    TORCH_CHECK(                                                    \
+        scalar_type() == ScalarType::name,                          \
+        "expected scalar type "                                     \
+        #name                                                       \
+        " but found ",                                              \
+        scalar_type());                                             \
+    return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)

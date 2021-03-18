@@ -7,10 +7,12 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
+#include <c10/util/accumulate.h>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
@@ -18,8 +20,10 @@
 #include <thrust/unique.h>
 #include <cufft.h>
 #include <cufftXt.h>
-#include <vector>
+
 #include <cmath>
+#include <vector>
+
 
 namespace at { namespace native {
 
@@ -115,7 +119,7 @@ void _fft_fill_with_conjugate_symmetry_cuda_(
   HermitianSymmetryOffsetCalculator<int64_t> output_offset_calculator(
       signal_half_sizes, out_strides, mirror_dims, element_size);
 
-  const auto numel = at::prod_intlist(signal_half_sizes);
+  const auto numel = c10::multiply_integers(signal_half_sizes);
   AT_DISPATCH_COMPLEX_TYPES(dtype, "_fft_fill_with_conjugate_symmetry", [&] {
         using namespace cuda::detail;
         _fft_conjugate_copy_kernel<<<
@@ -146,13 +150,13 @@ static void exec_cufft_plan(
         return;
       }
       case CuFFTTransformType::R2C: {
-        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(in_data),
-                                  static_cast<hipfftReal*>(out_data)));
+        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(in_data),
+                                  static_cast<hipfftComplex*>(out_data)));
         return;
       }
       case CuFFTTransformType::C2R: {
-        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(in_data),
-                                  static_cast<hipfftComplex*>(out_data)));
+        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(in_data),
+                                  static_cast<hipfftReal*>(out_data)));
         return;
       }
     }
@@ -252,7 +256,7 @@ static inline Tensor _run_cufft(
   // rescale if requested
   auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];
   if (norm != fft_norm_mode::none) {
-    auto signal_numel = at::prod_intlist(checked_signal_sizes);
+    auto signal_numel = c10::multiply_integers(checked_signal_sizes);
     double scale_denom;
     if (norm == fft_norm_mode::by_root_n) {
       scale_denom = std::sqrt(static_cast<double>(signal_numel));
@@ -439,10 +443,10 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
 // Calculates the normalization constant and applies it in-place to self
 // sizes is the sizes of a twosided tensor and dims are all transformed dims
-void _fft_apply_normalization(const Tensor& self, int64_t normalization, IntArrayRef sizes, IntArrayRef dims) {
+double _fft_normalization_scale(int64_t normalization, IntArrayRef sizes, IntArrayRef dims) {
   auto norm = static_cast<fft_norm_mode>(normalization);
   if (norm == fft_norm_mode::none) {
-    return;
+    return 1.0;
   }
 
   int64_t signal_numel = 1;
@@ -451,7 +455,17 @@ void _fft_apply_normalization(const Tensor& self, int64_t normalization, IntArra
   }
   const double scale_denom = (norm == fft_norm_mode::by_root_n) ?
     std::sqrt(signal_numel) : static_cast<double>(signal_numel);
-  self.div_(scale_denom);
+  return 1.0 / scale_denom;
+}
+
+const Tensor& _fft_apply_normalization(const Tensor& self, int64_t normalization, IntArrayRef sizes, IntArrayRef dims) {
+  auto scale = _fft_normalization_scale(normalization, sizes, dims);
+  return (scale == 1.0) ? self : self.mul_(scale);
+}
+
+Tensor& _fft_apply_normalization_out(Tensor& out, const Tensor& self, int64_t normalization, IntArrayRef sizes, IntArrayRef dims) {
+  auto scale = _fft_normalization_scale(normalization, sizes, dims);
+  return at::mul_out(out, self, c10::scalar_to_tensor(scale));
 }
 
 }  // namespace (anonymous)
@@ -522,6 +536,23 @@ Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   return output;
 }
 
+Tensor& _fft_r2c_cufft_out(const Tensor& self, IntArrayRef dim,
+                           int64_t normalization, bool onesided, Tensor& out) {
+  auto result = _fft_r2c_cufft(self, dim, static_cast<int64_t>(fft_norm_mode::none), /*onesided=*/true);
+  if (onesided) {
+    return _fft_apply_normalization_out(out, result, normalization, self.sizes(), dim);
+  }
+
+  resize_output(out, self.sizes());
+
+  auto last_dim = dim.back();
+  auto last_dim_halfsize = result.sizes()[last_dim];
+  auto out_slice = out.slice(last_dim, 0, last_dim_halfsize);
+  _fft_apply_normalization_out(out_slice, result, normalization, self.sizes(), dim);
+  at::native::_fft_fill_with_conjugate_symmetry_(out, dim);
+  return out;
+}
+
 // n-dimensional complex to real IFFT
 Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t lastdim) {
   TORCH_CHECK(self.is_complex());
@@ -544,8 +575,13 @@ Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   // TODO: could transform up to 2 other dims in the same cuFFT operation
   auto output = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
   _exec_fft(output, temp, out_sizes, dim.back(), /*forward=*/false);
-  _fft_apply_normalization(output, normalization, out_sizes, dim);
-  return output;
+  return _fft_apply_normalization(output, normalization, out_sizes, dim);
+}
+
+Tensor& _fft_c2r_cufft_out(const Tensor& self, IntArrayRef dim,
+                           int64_t normalization, int64_t lastdim, Tensor& out) {
+  auto result = _fft_c2r_cufft(self, dim, static_cast<int64_t>(fft_norm_mode::none), lastdim);
+  return _fft_apply_normalization_out(out, result, normalization, result.sizes(), dim);
 }
 
 // n-dimensional complex to complex FFT/IFFT
@@ -586,8 +622,13 @@ Tensor _fft_c2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
     }
   }
 
-  _fft_apply_normalization(output, normalization, out_sizes, dim);
-  return output;
+  return _fft_apply_normalization(output, normalization, out_sizes, dim);
+}
+
+Tensor& _fft_c2c_cufft_out(const Tensor& self, IntArrayRef dim,
+                           int64_t normalization, bool forward, Tensor& out) {
+  auto result = _fft_c2c_cufft(self, dim, static_cast<int64_t>(fft_norm_mode::none), forward);
+  return _fft_apply_normalization_out(out, result, normalization, result.sizes(), dim);
 }
 
 

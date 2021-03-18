@@ -259,9 +259,9 @@ TEST(Reductions, ReduceMax) {
 
   Tensor* m2d = Reduce("max", {{2, "n"}}, Maximum(kFloat), in2_, {{5, "m"}});
 
-  loop = LoopNest({m2d});
-  loop.prepareForCodegen();
-  s = loop.root_stmt();
+  LoopNest loop2({m2d});
+  loop2.prepareForCodegen();
+  s = loop2.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg2(s, {in2_, m2d});
@@ -372,9 +372,9 @@ TEST(Reductions, ReduceAnyAll) {
       },
       {{10, "j"}});
 
-  loop = LoopNest({allGreaterThan});
-  loop.prepareForCodegen();
-  s = loop.root_stmt();
+  LoopNest loop2({allGreaterThan});
+  loop2.prepareForCodegen();
+  s = loop2.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg2(s, {b, allGreaterThan, searchValue});
@@ -699,7 +699,8 @@ TEST(Reductions, ReduceRfactor) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(1)->var();
-  loop.rfactor(c->body(), v);
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v);
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -734,7 +735,8 @@ TEST(Reductions, Reduce3DRfactorInternal) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(1)->var();
-  loop.rfactor(c->body(), v);
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v);
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -769,7 +771,8 @@ TEST(Reductions, Reduce3DRfactorInner) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(2)->var();
-  loop.rfactor(c->body(), v);
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v);
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -804,7 +807,8 @@ TEST(Reductions, Reduce3DRfactorOuter) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(0)->var();
-  loop.rfactor(c->body(), v);
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v);
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -841,7 +845,8 @@ TEST(Reductions, Reduce3DRfactorWithOuter) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(3)->var();
-  loop.rfactor(c->body(), v);
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v);
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -870,12 +875,13 @@ TEST(Reductions, Reduce3DRfactorRepeated) {
   }
 
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "m"}, {n, "n"}, {k, "k"}});
+  LoopNest orig_loopnest({c});
 
   for (int rVar1 = 0; rVar1 < 3; ++rVar1) {
     for (int rVar2 = 0; rVar2 < 2; ++rVar2) {
       std::vector<float> out(1, -1.f);
 
-      LoopNest loop({c});
+      LoopNest loop(orig_loopnest);
       auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
       ASSERT_EQ(reduces.size(), 1);
       auto v1 = reduces[0]->reduce_args()[rVar1];
@@ -921,7 +927,8 @@ TEST(Reductions, ReduceRfactorInsertionPoint) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(0)->var();
-  loop.rfactor(c->body(), v, loops.at(0)->body());
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v, loops.at(0)->body());
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -956,7 +963,8 @@ TEST(Reductions, Reduce3DRfactorInsertionPoint) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   auto v = loops.at(1)->var();
-  loop.rfactor(c->body(), v, loops.at(1)->body());
+  auto c_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(c_body, v, loops.at(1)->body());
   auto rc = NodeFinder<ReduceOp>::find(loop.root_stmt());
   ASSERT_EQ(rc.size(), 2);
   loop.prepareForCodegen();
@@ -985,12 +993,11 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
       in_,
       {{2, "a"}, {3, "b"}, {4, "c"}, {5, "d"}, {6, "e"}});
   LoopNest refloop({c});
+  LoopNest loop(refloop);
   refloop.prepareForCodegen();
   SimpleIREvaluator ref_cg(
       IRSimplifier::simplify(refloop.root_stmt()), {in_, c});
   ref_cg.call({in, ref});
-
-  LoopNest loop({c});
 
   // rfactor out "c".
   auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
@@ -1298,7 +1305,7 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   // TODO: The alloc free should be eliminated here since it is size 0.
   const std::string& verification_pattern =
       R"IR(
-# CHECK: Allocate(tmp_buf, float, {0});
+# CHECK: Allocate(tmp_buf); // dtype=float, dims=[0]
 # CHECK: sum[0] = 0.f;
 # CHECK: for (int n = 0; n < 10; n++) {
 # CHECK:   for (int k_tail = 0; k_tail < 10; k_tail++) {
@@ -1373,7 +1380,7 @@ TEST(Reductions, ReduceInlineConsumer) {
   }
 
   LoopNest l1({y});
-  LoopNest l2({y});
+  LoopNest l2(l1);
   l2.computeInline(x->buf());
 
   l1.prepareForCodegen();
@@ -1382,8 +1389,8 @@ TEST(Reductions, ReduceInlineConsumer) {
   Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
   Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
-  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, y);
-  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, y);
+  SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, y});
+  SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, y});
 
   PaddedBuffer<float> y_1(M);
   PaddedBuffer<float> y_2(M);
@@ -1431,7 +1438,7 @@ TEST(Reductions, ReduceInlineReducerInternal) {
   }
 
   LoopNest l1({y});
-  LoopNest l2({y});
+  LoopNest l2(l1);
   l2.computeInline(x->buf());
 
   l1.prepareForCodegen();
@@ -1440,8 +1447,8 @@ TEST(Reductions, ReduceInlineReducerInternal) {
   Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
   Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
-  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, y);
-  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, y);
+  SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, y});
+  SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, y});
 
   PaddedBuffer<float> y_1(M);
   PaddedBuffer<float> y_2(M);
@@ -1489,7 +1496,7 @@ TEST(Reductions, ReductionCacheAccessesOuter) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(d_local, float, {1});
+#CHECK: Allocate(d_local); // dtype=float, dims=[1]
 #CHECK: sum[l1] = 0
 #CHECK: d_local[0] = 0
 #CHECK: for (int n1
@@ -1540,7 +1547,7 @@ TEST(Reductions, ReductionCacheAccessesInner) {
       R"IR(
 #CHECK: sum[l1] = 0
 #CHECK: for (int n1
-#CHECK:   Allocate(d_local, float, {1});
+#CHECK:   Allocate(d_local); // dtype=float, dims=[1]
 #CHECK:   d_local[0] = 0
 #CHECK:   for (int m1
 #CHECK:     d_local[0] = (d_local[0]) + (scale[
@@ -1583,7 +1590,7 @@ TEST(Reductions, ReductionCacheBodyAccess) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(scale_local, float, {1, 32, 12});
+#CHECK: Allocate(scale_local); // dtype=float, dims=[1, 32, 12]
 #CHECK: for (int j = 0; j < 32; j++) {
 #CHECK:   for (int k = 0; k < 12; k++) {
 #CHECK:     scale_local[k + 12 * j] = scale[(k + 384 * l1) + 12 * j];
@@ -1629,7 +1636,7 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: sum[l1] = (sum[l1]) + (scale[
-#CHECK: Allocate(sum_local, float, {4});
+#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1677,7 +1684,7 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((12 * n1_1 + 384 * l1_inner) + m1_1) + 1536 * l1_outer]);
-#CHECK: Allocate(sum_local, float, {4});
+#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1726,7 +1733,7 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: sum[l1] = (sum[l1]) + (scale[(12 * n1_1 + m1_1) + 384 * l1]);
-#CHECK: Allocate(sum_local, float, {4});
+#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK: scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1754,12 +1761,13 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
 
   Tensor* c = Reduce("sum", {}, Sum(), b, {{m, "a"}, {n, "b"}, {k, "c"}});
   LoopNest loop({c});
+
   auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
   loop.rfactor(reduces[0], reduces[0]->reduce_args()[1]);
 
-  reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
+  auto stores = NodeFinder<Store>::find(loop.root_stmt());
   std::vector<For*> loops = NodeFinder<For>::find(loop.root_stmt());
-  loop.cacheAccesses(reduces[0]->accumulator(), "tmp2", loops[2]);
+  loop.cacheAccesses(stores[1]->buf(), "tmp2", loops[2]);
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1768,9 +1776,9 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   oss << *s;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(tmp_buf, float, {n});
+#CHECK: Allocate(tmp_buf); // dtype=float, dims=[n]
 #CHECK: for (int a = 0; a < m
-#CHECK:   Allocate(tmp2, float, {n});
+#CHECK:   Allocate(tmp2); // dtype=float, dims=[n]
 #CHECK:   for (int i = 0; i < n
 #CHECK:     tmp2[i] = 0
 #CHECK:   }
@@ -1816,9 +1824,9 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   auto reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
   loop.rfactor(reduces[0], reduces[0]->reduce_args()[1]);
 
-  reduces = NodeFinder<ReduceOp>::find(loop.root_stmt());
+  auto stores = NodeFinder<Store>::find(loop.root_stmt());
   std::vector<For*> loops = NodeFinder<For>::find(loop.root_stmt());
-  loop.cacheAccesses(reduces[0]->accumulator(), "tmp2", loops[3]);
+  loop.cacheAccesses(stores[1]->buf(), "tmp2", loops[3]);
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1827,10 +1835,10 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   oss << *s;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(tmp_buf, float, {n});
+#CHECK: Allocate(tmp_buf); // dtype=float, dims=[n]
 #CHECK: for (int a = 0; a < m
 #CHECK:   for (int b = 0; b < n
-#CHECK:     Allocate(tmp2, float, {1});
+#CHECK:     Allocate(tmp2); // dtype=float, dims=[1]
 #CHECK:     tmp2[0] = 0
 #CHECK:     for (int c
 #CHECK:       tmp2[0] = (tmp2[0]) + (B[
@@ -1863,11 +1871,11 @@ TEST(Reductions, ReductionVectorize) {
 
   Tensor* tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l_before({tensor});
+  LoopNest l(l_before);
   l_before.prepareForCodegen();
   SimpleIREvaluator cg_before(l_before.root_stmt(), {in, tensor});
   cg_before.call({in_, out_before});
 
-  LoopNest l({tensor});
   l.vectorize(l.getLoopStmtsFor(tensor)[0]);
 
   Stmt* s = l.root_stmt();
@@ -1879,7 +1887,7 @@ TEST(Reductions, ReductionVectorize) {
       R"IR(
 #CHECK: sum[Ramp(0, 1, 8)] = Broadcast(0.f, 8);
 #CHECK: for (int n = 0; n < 8; n++) {
-#CHECK: sum[Ramp(0, 1, 8)] = ReduceOp((sum[Ramp(0, 1, 8)]) + (in[Ramp(n, 8, 8)]), out_args={Ramp(0, 1, 8)}, reduce_args={n});
+#CHECK: sum[Ramp(0, 1, 8)] = ReduceOp((sum[Ramp(0, 1, 8)]) + (in[Ramp(n, 8, 8)]), reduce_args={n});
 #CHECK: }
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
@@ -1923,11 +1931,11 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   Tensor* tensor = Reduce("sum", {}, Sum(), in, {{8, "m"}, {8, "n"}});
 
   LoopNest l_before({tensor});
+  LoopNest l(l_before);
   l_before.prepareForCodegen();
   SimpleIREvaluator cg_before(l_before.root_stmt(), {in, tensor});
   cg_before.call({in_, out_before});
 
-  LoopNest l({tensor});
   ASSERT_THROWS_WITH(
       l.vectorize(l.getLoopStmtsFor(tensor)[1]), "reduction axis");
 
@@ -1935,7 +1943,8 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   // loop.
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
   auto v = loops.at(1)->var();
-  l.rfactor(tensor->body(), v);
+  auto tensor_body = NodeFinder<ReduceOp>::find(l.root_stmt())[0];
+  l.rfactor(tensor_body, v);
 
   loops = NodeFinder<For>::find(l.root_stmt());
   l.vectorize(loops[2]);
@@ -1952,10 +1961,10 @@ TEST(Reductions, ReductionVectorizeRfactor) {
 #CHECK:   tmp_buf[n] = 0.f;
 #CHECK: }
 #CHECK: for (int m = 0; m < 8; m++) {
-#CHECK:   tmp_buf[Ramp(0, 1, 8)] = ReduceOp((tmp_buf[Ramp(0, 1, 8)]) + (in[Ramp(8 * m, 1, 8)]), out_args={Ramp(0, 1, 8)}, reduce_args={m});
+#CHECK:   tmp_buf[Ramp(0, 1, 8)] = ReduceOp((tmp_buf[Ramp(0, 1, 8)]) + (in[Ramp(8 * m, 1, 8)]), reduce_args={m});
 #CHECK: }
 #CHECK: for (int n = 0; n < 8; n++) {
-#CHECK:   sum = ReduceOp((sum) + (tmp_buf[n]), out_args={}, reduce_args={n});
+#CHECK:   sum = ReduceOp((sum) + (tmp_buf[n]), reduce_args={n});
 #CHECK: }
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
@@ -1969,5 +1978,34 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   ASSERT_EQ(out_before[0], out_after[0]);
 }
 
+TEST(Reductions, InitFunction) {
+  KernelScope ks;
+  constexpr int M = 32;
+  constexpr int N = 16;
+  Placeholder A("A", kFloat, {M, N});
+  Placeholder B("B", kFloat, {N});
+  Tensor* C = Reduce(
+      "C",
+      {{N, "n"}},
+      Sum(),
+      [&](const std::vector<VarHandle>& v) { return B.load(v[0]); },
+      [&](const std::vector<VarHandle>& v) { return A.load(v[1], v[0]); },
+      {{M, "m"}});
+  LoopNest nest({C});
+  nest.prepareForCodegen();
+  Stmt* s = IRSimplifier::simplify(nest.root_stmt());
+  std::ostringstream oss;
+  oss << *s << "\n";
+  const std::string& expected_ir =
+      R"IR(
+#CHECK:  for (int n = 0; n < 16; n++) {
+#CHECK:    C[n] = B[n];
+#CHECK:    for (int m = 0; m < 32; m++) {
+#CHECK:      C[n] = (C[n]) + (A[n + 16 * m]);
+#CHECK:    }
+#CHECK:  }
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
 } // namespace jit
 } // namespace torch

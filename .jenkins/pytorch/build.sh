@@ -9,6 +9,7 @@ set -ex
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
@@ -21,6 +22,17 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7* ]]; then
+  # Enabling DEPLOY build (embedded torch python interpreter, experimental)
+  # only on one config for now, can expand later
+  export USE_DEPLOY=ON
+
+  # Deploy feature builds cpython. It requires these packages.
+  # TODO move this to dockerfile?
+  sudo apt-get -qq update
+  sudo apt-get -qq install libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev
 fi
 
 echo "Python version:"
@@ -40,6 +52,11 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   # enable build option in CMake
   export USE_CPP_CODE_COVERAGE=ON
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
+  # enable split torch_cuda build option in CMake
+  export BUILD_SPLIT_CUDA=ON
 fi
 
 # TODO: Don't run this...
@@ -107,7 +124,8 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
   export USE_VULKAN=1
-  export VULKAN_SDK=/var/lib/jenkins/vulkansdk/
+  # shellcheck disable=SC1091
+  source /var/lib/jenkins/vulkansdk/setup-env.sh
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -126,7 +144,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   python tools/amd_build/build_amd.py
-  python setup.py install --user
+  python setup.py install
 
   # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
   sudo rm -f /opt/cache/bin/cc
@@ -223,6 +241,18 @@ else
     popd
     assert_git_not_dirty
 
+    # Build jit hook tests
+    JIT_HOOK_BUILD="$PWD/../jit-hook-build"
+    JIT_HOOK_TEST="$PWD/test/jit_hooks"
+    python --version
+    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    mkdir "$JIT_HOOK_BUILD"
+    pushd "$JIT_HOOK_BUILD"
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+
     # Build custom backend tests.
     CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
     CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
@@ -261,6 +291,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # TODO: Move this to Dockerfile.
 
   pip_install lark-parser
+  pip_install cloud-tpu-client
 
   sudo apt-get -qq update
   sudo apt-get -qq install npm nodejs

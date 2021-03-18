@@ -9,7 +9,8 @@ from torch.fx.graph import (
     Node,
 )
 
-from typing import Callable, Optional, List, Dict, Any
+from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union
+from .quantization_types import QuantizerCls
 
 # turn foo.bar -> ['foo', 'bar']
 def _parent_name(target):
@@ -93,54 +94,77 @@ def get_per_tensor_qparams(activation_post_process):
     dtype = activation_post_process.dtype
     return scale, zero_point, dtype
 
-def get_quantize_op_and_qparams(activation_post_process):
+def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Optional[Union[Callable, str]], Dict[str, Any]]:
     ''' Given an activation_post_process module,
-    return quantize op(e.g. quantize_per_tensor) and a dictionary
+    return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
     of extracted qparams from the module
     '''
-    scale, zero_point = activation_post_process.calculate_qparams()
-    dtype = activation_post_process.dtype
-    if is_per_channel(activation_post_process.qscheme):
-        ch_axis = int(activation_post_process.ch_axis)
-        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_axis_': ch_axis, '_dtype_': dtype}
-        quantize_op = torch.quantize_per_channel
-    else:
-        scale = float(scale)
-        zero_point = int(zero_point)
-        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_dtype_': dtype}
-        quantize_op = torch.quantize_per_tensor  # type: ignore
-    return quantize_op, qparams
+    dtype = activation_post_process.dtype  # type: ignore
+    quantize_op : Optional[Union[Callable, str]] = None
+    if dtype in [torch.quint8, torch.qint8]:
+        node_type = "call_function"
+        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore
+        if is_per_channel(activation_post_process.qscheme):  # type: ignore
+            ch_axis = int(activation_post_process.ch_axis)  # type: ignore
+            qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
+            quantize_op = torch.quantize_per_channel
+        else:
+            scale = float(scale)
+            zero_point = int(zero_point)
+            qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
+            quantize_op = torch.quantize_per_tensor  # type: ignore
+    elif dtype == torch.float16:
+        node_type = "call_method"
+        quantize_op = "to"
+        qparams = {"_dtype_": dtype}
+    return node_type, quantize_op, qparams
 
-def quantize_node(root_module, graph, node, activation_post_process):
-    ''' Add quantization nodes for given node to graph
-    with the qparams calculated from activation_post_process module
+def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
+    ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
+    with the qparams calculated from activation_post_process (obs_module).
+    The observer node (obs_node) is used to find the FQN of the user of act_post_process.
     e.g. Given input `node` in `node = self.conv(x)`, insert node:
     `quantized_node = torch.quantize_per_tensor(x, self._scale_0, self._zer_point_0, self._dtype_0)`
     where self._scale_0, self._zero_point_0 and self._dtype_0 are
-    calculated from `activation_post_process`
+    calculated from `obs_module`
     '''
-    def module_has_qparams_attr_with_index(module, qparams, i):
-        for name in qparams.keys():
-            if hasattr(module, name + str(i)):
-                return True
-        return False
+    # Find the first use of the observer node, we use this to get the scope of the module.
+    if is_input:
+        # if the quantize function is at the input of op, then we find the first user of the observer_node
+        # to get the path
+        users = list(obs_node.users)
+        first_use = users[0] if users else None
+        prefix = "_input"
+    else:
+        # if the quantize function is at the output of the op, we use the observer input node to get the path
+        first_use = in_node
+        prefix = "_output"
 
-    def get_next_qparams_idx(module, qparams):
-        idx = 0
-        while module_has_qparams_attr_with_index(module, qparams, idx):
-            idx += 1
-        return idx
+    if first_use:
+        module_path, _ = quantizer.node_name_to_scope[first_use.name]
+    else:
+        # TODO: it's not used, so actually we can skip quantization
+        # but this requires changing return type of quantize_node
+        # we can fix it later if needed
+        module_path = ""
+    root_module = quantizer.modules['']
+    graph = quantizer.quantized_graph
+    node_type, quantize_op, qparams = get_quantize_node_info(obs_module)
+    inputs = [in_node]
 
-    quantize_op, qparams = get_quantize_op_and_qparams(activation_post_process)
-    idx = get_next_qparams_idx(root_module, qparams)
-    inputs = [node]
     for key, value in qparams.items():
-        setattr(root_module, key + str(idx), value)
-        qparam_full_path = key + str(idx)
-        inputs.append(graph.create_node('get_attr', qparam_full_path))
-    return graph.create_node('call_function', quantize_op, tuple(inputs), {})
+        if key in ['_scale_', '_zero_point_']:
+            # For scale and zero_point values we register them as buffers in the root module.
+            qparam_node = create_getattr_from_value(root_module, graph, module_path + prefix + key, value)
+            inputs.append(qparam_node)
+        else:
+            get_new_attr_name = get_new_attr_name_with_prefix(module_path + prefix + key)
+            qparam_full_path = get_new_attr_name(root_module)
+            setattr(root_module, qparam_full_path, value)
+            inputs.append(graph.create_node('get_attr', qparam_full_path))
+    return graph.create_node(node_type, quantize_op, tuple(inputs), {})
 
-def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key):
+def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key) -> List[Any]:
     r""" Get all the unique custom module keys in the custom config dict
     e.g.
     Input:
@@ -163,7 +187,7 @@ def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key):
     [CustomModule1, CustomModule2, CustomModule3]
     """
     # using set to dedup
-    float_custom_module_classes = set()
+    float_custom_module_classes : Set[Any] = set()
     custom_module_mapping = custom_config_dict.get(custom_config_dict_key, {})
     for quant_mode in ["static", "dynamic", "weight_only"]:
         quant_mode_custom_module_config = custom_module_mapping.get(quant_mode, {})
@@ -179,12 +203,42 @@ def get_linear_prepack_op_for_dtype(dtype):
     else:
         raise Exception("can't get linear prepack op for dtype:", dtype)
 
+def get_qconv_prepack_op(conv_op: Callable) -> Callable:
+    prepack_ops = {
+        torch.nn.functional.conv1d: torch.ops.quantized.conv1d_prepack,
+        torch.nn.functional.conv2d: torch.ops.quantized.conv2d_prepack,
+        torch.nn.functional.conv3d: torch.ops.quantized.conv3d_prepack
+    }
+    prepack_op = prepack_ops.get(conv_op, None)
+    assert prepack_op, "Didn't find prepack op for {}".format(conv_op)
+    return prepack_op
+
+def get_qconv_op(conv_op: Callable, has_relu: bool) -> Callable:
+    qconv_op = {
+        # has relu
+        True: {
+            torch.nn.functional.conv1d: torch.ops.quantized.conv1d_relu,
+            torch.nn.functional.conv2d: torch.ops.quantized.conv2d_relu,
+            torch.nn.functional.conv3d: torch.ops.quantized.conv3d_relu
+        },
+        False: {
+            torch.nn.functional.conv1d: torch.ops.quantized.conv1d,
+            torch.nn.functional.conv2d: torch.ops.quantized.conv2d,
+            torch.nn.functional.conv3d: torch.ops.quantized.conv3d
+        }
+    }
+    qconv = qconv_op[has_relu].get(conv_op)
+    assert qconv, "Can't find corresponding quantized conv op for {} {}".format(conv_op, has_relu)
+    return qconv
+
 # Returns a function that can get a new attribute name for module with given
 # prefix, for example,
 # >> get_new_observer_name = get_new_attr_name_with_prefix('_observer')
 # >> new_name = get_new_observer_name(module)
 # new_name will be an unused attribute name on module, e.g. `_observer_1`
 def get_new_attr_name_with_prefix(prefix: str) -> Callable:
+    prefix = prefix.replace(".", "_")
+
     def get_new_attr_name(module: torch.nn.Module):
         def get_attr_name(i: int):
             return prefix + str(i)
@@ -260,3 +314,79 @@ def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
     )
     device = next(iter(devices)) if len(devices) > 0 else None
     return device
+
+def create_getattr_from_value(module: GraphModule, graph: Graph, prefix: str, value: Any) -> Node:
+    """
+    Given a value of any type, creates a getattr node corresponding to the value and
+    registers the value as a buffer to the module.
+    """
+    get_new_attr_name = get_new_attr_name_with_prefix(prefix)
+    attr_name = get_new_attr_name(module)
+    module.register_buffer(attr_name, torch.tensor(value))
+    # Create get_attr with value
+    attr_node = graph.create_node("get_attr", attr_name)
+    return attr_node
+
+def create_qparam_nodes(quantizer: QuantizerCls, node_name: str, scale: Any, zero_point: Any) -> Tuple[Node, Node]:
+    """
+    Create getattr nodes in the quantizer graph for scale and zero point values.
+    The nodes are registered with the root_module of the model.
+    """
+    root_module = quantizer.modules['']
+    module_path, _ = quantizer.node_name_to_scope[node_name]
+    scale_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_scale_"), scale)
+    zero_point_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_zero_point_"), zero_point)
+    return (scale_node, zero_point_node)
+
+
+def all_node_args_have_no_tensors(node: Node) -> bool:
+    """
+    If we know for sure that all of this node's args have no
+    tensors (are primitives), return True.  If we either
+    find a tensor or are not sure, return False. Note: this
+    function is not exact.
+    """
+    if not isinstance(node, Node):
+        return True
+    elif node.op == 'placeholder':
+        return False
+    elif node.op == 'call_module':
+        return False
+    elif node.op == 'get_attr':
+        return False
+    elif node.target is getattr and node.args[1] == 'ndim':
+        # x1 = x0.ndim
+        return True
+    elif node.op == 'call_method' and node.target == 'size':
+        # x1 = x0.size(0)
+        return True
+
+    found_one_tensor = False
+    for arg in node.args:
+        if isinstance(arg, list):
+            for list_el in arg:
+                if isinstance(list_el, Node):
+                    this_list_el_args_have_no_tensors = \
+                        all_node_args_have_no_tensors(list_el)
+                    found_one_tensor = found_one_tensor or \
+                        (not this_list_el_args_have_no_tensors)
+        elif isinstance(arg, int):
+            pass
+        else:
+            if isinstance(arg, Node):
+                this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg)
+                found_one_tensor = found_one_tensor or \
+                    (not this_arg_args_have_no_tensors)
+            else:
+                found_one_tensor = True
+    return not found_one_tensor
+
+
+def node_return_type_is_int(node: Node) -> bool:
+    """
+    Returns true if this node results in an integer, even if some of the args
+    are Tensors.
+    """
+    if node.op == 'call_method' and node.target == 'size':
+        return True
+    return False

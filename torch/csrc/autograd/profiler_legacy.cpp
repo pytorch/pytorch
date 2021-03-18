@@ -226,7 +226,13 @@ void ProfilerThreadLocalState::pushRange(
     evt.setSequenceNr(fn.seqNr());
     evt.setFwdThreadId(fn.forwardThreadId());
     evt.setScope((uint8_t)fn.scope());
-#ifndef C10_MOBILE
+    if (config_.with_flops) {
+      evt.setExtraArgs(saveExtraArgs(fn));
+      evt.setFlops(computeFlops(std::string(fn.name().str()), evt.extraArgs()));
+    }
+
+// TODO: will unify the two macros BUILD_LITE_INTERPRETER and C10_MOBILE soon.
+#if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
     // backward nodes source range corresponds to the forward node
     // TODO: consider using C++ stack trace
     if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
@@ -414,7 +420,7 @@ void pushProfilingCallbacksLegacy() {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
-      [](const at::RecordFunction& fn) {
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return nullptr;

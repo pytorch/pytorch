@@ -64,7 +64,7 @@ public:
     bitset cur = *this;
     size_t index = cur.find_first_set();
     while (0 != index) {
-      // -1 because find_first_set() is not one-indiced.
+      // -1 because find_first_set() is not one-indexed.
       index -= 1;
       func(index);
       cur.unset(index);
@@ -73,7 +73,7 @@ public:
   }
 
 private:
-  // Return the index of the first set bit. The returned index is one-indiced
+  // Return the index of the first set bit. The returned index is one-indexed
   // (i.e. if the very first bit is set, this function returns '1'), and a return
   // of '0' means that there was no bit set.
   size_t find_first_set() const {
@@ -108,7 +108,7 @@ private:
   friend bool operator==(bitset lhs, bitset rhs) noexcept {
     return lhs.bitset_ == rhs.bitset_;
   }
-  
+
   bitset_type bitset_;
 };
 

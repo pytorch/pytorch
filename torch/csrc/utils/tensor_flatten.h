@@ -20,8 +20,16 @@ inline std::vector<at::Tensor> unflatten_dense_tensors(const at::Tensor& flat, a
   size_t offset = 0;
   for (const auto & tensor : tensors) {
     auto numel = tensor.numel();
-    outputs.push_back(flat.narrow(0, offset, numel).view(tensor.sizes()));
-    offset += numel;
+    // If unflatten an empty tensor, create a new empty tensor using
+    // flat tensor Options.
+    // This can avoid the unflattened empty tensor to share the same storage
+    // with other unflatten tensors.
+    if (numel == 0) {
+      outputs.push_back(at::empty({0}, flat.options()));
+    } else {
+      outputs.push_back(flat.narrow(0, offset, numel).view(tensor.sizes()));
+      offset += numel;
+    }
   }
   return outputs;
 }

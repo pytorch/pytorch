@@ -59,6 +59,13 @@ Backend backendToBackendOfDeviceType(Backend b, DeviceType d) {
     case DeviceType::XLA:
       TORCH_CHECK(!isSparse(b), "Sparse not implemented for XLA");
       return Backend::XLA;
+    case DeviceType::XPU:
+      return backendToXPU(b);
+    case DeviceType::MLC:
+      TORCH_CHECK(!isSparse(b), "Sparse not implemented for MLC");
+      return Backend::MLC;
+    case DeviceType::Meta:
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "torch.tensor not supported for meta (file an issue if you need this)")
     default:
       AT_ERROR("Unknown device type");
   }
@@ -147,12 +154,14 @@ std::vector<int64_t> compute_sizes(PyObject* seq) {
 
 ScalarType infer_scalar_type(PyObject *obj) {
 #ifdef USE_NUMPY
-  if (PyArray_Check(obj)) {
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
-  }
-  if (PyArray_CheckScalar(obj)) {
-    THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
-    return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
+  if (is_numpy_available()) {
+    if (PyArray_Check(obj)) {
+      return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
+    }
+    if (PyArray_CheckScalar(obj)) {
+      THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
+      return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*) arr.get()));
+    }
   }
 #endif
   if (PyFloat_Check(obj)) {
@@ -268,7 +277,7 @@ Tensor internal_new_from_data(
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
 
-  if (PyArray_Check(data)) {
+  if (is_numpy_available() && PyArray_Check(data)) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = tensor_from_numpy(data, /*warn_if_not_writeable=*/!copy_numpy);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
@@ -334,24 +343,41 @@ Tensor legacy_new_from_sequence(
 // in x.new(y), 'x' is the base.
 void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_layout) {
   if (expected_layout == c10::kStrided) {
-    TORCH_CHECK(dispatch_key == c10::DispatchKey::CPU
-                || dispatch_key == c10::DispatchKey::CUDA
-                || dispatch_key == c10::DispatchKey::HIP
-                || dispatch_key == c10::DispatchKey::XLA,
-                "new(): expected DispatchKey: ", c10::DispatchKey::CPU,
-                " or ", c10::DispatchKey::CUDA,
-                " or ", c10::DispatchKey::HIP,
-                " or ", c10::DispatchKey::XLA,
-                " but got: ", dispatch_key);
+    TORCH_CHECK(
+        dispatch_key == c10::DispatchKey::CPU ||
+            dispatch_key == c10::DispatchKey::CUDA ||
+            dispatch_key == c10::DispatchKey::HIP ||
+            dispatch_key == c10::DispatchKey::XLA ||
+            dispatch_key == c10::DispatchKey::XPU,
+        "new(): expected DispatchKey: ",
+        c10::DispatchKey::CPU,
+        " or ",
+        c10::DispatchKey::CUDA,
+        " or ",
+        c10::DispatchKey::HIP,
+        " or ",
+        c10::DispatchKey::XLA,
+        " or ",
+        c10::DispatchKey::XPU,
+        " but got: ",
+        dispatch_key);
   } else if(expected_layout == c10::kSparse) {
     // NOTE: no sparse XLA
-    TORCH_CHECK(dispatch_key == c10::DispatchKey::SparseCPU
-                || dispatch_key == c10::DispatchKey::SparseCUDA
-                || dispatch_key == c10::DispatchKey::SparseHIP,
-                "new(): expected DispatchKey: ", c10::DispatchKey::SparseCPU,
-                " or ", c10::DispatchKey::SparseCUDA,
-                " or ", c10::DispatchKey::SparseHIP,
-                " but got: ", dispatch_key);
+    TORCH_CHECK(
+        dispatch_key == c10::DispatchKey::SparseCPU ||
+            dispatch_key == c10::DispatchKey::SparseCUDA ||
+            dispatch_key == c10::DispatchKey::SparseHIP ||
+            dispatch_key == c10::DispatchKey::SparseXPU,
+        "new(): expected DispatchKey: ",
+        c10::DispatchKey::SparseCPU,
+        " or ",
+        c10::DispatchKey::SparseCUDA,
+        " or ",
+        c10::DispatchKey::SparseHIP,
+        " or ",
+        c10::DispatchKey::SparseXPU,
+        " but got: ",
+        dispatch_key);
   } else {
     TORCH_INTERNAL_ASSERT(false, "unexpected layout");
   }
@@ -461,11 +487,6 @@ c10::DispatchKey typeIdWithDefault(PythonArgs& r, int64_t device_idx, c10::Dispa
   return backendToDispatchKey(backendToBackendOfDeviceType(dispatchKeyToBackend(dispatch_key), device_type));
 }
 
-// NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
-c10::DispatchKey denseTypeIdWithDefault(PythonArgs& r, int64_t device_idx, c10::DispatchKey dispatch_key) {
-  auto device_type = r.isNone(device_idx) ? computeDeviceType(dispatch_key) : r.device(device_idx).type();
-  return backendToDispatchKey(toDense(backendToBackendOfDeviceType(dispatchKeyToBackend(dispatch_key), device_type)));
-}
 } // namespace
 
 Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
@@ -603,6 +624,7 @@ Tensor indexing_tensor_from_data(
 }
 
 Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
   static PythonArgParser parser({
     "sparse_coo_tensor(PyObject* indices, PyObject* values, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
     "sparse_coo_tensor(PyObject* indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
@@ -613,7 +635,7 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     bool type_inference = r.isNone(2);
-    const auto inferred_dispatch_key = denseTypeIdWithDefault(r, 3, dispatch_key);
+    const auto inferred_dispatch_key = typeIdWithDefault(r, 3, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(2, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(3));
     // if no dtype provided, infer type based on value type.
@@ -626,7 +648,7 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(3);
-    const auto inferred_dispatch_key = denseTypeIdWithDefault(r, 4, dispatch_key);
+    const auto inferred_dispatch_key = typeIdWithDefault(r, 4, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(3, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(4));
     Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(4), r.pyobject(1),
@@ -646,6 +668,7 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
 }
 
 Tensor _sparse_coo_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
   enum {
     ARG_INDICES = 0,
     ARG_VALUES,
@@ -662,7 +685,7 @@ Tensor _sparse_coo_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarT
   ParsedArgs<ARGS_COUNT> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   bool type_inference = r.isNone(ARG_TYPE);
-  const auto inferred_dispatch_key = denseTypeIdWithDefault(r, ARG_DEVICE, dispatch_key);
+  const auto inferred_dispatch_key = typeIdWithDefault(r, ARG_DEVICE, dispatch_key);
   const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
   at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
   Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES),

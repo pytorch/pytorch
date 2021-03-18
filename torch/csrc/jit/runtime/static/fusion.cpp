@@ -1,39 +1,54 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
+
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/ops.h>
 
 namespace torch {
 namespace jit {
 
-void createFusionGroups(Block* block, AliasDb* aliasDb);
+void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 
-void fuseStaticSubgraphs(std::shared_ptr<Graph> graph) {
-  PrepareGraphForStaticRuntime(graph);
+void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
+  Inline(*graph);
+  ConstantPropagation(graph);
+  Canonicalize(graph);
+  ConstantPropagation(graph);
+  RemoveTensorMutation(graph);
+  ConstantPropagation(graph);
+  EliminateDeadCode(graph);
   auto aliasDb = torch::make_unique<AliasDb>(graph);
-  createFusionGroups(graph->block(), aliasDb.get());
+  createFusionGroups(graph->block(), aliasDb.get(), min_size);
+  ConstantPooling(graph);
+  ConstantPropagation(graph);
   torch::jit::EliminateDeadCode(graph);
 }
 
 Operation createStaticSubgraphRuntime(const Node* node) {
-  auto g = torch::jit::PrepareForStaticRuntime(node->g(attr::Subgraph));
-  auto runtime = std::make_shared<torch::jit::StaticRuntime>(g);
-  auto num_inputs = runtime->get_inference_module()->input_regs.size();
-  return [runtime, num_inputs](Stack* stack) {
+  auto g = node->g(attr::Subgraph);
+  auto module = std::make_shared<torch::jit::StaticModule>(g);
+  auto num_inputs = module->num_inputs();
+  return [module, num_inputs](Stack* stack) {
     RECORD_FUNCTION("Static Runtime", std::vector<c10::IValue>());
     auto inps = torch::jit::last(stack, num_inputs);
-    std::vector<at::Tensor> t_inputs;
-    t_inputs.reserve(num_inputs);
-    for (const auto& inp : inps) {
-      t_inputs.emplace_back(inp.toTensor());
-    }
+    // TODO maybe avoid call to vec
+    auto outputs = (*module)(inps.vec(), {});
     torch::jit::drop(stack, num_inputs);
-    auto outputs = runtime->run(t_inputs);
-    for (auto& o : outputs) {
-      push_one(*stack, std::move(o));
+
+    if (module->num_outputs() > 1) {
+      for (auto& o : outputs.toTuple()->elements()) {
+        push_one(*stack, std::move(o));
+      }
+    } else {
+      push_one(*stack, std::move(outputs));
     }
     return 0;
   };
@@ -52,23 +67,44 @@ RegisterOperators StaticSubgraphOps({torch::jit::Operator(
 
 bool canHandle(Node* node) {
   for (Value* input : node->inputs()) {
-    // TODO checks
+    bool is_tensor = !!input->type()->cast<TensorType>();
+    auto list_type = input->type()->cast<ListType>();
+    bool is_list = list_type && list_type->getElementType()->cast<TupleType>();
+    auto tuple_type = input->type()->cast<TupleType>();
+    bool is_tuple = [&]() -> bool {
+      if (!tuple_type) {
+        return false;
+      }
+      for (auto& t : tuple_type->elements()) {
+        if (!t->cast<TensorType>()) {
+          return false;
+        }
+      }
+      return true;
+    }();
+    if (!(is_tensor || is_list || is_tuple)) {
+      if (input->node()->kind() != prim::Constant) {
+        return false;
+      }
+    }
   }
 
   auto kind = node->kind();
   if (kind.is_prim()) {
     REQ(kind == prim::TupleConstruct || kind == prim::ListConstruct ||
         kind == prim::StaticSubgraph);
+    if (kind == prim::TupleConstruct || kind == prim::ListConstruct) {
+      for (Value* input : node->inputs()) {
+        if (!input->type()->cast<TensorType>()) {
+          return false;
+        }
+      }
+    }
     return true;
   }
-  const Operator& op = node->getOperator();
-  auto analysis = op.aliasAnalysisKind();
-  if (AliasAnalysisKind::PURE_FUNCTION == analysis ||
-      (AliasAnalysisKind::FROM_SCHEMA == analysis &&
-       !node->schema().is_mutable())) {
-    return true;
-  }
-  return false;
+
+  // TODO add "canRunNatively" once memory management is audited
+  return canRunOutOfPlace(node);
 }
 
 bool canMerge(Node* consumer, Node* producer, AliasDb* aliasDb) {
@@ -196,7 +232,33 @@ std::pair<graph_node_list::iterator, bool> scanNode(Node* n, AliasDb* aliasDb) {
   return createFusionGroup(n, aliasDb);
 }
 
-void createFusionGroups(Block* block, AliasDb* aliasDb) {
+bool inlineIfTooSmall(Node* n, size_t min_size) {
+  if (n->kind() != prim::StaticSubgraph) {
+    return false;
+  }
+  auto subgraph = SubgraphUtils::getSubgraph(n);
+  size_t num_nodes = std::distance(
+      subgraph->block()->nodes().begin(), subgraph->block()->nodes().end());
+  if (num_nodes < min_size) {
+    GRAPH_UPDATE("Fusion group is too small, unmerging: ", *n);
+    SubgraphUtils::unmergeSubgraph(n);
+    return true;
+  }
+  ConstantPooling(subgraph);
+  ConstantPropagation(subgraph);
+  return false;
+}
+
+void inlineSmallFusionGroups(Block* block, size_t min_size) {
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      inlineSmallFusionGroups(b, min_size);
+    }
+    inlineIfTooSmall(n, min_size);
+  }
+}
+
+void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
   bool any_changed = true;
   while (any_changed) {
     any_changed = false;
@@ -209,7 +271,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb) {
 
   for (Node* n : block->nodes()) {
     for (Block* b : n->blocks()) {
-      createFusionGroups(b, aliasDb);
+      createFusionGroups(b, aliasDb, min_size);
     }
   }
 
@@ -248,6 +310,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb) {
       prev_fusion_group = fusion_group;
     }
   }
+  inlineSmallFusionGroups(block, min_size);
 }
 
 } // namespace jit
