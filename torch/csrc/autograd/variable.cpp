@@ -133,10 +133,8 @@ namespace impl {
 
   void rebase_history(const Variable& self, Edge gradient_edge) {
     TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
-    if (self.is_view()) {
-      // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
-
+    auto diff_view_meta = get_view_autograd_meta(self);
+    if (diff_view_meta) {
       // See NOTE [ View + Inplace detection ]
       auto creation_meta = diff_view_meta->get_creation_meta();
       if (creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
@@ -237,9 +235,8 @@ namespace impl {
     // This logic is only relevant for custom autograd Functions for which multiple
     // operations can happen on a given Tensor before its gradient edge is set when
     // exiting the custom Function.
-    if (self.is_view()) {
-      // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
+    auto diff_view_meta = get_view_autograd_meta(self);
+    if (diff_view_meta) {
       diff_view_meta->set_attr_version(self._version());
     }
   }
@@ -317,9 +314,19 @@ namespace impl {
   }
 
   AutogradMeta* get_autograd_meta(const Variable& self) {
-    // NB: could return null
+    // NB: could return nullptr
     TORCH_CHECK(self.defined(), "cannot call get_autograd_meta() on undefined tensor");
     return static_cast<AutogradMeta*>(self.unsafeGetTensorImpl()->autograd_meta());
+  }
+
+  DifferentiableViewMeta* get_view_autograd_meta(const Variable& self) {
+    // NB: return nullptr if self is not a view
+    AutogradMeta* meta = get_autograd_meta(self);
+    if (meta && meta->is_view_) {
+      return static_cast<DifferentiableViewMeta*>(meta);
+    } else {
+      return nullptr;
+    }
   }
 
 } // namespace impl
@@ -361,9 +368,8 @@ Tensor VariableHooks::tensor_data(const Tensor& self) const {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 bool VariableHooks::is_view(const Tensor& self) const {
-  auto meta = torch::autograd::impl::get_autograd_meta(self);
-  if (meta && meta->is_view_) {
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta) {
     return diff_view_meta->has_bw_view();
   } else {
     return false;
@@ -371,9 +377,8 @@ bool VariableHooks::is_view(const Tensor& self) const {
 }
 
 const Tensor& VariableHooks::base(const Tensor& self) const {
-  if (self.is_view()) {
-    // is_view() implies get_autograd_meta()
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta) {
     TORCH_CHECK(diff_view_meta->has_bw_view(), "Can't get base of non-backward view Tensor");
     return diff_view_meta->get_backward_view().base_;
   } else {
@@ -399,10 +404,8 @@ namespace {
 }
 
 const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tensor& self) const {
-  if (self.is_view()) {
-    // NB: is_view() ==> get_autograd_meta()
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
-
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta) {
     // See NOTE [ View + Inplace detection ]
     if (diff_view_meta->get_creation_meta() != CreationMeta::MULTI_OUTPUT_SAFE) {
       std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
