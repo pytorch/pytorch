@@ -211,6 +211,7 @@ class LazyLinear(LazyModuleMixin, Linear):
 
     cls_to_become = Linear  # type: ignore[assignment]
     weight: UninitializedParameter
+    bias: UninitializedParameter  # type: ignore[assignment]
 
     def __init__(self, out_features: int, bias: bool = True) -> None:
         # bias is hardcoded to False to avoid creating tensor
