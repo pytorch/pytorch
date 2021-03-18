@@ -123,6 +123,22 @@ class NormalizeArgs(Transformer):
 
 
 class NormalizeOperators(AnnotateTypesWithSchema):
+    """
+    Normalize callsites that are different ways of "spelling" the same
+    invocation into a single, canonical call. Currently supports:
+
+    1. Normalize operators (e.g. operator.add) to the `torch` ops they
+       ultimately invoke (e.g. torch.add) when it is possible to statically
+       reason that
+
+    Example usage:
+
+        m = torchvision.models.resnet18()
+
+        traced = torch.fx.symbolic_trace(m)
+
+        traced = NormalizeOperators(traced).transform()
+    """
     binary_magic_method_remap = {
         operator.add : torch.add,
         operator.mul : torch.mul,
@@ -151,7 +167,9 @@ class NormalizeOperators(AnnotateTypesWithSchema):
 
             # If lhs is a Tensor, we definitely dispatch into the `torch` function
             if isinstance(lhs, torch.fx.Proxy) and lhs.node.type is torch.Tensor:
-                return self.binary_magic_method_remap[target](lhs, rhs)
+                rv = self.binary_magic_method_remap[target](lhs, rhs)
+                rv.node.type = torch.Tensor
+                return rv
 
             # If rhs is a Tensor but lhs is not, we *may* dispatch into the `torch`
             # function. Note that this is tricky to determine, as the LHS can do one
@@ -175,9 +193,13 @@ class NormalizeOperators(AnnotateTypesWithSchema):
 
             if target not in non_commutative_operators and not isinstance(lhs, torch.fx.Proxy):
                 if not hasattr(type(lhs), '__add__'):
-                    return self.binary_magic_method_remap[target](lhs, rhs)
+                    rv = self.binary_magic_method_remap[target](lhs, rhs)
+                    rv.node.type = torch.Tensor
+                    return rv
 
                 if isinstance(lhs, numbers.Number):
-                    return self.binary_magic_method_remap[target](lhs, rhs)
+                    rv = self.binary_magic_method_remap[target](lhs, rhs)
+                    rv.node.type = torch.Tensor
+                    return rv
 
         return super().call_function(target, args, kwargs)
