@@ -17,11 +17,6 @@ C10_DEFINE_bool(
     "of throwing an exception.");
 
 namespace c10 {
-namespace enforce_detail {
-/* implicit */ EnforceFailMessage::EnforceFailMessage(std::string&& msg) {
-  msg_ = new std::string(std::move(msg));
-}
-} // namespace enforce_detail
 
 namespace {
 std::function<string(void)>* GetFetchStackTrace() {

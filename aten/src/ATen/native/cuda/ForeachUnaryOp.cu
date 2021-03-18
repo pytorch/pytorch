@@ -216,8 +216,9 @@ OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
 std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
     TORCH_CHECK(tensors[0].scalar_type() != kBool,
-                "Negation, the `-` operator, on a bool tensor is not supported. "
-                "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+                "_foreach_neg: There is a bool tensor in the passed-in TensorList. "
+                "Negation on a bool tensor is not supported. If you are trying to invert a mask, please use the `~`"
+                "or `logical_not()` operator on the individual tensors instead.");
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_neg_slow(tensors);
@@ -229,8 +230,9 @@ std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
 void foreach_tensor_neg_cuda_(TensorList tensors) {
     check_foreach_api_restrictions(tensors);
     TORCH_CHECK(tensors[0].scalar_type() != kBool,
-                "Negation, the `-` operator, on a bool tensor is not supported. "
-                "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+                "_foreach_neg: There is a bool tensor in the passed-in TensorList. "
+                "Negation on a bool tensor is not supported. If you are trying to invert a mask, please use the `~`"
+                "or `logical_not()` operator on the individual tensors instead.");
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_neg_slow_(tensors);
