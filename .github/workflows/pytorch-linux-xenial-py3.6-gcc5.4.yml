@@ -64,7 +64,7 @@ jobs:
             -e TORCH_CUDA_ARCH_LIST \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
-            --user jenkins \
+            --user $(whoami) \
             --tty \
             -v ${GITHUB_WORKSPACE}:/var/lib/jenkins \
             -w /var/lib/jenkins \
