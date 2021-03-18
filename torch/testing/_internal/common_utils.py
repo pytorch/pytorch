@@ -2041,8 +2041,7 @@ def gradcheck(fn, inputs, **kwargs):
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradcheck.
     keys_enabled_by_default = (
-        "check_batched_grad",
-        "fast_mode")
+        "check_batched_grad",)
 
     for key in keys_enabled_by_default:
         kwargs[key] = kwargs.get(key, True)
@@ -2056,8 +2055,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     #
     # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
     keys_enabled_by_default = (
-        "check_batched_grad",
-        "fast_mode")
+        "check_batched_grad",)
 
     for key in keys_enabled_by_default:
         kwargs[key] = kwargs.get(key, True)
