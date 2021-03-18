@@ -401,5 +401,43 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
   }
 }
 
+void FuseSigridTransformsListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
+  auto nodes = graph->nodes();
+  for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+    Node* sigrid_node = *it;
+    auto kind = sigrid_node->kind();
+    // TODO: make it work the TorchBind version
+    if (strcmp(kind.toQualString(), "fb::sigrid_transforms") == 0) {
+      const Value* sigrid_out = sigrid_node->outputs()[0];
+      if (sigrid_out->uses().size() > 1) {
+        continue;
+      }
+
+      Node* list_unpack_node = sigrid_out->uses()[0].user;
+      if (list_unpack_node->kind() != prim::ListUnpack) {
+        continue;
+      }
+
+      auto list_unpack_outputs = list_unpack_node->outputs();
+      if (list_unpack_outputs.empty()) {
+        continue;
+      }
+
+      // handle outputs
+      for (Value* out : list_unpack_outputs) {
+        Value* new_out = sigrid_node->addOutput();
+        new_out->copyMetadata(out);
+        out->replaceAllUsesWith(new_out);
+      }
+
+      auto it_next = it;
+      ++it_next; // it_next points to list_unpack
+      it_next.destroyCurrent(); // remove list_unpack
+
+      sigrid_node->eraseOutput(0);
+    }
+  }
+}
+
 } // namespace jit
 } // namespace torch
