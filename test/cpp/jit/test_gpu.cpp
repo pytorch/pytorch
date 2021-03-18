@@ -13875,6 +13875,66 @@ TEST(NVFuserTest, FusionReductionPredicate_CUDA) {
       &fusion, {cg_output}, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionIssue728_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addOutput(tv0);
+  auto tv1 = makeSymbolicTensor(1);
+  fusion.addOutput(tv1);
+  auto tv2 = makeSymbolicTensor(1);
+  fusion.addOutput(tv2);
+
+  auto tv3 = add(tv0, new Double(1));
+  auto tv4 = add(tv3, tv1);
+  auto tv5 = add(tv4, new Double(1));
+  auto tv6 = add(tv2, new Double(1));
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv6);
+
+  // tv0 -> tv3 -+
+  // tv1 --------+-> tv4 -> tv5
+  //
+  // tv2 -> tv6
+
+  auto all_vals_under_tv3 =
+      DependencyCheck::getAllValsBetween({tv3}, fusion.outputs());
+  std::unordered_set<Val*> included_tensors({tv3, tv4, tv5});
+  for (auto tv : included_tensors) {
+    TORCH_CHECK(
+        std::find(all_vals_under_tv3.begin(), all_vals_under_tv3.end(), tv) !=
+            all_vals_under_tv3.end(),
+        "TV",
+        tv->name(),
+        " not found");
+  }
+  for (auto tv : ir_utils::filterByType<TensorView>(fusion.vals())) {
+    if (included_tensors.find(tv) == included_tensors.end()) {
+      TORCH_CHECK(
+          std::find(all_vals_under_tv3.begin(), all_vals_under_tv3.end(), tv) ==
+              all_vals_under_tv3.end(),
+          "TV",
+          tv->name(),
+          " should not be found");
+    }
+  }
+
+  auto no_dependency = DependencyCheck::getAllValsBetween({}, fusion.outputs());
+  TORCH_CHECK(no_dependency.empty(), "No val should be returned");
+
+  auto no_dep_path = DependencyCheck::getAllValsBetween({tv0, tv1}, {tv6});
+  TORCH_CHECK(no_dep_path.empty(), "No val should be returned");
+
+  auto no_dep_path2 = DependencyCheck::getAllValsBetween({tv2}, {tv5});
+  TORCH_CHECK(no_dep_path2.empty(), "No val should be returned");
+
+  auto just_tv3 = DependencyCheck::getAllValsBetween({tv3}, {tv3});
+  TORCH_CHECK(
+      just_tv3.size() == 1 && *(just_tv3.begin()) == tv3,
+      "Only tv3 should be included");
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

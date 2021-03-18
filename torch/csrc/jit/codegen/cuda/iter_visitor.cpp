@@ -364,17 +364,50 @@ namespace {
 // Looks for and returns all values in between dependencies and vals, including
 // them.
 struct Dependencies : public IterVisitor {
-  std::unordered_set<Val*> dependencies_;
-  std::unordered_set<Val*> vals_;
+ private:
+  //! A given set of dependency Vals
+  const std::unordered_set<Val*> dependencies_;
+  //! Vals that are found between dependencies_ and of. Topologically
+  //! ordered.
+  std::vector<Val*> vals_;
+  //! A set version of vals_
+  std::unordered_set<Val*> dependent_vals_;
+  //! Exprs found dependent on dependencies_
+  std::unordered_set<Expr*> dependent_exprs_;
 
+ private:
   std::vector<Statement*> next(Val* v) override {
-    if (dependencies_.find(v) != dependencies_.end())
+    if (dependencies_.find(v) != dependencies_.end()) {
       return std::vector<Statement*>();
+    }
     return IterVisitor::next(v);
   }
 
   void handle(Val* val) override {
-    vals_.emplace(val);
+    // val is included if:
+    // 1. it is one of the dependencies, or
+    // 2. its defining expression is included in the dependent expr set
+    if (dependencies_.find(val) != dependencies_.end()) {
+      vals_.push_back(val);
+      dependent_vals_.insert(val);
+    } else {
+      auto def = val->definition();
+      if (def != nullptr &&
+          dependent_exprs_.find(def) != dependent_exprs_.end()) {
+        vals_.push_back(val);
+        dependent_vals_.insert(val);
+      }
+    }
+  }
+
+  void handle(Expr* expr) override {
+    // Track which expr is depedent on the dependencies_ exprs.
+    if (std::any_of(
+            expr->inputs().begin(), expr->inputs().end(), [&](Val* input_val) {
+              return dependent_vals_.find(input_val) != dependent_vals_.end();
+            })) {
+      dependent_exprs_.insert(expr);
+    }
   }
 
   Dependencies(
@@ -385,11 +418,11 @@ struct Dependencies : public IterVisitor {
   };
 
  public:
-  static std::unordered_set<Val*> getAllVals(
+  static std::vector<Val*> getAllVals(
       const std::unordered_set<Val*>& dependencies,
       const std::vector<Val*>& of) {
     if (of.empty()) {
-      return std::unordered_set<Val*>();
+      return {};
     }
 
     Dependencies deps(dependencies, of);
@@ -598,7 +631,7 @@ std::deque<std::deque<Val*>> DependencyCheck::getAllUseChains(Val* producer) {
   return DependencyChains::getAllUseChains(producer);
 }
 
-std::unordered_set<Val*> DependencyCheck::getAllValsBetween(
+std::vector<Val*> DependencyCheck::getAllValsBetween(
     const std::unordered_set<Val*>& dependencies,
     const std::vector<Val*>& of) {
   return Dependencies::getAllVals(dependencies, of);

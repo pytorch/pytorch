@@ -112,7 +112,8 @@ unsigned int getReplayablePosCasP(
             producer->getMaybeRFactorDomain().begin(),
             producer->getMaybeRFactorDomain().end(),
             [&mappable_roots, &all_vals](IterDomain* root_id) {
-              return all_vals.find(root_id) != all_vals.end() &&
+              return std::find(all_vals.begin(), all_vals.end(), root_id) !=
+                  all_vals.end() &&
                   mappable_roots.find(root_id) == mappable_roots.end();
             })) {
       continue;

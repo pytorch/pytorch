@@ -197,8 +197,9 @@ class TORCH_CUDA_CU_API DependencyCheck {
   // Returns an empty deque if there are no uses of dependency found.
   static std::deque<std::deque<Val*>> getAllUseChains(Val* dependency);
 
-  // Grab all values that exist between and including provided vals
-  static std::unordered_set<Val*> getAllValsBetween(
+  // Grab all values that exist between and including provided
+  // vals. Returned values are topologicaly ordered.
+  static std::vector<Val*> getAllValsBetween(
       const std::unordered_set<Val*>& dependencies,
       const std::vector<Val*>& of);
 
