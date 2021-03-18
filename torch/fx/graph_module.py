@@ -41,8 +41,9 @@ def _forward_from_src(src: str, globals: Dict[str, Any]):
     # avoid mutating the passed in dict
     globals = globals.copy()
     exec_with_source(src, globals)
-    return globals['forward']
-
+    forward_fn = globals['forward']
+    del globals['forward']
+    return forward_fn
 
 def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
     if name in _custom_builtins:

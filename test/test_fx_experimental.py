@@ -23,7 +23,7 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.fuser import fuse
 from torch.fx.experimental import merge_matmul
-from torch.fx.experimental.normalize import NormalizeArgs
+from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 
@@ -752,6 +752,65 @@ terrible spacing
         a = torch.rand(64, 3, 7, 7)
         module_with_submodules = split_module(traced, m, lambda node: 0)
         module_with_submodules(a)
+
+    def test_normalize_binary_operators(self):
+        ops_to_test = {
+            operator.add,
+            operator.mul,
+            operator.sub,
+            operator.truediv,
+            operator.floordiv,
+            operator.mod,
+            operator.eq,
+            operator.ne,
+            operator.lt,
+            operator.le,
+            operator.gt,
+            operator.ge,
+        }
+
+        # Test Tensor/Tensor callsite
+        for op in ops_to_test:
+            relu_functional = torch.nn.functional.relu
+            class WrapperMod(torch.nn.Module):
+                def forward(self, x, y):
+                    return op(relu_functional(x), relu_functional(y))
+
+            traced = symbolic_trace(WrapperMod())
+            normalized = NormalizeOperators(traced).transform()
+            x, y = torch.randn(3, 4), torch.randn(3, 4)
+            torch.testing.assert_allclose(traced(x, y), normalized(x, y))
+            self.assertFalse(any(n.target in ops_to_test for n in normalized.graph.nodes))
+
+
+        # Test Tensor/scalar callsite
+        for op in ops_to_test:
+            relu_functional = torch.nn.functional.relu
+            class WrapperMod(torch.nn.Module):
+                def forward(self, x):
+                    return op(relu_functional(x), 42)
+
+            traced = symbolic_trace(WrapperMod())
+            normalized = NormalizeOperators(traced).transform()
+            x = torch.randn(3, 4)
+            torch.testing.assert_allclose(traced(x), normalized(x))
+            self.assertFalse(any(n.target in ops_to_test for n in normalized.graph.nodes))
+
+        # Test scalar/Tensor callsite
+        for op in ops_to_test:
+            # Mod does not commute, skip it
+            if op is operator.mod:
+                continue
+            relu_functional = torch.nn.functional.relu
+            class WrapperMod(torch.nn.Module):
+                def forward(self, x):
+                    return op(42, relu_functional(x))
+
+            traced = symbolic_trace(WrapperMod())
+            normalized = NormalizeOperators(traced).transform()
+            x = torch.randn(3, 4)
+            torch.testing.assert_allclose(traced(x), normalized(x))
+            self.assertFalse(any(n.target in ops_to_test for n in normalized.graph.nodes))
 
     @skipIfNoTorchVision
     def test_normalize_args(self):

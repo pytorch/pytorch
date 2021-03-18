@@ -1,12 +1,15 @@
 import torch
 import torch.fx
 import inspect
+import operator
+import numbers
 from typing import Any, Dict, Optional, Tuple
 from torch.fx.node import Argument, Target
 from torch._jit_internal import boolean_dispatched
 
 from torch.fx import Transformer
 from torch.fx.operator_schemas import get_signature_for_torch_op
+from .schema_type_annotation import AnnotateTypesWithSchema
 
 class NormalizeArgs(Transformer):
     """
@@ -117,3 +120,64 @@ class NormalizeArgs(Transformer):
             new_kwargs[param] = bound_args.arguments[param]
 
         return new_kwargs
+
+
+class NormalizeOperators(AnnotateTypesWithSchema):
+    binary_magic_method_remap = {
+        operator.add : torch.add,
+        operator.mul : torch.mul,
+        operator.sub : torch.sub,
+        operator.truediv : torch.div,
+        operator.floordiv: torch.floor_divide,
+        operator.mod: torch.remainder,
+        operator.eq: torch.eq,
+        operator.ne: torch.ne,
+        operator.lt: torch.lt,
+        operator.le: torch.le,
+        operator.gt: torch.gt,
+        operator.ge: torch.ge,
+    }
+
+    def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
+        # FIXME: placeholders do not get `Tensor` type by default
+        #
+        # Normalize operators according to the magic methods implemented on tensors here:
+        # https://github.com/pytorch/pytorch/blob/28c5d90b679c6b38bf4183ec99f16d933c2f1bcd/tools/autograd/templates/python_variable_methods.cpp#L1137
+
+        if target in self.binary_magic_method_remap:
+            assert len(args) == 2
+            assert len(kwargs) == 0
+            lhs, rhs = args
+
+            # If lhs is a Tensor, we definitely dispatch into the `torch` function
+            if isinstance(lhs, torch.fx.Proxy) and lhs.node.type is torch.Tensor:
+                return self.binary_magic_method_remap[target](lhs, rhs)
+
+            # If rhs is a Tensor but lhs is not, we *may* dispatch into the `torch`
+            # function. Note that this is tricky to determine, as the LHS can do one
+            # of the following:
+            # 1. Do its own custom behavior. In this case `lhs.__add__(rhs)` returns
+            #    a value. We do not want to normalize in this situation
+            # 2. Not have an `__add__` method. In this case we would dispatch into
+            #    `rhs.__radd__` and in turn call the torch method
+            # 3. Have an `__add__` method but throw NotImplementedError. This would
+            #    cause `rhs.__radd__` dispatch and subsequently call into the `torch`
+            #    method, but it is hard to reason about whether that will happen
+            #    statically
+            #
+            # In this case, we account for scenario (2) as well as an allowed list
+            # of known-good types that when used as lhs with a Tensor rhs, dispatch
+            # to the tensor method (e.g. numbers)
+
+            # These operators don't commute, i.e. we can't have a Tensor on
+            # rhs and a non-tensor on LHS
+            non_commutative_operators = {operator.mod}
+
+            if target not in non_commutative_operators and not isinstance(lhs, torch.fx.Proxy):
+                if not hasattr(type(lhs), '__add__'):
+                    return self.binary_magic_method_remap[target](lhs, rhs)
+
+                if isinstance(lhs, numbers.Number):
+                    return self.binary_magic_method_remap[target](lhs, rhs)
+
+        return super().call_function(target, args, kwargs)
