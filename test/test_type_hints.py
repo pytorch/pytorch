@@ -128,6 +128,7 @@ class TestTypeHints(TestCase):
                 self.fail(f"mypy failed:\n{stdout}")
 
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
+    @unittest.skipIf(os.getenv("IN_CI") is not None, "Already running in CI during lint")
     def test_run_mypy(self):
         """
         Runs mypy over all files specified in our mypy configs
