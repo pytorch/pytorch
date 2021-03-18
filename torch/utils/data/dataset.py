@@ -143,6 +143,7 @@ class IterableDataset(Dataset[T_co]):
         [3, 4, 5, 6]
     """
     functions: Dict[str, Callable] = {}
+    reduce_ex_hook : Optional[Callable] = None
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
@@ -173,6 +174,20 @@ class IterableDataset(Dataset[T_co]):
             return cls(source_dp, *args, **kwargs)
         function = functools.partial(class_function, cls_to_register)
         IterableDataset.functions[function_name] = function
+
+    def __reduce_ex__(self, *args, **kwargs):
+        if IterableDataset.reduce_ex_hook is not None:
+            try:
+                return IterableDataset.reduce_ex_hook(self)
+            except NotImplementedError:
+                pass
+        return super().__reduce_ex__(*args, **kwargs)
+
+    @classmethod
+    def set_reduce_ex_hook(cls, hook_fn):
+        if IterableDataset.reduce_ex_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing reduce_ex_hook")
+        IterableDataset.reduce_ex_hook = hook_fn
 
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
