@@ -14,7 +14,7 @@ BASE_RUNTIME              = ubuntu:18.04
 BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu18.04
 
 # The conda channel to use to install cudatoolkit
-CUDA_CHANNEL              = defaults
+CUDA_CHANNEL              = nvidia
 # The conda channel to use to install pytorch / torchvision
 INSTALL_CHANNEL           = pytorch
 

@@ -292,6 +292,7 @@ _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, fill_diagonal_) \
 _(aten, diff) \
+_(aten, frexp) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
@@ -548,7 +549,6 @@ _(aten, nuclear_norm) \
 _(aten, numel) \
 _(aten, ones) \
 _(aten, ones_like) \
-_(aten, orgqr) \
 _(aten, ormqr) \
 _(aten, pairwise_distance) \
 _(aten, _euclidean_dist) \
