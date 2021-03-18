@@ -6688,21 +6688,9 @@ Example::
 
 add_docstr(torch.orgqr,
            r"""
-orgqr(input, input2) -> Tensor
+orgqr(input, tau) -> Tensor
 
-Computes the orthogonal matrix `Q` of a QR factorization, from the `(input, input2)`
-tuple returned by :func:`torch.geqrf`.
-
-This directly calls the underlying LAPACK function `?orgqr`.
-See `LAPACK documentation for orgqr`_ for further details.
-
-Args:
-    input (Tensor): the `a` from :func:`torch.geqrf`.
-    input2 (Tensor): the `tau` from :func:`torch.geqrf`.
-
-.. _LAPACK documentation for orgqr:
-    https://software.intel.com/en-us/mkl-developer-reference-c-orgqr
-
+Alias for :func:`torch.linalg.householder_product`.
 """)
 
 add_docstr(torch.ormqr,
