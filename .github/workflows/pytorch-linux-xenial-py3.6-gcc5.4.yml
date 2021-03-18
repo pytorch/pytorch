@@ -76,7 +76,8 @@ jobs:
       - name: Clean up docker images
         if: always()
         run: |
-          chown -R "$(id -u):$(id -g)" .
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -it -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
   test:
@@ -117,6 +118,7 @@ jobs:
       - name: Clean up docker images
         if: always()
         run: |
-          chown -R "$(id -u):$(id -g)" .
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -it -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
