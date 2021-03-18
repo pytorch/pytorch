@@ -4449,7 +4449,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoCusolver
     @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_orgqr(self, device, dtype):
+    def test_householder_product(self, device, dtype):
         def generate_reflectors_and_tau(A):
             """
             This function uses numpy.linalg.qr with mode "raw" to extract output of LAPACK's geqrf.
@@ -4476,7 +4476,7 @@ class TestLinalg(TestCase):
             A = torch.randn(*shape, dtype=dtype, device=device)
             reflectors, tau = generate_reflectors_and_tau(A)
             expected, _ = torch.linalg.qr(A)
-            actual = torch.orgqr(reflectors, tau)
+            actual = torch.linalg.householder_product(reflectors, tau)
             # torch.linalg.qr does not work correctly for zero batch dimension tensors
             # see https://github.com/pytorch/pytorch/issues/50576
             if (A.numel() > 0):
@@ -4484,8 +4484,16 @@ class TestLinalg(TestCase):
             else:
                 self.assertTrue(actual.shape == shape)
 
+            # if tau is empty and A is not the result should be a matrix with ones on the diagonal
+            if (A.numel() > 0):
+                tau_empty = torch.empty(*shape[:-2], 0, dtype=dtype, device=device)
+                identity_mat = torch.zeros_like(reflectors)
+                identity_mat.diagonal(dim1=-1, dim2=-2)[:] = 1
+                actual = torch.linalg.householder_product(reflectors, tau_empty)
+                self.assertEqual(actual, identity_mat)
+
             out = torch.empty_like(A)
-            ans = torch.orgqr(reflectors, tau, out=out)
+            ans = torch.linalg.householder_product(reflectors, tau, out=out)
             self.assertEqual(ans, out)
             if (A.numel() > 0):
                 self.assertEqual(expected, out)
@@ -4501,7 +4509,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
     @skipCUDAIfRocm
-    def test_orgqr_errors_and_warnings(self, device):
+    def test_householder_product_errors_and_warnings(self, device):
         test_cases = [
             # input1 size, input2 size, error regex
             ((10,), (2,), r"input must have at least 2 dimensions"),
@@ -4512,7 +4520,7 @@ class TestLinalg(TestCase):
             a = torch.rand(*a_size, device=device)
             tau = torch.rand(*tau_size, device=device)
             with self.assertRaisesRegex(RuntimeError, error_regex):
-                torch.orgqr(a, tau)
+                torch.linalg.householder_product(a, tau)
 
         # if out tensor with wrong shape is passed a warning is given
         reflectors = torch.randn(3, 3, device=device)
@@ -4520,7 +4528,7 @@ class TestLinalg(TestCase):
         out = torch.empty(2, 3, device=device)
         with warnings.catch_warnings(record=True) as w:
             # Trigger warning
-            torch.orgqr(reflectors, tau, out=out)
+            torch.linalg.householder_product(reflectors, tau, out=out)
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
@@ -4528,23 +4536,23 @@ class TestLinalg(TestCase):
         # dtypes should be safely castable
         out = torch.empty_like(reflectors).to(torch.int)
         with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
-            torch.orgqr(reflectors, tau, out=out)
+            torch.linalg.householder_product(reflectors, tau, out=out)
 
         with self.assertRaisesRegex(RuntimeError, "tau dtype Int does not match input dtype"):
-            torch.orgqr(reflectors, tau.to(torch.int))
+            torch.linalg.householder_product(reflectors, tau.to(torch.int))
 
         if torch.cuda.is_available():
             # device of out and input should match
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty_like(reflectors).to(wrong_device)
             with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
-                torch.orgqr(reflectors, tau, out=out)
+                torch.linalg.householder_product(reflectors, tau, out=out)
 
             # device of tau and input should match
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             tau = tau.to(wrong_device)
             with self.assertRaisesRegex(RuntimeError, "Expected input and tau to be on the same device"):
-                torch.orgqr(reflectors, tau)
+                torch.linalg.householder_product(reflectors, tau)
 
     @precisionOverride({torch.complex64: 5e-6})
     @skipCUDAIfNoMagma
