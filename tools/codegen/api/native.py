@@ -1,7 +1,7 @@
 from tools.codegen.model import *
 
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 from tools.codegen import local
 
 from typing import Union, Sequence, List, Optional
@@ -38,6 +38,10 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
             return ConstRefCType(tensor_type)
     elif str(t) == 'Tensor?[]':
         return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
+    elif str(t) == 'Scalar':
+        return ConstRefCType(BaseCType('Scalar', binds))
+    elif str(t) == 'Scalar?':
+        return ConstRefCType(OptionalCType(BaseCType('Scalar', binds)))
     return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
 def returns_type(rs: Sequence[Return]) -> str:
