@@ -2343,6 +2343,9 @@ class TestQuantizedOps(TestCase):
         custom_module_config = {
             'float_to_observed_custom_module_class': {
                 torch.nn.LSTM: torch.nn.quantizable.LSTM
+            },
+            'observed_to_quantized_custom_module_class': {
+                torch.nn.quantizable.LSTM: torch.nn.quantizable.LSTM
             }
         }
 
@@ -2389,7 +2392,9 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(y_ref, y)
 
                 # Quantize
-                lstm_quantized = torch.quantization.convert(lstm_prepared)
+                lstm_quantized = torch.quantization.convert(
+                    lstm_prepared,
+                    convert_custom_config_dict=custom_module_config)
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)

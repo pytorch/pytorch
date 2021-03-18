@@ -31,6 +31,9 @@ class LSTMCell(torch.nn.Module):
 
     def __init__(self, input_dim: int, hidden_dim: int, bias: bool = True):
         super().__init__()
+
+        self._name_prefix = 'Quantizable'
+
         self.input_size = input_dim
         self.hidden_size = hidden_dim
         self.bias = bias
@@ -71,14 +74,16 @@ class LSTMCell(torch.nn.Module):
         return hy, cy
 
     def initialize_hidden(self, batch_size: int, is_quantized: bool = False) -> Tuple[Tensor, Tensor]:
-        h, c = torch.zeros((batch_size, self.hidden_size)), torch.zeros((batch_size, self.hidden_size))
+        device = self.hgates.weight.device
+        h = torch.zeros((batch_size, self.hidden_size), device=device)
+        c = torch.zeros((batch_size, self.hidden_size), device=device)
         if is_quantized:
             h = torch.quantize_per_tensor(h, scale=1.0, zero_point=0, dtype=torch.quint8)
             c = torch.quantize_per_tensor(c, scale=1.0, zero_point=0, dtype=torch.quint8)
         return h, c
 
     def _get_name(self):
-        return 'QuantizableLSTMCell'
+        return self._name_prefix + 'LSTMCell'
 
     @classmethod
     def from_params(cls, wi, wh, bi=None, bh=None):
@@ -295,6 +300,7 @@ class LSTM(torch.nn.Module):
                  batch_first: bool = False, dropout: float = 0.,
                  bidirectional: bool = False):
         super().__init__()
+        self._name_prefix = 'Quantizable'
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -381,7 +387,7 @@ class LSTM(torch.nn.Module):
         return x, (hx_tensor, cx_tensor)
 
     def _get_name(self):
-        return 'QuantizableLSTM'
+        return self._name_prefix + 'LSTM'
 
     @classmethod
     def from_float(cls, other, qconfig=None):
@@ -398,6 +404,14 @@ class LSTM(torch.nn.Module):
         observed = torch.quantization.prepare(observed, inplace=True)
         return observed
 
-    def from_observed(self, other):
-        return torch.quantization.convert(self, inplace=False,
-                                          remove_qconfig=True)
+    @classmethod
+    def from_observed(cls, other):
+        other = torch.quantization.convert(other, inplace=False, mapping=None,
+                                           remove_qconfig=True,
+                                           convert_custom_config_dict=None)
+        other._name_prefix = 'Quantized'
+        for layer in other.layers:
+            layer.layer_fw.cell._name_prefix = other._name_prefix
+            if layer.bidirectional:
+                layer.layer_bw.cell._name = other._name_prefix
+        return other
