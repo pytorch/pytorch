@@ -67,7 +67,8 @@ class SobolEngine(object):
         self._first_point = (self.quasi / 2 ** self.MAXBIT).reshape(1, -1)
         self.num_generated = 0
 
-    def draw(self, n=1, out=None, dtype=torch.float32):
+    def draw(self, n: int = 1, out: Optional[torch.Tensor] = None,
+             dtype: torch.dtype = torch.float32) -> torch.Tensor:
         r"""
         Function to draw a sequence of :attr:`n` points from a Sobol sequence.
         Note that the samples are dependent on the previous samples. The size
@@ -102,7 +103,8 @@ class SobolEngine(object):
 
         return result
 
-    def draw_base2(self, m, out=None, dtype=torch.float32):
+    def draw_base2(self, m: int, out: Optional[torch.Tensor] = None,
+                   dtype: torch.dtype = torch.float32):
         r"""
         Function to draw a sequence of :attr:`2**m` points from a Sobol sequence.
         Note that the samples are dependent on the previous samples. The size
