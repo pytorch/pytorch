@@ -454,7 +454,7 @@ TCPStore::TCPStore(
           tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
       if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
         waitForWorkers();
-      } 
+      }
 
       // socket to handle requests from server
       listenSocket_ = tcputil::connect(
