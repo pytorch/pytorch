@@ -120,7 +120,8 @@ std::string repro_from_args(const ConvolutionParams& params) {
   const int in_channels = params.weight_size[1] * params.groups;
   const size_t dim = params.input_dim;
   const std::string channels_last_xd = dim == 4 ? "channels_last" : "channels_last_3d";
-  const std::string to_channels_last = params.memory_format == at::MemoryFormat::ChannelsLast \
+  const std::string to_channels_last =
+    ((params.memory_format == at::MemoryFormat::ChannelsLast) || (params.memory_format == at::MemoryFormat::ChannelsLast3d)) \
     ? ".to(memory_format=torch." + channels_last_xd + ")" : "";
 
   std::ostringstream ss;
