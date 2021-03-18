@@ -49,17 +49,6 @@ steps:
     displayName: Install sccache and randomtemp
     condition: not(eq(variables.CUDA_VERSION, ''))
 
-  # Set MKL, sccache and randomtemp environment variables
-  - powershell: |
-      Write-Host "##vso[task.setvariable variable=CMAKE_INCLUDE_PATH;]$(Build.SourcesDirectory)\mkl\include"
-      Write-Host "##vso[task.setvariable variable=LIB;]$(Build.SourcesDirectory)\mkl\lib;$[LIB]"
-      Write-Host "##vso[task.setvariable variable=ADDITIONAL_PATH;]$(Build.SourcesDirectory)\tmp_bin"
-      Write-Host "##vso[task.setvariable variable=SCCACHE_IDLE_TIMEOUT;]1500"
-      Write-Host "##vso[task.setvariable variable=RANDOMTEMP_EXECUTABLE;]$(Build.SourcesDirectory)\tmp_bin\nvcc.exe"
-      Write-Host "##vso[task.setvariable variable=CUDA_NVCC_EXECUTABLE;]$(Build.SourcesDirectory)\tmp_bin\randomtemp.exe"
-      Write-Host "##vso[task.setvariable variable=RANDOMTEMP_BASEDIR;]$(Build.SourcesDirectory)\tmp_bin"
-    displayName: Set MKL, sccache and randomtemp environment variables
-
   # CUDA 11.2's CUB directory conflicts with CUDA 10.2 and 10.1
   # builds, where CUDA 11.2's CUB is injected into non-CUDA
   # 11.2 builds.

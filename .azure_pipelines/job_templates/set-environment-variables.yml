@@ -30,6 +30,17 @@ steps:
             echo "##vso[task.setvariable variable=PYTORCH_BUILD_VERSION;]$(PYTORCH_BUILD_VERSION).cu$(CUDA_VERSION)"
           displayName: Set CUDA-specific build flag for GPU builds
 
+    # Set MKL environment variables
+    - bash: |
+        echo "##vso[task.setvariable variable=CMAKE_LIBRARY_PATH;]/opt/intel/lib:$CMAKE_LIBRARY_PATH"
+        echo "##vso[task.setvariable variable=CMAKE_INCLUDE_PATH;]/opt/intel/include:$CMAKE_INCLUDE_PATH"
+      displayName: Set MKL paths
+
+    # View current environment variables
+    - bash:
+        printenv
+      displayName: Show environment variables
+
   # Environment configuration steps for Windows builds
   - ${{ if contains(parameters.os, 'windows') }}:
     # Set Conda Lib Path
@@ -102,3 +113,19 @@ steps:
           copy "$(CONDA_LIB_PATH)\libiomp*5md.dll" $(Build.SourcesDirectory)\torch\lib
           copy "$(CONDA_LIB_PATH)\uv.dll" $(Build.SourcesDirectory)\torch\lib
         displayName: Copy CUDA/cuDNN/libomp/libuv dlls to torch\lib
+
+    # Set MKL, sccache and randomtemp environment variables
+    - powershell: |
+        Write-Host "##vso[task.setvariable variable=CMAKE_INCLUDE_PATH;]$(Build.SourcesDirectory)\mkl\include"
+        Write-Host "##vso[task.setvariable variable=CMAKE_LIBRARY_PATH;]$(Build.SourcesDirectory)\mkl\lib;$env:CMAKE_LIBRARY_PATH"
+        Write-Host "##vso[task.setvariable variable=ADDITIONAL_PATH;]$(Build.SourcesDirectory)\tmp_bin"
+        Write-Host "##vso[task.setvariable variable=SCCACHE_IDLE_TIMEOUT;]1500"
+        Write-Host "##vso[task.setvariable variable=RANDOMTEMP_EXECUTABLE;]$(Build.SourcesDirectory)\tmp_bin\nvcc.exe"
+        Write-Host "##vso[task.setvariable variable=CUDA_NVCC_EXECUTABLE;]$(Build.SourcesDirectory)\tmp_bin\randomtemp.exe"
+        Write-Host "##vso[task.setvariable variable=RANDOMTEMP_BASEDIR;]$(Build.SourcesDirectory)\tmp_bin"
+      displayName: Set MKL, sccache and randomtemp environment variables
+
+    # View current environment variables
+    - script:
+        set
+      displayName: Show environment variables
