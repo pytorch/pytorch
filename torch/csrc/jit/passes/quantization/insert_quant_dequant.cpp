@@ -353,7 +353,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
         "Expecting FP aten::embedding_bag operator to have 9 inputs");
     // input 0 is the output of prepack op.
     // Last input is added after we account for extra input in 4-bit case.
-    for (auto i = 1; i < inputs_size - 2; ++i) {
+    for (int64_t i = 1; i < inputs_size - 2; ++i) {
       qembedding_bag_inputs.push_back(embedding_bag_inputs[i]);
     }
     // The sparse field in the float operator denotes sparse gradients.
