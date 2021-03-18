@@ -63,7 +63,7 @@ class TestComplex(JitTestCase):
         inf = float("inf")
         NaN = float("nan")
         vals = ([inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
-               +  [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
+                + [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
         complex_vals = tuple(complex(x, y) for x, y in product(vals, vals))
 
         def checkMath(func_name, num_args, ret_type="complex", debug=False, vals=None, args_type=None):
@@ -101,10 +101,7 @@ class TestComplex(JitTestCase):
                 if debug:
                     print("in: ", a)
                     print("out: ", res_python, res_script)
-                # We can't use assertEqual because of a couple of differences:
-                # 1. nan == nan should return true
-                # 2. When python functions throw an exception, we usually want to silently ignore them.
-                # (ie: We want to return `nan` for math.sqrt(-5))
+
                 if res_python != res_script:
                     if isinstance(res_python, Exception):
                         continue
@@ -118,7 +115,7 @@ class TestComplex(JitTestCase):
                            .format(func_name=func_name, a=a, res_python=res_python, res_script=res_script))
                     self.assertEqual(res_python, res_script, msg=msg)
 
-        unary_ops = ['log', 'log10', 'sqrt', 'exp', 'sin', 'cos', 'asin','acos', 'atan', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh']
+        unary_ops = ['log', 'log10', 'sqrt', 'exp', 'sin', 'cos', 'asin', 'acos', 'atan', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh']
         for op in unary_ops:
             checkMath(op, 1)
 
