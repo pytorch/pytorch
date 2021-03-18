@@ -15,11 +15,11 @@ namespace rpc {
 class TestE2EProcessGroup : public TestE2EBase {
  protected:
   void buildRpcAgent() override {
-    c10d::ProcessGroupGloo::Options options;
-    options.devices.push_back(
+    auto options = c10d::ProcessGroupGloo::Options::create();
+    options->devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname(serverAddress));
     std::chrono::milliseconds rpcTimeout(30000);
-    options.timeout = rpcTimeout;
+    options->timeout = rpcTimeout;
 
     // Initialize server rpc agent.
     auto pg = c10::make_intrusive<c10d::ProcessGroupGloo>(
