@@ -24,18 +24,15 @@ static_assert(false);
 int main(int argc, char* argv[]) {
     // This file should only be called inside of `Timer`, so we can adopt a
     // very simple and rigid argument parsing scheme.
-    TORCH_CHECK(argc == 9);
+    TORCH_CHECK(argc == 7);
     TORCH_CHECK(std::string(argv[1]) == "--number");
     auto number = std::stoi(argv[2]);
 
     TORCH_CHECK(std::string(argv[3]) == "--number_warmup");
     auto number_warmup = std::stoi(argv[4]);
 
-    TORCH_CHECK(std::string(argv[5]) == "--repeats");
-    auto repeats = std::stoi(argv[6]);
-
-    TORCH_CHECK(std::string(argv[7]) == "--number_threads");
-    auto number_threads = std::stoi(argv[8]);
+    TORCH_CHECK(std::string(argv[5]) == "--number_threads");
+    auto number_threads = std::stoi(argv[6]);
     torch::set_num_threads(number_threads);
 
     // Setup
@@ -47,15 +44,9 @@ int main(int argc, char* argv[]) {
     }
 
     // Main loop
-    for (int repeat = 0; repeat < repeats; repeat++) {
-        CALLGRIND_TOGGLE_COLLECT;
-
-        for (int i = 0; i < number; i++) {
+    CALLGRIND_TOGGLE_COLLECT;
+    for (int i = 0; i < number; i++) {
         // STMT_TEMPLATE_LOCATION
-        }
-
-        // NB: See note in Module.cpp
-        CALLGRIND_TOGGLE_COLLECT;
-        CALLGRIND_DUMP_STATS;
     }
+    CALLGRIND_TOGGLE_COLLECT;
 }
