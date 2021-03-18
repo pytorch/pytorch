@@ -77,7 +77,7 @@ Tensor arange(
   return at::arange_out(result, start, end, step);
 }
 
-Tensor& arange_out(Tensor& result, const Scalar& end) {
+Tensor& arange_out(const Scalar& end, Tensor& result) {
   return at::arange_out(result, /*start=*/0, end);
 }
 
@@ -112,7 +112,7 @@ void complex_check_dtype(
               " for argument 'out'");
 }
 
-Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
+Tensor& complex_out(const Tensor& real, const Tensor& imag, Tensor& result) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
       .add_output(result)
@@ -132,7 +132,7 @@ Tensor complex(const Tensor& real, const Tensor& imag) {
   return at::complex_out(result, real, imag);
 }
 
-Tensor& polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
+Tensor& polar_out(const Tensor& abs, const Tensor& angle, Tensor& result) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
       .add_output(result)
@@ -183,10 +183,9 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<Sca
   return t;
 }
 
-Tensor& empty_out(
-    Tensor& result,
-    IntArrayRef size,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor& empty_out(IntArrayRef size,
+    c10::optional<c10::MemoryFormat> optional_memory_format,
+    Tensor& result) {
   // Preferably, this argument would not be accepted by _out, but the code
   // generator requires the out and non-out overloads to match exactly
   TORCH_CHECK(
@@ -359,12 +358,12 @@ Tensor eye(int64_t n, int64_t m, const TensorOptions& options) {
   return at::eye_out(tensor, n, m);
 }
 
-Tensor& eye_out_cpu(Tensor& result, int64_t n) {
+Tensor& eye_out_cpu(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
-  return native::eye_out_cpu(result, n, n);
+  return native::eye_out_cpu(n, n, result);
 }
 
-Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
+Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
@@ -420,7 +419,7 @@ Tensor full(IntArrayRef size, const Scalar& fill_value, const TensorOptions& opt
   return result.fill_(fill_value);
 }
 
-Tensor& full_out(Tensor& result, IntArrayRef size, const Scalar& fill_value) {
+Tensor& full_out(IntArrayRef size, const Scalar& fill_value, Tensor& result) {
   TORCH_CHECK(!result.is_sparse(),
     "full(...) is not implemented for sparse layout");
 
@@ -508,7 +507,7 @@ Tensor ones(IntArrayRef size, const TensorOptions& options) {
 }
 
 Tensor& ones_out(Tensor& result, IntArrayRef size) {
-  return native::full_out(result, size, /*fill_value=*/1.);
+  return native::full_out(size, /*fill_value=*/1., result);
 }
 
 Tensor ones_like(

@@ -382,19 +382,19 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
   auto wrapped_outputs = _wrap_outputs(input_vars, non_differentiable, dirty_inputs, raw_output_vars, cdata_if_executable);
 
   for (int i = 0; i < num_outputs; i++) {
-    PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
+    PyObject* obj = PyTuple_GetItem(raw_output, i);
     // Keep the non-tensor outputs as is.
     if (!THPVariable_Check(obj)) {
       if (is_executable) {
         self->output_info.emplace_back();
       }
       Py_INCREF(obj);
-      PyTuple_SET_ITEM(outputs, i, obj);
+      PyTuple_SetItem(outputs, i, obj);
     } else {
       if (is_executable) {
         self->output_info.emplace_back(*wrapped_outputs[i]);
       }
-      PyTuple_SET_ITEM(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
+      PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
     }
   }
 }

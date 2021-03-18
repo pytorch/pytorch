@@ -347,7 +347,11 @@ class TestAutograd(TestCase):
         self.assertIsNone(t3.grad)
 
         # Test gradcheck
-        gradcheck(MyFunction.apply, (t1, t2, scale, t3))
+        def foo(t1, t2, t3):
+            res = MyFunction.apply(t1, t2, scale, t3)
+            return res[1], res[4], res[6]
+
+        gradcheck(foo, (t1, t2, t3))
 
     def test_custom_function_no_tensors(self):
         class MyFunction(Function):

@@ -159,6 +159,12 @@ def checkpoint(function, *args, **kwargs):
     :attr:`function` again, now tracking the intermediate activations, and then
     the gradients are calculated using these activation values.
 
+    The output of :attr:`function` can contain non-Tensor values and gradient
+    recording is only performed for the Tensor values. Note that if the output
+    consists of nested structures (ex: custom objects, lists, dicts etc.)
+    consisting of Tensors, these Tensors nested in custom structures would not
+    be considered as part of autograd.
+
     .. warning::
         Checkpointing currently only supports :func:`torch.autograd.backward`
         and only if its `inputs` argument is not passed. :func:`torch.autograd.grad`

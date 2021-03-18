@@ -147,7 +147,7 @@ struct TORCH_API VariableInfo {
   at::ScalarType scalar_type = at::kFloat;
   std::vector<int64_t> size;
   bool requires_grad;
-  bool is_null;
+  bool is_empty;
 };
 
 // CppNode<T> is the Node in the autograd graph that represents the user defined
@@ -260,8 +260,8 @@ auto Function<T>::apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::v
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {
-    if (is_executable && output) {
-      node->output_info_.emplace_back(*output);
+    if (is_executable && output.has_value()) {
+      node->output_info_.emplace_back(output.value());
     } else if (is_executable) {
       node->output_info_.emplace_back();
     }
