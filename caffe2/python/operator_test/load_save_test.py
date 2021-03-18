@@ -673,15 +673,16 @@ class TestLoadSave(TestLoadSaveBase):
         )
         self.assertTrue(workspace.RunOperatorOnce(save_op))
 
-        # The serialized data for float1 should
-        # be almost half the size of float2
-        blob_chunks = self._read_chunk_info(Path(tmp_file))
-        self.assertEqual(len(blob_chunks["float1"]), 1, blob_chunks["float1"])
-        self.assertEqual(len(blob_chunks["float2"]), 1, blob_chunks["float2"])
-        self.assertLess(
-            blob_chunks["float1"][0].value_size,
-            0.6 * blob_chunks["float2"][0].value_size
-        )
+        # As long as fbgemm was available for us to perform bfloat16 conversion,
+        # the serialized data for float1 should be almost half the size of float2
+        if workspace.has_fbgemm:
+            blob_chunks = self._read_chunk_info(Path(tmp_file))
+            self.assertEqual(len(blob_chunks["float1"]), 1, blob_chunks["float1"])
+            self.assertEqual(len(blob_chunks["float2"]), 1, blob_chunks["float2"])
+            self.assertLess(
+                blob_chunks["float1"][0].value_size,
+                0.6 * blob_chunks["float2"][0].value_size
+            )
 
         self.load_blobs(blob_names, [tmp_file])
 
