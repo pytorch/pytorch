@@ -72,8 +72,8 @@ class CudaFusionManager {
     // We should not call `EraseShapeInformation(graph);`, graph representation
     // does not incorporate static sizes, but just rank of input tensors, which
     // is exactly what we wanted.
-    Canonicalize(graph, false);
-    auto repr = graph->toString(false);
+    auto canonical_graph = Canonicalize(graph, false);
+    auto repr = canonical_graph->toString(false);
 
     // create new graph_cache_ids_ entry if none existed yet;
     if (graph_cache_ids_.count(repr) == 0) {

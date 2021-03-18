@@ -10518,7 +10518,7 @@ TEST(NVFuserTest, FusionBiasGeluBwd_CUDA) {
   fusion.addOutput(t27);
 
   auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
-  at::manual_seed(0);
+  at::manual_seed(1);
   c10::IntArrayRef input_shape{6, 512, 4096};
   c10::IntArrayRef bias_shape{4096};
   auto at_input = at::randn(input_shape, options);
