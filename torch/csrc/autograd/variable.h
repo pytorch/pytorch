@@ -206,7 +206,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::shared_ptr<ForwardGrad> fw_grad_;
 
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
-  std::shared_ptr<hooks_list> cpp_hooks_list;
+  std::shared_ptr<hooks_list> cpp_hooks_list_;
 
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
@@ -526,9 +526,9 @@ private:
   /// any operation on this backward view is valid.
 
   /// The value of the version_counter at the time grad_fn was created. The
-  /// grad_fn field is stale if attr_version != version_counter.current_version().
-  uint32_t attr_version;
-  CreationMeta creation_meta;
+  /// grad_fn field is stale if attr_version_ != version_counter.current_version().
+  uint32_t attr_version_;
+  CreationMeta creation_meta_;
 
 public:
   /// requires_grad is a backward AD field so we only use the view specific logic
@@ -548,22 +548,22 @@ public:
 
   uint32_t get_attr_version() const {
     TORCH_CHECK(has_bw_view(), "attr_version can only exist for backward views.");
-    return attr_version;
+    return attr_version_;
   }
 
   void set_attr_version(uint32_t new_attr_version) {
     TORCH_CHECK(has_bw_view(), "attr_version can only exist for backward views.");
-    attr_version = new_attr_version;
+    attr_version_ = new_attr_version;
   }
 
   CreationMeta get_creation_meta() const {
     TORCH_CHECK(has_bw_view(), "creation_meta can only exist for backward views.");
-    return creation_meta;
+    return creation_meta_;
   }
 
   void set_creation_meta(CreationMeta new_creation_meta) {
     TORCH_CHECK(has_bw_view(), "creation_meta can only exist for backward views.");
-    creation_meta = new_creation_meta;
+    creation_meta_ = new_creation_meta;
   }
 
   bool has_fw_view() const {
