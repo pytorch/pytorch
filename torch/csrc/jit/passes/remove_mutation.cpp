@@ -66,9 +66,12 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
   return new_node;
 }
 
-bool MutationRemover::listAppendFollowingListConstruct(Node* n) {
-  return n->kind() == aten::append &&
-      n->inputs().at(0)->node()->kind() == prim::ListConstruct;
+bool MutationRemover::listMutationFollowingListConstruct(Node* n) {
+  return (
+      (n->kind() == aten::append ||
+       (n->kind() == aten::insert &&
+        n->inputs().at(1)->node()->kind() == prim::Constant)) &&
+      n->inputs().at(0)->node()->kind() == prim::ListConstruct);
 }
 
 bool MutationRemover::tryMakeCreationAndMutationAtomic(
@@ -128,7 +131,7 @@ void MutationRemover::RemoveListMutation(Block* block) {
       RemoveListMutation(sub_block);
     }
 
-    if (!listAppendFollowingListConstruct(node)) {
+    if (!listMutationFollowingListConstruct(node)) {
       continue;
     }
 
@@ -139,15 +142,37 @@ void MutationRemover::RemoveListMutation(Block* block) {
 
     // We rewrite something like:
     // x = {v0}
-    // x.append(v1)
+    // x.append(v1) (or x.insert(0, v1))
     // to:
-    // x = {v0, v1}
+    // x = {v0, v1} (or x = {v1, v0})
     // We can remove x.append from the the alias db list of writes.
     // All other aliasing properties remain valid.
     Node* list_construct = mutated_value->node();
-    list_construct->addInput(node->inputs().at(1));
-    node->output()->replaceAllUsesWith(mutated_value);
-    aliasDb_->writeIndex_->erase(node);
+    switch (node->kind()) {
+      case aten::append:
+        list_construct->addInput(node->inputs().at(1));
+        break;
+      case aten::insert: {
+        auto pos = toIValue(node->inputs().at(1))->toInt();
+        // insert to neg position is the same as insert to 0
+        // insert beyond current list length is the same as append
+        pos = std::min(
+            static_cast<size_t>(std::max(pos, 0L)),
+            list_construct->inputs().size());
+        list_construct->insertInput(pos, node->inputs().at(2));
+        break;
+      }
+      default:
+        TORCH_INTERNAL_ASSERT(false);
+    }
+
+    // process use-chain and aliasing of node output
+    bool has_output = (node->outputs().size() > 0);
+    if (has_output) {
+      node->output()->replaceAllUsesWith(mutated_value);
+      aliasDb_->writeIndex_->erase(node);
+    }
+
     node->destroy();
 
     // TODO: don't strictly need to reset write cache, evaluate on models
