@@ -126,6 +126,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.cudnn_batch_norm,
         torch.cudnn_convolution,
         torch.cudnn_convolution_transpose,
+        torch.cudnn_convolution_relu,
+        torch.cudnn_convolution_add_relu,
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
         torch.empty,
