@@ -2328,7 +2328,6 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,
-           supports_tensor_out=False,
            test_inplace_grad=False,
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
