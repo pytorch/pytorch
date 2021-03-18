@@ -532,8 +532,7 @@ void populateRemoteProfiledEvents(
     }
   }
   // find __start_profile event
-  bool cudaProfilingEnabled =
-      profilingConfig.state == ProfilerState::CUDA;
+  bool cudaProfilingEnabled = profilingConfig.state == ProfilerState::CUDA;
   const LegacyEvent* profilerStart = nullptr;
 
   for (auto& e : profiledEvents) {
@@ -557,8 +556,12 @@ void populateRemoteProfiledEvents(
       if (e.hasCuda()) {
         if (e.kind() == EventKind::PushRange) {
           startEvents[e.handle()] = &e;
-          e.setCudaUs(0);
-        } else if (e.kind() == EventKind::PopRange) {
+        }
+      }
+    }
+    for (auto& e : profiledEvents) {
+      if (e.hasCuda()) {
+        if (e.kind() == EventKind::PopRange) {
           auto it = startEvents.find(e.handle());
           if (it != startEvents.end()) {
             e.setCudaUs(it->second->cudaElapsedUs(e));
@@ -566,6 +569,8 @@ void populateRemoteProfiledEvents(
             TORCH_WARN("Found a pop event without a corresponding push event");
             e.setCudaUs(0);
           }
+        } else {
+          e.setCudaUs(0);
         }
       }
     }
