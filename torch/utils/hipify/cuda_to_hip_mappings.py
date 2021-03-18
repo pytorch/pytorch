@@ -7734,7 +7734,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cub::Sum", ("hipcub::Sum", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::TransformInputIterator", ("hipcub::TransformInputIterator", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("cub::WarpReduce", ("hipcub::WarpReduce", CONV_SPECIAL_FUNC, API_RUNTIME)),
-#         ("namespace cub", ("namespace hipcub", CONV_SPECIAL_FUNC, API_RUNTIME)),
         ("nvtxMark", ("roctxMark", CONV_OTHER, API_ROCTX)),
         ("nvtxMarkA", ("roctxMarkA", CONV_OTHER, API_ROCTX)),
         ("nvtxRangePushA", ("roctxRangePushA", CONV_OTHER, API_ROCTX)),
