@@ -100,7 +100,7 @@ static void update2ndGraph(Module& module){
     module._ivalue()->compilation_unit()->unsafeRemoveMethod(method_name);
     auto fn = module._ivalue()->compilation_unit()->create_function(method_name, graph);
     module.type()->addMethod(fn);
-    printf("\n------ Print second module after: \n%s ------", module.dump_to_str(true, false, false, 0).c_str());
+    printf("\n------ Print second module after: \n%s ------", module.dump_to_str(true, false, false).c_str());
 }
 
 void NeZha_TrySplitModule(
@@ -108,7 +108,7 @@ void NeZha_TrySplitModule(
     Module& module_2nd) {
 
     printf("\n------ Start NeZha_TrySplitModule ------");
-    printf("\n------ Print first module before: \n%s ------", module_1st.dump_to_str(true, false, true, 0).c_str());
+    printf("\n------ Print first module before: \n%s ------", module_1st.dump_to_str(true, false, true).c_str());
     auto graph_bak = module_1st.get_method("forward").graph()->copy();
     updateGraph(graph_bak);
     const auto method_name = QualifiedName(*module_1st.type()->name(), "forward");
@@ -117,7 +117,7 @@ void NeZha_TrySplitModule(
     auto fn = module_1st._ivalue()->compilation_unit()->create_function(
         method_name, graph_bak);
     module_1st.type()->addMethod(fn);
-    printf("\n------ Print first module after: \n%s ------", module_1st.dump_to_str(true, false, true, 0).c_str());
+    printf("\n------ Print first module after: \n%s ------", module_1st.dump_to_str(true, false, true).c_str());
 
     update2ndGraph(module_2nd);
 }

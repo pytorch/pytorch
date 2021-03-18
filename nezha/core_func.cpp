@@ -73,7 +73,7 @@ static void update2ndGraph(torch::jit::Module& module){
     module._ivalue()->compilation_unit()->unsafeRemoveMethod(method_name);
     auto fn = module._ivalue()->compilation_unit()->create_function(method_name, graph);
     module.type()->addMethod(fn);
-    printf("\n------ Print second module after: \n%s ------", module.dump_to_str(true, false, false, 0).c_str());
+    printf("\n------ Print second module after: \n%s ------", module.dump_to_str(true, false, false).c_str());
 }
 
 std::vector<torch::jit::Module> split_modules(
