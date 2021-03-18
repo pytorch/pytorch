@@ -72,7 +72,6 @@ def _check_supported(a: torch.Tensor, b: torch.Tensor) -> None:
 def _assert_attributes_equal(
     a: torch.Tensor,
     b: torch.Tensor,
-    /,
     *,
     check_device: bool = True,
     check_dtype: bool = True,
@@ -149,7 +148,7 @@ def _equalize_attributes(a: torch.Tensor, b: torch.Tensor) -> Tuple[torch.Tensor
 _Trace = namedtuple("Trace", ("total", "abs", "rel", "idx", "diff", "a", "b"))
 
 
-def _trace_mismatches(a: torch.Tensor, b: torch.Tensor, /, mismatches: torch.Tensor) -> _Trace:
+def _trace_mismatches(a: torch.Tensor, b: torch.Tensor, mismatches: torch.Tensor) -> _Trace:
     """Traces mismatches and returns the found information.
 
     The returned named tuple has the following fields:
@@ -220,7 +219,6 @@ def _assert_values_equal(a: torch.Tensor, b: torch.Tensor):
 def _assert_values_allclose(
     a: torch.Tensor,
     b: torch.Tensor,
-    /,
     *,
     rtol: float = 1e-5,
     atol: float = 1e-8,
@@ -255,7 +253,6 @@ def _assert_values_allclose(
 def assert_tensors_equal(
     a: torch.Tensor,
     b: torch.Tensor,
-    /,
     *,
     check_device: bool = True,
     check_dtype: bool = True,
@@ -306,7 +303,6 @@ def assert_tensors_equal(
 def assert_tensors_allclose(
     a: torch.Tensor,
     b: torch.Tensor,
-    /,
     *,
     rtol: Optional[float] = None,
     atol: Optional[float] = None,
