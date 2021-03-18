@@ -50,11 +50,6 @@ jobs:
       - name: Pull docker image
         run: |
           docker pull "${DOCKER_IMAGE}"
-      - name: Test s3 capabilities
-        run: |
-          touch hello.txt
-          aws s3 cp ./hello.txt s3://${SCCACHE_BUCKET}/hello.txt
-          aws s3 rm s3://${SCCACHE_BUCKET}/hello.txt
       - name: Build PyTorch
         run: |
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
