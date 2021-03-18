@@ -283,28 +283,12 @@ typedef void (*ParallelCallee)(int index, int8_t* packed_data);
 void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
   // TODO: preserve the func type.
   ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
-  // TODO: use absl::BlockingCounter or similar if less overhead is needed.
-  std::mutex m;
-  int remaining_tasks = stop - start; // GUARDED_BY m
-  std::condition_variable cv; // GUARDED_BY m
-  for (int index = start; index < stop; index++) {
-    if (index != stop - 1) {
-      at::intraop_launch([&, index]() {
-        callee(index, packed_data);
-        std::unique_lock<std::mutex> l(m);
-        remaining_tasks--;
-        cv.notify_one();
-      });
-      USE_TRIGGER(llvm_codegen_parallel_dispatched);
-    } else {
-      // the current thread handles the last one.
+  at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
+    for (int index = f_begin; index < f_end; index++) {
       callee(index, packed_data);
-      USE_TRIGGER(llvm_codegen_parallel_dispatched);
-      std::unique_lock<std::mutex> l(m);
-      remaining_tasks--;
-      cv.wait(l, [&] { return remaining_tasks == 0; });
     }
-  }
+  });
+  USE_TRIGGER(llvm_codegen_parallel_dispatched);
 }
 
 } // namespace tensorexpr

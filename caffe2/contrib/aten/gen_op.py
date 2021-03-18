@@ -84,7 +84,7 @@ RETURN_MAP = {
 # attribute list. Most of these call runtime functions defined in the
 # template class.
 ARGUMENT_MAP = {
-    'Scalar': 'at::Scalar ${arg} = readScalarAttribute("${arg}");',
+    'const Scalar &': 'at::Scalar ${arg} = readScalarAttribute("${arg}");',
     'bool': 'bool ${arg} = readAttribute<int64_t>("${arg}");',
     'int': 'int ${arg} = readAttribute<int64_t>("${arg}");',
     'double': 'double ${arg} = readAttribute<float>("${arg}");',
