@@ -2331,9 +2331,6 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_inplace_grad=False,
            skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/52437
-               SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                        device_type='cuda', dtypes=[torch.complex128]),
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.cfloat, torch.cdouble]),
                SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
@@ -2344,6 +2341,9 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_scatter,
+           skips=(
+               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
+           ),
            supports_tensor_out=False),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
