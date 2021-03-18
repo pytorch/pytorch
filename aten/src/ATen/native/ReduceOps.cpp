@@ -840,9 +840,9 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scala
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0).to<double>();
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "norm only supports CPU AND CUDA device type, got: ", self.device().type());
+              "norm only supports CPU and CUDA device types, but got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
-              "norm only supports strided layout, got: ", self.layout());
+              "norm only supports strided layout, but got: ", self.layout());
 
   ScalarType in_dtype = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
