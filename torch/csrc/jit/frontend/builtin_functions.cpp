@@ -200,7 +200,7 @@ struct BuiltinFunctionRegistry {
   }
 
   void loadBuiltinFunctions() {
-    for (auto scalar : {"float", "int"}) {
+    for (auto scalar : {"float", "int", "complex"}) {
       TemplateEnv env;
       env.s("Scalar", scalar);
       loadSource(scalar_operators_source.format(env), "aten");
@@ -213,7 +213,7 @@ struct BuiltinFunctionRegistry {
         str_pair("triple", "3"),
         str_pair("quadruple", "4"),
     };
-    for (const auto scalar : {"float", "int"}) {
+    for (const auto scalar : {"float", "int", "complex"}) {
       for (const auto& pair : name_len) {
         TemplateEnv env;
         env.s("Scalar", scalar);

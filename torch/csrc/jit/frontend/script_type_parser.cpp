@@ -161,9 +161,9 @@ c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
         << "Subscripted type must be a type identifier";
 
   auto value_name = Var(typ).name().name();
-  if (value_name != "float" && value_name != "int")
+  if (value_name != "float" && value_name != "int" && value_name != "complex")
     throw ErrorReport(subscript.value().range())
-        << "Broadcastable lists only supported for int or float";
+        << "Broadcastable lists only supported for int, float, and complex";
 
   auto elem_ptr = string_to_type_lut().find(value_name);
   AT_ASSERT(elem_ptr != string_to_type_lut().end());

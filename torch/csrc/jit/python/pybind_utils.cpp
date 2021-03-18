@@ -101,7 +101,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::ListType: {
       const auto& elem_type = type->expectRef<ListType>().getElementType();
       switch (elem_type->kind()) {
-        // allows single int/float to be broadcasted to a fixed size list
+        // allows single int/float/complex to be broadcasted to a fixed size list
         case TypeKind::IntType:
           if (!N || !py::isinstance<py::int_>(obj)) {
             return IValue(py::cast<std::vector<int64_t>>(obj));
@@ -120,6 +120,20 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           } else {
             double value = py::cast<double>(obj);
             c10::List<double> repeated;
+            repeated.reserve(*N);
+            for (int i = 0; i < *N; ++i) {
+              repeated.push_back(value);
+            }
+            return repeated;
+          }
+        case TypeKind::ComplexType:
+          if (!N || !PyComplex_CheckExact(obj.ptr())) {
+            auto vec = py::cast<std::vector<std::complex<double>>>(obj);
+            return IValue(std::vector<c10::complex<double>>(vec.begin(), vec.end()));
+          } else {
+            auto c_obj = py::cast<std::complex<double>>(obj.ptr());
+            auto value = static_cast<c10::complex<double>>(c_obj);
+            c10::List<c10::complex<double>> repeated;
             repeated.reserve(*N);
             for (int i = 0; i < *N; ++i) {
               repeated.push_back(value);

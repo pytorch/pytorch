@@ -1483,12 +1483,16 @@ graph(%Ra, %Rb):
         def broadcast(a, b):
             return a + b
 
-        x = torch.randn(3, 1, 5, requires_grad=True)
-        y = torch.randn(4, 1, 8, 5, requires_grad=True)
+        def test_fn(dtype, type_str):
+            x = torch.randn(3, 1, 5, dtype=dtype, requires_grad=True)
+            y = torch.randn(4, 1, 8, 5, dtype=dtype, requires_grad=True)
 
-        graph = torch.jit.script(broadcast).graph
-        torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
-        FileCheck().check("Double(4, 3, 8, 5, strides=[120, 40, 5, 1], device=cpu)").run(str(graph))
+            graph = torch.jit.script(broadcast).graph
+            torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
+            FileCheck().check(type_str + "(4, 3, 8, 5, strides=[120, 40, 5, 1], device=cpu)").run(str(graph))
+
+        test_fn(torch.double, "Double")
+        test_fn(torch.cdouble, "ComplexDouble")
 
     def test_shape_analysis_unsqueeze_in_loop(self):
         input_str = """graph(%x.1 : Tensor):
@@ -10267,6 +10271,18 @@ dedent """
             print(float_fn(1.0, (1.0, 1.0, 1.0)))
 
         @torch.jit.script
+        def complex_fn(x, y):
+            # type: (complex, BroadcastingList3[complex]) -> List[complex]
+            return y
+        self.assertEqual(complex_fn(2.0 + 2j, 1.0 + 2j), complex_fn(2.0+4j, [1.0 + 2j, 1.0 + 2j, 1.0 + 2j]))
+        self.assertEqual(complex_fn(2.0 + 4j, 1.0 + 2j), complex_fn(1.0 + 2j, (1.0 + 2j, 1.0 + 2j, 1.0 + 2j)))
+
+        # @torch.jit.script
+        # def float_fn_call():
+        #     print(complex_fn(1.0, 1.0))
+        #     print(complex_fn(1.0, (1.0, 1.0, 1.0)))
+
+        @torch.jit.script
         def int_fn(x):
             # type: (BroadcastingList3[int]) -> List[int]
             return x
@@ -13428,6 +13444,22 @@ dedent """
             return opt_list(x) + broadcast_opt_list(x)
 
         self.assertEqual(opt_list_tuple_caller((2., 3.)), 4)
+
+        @torch.jit.script
+        def opt_list(x):
+            # type: (Optional[List[complex]]) -> int
+            return 2
+
+        @torch.jit.script
+        def broadcast_opt_list(x):
+            # type: (Optional[BroadcastingList2[complex]]) -> int
+            return 2
+
+        @torch.jit.script
+        def opt_list_tuple_caller(x):
+            # type: (Tuple[complex, complex]) -> int
+            return opt_list(x) + broadcast_opt_list(x)
+        self.assertEqual(opt_list_tuple_caller((2.3 - 5.2j, -3.2j)), 4)
 
     def test_lhs_indexing(self):
         def foo(a, b):

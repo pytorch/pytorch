@@ -799,8 +799,12 @@ class TestScriptPy3(JitTestCase):
         def sum_f(x: BroadcastingList2[float]) -> float:
             return x[0] + x[1]
 
+        def sum_c(x: BroadcastingList2[complex]) -> complex:
+            return x[0] + x[1]
+
         self.assertTrue(torch.jit.script(sum_i)(4) == 8)
         self.assertTrue(torch.jit.script(sum_f)(4.5) == 9.)
+        self.assertTrue(torch.jit.script(sum_c)(4.5 + 2j) == 9 + 4j)
 
 
 if __name__ == '__main__':
