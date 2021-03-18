@@ -4,10 +4,13 @@ import argparse
 import bz2
 import json
 import subprocess
+import sys
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
-from tools.stats_utils.s3_stat_parser import (get_S3_bucket_readonly, get_cases, Report)
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+
+from tools.stats_utils.s3_stat_parser import (Report, get_cases,
+                                              get_S3_bucket_readonly)
 
 
 def get_git_commit_history(
@@ -144,7 +147,7 @@ def make_lines(
         return ['(no reports in S3)']
 
 
-def display_history(
+def history_lines(
     *,
     bucket: Any,
     commits: List[Tuple[str, datetime]],
@@ -156,7 +159,7 @@ def display_history(
     sha_length: int,
     mode: str,
     digits: int,
-) -> None:
+) -> Iterator[str]:
     prev_time = datetime.now()
     for sha, time in commits:
         if (prev_time - time).total_seconds() < delta * 3600:
@@ -195,7 +198,7 @@ def display_history(
                 test_name=test_name,
             )
         for line in lines:
-            print(f"{time} {sha[:sha_length]} {line}".rstrip())
+            yield f"{time} {sha[:sha_length]} {line}".rstrip()
 
 
 class HelpFormatter(
@@ -205,10 +208,8 @@ class HelpFormatter(
     pass
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        __file__,
-        description='''
+def description() -> str:
+    return r'''
 Display the history of a test.
 
 Each line of (non-error) output starts with the timestamp and SHA1 hash
@@ -220,8 +221,8 @@ In multiline mode, each line next includes the name of a CircleCI job,
 followed by the time of the specified test in that job at that commit.
 Example:
 
-    $ tools/test_history.py multiline --ref=594a66 --sha-length=8 \\
-      test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
+    $ tools/test_history.py multiline --ref=594a66 --sha-length=8 test_set_dir \
+       pytorch_linux_xenial_py3_6_gcc5_4_test pytorch_linux_xenial_py3_6_gcc7_test
     2021-02-10 03:13:34 594a66d7 pytorch_linux_xenial_py3_6_gcc5_4_test 0.36s
     2021-02-10 03:13:34 594a66d7 pytorch_linux_xenial_py3_6_gcc7_test 0.573s errored
     2021-02-10 02:13:25 9c0caf03 pytorch_linux_xenial_py3_6_gcc5_4_test 0.819s
@@ -236,7 +237,7 @@ Example:
 
 Another multiline example, this time with the --all flag:
 
-    $ tools/test_history.py multiline --all --ref=321b9 --delta=12 --sha-length=8 \\
+    $ tools/test_history.py multiline --all --ref=321b9 --delta=12 --sha-length=8 \
       test_qr_square_many_batched_complex_cuda
     2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 424.284s
     2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
@@ -251,8 +252,8 @@ In columns mode, the name of the job isn't printed, but the order of the
 columns is guaranteed to match the order of the jobs passed on the
 command line. Example:
 
-    $ tools/test_history.py columns --ref=3cf783 --sha-length=8 \\
-      test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
+    $ tools/test_history.py columns --ref=3cf783 --sha-length=8 test_set_dir \
+      pytorch_linux_xenial_py3_6_gcc5_4_test pytorch_linux_xenial_py3_6_gcc7_test
     2021-02-10 04:18:50 3cf78395    0.644s    0.312s
     2021-02-10 03:13:34 594a66d7    0.360s  errored
     2021-02-10 02:13:25 9c0caf03    0.819s    0.449s
@@ -266,7 +267,13 @@ command line. Example:
 Minor note: in columns mode, a blank cell means that no report was found
 in S3, while the word "absent" means that a report was found but the
 indicated test was not found in that report.
-''',
+'''
+
+
+def parse_args(raw: List[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        __file__,
+        description=description(),
         formatter_class=HelpFormatter,
     )
     parser.add_argument(
@@ -325,19 +332,25 @@ indicated test was not found in that report.
         help='names of jobs to display columns for, in order',
         default=[],
     )
-    args = parser.parse_args()
+    args = parser.parse_args(raw)
 
-    jobs = None if args.all else args.job
-    if jobs == []:  # no jobs, and not None (which would mean all jobs)
+    args.jobs = None if args.all else args.job
+    if args.jobs == []:  # no jobs, and not None (which would mean all jobs)
         parser.error('No jobs specified.')
+
+    return args
+
+
+def run(raw: List[str]) -> Iterator[str]:
+    args = parse_args(raw)
 
     commits = get_git_commit_history(path=args.pytorch, ref=args.ref)
     bucket = get_S3_bucket_readonly('ossci-metrics')
 
-    display_history(
+    return history_lines(
         bucket=bucket,
         commits=commits,
-        jobs=jobs,
+        jobs=args.jobs,
         filename=args.file,
         suite_name=args.suite,
         test_name=args.test,
@@ -346,6 +359,11 @@ indicated test was not found in that report.
         sha_length=args.sha_length,
         digits=args.digits,
     )
+
+
+def main() -> None:
+    for line in run(sys.argv[1:]):
+        print(line)
 
 
 if __name__ == "__main__":
