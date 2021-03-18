@@ -139,7 +139,7 @@ class NormalizeOperators(AnnotateTypesWithSchema):
 
         traced = NormalizeOperators(traced).transform()
     """
-    binary_magic_method_remap : Dict[Callable[[Any, Any], Any], Callable[[Any, Any], Any]]= {
+    binary_magic_method_remap : Dict[Callable[[Any, Any], Any], Callable[[Any, Any], Any]] = {
         operator.add : torch.add,
         operator.mul : torch.mul,
         operator.sub : torch.sub,
@@ -158,7 +158,7 @@ class NormalizeOperators(AnnotateTypesWithSchema):
         # FIXME: placeholders do not get `Tensor` type by default
         #
         # Normalize operators according to the magic methods implemented on tensors here:
-        # https://github.com/pytorch/pytorch/blob/28c5d90b679c6b38bf4183ec99f16d933c2f1bcd/tools/autograd/templates/python_variable_methods.cpp#L1137
+        # https://github.com/pytorch/pytorch/blob/28c5d90b679c6b38bf4183ec99f16d933c2f1bcd/tools/autograd/templates/python_variable_methods.cpp#L1137 # noqa: B950
 
         assert callable(target)
 
