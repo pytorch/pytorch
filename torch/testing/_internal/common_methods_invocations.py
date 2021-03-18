@@ -2344,7 +2344,7 @@ op_db: List[OpInfo] = [
            skips=(
                SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
            ),
-           supports_tensor_out=False),
+           supports_out=False),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
