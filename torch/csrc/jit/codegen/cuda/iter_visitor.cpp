@@ -364,6 +364,42 @@ namespace {
 // Looks for and returns all values in between dependencies and vals, including
 // them.
 struct Dependencies : public IterVisitor {
+  std::unordered_set<Val*> dependencies_;
+  std::unordered_set<Val*> vals_;
+
+  std::vector<Statement*> next(Val* v) override {
+    if (dependencies_.find(v) != dependencies_.end())
+      return std::vector<Statement*>();
+    return IterVisitor::next(v);
+  }
+
+  void handle(Val* val) override {
+    vals_.emplace(val);
+  }
+
+  Dependencies(
+      std::unordered_set<Val*> _dependencies,
+      const std::vector<Val*>& of)
+      : dependencies_(std::move(_dependencies)) {
+    traverseFrom(of[0]->fusion(), of, false);
+  };
+
+ public:
+  static std::unordered_set<Val*> getAllVals(
+      const std::unordered_set<Val*>& dependencies,
+      const std::vector<Val*>& of) {
+    if (of.empty()) {
+      return std::unordered_set<Val*>();
+    }
+
+    Dependencies deps(dependencies, of);
+    return deps.vals_;
+  }
+};
+
+// Looks for and returns all values in between dependencies and vals, including
+// them.
+struct Dependencies2 : public IterVisitor {
  private:
   //! A given set of dependency Vals
   const std::unordered_set<Val*> dependencies_;
@@ -410,7 +446,7 @@ struct Dependencies : public IterVisitor {
     }
   }
 
-  Dependencies(
+  Dependencies2(
       std::unordered_set<Val*> _dependencies,
       const std::vector<Val*>& of)
       : dependencies_(std::move(_dependencies)) {
@@ -425,7 +461,7 @@ struct Dependencies : public IterVisitor {
       return {};
     }
 
-    Dependencies deps(dependencies, of);
+    Dependencies2 deps(dependencies, of);
     return deps.vals_;
   }
 };
@@ -631,10 +667,16 @@ std::deque<std::deque<Val*>> DependencyCheck::getAllUseChains(Val* producer) {
   return DependencyChains::getAllUseChains(producer);
 }
 
-std::vector<Val*> DependencyCheck::getAllValsBetween(
+std::unordered_set<Val*> DependencyCheck::getAllValsBetween(
     const std::unordered_set<Val*>& dependencies,
     const std::vector<Val*>& of) {
   return Dependencies::getAllVals(dependencies, of);
+}
+
+std::vector<Val*> DependencyCheck::getAllValsBetween2(
+    const std::unordered_set<Val*>& dependencies,
+    const std::vector<Val*>& of) {
+  return Dependencies2::getAllVals(dependencies, of);
 }
 
 std::unordered_set<Val*> DependencyCheck::getAllOutputsOf(
