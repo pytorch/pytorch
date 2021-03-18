@@ -4854,7 +4854,7 @@ class NNTestCase(TestCase):
         return res
 
     def _numerical_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True, jacobian_parameters=True):
-        def fw(input):
+        def fw(*input):
             return self._forward(module, input).detach()
 
         res: Tuple[torch.Tensor, ...] = tuple()

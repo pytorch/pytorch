@@ -150,7 +150,7 @@ def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
                     inp = [x.to_mkldnn()]
                 else:
                     inp = inputs
-                return tuple(a.clone() for a in _as_tuple(fn(inp)))
+                return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
             orig = x[idx].item()
             x[idx] = orig - delta
@@ -331,9 +331,7 @@ def check_outputs(outputs) -> None:
 def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> bool:
     # When there are no differentiable outputs, numerical gradient for a function is
     # expected to be zero.
-    def fn(input):
-        return _as_tuple(func(*input))
-    jacobians_inputs_outputs = get_numerical_jacobian(fn, inputs, func_out, eps=eps)
+    jacobians_inputs_outputs = get_numerical_jacobian(func, inputs, func_out, eps=eps)
     for jacobian_inputs in jacobians_inputs_outputs:
         for jacobian in jacobian_inputs:
             if torch.ne(jacobian, 0).sum() > 0:
@@ -622,11 +620,8 @@ def gradcheck(
     if not outputs:
         return check_no_differentiable_outputs(fail_test, func, tupled_inputs, _as_tuple(func_out), eps)
 
-    def fn(input):
-        return _as_tuple(func(*input))
-
-    numerical = transpose(get_numerical_jacobian(fn, tupled_inputs, outputs, eps=eps))
-    numerical_from_imag_grad_out = transpose(get_numerical_jacobian(fn, tupled_inputs, outputs, eps=eps, grad_out=1j))
+    numerical = transpose(get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps))
+    numerical_from_imag_grad_out = transpose(get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps, grad_out=1j))
 
     # recompute because get_numerical_jacobians
     outputs = _differentiable_outputs(func(*tupled_inputs))
