@@ -26,17 +26,16 @@ class TORCH_API LoopNest {
  public:
   // A constructor for building a LoopNest from a list of Tensors
   LoopNest(const std::vector<Tensor*>& output_tensors);
-
-  // A constructor for building a LoopNest from a pre-baked Stmt and meta-info
-  // TODO: Nuke intermediate_bufs_ from here if they can be deduced.
   LoopNest(
-      Stmt* stmt,
-      const std::unordered_set<const Buf*>& output_bufs,
-      const std::unordered_set<const Buf*>& intermediate_bufs)
-      : root_stmt_(stmt),
-        output_bufs_(output_bufs),
-        intermediate_bufs_(intermediate_bufs) {}
+      const std::vector<Tensor*>& output_tensors,
+      const std::vector<Tensor*>& tensors_to_compute);
 
+  // A constructor for building a LoopNest from an Stmt and a list of output
+  // buffers.
+  LoopNest(Stmt* stmt, const std::unordered_set<const Buf*>& output_bufs);
+
+  // A constructor for building a LoopNest from another loopnest. It clones the
+  // other loopnest's stmt.
   LoopNest(const LoopNest& other);
 
   Stmt* root_stmt() const {
@@ -44,9 +43,47 @@ class TORCH_API LoopNest {
   }
 
   std::vector<For*> getLoopStmtsFor(Tensor*) const;
+  std::vector<For*> getLoopStmtsFor(const Buf*) const;
   std::vector<For*> getLoopStmtsFor(Stmt*) const;
   Stmt* getLoopBodyFor(Tensor*) const;
+  Stmt* getLoopBodyFor(const Buf*) const;
   bool hasLoopBodyFor(Tensor*) const;
+
+  // Returns the For stmt that is immediately enclosing the given stmt.
+  static For* getParentLoop(const Stmt* st);
+
+  // Returns the list of For stmts corresponding to the loopnest that is
+  // enclosing the given stmt.
+  static std::vector<For*> getEnclosingLoopNest(const Stmt* st);
+
+  // Returns a list of all Stmts that write to the given buf.
+  std::vector<const Stmt*> getAllWritesToBuf(const Buf*) const;
+
+  // The following methods return the For loops that contain writes to
+  // the given buf.
+  //
+  // For example, consider the following code:
+  //   for i1
+  //     for j1
+  //       a[i1,j1] =
+  //   for i2
+  //     for j2
+  //       for k2
+  //         a[i2,j2] =
+  //     for j3
+  //       a[i2,j3] =
+
+  // Returns a list of For loops which directly contain a Stmt that writes
+  // to buf.
+  // For the above example:
+  //   getAllInnermostLoopsWritingToBuf(a) => {j1, k2, j3}
+  std::vector<For*> getAllInnermostLoopsWritingToBuf(const Buf*) const;
+
+  // Returns a list of For loopnests which contain a Stmt that writes to
+  // the given buf. Each loopnest here is a vector For loops.
+  // For the above example:
+  //   getAllLoopNestsWritingToBuf(a) => {{i1,j1}, {i2,j2,k2}, {i2,j3}}
+  std::vector<std::vector<For*>> getAllLoopNestsWritingToBuf(const Buf*) const;
 
   static void vectorize(For*);
   Stmt* simplify();
@@ -114,23 +151,21 @@ class TORCH_API LoopNest {
   // for the LLVM backend, when no reductions are involved.
   void vectorizeInnerLoops();
 
-  const std::unordered_set<const Buf*> getInputBufs() {
-    return input_bufs_;
-  }
-  const std::unordered_set<const Buf*> getOutputBufs() {
+  const std::unordered_set<const Buf*> getInputBufs() const;
+  const std::unordered_set<const Buf*> getOutputBufs() const {
     return output_bufs_;
   }
 
  private:
-  std::vector<Tensor*> findAllNeededTensors(
-      const std::vector<Tensor*>& tensors);
+  void initialize(
+      const std::vector<Tensor*>& output_tensors,
+      const std::vector<Tensor*>& tensors_to_compute);
   Stmt* insertAllocFree(Stmt* stmt);
+  const std::unordered_set<const Buf*> getIntermediateBufs() const;
 
   Stmt* root_stmt_;
 
-  std::unordered_set<const Buf*> input_bufs_;
   std::unordered_set<const Buf*> output_bufs_;
-  std::unordered_set<const Buf*> intermediate_bufs_;
 };
 
 TORCH_API Stmt* FlattenIndexes(Stmt* s);

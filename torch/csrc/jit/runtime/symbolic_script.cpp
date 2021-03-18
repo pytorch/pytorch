@@ -408,7 +408,7 @@ const std::vector<std::string> functions = {
                    weight : Tensor,
                    bias : Optional[Tensor]):
             result = torch.linear(input, weight, bias)
- 
+
             def backward(grad_output):
                 if bias is not None:
                    grad_bias = grad_output._grad_sum_to_size(bias.size())
@@ -512,11 +512,14 @@ const std::vector<std::string> functions = {
             result = torch.lerp(self, end, weight)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             end_size = torch._size_if_not_equal(end.size(), result.size())
+            weight_size = torch._size_if_not_equal(weight.size(), result.size())
 
             def backward(grad_output):
                 grad_self = (grad_output * (1 - weight))._grad_sum_to_size(self_size)
                 grad_end = (grad_output * weight)._grad_sum_to_size(end_size)
-                return grad_self, grad_end, None
+                grad_weight = (grad_output * (end - self))._grad_sum_to_size(weight_size)
+                return grad_self, grad_end, grad_weight
+
             return result, backward
 
         def reshape(self,

@@ -14,6 +14,7 @@ coverage.xml
 .gradle
 .hypothesis
 .mypy_cache
+.pytorch-test-times
 */*.pyc
 */*.so*
 */**/__pycache__
@@ -237,6 +238,7 @@ caffe2/version.py
 # setup.py intermediates
 .eggs
 caffe2.egg-info
+MANIFEST
 
 # Atom/Watchman required file
 .watchmanconfig

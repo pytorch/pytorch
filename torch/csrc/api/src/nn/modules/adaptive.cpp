@@ -159,7 +159,7 @@ Tensor AdaptiveLogSoftmaxWithLossImpl::predict(const Tensor& input) {
 }
 
 void AdaptiveLogSoftmaxWithLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::AdaptiveLogSoftmaxWithLoss"; 
+  stream << "torch::nn::AdaptiveLogSoftmaxWithLoss";
 }
 
 } // namespace nn

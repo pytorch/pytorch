@@ -4,11 +4,10 @@ import argparse
 import bz2
 import json
 import subprocess
+from collections import defaultdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
-
-import boto3  # type: ignore[import]
-import botocore  # type: ignore[import]
+from typing import Any, Dict, List, Optional, Set, Tuple
+from tools.stats_utils.s3_stat_parser import (get_S3_bucket_readonly, get_cases, Report)
 
 
 def get_git_commit_history(
@@ -25,108 +24,124 @@ def get_git_commit_history(
     ]
 
 
-def get_ossci_jsons(
-    *,
-    bucket: Any,
-    sha: str,
-    jobs: Optional[List[str]]
-) -> Dict[str, Any]:
-    prefix = f"test_time/{sha}/"
-    objs: List[Any]
+def get_object_summaries(*, bucket: Any, sha: str) -> Dict[str, List[Any]]:
+    summaries = list(bucket.objects.filter(Prefix=f'test_time/{sha}/'))
+    by_job = defaultdict(list)
+    for summary in summaries:
+        job = summary.key.split('/')[2]
+        by_job[job].append(summary)
+    return dict(by_job)
+
+def get_jsons(
+    jobs: Optional[List[str]],
+    summaries: Dict[str, Any],
+) -> Dict[str, Report]:
     if jobs is None:
-        objs = list(bucket.objects.filter(Prefix=prefix))
+        keys = sorted(summaries.keys())
     else:
-        objs = []
-        for job in jobs:
-            objs.extend(list(bucket.objects.filter(Prefix=f"{prefix}{job}/")))
-    # initial pass to avoid downloading more than necessary
-    # in the case where there are multiple reports for a single sha+job
-    uniqueified = {obj.key.split('/')[2]: obj for obj in objs}
+        keys = [job for job in jobs if job in summaries]
     return {
-        job: json.loads(bz2.decompress(obj.get()['Body'].read()))
-        for job, obj in uniqueified.items()
+        job: json.loads(bz2.decompress(summaries[job].get()['Body'].read()))
+        for job in keys
     }
-
-
-def get_case(
-    *,
-    data: Any,
-    suite_name: str,
-    test_name: str,
-) -> Optional[Dict[str, Any]]:
-    suite = data.get('suites', {}).get(suite_name)
-    if suite:
-        testcase_times = {
-            case['name']: case
-            for case in suite['cases']
-        }
-        return testcase_times.get(test_name)
-    return None
-
-
-def case_status(case: Dict[str, Any]) -> Optional[str]:
-    for k in {'errored', 'failed', 'skipped'}:
-        if case[k]:
-            return k
-    return None
 
 
 def make_column(
     *,
-    data: Any,
-    suite_name: str,
+    data: Optional[Report],
+    filename: Optional[str],
+    suite_name: Optional[str],
     test_name: str,
     digits: int,
-) -> str:
+) -> Tuple[str, int]:
     decimals = 3
     num_length = digits + 1 + decimals
-    case = get_case(data=data, suite_name=suite_name, test_name=test_name)
-    if case:
-        status = case_status(case)
-        if status:
-            return f'{status.rjust(num_length)} '
+    if data:
+        cases = get_cases(
+            data=data,
+            filename=filename,
+            suite_name=suite_name,
+            test_name=test_name
+        )
+        if cases:
+            case = cases[0]
+            status = case['status']
+            omitted = len(cases) - 1
+            if status:
+                return f'{status.rjust(num_length)} ', omitted
+            else:
+                return f'{case["seconds"]:{num_length}.{decimals}f}s', omitted
         else:
-            return f'{case["seconds"]:{num_length}.{decimals}f}s'
-    return ' ' * (num_length + 1)
+            return f'{"absent".rjust(num_length)} ', 0
+    else:
+        return ' ' * (num_length + 1), 0
 
 
 def make_columns(
     *,
-    bucket: Any,
-    sha: str,
     jobs: List[str],
-    suite_name: str,
+    jsons: Dict[str, Report],
+    omitted: Dict[str, int],
+    filename: Optional[str],
+    suite_name: Optional[str],
     test_name: str,
     digits: int,
 ) -> str:
-    jsons = get_ossci_jsons(bucket=bucket, sha=sha, jobs=jobs)
-    return ' '.join(
-        make_column(
-            data=jsons.get(job, {}),
+    columns = []
+    total_omitted = 0
+    total_suites = 0
+    for job in jobs:
+        data = jsons.get(job)
+        column, omitted_suites = make_column(
+            data=data,
+            filename=filename,
             suite_name=suite_name,
             test_name=test_name,
             digits=digits,
         )
-        for job in jobs
-    )
+        columns.append(column)
+        total_suites += omitted_suites
+        if job in omitted:
+            total_omitted += omitted[job]
+    if total_omitted > 0:
+        columns.append(f'({total_omitted} S3 reports omitted)')
+    if total_suites > 0:
+        columns.append(f'({total_suites} matching suites omitted)')
+    return ' '.join(columns)
 
 
 def make_lines(
     *,
-    bucket: Any,
-    sha: str,
-    jobs: Optional[List[str]],
-    suite_name: str,
+    jobs: Set[str],
+    jsons: Dict[str, Report],
+    omitted: Dict[str, int],
+    filename: Optional[str],
+    suite_name: Optional[str],
     test_name: str,
 ) -> List[str]:
-    jsons = get_ossci_jsons(bucket=bucket, sha=sha, jobs=jobs)
     lines = []
     for job, data in jsons.items():
-        case = get_case(data=data, suite_name=suite_name, test_name=test_name)
-        if case:
-            status = case_status(case)
-            lines.append(f'{job} {case["seconds"]} {status or ""}')
-    return lines
+        cases = get_cases(
+            data=data,
+            filename=filename,
+            suite_name=suite_name,
+            test_name=test_name,
+        )
+        if cases:
+            case = cases[0]
+            status = case['status']
+            line = f'{job} {case["seconds"]}s{f" {status}" if status else ""}'
+            if job in omitted and omitted[job] > 0:
+                line += f' ({omitted[job]} S3 reports omitted)'
+            if len(cases) > 1:
+                line += f' ({len(cases) - 1} matching suites omitted)'
+            lines.append(line)
+        elif job in jobs:
+            lines.append(f'{job} (test not found)')
+    if lines:
+        return lines
+    else:
+        return ['(no reports in S3)']
 
 
 def display_history(
@@ -134,9 +149,11 @@ def display_history(
     bucket: Any,
     commits: List[Tuple[str, datetime]],
     jobs: Optional[List[str]],
-    suite_name: str,
+    filename: Optional[str],
+    suite_name: Optional[str],
     test_name: str,
     delta: int,
+    sha_length: int,
     mode: str,
     digits: int,
 ) -> None:
@@ -145,13 +162,24 @@ def display_history(
         if (prev_time - time).total_seconds() < delta * 3600:
             continue
         prev_time = time
-        lines: List[str]
+        summaries = get_object_summaries(bucket=bucket, sha=sha)
+        # we assume that get_object_summaries doesn't return empty lists
+        jsons = get_jsons(
+            jobs=jobs,
+            summaries={job: l[0] for job, l in summaries.items()},
+        )
+        omitted = {
+            job: len(l) - 1
+            for job, l in summaries.items()
+            if len(l) > 1
+        }
         if mode == 'columns':
             assert jobs is not None
             lines = [make_columns(
-                bucket=bucket,
-                sha=sha,
                 jobs=jobs,
+                jsons=jsons,
+                omitted=omitted,
+                filename=filename,
                 suite_name=suite_name,
                 test_name=test_name,
                 digits=digits,
@@ -159,21 +187,87 @@ def display_history(
         else:
             assert mode == 'multiline'
             lines = make_lines(
-                bucket=bucket,
-                sha=sha,
-                jobs=jobs,
+                jobs=set(jobs or []),
+                jsons=jsons,
+                omitted=omitted,
+                filename=filename,
                 suite_name=suite_name,
                 test_name=test_name,
             )
         for line in lines:
-            print(f"{time} {sha} {line}".rstrip())
+            print(f"{time} {sha[:sha_length]} {line}".rstrip())
 
 
-if __name__ == "__main__":
+class HelpFormatter(
+    argparse.ArgumentDefaultsHelpFormatter,
+    argparse.RawDescriptionHelpFormatter,
+):
+    pass
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(
         __file__,
-        description='Display the history of a test.',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description='''
+Display the history of a test.
+
+Each line of (non-error) output starts with the timestamp and SHA1 hash
+of the commit it refers to, in this format:
+
+    YYYY-MM-DD hh:mm:ss 0123456789abcdef0123456789abcdef01234567
+
+In multiline mode, each line next includes the name of a CircleCI job,
+followed by the time of the specified test in that job at that commit.
+Example:
+
+    $ tools/test_history.py multiline --ref=594a66 --sha-length=8 \\
+      test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
+    2021-02-10 03:13:34 594a66d7 pytorch_linux_xenial_py3_6_gcc5_4_test 0.36s
+    2021-02-10 03:13:34 594a66d7 pytorch_linux_xenial_py3_6_gcc7_test 0.573s errored
+    2021-02-10 02:13:25 9c0caf03 pytorch_linux_xenial_py3_6_gcc5_4_test 0.819s
+    2021-02-10 02:13:25 9c0caf03 pytorch_linux_xenial_py3_6_gcc7_test 0.449s
+    2021-02-10 02:09:14 602434bc pytorch_linux_xenial_py3_6_gcc5_4_test 0.361s
+    2021-02-10 02:09:14 602434bc pytorch_linux_xenial_py3_6_gcc7_test 0.454s
+    2021-02-10 02:09:10 2e35fe95 (no reports in S3)
+    2021-02-10 02:09:07 ff73be7e (no reports in S3)
+    2021-02-10 02:05:39 74082f0d (no reports in S3)
+    2021-02-09 23:42:29 0620c96f pytorch_linux_xenial_py3_6_gcc5_4_test 0.414s (1 S3 reports omitted)
+    2021-02-09 23:42:29 0620c96f pytorch_linux_xenial_py3_6_gcc7_test 0.377s (1 S3 reports omitted)
+
+Another multiline example, this time with the --all flag:
+
+    $ tools/test_history.py multiline --all --ref=321b9 --delta=12 --sha-length=8 \\
+      test_qr_square_many_batched_complex_cuda
+    2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 424.284s
+    2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
+    2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_test 402.572s
+    2021-01-07 02:04:56 321b9883 pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test 287.164s
+    2021-01-06 12:58:28 fcb69d2e pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 436.732s
+    2021-01-06 12:58:28 fcb69d2e pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
+    2021-01-06 12:58:28 fcb69d2e pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_test 407.616s
+    2021-01-06 12:58:28 fcb69d2e pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test 287.044s
+
+In columns mode, the name of the job isn't printed, but the order of the
+columns is guaranteed to match the order of the jobs passed on the
+command line. Example:
+
+    $ tools/test_history.py columns --ref=3cf783 --sha-length=8 \\
+      test_set_dir pytorch_linux_xenial_py3_6_gcc{5_4,7}_test
+    2021-02-10 04:18:50 3cf78395    0.644s    0.312s
+    2021-02-10 03:13:34 594a66d7    0.360s  errored
+    2021-02-10 02:13:25 9c0caf03    0.819s    0.449s
+    2021-02-10 02:09:14 602434bc    0.361s    0.454s
+    2021-02-10 02:09:10 2e35fe95
+    2021-02-10 02:09:07 ff73be7e
+    2021-02-10 02:05:39 74082f0d
+    2021-02-09 23:42:29 0620c96f    0.414s    0.377s (2 S3 reports omitted)
+    2021-02-09 23:27:53 33afb5f1    0.381s    0.294s
+
+Minor note: in columns mode, a blank cell means that no report was found
+in S3, while the word "absent" means that a report was found but the
+indicated test was not found in that report.
+''',
+        formatter_class=HelpFormatter,
     )
     parser.add_argument(
         'mode',
@@ -193,8 +287,14 @@ if __name__ == "__main__":
     parser.add_argument(
         '--delta',
         type=int,
-        help='minimum number of hours between rows',
-        default=12,
+        help='minimum number of hours between commits',
+        default=0,
+    )
+    parser.add_argument(
+        '--sha-length',
+        type=int,
+        help='length of the prefix of the SHA1 hash to show',
+        default=40,
     )
     parser.add_argument(
         '--digits',
@@ -208,7 +308,11 @@ if __name__ == "__main__":
         help='(multiline) ignore listed jobs, show all jobs for each commit',
     )
     parser.add_argument(
-        'suite',
+        '--file',
+        help='name of the file containing the test',
+    )
+    parser.add_argument(
+        '--suite',
         help='name of the suite containing the test',
     )
     parser.add_argument(
@@ -223,18 +327,26 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    commits = get_git_commit_history(path=args.pytorch, ref=args.ref)
+    jobs = None if args.all else args.job
+    if jobs == []:  # no jobs, and not None (which would mean all jobs)
+        parser.error('No jobs specified.')
 
-    s3 = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
-    bucket = s3.Bucket('ossci-metrics')
+    commits = get_git_commit_history(path=args.pytorch, ref=args.ref)
+    bucket = get_S3_bucket_readonly('ossci-metrics')
 
     display_history(
         bucket=bucket,
         commits=commits,
-        jobs=None if args.all else args.job,
+        jobs=jobs,
+        filename=args.file,
         suite_name=args.suite,
         test_name=args.test,
         delta=args.delta,
         mode=args.mode,
+        sha_length=args.sha_length,
         digits=args.digits,
     )
+
+
+if __name__ == "__main__":
+    main()

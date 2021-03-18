@@ -1,5 +1,6 @@
 import enum
 
+import torch
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.fx.quantize import is_activation_post_process
@@ -25,24 +26,27 @@ def getattr_from_fqn(gm: GraphModule, fqn: str) -> Any:
         cur_val = getattr(cur_val, part)
     return cur_val
 
-class NodeIOType(enum.Enum):
-    FP32 = enum.auto()  # all inputs and outputs fp32
-    INT8 = enum.auto()  # all inputs and outputs int8
+class NodeInputType(enum.Enum):
+    FP32 = enum.auto()  # first input fp32
+    INT8 = enum.auto()  # first input int8
     # TODO(future PRs): dynamic quant, fake quant, etc
 
 
-def get_node_io_type(node: Node, gm: GraphModule) -> NodeIOType:
+def get_node_input_type(node: Node, gm: GraphModule) -> NodeInputType:
     if node.op == 'call_function':
         fp32_fun_target_names = ('torch.nn.functional', 'torch.nn')
+        # hack alert: this is not ready for production
+        # TODO(future PR): use a real mapping
+        fp32_funs = (torch.cat,)
         int8_fun_target_names = ('torch._ops.quantized',)
         # For now, hacky check to see which op is in which namespace
         # TODO(future PR): use a real mapping
-        if node.target.__module__ in fp32_fun_target_names:
-            return NodeIOType.FP32
+        if node.target.__module__ in fp32_fun_target_names or node.target in fp32_funs:
+            return NodeInputType.FP32
         else:
             assert node.target.__module__ in int8_fun_target_names, \
-                'unknown node target %s' % node.target
-            return NodeIOType.INT8
+                'unknown node target %s with module %s' % (node.target, node.target.__module__)
+            return NodeInputType.INT8
     else:
         assert node.op == 'call_module'
         assert isinstance(node.target, str)
@@ -50,11 +54,11 @@ def get_node_io_type(node: Node, gm: GraphModule) -> NodeIOType:
         # For now, hacky check to see which mod is in which namespace
         # TODO(future PR): use a real mapping
         if mod.__module__.startswith('torch.nn.modules'):
-            return NodeIOType.FP32
+            return NodeInputType.FP32
         else:
             assert mod.__module__.startswith('torch.nn.q'), \
                 'unknown node target %s' % mod
-            return NodeIOType.INT8
+            return NodeInputType.INT8
 
 def return_first_non_observer_node(
     node: Node,

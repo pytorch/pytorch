@@ -435,7 +435,7 @@ std::string AliasDb::toGraphviz() const {
   dot << toString();
   dot << "*/\n";
 
-  dot << "digraph fusion_ir {\n"
+  dot << "digraph alias_db {\n"
       << "  rankdir=LR\n"
       << "  node [shape=rect, color=gray];\n"
       << "  edge [color=black];\n";
@@ -555,8 +555,15 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
+    case prim::BroadcastMKLDNNTensors: {
+      makePointerTo(node->outputs().at(0), node->inputs().at(0));
+      makePointerTo(node->outputs().at(1), node->inputs().at(1));
+      return;
+    }
     // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:
+    case prim::MKLDNNGroup:
+    case prim::ConstantMKLDNNTensor:
     case prim::StaticSubgraph:
     case prim::Constant:
     case prim::AutogradZero:

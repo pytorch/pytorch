@@ -17,11 +17,6 @@ C10_DEFINE_bool(
     "of throwing an exception.");
 
 namespace c10 {
-namespace enforce_detail {
-/* implicit */ EnforceFailMessage::EnforceFailMessage(std::string&& msg) {
-  msg_ = new std::string(std::move(msg));
-}
-} // namespace enforce_detail
 
 namespace {
 std::function<string(void)>* GetFetchStackTrace() {
@@ -49,6 +44,15 @@ void ThrowEnforceNotMet(
   throw e;
 }
 
+void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const char* msg,
+    const void* caller) {
+  ThrowEnforceNotMet(file, line, condition, std::string(msg), caller);
+}
+
 void ThrowEnforceFiniteNotMet(
     const char* file,
     const int line,
@@ -59,6 +63,15 @@ void ThrowEnforceFiniteNotMet(
       file, line, condition, msg, (*GetFetchStackTrace())(), caller);
 }
 
+void ThrowEnforceFiniteNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const char* msg,
+    const void* caller) {
+
+  ThrowEnforceFiniteNotMet(file, line, condition, std::string(msg), caller);
+}
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
 Error::Error(SourceLocation source_location, std::string msg)
