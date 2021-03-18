@@ -357,7 +357,7 @@
   self: logcumsumexp_backward(grad, self, result, dim)
 
 - name: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-  self: cumprod_backward(grad.to(self.scalar_type()), self, dim)
+  self: cumprod_backward(grad.to(self.scalar_type()), self, dim, result)
 
 - name: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   self: cumsum_backward(grad.to(self.scalar_type()), dim)
@@ -609,13 +609,13 @@
   other: zeros_like(other)
 
 - name: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor
-  self: grad * (1 - weight.toDouble())
-  end: grad * weight
+  self: "weight.isComplex() ? grad * (1 - weight.conj().toComplexDouble()) : grad * (1 - weight.toDouble())"
+  end: grad * weight.conj()
 
 - name: lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor
-  self: grad * (1 - weight)
-  end: grad * weight
-  weight: grad * (end - self)
+  self: grad * (1 - weight).conj()
+  end: grad * weight.conj()
+  weight: grad * (end - self).conj()
 
 - name: lgamma(Tensor self) -> Tensor
   self: grad * digamma(self)

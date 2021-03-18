@@ -88,12 +88,6 @@ enum class DispatchKey : uint8_t {
   QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
   QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
-  ComplexCPU, // lives out of tree at
-  // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
-  ComplexCUDA, // and
-  // https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
-  // tested at test/cpp_extensions/complex_registration_extension.cpp
-  // TODO: Remove Complex dispatch keys when Complex is moved in tree
 
   // This backend is to support custom RNGs; it lets you go
   // to a different kernel if you pass in a generator that is not a
