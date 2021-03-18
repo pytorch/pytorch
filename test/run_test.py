@@ -435,7 +435,7 @@ def pull_job_times_from_S3() -> Dict[str, float]:
     return calculate_job_times(s3_reports)
 
 
-def get_S3_job_times() -> Dict[str, float]:
+def get_past_job_times() -> Dict[str, float]:
     if os.path.exists(TEST_TIMES_FILE):
         with open(TEST_TIMES_FILE) as file:
             test_times_json: JobTimeJSON = json.load(file)
@@ -471,7 +471,7 @@ def get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
 
 
 def get_shard(which_shard: int, num_shards: int, tests: List[str]) -> List[str]:
-    jobs_to_times = get_S3_job_times()
+    jobs_to_times = get_past_job_times()
 
     # Got no stats from S3, returning early to save runtime
     if len(jobs_to_times) == 0:
@@ -484,7 +484,7 @@ def get_shard(which_shard: int, num_shards: int, tests: List[str]) -> List[str]:
 
 
 def get_slow_tests_based_on_S3() -> List[str]:
-    jobs_to_times: Dict[str, float] = get_S3_job_times()
+    jobs_to_times: Dict[str, float] = get_past_job_times()
 
     # Got no stats from S3, returning early to save runtime
     if len(jobs_to_times) == 0:
@@ -760,7 +760,7 @@ def parse_args():
         help='additional arguments passed through to unittest, e.g., '
              'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
     parser.add_argument(
-        '--export-historic-test-times',
+        '--export-past-test-times',
         nargs='?',
         type=str,
         const=TEST_TIMES_FILE,
@@ -1037,9 +1037,9 @@ def export_S3_test_times(test_times_filename: str, test_times: Dict[str, float])
 def main():
     options = parse_args()
 
-    test_times_filename = options.export_historic_test_times
+    test_times_filename = options.export_past_test_times
     if test_times_filename:
-        print(f'Exporting historic test times from S3 to {test_times_filename}, no tests will be run.')
+        print(f'Exporting past test times from S3 to {test_times_filename}, no tests will be run.')
         export_S3_test_times(test_times_filename, pull_job_times_from_S3())
         return
 
