@@ -435,7 +435,7 @@ std::string AliasDb::toGraphviz() const {
   dot << toString();
   dot << "*/\n";
 
-  dot << "digraph fusion_ir {\n"
+  dot << "digraph alias_db {\n"
       << "  rankdir=LR\n"
       << "  node [shape=rect, color=gray];\n"
       << "  edge [color=black];\n";
