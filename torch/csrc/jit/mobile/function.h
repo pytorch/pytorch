@@ -19,7 +19,7 @@ class Function {
   c10::IValue operator()(Stack& stack) const;
   const std::string& name() const;
   const c10::QualifiedName& qualname() const;
-  void append_instruction(OpCode op, int X, int N);
+  void append_instruction(OpCode op, int X, int N, int64_t dbg_handle=-1);
   bool append_operator(
       const std::string& name,
       const std::string& overload_name,
@@ -36,6 +36,8 @@ class Function {
 
   void setSchema(c10::FunctionSchema schema);
   const at::optional<c10::FunctionSchema>& getSchema() const;
+
+  int64_t getCurrentDebugHandle() const;
 
  private:
   c10::QualifiedName name_;

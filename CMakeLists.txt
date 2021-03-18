@@ -264,6 +264,7 @@ if(NOT DEFINED USE_VULKAN)
       "ANDROID" OFF)
 endif()
 
+option(USE_SOURCE_DEBUG_ON_MOBILE "Enable exception throwing on mobile with model backtrace" ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
@@ -650,6 +651,8 @@ endif()
 if(USE_PYTORCH_METAL)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL")
 endif()
+
+string(APPEND CMAKE_CXX_FLAGS " -DSYMBOLICATE_MOBILE_DEBUG_HANDLE")
 
 # ---[ Allowlist file if allowlist is specified
 include(cmake/Allowlist.cmake)

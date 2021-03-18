@@ -3,6 +3,12 @@
 
 namespace torch {
 namespace jit {
+size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
+  return (std::hash<uintptr_t>()(
+        reinterpret_cast<uintptr_t>(key.source().get())) ^
+      std::hash<size_t>()(key.start()) ^
+      std::hash<size_t>()(key.end()));
+}
 
 c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
     const SourceRange& range) {

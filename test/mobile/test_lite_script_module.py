@@ -4,11 +4,26 @@ from torch.utils.mobile_optimizer import *
 import io
 from typing import NamedTuple
 from collections import namedtuple
+import inspect
 
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 class TestLiteScriptModule(TestCase):
+
+    def getScriptExportImportCopy(self, m, save_mobile_debug_info=True, also_test_file=False):
+        m_scripted = torch.jit.script(m)
+
+        if not also_test_file:
+            buffer = io.BytesIO(m_scripted._save_to_buffer_for_lite_interpreter(_save_mobile_debug_info=save_mobile_debug_info))
+            buffer.seek(0)
+            mobile_module = _load_for_lite_interpreter(buffer)
+            return mobile_module
+
+        with TemporaryFileName() as fname:
+            m_scripted._save_for_lite_interpreter(fname, _save_mobile_debug_info=save_mobile_debug_info)
+            mobile_module = _load_for_lite_interpreter(fname)
+            return mobile_module
 
     def test_load_mobile_module(self):
         class MyTestModule(torch.nn.Module):
@@ -373,6 +388,70 @@ class TestLiteScriptModule(TestCase):
         }
         actual_ops = _export_operator_list(mobile_module)
         self.assertEqual(actual_ops, expected_ops)
+
+    def test_source_range_simple(self):
+
+        class FooTest(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, w):
+                return torch.mm(x, w.t())
+
+        ft = FooTest()
+        loaded = self.getScriptExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest)
+
+        with self.assertRaisesRegex(RuntimeError, 'test_lite_script_module.py\", line {}'.format(lineno + 3)):
+            loaded(torch.rand(3, 4), torch.rand(30, 40))
+
+    def test_source_range_raise_exception(self):
+
+        class FooTest2(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self):
+                raise RuntimeError('foo')
+
+        _, lineno = inspect.getsourcelines(FooTest2)
+
+        with self.assertRaisesRegex(RuntimeError, 'test_lite_script_module.py\", line {}'.format(lineno + 3)):
+            ft = FooTest2()
+            loaded = self.getScriptExportImportCopy(ft)
+            loaded()
+
+    def test_source_range_function_call(self):
+        class FooTest3(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def add_method(self, x, w):
+                return x + w
+
+            @torch.jit.script_method
+            def forward(self, x, y, w):
+                x = x * y
+                x = x + 2
+                return self.add_method(x, w)
+
+        ft = FooTest3()
+        loaded = self.getScriptExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest3)
+
+        with self.assertRaisesRegex(RuntimeError, 'test_lite_script_module.py\", line {}'.format(lineno + 3)):
+            loaded(torch.rand(3, 4), torch.rand(3, 4), torch.rand(30, 40))
+
+    def test_source_range_no_debug_info(self):
+
+        class FooTest4(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, w):
+                return torch.mm(x, w.t())
+
+        ft = FooTest4()
+        loaded = self.getScriptExportImportCopy(ft, save_mobile_debug_info=False)
+
+        try:
+            loaded(torch.rand(3, 4), torch.rand(30, 40))
+        except RuntimeError as e:
+            error_message = f"{e}"
+        self.assertTrue("test_lite_script_module.py" not in error_message)
+
 
 if __name__ == '__main__':
     run_tests()

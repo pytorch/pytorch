@@ -8,8 +8,10 @@ namespace torch {
 namespace jit {
 namespace mobile {
 using Stack = std::vector<c10::IValue>;
+using DebugHandle = int64_t;
 struct Code {
   std::vector<Instruction> instructions_;
+  std::vector<DebugHandle> debug_handles_;
   std::vector<c10::OperatorName> op_names_;
   std::vector<std::function<void(Stack&)>> operators_;
   std::vector<c10::IValue> constants_;
@@ -23,10 +25,12 @@ struct InterpreterState {
 
  private:
   std::shared_ptr<Code> code_;
+  size_t current_pc_;
   c10::IValue& reg(size_t reg);
   std::vector<c10::IValue> registers_;
 };
 
+int64_t getInterpretersCurrentPC();
 } // namespace mobile
 } // namespace jit
 } // namespace torch

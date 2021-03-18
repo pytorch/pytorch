@@ -22,12 +22,13 @@ const std::string& Function::name() const {
   return name_.name();
 }
 
-void Function::append_instruction(OpCode op, int X, int N) {
+void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
   TORCH_CHECK(
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
   code_->instructions_.emplace_back(op, X, N);
+  code_->debug_handles_.emplace_back(dbg_handle);
 }
 
 bool Function::append_operator(
@@ -128,6 +129,11 @@ c10::IValue Function::operator()(Stack& stack) const {
 
 const std::shared_ptr<Code> Function::get_code() const {
   return code_;
+}
+
+int64_t Function::getCurrentDebugHandle() const {
+  size_t pc = getInterpretersCurrentPC();
+  return (pc < code_->debug_handles_.size()) ? code_->debug_handles_[pc] : -1;
 }
 
 } // namespace mobile
