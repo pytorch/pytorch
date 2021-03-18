@@ -23,10 +23,14 @@
 #     differentiable subcomponents.
 #
 from .gen_trace_type import (
-    MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, MANUAL_AUTOGRAD,
-    declare_returned_variables, tie_return_values, get_return_value, type_wrapper_name,
+    MANUAL_BACKEND, MANUAL_AUTOGRAD_AND_TRACER, declare_returned_variables,
+    tie_return_values, get_return_value, type_wrapper_name,
 )
-from .gen_inplace_or_view_type import emit_view_body, get_view_info, is_tensor_list_type, unpack_args, get_base_name
+from .gen_inplace_or_view_type import (
+    get_view_info, is_tensor_list_type, unpack_args, get_base_name,
+    use_derived, modifies_arguments, WRAPPER_REGISTRATION, TMP_VAR, METHOD_DEFINITION,
+    ASSIGN_RETURN_VALUE, gen_formals,
+)
 
 from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
@@ -87,7 +91,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum',
-    'eig',
+    'eig', 'lerp'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -189,18 +193,6 @@ METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${type_wrapper_name}(${formals}) ;
 """)
 
-METHOD_DEFINITION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) {
-  ${type_definition_body}
-}
-""")
-
-WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl("${unqual_operator_name_with_overload}",
-       TORCH_FN(${class_type}::${type_wrapper_name})
-);
-""")
-
 DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
 """)
@@ -233,19 +225,15 @@ at::redispatch::${api_name}(${unpacked_args})""")
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
 DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate("""\
-auto tmp = ([&]() {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+auto ${tmp_var} = ([&]() {
+  ${guard}
   return ${base_type_call};
 })();
 """)
 
-ASSIGN_RETURN_VALUE = CodeTemplate("""\
-${return_values} = ${rhs_value};
-""")
-
 DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
 {
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  ${guard}
   ${base_type_call};
 }
 """)
@@ -300,16 +288,6 @@ def gen_variable_type(
     gen_variable_type_shard(fm, fns_with_diff_infos, 'VariableType.cpp', 'VariableTypeEverything.cpp')
 
 @with_native_function
-def gen_formals(f: NativeFunction) -> str:
-    return ', '.join(
-        # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
-        # See Note [Plumbing Keys Through The Dispatcher] for details.
-        ['c10::DispatchKeySet ks'] +
-        [f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
-         for a in f.func.schema_order_arguments()]
-    )
-
-@with_native_function
 def gen_wrapper_registration(f: NativeFunction) -> str:
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,
@@ -326,19 +304,19 @@ def gen_variable_type_shard(
     type_definitions: List[str] = []
     wrapper_registrations: List[str] = []
 
-    for fn in fns_with_diff_infos:
+    filtered_fns_with_diff_infos = list(filter(use_derived, fns_with_diff_infos))
+    for fn in filtered_fns_with_diff_infos:
         f = fn.func
         name = cpp.name(f.func)
         formals = gen_formals(f)
 
-        if name not in MANUAL_AUTOGRAD and dispatch_strategy(fn) == 'use_derived':
-            type_definitions.append(METHOD_DEFINITION.substitute(
-                return_type=cpp.returns_type(f.func.returns),
-                type_wrapper_name=type_wrapper_name(f),
-                type_definition_body=emit_body(fn),
-                formals=formals,
-            ))
-            wrapper_registrations.append(gen_wrapper_registration(f))
+        type_definitions.append(METHOD_DEFINITION.substitute(
+            return_type=cpp.returns_type(f.func.returns),
+            type_wrapper_name=type_wrapper_name(f),
+            type_definition_body=emit_body(fn),
+            formals=formals,
+        ))
+        wrapper_registrations.append(gen_wrapper_registration(f))
 
         # See Note [Manual Backend kernels]
         assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
@@ -353,7 +331,7 @@ def gen_variable_type_shard(
             assert f.is_abstract, msg
 
     fm.write_with_template(output_name, template_name, lambda: {
-        'generated_comment': '@' + f'generated from {fm.template_dir}/{template_name}',
+        'generated_comment': f'@generated from {fm.template_dir}/{template_name}',
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
     })
@@ -597,9 +575,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         rhs_value: Optional[str] = None
         if not any(r.type.is_tensor_like() for r in f.func.returns):
             rhs_value = var
-        elif view_info is not None:
-            as_view_call, rhs_value = emit_view_body(fn, var)
-            call += as_view_call
         else:
             rhs_value = f'std::move({var})'
         assert rhs_value is not None
@@ -645,14 +620,19 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         unpacked_args = [b.name for b in unpacked_bindings]
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
+        if get_view_info(fn) is not None or modifies_arguments(f):
+            guard = 'at::AutoNonVariableTypeMode guard;'
+        else:
+            guard = 'at::AutoDispatchBelowInplaceOrView guard;'
+
         if not modifies_arguments(f) and not returns_void:
             call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
-                base_type_call=base_type_call)
+                base_type_call=base_type_call, tmp_var=TMP_VAR, guard=guard)
 
-            call += wrap_output(f, unpacked_bindings, 'tmp')
+            call += wrap_output(f, unpacked_bindings, TMP_VAR)
         else:
             call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
-                base_type_call=base_type_call)
+                base_type_call=base_type_call, guard=guard)
         call = enforce_same_tensorimpl_and_storage(call, unpacked_bindings)
         return call
 
@@ -683,11 +663,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             return []
         return [f'check_inplace({arg.name}, _any_requires_grad);' for arg in differentiable_outputs]
 
-    def emit_increment_version(f: NativeFunction) -> List[str]:
-        if not modifies_arguments(f):
-            return []
-        return [f'increment_version({r});' for r in cpp.return_names(f)]
-
     body: List[str] = []
     unpack_args_stats, unpacked_bindings = unpack_args(f)
 
@@ -699,7 +674,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     body.append(declare_returned_variables(f))
 
     body.append(emit_call(f, unpacked_bindings))
-    body.extend(emit_increment_version(f))
     if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
@@ -716,6 +690,3 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     if not returns_void:
         body.append(f'return {get_return_value(f)};')
     return body
-
-def modifies_arguments(f: NativeFunction) -> bool:
-    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]

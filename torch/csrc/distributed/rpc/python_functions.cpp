@@ -157,15 +157,16 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
             }
 
             // toPyIValue might throw and we need to record the appropriate exception.
+            IValue ivalue;
             try {
-              auto ivalue = toPyIValue(message);
+              ivalue = toPyIValue(message);
             } catch (std::exception& e) {
               child->setErrorIfNeeded(std::current_exception());
               return;
             }
 
             child->markCompletedWithDataPtrs(
-                toPyIValue(message), std::move(dataPtrs));
+                ivalue, std::move(dataPtrs));
           }
         }));
     return child;
