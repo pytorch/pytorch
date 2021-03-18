@@ -209,7 +209,6 @@ else
   ( ! get_exit_code python setup.py bad_argument )
   ( ! get_exit_code python setup.py clean] )
   ( ! get_exit_code python setup.py clean bad_argument )
-  mkdir -p build
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 

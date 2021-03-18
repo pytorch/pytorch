@@ -55,8 +55,6 @@ jobs:
           SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
           MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
           MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
-          # TODO: Find some way to make this not rely on the "jenkins" user
-          #       and to rely on some other named user
           docker run \
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS \
@@ -65,15 +63,15 @@ jobs:
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --tty \
-            -v ${GITHUB_WORKSPACE}:/var/lib/jenkins \
-            -w /var/lib/jenkins \
+            --user jenkins \
+            -v ${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace \
+            -w /var/lib/jenkins/workspace \
             ${DOCKER_IMAGE} \
-            .jenkins/pytorch/build.sh
+            sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       # TODO: Add step to archive built artifacts
       - name: Clean up docker images
         if: always()
         run: |
-          cat ${GITHUB_WORKSPACE}/sccache*
           # Prune all of the docker images
           docker system prune -af
   # TODO: Add test step here
