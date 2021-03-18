@@ -21,6 +21,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # deep clone, to allow us to use git log
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # boto3 version copied from .circleci/docker/common/install_conda.sh
+        run: |
+          set -eux
+          pip install -r requirements.txt
+          pip install boto3==1.16.34
       - name: Run tests
         run: python -m unittest discover -vs tools/test -p 'test_*.py'
