@@ -157,10 +157,10 @@ class TestForeach(TestCase):
         scalars = [2, 2.2, True, 3 + 5j]
 
         # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-        dtype = torch.float32 if (self.device_type == 'cuda' and 
+        dtype = torch.float32 if (self.device_type == 'cuda' and
                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
         for N in N_values:
-            for scalar in scalars: 
+            for scalar in scalars:
                 # test out of place
                 foreach_exeption = False
                 torch_exeption = False
@@ -197,7 +197,7 @@ class TestForeach(TestCase):
 
                 try:
                     # get torch inplace reference function
-                    inplace_name = op.ref_name + "_"
+                    inplace_name = op.name + "_"
                     torch_inplace = getattr(torch.Tensor, inplace_name, None)
 
                     for t in tensors:
@@ -214,7 +214,7 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     def test_binary_ops_scalar_list(self, device, dtype, op):
         # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-        dtype = torch.float32 if (self.device_type == 'cuda' and 
+        dtype = torch.float32 if (self.device_type == 'cuda' and
                                   (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
         for N in N_values:
             scalar_lists = [
@@ -224,7 +224,7 @@ class TestForeach(TestCase):
                 [3 + 5j for _ in range(N)],
             ]
 
-            for scalar_list in scalar_lists: 
+            for scalar_list in scalar_lists:
                 # test out of place
                 foreach_exeption = False
                 torch_exeption = False
@@ -261,7 +261,7 @@ class TestForeach(TestCase):
 
                 try:
                     # get torch inplace reference function
-                    inplace_name = op.ref_name + "_"
+                    inplace_name = op.name + "_"
                     torch_inplace = getattr(torch.Tensor, inplace_name, None)
 
                     for t, s in zip(tensors, scalar_list):
