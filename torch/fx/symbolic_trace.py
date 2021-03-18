@@ -50,6 +50,11 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normal variables
 
+ENABLE_CTRACING = False
+def enable_ctracing(flag):
+    global ENABLE_CTRACING
+    ENABLE_CTRACING = flag
+
 class CPatchManager(object):
     """
     Calls patch_function in order to intercept functions at the C-extension level
@@ -57,6 +62,7 @@ class CPatchManager(object):
     def __init__(self, tracer):
         self.tracer = tracer
         patched_fns = [torch.randn, torch.rand, torch.randint]
+
         def patched_impl(to_patch, args, kwargs):
             return tracer.create_proxy('call_function', to_patch, args, kwargs)
 
@@ -80,7 +86,9 @@ class CPatchManager(object):
         self.func = trace_func
 
     def __enter__(self):
-        sys.setprofile(self.func)
+        global ENABLE_CTRACING
+        if ENABLE_CTRACING:
+            sys.setprofile(self.func)
 
     def __exit__(self, type, value, tb):
         sys.setprofile(None)
