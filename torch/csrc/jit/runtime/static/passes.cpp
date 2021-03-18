@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 namespace torch {
@@ -257,6 +259,10 @@ void ClipRangesGatherRangesX2SigridHash(
 
   fuse.RegisterRewritePattern(pattern2, fused_pattern2);
   fuse.runOnGraph(graph);
+
+  // reverse the ops that got fused in step 1 but not in step2
+  fuse.RegisterRewritePattern(fused_pattern, pattern);
+  fuse.runOnGraph(graph);
 }
 
 void ClipRangesGatherRangesX2SigridHashPrecompute(
@@ -294,10 +300,16 @@ void ClipRangesGatherRangesX2SigridHashPrecompute(
 
   fuse.RegisterRewritePattern(pattern2, fused_pattern2);
   fuse.runOnGraph(graph);
+
+  // reverse the ops that got fused in step 1 but not in step2
+  fuse.RegisterRewritePattern(fused_pattern, pattern);
+  fuse.runOnGraph(graph);
 }
 
 void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
+  SplitOutPrecomputeOpsForSparseNN(graph);
+
   ConcatAddMulReplaceNaNClip(graph);
   CastedBatchOneHotLengths(graph);
   ConcatBatchMatMulBatchGather(graph);
@@ -305,6 +317,7 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
   ClipRangesGatherRangesLengthsToOffsets(graph);
   ClipRangesGatherSigridHash(graph);
   ClipRangesGatherRangesSigridHash(graph);
+
   ClipRangesGatherRangesX2SigridHash(graph);
   ClipRangesGatherRangesX2SigridHashPrecompute(graph);
 
@@ -318,6 +331,8 @@ void SplitOutPrecomputeOpsForSparseNN(
     std::shared_ptr<torch::jit::Graph>& graph) {
 #ifdef FBCODE_CAFFE2
   PrecomputeMultiplierShiftForSigridHash(graph);
+  ConstantPropagation(graph);
+  ConstantPooling(graph);
 #endif
 }
 
@@ -325,13 +340,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def("static_runtime::pure_inputs() -> Tensor", []() -> at::Tensor {
     return at::randn({1});
   });
+  m.def("static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor");
   m.def(
-      "static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor",
-      [](at::Tensor self, ArrayRef<int64_t> dims) -> at::Tensor {
-        at::Tensor out = at::empty_like(self);
-        at::native::copy_(out, self);
-        return out.permute(dims);
-      });
+      "static_runtime::to_copy(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
 }
 
 void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -357,7 +368,9 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
       {c10::Symbol::fromQualString("aten::permute"),
        c10::Symbol::fromQualString("static_runtime::permute_copy")},
       {c10::Symbol::fromQualString("aten::narrow"),
-       c10::Symbol::fromQualString("aten::narrow_copy")}};
+       c10::Symbol::fromQualString("aten::narrow_copy")},
+      {c10::Symbol::fromQualString("aten::to"),
+       c10::Symbol::fromQualString("static_runtime::to_copy")}};
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto* n : graph->nodes()) {
     if (!supported.count(n->kind())) {

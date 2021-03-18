@@ -315,9 +315,16 @@ def generate_tensor_like_torch_implementations():
     torch_vars = vars(torch)
     untested_funcs = []
     testing_overrides = get_testing_overrides()
+    # test/test_cpp_api_parity.py monkeypatches torch.nn to have a new
+    # function sample_functional.  Depending on what order you run pytest
+    # collection, this may trigger the error here.  This is a hack to fix
+    # the problem.  A more proper fix is to make the "not tested" check
+    # a test on its own, and to make sure the monkeypatch is only installed
+    # for the span of the relevant test (and deleted afterwards)
+    testing_ignore = {"sample_functional"}
     for namespace, funcs in get_overridable_functions().items():
         for func in funcs:
-            if func not in testing_overrides:
+            if func not in testing_overrides and func.__name__ not in testing_ignore:
                 untested_funcs.append("{}.{}".format(namespace, func.__name__))
     msg = (
         "The following functions are not tested for __torch_function__ "

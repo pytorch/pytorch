@@ -8,7 +8,7 @@
 // At top level, with a tuple of (operator_name, op_version_in_model,
 // bytecode_version_in_model), check the compatibility for that operator. If
 // it's not compatible, throw an error with reason. If it's compatible, do
-// compatibility treatments if necessary and return the corresponding operator
+// compatibility adaptation if necessary and return the corresponding operator
 // functor that is compatible to this runtime. The logic is implemented in
 // function operator_resolver().
 //
@@ -17,7 +17,7 @@
 // names and values are a container with version numbers and their metadata. The
 // incoming operator with version is searched in the table to find the match.
 // Note that the size of op_version_table is small because it only contains
-// operators that have more than one versions. For most of the operators, they
+// operators with compatibility updates. For most of the operators, they
 // fall through to the existing implementation with default version 0.
 
 namespace torch {
@@ -29,93 +29,17 @@ namespace {
 //   * Route to another op name
 //   * Push additional default values
 // It’s fine to update the content of version info, to handle more situations in
-// fugure. Since it’s implementation details, it should not affect
-// compatibility.
+// future. Since it’s implementation details, it should not affect compatibility.
 struct VersionInfo {
   VersionInfo(
-      int64_t version,
       const c10::OperatorName& name,
       c10::optional<IValue> default_val)
-      : version(version), name(name), default_val(default_val) {}
-  int64_t version;
+      : name(name), default_val(default_val) {}
   c10::OperatorName name;
   c10::optional<IValue> default_val;
 };
 
-struct VersionInfoContainer {
-  VersionInfoContainer(const std::vector<VersionInfo>& version_vec)
-      : version_vec(version_vec) {}
-  int64_t min_version() const {
-    return version_vec.begin()->version;
-  }
-
-  int64_t max_version() const {
-    return version_vec.rbegin()->version + 1;
-  }
-
-  std::vector<VersionInfo> version_vec;
-};
-
-VersionInfo getVersioninfo(
-    const VersionInfoContainer& container,
-    const c10::OperatorName& name,
-    int64_t op_version) {
-  // Backward compatibility breakage
-  TORCH_CHECK(
-      op_version >= container.min_version(),
-      "The version number of ",
-      c10::toString(name),
-      ", ",
-      op_version,
-      ", is smaller than the minimum version number, ",
-      container.min_version(),
-      ", supported in this runtime. The model file is too old. ",
-      "Update the model with most recent code.");
-
-  // Forward compatibility breakage
-  TORCH_CHECK(
-      op_version <= container.max_version(),
-      "The version number of ",
-      c10::toString(name),
-      ", ",
-      op_version,
-      ", is larger than the maximum version number, ",
-      container.max_version(),
-      ", supported in this runtime. Update the runtime to be compatible",
-      " to this model.");
-
-  for (const auto& info : container.version_vec) {
-    if (info.version == op_version) {
-      return info;
-    }
-  }
-
-  if (op_version == container.max_version() + 1) {
-    // Current version
-    return VersionInfo(op_version, name, c10::nullopt);
-  }
-
-  // The situation where op_version is in [min_version, max_version + 1], but
-  // not in the container, which should not happen.
-  TORCH_CHECK(
-      true,
-      "The version number of ",
-      c10::toString(name),
-      ", ",
-      op_version,
-      " is not compatible in this runtime. ");
-
-  return VersionInfo(
-      0, c10::OperatorName("aten::_convolution", ""), c10::nullopt);
-}
-
-static const std::unordered_map<std::string, VersionInfoContainer>
-    op_version_table(
-        {{"aten::_convolution",
-          VersionInfoContainer(
-              {{0, c10::OperatorName("aten::_convolution", ""), true}})}});
-} // namespace
-
+// Auxiliary function for operator dispatch from name
 OperatorFunctor findOperatorFromName(const c10::OperatorName& opname) {
   auto jit_op = findOperatorFor(opname);
   OperatorFunctor fn;
@@ -132,6 +56,72 @@ OperatorFunctor findOperatorFromName(const c10::OperatorName& opname) {
   return nullptr;
 }
 
+// VersionInfoContainer holds a map of {verion_num: VersionInfo} and an explicit
+// cur_version. cur_version is necessary for the situation where an update
+// invalidate all versions in the container. In such case there's an
+// empty version_vec and the only supported version is cur_version.
+// an example of VersionInfoContainer
+//   version_map =
+//     op_version  | op_info
+//     0           | {"op_A_old", None}
+//     1           | {"op_A", default_val}
+//   cur_version = 2
+struct VersionInfoContainer {
+  VersionInfoContainer(std::unordered_map<int64_t, VersionInfo> version_map, int64_t cur_version)
+      : version_map(version_map), cur_version(cur_version) {}
+
+  // Resolve the operator from the op_version. name is used for messaging.
+  OperatorFunctor resolve_operator(const c10::OperatorName& name, int64_t op_version) const {
+    if (op_version == cur_version) {
+      // It's the current version, no adaptation is needed.
+      return findOperatorFromName(name);
+    }
+    auto it = version_map.find(op_version);
+    if (it != version_map.end()) {
+      // The version is in the supported map, do corresponding adaptation and return
+      const auto& opinfo = it->second;
+      auto fn = findOperatorFromName(opinfo.name);
+      if (opinfo.default_val) {
+        fn = [fn, opinfo](Stack& stack) {
+          stack.push_back(opinfo.default_val.value());
+          fn(stack);
+        };
+      }
+      return fn;
+    }
+    // The version is not supported, throw error with the original name
+    TORCH_CHECK(
+        false,
+        "The version number of ",
+        c10::toString(name),
+        ", ",
+        op_version,
+        " is not compatible in this runtime. ");
+    return nullptr;
+  }
+
+  std::unordered_map<int64_t, VersionInfo> version_map;
+  int64_t cur_version;
+};
+
+// The operator version table that contains the operators with versions that
+// this runtime can "up-version". "up-version" here means that if there's an
+// operator with older version in the model, some treatment can be done to
+// make this model run with current (newer) version of that operator. Currently,
+// this "up-version" is limited to combinations of two situations:
+//   * Route to another op name
+//   * Push additional default values
+// This limitation is guarded by the definition of the VersionInfo struct.
+static const std::unordered_map<std::string, VersionInfoContainer>
+    op_version_table(
+        {
+          {"aten::_convolution",
+            VersionInfoContainer(
+              {{0, VersionInfo(c10::OperatorName("aten::_convolution", ""), true)}}, 1)
+          }
+        });
+} // namespace
+
 OperatorFunctor operator_resolver(
     const c10::OperatorName& opname,
     int64_t op_version,
@@ -143,15 +133,7 @@ OperatorFunctor operator_resolver(
       // opname with no compatibility treatment
       return findOperatorFromName(opname);
     } else {
-      auto opinfo = getVersioninfo(it->second, opname, op_version);
-      auto fn = findOperatorFromName(opinfo.name);
-      if (opinfo.default_val) {
-        fn = [fn, opinfo](Stack& stack) {
-          stack.push_back(opinfo.default_val.value());
-          fn(stack);
-        };
-      }
-      return fn;
+      return it->second.resolve_operator(opname, op_version);
     }
   } else if (model_version == 0x3LL) {
     auto fn = findOperatorFromName(opname);
@@ -171,12 +153,14 @@ OperatorFunctor operator_resolver(
   return nullptr;
 }
 
-TORCH_API std::unordered_map<std::string, std::pair<int64_t, int64_t>>
+std::unordered_map<std::string, std::unordered_set<int64_t>>
 get_op_version_table() {
-  std::unordered_map<std::string, std::pair<int64_t, int64_t>> table;
+  std::unordered_map<std::string, std::unordered_set<int64_t>> table;
   for (const auto& item : op_version_table) {
-    table[item.first] = std::pair<int64_t, int64_t>(
-        item.second.min_version(), item.second.max_version());
+    table[item.first].emplace(item.second.cur_version);
+    for (const auto& version : item.second.version_map) {
+      table[item.first].emplace(version.first);
+    }
   }
   return table;
 }

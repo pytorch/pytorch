@@ -31,7 +31,7 @@ TORCH_API OperatorFunctor operator_resolver(
  * @return a map with key: operator name, val: a pair of supported version range
  * [min, max]
  */
-TORCH_API std::unordered_map<std::string, std::pair<int64_t, int64_t>>
+TORCH_API std::unordered_map<std::string, std::unordered_set<int64_t>>
 get_op_version_table();
 } // namespace mobile
 } // namespace jit

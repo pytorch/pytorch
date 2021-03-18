@@ -847,6 +847,35 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
   AT_ASSERT(resd == refd);
 }
 
+TEST(LiteInterpreterTest, DuplicateSetState) {
+  Module m("M");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def __getstate__(self):
+      return self.foo + self.foo
+    def __setstate__(self, a):
+      self.foo = a
+    def forward(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+
+  Module b("B");
+  b.register_module("M0", m);
+  b.register_module("M1", m);
+  b.define(R"(
+    def forward(self, x):
+      return self.M0.forward(x) + self.M1.forward(x)
+  )");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  const auto methods = bc.get_methods();
+  const size_t expected_n = 3;
+  ASSERT_EQ(methods.size(), expected_n);
+}
+
 TEST(LiteInterpreterTest, ExtraFiles) {
   const auto script = R"JIT(
     def forward(self):
@@ -920,15 +949,14 @@ TEST(LiteInterpreterTest, OpVersionTable) {
   ASSERT_THROWS_WITH_MESSAGE(
       torch::jit::mobile::operator_resolver(
           op1_name, /*op_version*/ -1, /*model_version*/ 4),
-      "is smaller than the minimum version number");
+      "is not compatible in this runtime");
   ASSERT_THROWS_WITH_MESSAGE(
       torch::jit::mobile::operator_resolver(
           op1_name, /*op_version*/ 2, /*model_version*/ 4),
-      "is larger than the maximum version number");
+      "is not compatible in this runtime");
 
   auto table = torch::jit::mobile::get_op_version_table();
-  EXPECT_EQ(table["aten::_convolution"].first, 0);
-  EXPECT_EQ(table["aten::_convolution"].second, 1);
+  EXPECT_EQ(table["aten::_convolution"].size(), 2);
 }
 
 namespace {

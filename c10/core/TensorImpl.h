@@ -711,13 +711,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T * data() const {
-    TORCH_CHECK(has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
-    TORCH_CHECK(
-        storage_initialized(),
-        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
-        "mutable_data() or raw_mutable_data() to actually allocate memory.");
     TORCH_CHECK(
         data_type_.Match<T>(),
         "Tensor type mismatch, caller expects elements to be ",
@@ -725,7 +718,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         ", while tensor contains ",
         data_type_.name(),
         ". ");
-    // We managed the type check ourselves
+    return data_ptr_impl<T>();
+  }
+
+  /**
+   * More efficient helper for Tensor::data_ptr(). Like data<T>(), but
+   * does not do a type check. Unlike the untemplated data(), does
+   * check has_storage() and storage_initialized().
+   */
+  template <typename T>
+  inline T * data_ptr_impl() const {
+    TORCH_CHECK(has_storage(),
+        "Cannot access data pointer of Tensor that doesn't have storage");
+    TORCH_CHECK(
+        storage_initialized(),
+        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
+        "Caffe2 uses a lazy allocation, so you will need to call "
+        "mutable_data() or raw_mutable_data() to actually allocate memory.");
+    // Caller does the type check.
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
@@ -1229,27 +1239,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void Resize(Ts... dim_source) {
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
-      // If needed, we will free the data. the next mutable_data() call
-      // will create the data storage.
-      bool reset_tensor = false;
-      if (reserved_) {
-        // If tensor is reserved then don't claim its memeory unless nbytes()
-        // is smaller than new size
-        reset_tensor = storage_.nbytes() <
-            (storage_offset_ + numel_) * data_type_.itemsize();
-      } else {
-        reset_tensor = storage_.nbytes() <
-                (storage_offset_ + numel_) * data_type_.itemsize() ||
-            !FLAGS_caffe2_keep_on_shrink ||
-            storage_.nbytes() -
-                    (storage_offset_ + numel_) * data_type_.itemsize() >
-                static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
-      }
-
-      if (reset_tensor && storage_initialized()) {
-        FreeMemory();
-      }
+      HandleResize();
     }
+  }
+
+  template <typename T>
+  void Resize(const std::vector<T>& dim_source) {
+    Resize(ArrayRef<T>(dim_source));
   }
 
   /**
@@ -1537,6 +1533,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
 private:
+  void HandleResize();
 
   // The Caffe2 Resize() method supports being called both as Resize({2,2}) as
   // well as variadic with Resize(2, 2).  These overloads provide all of the
@@ -1705,10 +1702,12 @@ protected:
   // See NOTE [ Metadata Change for a Detached Tensor ] for details.
   static const char * const err_msg_tensor_metadata_change_not_allowed;
 
+public:
   void set_storage_access_should_throw() {
     storage_access_should_throw_ = true;
   }
 
+protected:
   Storage storage_;
 
 private:

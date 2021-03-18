@@ -71,7 +71,7 @@ def backward(
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
     grad_variables: Optional[_TensorOrTensors] = None,
-    inputs: Optional[Sequence[torch.Tensor]] = None,
+    inputs: Optional[_TensorOrTensors] = None,
 ) -> None:
     r"""Computes the sum of gradients of given tensors w.r.t. graph leaves.
 
@@ -103,13 +103,13 @@ def backward(
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
     Args:
-        tensors (sequence of Tensor): Tensors of which the derivative will be
+        tensors (Sequence[Tensor] or Tensor): Tensors of which the derivative will be
             computed.
-        grad_tensors (sequence of (Tensor or None)): The "vector" in the Jacobian-vector
-            product, usually gradients w.r.t. each element of corresponding tensors.
-            None values can be specified for scalar Tensors or ones that don't require
-            grad. If a None value would be acceptable for all grad_tensors, then this
-            argument is optional.
+        grad_tensors (Sequence[Tensor or None] or Tensor, optional): The "vector" in
+            the Jacobian-vector product, usually gradients w.r.t. each element of
+            corresponding tensors. None values can be specified for scalar Tensors or
+            ones that don't require grad. If a None value would be acceptable for all
+            grad_tensors, then this argument is optional.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient
@@ -117,10 +117,10 @@ def backward(
         create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
             Defaults to ``False``.
-        inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
-            accumulated into ``.grad``. All other Tensors will be ignored. If not
-            provided, the gradient is accumulated into all the leaf Tensors that were
-            used to compute the attr::tensors. All the provided inputs must be leaf
+        inputs (Sequence[Tensor] or Tensor, optional): Inputs w.r.t. which the gradient
+            be will accumulated into ``.grad``. All other Tensors will be ignored. If
+            not provided, the gradient is accumulated into all the leaf Tensors that
+            were used to compute the attr::tensors. All the provided inputs must be leaf
             Tensors.
     """
     if grad_variables is not None:
@@ -135,7 +135,8 @@ def backward(
         raise RuntimeError("'inputs' argument to backward() cannot be empty.")
 
     tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
-    inputs = tuple(inputs) if inputs is not None else tuple()
+    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else \
+        tuple(inputs) if inputs is not None else tuple()
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_)
