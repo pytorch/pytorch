@@ -182,18 +182,19 @@ class ProcessGroupNCCL : public ProcessGroup {
     friend class ProcessGroupNCCL;
   };
 
-  struct Options : torch::CustomClassHolder {
-    explicit Options();
+  struct Options : ProcessGroup::Options {
+    explicit Options(
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
+        bool is_high_priority_stream = false);
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
-        std::chrono::milliseconds timeout = kNoTimeout,
-        bool isHighStream = false) {
-      return c10::make_intrusive<Options>();
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
+        bool is_high_priority_stream = false) {
+      return c10::make_intrusive<Options>(timeout, is_high_priority_stream);
     }
 
-    std::chrono::milliseconds opTimeout;
-    bool isHighPriorityStream;
+    bool is_high_priority_stream;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -313,8 +314,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
-
-  static const int64_t kProcessGroupNCCLOpTimeoutMillis;
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
