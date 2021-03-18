@@ -339,7 +339,7 @@ struct C10_API TensorOptions {
 
   // For compatibility with legacy tensor.type() comparisons
   bool type_equal(const TensorOptions& other) const {
-    return backend() == other.backend() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
+    return computeDispatchKey() == other.computeDispatchKey() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
   }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
@@ -404,6 +404,10 @@ struct C10_API TensorOptions {
     return DispatchKeySet(computeDispatchKey());
   }
 
+  // INVARIANT: computeDispatchKey returns only the subset of dispatch keys for
+  // which dispatchKeyToBackend is injective, if it is defined at all  (for
+  // the most part, this just means that this function never returns an
+  // Autograd key)
   DispatchKey computeDispatchKey() const {
     return c10::computeDispatchKey(optTypeMetaToScalarType(dtype_opt()), layout_opt(), device_opt());
   }
@@ -635,8 +639,10 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             return DispatchKey::Vulkan;
           case DeviceType::Metal:
             return DispatchKey::Metal;
+          case DeviceType::Meta:
+            return DispatchKey::Meta;
           default:
-            TORCH_CHECK(false, "Unsupported device type for dense layout: ", device_.type());
+            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for dense layout: ", device_.type());
         }
       }
       case Layout::Sparse:
@@ -650,14 +656,14 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
           case DeviceType::XPU:
             return DispatchKey::SparseXPU;
           default:
-            TORCH_CHECK(false, "Unsupported device type for sparse layout: ", device_.type());
+            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for sparse layout: ", device_.type());
         }
       case Layout::Mkldnn:
         switch (device_.type()) {
           case DeviceType::CPU:
             return DispatchKey::MkldnnCPU;
           default:
-            TORCH_CHECK(false, "Unsupported device type for mkldnn layout: ", device_.type());
+            TORCH_CHECK_NOT_IMPLEMENTED(false, "Unsupported device type for mkldnn layout: ", device_.type());
         }
       default:
         TORCH_CHECK(false, "Unsupported layout: ", layout_);
@@ -691,6 +697,8 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::XLA;
   } else if (tid == DispatchKey::MLC) {
     return DeviceType::MLC;
+  } else if (tid == DispatchKey::Meta) {
+    return DeviceType::Meta;
   } else if (tid == DispatchKey::SparseCPU) {
     return DeviceType::CPU;
   } else if (tid == DispatchKey::SparseCUDA) {

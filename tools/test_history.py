@@ -7,10 +7,7 @@ import subprocess
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
-
-import boto3  # type: ignore[import]
-import botocore  # type: ignore[import]
-from typing_extensions import TypedDict
+from tools.stats_utils.s3_stat_parser import (get_S3_bucket_readonly, get_cases, Report)
 
 
 def get_git_commit_history(
@@ -35,34 +32,6 @@ def get_object_summaries(*, bucket: Any, sha: str) -> Dict[str, List[Any]]:
         by_job[job].append(summary)
     return dict(by_job)
 
-
-class Case(TypedDict):
-    name: str
-    seconds: float
-    errored: bool
-    failed: bool
-    skipped: bool
-
-
-class Suite(TypedDict):
-    total_seconds: float
-    cases: List[Case]
-
-
-class ReportMeta(TypedDict):
-    build_pr: str
-    build_tag: str
-    build_sha1: str
-    build_branch: str
-    build_job: str
-    build_workflow_id: str
-
-
-class Report(ReportMeta):
-    total_seconds: float
-    suites: Dict[str, Suite]
-
-
 def get_jsons(
     jobs: Optional[List[str]],
     summaries: Dict[str, Any],
@@ -77,32 +46,10 @@ def get_jsons(
     }
 
 
-def get_cases(
-    *,
-    data: Report,
-    suite_name: Optional[str],
-    test_name: str,
-) -> List[Case]:
-    cases = []
-    suites = data['suites']
-    for name, suite in suites.items():
-        if name == suite_name or not suite_name:
-            for case in suite['cases']:
-                if case['name'] == test_name:
-                    cases.append(case)
-    return cases
-
-
-def case_status(case: Case) -> Optional[str]:
-    for k in {'errored', 'failed', 'skipped'}:
-        if case[k]:  # type: ignore[misc]
-            return k
-    return None
-
-
 def make_column(
     *,
     data: Optional[Report],
+    filename: Optional[str],
     suite_name: Optional[str],
     test_name: str,
     digits: int,
@@ -112,12 +59,13 @@ def make_column(
     if data:
         cases = get_cases(
             data=data,
+            filename=filename,
             suite_name=suite_name,
             test_name=test_name
         )
         if cases:
             case = cases[0]
-            status = case_status(case)
+            status = case['status']
             omitted = len(cases) - 1
             if status:
                 return f'{status.rjust(num_length)} ', omitted
@@ -134,6 +82,7 @@ def make_columns(
     jobs: List[str],
     jsons: Dict[str, Report],
     omitted: Dict[str, int],
+    filename: Optional[str],
     suite_name: Optional[str],
     test_name: str,
     digits: int,
@@ -145,6 +94,7 @@ def make_columns(
         data = jsons.get(job)
         column, omitted_suites = make_column(
             data=data,
+            filename=filename,
             suite_name=suite_name,
             test_name=test_name,
             digits=digits,
@@ -156,7 +106,7 @@ def make_columns(
     if total_omitted > 0:
         columns.append(f'({total_omitted} S3 reports omitted)')
     if total_suites > 0:
-        columns.append(f'({total_suites}) matching suites omitted)')
+        columns.append(f'({total_suites} matching suites omitted)')
     return ' '.join(columns)
 
 
@@ -165,6 +115,7 @@ def make_lines(
     jobs: Set[str],
     jsons: Dict[str, Report],
     omitted: Dict[str, int],
+    filename: Optional[str],
     suite_name: Optional[str],
     test_name: str,
 ) -> List[str]:
@@ -172,12 +123,13 @@ def make_lines(
     for job, data in jsons.items():
         cases = get_cases(
             data=data,
+            filename=filename,
             suite_name=suite_name,
             test_name=test_name,
         )
         if cases:
             case = cases[0]
-            status = case_status(case)
+            status = case['status']
             line = f'{job} {case["seconds"]}s{f" {status}" if status else ""}'
             if job in omitted and omitted[job] > 0:
                 line += f' ({omitted[job]} S3 reports omitted)'
@@ -197,6 +149,7 @@ def display_history(
     bucket: Any,
     commits: List[Tuple[str, datetime]],
     jobs: Optional[List[str]],
+    filename: Optional[str],
     suite_name: Optional[str],
     test_name: str,
     delta: int,
@@ -226,6 +179,7 @@ def display_history(
                 jobs=jobs,
                 jsons=jsons,
                 omitted=omitted,
+                filename=filename,
                 suite_name=suite_name,
                 test_name=test_name,
                 digits=digits,
@@ -236,6 +190,7 @@ def display_history(
                 jobs=set(jobs or []),
                 jsons=jsons,
                 omitted=omitted,
+                filename=filename,
                 suite_name=suite_name,
                 test_name=test_name,
             )
@@ -353,6 +308,10 @@ indicated test was not found in that report.
         help='(multiline) ignore listed jobs, show all jobs for each commit',
     )
     parser.add_argument(
+        '--file',
+        help='name of the file containing the test',
+    )
+    parser.add_argument(
         '--suite',
         help='name of the suite containing the test',
     )
@@ -373,14 +332,13 @@ indicated test was not found in that report.
         parser.error('No jobs specified.')
 
     commits = get_git_commit_history(path=args.pytorch, ref=args.ref)
-
-    s3 = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
-    bucket = s3.Bucket('ossci-metrics')
+    bucket = get_S3_bucket_readonly('ossci-metrics')
 
     display_history(
         bucket=bucket,
         commits=commits,
         jobs=jobs,
+        filename=args.file,
         suite_name=args.suite,
         test_name=args.test,
         delta=args.delta,

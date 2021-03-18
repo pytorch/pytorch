@@ -24,7 +24,7 @@ namespace {
 // applied to the result of the inline function, and thus the result is incorrect.
 //   e.g. if we use 1.0 / sqrt(2) for 2 ^ (-0.5) in MSVC, we get
 //          int(2 ^ (-0.5)) = int(1.0 / sqrt(2)) = int(1.0 / int(1.414)) = int(1.0 / 1) = 1
-//        However, the correct result is 
+//        However, the correct result is
 //          int(2 ^ (-0.5)) = int(1.0 / 1.414) = 0
 #ifdef _MSC_VER
 // Functions for pow
@@ -158,7 +158,7 @@ void pow_tensor_scalar_kernel_impl(TensorIterator& iter,
   }
 }
 
-void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
+void pow_tensor_scalar_kernel(TensorIterator& iter, const Scalar& exp_scalar) {
   if (isComplexType(iter.dtype()) || exp_scalar.isComplex()) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
