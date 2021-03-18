@@ -15,10 +15,11 @@ from typing import List, Tuple, Dict, Any
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and,
      floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and, all_types_and, all_types_and_complex, all_types,
+     all_types_and_complex_and, all_types_and, all_types_and_complex,
      integral_types_and, integral_types)
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCPUIfNoMkl,
+    (skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+     skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
@@ -415,6 +416,65 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
                             keepdim=keepdim,
                             dim=(0, 1))))
         return inputs
+
+def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad):
+    size_1D = (S,)
+    size_2D = (2, 2)
+
+    test_cases = [
+        # input size, ord, dim args
+        (size_1D, None, None),
+        (size_1D, None, (0,)),
+        (size_1D, 0, None),
+        (size_1D, 0, (0,)),
+        (size_1D, 0.9, None),
+        (size_1D, 0.9, (0,)),
+        (size_1D, 1, None),
+        (size_1D, 1, (0,)),
+        (size_1D, -2.1, None),
+        (size_1D, -2.1, (0,)),
+        (size_1D, inf, None),
+        (size_1D, inf, (0,)),
+        (size_1D, -inf, None),
+        (size_1D, -inf, (0,)),
+
+        (size_2D, None, None),
+        (size_2D, None, (0,)),
+        (size_2D, None, (-1, 0)),
+        (size_2D, 0, None),
+        (size_2D, 0, (0,)),
+        (size_2D, 0, (-1, 0)),
+        (size_2D, 0.9, None),
+        (size_2D, 0.9, (0,)),
+        (size_2D, 0.9, (-1, 0)),
+        (size_2D, 1, None),
+        (size_2D, 1, (0,)),
+        (size_2D, 1, (-1, 0)),
+        (size_2D, -2.1, None),
+        (size_2D, -2.1, (0,)),
+        (size_2D, -2.1, (-1, 0)),
+        (size_2D, inf, None),
+        (size_2D, inf, (0,)),
+        (size_2D, inf, (-1, 0)),
+        (size_2D, -inf, None),
+        (size_2D, -inf, (0,)),
+        (size_2D, -inf, (-1, 0)),
+    ]
+    inputs = []
+
+    for test_size, ord, dim in test_cases:
+        for keepdim in [False, True]:
+            inputs.append(SampleInput(
+                make_tensor(
+                    test_size, device, dtype,
+                    low=None, high=None,
+                    requires_grad=requires_grad),
+                args=(ord,),
+                kwargs=dict(
+                    keepdim=keepdim,
+                    dim=dim)))
+
+    return inputs
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     input = SampleInput((make_tensor((S, S), device, dtype,
@@ -927,40 +987,52 @@ def sample_inputs_foreach(self, device, dtype, N):
     tensors = [make_tensor((N, N), device, dtype) for _ in range(N)]
     return tensors
 
+
+def get_foreach_method_names(name, has_no_inplace):
+    # get torch inplace reference function
+    method_name = "_foreach_" + name
+    method_name_inplace = "_foreach_" + name + "_"
+
+    method = getattr(torch, method_name, None)
+    if has_no_inplace:
+        method_inplace = None
+    else:
+        method_inplace = getattr(torch, method_name_inplace, None)
+
+    ref = getattr(torch.Tensor, name, None)
+
+    return method, method_inplace, ref
+
 class ForeachFuncInfo(OpInfo):
     """Early version of a specialized OpInfo for foreach unary and pointwise functions"""
     def __init__(self,
                  name,
-                 method,
-                 inplace,
-                 ref,  # torch reference function
-                 ref_name,  # torch reference function name
+                 has_no_inplace=False,
                  dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfROCM=None,
                  sample_inputs_func=sample_inputs_foreach,
                  **kwargs):
-        super(ForeachFuncInfo, self).__init__(name,
+
+        super(ForeachFuncInfo, self).__init__("_foreach_" + name,
                                               dtypes=dtypes,
                                               dtypesIfCPU=dtypesIfCPU,
                                               dtypesIfCUDA=dtypesIfCUDA,
                                               dtypesIfROCM=dtypesIfROCM,
                                               sample_inputs_func=sample_inputs_func,
                                               **kwargs)
-        self.method_variant = method
-        self.inplace_variant = inplace
-        self.ref = ref
-        self.ref_name = ref_name
+
+        foreach_method, foreach_method_inplace, torch_ref_method = get_foreach_method_names(name, has_no_inplace)
+        self.method_variant = foreach_method
+        self.inplace_variant = foreach_method_inplace
+        self.ref = torch_ref_method
 
 class ForeachBinaryFuncInfo(OpInfo):
     """Early version of a specialized OpInfo for foreach binary functions"""
     def __init__(self,
                  name,
-                 method,
-                 inplace,
-                 ref,  # torch reference function
-                 ref_name,  # torch reference function name
+                 has_no_inplace=False,
                  dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -975,10 +1047,10 @@ class ForeachBinaryFuncInfo(OpInfo):
                                                     dtypesIfROCM=dtypesIfROCM,
                                                     sample_inputs_func=sample_inputs_func,
                                                     **kwargs)
-        self.method_variant = method
-        self.inplace_variant = inplace
-        self.ref = ref
-        self.ref_name = ref_name
+        foreach_method, foreach_method_inplace, torch_ref_method = get_foreach_method_names(name, has_no_inplace)
+        self.method_variant = foreach_method
+        self.inplace_variant = foreach_method_inplace
+        self.ref = torch_ref_method
         self.supports_alpha_param = supports_alpha_param
 
 class HermitianOpInfo(OpInfo):
@@ -1102,6 +1174,37 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False):
         b = make_tensor(shape, device, dtype, low=None, high=None)
         out.append(SampleInput((a, b)))
     return out
+
+def sample_inputs_householder_product(op_info, device, dtype, requires_grad):
+    """
+    This function generates input for torch.linalg.householder_product (torch.orgqr).
+    The first argument should be a square matrix or batch of square matrices, the second argument is a vector or batch of vectors.
+    Empty, square, rectangular, batched square and batched rectangular input is generated.
+    """
+    # Each column of the matrix is getting multiplied many times leading to very large values for
+    # the Jacobian matrix entries and making the finite-difference result of grad check less accurate.
+    # That's why gradcheck with the default range [-9, 9] fails and [-2, 2] is used here.
+    samples = (
+        SampleInput((make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((S + 1, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((2, 1, S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((2, 1, S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((2, 1, S + 1, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((2, 1, S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((0, 0), device, dtype, low=None, high=None, requires_grad=requires_grad),
+                    make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+    )
+
+    return samples
 
 def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False):
     """
@@ -1522,38 +1625,67 @@ def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
 
     return samples
 
+def sample_inputs_lerp(op_info, device, dtype, requires_grad):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        # no broadcast
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 0.4)),
+        # broadcast rhs
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), 0.4)),
+        # scalar tensor
+        SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 0.4)),
+        # broadcast rhs scalar-tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 0.4)),
+        # broadcast rhs with weight tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), _make_tensor_helper((S, S)))),
+        # broadcast rhs and weight tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, 1)), _make_tensor_helper((S,)))),
+
+        # Broadcasts `self` : Issue with inplace-variants
+        # Reference: https://github.com/pytorch/pytorch/issues/50747
+        # SampleInput((_make_tensor_helper((S,)), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper(()), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
+    )  # type: ignore
+
+    if dtype.is_complex:
+        samples = samples + (  # type: ignore
+            # no broadcast
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 1.2 + 0.1j)),
+            # broadcast rhs
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 5.4 + 9j)),
+            # scalar tensor
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 0.4j)),
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 6.1 + 0.004j)),
+            # broadcast rhs scalar-tensor
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 1 + 2j)),
+        )
+
+    return samples
+
 # Foreach pointwise ops
 foreach_pointwise_op_db: List[OpInfo] = [
-    ForeachFuncInfo('_foreach_addcmul',
-                    method=torch._foreach_addcmul,
-                    inplace=torch._foreach_addcmul_,
-                    ref=torch.addcmul,
-                    ref_name="addcmul"),
-
-    ForeachFuncInfo('_foreach_addcdiv',
-                    method=torch._foreach_addcdiv,
-                    inplace=torch._foreach_addcdiv_,
-                    ref=torch.addcdiv,
-                    ref_name="addcdiv"),
+    ForeachFuncInfo('addcmul'),
+    ForeachFuncInfo('addcdiv'),
 ]
 
 # Foreach min/max ops
 combination_min_max_dtypes = (tuple(combinations_with_replacement(floating_types_and(torch.bool, torch.half, torch.bfloat16), 2)))
 foreach_min_max_op_db: List[OpInfo] = [
-    ForeachFuncInfo('_foreach_maximum',
-                    method=torch._foreach_maximum,
-                    inplace=None,
-                    ref=torch.max,
-                    ref_name="max",
+    ForeachFuncInfo('maximum',
+                    has_no_inplace=True,
                     dtypes=combination_min_max_dtypes,
                     dtypesIfCPU=combination_min_max_dtypes,
                     dtypesIfCUDA=combination_min_max_dtypes),
 
-    ForeachFuncInfo('_foreach_minimum',
-                    method=torch._foreach_minimum,
-                    inplace=None,
-                    ref=torch.min,
-                    ref_name="min",
+    ForeachFuncInfo('minimum',
+                    has_no_inplace=True,
                     dtypes=combination_min_max_dtypes,
                     dtypesIfCPU=combination_min_max_dtypes,
                     dtypesIfCUDA=combination_min_max_dtypes),
@@ -1561,242 +1693,44 @@ foreach_min_max_op_db: List[OpInfo] = [
 
 # Foreach binary ops
 foreach_binary_op_db: List[OpInfo] = [
-    ForeachBinaryFuncInfo('_foreach_add',
-                          method=torch._foreach_add,
-                          inplace=torch._foreach_add_,
-                          ref=torch.add,
-                          ref_name='add',
-                          supports_alpha_param=True),
-
-    ForeachBinaryFuncInfo('_foreach_sub',
-                          method=torch._foreach_sub,
-                          inplace=torch._foreach_sub_,
-                          ref=torch.sub,
-                          ref_name='sub',
-                          supports_alpha_param=True),
-
-    ForeachBinaryFuncInfo('_foreach_mul',
-                          method=torch._foreach_mul,
-                          inplace=torch._foreach_mul_,
-                          ref=torch.mul,
-                          ref_name='mul'),
-
-    ForeachBinaryFuncInfo('_foreach_div',
-                          method=torch._foreach_div,
-                          inplace=torch._foreach_div_,
-                          ref=torch.div,
-                          ref_name='div'),
-]
-
-# This list is needed to test binary ops with tensor lists of different dtypes.
-combination_of_all_dtypes = (tuple(combinations_with_replacement(all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16), 2)))
-foreach_binary_op_tensor_list_db: List[OpInfo] = [
-    ForeachBinaryFuncInfo('_foreach_add',
-                          method=torch._foreach_add,
-                          inplace=torch._foreach_add_,
-                          ref=torch.add,
-                          ref_name='add',
-                          dtypes=combination_of_all_dtypes,
-                          dtypesIfCPU=combination_of_all_dtypes,
-                          dtypesIfCUDA=combination_of_all_dtypes,
-                          supports_alpha_param=True),
-
-    ForeachBinaryFuncInfo('_foreach_sub',
-                          method=torch._foreach_sub,
-                          inplace=torch._foreach_sub_,
-                          ref=torch.sub,
-                          ref_name='sub',
-                          dtypes=combination_of_all_dtypes,
-                          dtypesIfCPU=combination_of_all_dtypes,
-                          dtypesIfCUDA=combination_of_all_dtypes,
-                          supports_alpha_param=True),
-
-    ForeachBinaryFuncInfo('_foreach_mul',
-                          method=torch._foreach_mul,
-                          inplace=torch._foreach_mul_,
-                          ref=torch.mul,
-                          ref_name='mul',
-                          dtypes=combination_of_all_dtypes,
-                          dtypesIfCPU=combination_of_all_dtypes,
-                          dtypesIfCUDA=combination_of_all_dtypes),
-
-    ForeachBinaryFuncInfo('_foreach_div',
-                          method=torch._foreach_div,
-                          inplace=torch._foreach_div_,
-                          ref=torch.div,
-                          ref_name='div',
-                          dtypes=combination_of_all_dtypes,
-                          dtypesIfCPU=combination_of_all_dtypes,
-                          dtypesIfCUDA=combination_of_all_dtypes),
+    ForeachBinaryFuncInfo('add', supports_alpha_param=True),
+    ForeachBinaryFuncInfo('sub', supports_alpha_param=True),
+    ForeachBinaryFuncInfo('mul'),
+    ForeachBinaryFuncInfo('div', safe_casts_outputs=True),
 ]
 
 # Foreach unary ops
 foreach_unary_op_db: List[OpInfo] = [
-    ForeachFuncInfo('_foreach_neg',
-                    method=torch._foreach_neg,
-                    inplace=torch._foreach_neg_,
-                    ref=torch.neg,
-                    ref_name="neg"),
-
-    ForeachFuncInfo('_foreach_sqrt',
-                    method=torch._foreach_sqrt,
-                    inplace=torch._foreach_sqrt_,
-                    ref=torch.sqrt,
-                    ref_name="sqrt"),
-
-    ForeachFuncInfo('_foreach_exp',
-                    method=torch._foreach_exp,
-                    inplace=torch._foreach_exp_,
-                    ref=torch.exp,
-                    ref_name="exp"),
-
-    ForeachFuncInfo('_foreach_acos',
-                    method=torch._foreach_acos,
-                    inplace=torch._foreach_acos_,
-                    ref=torch.acos,
-                    ref_name="acos"),
-
-    ForeachFuncInfo('_foreach_asin',
-                    method=torch._foreach_asin,
-                    inplace=torch._foreach_asin_,
-                    ref=torch.asin,
-                    ref_name="asin"),
-
-    ForeachFuncInfo('_foreach_atan',
-                    method=torch._foreach_atan,
-                    inplace=torch._foreach_atan_,
-                    ref=torch.atan,
-                    ref_name="atan"),
-
-    ForeachFuncInfo('_foreach_cos',
-                    method=torch._foreach_cos,
-                    inplace=torch._foreach_cos_,
-                    ref=torch.cos,
-                    ref_name="cos"),
-
-    ForeachFuncInfo('_foreach_cosh',
-                    method=torch._foreach_cosh,
-                    inplace=torch._foreach_cosh_,
-                    ref=torch.cosh,
-                    ref_name="cosh"),
-
-    ForeachFuncInfo('_foreach_log',
-                    method=torch._foreach_log,
-                    inplace=torch._foreach_log_,
-                    ref=torch.log,
-                    ref_name="log"),
-
-    ForeachFuncInfo('_foreach_log10',
-                    method=torch._foreach_log10,
-                    inplace=torch._foreach_log10_,
-                    ref=torch.log10,
-                    ref_name="log10"),
-
-    ForeachFuncInfo('_foreach_log2',
-                    method=torch._foreach_log2,
-                    inplace=torch._foreach_log2_,
-                    ref=torch.log2,
-                    ref_name="log2"),
-
-    ForeachFuncInfo('_foreach_tan',
-                    method=torch._foreach_tan,
-                    inplace=torch._foreach_tan_,
-                    ref=torch.tan,
-                    ref_name="tan"),
-
-    ForeachFuncInfo('_foreach_tanh',
-                    method=torch._foreach_tanh,
-                    inplace=torch._foreach_tanh_,
-                    ref=torch.tanh,
-                    ref_name="tanh"),
-
-    ForeachFuncInfo('_foreach_sin',
-                    method=torch._foreach_sin,
-                    inplace=torch._foreach_sin_,
-                    ref=torch.sin,
-                    ref_name="sin"),
-
-    ForeachFuncInfo('_foreach_sinh',
-                    method=torch._foreach_sinh,
-                    inplace=torch._foreach_sinh_,
-                    ref=torch.sinh,
-                    ref_name="sinh"),
-
-    ForeachFuncInfo('_foreach_ceil',
-                    method=torch._foreach_ceil,
-                    inplace=torch._foreach_ceil_,
-                    ref=torch.ceil,
-                    ref_name="ceil"),
-
-    ForeachFuncInfo('_foreach_erf',
-                    method=torch._foreach_erf,
-                    inplace=torch._foreach_erf_,
-                    ref=torch.erf,
-                    ref_name="erf"),
-
-    ForeachFuncInfo('_foreach_erfc',
-                    method=torch._foreach_erfc,
-                    inplace=torch._foreach_erfc_,
-                    ref=torch.erfc,
-                    ref_name="erfc"),
-
-    ForeachFuncInfo('_foreach_expm1',
-                    method=torch._foreach_expm1,
-                    inplace=torch._foreach_expm1_,
-                    ref=torch.expm1,
-                    ref_name="expm1"),
-
-    ForeachFuncInfo('_foreach_floor',
-                    method=torch._foreach_floor,
-                    inplace=torch._foreach_floor_,
-                    ref=torch.floor,
-                    ref_name="floor"),
-
-    ForeachFuncInfo('_foreach_log1p',
-                    method=torch._foreach_log1p,
-                    inplace=torch._foreach_log1p_,
-                    ref=torch.log1p,
-                    ref_name="log1p"),
-
-    ForeachFuncInfo('_foreach_round',
-                    method=torch._foreach_round,
-                    inplace=torch._foreach_round_,
-                    ref=torch.round,
-                    ref_name="round"),
-
-    ForeachFuncInfo('_foreach_frac',
-                    method=torch._foreach_frac,
-                    inplace=torch._foreach_frac_,
-                    ref=torch.frac,
-                    ref_name="frac"),
-
-    ForeachFuncInfo('_foreach_reciprocal',
-                    method=torch._foreach_reciprocal,
-                    inplace=torch._foreach_reciprocal_,
-                    ref=torch.reciprocal,
-                    ref_name="reciprocal"),
-
-    ForeachFuncInfo('_foreach_sigmoid',
-                    method=torch._foreach_sigmoid,
-                    inplace=torch._foreach_sigmoid_,
-                    ref=torch.sigmoid,
-                    ref_name="sigmoid"),
-
-    ForeachFuncInfo('_foreach_trunc',
-                    method=torch._foreach_trunc,
-                    inplace=torch._foreach_trunc_,
-                    ref=torch.trunc,
-                    ref_name="trunc"),
-
-    ForeachFuncInfo('_foreach_abs',
-                    method=torch._foreach_abs,
-                    inplace=torch._foreach_abs_,
-                    ref=torch.abs,
-                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-                    dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.half),
-                    dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-                    safe_casts_outputs=False,
-                    ref_name="abs"),
+    ForeachFuncInfo('exp'),
+    ForeachFuncInfo('acos'),
+    ForeachFuncInfo('asin'),
+    ForeachFuncInfo('atan'),
+    ForeachFuncInfo('cos'),
+    ForeachFuncInfo('cosh'),
+    ForeachFuncInfo('log'),
+    ForeachFuncInfo('log10'),
+    ForeachFuncInfo('log2'),
+    ForeachFuncInfo('tan'),
+    ForeachFuncInfo('tanh'),
+    ForeachFuncInfo('sin'),
+    ForeachFuncInfo('sinh'),
+    ForeachFuncInfo('neg',
+                    sample_inputs_func=sample_inputs_foreach,
+                    safe_casts_outputs=False),
+    ForeachFuncInfo('sqrt'),
+    ForeachFuncInfo('ceil'),
+    ForeachFuncInfo('erf'),
+    ForeachFuncInfo('erfc'),
+    ForeachFuncInfo('expm1'),
+    ForeachFuncInfo('floor'),
+    ForeachFuncInfo('log1p'),
+    ForeachFuncInfo('round'),
+    ForeachFuncInfo('frac'),
+    ForeachFuncInfo('reciprocal',),
+    ForeachFuncInfo('sigmoid',),
+    ForeachFuncInfo('trunc',),
+    ForeachFuncInfo('abs',
+                    safe_casts_outputs=False),
 ]
 
 # Operator database (sorted alphabetically)
@@ -2419,6 +2353,20 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 active_if=IS_WINDOWS),
                    )),
+    OpInfo('linalg.householder_product',
+           aten_name='linalg_householder_product',
+           op=torch.linalg.householder_product,
+           aliases=('orgqr', ),
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           # TODO: backward uses in-place operations that vmap doesn't like
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_householder_product,
+           decorators=[skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack,
+                       # gradgrad checks are slow
+                       DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'), ]),
+
     OpInfo('inverse',
            op=torch.inverse,
            dtypes=floating_and_complex_types(),
@@ -2512,6 +2460,23 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_invertible,
            output_func=itemgetter(1),
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+    OpInfo('linalg.vector_norm',
+           op=torch.linalg.vector_norm,
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           test_inplace_grad=False,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           sample_inputs_func=sample_inputs_linalg_vector_norm,
+           aten_name='linalg_vector_norm',
+           skips=(
+               # TODO: remove this once `pow` is implemented for float16
+               #       and bfloat16 on CPU. Issue:
+               #       https://github.com/pytorch/pytorch/issues/50789
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cpu',
+                        dtypes=[torch.float16, torch.bfloat16]),
+               # linalg.vector_norm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
@@ -2959,6 +2924,21 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.bfloat16])),
                    safe_casts_outputs=True,
                    handles_complex_extremals=False),
+    OpInfo('lerp',
+           dtypes=floating_and_complex_types(),
+           # Reference: https://github.com/pytorch/pytorch/issues/54048
+           # CUDA and ROCM don't support complex inputs
+           dtypesIfCUDA=floating_types_and(torch.half),
+           dtypesIfROCM=floating_types_and(torch.half),
+           sample_inputs_func=sample_inputs_lerp,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.cfloat, torch.cdouble]),
+               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
+           ),
+           assert_autodiffed=True),
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
            op=torch.linalg.inv,
@@ -3676,12 +3656,8 @@ def method_tests():
         ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
         ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
         ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-        ('lerp', (S, S, S), ((S, S, S), 0.4), 'no_broadcast', (True,)),
-        ('lerp', (S, S, S), ((S,), 0.4), 'broadcast_rhs', (True,)),
         ('lerp', (S,), ((S, S, S), 0.4), 'broadcast_lhs', (True,)),
         ('lerp', (S, 1, S), ((S, S), 0.4), 'broadcast_all', (True,)),
-        ('lerp', (), ((), 0.4), 'scalar', (True,)),
-        ('lerp', (S, S, S), ((), 0.4), 'scalar_broadcast_rhs', (True,)),
         ('lerp', (), ((S, S, S), 0.4), 'scalar_broadcast_lhs', (True,)),
         ('lerp', (S, 1, S), ((S, S), (S, 1, 1, S)), 'tensor_broadcast_all', (True,)),
         ('mean', (S, S, S), NO_ARGS, '', (True,)),

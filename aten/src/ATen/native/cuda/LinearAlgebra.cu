@@ -7,6 +7,9 @@
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/Reduce.cuh>
+#include <ATen/native/SharedReduceOps.h>
+#include <ATen/native/ReduceOps.h>
 
 namespace at { namespace native {
 
@@ -253,7 +256,7 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
 
 } // anonymous namespace
 
-Tensor& mm_out_cuda(Tensor& result, const Tensor& self, const Tensor& mat2) {
+Tensor& mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   result.resize_({ self.size(0), mat2.size(1) });
   return addmm_out_cuda_impl(result, result, self, mat2, 0, 1);
 }
@@ -287,7 +290,7 @@ Tensor& addmm__cuda(Tensor& self, const Tensor& mat1, const Tensor& mat2,
   return self;
 }
 
-Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+Tensor& baddbmm_out_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
   Tensor self_;
   if (&result != &self) {
     std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
@@ -306,14 +309,14 @@ Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch
 
 Tensor baddbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   Tensor out = at::empty({0}, self.options());
-  return baddbmm_out_cuda(out, self, batch1, batch2, beta, alpha);
+  return baddbmm_out_cuda(self, batch1, batch2, beta, alpha, out);
 }
 
 Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  return baddbmm_out_cuda(self, self, batch1, batch2, beta, alpha);
+  return baddbmm_out_cuda(self, batch1, batch2, beta, alpha, self);
 }
 
-Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
+Tensor& bmm_out_cuda(const Tensor& batch1, const Tensor& batch2, Tensor &result) {
   result.resize_({ batch1.size(0), batch1.size(1), batch2.size(2) });
   Scalar beta(0.0);
   Scalar alpha(1.0);
@@ -329,7 +332,7 @@ Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2)
 
 Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({0}, self.options());
-  return native::bmm_out_cuda(result, self, mat2);
+  return native::bmm_out_cuda(self, mat2, result);
 }
 
 namespace {
@@ -498,8 +501,62 @@ void addr_kernel_cuda(TensorIterator &iter, const Scalar& beta, const Scalar& al
   });
 }
 
+// This reduction accumulates results as the type `acc_t`. By default, when
+// `scalar_t` is complex, `acc_t` is the downgraded real number type.
+// Otherwise, `acc_t` and `scalar_t` are the same type.
+template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>::type, typename out_t=typename scalar_value_type<scalar_t>::type>
+void linalg_vector_norm_kernel_cuda_impl(TensorIterator& iter, Scalar ord) {
+  double ord_val;
+  if (ord.isFloatingPoint()) {
+     ord_val = ord.to<double>();
+  } else {
+     TORCH_CHECK(false, "linalg.vector_norm expects ord to be float");
+  }
+  if (iter.numel() == 0) {
+    iter.output().fill_((ord_val < 0) ? INFINITY : 0);
+    return;
+  }
+  if (ord_val == 0) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormZeroOps<scalar_t, acc_t>(), 0);
+  } else if (ord_val == 1) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOneOps<scalar_t, acc_t>(), 0);
+  } else if (ord_val == 2) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormTwoOps<scalar_t, acc_t>(), 0);
+  } else if (ord_val == INFINITY) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMaxOps<scalar_t, acc_t>(), 0);
+  } else if (ord_val == -INFINITY) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMinOps<scalar_t, acc_t>(), std::numeric_limits<acc_t>::infinity());
+  } else {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOps<scalar_t, acc_t>{ static_cast<acc_t>(ord_val) }, 0);
+  }
+  // For complex outputs, the above kernels do not touch the imaginary values,
+  // so we must zero them out
+  if (isComplexType(iter.output().scalar_type())) {
+    at::imag(iter.output()).zero_();
+  }
+}
+
+static void linalg_vector_norm_kernel_cuda(TensorIterator& iter, Scalar ord) {
+  if (iter.output().scalar_type() == kHalf) {
+    return linalg_vector_norm_kernel_cuda_impl<at::Half, float>(iter, ord);
+  } else if (iter.input_dtype() == kHalf && iter.output().scalar_type() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return linalg_vector_norm_kernel_cuda_impl<at::Half, float, float>(iter, ord);
+  }
+  else if(iter.output().scalar_type() == kBFloat16) {
+    return linalg_vector_norm_kernel_cuda_impl<at::BFloat16, float>(iter, ord);
+  } else if (iter.input_dtype() == kBFloat16 && iter.output().scalar_type() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return linalg_vector_norm_kernel_cuda_impl<at::BFloat16, float, float>(iter, ord);
+  }
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.input_dtype(), "linalg_vector_norm_cuda", [&] {
+    linalg_vector_norm_kernel_cuda_impl<scalar_t>(iter, ord);
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda);
+REGISTER_DISPATCH(linalg_vector_norm_stub, &linalg_vector_norm_kernel_cuda);
 
 }}

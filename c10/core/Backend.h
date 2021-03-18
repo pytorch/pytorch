@@ -49,43 +49,6 @@ enum class Backend {
   NumOptions
 };
 
-static inline Backend toDense(Backend b) {
-  switch (b) {
-    case Backend::CPU:
-      return Backend::CPU;
-    case Backend::CUDA:
-      return Backend::CUDA;
-    case Backend::HIP:
-      return Backend::HIP;
-    case Backend::FPGA:
-      return Backend::FPGA;
-    case Backend::MSNPU:
-      return Backend::MSNPU;
-    case Backend::XLA:
-      return Backend::XLA;
-    case Backend::XPU:
-      return Backend::XPU;
-    case Backend::SparseXPU:
-      return Backend::XPU;
-    case Backend::SparseCPU:
-      return Backend::CPU;
-    case Backend::SparseCUDA:
-      return Backend::CUDA;
-    case Backend::SparseHIP:
-      return Backend::HIP;
-    case Backend::QuantizedCPU:
-      return Backend::QuantizedCPU;
-    case Backend::QuantizedCUDA:
-      return Backend::QuantizedCUDA;
-    case Backend::QuantizedXPU:
-      return Backend::QuantizedXPU;
-    case Backend::MLC:
-      return Backend::MLC;
-    default:
-      throw std::runtime_error("Unknown backend");
-  }
-}
-
 static inline Backend dispatchKeyToBackend(DispatchKey t) {
   if (t == DispatchKey::CPU || t == DispatchKey::AutogradCPU) {
     return Backend::CPU;
