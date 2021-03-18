@@ -307,7 +307,7 @@ template <
     typename Func>
 __device__ bool gridReduce(
     T& out,
-    T inp_val,
+    const T& inp_val,
     Func reduction_op,
     volatile T* work_buf,
     Tensor<int64_t, 1> sync_flags,

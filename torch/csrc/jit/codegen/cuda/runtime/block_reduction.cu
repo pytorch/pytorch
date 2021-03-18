@@ -23,7 +23,7 @@ template <
     typename _dim3bd>
 __device__ void blockReduce(
     T& out,
-    const T inp_val,
+    const T& inp_val,
     Func reduction_op,
     const _dim3ti& thread_idx,
     const _dim3bd& block_dim,
