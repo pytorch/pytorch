@@ -98,8 +98,10 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
 
   auto opt = TensorOptions().device(result.device());
 
+  constexpr double threshold_probability = 0.9;
+  double nd = static_cast<double>(n);
   int bits = std::min(64,
-    static_cast<int>(std::ceil(std::log2(static_cast<double>(n)))) + 1);
+    static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / (12 * std::log(threshold_probability))))));
 
   if (n == 0) {
     return result;
