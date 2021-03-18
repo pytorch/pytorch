@@ -3129,7 +3129,6 @@ class TestRandomTensorCreation(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @slowTest
     def test_randperm(self, device):
         if device == 'cpu':
             rng_device = None
