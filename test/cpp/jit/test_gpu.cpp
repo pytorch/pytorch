@@ -3055,6 +3055,139 @@ TEST(NVFuserTest, FusionRootMappingReductionDependency4_CUDA) {
       {true, false});
 }
 
+// Reproducer of issue #749
+TEST(NVFuserTest, FusionRootMappingReductionDependency5_CUDA_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = broadcast(tv2, {false, true});
+  auto tv4 = add(tv0, tv3);
+  auto tv5 = add(tv4, tv1);
+  fusion.addOutput(tv5);
+
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, false},
+      tv1,
+      tv1->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv2,
+      tv2->getRootDomain(),
+      {true, false},
+      tv3,
+      tv3->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv3,
+      tv3->getRootDomain(),
+      {true, true},
+      tv4,
+      tv4->getRootDomain(),
+      {true, true});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, false},
+      tv4,
+      tv4->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv4,
+      tv4->getRootDomain(),
+      {true, true},
+      tv5,
+      tv5->getRootDomain(),
+      {true, true});
+}
+
+// Similar to RootMappingReductionDependency5 but with rFactor
+TEST(NVFuserTest, FusionRootMappingReductionDependency6_CUDA_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {1});
+  auto tv3 = broadcast(tv2, {false, true});
+  auto tv4 = add(tv0, tv3);
+  auto tv5 = add(tv4, tv1);
+  fusion.addOutput(tv5);
+
+  tv2->split(1, 4);
+  auto tv6 = tv2->rFactor({-1});
+
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, false},
+      tv1,
+      tv1->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, false},
+      tv6,
+      tv6->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv6,
+      tv6->getMaybeRFactorDomain(),
+      {true, true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, true});
+  checkIdMapped(
+      tv1,
+      tv1->getRootDomain(),
+      {true, false},
+      tv2,
+      tv2->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv2,
+      tv2->getRootDomain(),
+      {true, false},
+      tv3,
+      tv3->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv3,
+      tv3->getRootDomain(),
+      {true, true},
+      tv4,
+      tv4->getRootDomain(),
+      {true, true});
+  checkIdMapped(
+      tv0,
+      tv0->getRootDomain(),
+      {true, false},
+      tv4,
+      tv4->getRootDomain(),
+      {true, false});
+  checkIdMapped(
+      tv4,
+      tv4->getRootDomain(),
+      {true, true},
+      tv5,
+      tv5->getRootDomain(),
+      {true, true});
+}
+
 TEST(NVFuserTest, FusionRootMappingMultipleBroadcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

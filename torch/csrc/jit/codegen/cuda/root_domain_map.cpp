@@ -194,6 +194,63 @@ UnmappableReductionDomains::UnmappableReductionDomains() {
   traverse(fusion);
 }
 
+namespace {
+
+//! Find all domains that a given domain is depeendent on
+class FindInputDomains : BackwardVisitor {
+ private:
+  FindInputDomains(TensorView* tv, const IterDomain* id) : tv_(tv) {
+    input_keys.insert(DomainKey(tv_->domain(), id));
+  }
+
+  DomainKeySet find() {
+    traverseFrom(tv_->fusion(), {tv_});
+    return input_keys;
+  }
+
+  void handle(Expr* expr) override {
+    for (auto output : expr->outputs()) {
+      if (!output->isA<TensorView>()) {
+        continue;
+      }
+      for (auto input : expr->inputs()) {
+        if (!input->isA<TensorView>()) {
+          continue;
+        }
+        propagate(input->as<TensorView>(), output->as<TensorView>());
+      }
+    }
+  }
+
+  void propagate(TensorView* in_tv, TensorView* out_tv) {
+    auto c2p = PairwiseRootDomainMap(in_tv, out_tv)
+                   .mapConsumerToProducer(out_tv->domain(), in_tv->domain());
+    for (auto root_dom : out_tv->getRootDomain()) {
+      DomainKey out_key({out_tv->domain(), root_dom});
+      if (input_keys.find(out_key) == input_keys.end()) {
+        continue;
+      }
+      auto input_id_it = c2p.find(root_dom);
+      if (input_id_it == c2p.end()) {
+        continue;
+      }
+      DomainKey input_key(in_tv->domain(), input_id_it->second);
+      input_keys.insert(input_key);
+    }
+  }
+
+ private:
+  TensorView* tv_ = nullptr;
+  DomainKeySet input_keys;
+
+ public:
+  static DomainKeySet find(TensorView* tv, const IterDomain* id) {
+    return FindInputDomains(tv, id).find();
+  }
+};
+
+} // namespace
+
 void UnmappableReductionDomains::handle(ReductionOp* op) {
   // Builds a map from reduction domains to consumer domains.
   TensorView* out_tv = op->out()->as<TensorView>();
@@ -217,25 +274,28 @@ void UnmappableReductionDomains::handle(ReductionOp* op) {
       }
     }
   }
+  for (const auto& reduction_key : reduction_keys) {
+    reduction_domain_inputs_.insert(
+        {reduction_key, FindInputDomains::find(out_tv, reduction_key.id())});
+  }
 }
 
 bool UnmappableReductionDomains::isReductionOutputMapped(
     const std::vector<DomainKey>& consumer_domains,
     const ComputeAtRootDomainMap& root_map) const {
   for (const auto& kv : reduction_domains_) {
-    const DomainKey& reducion_domain = kv.first;
+    const DomainKey& reduction_domain = kv.first;
     const DomainKeySet& incompatible_domains = kv.second;
     DomainKey consumer_domain_with_reduction;
     bool reduction_found = false;
+    const auto& input_keys = reduction_domain_inputs_.at(reduction_domain);
     for (const DomainKey& consumer_domain : consumer_domains) {
-      if (root_map.canMap(
-              consumer_domain.td(),
-              consumer_domain.id(),
-              reducion_domain.td(),
-              reducion_domain.id())) {
-        consumer_domain_with_reduction = consumer_domain;
-        reduction_found = true;
-        break;
+      for (const auto& input_key : input_keys) {
+        if (input_key == consumer_domain) {
+          consumer_domain_with_reduction = consumer_domain;
+          reduction_found = true;
+          break;
+        }
       }
     }
     if (!reduction_found) {
@@ -817,8 +877,6 @@ bool ComputeAtRootDomainMapBuilder::safeToMap(const DomainKeySet& domains) {
     return false;
   }
   // Can't map if reduction output domains would be mapped
-  // if (incompatible_domains_.isReductionOutputMapped(unique_domains,
-  // eq_set_)) {
   if (incompatible_domains_.isReductionOutputMapped(
           unique_domains, root_map_) &&
       !map_through_reduction_) {
