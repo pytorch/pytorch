@@ -6880,6 +6880,17 @@ class TestAutogradForwardMode(TestCase):
             del dual
             self.assertIsNone(tangent_ref())
 
+    def test_size_check(self):
+        foo = torch.rand(2)
+        tangent = torch.rand(3)
+
+        with fwAD.dual_level():
+            with self.assertRaisesRegex(RuntimeError, "Trying to set a forward gradient that has a different size"):
+                dual = fwAD.make_dual(foo, tangent)
+
+            dual = fwAD.make_dual(foo, tangent[1:])
+
+
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
 
