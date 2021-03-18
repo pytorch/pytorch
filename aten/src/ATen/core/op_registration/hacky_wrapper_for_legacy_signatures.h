@@ -262,24 +262,30 @@ private:
     // the KernelFunction types, but for arguments we get schema order arguments and need to generate
     // the KernelFunction arguments.
     // That's why in this reordering, we use NumOutParameters instead of the num_nonout_parameters we used above.
-    using target_signature_parameters = guts::typelist::concat_t<
+    using schema_parameters = guts::typelist::concat_t<
         guts::typelist::drop_t<typename kernel_signature_traits::parameter_types, NumOutParameters>,
         guts::typelist::take_t<typename kernel_signature_traits::parameter_types, NumOutParameters>
     >;
 
-    template<class Return, class ParameterList, class IndexPermutation>
+    template<class Return, class SchemaParameterList, class KernelParameterList, class IndexPermutation>
     struct wrapper_;
-    template<class Return, class... Parameters, size_t... Indices>
-    struct wrapper_<Return, guts::typelist::typelist<Parameters...>, std::index_sequence<Indices...>> {
-        static Return call(Parameters... args) {
+    template<class Return, class... SchemaParameters, class... KernelParameters, size_t... Indices>
+    struct wrapper_<Return, guts::typelist::typelist<SchemaParameters...>, guts::typelist::typelist<KernelParameters...>, std::index_sequence<Indices...>> {
+        static Return call(SchemaParameters... args) {
             // call through to KernelFunc but reorder arguments as determined
             // by the permutation we calculated above.
-            return (*KernelFunc::func_ptr())(std::get<Indices>(std::tuple<Parameters...>(std::forward<Parameters>(args)...))...);
+            return (*KernelFunc::func_ptr())(
+                std::forward<KernelParameters>(
+                    std::get<Indices>(
+                        std::tuple<std::add_lvalue_reference_t<SchemaParameters>...>(args...)
+                    )
+                )...
+            );
         }
     };
 
 public:
-    using wrapper = wrapper_<typename kernel_signature_traits::return_type, target_signature_parameters, kernel_to_schema_permutation_indices>;
+    using wrapper = wrapper_<typename kernel_signature_traits::return_type, schema_parameters, typename kernel_signature_traits::parameter_types, kernel_to_schema_permutation_indices>;
 };
 
 

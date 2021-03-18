@@ -104,7 +104,7 @@ std::ostream& operator<<(
 static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
   // 1-elem tensors are usually boxed scalars, so print them like it
   if (tensor.numel() == 1) {
-    auto scalar_tensor = tensor.view({}).item();
+    auto scalar_tensor = tensor.view(std::vector<int64_t>{}).item();
     out << "{";
     if (scalar_tensor.isFloatingPoint()) {
       out << scalar_tensor.toDouble();
@@ -797,12 +797,24 @@ Value* Value::setDebugName(const std::string& name) {
         name_base = name.substr(0, last_dot_pos);
       }
     }
+
+    auto& names_suffixes = node()->owningGraph()->name_base_suffix_;
+    auto it = names_suffixes.find(name_base);
+    if (it != names_suffixes.end()) {
+      suffix = std::max(suffix, it->second + 1);
+    }
+
+    // Verify that new name is not used and find next usable name in case
+    // suffix is used.
     std::string replacement_name;
     do {
       std::stringstream ss;
       ss << name_base << "." << suffix++;
       replacement_name = ss.str();
     } while (names.count(replacement_name) > 0);
+
+    names_suffixes[name_base] = suffix;
+
     old_owner_of_name->second->setDebugName(replacement_name);
   }
 
@@ -1079,6 +1091,11 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
+#ifndef __HIP_PLATFORM_HCC__
+    case cuda::set_stream:
+    case cuda::_set_device:
+    case cuda::_current_device:
+#endif
     case prim::Enter:
     case prim::Exit:
       return true;
@@ -1094,7 +1111,7 @@ bool Node::hasSideEffects() const {
     return false;
   }
 
-  if (kind_.is_prim() || kind_.is_aten()) {
+  if (kind_.is_prim() || kind_.is_aten() || kind_.is_cuda()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
     // ops using AliasAnalysisKind::FROM_SCHEMA,
     // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, or
@@ -2051,16 +2068,6 @@ Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
 }
 
-void ProfileOptionalOp::cloneFrom(Node* other_) {
-  Node::cloneFrom(other_);
-  auto other = other_->cast<ProfileOptionalOp>();
-  this->callback_ = other->getCallback();
-}
-
-Node* ProfileOptionalOp::allocNewInstance(Graph* g) {
-  return new ProfileOptionalOp(g, {nullptr});
-}
-
 void ProfileIValueOp::cloneFrom(Node* other_) {
   Node::cloneFrom(other_);
   auto other = other_->cast<ProfileIValueOp>();
@@ -2080,7 +2087,6 @@ TypePtr NamedValue::type() const {
 }
 
 const Symbol ProfileOp::Kind = ::c10::prim::profile;
-const Symbol ProfileOptionalOp::Kind = ::c10::prim::profile_optional;
 const Symbol ProfileIValueOp::Kind = ::c10::prim::profile_ivalue;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {

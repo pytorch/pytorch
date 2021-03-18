@@ -122,9 +122,9 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     // return and input that is a view as is).
     // See NOTE [ View + Inplace detection ] for why we replace everything by a warning.
     if (!(is_input && is_modified) && var.is_view()) {
-      // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-      diff_view_meta->creation_meta = CreationMeta::IN_CUSTOM_FUNCTION;
+      // is_view() => diff_view_meta
+      auto diff_view_meta = impl::get_view_autograd_meta(var);
+      diff_view_meta->set_creation_meta(CreationMeta::IN_CUSTOM_FUNCTION);
     }
 
     if (is_differentiable) {
@@ -139,10 +139,9 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   // See NOTE [ View + Inplace detection ] for more details
   if (num_diff_outputs > 1) {
     for (auto& var: outputs) {
-      if (var.is_view()) {
-        // NB: is_view() ==> get_autograd_meta()
-        auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-        diff_view_meta->creation_meta = CreationMeta::MULTI_OUTPUT_NODE;
+      auto diff_view_meta = impl::get_view_autograd_meta(var);
+      if (diff_view_meta) {
+        diff_view_meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
       }
     }
   }

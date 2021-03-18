@@ -153,7 +153,7 @@ static void nll_loss2d_forward_out_frame(
   for (int64_t b = 0; b < batch_size; b++) {
     for (int64_t elem = 0; elem < map_size; elem++) {
       const int64_t cur_target = target_data[b * map_size + elem];
-      
+
       if (cur_target == ignore_index) {
         continue;
       }
@@ -284,7 +284,7 @@ static void nll_loss2d_backward_out_frame(
     for (int64_t b = start; b < end; b++) {
       for (int64_t elem = 0; elem < map_size; elem++) {
         const int64_t cur_target = target_data[b * map_size + elem];
-        
+
         if (cur_target == ignore_index) {
           continue;
         }

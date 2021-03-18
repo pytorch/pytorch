@@ -13,17 +13,19 @@
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 
-THC_API THCStorage* THCStorage_new(THCState* state);
+TORCH_CUDA_CU_API THCStorage* THCStorage_new(THCState* state);
 
-THC_API void THCStorage_retain(THCState *state, THCStorage *storage);
+TORCH_CUDA_CU_API void THCStorage_retain(THCState* state, THCStorage* storage);
 
-THC_API void THCStorage_resizeBytes(
+TORCH_CUDA_CU_API void THCStorage_resizeBytes(
     THCState* state,
     THCStorage* storage,
     ptrdiff_t size_bytes);
-THC_API int THCStorage_getDevice(THCState* state, const THCStorage* storage);
+TORCH_CUDA_CU_API int THCStorage_getDevice(
+    THCState* state,
+    const THCStorage* storage);
 
-THC_API THCStorage* THCStorage_newWithDataAndAllocator(
+TORCH_CUDA_CU_API THCStorage* THCStorage_newWithDataAndAllocator(
     THCState* state,
     at::DataPtr&& data,
     ptrdiff_t size,

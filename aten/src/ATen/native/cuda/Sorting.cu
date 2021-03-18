@@ -6,6 +6,7 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
+#include <ATen/MemoryOverlap.h>
 #include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
 #include <THC/THCNumerics.cuh>
 #include <THC/THCScanUtils.cuh>
@@ -262,6 +263,8 @@ void kthvalue_cuda_template(
       " on tensor with no elements because the operation does not have an identity");
   TORCH_CHECK(k >= 1 && k <= slicesize, "selected number k out of range");
 
+  at::assert_no_overlap(self, values);
+
   _reduction_with_indices_allocate_or_resize_output(
       values, indices, self, dim, keepdim);
   if (self.dim() == 0 && self.numel() == 1) {
@@ -406,12 +409,12 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 // Mark: kthvalue
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     int64_t k,
     int64_t dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   // See note [Writing Nondeterministic Operations]
   // If there are duplicate elements of the kth value, the procedure for choosing which
   // of the duplicates to use for the indices output is nondeterministic.
@@ -429,11 +432,11 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cuda(
 // Mark: median
 
 std::tuple<Tensor&, Tensor&> median_out_cuda(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     int64_t dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   return median_with_indices_impl(
       values, indices, self, dim, keepdim, /*ignore_nan=*/false);
 }
@@ -443,11 +446,11 @@ Tensor median_cuda(const Tensor& self) {
 }
 
 std::tuple<Tensor&, Tensor&> nanmedian_out_cuda(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     int64_t dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   return median_with_indices_impl(
       values, indices, self, dim, keepdim, /*ignore_nan=*/true);
 }

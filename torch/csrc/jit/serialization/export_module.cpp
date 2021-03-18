@@ -4,6 +4,10 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/method.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -20,6 +24,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -139,9 +144,10 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         auto method_name_idx =
             code.constant_table().size() + method_names.size();
         method_names.emplace_back(node->s(attr::name));
-        Instruction new_instr{INTERFACE_CALL,
-                              static_cast<int32_t>(method_name_idx),
-                              static_cast<uint16_t>(node->inputs().size())};
+        Instruction new_instr{
+            INTERFACE_CALL,
+            static_cast<int32_t>(method_name_idx),
+            static_cast<uint16_t>(node->inputs().size())};
         instructions_copy[i] = new_instr;
       } else {
         TORCH_INTERNAL_ASSERT(
@@ -177,11 +183,6 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       }
     } else {
       TORCH_CHECK(
-          ins.op != CREATE_OBJECT,
-          "CREATE_OBJECT is not supported in mobile module. ",
-          "Workaround: instead of using arbitrary class type (class Foo()), ",
-          "define a pytorch class (class Foo(torch.nn.Module)).");
-      TORCH_CHECK(
           isOpSupportedInMobile(ins.op),
           toString(ins.op),
           " is not supported in mobile module.");
@@ -214,20 +215,67 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // types
   std::vector<IValue> types;
   types.reserve(code.type_table().size());
+  static const std::string torch_prefix("__torch__");
+  static const std::string class_prefix("__torch__.torch.classes");
   for (const TypePtr& t : code.type_table()) {
-    types.emplace_back(t->annotation_str());
+    auto type_str = t->annotation_str();
+    if (type_str.find(torch_prefix) == 0) {
+      TORCH_CHECK(
+          type_str.find(class_prefix) == 0,
+          "__torch__ types other than torchbind (__torch__.torch.classes)"
+          "are not supported in lite interpreter. ",
+          "Workaround: instead of using arbitrary class type (class Foo()), ",
+          "define a pytorch class (class Foo(torch.nn.Module)).");
+    }
+    types.emplace_back(type_str);
   }
 
   // since the register location is embedded into the bytecode, pass the
   // register size
   auto register_size = static_cast<int>(code.register_size());
 
-  auto table = Table({{"instructions", Tup(instructions)},
-                      {"operators", Tup(operators)},
-                      {"constants", Tup(constants)},
-                      {"types", Tup(types)},
-                      {"register_size", register_size}});
-  auto bytecode_vals = Tup({func.qualname().qualifiedName(), table});
+  auto codeTable = Table(
+      {{"instructions", Tup(instructions)},
+       {"operators", Tup(operators)},
+       {"constants", Tup(constants)},
+       {"types", Tup(types)},
+       {"register_size", register_size}});
+
+  // schema
+  const auto& schema = func.getSchema();
+  TORCH_CHECK(
+      schema.overload_name().empty(), // @TODO: is this check correct?
+      "Overloads are not supported in mobile modules.");
+  TORCH_CHECK(
+      !schema.is_vararg(), "Python *args are not supported in mobile modules.");
+  TORCH_CHECK(
+      !schema.is_varret(),
+      "A variable number of return values is not supported in mobile modules.");
+  auto makeArgTuple = [](const std::vector<Argument>& args) {
+    std::vector<IValue> argTables;
+    for (auto&& arg : args) {
+      TORCH_CHECK(
+          !arg.N(),
+          "Arguments with known list lengths are not supported in mobile modules.");
+      TORCH_CHECK(
+          !arg.kwarg_only(),
+          "Keyword-only arguments are not supported in mobile modules.");
+      argTables.emplace_back(Table({
+          {"name", arg.name()},
+          {"type", arg.type()->annotation_str()},
+          {"default_value", arg.default_value()},
+      }));
+    }
+    return Tup(argTables);
+  };
+  auto schemaTable = Table({
+      {"arguments", makeArgTuple(schema.arguments())},
+      {"returns", makeArgTuple(schema.returns())},
+  });
+
+  // function tuple
+  auto bytecode_vals =
+      Tup({func.qualname().qualifiedName(), codeTable, schemaTable});
 
   c10::optional<IValue> debug_info_vals;
   if (save_mobile_debug_info) {
@@ -247,6 +295,7 @@ void setstateTuple(
     const Module& module,
     const IValue& ivalue,
     std::vector<c10::IValue>& elements,
+    std::unordered_set<std::string>& qn_cache,
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
     bool save_mobile_debug_info) {
   if (!ivalue.isObject())
@@ -255,10 +304,15 @@ void setstateTuple(
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
+    const auto qn = setstate.qualname().qualifiedName();
+    if (qn_cache.find(qn) != qn_cache.end()) {
+      return;
+    }
     if (setstate.isGraphFunction()) {
       auto func_tuple =
           getFunctionTuple(module, setstate, save_mobile_debug_info);
       elements.push_back(func_tuple.first);
+      qn_cache.emplace(qn);
       if (save_mobile_debug_info) {
         debug_info_elements->push_back(func_tuple.second.value());
       }
@@ -269,6 +323,7 @@ void setstateTuple(
           module,
           obj->getSlot(i),
           elements,
+          qn_cache,
           debug_info_elements,
           save_mobile_debug_info);
     }
@@ -278,15 +333,21 @@ void setstateTuple(
 
 void moduleMethodsTuple(
     const Module& module,
-    std::vector<c10::IValue>& elements,
+    std::vector<c10::IValue>& elements, // note: appended to in-place
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
     bool save_mobile_debug_info) {
   auto methods = module.get_methods();
+  std::unordered_set<std::string> qn_cache;
   // top level methods
   for (const auto& method : methods) {
+    const auto qn = method.function().qualname().qualifiedName();
+    if (qn_cache.find(qn) != qn_cache.end()) {
+      continue;
+    }
     auto func_tuple =
         getFunctionTuple(module, method.function(), save_mobile_debug_info);
     elements.push_back(func_tuple.first);
+    qn_cache.emplace(qn);
     if (save_mobile_debug_info) {
       debug_info_elements->push_back(func_tuple.second.value());
     }
@@ -297,6 +358,7 @@ void moduleMethodsTuple(
       module,
       module._ivalue(),
       elements,
+      qn_cache,
       debug_info_elements,
       save_mobile_debug_info);
 }
@@ -350,7 +412,7 @@ class ScriptModuleSerializer {
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
-    std::vector<c10::ClassTypePtr> memorizedClassTypes;
+    std::vector<c10::ClassTypePtr> memoizedClassTypes;
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
@@ -359,7 +421,7 @@ class ScriptModuleSerializer {
         [&](const c10::ClassTypePtr& t) {
           return type_name_uniquer_.getUniqueName(t);
         },
-        &memorizedClassTypes);
+        &memoizedClassTypes);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
@@ -374,7 +436,7 @@ class ScriptModuleSerializer {
     writer_.writeRecord(fname, data.data(), data.size());
 
     // serialize all the captured run-time class types
-    for (const c10::ClassTypePtr& wroteType : memorizedClassTypes) {
+    for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
       convertNamedType(wroteType);
     }
   }
@@ -596,5 +658,26 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   return std::vector<std::string>(names.begin(), names.end());
 }
 
+namespace mobile {
+
+std::set<std::string> _export_operator_list(
+    torch::jit::mobile::Module& module) {
+  std::set<std::string> operator_list;
+  for (Method func : module.get_methods()) {
+    const Function& function = func.function();
+    const std::shared_ptr<Code> cptr = function.get_code();
+    // op_names below isn't a list of unique operator names. In fact
+    // it can contain the same operator name many many times, so we need
+    // to de-dup the list by adding all the operator names into
+    // an std::set<std::string>.
+    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    for (auto& op_name : op_names) {
+      operator_list.insert(toString(op_name));
+    }
+  }
+  return operator_list;
+}
+
+} // namespace mobile
 } // namespace jit
 } // namespace torch

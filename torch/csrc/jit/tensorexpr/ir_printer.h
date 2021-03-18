@@ -52,6 +52,7 @@ class TORCH_API IRPrinter : public IRVisitor {
 
   void visit(const AtomicAdd* v) override;
   void visit(const SyncThreads* v) override;
+  void visit(const ExternalCall* v) override;
   void visit(const Store* v) override;
   void visit(const For* v) override;
   void visit(const Cond* v) override;

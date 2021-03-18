@@ -37,7 +37,7 @@ parser.add_argument(
 )
 parser.add_argument(
     '--graph',
-    metavar='FILE.dot',
+    metavar='FILE.gv',
     help='write Graphviz DOT file with execution graph',
 )
 parser.add_argument(
@@ -155,6 +155,19 @@ def warn_if_tmpdir_set(env):
     if os.getenv('TMPDIR') or 'TMPDIR' in env:
         fast_nvcc_warn("TMPDIR is set, might not work; see this URL:")
         fast_nvcc_warn(url_vars)
+
+
+def contains_non_executable(commands):
+    for command in commands:
+        # This is to deal with special command dry-run result from NVCC such as:
+        # ```
+        # #$ "/lib64/ccache"/c++ -std=c++11 -E -x c++ -D__CUDACC__ -D__NVCC__  -fPIC -fvisibility=hidden -O3 \
+        #   -I ... -m64 "reduce_scatter.cu" > "/tmp/tmpxft_0037fae3_00000000-5_reduce_scatter.cpp4.ii
+        # #$ -- Filter Dependencies -- > ... pytorch/build/nccl/obj/collectives/device/reduce_scatter.dep.tmp
+        # ```
+        if command.startswith("--"):
+            return True
+    return False
 
 
 def module_id_contents(command):
@@ -275,6 +288,8 @@ def is_weakly_connected(graph):
     """
     Return true iff graph is weakly connected.
     """
+    if not graph:
+        return True
     neighbors = [set() for _ in graph]
     for node, predecessors in enumerate(graph):
         for pred in predecessors:
@@ -322,7 +337,10 @@ async def run_command(command, *, env, deps, gather_data, i, save):
     Run the command with the given env after waiting for deps.
     """
     for task in deps:
-        await task
+        dep_result = await task
+        # abort if a previous step failed
+        if 'exit_code' not in dep_result or dep_result['exit_code'] != 0:
+            return {}
     if gather_data:
         t1 = time.monotonic()
     proc = await asyncio.create_subprocess_shell(
@@ -353,7 +371,7 @@ async def run_command(command, *, env, deps, gather_data, i, save):
     return results
 
 
-async def run_graph(*, env, commands, graph, gather_data, save):
+async def run_graph(*, env, commands, graph, gather_data=False, save=None):
     """
     Return outputs/errors (and optionally time/file info) from commands.
     """
@@ -376,8 +394,8 @@ def print_command_outputs(command_results):
     Print captured stdout and stderr from commands.
     """
     for result in command_results:
-        sys.stdout.write(result['stdout'].decode('ascii'))
-        sys.stderr.write(result['stderr'].decode('ascii'))
+        sys.stdout.write(result.get('stdout', b'').decode('ascii'))
+        sys.stderr.write(result.get('stderr', b'').decode('ascii'))
 
 
 def write_log_csv(command_parts, command_results, *, filename):
@@ -386,15 +404,15 @@ def write_log_csv(command_parts, command_results, *, filename):
     """
     tmp_files = []
     for result in command_results:
-        tmp_files.extend(result['files'].keys())
+        tmp_files.extend(result.get('files', {}).keys())
     with open(filename, 'w', newline='') as csvfile:
         fieldnames = ['command', 'seconds'] + list(dict.fromkeys(tmp_files))
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         for i, result in enumerate(command_results):
             command = f'{i} {os.path.basename(command_parts[i][0])}'
-            row = {'command': command, 'seconds': result['time']}
-            writer.writerow({**row, **result['files']})
+            row = {'command': command, 'seconds': result.get('time', 0)}
+            writer.writerow({**row, **result.get('files', {})})
 
 
 def exit_code(results):
@@ -402,10 +420,14 @@ def exit_code(results):
     Aggregate individual exit codes into a single code.
     """
     for result in results:
-        code = result['exit_code']
+        code = result.get('exit_code', 0)
         if code != 0:
             return code
     return 0
+
+
+def wrap_nvcc(args, config=default_config):
+    return subprocess.call([config.nvcc] + args)
 
 
 def fast_nvcc(args, *, config=default_config):
@@ -422,6 +444,10 @@ def fast_nvcc(args, *, config=default_config):
     commands = dryrun_data['commands']
     if not config.faithful:
         commands = make_rm_force(unique_module_id_files(commands))
+
+    if contains_non_executable(commands):
+        return wrap_nvcc(args, config)
+
     command_parts = list(map(shlex.split, commands))
     if config.verbose:
         print_verbose_output(

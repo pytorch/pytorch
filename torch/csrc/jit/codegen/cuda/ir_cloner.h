@@ -14,7 +14,7 @@ namespace cuda {
 class Fusion;
 
 // Clones nodes from an exiting Fusion
-class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
+class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   friend class Statement;
 
  public:

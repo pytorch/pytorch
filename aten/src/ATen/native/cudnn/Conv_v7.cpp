@@ -61,8 +61,33 @@ constexpr size_t operator "" _TiB(unsigned long long n) {
 
 namespace at { namespace native {
 
-// TODO: Go through all the checking code again and make sure
-// we haven't missed anything.
+// Convenience struct for passing around descriptors and data
+// pointers
+struct ConvolutionArgs {
+  cudnnHandle_t handle;
+  ConvolutionParams params;
+  TensorDescriptor idesc, odesc;
+  FilterDescriptor wdesc;
+  const Tensor& input, output, weight;
+  ConvolutionDescriptor cdesc;
+
+  ConvolutionArgs(const Tensor& input, const Tensor& output, const Tensor& weight) : input(input), output(output), weight(weight) {
+  }
+};
+
+std::ostream& operator<<(std::ostream & out, const ConvolutionArgs& args) {
+  out << repro_from_args(args.params)  // already has a trailing newline
+    << args.params                     // already has a trailing newline
+    << "input: " << args.idesc         // already has a trailing newline
+    << "output: " << args.odesc        // already has a trailing newline
+    << "weight: " << args.wdesc        // already has a trailing newline
+    << "Pointer addresses: " << "\n"
+    << "    input: " << args.input.data_ptr() << "\n"
+    << "    output: " << args.output.data_ptr() << "\n"
+    << "    weight: " << args.weight.data_ptr() << "\n";
+
+  return out;
+}
 
 // ---------------------------------------------------------------------
 //
@@ -528,7 +553,7 @@ static inline void split_batch_dim_to_32bit_out(
     const at::Tensor& input,
     const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32, 
+    bool benchmark, bool deterministic, bool allow_tf32,
     int64_t max_worksize, func_t func_32bit) {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   const int64_t ni = input.numel();

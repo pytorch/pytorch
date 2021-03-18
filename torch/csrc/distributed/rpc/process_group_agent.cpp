@@ -3,6 +3,7 @@
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
 #include <fmt/format.h>
+#include <torch/csrc/distributed/rpc/agent_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -57,38 +58,8 @@ const std::string kClientActiveCalls = "agent.client_active_calls";
 const std::string kServerActiveCalls = "agent.server_active_calls";
 const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 
-void ProcessGroupAgent::collectNames() {
-  const std::string& workerName = workerInfo_.name_;
-  const auto worldSize = pg_->getSize();
-
-  // use c10d allgather to collect names
-  torch::Tensor nameTensor =
-      torch::zeros({WorkerInfo::MAX_NAME_LEN}, torch::kChar);
-  memcpy(nameTensor.storage().data(), workerName.c_str(), workerName.length());
-  std::vector<torch::Tensor> inputName = {nameTensor};
-  std::vector<std::vector<torch::Tensor>> outputNames(1);
-  for (int i = 0; i < worldSize; ++i) {
-    outputNames[0].emplace_back(
-        torch::empty({WorkerInfo::MAX_NAME_LEN}, {torch::kChar}));
-  }
-  pg_->allgather(outputNames, inputName)->wait();
-
-  // convert collected name tensors into string names
-  for (worker_id_t i = 0; i < worldSize; ++i) {
-    torch::Tensor& tensor = outputNames[0][i];
-    std::string peerName((const char*)tensor.storage().data<signed char>());
-
-    TORCH_CHECK(
-        nameMap_.find(peerName) == nameMap_.end(),
-        "RpcAgent name ",
-        peerName,
-        " is not unique.");
-
-    nameMap_[std::move(peerName)] = i;
-  }
-}
-
 ProcessGroupAgent::ProcessGroupAgent(
+    const c10::intrusive_ptr<::c10d::Store>& store,
     std::string workerName,
     c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
@@ -109,7 +80,12 @@ ProcessGroupAgent::ProcessGroupAgent(
   metrics_.resize(ProcessGroupAgentMetrics::N_METRICS);
   metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] =
       std::make_unique<AverageMetricsTracker>(kGilAverageWaitTime);
-  collectNames();
+
+  nameMap_ = collectNames(
+      ::c10d::PrefixStore("names", store),
+      workerInfo_.id_,
+      workerInfo_.name_,
+      pg_->getSize());
   auto workerRankIter = nameMap_.find(workerInfo_.name_);
   TORCH_CHECK(
       workerRankIter != nameMap_.end(),
@@ -162,7 +138,7 @@ std::vector<WorkerInfo> ProcessGroupAgent::getWorkerInfos() const {
   return allWorkerInfo_;
 }
 
-void ProcessGroupAgent::join() {
+void ProcessGroupAgent::join(bool /* unused */) {
   sync();
   std::unique_lock<std::mutex> lock(futureMutex_);
   futureCV_.wait(
@@ -287,10 +263,11 @@ void ProcessGroupAgent::shutdownImpl() {
   threadPool_.waitWorkComplete();
 }
 
-std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
+std::shared_ptr<JitFuture> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
@@ -319,7 +296,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       pg_->getRank());
 
   auto requestId = nextId();
-  auto future = std::make_shared<FutureMessage>();
+  auto future = std::make_shared<JitFuture>(at::AnyClassType::get());
   if (message.isRequest()) {
     // millisecond level precision of when request started.
     auto futureStartTime = std::chrono::steady_clock::now();
@@ -362,7 +339,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     message.setId(requestId);
     ++clientActiveCalls_;
   } else {
-    future->markCompleted(Message());
+    future->markCompleted(IValue());
   }
 
   // Sending to ourselves: bypass the send logic and enqueue directly
@@ -382,6 +359,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   // the C++ land. Hence, we have to explicitly use the ``WorkerInfo`` in the
   // C++ land.
   enqueueSend(SendWork(allWorkerInfo_[to.id_], std::move(message)));
+
   return future;
 }
 
@@ -513,22 +491,24 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       std::move(data.first), std::move(data.second), work.type_, work.id_);
   if (message.isRequest()) {
     ++serverActiveCalls_;
-    std::shared_ptr<FutureMessage> futureResponse;
+    std::shared_ptr<JitFuture> futureResponse;
     try {
       futureResponse = cb_->operator()(message);
     } catch (const std::exception& e) {
-      futureResponse = std::make_shared<FutureMessage>();
-      futureResponse->setError(e.what());
+      futureResponse = std::make_shared<JitFuture>(at::AnyClassType::get());
+      futureResponse->setError(std::current_exception());
     }
     if (futureResponse->completed()) {
       --serverActiveCalls_;
       if (!futureResponse->hasError()) {
-        send(work.from_, std::move(*futureResponse).moveValue());
+        send(
+            work.from_,
+            std::move(*futureResponse->value().toCustomClass<Message>()));
       } else {
         send(
             work.from_,
             createExceptionResponse(
-                futureResponse->error()->what(), message.id()));
+                futureResponse->tryRetrieveErrorMessage(), message.id()));
       }
     } else {
       ++serverActiveAsyncCalls_;
@@ -537,28 +517,30 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       // Use a weak_ptr, so we can std::move the future's value.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
-      futureResponse->addCallback([this,
-                                   fromId,
-                                   requestId,
-                                   weak = std::weak_ptr<FutureMessage>(
-                                       futureResponse)]() {
-        auto futureResponse = weak.lock();
-        TORCH_INTERNAL_ASSERT(futureResponse);
-        --serverActiveCalls_;
-        --serverActiveAsyncCalls_;
-        if (!futureResponse->hasError()) {
-          send(getWorkerInfo(fromId), std::move(*futureResponse).moveValue());
-        } else {
-          send(
-              getWorkerInfo(fromId),
-              createExceptionResponse(
-                  futureResponse->error()->what(), requestId));
-        }
-      });
+      futureResponse->addCallback(
+          [this,
+           fromId,
+           requestId,
+           weak = std::weak_ptr<JitFuture>(futureResponse)]() {
+            auto futureResponse = weak.lock();
+            TORCH_INTERNAL_ASSERT(futureResponse);
+            --serverActiveCalls_;
+            --serverActiveAsyncCalls_;
+            if (!futureResponse->hasError()) {
+              send(
+                  getWorkerInfo(fromId),
+                  std::move(*futureResponse->value().toCustomClass<Message>()));
+            } else {
+              send(
+                  getWorkerInfo(fromId),
+                  createExceptionResponse(
+                      futureResponse->tryRetrieveErrorMessage(), requestId));
+            }
+          });
     }
   } else if (message.isResponse()) {
     auto id = message.id();
-    std::shared_ptr<FutureMessage> fm = nullptr;
+    std::shared_ptr<JitFuture> jitFuture = nullptr;
     {
       std::lock_guard<std::mutex> lock{futureMutex_};
       const auto& futureInfo = futures_.find(id);
@@ -570,7 +552,7 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
         return false;
       }
       // Use futureInfo before destructing it.
-      fm = futureInfo->second.future_;
+      jitFuture = futureInfo->second.future_;
       auto endTime = futureInfo->second.endTime_;
       futures_.erase(id);
       // look up the corresponding future by its time out and request
@@ -589,10 +571,11 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
     futureCV_.notify_all();
     --clientActiveCalls_;
     if (message.type() == MessageType::EXCEPTION) {
-      fm->setError(
-          std::string(message.payload().begin(), message.payload().end()));
+      jitFuture->setError(std::make_exception_ptr(std::runtime_error(
+          std::string(message.payload().begin(), message.payload().end()))));
     } else {
-      fm->markCompleted(std::move(message));
+      jitFuture->markCompleted(
+          IValue(c10::make_intrusive<Message>(std::move(message))));
     }
   } else {
     // TODO: pass the error back to the caller instead of crashing here.
@@ -643,7 +626,7 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
 }
 
 void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
-  std::shared_ptr<FutureMessage> fm = nullptr;
+  std::shared_ptr<JitFuture> jitFuture = nullptr;
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
     const auto& futureInfo = futures_.find(id);
@@ -653,7 +636,7 @@ void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
       // out and been processed accordingly.
       return;
     }
-    fm = futureInfo->second.future_;
+    jitFuture = futureInfo->second.future_;
     auto rpcEndTime = futureInfo->second.endTime_;
     futures_.erase(id);
     // look up the corresponding future by its time out and request ID,
@@ -671,7 +654,7 @@ void ProcessGroupAgent::markFutureWithError(int64_t id, std::string errorMsg) {
   }
 
   --clientActiveCalls_;
-  fm->setError(std::move(errorMsg));
+  jitFuture->setError(std::make_exception_ptr(std::runtime_error(errorMsg)));
   futureCV_.notify_all();
 }
 
@@ -803,7 +786,8 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
 
       if (!timedOutFuture.future_->hasError()) {
         --clientActiveCalls_;
-        timedOutFuture.future_->setError(std::move(err));
+        timedOutFuture.future_->setError(
+            std::make_exception_ptr(std::runtime_error(err)));
         // The future timed out and will not be processed by handleRecv(), even
         // if we eventually get a response. In order to keep track of all
         // send/recv pairs, we increment the count here.

@@ -24,6 +24,12 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
     data_ = variable.tensor_data();
+    // TODO(albanD) This needs to be updated when moving to multiple levels
+    const auto& fw_grad = variable._fw_grad(/* level */ 0);
+    if (fw_grad.defined()) {
+      fw_grad_ = std::make_shared<ForwardGrad>();
+      fw_grad_->set_value(fw_grad, /* level */ 0);
+    }
     if (variable.is_leaf()) {
       grad_accumulator_ = impl::grad_accumulator(variable);
     } else if (!is_output) {
@@ -99,6 +105,16 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired())
     throw std::logic_error("No grad accumulator for a saved leaf!");
   impl::set_grad_accumulator(var, grad_accumulator_);
+
+  // NB: var here is never a view so there is no need to make anything special
+  // for the case where the saved Tensor was a view. This whole argument relies
+  // on the fact that the Tensor returned by this function is never
+  // modified in-place.
+  if (fw_grad_ && !fw_grad_->empty()) {
+    // TODO(albanD) This needs to be updated when moving to multiple levels
+    auto new_fw_grad = fw_grad_->value(/* level */ 0);
+    var._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
+  }
 
   return var;
 }

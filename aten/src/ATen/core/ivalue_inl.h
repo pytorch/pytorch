@@ -28,6 +28,7 @@ struct IValue;
 struct ClassType;
 struct TupleType;
 struct EnumType;
+struct InferredType;
 
 // For custom class __init__ registration, we need to pass in a function
 // that looks like this: [](IValue x, args...)
@@ -47,14 +48,18 @@ struct tagged_capsule {
 template <class T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
   auto t = c10::intrusive_ptr<T, NullType>::reclaim(
-      static_cast<T*>(payload.as_intrusive_ptr));
+      payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()
+      ? NullType::singleton()
+      : static_cast<T*>(payload.u.as_intrusive_ptr));
   clearToNone();
   return t;
 }
 template <typename T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::toIntrusivePtr() const {
   auto r = c10::intrusive_ptr<T, NullType>::reclaim(
-      static_cast<T*>(payload.as_intrusive_ptr));
+      payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()
+      ? NullType::singleton()
+      : static_cast<T*>(payload.u.as_intrusive_ptr));
   auto p = r;
   r.release();
   return p;
@@ -128,20 +133,54 @@ inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() const& {
   TORCH_INTERNAL_ASSERT(isEnum(), "Expected Enum but got ", tagKind());
   return toIntrusivePtr<ivalue::EnumHolder>();
 }
-inline at::Tensor IValue::toTensor() && {
-  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
-  return at::Tensor(
-      moveToIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
+inline c10::complex<double> IValue::toComplexDouble() const {
+  TORCH_INTERNAL_ASSERT(isComplexDouble(), "Expected ComplexDouble but got ", tagKind());
+  auto ptr = toIntrusivePtr<ivalue::ComplexHolder>();
+  return (*ptr).val;
 }
-inline at::Tensor IValue::toTensor() const& {
-  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
-  return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
+inline at::Tensor IValue::toTensor() && {
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
+  auto result = std::move(payload.as_tensor);
+  // As far as I can tell, omitting the usual explicit destructor call
+  // is not UB in and of itself, and it's a slight perf win. The
+  // destructor is a no-op, because the moved-from Tensor is
+  // effectively an intrusive_ptr in the null state, so we don't need
+  // the behavior for correctness reasons either. Leaving this
+  // explanatory comment, including commented-out destructor call, to
+  // make this abundantly clear.
+  //
+  // payload.as_tensor.~Tensor();
+  clearToNone();
+  return result;
+}
+inline at::Tensor& IValue::toTensor() & {
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
+  return payload.as_tensor;
+}
+inline const at::Tensor& IValue::toTensor() const& {
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
+  return payload.as_tensor;
+}
+inline c10::Storage IValue::toStorage() && {
+  AT_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
+  return c10::Storage(
+      moveToIntrusivePtr<at::StorageImpl>());
+}
+inline c10::Storage IValue::toStorage() const& {
+  AT_ASSERT(isStorage(), "Expected Storage but got ", tagKind());
+  return c10::Storage(toIntrusivePtr<at::StorageImpl>());
 }
 inline c10::Stream IValue::toStream() && {
-  return c10::Stream::unpack(payload.as_int);
+  return c10::Stream::unpack(payload.u.as_int);
 }
 inline c10::Stream IValue::toStream() const& {
-  return c10::Stream::unpack(payload.as_int);
+  return c10::Stream::unpack(payload.u.as_int);
 }
 inline c10::intrusive_ptr<caffe2::Blob> IValue::toBlob() && {
   AT_ASSERT(isBlob(), "Expected Blob but got ", tagKind());
@@ -171,14 +210,14 @@ inline at::Generator IValue::toGenerator() const& {
 
 namespace ivalue {
 
-void CAFFE2_API
+void TORCH_API
 checkCustomClassType(const Type* expected_type, const Type* actual_type);
 
 template <typename T>
 using Shared = c10::intrusive_ptr<T>;
 
 // string
-struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
+struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
  private:
   const std::string str_;
 
@@ -191,14 +230,14 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
   operator const std::string&() const {
     return string();
   }
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const ConstantString& v);
 };
 
 struct Future;
 
-struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
+struct TORCH_API Tuple : c10::intrusive_ptr_target {
  private:
   std::vector<IValue> elements_;
   mutable std::shared_ptr<TupleType>
@@ -245,7 +284,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
     return c10::get_hash(t.elements());
   }
 
-  CAFFE2_API friend bool operator==(
+  TORCH_API friend bool operator==(
       const ivalue::Tuple& lhs,
       const ivalue::Tuple& rhs);
 
@@ -274,7 +313,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
  public:
   explicit Future(TypePtr type) : type_(type) {}
-  struct CAFFE2_API FutureError final : public std::exception {
+  struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
 
@@ -322,6 +361,22 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * Explicitly mark the future as completed with the output value.
    */
   void markCompleted(IValue value) {
+    markCompletedWithDataPtrs(std::move(value));
+  }
+
+  /**
+   * Explicitly mark the future as completed with the output value and DataPtrs.
+   * The data_ptrs contains storage pointers for all tensors in IValue, which
+   * will be passed to postMarkCompletedHook. Some subclass, like CUDAFuture,
+   * uses these DataPtrs to synchronize CUDA streams. You only need to provide
+   * data_ptrs when 1) DataPtrs cannot be extracted through
+   * IValue::getSubValues() or 2) customized DataPtrs extraction is more
+   * efficient.
+   */
+  void markCompletedWithDataPtrs(
+      IValue value,
+      c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
+          data_ptrs = c10::nullopt) {
     std::unique_lock<std::mutex> lock(mutex_);
     TORCH_CHECK(
         !completed(),
@@ -330,7 +385,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     completed_ = true;
     value_ = std::move(value);
 
-    postMarkCompletedHook(value_);
+    postMarkCompletedHook(value_, std::move(data_ptrs));
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
@@ -378,7 +433,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
   // This accessor should only be used if we know that the future is
   // completed() with no error.
-  const IValue& constValue() {
+  const IValue& constValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
@@ -422,35 +477,8 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return fut;
   }
 
-  // Some subclasses deal with CUDA tensors and must inform the CUDA caching
-  // allocator of which CUDA streams each DataPtr is used in. If the value held
-  // by the future is a Python object we need to acquire the GIL when extracting
-  // these DataPtrs. Since this file cannot depend on Python, we allow users to
-  // provide a "custom" extractor. Look for example at the PythonFutureWrapper.
-  using DataPtrExtractor =
-      std::function<std::vector<std::reference_wrapper<const at::DataPtr>>(
-          const at::IValue&)>;
-  virtual void setDataPtrExtractor(DataPtrExtractor data_ptr_extractor) {}
-
-  // Expose the default implementation so that external ones can defer to it.
-  static std::vector<std::reference_wrapper<const at::DataPtr>>
-  defaultDataPtrExtractor(const at::IValue& value) {
-    at::IValue::HashAliasedIValues sub_values;
-    // Prefer getSubValues() over visit() as the latter is a silent no-op for
-    // some unsupported types, whereas the former at least fails loudly.
-    value.getSubValues(sub_values);
-
-    std::vector<std::reference_wrapper<const at::DataPtr>> res;
-    for (const at::IValue& sub_value : sub_values) {
-      if (sub_value.isTensor()) {
-        res.emplace_back(sub_value.toTensor().storage().data_ptr());
-      }
-    }
-    return res;
-  };
-
   // Tries to retrieve the error message from std::exception_ptr.
-  std::string tryRetrieveErrorMessage() {
+  std::string tryRetrieveErrorMessage() const {
     TORCH_CHECK(hasError(), "No error present on the future.");
     std::unique_lock<std::mutex> lock(mutex_);
     return tryRetrieveErrorMessageInternal(eptr_);
@@ -476,7 +504,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return eptr_;
   }
 
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
 
@@ -484,13 +512,13 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     return type_;
   }
 
- protected:
-  // This hook is called by this class's then() method when it prepares the
-  // instance it returns to the caller. It should be overridden by subclasses so
-  // that they can produce an instace of their own type.
+  // This method should be overridden by subclasses so that they can produce an
+  // instace of their own type.
   virtual c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
     return c10::make_intrusive<Future>(type);
   }
+
+ protected:
 
   // This hook will be called by this class (the superclass) when the future is
   // marked completed _with a value_ (hence not in case of error). This is done
@@ -498,7 +526,12 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   // It allows subclasses to further update their state if they so need. For
   // example the CUDAFuture subclass uses it to determine what devices the value
   // resides on and record an event in those devices' current streams.
-  virtual void postMarkCompletedHook(const at::IValue& value) {}
+  // The data_ptrs field contains storage pointers of all tensors in the value,
+  // which is used by the CUDAFuture subclass to synchronize streams.
+  virtual void postMarkCompletedHook(
+      const at::IValue& value,
+      c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
+          data_ptrs) {}
 
   // This hook will be called by the addCallback() and the then() methods before
   // storing the callback for later execution (or before running it inline if
@@ -542,7 +575,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
-  std::string tryRetrieveErrorMessageInternal(std::exception_ptr eptr) {
+  std::string tryRetrieveErrorMessageInternal(std::exception_ptr eptr) const {
     try {
       std::rethrow_exception(eptr);
     } catch (const std::exception& e) {
@@ -564,11 +597,11 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
 // Input is a list of Futures with the same target type.
 // Output is a Future to the List of completed Futures.
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
 // Input is a List of Futures with the same target type.
 // Output is a Future that will be updated with a seen value.
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     c10::List<c10::intrusive_ptr<ivalue::Future>> srcs);
 
 // User-defined object.
@@ -665,6 +698,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
  public:
   virtual PyObject* getPyObject() = 0;
+  virtual c10::InferredType tryToInferType() = 0;
+  virtual IValue toIValue(const TypePtr& type, c10::optional<int32_t> N = c10::nullopt) = 0;
+  virtual std::string toStr() = 0;
+
   virtual ~PyObjectHolder(){};
 };
 
@@ -683,11 +720,11 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
       const ivalue::EnumHolder& lhs,
       const ivalue::EnumHolder& rhs);
 
-  CAFFE2_API friend std::ostream& operator<<(
+  TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
       const EnumHolder& v);
 
-  CAFFE2_API const std::string qualifiedClassName() const;
+  TORCH_API const std::string qualifiedClassName() const;
 
   const std::string unqualifiedClassName() const;
 
@@ -726,26 +763,30 @@ using _guarded_unsigned_long = std::conditional_t<
 
 inline const ivalue::Object& IValue::toObjectRef() const {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
-  return *static_cast<const c10::ivalue::Object*>(payload.as_intrusive_ptr);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(), "Attempted to create null reference");
+  return *static_cast<const c10::ivalue::Object*>(payload.u.as_intrusive_ptr);
 }
 
 // note: when adding a DEFINE_TO case here you should also add a
 // toX method to IValue. These named methods are much more discoverable
 // than the to templated function.
 
-#define DEFINE_TO(type, method_name)       \
+#define DEFINE_TO(T, method_name)          \
   template <>                              \
-  inline type IValue::to<type>()&& {       \
+  inline T IValue::to<T>()&& {             \
     return std::move(*this).method_name(); \
   }                                        \
   template <>                              \
-  inline type IValue::to<type>() const& {  \
+  inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
     return this->method_name();            \
   }
+
 DEFINE_TO(at::Tensor, toTensor)
+DEFINE_TO(at::Storage, toStorage)
 DEFINE_TO(c10::Stream, toStream)
 DEFINE_TO(float, toDouble)
 DEFINE_TO(double, toDouble)
+DEFINE_TO(c10::complex<double>, toComplexDouble)
 DEFINE_TO(unsigned char, toInt)
 DEFINE_TO(signed char, toInt)
 DEFINE_TO(unsigned short, toInt)
@@ -762,6 +803,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(c10::List<int64_t>, toIntList)
 DEFINE_TO(c10::List<double>, toDoubleList)
+DEFINE_TO(c10::List<c10::complex<double>>, toComplexDoubleList)
 DEFINE_TO(c10::List<bool>, toBoolList)
 DEFINE_TO(c10::List<at::Tensor>, toTensorList)
 DEFINE_TO(c10::impl::GenericList, toList)
@@ -861,6 +903,36 @@ c10::List<Elem> generic_to(IValue ivalue, _fake_type<c10::List<Elem>>) {
   return impl::toTypedList<Elem>(std::move(ivalue).toList());
 }
 
+template <typename T>
+static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
+  std::vector<T> result;
+  result.reserve(impl->list.size());
+  for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
+    result.push_back(impl->list[i].to<T>());
+  }
+  return result;
+}
+
+template <typename T>
+std::vector<T> createVectorFromList(const c10::List<T>& impl) {
+  std::vector<T> result;
+  result.reserve(impl.size());
+  for (size_t i = 0, N = impl.size(); i < N; ++i) {
+    result.push_back(impl[i]);
+  }
+  return result;
+}
+
+template <typename T>
+OptionalArray<T> generic_to(IValue ivalue, _fake_type<OptionalArray<T>>) {
+  if (ivalue.isNone()) {
+    return {};
+  }
+  return createVectorFromList<T>(
+    std::move(ivalue).to<c10::List<T>>()
+  );
+}
+
 namespace detail {
 template <typename Elem, size_t... I>
 std::array<Elem, sizeof...(I)> generic_to_array(
@@ -948,18 +1020,8 @@ inline T IValue::to() && {
 }
 
 template <typename T>
-inline T IValue::to() const& {
+inline typename c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to() const& {
   return generic_to(*this, _fake_type<T>{});
-}
-
-template <typename T>
-static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
-  std::vector<T> result;
-  result.reserve(impl->list.size());
-  for (size_t i = 0, N = impl->list.size(); i < N; ++i) {
-    result.push_back(impl->list[i].to<T>());
-  }
-  return result;
 }
 
 inline c10::List<int64_t> IValue::toIntList() && {
@@ -972,8 +1034,11 @@ inline c10::List<int64_t> IValue::toIntList() const& {
 }
 inline std::vector<int64_t> IValue::toIntVector() const {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toIntVector on null intrusive_ptr IValue");
   return createVectorFromList<int64_t>(
-      static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<double> IValue::toDoubleList() && {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
@@ -985,8 +1050,27 @@ inline c10::List<double> IValue::toDoubleList() const& {
 }
 inline std::vector<double> IValue::toDoubleVector() const {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toDoubleVector on null intrusive_ptr IValue");
   return createVectorFromList<double>(
-      static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
+inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() && {
+  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  return c10::List<c10::complex<double>>(moveToIntrusivePtr<c10::detail::ListImpl>());
+}
+inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() const& {
+  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  return c10::List<c10::complex<double>>(toIntrusivePtr<c10::detail::ListImpl>());
+}
+inline std::vector<c10::complex<double>> IValue::toComplexDoubleVector() const {
+  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toComplexDoubleVector on null intrusive_ptr IValue");
+  return createVectorFromList<c10::complex<double>>(
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<bool> IValue::toBoolList() && {
   AT_ASSERT(isBoolList(), "Expected BoolList but got ", tagKind());
@@ -1006,8 +1090,11 @@ inline c10::List<at::Tensor> IValue::toTensorList() const& {
 }
 inline std::vector<at::Tensor> IValue::toTensorVector() const {
   AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toTensorVector on null intrusive_ptr IValue");
   return createVectorFromList<at::Tensor>(
-      static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<IValue> IValue::toList() && {
   AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
@@ -1019,7 +1106,10 @@ inline c10::List<IValue> IValue::toList() const& {
 }
 inline c10::ArrayRef<IValue> IValue::toListRef() const {
   AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
-  return static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr)
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toListRef on null intrusive_ptr IValue");
+  return static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr)
       ->list;
 }
 inline c10::Dict<IValue, IValue> IValue::toGenericDict() && {
@@ -1041,7 +1131,7 @@ inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const& {
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
     : tag(Tag::Tuple), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 template <
     typename... Args,
@@ -1057,18 +1147,20 @@ inline IValue::IValue(const std::tuple<Args...>& t)
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
     : tag(Tag::String), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 inline IValue::IValue(std::string v)
     : IValue(ivalue::ConstantString::create(std::move(v))) {}
 
 inline IValue::IValue(c10::impl::GenericList v)
     : tag(Tag::GenericList), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.impl_.release();
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.impl_.release());
 }
 
 template <class T, IValue::enable_if_ivalue_constructible<T>>
-inline IValue::IValue(c10::List<T> v) : IValue(impl::toList<T>(std::move(v))) {}
+inline IValue::IValue(c10::List<T>&& v) : IValue(impl::toList<T>(std::move(v))) {}
+template <class T, IValue::enable_if_ivalue_constructible<T>>
+inline IValue::IValue(const c10::List<T>& v) : IValue(impl::toList<T>(v)) {}
 template <class T, IValue::enable_if_ivalue_constructible<T>>
 inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
@@ -1096,7 +1188,7 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
 
 inline IValue::IValue(c10::impl::GenericDict v)
     : tag(Tag::GenericDict), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.impl_.release();
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.impl_.release());
 }
 template <class Key, class Value>
 inline IValue::IValue(c10::Dict<Key, Value> v)
@@ -1123,17 +1215,17 @@ inline IValue::IValue(c10::nullopt_t) : IValue() {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
     : tag(Tag::Object), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
     : tag(Tag::PyObject), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::EnumHolder> v)
     : tag(Tag::Enum), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue IValue::make_capsule(
@@ -1141,7 +1233,7 @@ inline IValue IValue::make_capsule(
   IValue iv;
   iv.tag = Tag::Capsule;
   iv.is_intrusive_ptr = true;
-  iv.payload.as_intrusive_ptr = blob.release();
+  iv.payload.u.as_intrusive_ptr = null_to_undefined_tensor(blob.release());
   return iv;
 }
 
@@ -1162,30 +1254,40 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   auto ivalue_obj = c10::ivalue::Object::create(
       c10::StrongTypePtr(nullptr, classType), /*num_slots=*/1);
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
-  payload.as_intrusive_ptr = ivalue_obj.release();
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(ivalue_obj.release());
   tag = Tag::Object;
   is_intrusive_ptr = true;
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
     : tag(Tag::Future), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<c10::RRefInterface> v)
     : tag(Tag::RRef), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<at::Quantizer> v)
     : tag(Tag::Quantizer), is_intrusive_ptr(true) {
-  payload.as_intrusive_ptr = v.release();
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
+}
+
+template <typename T>
+inline IValue::IValue(c10::complex<T> c)
+    : tag(Tag::ComplexDouble), is_intrusive_ptr(true) {
+  auto v = c10::make_intrusive<ivalue::ComplexHolder>(c);
+  payload.u.as_intrusive_ptr = v.release();
 }
 
 inline const std::string& IValue::toStringRef() const {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toStringRef on null intrusive_ptr IValue");
   return static_cast<const c10::ivalue::ConstantString*>(
-             payload.as_intrusive_ptr)
+             payload.u.as_intrusive_ptr)
       ->string();
 }
 inline c10::optional<std::reference_wrapper<const std::string>> IValue::
@@ -1194,8 +1296,11 @@ inline c10::optional<std::reference_wrapper<const std::string>> IValue::
     return c10::nullopt;
   }
   AT_ASSERT(isString(), "Expected optional<string> but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toOptionalStringRef on null intrusive_ptr IValue");
   return std::reference_wrapper<const std::string>(
-      static_cast<const c10::ivalue::ConstantString*>(payload.as_intrusive_ptr)
+      static_cast<const c10::ivalue::ConstantString*>(payload.u.as_intrusive_ptr)
           ->string());
 }
 
@@ -1211,18 +1316,12 @@ inline optional<T> IValue::toOptional() {
   return this->to<T>();
 }
 
-inline OptionalArray<int64_t> IValue::toOptionalIntArray() {
+template <typename T>
+inline optional<T> IValue::toOptional() const {
   if (this->isNone()) {
-    return {};
+    return nullopt;
   }
-  return this->toIntVector();
-}
-
-inline OptionalArray<double> IValue::toOptionalDoubleArray() {
-  if (this->isNone()) {
-    return {};
-  }
-  return this->toDoubleVector();
+  return this->to<T>();
 }
 
 inline bool IValue::isCustomClass() const {
@@ -1247,15 +1346,13 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
     // for bool type, do equality check
     return this->toBool() == rhs.toBool();
   } else if (this->isTensor() && rhs.isTensor()) {
-    // for tensor type, just check the as_intrusive_ptr since is_intrusive_ptr
-    // is false for undefined tensor
-    return this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+    return this->payload.as_tensor.is_same(rhs.payload.as_tensor);
   } else if (this->isTensor() && rhs.isNone()) {
     // special case: undefined tensor and None are the same identity
-    return !this->is_intrusive_ptr;
+    return !this->payload.as_tensor.defined();
   } else if (this->isNone() && rhs.isTensor()) {
     // special case: undefined tensor and None are the same identity
-    return !rhs.is_intrusive_ptr;
+    return !rhs.payload.as_tensor.defined();
   } else if (this->isInt() && rhs.isInt()) {
     return this->toInt() == rhs.toInt();
   } else if (this->isDouble() && rhs.isDouble()) {
@@ -1266,7 +1363,7 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
     // for objects holding in IValue, do shallow compare on pointer address to
     // testify the identity
     return this->is_intrusive_ptr && rhs.is_intrusive_ptr &&
-        this->payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+        this->payload.u.as_intrusive_ptr == rhs.payload.u.as_intrusive_ptr;
   }
 }
 
@@ -1274,15 +1371,15 @@ namespace ivalue {
 namespace detail {
 
 template <typename T>
-IValue from_(T x, std::true_type) {
+IValue from_(T&& x, std::true_type) {
   return IValue(std::move(x));
 }
 template <typename T>
 IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
-  return IValue(x);
+  return IValue(std::move(x));
 }
 template <typename T>
-IValue from_(T x, std::false_type) {
+IValue from_(T&& x, std::false_type) {
   static_assert(
       guts::false_t<T>::value,
       "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
@@ -1291,9 +1388,9 @@ IValue from_(T x, std::false_type) {
 } // namespace detail
 
 template <typename T>
-IValue from(T x) {
+IValue from(T&& x) {
   return detail::from_(
-      std::move(x), typename std::is_constructible<IValue, T>::type{});
+      std::forward<T>(x), typename std::is_constructible<IValue, T>::type{});
 }
 
 } // namespace ivalue

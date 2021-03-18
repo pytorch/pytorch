@@ -1,6 +1,8 @@
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/library.h>
 
 #include <algorithm>
@@ -29,23 +31,22 @@ namespace {
 
 std::string stringSlice(
     std::string string,
-    int64_t start,
-    int64_t end,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
     int64_t step) {
-  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
+  int64_t start_val = start.has_value() ? start.value() : INT64_MAX;
+  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
 
-  const int64_t size = string.size();
+  const int64_t num_vals =
+      slice_indices_adjust(string.size(), &start_val, &end_val, step);
 
-  // Clamp start and end to the bounds of the list
-  start = std::max(int64_t(0), normalizeIndex(start, size));
-  end = std::min(size, normalizeIndex(end, size));
-
-  if (end <= start) {
-    // Slice is empty
-    return std::string("");
+  int64_t i = start_val;
+  std::string result = "";
+  for (int64_t j = 0; j < num_vals; j++) {
+    result += string[i];
+    i += step;
   }
 
-  std::string result(string.begin() + start, string.begin() + end);
   return result;
 }
 
@@ -87,7 +88,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::list(str t) -> str[]"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto str = pop(stack).toStringRef();
            c10::List<std::string> chars;
            chars.reserve(str.size());
@@ -95,7 +96,6 @@ RegisterOperators reg(
              chars.push_back(std::string(1, c));
            }
            push(stack, std::move(chars));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -107,12 +107,20 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::layout(Tensor a) -> int",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.layout());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          prim::tolist,
          // This operator has to be unschematized because the return type
          // depends on the type hint and input. The implementation of this
          // operator below is intended to be as close to the Python
          // implementation in torch/csrc/utils/tensor_list.cpp as possible.
-         [](const Node * /*node*/) -> Operation {
+         [](const Node* /*node*/) -> Operation {
            return [](Stack* stack) {
              int elem_ty_val;
              int dim_val;
@@ -184,7 +192,7 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::__range_length(int lo, int hi, int step) -> int"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            int64_t lo, hi, step;
            pop(stack, lo, hi, step);
            // error handling when step_val = 0 during runtime
@@ -198,17 +206,15 @@ RegisterOperators reg(
            } else {
              push(stack, 0);
            }
-           return 0;
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::__derive_index(int index, int start, int step) -> int"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            int64_t index, start, step;
            pop(stack, index, start, step);
            push(stack, start + index * step);
-           return 0;
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -603,7 +609,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "aten::slice.t(t[] l, int start, int end=9223372036854775807, int step=1) -> t[]"),
+             "aten::slice.t(t[] l, int? start=0, int? end=9223372036854775807, int step=1) -> t[]"),
          listSlice,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -636,6 +642,30 @@ RegisterOperators reg(
            auto a = pop(stack).toDevice();
            auto b = pop(stack).toDevice();
            push(stack, a == b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::ne.device(Device a, Device b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack).toDevice();
+           auto b = pop(stack).toDevice();
+           push(stack, a != b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::eq.bool(bool a, bool b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack);
+           auto b = pop(stack);
+           push(stack, a == b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::ne.bool(bool a, bool b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack);
+           auto b = pop(stack);
+           push(stack, a != b);
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -679,6 +709,12 @@ RegisterOperators reg(
            push(stack, x != y);
          },
          aliasAnalysisFromSchema()),
+     // We define aten::dequantize in both native_functions.yaml and here,
+     // however, aten::dequantize.any defined here overrides
+     // aten::dequantize.tensors in native_functions.yaml. The variants here
+     // are only for graph mode quantization, and they should be removed once
+     // we deprecate graph mode quantization, and use the variants in
+     // native_functions.yaml.
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::dequantize.tensor(Tensor qtensor) -> Tensor"),
@@ -686,6 +722,14 @@ RegisterOperators reg(
            at::Tensor qtensor;
            pop(stack, qtensor);
            push(stack, at::dequantize(qtensor));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::dequantize.list(Tensor[] qtensors) -> Tensor[]"),
+         [](Stack* stack) {
+           auto qtensors = pop(stack).toTensorVector();
+           push(stack, at::dequantize(qtensors));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -799,7 +843,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::ord(str string) -> int"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto string = pop(stack).toStringRef();
            TORCH_CHECK(
                string.size() == 1,
@@ -807,19 +851,17 @@ RegisterOperators reg(
                string.size());
            uint8_t ord = string.at(0);
            push(stack, int64_t(ord));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::lower(str self) -> str"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto string = pop(stack).toStringRef();
            std::stringstream ss;
            for (char c : string) {
              ss << static_cast<char>(::tolower(c));
            }
            push(stack, ss.str());
-           return 0;
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -834,22 +876,28 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::len.str(str s) -> int"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto string = pop(stack).toStringRef();
            push(stack, static_cast<int64_t>(string.size()));
-           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::dict() -> Dict(str, Tensor)",
+         [](Stack* stack) {
+           auto dict =
+               c10::impl::GenericDict(StringType::get(), TensorType::get());
+           push(stack, dict);
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::__getitem__.str(str s, int index) -> str"),
-         [](Stack& stack) {
+         [](Stack* stack) {
            auto index = pop(stack).toInt();
            auto string = pop(stack).toStringRef();
            auto norm_index = normalizeIndex(index, string.size());
            char c = string.at(norm_index);
            push(stack, std::string(&c, 1));
-           return 0;
          },
          aliasAnalysisFromSchema()),
 #define CREATE_COPY_OP(other_type, c_type)                               \
@@ -894,7 +942,7 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA(
              "aten::index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor"),
          [](Stack* stack) {
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result = at::index(self, indices);
            push(stack, std::move(result));
@@ -907,7 +955,7 @@ RegisterOperators reg(
            auto unsafe = pop(stack).toBool();
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result =
                at::_index_put_impl_(self, indices, values, accumulate, unsafe);
@@ -920,7 +968,7 @@ RegisterOperators reg(
          [](Stack* stack) {
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
@@ -932,7 +980,7 @@ RegisterOperators reg(
          [](Stack* stack) {
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
@@ -978,6 +1026,14 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_cuda());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::is_xpu(Tensor a) -> bool"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_xpu());
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -1326,6 +1382,11 @@ void dictConstructFromList(Stack* stack) {
                                  ", tVal)[] inputs) -> Dict(" key_type         \
                                  ", tVal)"),                                   \
           dictConstructFromList,                                               \
+          aliasAnalysisFromSchema()),                                          \
+      OperatorGenerator(                                                       \
+          TORCH_SELECTIVE_SCHEMA("aten::dict.Dict_" key_type "(Dict(" key_type \
+                                 ", t)(a) self) -> Dict(" key_type ", t)"),    \
+          dictCopy,                                                            \
           aliasAnalysisFromSchema())
 
 RegisterOperators reg_dict_ops({
@@ -1333,6 +1394,7 @@ RegisterOperators reg_dict_ops({
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("bool"),
     CREATE_DICT_OPS("float"),
+    CREATE_DICT_OPS("complex"),
     CREATE_DICT_OPS("Tensor"),
 });
 

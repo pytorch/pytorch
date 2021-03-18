@@ -252,6 +252,9 @@ E.g.: ::
 Write PyTorch model in Torch way
 --------------------------------
 
+Avoid using numpy
+~~~~~~~~~~~~~~~~~
+
 PyTorch models can be written using numpy manipulations, but this is not proper when we convert to the ONNX model.
 For the trace-based exporter, tracing treats the numpy values as the constant node,
 therefore it calculates the wrong result if we change the input.
@@ -274,11 +277,18 @@ In addition, Dropout layer need defined in init function so that inferencing can
         def forward(self, x):
             x = self.dropout(x)
 
+Avoid using .data field
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The .data field is an old field that is kept for backward compatibility and should be avoided when writing models.
+It's usage is dangerous and can make computations wrong, furthermore it can produce an incorrect trace graph and
+therefore an incorrect ONNX graph. A safer alternative is to use .detach() instead.
+
 Using dictionaries to handle Named Arguments as model inputs
 ------------------------------------------------------------
 
 There are two ways to handle models which consist of named parameters or keyword arguments as inputs:
- 
+
 * The first method is to pass all the inputs in the same order as required by the model and pass None
   values for the keyword arguments that do not require a value to be passed
 
@@ -288,23 +298,23 @@ There are two ways to handle models which consist of named parameters or keyword
 
 For example, in the model: ::
 
-    class Model(torch.nn.Module): 
-      def forward(self, x, y=None, z=None): 
-        if y is not None: 
-          return x + y 
-        if z is not None: 
-          return x + z 
-        return x 
-    m = Model() 
+    class Model(torch.nn.Module):
+      def forward(self, x, y=None, z=None):
+        if y is not None:
+          return x + y
+        if z is not None:
+          return x + z
+        return x
+    m = Model()
     x = torch.randn(2, 3)
-    z = torch.randn(2, 3) 
+    z = torch.randn(2, 3)
 
 There are two ways of exporting the model:
 
-* Not using a dictionary for the keyword arguments and passing all the inputs in the same order 
+* Not using a dictionary for the keyword arguments and passing all the inputs in the same order
   as required by the model ::
 
-      torch.onnx.export(model, (x, None, z), ‘test.onnx’) 
+      torch.onnx.export(model, (x, None, z), ‘test.onnx’)
 
 * Using a dictionary to represent the keyword arguments. This dictionary is always passed in
   addition to the non-keyword arguments and is always the last argument in the args tuple. ::
@@ -318,25 +328,25 @@ empty or no dictionary. For example, ::
     or
     torch.onnx.export(model, (x, ), ‘test.onnx’)
 
-An exception to this rule are cases in which the last input is also of a dictionary type. 
-In these cases it is mandatory to have an empty dictionary as the last argument in the 
+An exception to this rule are cases in which the last input is also of a dictionary type.
+In these cases it is mandatory to have an empty dictionary as the last argument in the
 args tuple. For example, ::
 
-    class Model(torch.nn.Module): 
-      def forward(self, k, x): 
-        ...  
-        return x 
-    m = Model() 
-    k = torch.randn(2, 3)   
+    class Model(torch.nn.Module):
+      def forward(self, k, x):
+        ...
+        return x
+    m = Model()
+    k = torch.randn(2, 3)  
     x = {torch.tensor(1.): torch.randn(2, 3)}
 
-Without the presence of the empty dictionary, the export call assumes that the 
-‘x’ input is intended to represent the optional dictionary consisting of named arguments. 
-In order to prevent this from being an issue a constraint is placed to provide an empty 
-dictionary as the last input in the tuple args in such cases. 
-The new call would look like this. :: 
+Without the presence of the empty dictionary, the export call assumes that the
+‘x’ input is intended to represent the optional dictionary consisting of named arguments.
+In order to prevent this from being an issue a constraint is placed to provide an empty
+dictionary as the last input in the tuple args in such cases.
+The new call would look like this. ::
 
-    torch.onnx.export(model, (k, x, {}), ‘test.onnx’) 
+    torch.onnx.export(model, (k, x, {}), ‘test.onnx’)
 
 
 Indexing
@@ -755,7 +765,7 @@ but intuitively the interface they provide looks like this::
       ONNX outputs whose values correspond to the original PyTorch return values
       of the autograd Function (or None if an output is not supported by ONNX).
 
-      Arguments:
+      Args:
         g (Graph): graph to write the ONNX representation into
         inputs (Value...): list of values representing the variables which contain
             the inputs for this function
@@ -782,7 +792,7 @@ but intuitively the interface they provide looks like this::
         The set of operators and the inputs/attributes they take
         is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
 
-        Arguments:
+        Args:
             opname (string): The ONNX operator name, e.g., `Abs` or `Add`.
             args (Value...): The inputs to the operator; usually provided
                 as arguments to the `symbolic` definition.

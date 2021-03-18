@@ -24,8 +24,9 @@ def get_simple_regression(device: torch.device) -> GetterReturnType:
         mu = X.mm(beta_value)
 
         # We need to compute the first and second gradient of this score with respect
-        # to beta_value.
-        score = dist.Bernoulli(logits=mu).log_prob(Y).sum() + beta_prior.log_prob(beta_value).sum()
+        # to beta_value. We disable Bernoulli validation because Y is a relaxed value.
+        score = (dist.Bernoulli(logits=mu, validate_args=False).log_prob(Y).sum() +
+                 beta_prior.log_prob(beta_value).sum())
         return score
 
     return forward, (beta_value.to(device),)
@@ -40,7 +41,7 @@ def get_robust_regression(device: torch.device) -> GetterReturnType:
     Y = torch.rand(N, 1, device=device)
 
     # Predefined nu_alpha and nu_beta, nu_alpha.shape: (1, 1), nu_beta.shape: (1, 1)
-    nu_alpha = torch.randn(1, 1, device=device)
+    nu_alpha = torch.rand(1, 1, device=device)
     nu_beta = torch.rand(1, 1, device=device)
     nu = dist.Gamma(nu_alpha, nu_beta)
 

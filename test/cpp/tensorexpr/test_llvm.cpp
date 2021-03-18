@@ -1,24 +1,23 @@
 #ifdef TORCH_ENABLE_LLVM
 #include <gtest/gtest.h>
 
-#include "test/cpp/tensorexpr/test_base.h"
+#include <test/cpp/tensorexpr/test_base.h>
 
-#include "test/cpp/tensorexpr/padded_buffer.h"
-#include "test/cpp/tensorexpr/test_utils.h"
-#include "torch/csrc/jit/tensorexpr/eval.h"
-#include "torch/csrc/jit/tensorexpr/ir.h"
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
-#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
-#include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
-#include "torch/csrc/jit/tensorexpr/loopnest.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
+#include <test/cpp/tensorexpr/padded_buffer.h>
+#include <test/cpp/tensorexpr/test_utils.h>
+#include <torch/csrc/jit/tensorexpr/eval.h>
+#include <torch/csrc/jit/tensorexpr/ir.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 #include <cmath>
 #include <numeric>
 
 namespace torch {
 namespace jit {
-using namespace torch::jit::tensorexpr;
 using namespace torch::jit::tensorexpr;
 
 using LLVMExprEval = ExprEval<LLVMCodeGen>;
@@ -217,6 +216,38 @@ TEST(LLVM, BitCast) {
   }
 }
 
+TEST(LLVM, fastLogFloat) {
+  KernelScope kernel_scope;
+  const int kTotalSize = 128 * 128;
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+
+  VarHandle index = VarHandle("index", kInt);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, fast_log(load_a));
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+
+  PaddedBuffer<float> a_v(kTotalSize);
+  PaddedBuffer<float> b_v(kTotalSize);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    a_v(i) = at::randn({1}).item().to<float>();
+  }
+
+  LLVMCodeGen ir_eval(stmt, {a_buf, b_buf});
+  ir_eval.call({a_v, b_v});
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    auto test = b_v(i);
+    auto ref = std::log(a_v(i));
+    if (std::isnan(ref)) {
+      ASSERT_EQ(std::isnan(test), true);
+    } else {
+      ASSERT_FLOAT_EQ(test, ref);
+    }
+  }
+}
+
 TEST(LLVM, LetTest01) {
   KernelScope kernel_scope;
 
@@ -262,15 +293,15 @@ TEST(LLVM, LetTestMultitype) {
   std::vector<void*> args({v.data()});
   VarHandle x("x", kByte);
   VarHandle y("y", kHalf);
-  auto block =
-      Block::make({Let::make(x, 3),
-                   Let::make(y, 6.f),
-                   a.store(
-                       {0},
-                       Cast::make(
-                           kDouble,
-                           ExprHandle(2.f) +
-                               (x * ExprHandle(3.f) + y * ExprHandle(4.f))))});
+  auto block = Block::make(
+      {Let::make(x, 3),
+       Let::make(y, 6.f),
+       a.store(
+           {0},
+           Cast::make(
+               kDouble,
+               ExprHandle(2.f) +
+                   (x * ExprHandle(3.f) + y * ExprHandle(4.f))))});
 
   LLVMCodeGen cg(block, {a});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -437,6 +468,36 @@ TEST(LLVM, CondNestedTest) {
   }
 }
 
+TEST(LLVM, DirectVectorization) {
+  KernelScope ks;
+  constexpr int M = 3;
+  constexpr int N = 64;
+  BufHandle a("a", {M, N}, kFloat);
+  BufHandle b("b", {M, N}, kFloat);
+  BufHandle c("c", {M, N}, kFloat);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  Stmt* s = For::make(
+      m,
+      0,
+      M,
+      Store::make(
+          c,
+          {Ramp::make(m * 64, 1, 64)},
+          Load::make(
+              {kFloat, 64},
+              a,
+              {Ramp::make(m * 64, 1, 64)},
+              Broadcast::make(1, 64)) *
+              Load::make(
+                  {kFloat, 64},
+                  b,
+                  {Ramp::make(m * 64, 1, 64)},
+                  Broadcast::make(1, 64)),
+          Broadcast::make(1, 64)));
+  LLVMCodeGen cg(s, {a, b, c});
+}
+
 TEST(LLVM, VecLoadStoreTest) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("A", {1}, kInt));
@@ -558,7 +619,7 @@ TEST(LLVM, VectorizerLoadStoreTest) {
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(dynamic_cast<Block*>(s)->front());
+  l.vectorize(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()));
 
   ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
@@ -582,7 +643,7 @@ TEST(LLVM, VectorizeBitCast) {
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(dynamic_cast<Block*>(s)->front());
+  l.vectorize(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()));
   ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
   LLVMCodeGen cg(s, {a, c_buf});
@@ -1270,6 +1331,24 @@ TEST(LLVM, BitwiseOps) {
   ASSERT_EQ(cg.value<int>(), 11);
 }
 
+TEST(LLVM, ArithmeticRightShift) {
+  KernelScope ks;
+  auto a = CharImm::make(-4);
+  auto b = CharImm::make(1);
+  ExprHandle f = a >> b;
+  LLVMExprEval cg(f);
+  ASSERT_EQ(cg.value<int8_t>(), -2);
+}
+
+TEST(LLVM, LogicalRightShift) {
+  KernelScope ks;
+  auto a = ByteImm::make(0xfc);
+  auto b = ByteImm::make(1);
+  ExprHandle f = a >> b;
+  LLVMExprEval cg(f);
+  ASSERT_EQ(cg.value<uint8_t>(), 0x7e);
+}
+
 TEST(LLVM, DynamicShapeAdd) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
@@ -1449,7 +1528,8 @@ TEST(LLVM, RFactorReduction) {
   loops = loop.getLoopStmtsFor(b);
   loop_m = loops.at(2);
   loop_n = loops.at(1);
-  loop.rfactor(b->body(), loop_n->var(), loop_n->body());
+  auto b_body = NodeFinder<ReduceOp>::find(loop.root_stmt())[0];
+  loop.rfactor(b_body, loop_n->var(), loop_n->body());
 
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
@@ -1490,7 +1570,8 @@ TEST(LLVM, RFactorVectorizedReduction) {
   For* loop_k = loops.at(0);
   For* loop_m = loops.at(1);
   For* loop_n = loops.at(2);
-  loopnest.rfactor(b->body(), loop_n->var());
+  auto b_body = NodeFinder<ReduceOp>::find(loopnest.root_stmt())[0];
+  loopnest.rfactor(b_body, loop_n->var());
 
   loops = NodeFinder<For>::find(loopnest.root_stmt());
   loop_k = loops.at(0);
@@ -1527,6 +1608,128 @@ TEST(LLVM, RFactorVectorizedReduction) {
   cg.call({a_v, b_v});
 
   ExpectAllNear(b_v, b_ref, 1e-5);
+}
+
+TEST(LLVM, SimpleParallel) {
+  for (int test_cfg = 0; test_cfg < 4; test_cfg++) {
+    // Compute a simple operation, and try all loop-axis combination to be
+    // parallel or sequential.
+    ExecutionCounter counter(llvm_codegen_parallel_dispatched);
+    KernelScope kernel_scope;
+    const int M = 4;
+    const int N = 6;
+    Tensor* f = Compute(
+        "f", {{M, "m"}, {N, "n"}}, [](const VarHandle& m, const VarHandle& n) {
+          return cast<float>(m + n);
+        });
+    LoopNest loop_nest({f});
+    auto const& loops = loop_nest.getLoopStmtsFor(f);
+    For* m = loops[0];
+    For* n = loops[1];
+    if (test_cfg & 0x1) {
+      m->set_parallel();
+    }
+    if (test_cfg & 0x2) {
+      n->set_parallel();
+    }
+    loop_nest.prepareForCodegen();
+    Stmt* stmt = loop_nest.root_stmt();
+    LLVMCodeGen cg(stmt, {f});
+
+    PaddedBuffer<float> f_v(M, N, "f_v");
+    std::vector<void*> args({f_v.data()});
+    int value = cg.value<int>(args);
+    ASSERT_EQ(value, 0);
+    PaddedBuffer<float> f_ref(M, N, "f_ref");
+    for (int m = 0; m < M; m++) {
+      for (int n = 0; n < N; n++) {
+        f_ref(m, n) = m + n;
+      }
+    }
+    ExpectAllNear(f_v, f_ref, 1e-5);
+    int count = counter.elapsed_value();
+    if (test_cfg == 0) {
+      ASSERT_EQ(count, 0);
+    } else {
+      ASSERT_GT(count, 0);
+    }
+  }
+}
+
+TEST(LLVM, CompositeParallel) {
+  int loop_count = 6;
+  int test_count = 1 << loop_count;
+  // Compute a composite operation, and try all loop-axis combination to be
+  // parallel or sequential.
+  for (int test_cfg = 0; test_cfg < test_count; test_cfg++) {
+    ExecutionCounter counter(llvm_codegen_parallel_dispatched);
+    KernelScope kernel_scope;
+    int M = 5;
+    int N = 7;
+    Tensor* t1 =
+        Compute("t1", {{M, "M"}}, [](const VarHandle& m) { return m + 1.f; });
+    Tensor* t2 =
+        Compute("t2", {{N, "N"}}, [](const VarHandle& n) { return n + 2.f; });
+    Tensor* t3 = Compute(
+        "t3",
+        {{M, "M"}, {N, "N"}},
+        [=](const VarHandle& m, const VarHandle& n) {
+          return t1->call(m) * t2->call(n);
+        });
+    Tensor* t4 = Compute(
+        "t4",
+        {{M, "M"}, {N, "N"}},
+        [=](const VarHandle& m, const VarHandle& n) {
+          return t3->call(m, n) + m + n;
+        });
+    LoopNest loop_nest({t4});
+    std::vector<For*> loop_list;
+    {
+      auto const& loops = loop_nest.getLoopStmtsFor(t1);
+      loop_list.push_back(loops[0]);
+    }
+    {
+      auto const& loops = loop_nest.getLoopStmtsFor(t2);
+      loop_list.push_back(loops[0]);
+    }
+    {
+      auto const& loops = loop_nest.getLoopStmtsFor(t3);
+      loop_list.push_back(loops[0]);
+      loop_list.push_back(loops[1]);
+    }
+    {
+      auto const& loops = loop_nest.getLoopStmtsFor(t4);
+      loop_list.push_back(loops[0]);
+      loop_list.push_back(loops[1]);
+    }
+    ASSERT_EQ(loop_list.size(), loop_count);
+    for (int i = 0; i < loop_count; i++) {
+      if (test_cfg & (1 << i)) {
+        loop_list[i]->set_parallel();
+      }
+    }
+    loop_nest.prepareForCodegen();
+    Stmt* stmt = loop_nest.root_stmt();
+    LLVMCodeGen cg(stmt, {t4});
+
+    PaddedBuffer<float> t4_v(M, N, "t4_v");
+    std::vector<void*> args({t4_v.data()});
+    int value = cg.value<int>(args);
+    ASSERT_EQ(value, 0);
+    PaddedBuffer<float> t4_ref(M, N, "t4_ref");
+    for (int m = 0; m < M; m++) {
+      for (int n = 0; n < N; n++) {
+        t4_ref(m, n) = (m + 1) * (n + 2) + m + n;
+      }
+    }
+    ExpectAllNear(t4_v, t4_ref, 1e-5);
+    int count = counter.elapsed_value();
+    if (test_cfg == 0) {
+      ASSERT_EQ(count, 0);
+    } else {
+      ASSERT_GT(count, 0);
+    }
+  }
 }
 
 TEST(LLVM, VectorizedGEMM) {

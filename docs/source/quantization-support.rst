@@ -105,14 +105,16 @@ Fused modules are provided for common patterns in CNNs. Combining several
 operations together (like convolution and relu) allows for better quantization
 accuracy
 
-    
+
 * `torch.nn.intrinsic` — float versions of the modules, can be swapped with
   quantized version 1 to 1:
 
   * :class:`~torch.nn.intrinsic.ConvBn1d` — Conv1d + BatchNorm1d
   * :class:`~torch.nn.intrinsic.ConvBn2d` — Conv2d + BatchNorm
+  * :class:`~torch.nn.intrinsic.ConvBn3d` — Conv3d + BatchNorm3d
   * :class:`~torch.nn.intrinsic.ConvBnReLU1d` — Conv1d + BatchNorm1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
+  * :class:`~torch.nn.intrinsic.ConvBnReLU3d` — Conv3d + BatchNorm3d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU1d` — Conv1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU3d` — Conv3d + ReLU
@@ -121,8 +123,11 @@ accuracy
 * `torch.nn.intrinsic.qat` — versions of layers for quantization-aware training:
 
   * :class:`~torch.nn.intrinsic.qat.ConvBn2d` — Conv2d + BatchNorm
+  * :class:`~torch.nn.intrinsic.qat.ConvBn3d` — Conv3d + BatchNorm3d
   * :class:`~torch.nn.intrinsic.qat.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
+  * :class:`~torch.nn.intrinsic.qat.ConvBnReLU3d` — Conv3d + BatchNorm3d + ReLU
   * :class:`~torch.nn.intrinsic.qat.ConvReLU2d` — Conv2d + ReLU
+  * :class:`~torch.nn.intrinsic.qat.ConvReLU3d` — Conv3d + ReLU
   * :class:`~torch.nn.intrinsic.qat.LinearReLU` — Linear + ReLU
 
 * `torch.nn.intrinsic.quantized` — quantized version of fused layers for
@@ -141,6 +146,7 @@ Layers for the quantization-aware training
 
 * :class:`~torch.nn.qat.Linear` — Linear (fully-connected) layer
 * :class:`~torch.nn.qat.Conv2d` — 2D convolution
+* :class:`~torch.nn.qat.Conv3d` — 3D convolution
 
 `torch.quantization`
 ~~~~~~~~~~~~~~~~~~~~
@@ -172,7 +178,6 @@ Layers for the quantization-aware training
   * :func:`~torch.quantization.fuse_modules`
 
 * Functions for graph mode quantization:
-
   * :func:`~torch.quantization.quantize_jit` - Function for graph mode post training static quantization
   * :func:`~torch.quantization.quantize_dynamic_jit` - Function for graph mode post training dynamic quantization
 
@@ -322,5 +327,3 @@ Quantized dtypes and quantization schemes
   * :attr:`torch.quint8` — 8-bit unsigned integer
   * :attr:`torch.qint8` — 8-bit signed integer
   * :attr:`torch.qint32` — 32-bit signed integer
-
-
