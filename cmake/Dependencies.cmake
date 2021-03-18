@@ -1784,6 +1784,11 @@ endif()
 #
 # End ATen checks
 #
+
+# Only install libfmt.a when do static build.
+if(NOT BUILD_SHARED_LIBS)
+  set(FMT_INSTALL ON CACHE BOOL "install libfmt.a when build static pytorch library")
+endif()
 set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
