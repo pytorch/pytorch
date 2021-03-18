@@ -173,6 +173,9 @@ static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, co
   }
 }
 
+static void warn_memory_formats(CheckedFrom c, MemoryFormat memory_format, ScalarType scalar_type) {
+
+}
 
 // NOTE [ Convolution checks ]
 //
@@ -192,7 +195,8 @@ static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, co
 static void convolution_shape_check(
     CheckedFrom c,
     const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    MemoryFormat memory_format, ScalarType scalar_type)
 {
   check_args(c, padding, input->dim() - 2, "padding");
   check_args(c, stride, padding.size(), "stride");
@@ -208,6 +212,8 @@ static void convolution_shape_check(
   // TODO: check that output->size() matches output_sizes
   // TODO: check that weight matches output->sizes()
   checkSameDim(c, input, output);
+
+  warn_memory_formats(c, memory_format, scalar_type);
 }
 
 // ---------------------------------------------------------------------
@@ -242,7 +248,7 @@ Tensor cudnn_convolution_forward(
 
   // Avoid ambiguity of "output" when this is being used as backwards
   TensorArg output{ output_t, "result", 0 };
-  convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
+  convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups, memory_format, weight->scalar_type());
 
   // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
@@ -342,7 +348,7 @@ Tensor cudnn_convolution_backward_input(
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
-  convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
+  convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups, memory_format, weight->scalar_type());
 
   // See #4500
   Tensor weight_contig = weight->contiguous(memory_format);
@@ -456,7 +462,7 @@ Tensor cudnn_convolution_backward_weight(
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
   TensorArg grad_weight{ grad_weight_t, "result", 0 };
-  convolution_shape_check(c, input, grad_weight, grad_output_contig, padding, stride, dilation, groups);
+  convolution_shape_check(c, input, grad_weight, grad_output_contig, padding, stride, dilation, groups, layout, input->scalar_type());
 
   raw_cudnn_convolution_backward_weight_out(
       *grad_weight, *grad_output_contig, *input,
