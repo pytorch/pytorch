@@ -2461,7 +2461,7 @@ struct LapackLstsqHelper {
   }
   self_type& set_ldb(int ldb) { this->ldb = ldb; return *this; }
   self_type& set_work() {
-    lwork = static_cast<int>(real_impl<scalar_t, value_t>(work_opt));
+    lwork = std::max<int>(1, real_impl<scalar_t, value_t>(work_opt));
     work = at::empty({lwork}, scalar_type);
     work_ptr = work.data_ptr<scalar_t>();
     return *this;
@@ -2507,7 +2507,7 @@ struct LapackLstsqHelper {
         break;
       // case LapackLstsqDriverType::Gelsd:
       default:
-        rwork_len = static_cast<int64_t>(rwork_opt);
+        rwork_len = std::max<int64_t>(1, rwork_opt);
     }
     rwork = at::empty({rwork_len}, c10::toValueType(scalar_type));
     rwork_ptr = rwork.data_ptr<value_t>();
@@ -2530,7 +2530,7 @@ struct LapackLstsqHelper {
   self_type& set_iwork() {
     // handle `iwork` workspace array (relevant only for `?gelsd`)
     if (LapackLstsqDriverType::Gelsd == driver_type) {
-      iwork = at::empty({iwork_opt}, at::kInt);
+      iwork = at::empty({std::max<int>(1, iwork_opt)}, at::kInt);
       iwork_ptr = iwork.data_ptr<int>();
     }
     return *this;
