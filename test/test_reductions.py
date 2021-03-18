@@ -462,8 +462,8 @@ class TestReductions(TestCase):
             # input unchanged
             self.assertEqual(x, x0, atol=0, rtol=0)
 
-    def _test_mode_intervals(self, shape, intervals, device, v = 1):
-        x = torch.arange(0, shape[0] * shape[1], device = device)
+    def _test_mode_intervals(self, shape, intervals, device, v=1):
+        x = torch.arange(0, shape[0] * shape[1], device=device)
         x[v] = x.numel()
         x = x.resize_(shape)
 
@@ -499,12 +499,12 @@ class TestReductions(TestCase):
 
     def test_mode_wrong_dtype(self, device):
         def test_for_dtypes(x_ty, v_ty, i_ty, message):
-            x = torch.ones(10, device = device, dtype = x_ty)
-            v = torch.ones(10, device = device, dtype = v_ty)
-            i = torch.ones(10, device = device, dtype = i_ty)
+            x = torch.ones(10, device=device, dtype=x_ty)
+            v = torch.ones(10, device=device, dtype=v_ty)
+            i = torch.ones(10, device=device, dtype=i_ty)
 
             with self.assertRaisesRegex(RuntimeError, message):
-                torch.mode(x, -1, True, out = (v, i))
+                torch.mode(x, -1, True, out=(v, i))
 
         err_msg = "expected scalar type .* but got .* for "
         values_err = err_msg + "values"
@@ -522,17 +522,18 @@ class TestReductions(TestCase):
 
     @onlyCUDA
     def test_mode_wrong_device(self, device):
-        x = torch.ones(2) # CPU Input Tensor
+        # CPU Input Tensor
+        x = torch.ones(2)
 
         with self.assertRaisesRegex(RuntimeError,
                                     "expected device .* but got .* for values"):
-            values = torch.tensor([], device = device)
-            torch.mode(x, -1, True, out = (values, torch.tensor([], dtype = torch.long)))
+            values = torch.tensor([], device=device)
+            torch.mode(x, -1, True, out=(values, torch.tensor([], dtype=torch.long)))
 
         with self.assertRaisesRegex(RuntimeError,
                                     "expected device .* but got .* for indices"):
-            indices = torch.tensor([], device = device)
-            torch.mode(x, -1, True, out = (torch.tensor([]), indices))
+            indices = torch.tensor([], device=device)
+            torch.mode(x, -1, True, out=(torch.tensor([]), indices))
 
     # TODO: make work on CUDA, too
     @onlyCPU
