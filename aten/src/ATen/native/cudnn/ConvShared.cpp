@@ -180,7 +180,7 @@ static void warn_memory_formats(CheckedFrom c, MemoryFormat memory_format, Scala
         "Using torch.float data type with torch.channels_last or torch.channels_last_3d memory format "
         "is generally not recommended in GPU convolution. "
         "If you experience slow performance in convolution, please try "
-        "torch.float + torch.contiguous_format or torch.half (pure half or Automatic Mixed Precision) + torch.channels_last(_3d)."
+        "torch.float + torch.contiguous_format or torch.half (full .half() or Automatic Mixed Precision) + torch.channels_last(_3d)."
       );
     }
   }
