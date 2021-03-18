@@ -15,6 +15,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
 from .utils import getattr_from_fqn
+from .ns_types import NSSubgraph
 
 from typing import Dict, Tuple, List, Optional, Set, Callable, Any
 
@@ -182,9 +183,9 @@ class _NSGraphMatchableSubgraphsIterator:
     def __iter__(self):
         return self
 
-    def __next__(self) -> Tuple[Node, Node]:
+    def __next__(self) -> NSSubgraph:
         """
-        Returns the next matchable subgraph, defined by (start_node, end_node)
+        Returns the next matchable subgraph.
         """
         while len(self.stack) > 0:
             cur_end_node = self.stack.pop()
@@ -225,7 +226,7 @@ class _NSGraphMatchableSubgraphsIterator:
             if not self._is_matchable(cur_start_node):
                 continue
 
-            return cur_start_node, cur_end_node
+            return NSSubgraph(start_node=cur_start_node, end_node=cur_end_node)
 
         raise StopIteration
 
@@ -310,8 +311,7 @@ def _get_node_relationship_type(
     return NodeTypeRelationship.NOT_RELATED
 
 def _get_name_for_subgraph(
-    start_node_a: Node,
-    end_node_a: Node,
+    subgraph_a: NSSubgraph,
     gm_a: GraphModule,
     base_name_to_sets_of_related_ops: Dict[str, Set[Callable]],
     existing_names: Set[str],
@@ -348,7 +348,7 @@ def _get_name_for_subgraph(
     of the graphs match, both of these subgraphs will get the same name without
     (1) and (2) knowing anything about each other.
     """
-    target_type = _get_node_target_type(start_node_a, gm_a)
+    target_type = _get_node_target_type(subgraph_a.start_node, gm_a)
     target_base_type = None
     for base_name, sets_of_related_ops in base_name_to_sets_of_related_ops.items():
         if target_type in sets_of_related_ops:
@@ -374,7 +374,7 @@ def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[Callable]:
 def get_matching_subgraph_pairs(
     gm_a: GraphModule,
     gm_b: GraphModule,
-) -> Dict[str, Tuple[Tuple[Node, Node], Tuple[Node, Node]]]:
+) -> Dict[str, Tuple[NSSubgraph, NSSubgraph]]:
     """
     Matches matchable subgraphs of graph_a to graph_b.
 
@@ -453,66 +453,60 @@ def get_matching_subgraph_pairs(
     existing_names_b: Set[str] = set()
 
     while True:
-        # fetch the next nodes from a and b
-        cur_start_node_a, cur_start_node_b = None, None
-        cur_end_node_a, cur_end_node_b = None, None
+        # fetch the next subgraphs from a and b
+        cur_subgraph_a, cur_subgraph_b = None, None
         try:
-            cur_start_node_a, cur_end_node_a = next(graph_a_iterator)
+            cur_subgraph_a = next(graph_a_iterator)
         except StopIteration:
             pass
         try:
-            cur_start_node_b, cur_end_node_b = next(graph_b_iterator)
+            cur_subgraph_b = next(graph_b_iterator)
         except StopIteration:
             pass
 
         # look up types of a and b for useful error messages
         type_start_a, type_start_b = None, None
-        if cur_end_node_a is not None:
-            type_start_a = _get_node_target_type(cur_start_node_a, gm_a)  # type: ignore
-        if cur_end_node_b is not None:
-            type_start_b = _get_node_target_type(cur_start_node_b, gm_b)  # type: ignore
+        if cur_subgraph_a is not None:
+            type_start_a = _get_node_target_type(cur_subgraph_a.start_node, gm_a)  # type: ignore
+        if cur_subgraph_b is not None:
+            type_start_b = _get_node_target_type(cur_subgraph_b.start_node, gm_b)  # type: ignore
 
         # check for results and determine what to do next
-        if cur_end_node_a is not None and cur_end_node_b is not None:
-            assert isinstance(cur_start_node_a, Node)
-            assert isinstance(cur_start_node_b, Node)
+        if cur_subgraph_a is not None and cur_subgraph_b is not None:
             # both nodes were fetched, check for node_relationship
             # note: node_relationship is checked on the start node, i.e.
             # if a linear-relu pattern is checked, we would check for node_relationship
             # of the linear
             node_relationship = _get_node_relationship_type(
-                cur_start_node_a, cur_start_node_b,
+                cur_subgraph_a.start_node, cur_subgraph_b.start_node,
                 gm_a, gm_b, type_a_related_to_b)
             if node_relationship == NodeTypeRelationship.NOT_RELATED:
                 msg = f"""
-({cur_start_node_a}, {type_start_a}) and
-({cur_start_node_b}, {type_start_b}) are not related"""
+({cur_subgraph_a}, {type_start_a}) and
+({cur_subgraph_b}, {type_start_b}) are not related"""
                 raise GraphMatchingException(msg)
             elif node_relationship == NodeTypeRelationship.EQUAL:
                 # For now, skip nodes with equal types. In the future, this can
                 # be made configurable.
                 continue
             key_name_a = _get_name_for_subgraph(
-                cur_start_node_a, cur_end_node_a, gm_a, base_name_to_sets_of_related_ops,
+                cur_subgraph_a, gm_a, base_name_to_sets_of_related_ops,
                 existing_names_a)
             key_name_b = _get_name_for_subgraph(
-                cur_start_node_b, cur_end_node_b, gm_b, base_name_to_sets_of_related_ops,
+                cur_subgraph_b, gm_b, base_name_to_sets_of_related_ops,
                 existing_names_b)
             assert key_name_a == key_name_b, \
                 f"Subgraph names {key_name_a} and {key_name_b} do not match"
-            results[key_name_a] = (
-                (cur_start_node_a, cur_end_node_a),
-                (cur_start_node_b, cur_end_node_b),
-            )
+            results[key_name_a] = (cur_subgraph_a, cur_subgraph_b)
             continue
-        elif cur_end_node_a is None and cur_end_node_b is None:
+        elif cur_subgraph_a is None and cur_subgraph_b is None:
             # we reached the end of both graphs
             break
         else:
             # only one node was fetched, no match possible, throw error
             msg = f"""
-Matchable nodes count mismatch: ({cur_start_node_a}, {type_start_a}) and
-({cur_start_node_b}, {type_start_b})"""
+Matchable nodes count mismatch: ({cur_subgraph_a}, {type_start_a}) and
+({cur_subgraph_b}, {type_start_b})"""
             raise GraphMatchingException(msg)
 
     return results
