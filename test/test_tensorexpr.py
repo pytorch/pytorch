@@ -864,6 +864,10 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.relu(torch.add(x, y))
             return c
 
+        def test_hardtanh(x, y):
+            c = F.hardtanh(torch.add(x, y), -1.0, 1.0)
+            return c
+
         def test_threshold(x, y):
             c = F.threshold(torch.add(x, y), 0.5, 10)
             return c
@@ -899,6 +903,7 @@ class TestTensorExprFuser(BaseTestClass):
             test_threshold,
             test_relu,
             test_tanh,
+            test_hardtanh,
             test_sigmoid,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']

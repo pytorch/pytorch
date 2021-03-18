@@ -11,22 +11,14 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Ensure consistent CircleCI YAML config
         run: |
           pip install -r requirements.txt
@@ -40,12 +32,15 @@ jobs:
           rm -r "shellcheck-${scversion}"
           shellcheck --version
           .jenkins/run-shellcheck.sh
+      - name: Ensure no trailing spaces
+        run: |
+          (! git grep -I -no ' $' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above files have trailing spaces; please remove them"; false))
       - name: Ensure no tabs
         run: |
-          (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
+          (! git grep -I -no $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
       - name: Ensure canonical include
         run: |
-          (! git grep -I -l $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
+          (! git grep -I -no $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
       # note that this next step depends on a clean heckout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
@@ -65,22 +60,17 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Get HEAD commit SHA
+        run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
+        id: get-commit-sha
       - name: Run flake8
         run: |
           set -eux
@@ -92,32 +82,31 @@ jobs:
         with:
           check_name: 'flake8-py3'
           linter_output_path: 'flake8-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
+          commit_sha: ${{ steps.get-commit-sha.outputs.commit-sha }}
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w+\d+) (?<errorDesc>.*)'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Catch any other warnings
+        run: |
+          [ ! -s flake8-output.txt ]
 
   clang-tidy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0 # deep clone, to allow us to use git merge-base
+      - name: Get HEAD commit SHA
+        run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
+        id: get-commit-sha
       - name: Install dependencies
         run: |
           set -eux
@@ -195,11 +184,11 @@ jobs:
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
       - name: Add annotations
-        uses: suo/add-annotations-github-action@master
+        uses: pytorch/add-annotations-github-action@master
         with:
           check_name: 'clang-tidy'
           linter_output_path: 'clang-tidy-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
+          commit_sha: ${{ steps.get-commit-sha.outputs.commit-sha }}
           regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -208,22 +197,14 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@v1
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Run cmakelint
         run: |
           set -eux
@@ -232,3 +213,38 @@ jobs:
           git ls-files -z -- bootstrap '*.cmake' '*.cmake.in' '*CMakeLists.txt' | \
           grep -E -z -v '^(cmake/Modules/|cmake/Modules_CUDA_fix/)' | \
           xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
+
+  mypy:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Get HEAD commit SHA
+        run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
+        id: get-commit-sha
+      - name: Install dependencies
+        run: |
+          set -eux
+          pip install -r requirements.txt
+          pip install mypy==0.770
+      - name: Run autogen
+        run: |
+          set -eux
+          time python -mtools.generate_torch_version --is_debug=false
+          time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
+          time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
+      - name: Run mypy
+        run: |
+          set -eux
+          mypy --config=mypy.ini
+      - name: Run mypy strict
+        run: |
+          set -eux
+          mypy --config=mypy-strict.ini

@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 
 import argparse
+import bz2
 import copy
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
 import modulefinder
 import os
 import shutil
@@ -14,10 +16,21 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd, FILE_SCHEMA
+from torch.testing._internal.framework_utils import calculate_shards
 import torch.distributed as dist
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, List, Any
+from typing_extensions import TypedDict
+
+try:
+    sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from tools.stats_utils.s3_stat_parser import (get_S3_bucket_readonly, HAVE_BOTO3)
+except ImportError:
+    print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
+    HAVE_BOTO3 = False
+
 
 TESTS = [
+    'test_public_bindings',
     'test_type_hints',
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
@@ -161,6 +174,8 @@ USE_PYTEST_LIST = [
     'distributions/test_constraints',
     'distributions/test_transforms',
     'distributions/test_utils',
+    'test_typing',
+    "distributed/elastic/events/lib_test",
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -221,13 +236,14 @@ RUN_PARALLEL_BLOCKLIST = [
 ] + [test for test in TESTS if test.startswith('distributed/')]
 
 WINDOWS_COVERAGE_BLOCKLIST = [
-    'test_dataloader',
 ]
 
 
 # These tests are slow enough that it's worth calculating whether the patch
-# touched any related files first.
-SLOW_TESTS = [
+# touched any related files first. This list was manually generated, but for every
+# run with --determine-from, we use another generated list based on this one and the
+# previous test stats.
+TARGET_DET_LIST = [
     'distributions/test_distributions',
     'test_nn',
     'test_autograd',
@@ -291,6 +307,10 @@ SLOW_TESTS = [
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
 ]
+
+# if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
+SLOW_TEST_THRESHOLD = 300
+
 _DEP_MODULES_CACHE: Dict[str, set] = {}
 
 DISTRIBUTED_TESTS_CONFIG = {}
@@ -338,6 +358,123 @@ JIT_EXECUTOR_TESTS = [
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
+
+
+# This function returns a list of S3 test time reports. This function can run into errors if HAVE_BOTO3 = False
+# or the S3 bucket is somehow unavailable. Even though this function goes through ten nightly commits' reports
+# to find a non-empty report, it is still conceivable (though highly unlikely) for this function to return no reports.
+def get_test_time_reports_from_S3() -> List[Dict[str, Any]]:
+    commit_date_ts = subprocess.check_output(
+        ['git', 'show', '-s', '--format=%ct', 'HEAD'],
+        encoding="ascii").strip()
+    commit_date = datetime.fromtimestamp(int(commit_date_ts))
+    day_before_commit = str(commit_date - timedelta(days=1)).split(' ')[0]
+    # something like git rev-list --before="2021-03-04" --max-count=10 --remotes="*origin/nightly"
+    nightly_commits = subprocess.check_output(
+        ["git", "rev-list", f"--before={day_before_commit}", "--max-count=10", "--remotes=*origin/nightly"],
+        encoding="ascii").splitlines()
+
+    job = os.environ.get("CIRCLE_JOB", "")
+    job_minus_shard_number = job.rstrip('0123456789')
+
+    bucket = get_S3_bucket_readonly('ossci-metrics')
+    reports = []
+    commit_index = 0
+    while len(reports) == 0 and commit_index < len(nightly_commits):
+        nightly_commit = nightly_commits[commit_index]
+        print(f'Grabbing reports from nightly commit: {nightly_commit}')
+        summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{job_minus_shard_number}")
+        for summary in summaries:
+            binary = summary.get()["Body"].read()
+            string = bz2.decompress(binary).decode("utf-8")
+            reports.append(json.loads(string))
+        commit_index += 1
+    return reports
+
+
+def calculate_job_times(reports: List[Dict[str, Any]]) -> Dict[str, Tuple[float, int]]:
+    # an entry will be like ("test_file_name" -> (current_avg, # values))
+    jobs_to_times: Dict[str, Tuple[float, int]] = dict()
+    for report in reports:
+        assert report.get('format_version') == 2, "S3 format currently handled is version 2 only"
+        files: Dict[str, Any] = report['files']
+        for name, test_file in files.items():
+            if name not in jobs_to_times:
+                jobs_to_times[name] = (test_file['total_seconds'], 1)
+            else:
+                curr_avg, curr_count = jobs_to_times[name]
+                new_count = curr_count + 1
+                new_avg = (curr_avg * curr_count + test_file['total_seconds']) / new_count
+                jobs_to_times[name] = (new_avg, new_count)
+
+    # if there's 'test_cpp_extensions_aot' entry in jobs_to_times, add 'test_cpp_extensions_aot_ninja'
+    # and 'test_cpp_extensions_aot_no_ninja' duplicate entries to ease future computation since
+    # test_cpp_extensions_aot_no_ninja and test_cpp_extensions_aot_ninja are Python test jobs that
+    # both use the test_cpp_extensions_aot.py file.
+    if 'test_cpp_extensions_aot' in jobs_to_times:
+        jobs_to_times['test_cpp_extensions_aot_ninja'] = jobs_to_times['test_cpp_extensions_aot']
+        jobs_to_times['test_cpp_extensions_aot_no_ninja'] = jobs_to_times['test_cpp_extensions_aot']
+    return jobs_to_times
+
+
+
+
+
+def pull_job_times_from_S3() -> Dict[str, Tuple[float, int]]:
+    if HAVE_BOTO3:
+        s3_reports = get_test_time_reports_from_S3()
+    else:
+        print('Uh oh, boto3 is not found. Either it is not installed or we failed to import s3_stat_parser.')
+        print('If not installed, please install boto3 for automatic sharding and test categorization.')
+        s3_reports = []
+
+    if len(s3_reports) == 0:
+        print('Gathered no reports from S3. Please proceed without them.')
+        return dict()
+
+    return calculate_job_times(s3_reports)
+
+
+class JobTimeJSON(TypedDict):
+    commit: str
+    job_times: Dict[str, float]
+
+
+def get_job_times_json(job_times: Dict[str, Tuple[float, int]]) -> JobTimeJSON:
+    return {
+        'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip(),
+        'job_times': {job: time for job, (time, _) in job_times.items()},
+    }
+
+
+def get_shard(which_shard: int, num_shards: int, tests: List[str]) -> List[str]:
+    jobs_to_times = pull_job_times_from_S3()
+
+    # Got no stats from S3, returning early to save runtime
+    if len(jobs_to_times) == 0:
+        print('Gathered no stats from S3. Proceeding with default sharding plan.')
+        return tests[which_shard - 1 :: num_shards]
+
+    shards = calculate_shards(num_shards, tests, jobs_to_times)
+    _, tests_from_shard = shards[which_shard - 1]
+    return tests_from_shard
+
+
+def get_slow_tests_based_on_S3() -> List[str]:
+    jobs_to_times = pull_job_times_from_S3()
+
+    # Got no stats from S3, returning early to save runtime
+    if len(jobs_to_times) == 0:
+        print('Gathered no stats from S3. No new slow tests calculated.')
+        return []
+
+    slow_tests: List[str] = []
+    for test in TESTS:
+        if test in jobs_to_times and test not in TARGET_DET_LIST:
+            test_time, _ = jobs_to_times[test]
+            if test_time > SLOW_TEST_THRESHOLD:
+                slow_tests.append(test)
+    return slow_tests
 
 
 def get_executable_command(options, allow_pytest, disable_coverage=False):
@@ -601,6 +738,13 @@ def parse_args():
         help='additional arguments passed through to unittest, e.g., '
              'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
     parser.add_argument(
+        '--export-historic-test-times',
+        nargs='?',
+        type=str,
+        const='.pytorch-test-times',
+        help='dumps test times from previous S3 stats into a file, format JSON',
+    )
+    parser.add_argument(
         '--shard',
         nargs=2,
         type=int,
@@ -686,7 +830,7 @@ def get_selected_tests(options):
         which_shard, num_shards = options.shard
         assert which_shard <= num_shards, "Selected shard must be less or equal that total number of shards"
         assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
-        selected_tests = selected_tests[which_shard - 1 :: num_shards]
+        selected_tests = get_shard(which_shard, num_shards, selected_tests)
 
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
@@ -793,10 +937,10 @@ def get_dep_modules(test):
     return dep_modules
 
 
-def determine_target(test, touched_files, options):
+def determine_target(target_det_list, test, touched_files, options):
     test = parse_test_module(test)
     # Some tests are faster to execute than to determine.
-    if test not in SLOW_TESTS:
+    if test not in target_det_list:
         if options.verbose:
             print_to_stderr(f'Running {test} without determination')
         return True
@@ -846,7 +990,7 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 
     # Printing the date here can help diagnose which tests are slow
     print_to_stderr('Running {} ... [{}]'.format(test, datetime.now()))
-    handler = CUSTOM_HANDLERS.get(test, run_test)
+    handler = CUSTOM_HANDLERS.get(test_module, run_test)
     return_code = handler(test_module, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool), 'Return code should be an integer'
@@ -861,8 +1005,22 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
         message += f' Received signal: {signal_name}'
     return message
 
+def export_S3_test_times(test_times_filename: str, test_times: Dict[str, Tuple[float, int]]) -> None:
+    if os.path.exists(test_times_filename):
+        print(f'Overwriting existent file: {test_times_filename}')
+    with open(test_times_filename, 'w+') as file:
+        job_times_json = get_job_times_json(test_times)
+        json.dump(job_times_json, file)
+
 def main():
     options = parse_args()
+
+    test_times_filename = options.export_historic_test_times
+    if test_times_filename:
+        print(f'Exporting historic test times from S3 to {test_times_filename}, no tests will be run.')
+        export_S3_test_times(test_times_filename, pull_job_times_from_S3())
+        return
+
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
 
@@ -876,6 +1034,9 @@ def main():
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     if options.determine_from is not None and os.path.exists(options.determine_from):
+        slow_tests = get_slow_tests_based_on_S3()
+        print('Added the following tests to target_det tests as calculated based on S3:')
+        print(slow_tests)
         with open(options.determine_from, 'r') as fh:
             touched_files = [
                 os.path.normpath(name.strip()) for name in fh.read().split('\n')
@@ -885,7 +1046,7 @@ def main():
         sys.path.append('test')
         selected_tests = [
             test for test in selected_tests
-            if determine_target(test, touched_files, options)
+            if determine_target(TARGET_DET_LIST + slow_tests, test, touched_files, options)
         ]
         sys.path.remove('test')
 

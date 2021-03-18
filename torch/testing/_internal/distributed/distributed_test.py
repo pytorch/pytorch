@@ -17,6 +17,7 @@ import torch
 import torch.cuda
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
+from torch.distributed.algorithms.ddp_comm_hooks import quantization as quantization_hooks
 from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
@@ -87,11 +88,19 @@ COLLECTIVES_OBJECT_TEST_LIST = [
 PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.NCCL,
     dist.Backend.GLOO,
+    dist.Backend.MPI,
 ]
 
 # Allowlist of distributed backends where profiling is supported with use_cuda=True
 CUDA_PROFILING_SUPPORTED_BACKENDS = [
-    dist.Backend.GLOO
+    dist.Backend.GLOO,
+    dist.Backend.MPI,
+]
+
+# Allowlist of distributed backends where profiling is supported for p2p ops
+SEND_RECV_PROFILING_SUPPORTED_BACKENDS = [
+    dist.Backend.MPI,
+    dist.Backend.GLOO,
 ]
 
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
@@ -114,6 +123,23 @@ def get_profiling_event(postfix, profiler):
     return [
         event for event in profiler.function_events if event.name.endswith(postfix)
     ]
+
+# Base error message substring on unfinished reductions.
+ddp_prev_reduction_unfinished_str = "Expected to have finished reduction in the prior iteration"
+# Error message substring when find_unused_parameters=True has not been passed
+ddp_recommend_find_unused_params_str = "passing the keyword argument `find_unused_parameters=True`"
+# Error message substring when find_unused_parameters=True is enabled
+ddp_find_unused_params_enabled_str = "Since `find_unused_parameters=True` is enabled"
+# Error message substring for possibility of not all model outputs being used
+# in loss computation
+ddp_outputs_not_used_in_loss_str = "`forward` function outputs participate in calculating loss"
+
+
+class DDPUnevenTestInput(NamedTuple):
+    name: str
+    model: nn.Module
+    inp: Union[torch.tensor, tuple]
+    sync_interval: int
 
 
 class _FC2(nn.Module):
@@ -178,6 +204,33 @@ class BatchNormNet(nn.Module):
         x = self.fc2(x)
         return F.softmax(x, dim=1)
 
+class TwoLinLayerNet(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.a = nn.Linear(10, 10, bias=False)
+        self.b = nn.Linear(10, 10, bias=False)
+
+    def forward(self, x):
+        a = self.a(x)
+        b = self.b(x)
+        return (a, b)
+
+class EmbeddingNet(nn.Module):
+
+    def __init__(self, rank):
+        super().__init__()
+        embedding_dim = 500 if rank == 0 else 50
+        self.embedding = nn.Embedding(
+            num_embeddings=10,
+            embedding_dim=embedding_dim
+        )
+        self.lin = nn.Linear(embedding_dim, 1)
+
+    def forward(self, x):
+        x = self.embedding(x)
+        return self.lin(x)
+
 
 DDP_NET = Net()
 BN_NET = BatchNormNet()
@@ -189,6 +242,13 @@ def get_timeout(test_id):
         return CUSTOMIZED_TIMEOUT[test_name]
     else:
         return DEFAULT_TIMEOUT
+
+default_pg_timeout = 60
+# These tests can run slowly and need additional time to complete, otherwise
+# they would be taken down by NCCL_ASYNC_ERROR_HANDLING.
+CUSTOM_PG_TIMEOUT = {
+    "test_ddp_uneven_inputs": 300,
+}
 
 
 def require_backend(backends):
@@ -307,7 +367,10 @@ class TestDistBackend(MultiProcessTestCase):
     def setUpClass(cls):
         os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
         os.environ["MASTER_PORT"] = str(MASTER_PORT)
-        # os.environ["WORLD_SIZE"] = str(WORLD_SIZE)
+        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
+        # such as test_batch_isend_irecv_nccl will test NCCL_BLOCKING_WAIT as
+        # expected.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
         super().setUpClass()
 
     def setUp(self):
@@ -316,6 +379,11 @@ class TestDistBackend(MultiProcessTestCase):
         initialize_temp_directories()
         # initialize Barrier
         Barrier.init()
+        # Skip return code checking for following tests as they are expected to
+        # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
+        self.skip_return_code_checks = [
+            self.test_ddp_model_diff_across_ranks.__wrapped__,
+        ]
 
     def tearDown(self):
         cleanup_temp_dir()
@@ -326,7 +394,7 @@ class TestDistBackend(MultiProcessTestCase):
         return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name):
+    def _run(cls, rank, test_name, file_name, pipe):
         if BACKEND == 'nccl' and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS['no_cuda'].exit_code)
         self = cls(test_name)
@@ -336,7 +404,10 @@ class TestDistBackend(MultiProcessTestCase):
         if torch.cuda.is_available() and torch.cuda.device_count() < int(self.world_size):
             sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
         try:
-            timeout = timedelta(seconds=60)
+            pg_timeout_seconds = CUSTOM_PG_TIMEOUT.get(
+                test_name, default_pg_timeout
+            )
+            timeout = timedelta(seconds=pg_timeout_seconds)
             dist.init_process_group(
                 init_method=self.init_method,
                 backend=BACKEND,
@@ -355,9 +426,7 @@ class TestDistBackend(MultiProcessTestCase):
         # immediately exiting due to a skip doesn't cause flakiness.
         self._barrier()
 
-        # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
-        # We're retreiving a corresponding test and executing it.
-        getattr(self, test_name)()
+        self.run_test(test_name, pipe)
         self._barrier()
         dist.destroy_process_group()
         sys.exit(0)
@@ -887,9 +956,8 @@ class DistributedTest:
 
                 self._barrier()
 
-            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
             backend = dist.get_backend()
-            if backend == "gloo":
+            if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                 for event_name in [f"{backend}:send", f"{backend}:recv"]:
                     events = get_profiling_event(event_name, prof)
                     # Each rank sends/recvs from all other ranks.
@@ -944,9 +1012,8 @@ class DistributedTest:
                         dist.send(tensor, dst)  # recv
                         dist.send(tensor, dst)  # irecv
 
-            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
             backend = dist.get_backend()
-            if backend == "gloo":
+            if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                 for event_name in [f"{backend}:send", f"{backend}:recvAnySource"]:
                     events = get_profiling_event(event_name, prof)
                     # Each rank sends/recvs from other rank twice.
@@ -991,9 +1058,8 @@ class DistributedTest:
                         # Send mode
                         dist.send(tensor, dst, tag=rank)
 
-            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
             backend = dist.get_backend()
-            if backend == "gloo":
+            if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                 for event_name in [f"{backend}:send", f"{backend}:recv"]:
                     events = get_profiling_event(event_name, prof)
                     # Each rank sends/recvs from all other ranks
@@ -1025,9 +1091,8 @@ class DistributedTest:
 
                 self._barrier()
 
-            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
             backend = dist.get_backend()
-            if backend == "gloo":
+            if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                 expected_event_name = f"{backend}:send" if rank == 0 else f"{backend}:recv"
                 events = get_profiling_event(expected_event_name, prof)
                 event_count = sum(e.count for e in events)
@@ -1153,7 +1218,7 @@ class DistributedTest:
             store = dist.PrefixStore(new_port, store)
 
             opts = dist.ProcessGroupNCCL.Options()
-            opts.is_high_priority = False
+            opts.is_high_priority_stream = False
             group_id = dist.ProcessGroupNCCL(store, rank, size, opts)
 
             self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU, True)
@@ -2827,11 +2892,13 @@ class DistributedTest:
             return global_bs, input_cpu, target, loss
 
         # END TO END TEST FOR DISTRIBUTEDDATAPARALLEL
-        def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0):
+        def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0, memory_format=None):
             model.train()
             output = model(input_var)
             l = loss(output, target) * scale_factor
             l.backward()
+            if memory_format is not None:
+                self.assertTrue(output.is_contiguous(memory_format=memory_format))
 
         def _assert_equal_param(self, param_gpu, param_DDP):
             self.assertEqual(len(param_gpu), len(param_DDP))
@@ -2840,11 +2907,11 @@ class DistributedTest:
 
         def _test_DDP_5iter(
             self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save,
-            offset=None, world_size=0, zero_grad=False
+            offset=None, world_size=0, zero_grad=False, memory_format=None
         ):
             for idx in range(5):
                 # single cpu/gpu training
-                self._test_DDP_helper(model_base, input, target, loss)
+                self._test_DDP_helper(model_base, input, target, loss, memory_format=memory_format)
 
                 if offset is None:
                     offset = rank * local_bs
@@ -2856,6 +2923,7 @@ class DistributedTest:
                     target[offset: offset + local_bs],
                     loss,
                     world_size * local_bs / batch_size if world_size != 0 else 1,
+                    memory_format=memory_format
                 )
 
                 # Update weights and run a second iteration to shake out errors
@@ -2932,7 +3000,7 @@ class DistributedTest:
                 local_bs,
                 rank,
                 global_bs,
-                True,
+                True
             )
             self._barrier()
 
@@ -2955,9 +3023,20 @@ class DistributedTest:
 
             # check two model parameters over 5 iterations
             self._test_DDP_5iter(
-                model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs, False, zero_grad=True
+                model_base,
+                model_DDP,
+                input_cpu,
+                target,
+                loss,
+                local_bs,
+                rank,
+                global_bs,
+                False,
+                zero_grad=True
             )
             self._barrier()
+
+            return model_DDP
 
         @unittest.skipIf(
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
@@ -3015,6 +3094,68 @@ class DistributedTest:
                         expected_grad,
                         msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
                     )
+
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
+        def test_ddp_comm_hook_logging(self):
+            hooks = [
+                default.allreduce_hook,
+                default.fp16_compress_hook,
+                powerSGD.powerSGD_hook,
+                powerSGD.batched_powerSGD_hook,
+                quantization_hooks.quantization_pertensor_hook,
+                quantization_hooks.quantization_perchannel_hook,
+            ]
+
+            cpp_builtin_hooks = [
+                dist.BuiltinCommHookType.ALLREDUCE,
+                dist.BuiltinCommHookType.FP16_COMPRESS,
+            ]
+
+            for hook in hooks:
+                ddp_model = torch.nn.parallel.DistributedDataParallel(
+                    torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
+                    device_ids=[self.rank]
+                )
+                ddp_logging_data = ddp_model.get_ddp_logging_data()
+                # Hook not registered yet, so should be empty
+                self.assertEqual(ddp_logging_data.comm_hook, "")
+                ddp_model.register_comm_hook(None, hook)
+                ddp_logging_data = ddp_model.get_ddp_logging_data()
+                self.assertEqual(ddp_logging_data.comm_hook, hook.__qualname__)
+
+            for hook in cpp_builtin_hooks:
+                ddp_model = torch.nn.parallel.DistributedDataParallel(
+                    torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
+                    device_ids=[self.rank]
+                )
+                ddp_logging_data = ddp_model.get_ddp_logging_data()
+                # Hook not registered yet, so should be empty
+                self.assertEqual(ddp_logging_data.comm_hook, "")
+                ddp_model._register_builtin_comm_hook(hook)
+                ddp_logging_data = ddp_model.get_ddp_logging_data()
+                self.assertEqual(ddp_logging_data.comm_hook, str(hook))
+
+            # No hook registered
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                torch.nn.Linear(1, 1, bias=False).cuda(self.rank),
+                device_ids=[self.rank]
+            )
+            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            # Hook not registered yet, so should be empty
+            self.assertEqual(ddp_logging_data.comm_hook, "")
+            # After second forward pass, hook should still be empty string
+            for i in range(2):
+                inp = torch.ones(1, 1, device=self.rank)
+                loss = ddp_model(inp).sum()
+                loss.backward()
+
+            ddp_logging_data = ddp_model.get_ddp_logging_data()
+            self.assertEqual(ddp_logging_data.comm_hook, "")
 
         def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
@@ -3183,6 +3324,44 @@ class DistributedTest:
                 True,
                 offset,
                 dist.get_world_size()
+            )
+            self._barrier()
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        def test_DistributedDataParallel_SyncBatchNorm_Channels_Last(self):
+            group, group_id, rank = self._init_global_test()
+            num_processes = dist.get_world_size()
+            local_bs = 2
+            bs_offset = int(rank * 2)
+            global_bs = int(num_processes * 2)
+
+            model = ONLY_SBN_NET
+            model_gpu = copy.deepcopy(model).cuda(rank)
+            model_DDP = nn.parallel.DistributedDataParallel(
+                model_gpu, device_ids=[rank]
+            )
+
+            memory_format = torch.channels_last
+            input_gpu = torch.randn(global_bs, 2, 4, 4, dtype=torch.float).cuda(rank).to(memory_format=memory_format)
+            target_gpu = torch.randn(global_bs, 2, 4, 4, dtype=torch.float).cuda(rank).to(memory_format=memory_format)
+            loss = nn.MSELoss()
+
+            # check two model parameters over 5 iterations
+            self._test_DDP_5iter(
+                model_gpu,
+                model_DDP,
+                input_gpu,
+                target_gpu,
+                loss,
+                local_bs,
+                rank,
+                global_bs,
+                True,
+                bs_offset,
+                dist.get_world_size(),
+                memory_format=memory_format
             )
             self._barrier()
 
@@ -3374,6 +3553,63 @@ class DistributedTest:
                 global_bs=global_bs,
                 offset=bs_offset)
 
+        def _test_ddp_logging_data(self, is_gpu):
+            rank = dist.get_rank()
+            model_DDP = copy.deepcopy(DDP_NET)
+            if is_gpu:
+                model_DDP = nn.parallel.DistributedDataParallel(model_DDP.cuda(rank), device_ids=[rank])
+            else:
+                model_DDP = nn.parallel.DistributedDataParallel(model_DDP)
+
+            # dummy data initialization
+            local_bs = 2
+            batch_size, input, target, loss = self._prepare_dummy_data(local_bs)
+            if is_gpu:
+                input = input.cuda(rank)
+                target = target.cuda(rank)
+
+            model_DDP.set_ddp_runtime_logging_sample_rate(2)
+
+            for idx in range(20):
+                offset = rank * local_bs
+
+                # DDP training, DDP scatters subsets of input to nodes/GPUs
+                self._test_DDP_helper(
+                    model_DDP,
+                    input[offset: offset + local_bs],
+                    target[offset: offset + local_bs],
+                    loss,
+                    1,
+                )
+
+                self._model_step_with_zero_grad(model_DDP)
+
+                # Verify DDP logging data is sampled as expected
+                # If it has ran more than 10 iteratons and this is
+                # the sampled iteration for measuring run time stats,
+                # the run time stats for this idx-th iteration will not
+                # be zeros.
+                ddp_logging_data = model_DDP.get_ddp_logging_data()
+                if (idx > 0 and (idx < 10 or idx % 2 != 0)):
+                    self.assertGreaterEqual(ddp_logging_data.forward_compute_time, 1)
+                    self.assertGreaterEqual(ddp_logging_data.backward_compute_comm_overlap_time, 1)
+                    self.assertGreaterEqual(
+                        ddp_logging_data.backward_compute_time,
+                        ddp_logging_data.backward_compute_comm_overlap_time)
+                    self.assertGreaterEqual(
+                        ddp_logging_data.backward_comm_time,
+                        ddp_logging_data.backward_compute_comm_overlap_time)
+                else:
+                    self.assertGreaterEqual(ddp_logging_data.forward_compute_time, 0)
+                    self.assertGreaterEqual(ddp_logging_data.backward_compute_comm_overlap_time, 0)
+                    self.assertGreaterEqual(ddp_logging_data.backward_compute_time, 0)
+                    self.assertGreaterEqual(ddp_logging_data.backward_comm_time, 0)
+
+                # Shuffle the input so that DDP input is different
+                input = input[torch.randperm(batch_size)]
+
+            return model_DDP
+
         @unittest.skipIf(
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
@@ -3382,9 +3618,9 @@ class DistributedTest:
                 return os.environ[var] if var in os.environ else "N/A"
 
             group, group_id, rank = self._init_global_test()
-            model_DDP = copy.deepcopy(DDP_NET)
-            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, bucket_cap_mb=0.001)
-            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
+            model_DDP = self._test_ddp_logging_data(is_gpu=False)
+
+            ddp_logging_data = model_DDP.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
             self.assertEqual(ddp_logging_data.rank, dist.get_rank())
             self.assertEqual(ddp_logging_data.module_name, 'Net')
@@ -3393,11 +3629,11 @@ class DistributedTest:
             # output_device of CPU training is -1.
             self.assertEqual(ddp_logging_data.output_device, -1)
             self.assertEqual(ddp_logging_data.broadcast_buffers, True)
-            self.assertEqual(ddp_logging_data.bucket_cap_mb, 0.001)
+            self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
             self.assertEqual(ddp_logging_data.find_unused_parameters, False)
             self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
             self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
-            self.assertEqual(ddp_logging_data.iteration, 0)
+            self.assertEqual(ddp_logging_data.iteration, 18)
             params = list(model_DDP.parameters())
             num_params = 0
             param_size = 0
@@ -3405,7 +3641,7 @@ class DistributedTest:
             for p in params:
                 num_params += 1
                 param_size += p.numel() * p.element_size()
-            self.assertEqual(ddp_logging_data.dtype, "float")
+            self.assertEqual(ddp_logging_data.dtypes, ["float"])
             self.assertEqual(ddp_logging_data.total_parameter_size_bytes, param_size)
             self.assertEqual(ddp_logging_data.num_parameter_tensors, num_params)
             self.assertEqual(ddp_logging_data.bucket_sizes, [param_size])
@@ -3416,29 +3652,57 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.gloo_device_transport, parse_env("GLOO_DEVICE_TRANSPORT"))
             self.assertEqual(ddp_logging_data.nccl_socket_ifname, parse_env("NCCL_SOCKET_IFNAME"))
             self.assertEqual(ddp_logging_data.nccl_blocking_wait, parse_env("NCCL_BLOCKING_WAIT"))
+            self.assertEqual(ddp_logging_data.nccl_async_error_handling, parse_env("NCCL_ASYNC_ERROR_HANDLING"))
             self.assertEqual(ddp_logging_data.nccl_debug, parse_env("NCCL_DEBUG"))
             self.assertEqual(ddp_logging_data.nccl_nthreads, parse_env("NCCL_NTHREADS"))
             self.assertEqual(ddp_logging_data.nccl_ib_timeout, parse_env("NCCL_IB_TIMEOUT"))
-            # test larger net and verify multiple bucket sizes
+            # test runtime logging fields
+            self.assertEqual(ddp_logging_data.unused_parameter_size, 0)
+            self.assertEqual(ddp_logging_data.has_rebuilt_buckets, True)
+            self.assertEqual(ddp_logging_data.rebuilt_bucket_sizes, [param_size])
+            # It is hard to test accurate latency, but it can test whether the latency is
+            # a valid value and in the expected range.
+            self.assertGreaterEqual(ddp_logging_data.avg_forward_compute_time, 1)
+            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_comm_overlap_time, 1)
+            self.assertGreaterEqual(
+                ddp_logging_data.avg_backward_compute_time,
+                ddp_logging_data.avg_backward_compute_comm_overlap_time)
+            self.assertGreaterEqual(
+                ddp_logging_data.avg_backward_comm_time,
+                ddp_logging_data.avg_backward_compute_comm_overlap_time)
+            # test larger net with mixed data types, verify multiple bucket sizes
             model = LargeNet()
-            model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1)
-            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
+            model.float()
+            model.fc1.double()
+            model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1.5)
+            ddp_logging_data = model_DDP.get_ddp_logging_data()
             params = list(model_DDP.parameters())
+            self.assertEqual(ddp_logging_data.bucket_cap_mb, 1.5)
             self.assertEqual(
                 ddp_logging_data.bucket_sizes,
                 [params[1].numel() * params[1].element_size(), params[0].numel() * params[0].element_size()])
+            self.assertEqual(','.join(ddp_logging_data.dtypes), 'double,float')
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_no_gpu
         def test_ddp_logging_data_gpu(self):
             group, group_id, rank = self._init_global_test()
-            model_DDP = copy.deepcopy(DDP_NET)
-            model_DDP.cuda(rank)
-            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=[rank])
-            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
+            model_DDP = self._test_ddp_logging_data(is_gpu=True)
+            ddp_logging_data = model_DDP.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.device_ids, [rank])
             self.assertEqual(ddp_logging_data.output_device, rank)
+            # test runtime logging fields
+            # It is hard to test accurate latency, but it can test whether the latency is
+            # a valid value and in the expected range.
+            self.assertGreaterEqual(ddp_logging_data.avg_forward_compute_time, 1)
+            self.assertGreaterEqual(ddp_logging_data.avg_backward_compute_comm_overlap_time, 1)
+            self.assertGreaterEqual(
+                ddp_logging_data.avg_backward_compute_time,
+                ddp_logging_data.avg_backward_compute_comm_overlap_time)
+            self.assertGreaterEqual(
+                ddp_logging_data.avg_backward_comm_time,
+                ddp_logging_data.avg_backward_compute_comm_overlap_time)
 
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
@@ -3998,12 +4262,6 @@ class DistributedTest:
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
         def test_ddp_uneven_inputs(self):
-            class DDPUnevenTestInput(NamedTuple):
-                name: str
-                model: nn.Module
-                inp: Union[torch.tensor, tuple]
-                sync_interval: int
-
             dim = 1000
             batch = 1
             # Create a variety of models to run uneven input tests on.
@@ -4378,11 +4636,23 @@ class DistributedTest:
                     # On 2nd iteration, this will fail during rebuild_buckets,
                     # but we should report an error regarding unused parameters
                     # since that is the underlying root cause.
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        "Expected to have finished reduction in the prior iteration",
-                    ):
+                    try:
                         ddp(inp).sum().backward()
+                    except RuntimeError as e:
+                        msg = str(e)
+                        expected_strs = [
+                            ddp_prev_reduction_unfinished_str,
+                            ddp_recommend_find_unused_params_str,
+                            ddp_outputs_not_used_in_loss_str
+                        ]
+                        for s in expected_strs:
+                            self.assertTrue(
+                                s in msg,
+                                f"Expected {s} to be in {msg}"
+                            )
+                        self.assertFalse(ddp_find_unused_params_enabled_str in msg)
+                    else:
+                        self.assertFalse(True, "DDP unused parameters error not raised.")
                 else:
                     ddp(inp).sum().backward()
 
@@ -4620,12 +4890,28 @@ class DistributedTest:
                 find_unused_parameters=False,
             )
             for i in range(2):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "Expected to have finished reduction in the prior iteration before starting a new one",
-                ) if i == 1 else suppress():
+                if i == 0:
                     loss = model(random_input).sum()
                     loss.backward()
+                else:
+                    try:
+                        loss = model(random_input).sum()
+                        loss.backward()
+                    except RuntimeError as e:
+                        msg = str(e)
+                        expected_strs = [
+                            ddp_prev_reduction_unfinished_str,
+                            ddp_recommend_find_unused_params_str,
+                            ddp_outputs_not_used_in_loss_str
+                        ]
+                        for s in expected_strs:
+                            self.assertTrue(
+                                s in msg,
+                                f"Expected {s} to be in {msg}"
+                            )
+                        self.assertFalse(ddp_find_unused_params_enabled_str in msg)
+                    else:
+                        self.assertFalse(True, "DDP error not raised")
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -4694,12 +4980,28 @@ class DistributedTest:
                 find_unused_parameters=False,
             )
             for i in range(2):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "Expected to have finished reduction in the prior iteration before starting a new one",
-                ) if i == 1 else suppress():
+                if i == 0:
                     loss = model(random_input).sum()
                     loss.backward()
+                else:
+                    try:
+                        loss = model(random_input).sum()
+                        loss.backward()
+                    except RuntimeError as e:
+                        msg = str(e)
+                        expected_strs = [
+                            ddp_prev_reduction_unfinished_str,
+                            ddp_recommend_find_unused_params_str,
+                            ddp_outputs_not_used_in_loss_str
+                        ]
+                        for s in expected_strs:
+                            self.assertTrue(
+                                s in msg,
+                                f"Expected {s} to be in {msg}"
+                            )
+                        self.assertFalse(ddp_find_unused_params_enabled_str in msg)
+                    else:
+                        self.assertFalse(True, "DDP error not raised")
 
         @require_backend({"gloo"})
         @unittest.skipIf(BACKEND == "nccl", "NCCL does not support scatter")
@@ -4729,3 +5031,91 @@ class DistributedTest:
                 "Expected argument scatter_object_output_list to be a list of size at least 1.",
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_model_diff_across_ranks(self):
+            torch.cuda.set_device(self.rank)
+            # Creates network with different sized embedding table on different
+            # ranks. This should throw an error during DDP init.
+            net = EmbeddingNet(self.rank)
+            # When running with NCCL backend, we don't expect an error on rank 0,
+            # rather, it will be taken down by NCCL_ASYNC_ERROR_HANDLING. When
+            # running with Gloo, we expect the error to be caught inline.
+            rank_0_ctx = (
+                suppress()
+                if dist.get_backend() == dist.Backend.NCCL
+                else self.assertRaisesRegex(RuntimeError, "Connection closed by peer")
+            )
+            ctx = (
+                rank_0_ctx
+                if self.rank == 0
+                else self.assertRaisesRegex(RuntimeError, "appears not to match")
+            )
+            with ctx:
+                net = torch.nn.parallel.DistributedDataParallel(
+                    net.to(self.rank), device_ids=[self.rank]
+                )
+                dist.barrier()
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_output_unused_in_loss(self):
+            model = TwoLinLayerNet()
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+            )
+            net_with_find_unused = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(self.rank),
+                device_ids=[self.rank],
+                find_unused_parameters=True,
+            )
+
+            inp = torch.randn(10, 10)
+
+            for ddp in [net, net_with_find_unused]:
+                for i in range(2):
+                    if i == 0:
+                        a, b = ddp(inp)
+                        loss = b.sum()
+                        loss.backward()
+                    else:
+                        try:
+                            a, b = ddp(inp)
+                            loss = b.sum()
+                            loss.backward()
+                        except RuntimeError as e:
+                            msg = str(e)
+                            if ddp == net:
+                                expected_strs = [
+                                    ddp_prev_reduction_unfinished_str,
+                                    ddp_recommend_find_unused_params_str,
+                                    ddp_outputs_not_used_in_loss_str,
+                                ]
+                                unexpected_strs = [
+                                    ddp_find_unused_params_enabled_str,
+                                ]
+                            elif ddp == net_with_find_unused:
+                                expected_strs = [
+                                    ddp_prev_reduction_unfinished_str,
+                                    ddp_outputs_not_used_in_loss_str,
+                                    ddp_find_unused_params_enabled_str,
+                                ]
+                                unexpected_strs = [
+                                    ddp_recommend_find_unused_params_str,
+                                ]
+                            for s in expected_strs:
+                                self.assertTrue(
+                                    s in msg,
+                                    f"Expected {s} to be in {msg}"
+                                )
+                            for s in unexpected_strs:
+                                self.assertFalse(
+                                    s in msg,
+                                    f"Expected {s} not to be in {msg}"
+                                )
+                        else:
+                            self.assertFalse(True, "DDP error not raised")

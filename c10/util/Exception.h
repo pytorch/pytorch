@@ -181,6 +181,12 @@ class C10_API TypeError : public Error {
   using Error::Error;
 };
 
+// Used in ATen for functionality that is not implemented.  These turn into
+// NotImplementedError when they cross to Python.
+class C10_API NotImplementedError : public Error {
+  using Error::Error;
+};
+
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
 class C10_API EnforceFiniteError : public Error {
@@ -278,18 +284,21 @@ C10_API std::string GetExceptionString(const std::exception& e);
         #cond "INTERNAL ASSERT FAILED at" C10_STRINGIZE(__FILE__)); \
   }
 #else
-#define TORCH_INTERNAL_ASSERT(cond, ...)                        \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {                         \
-    ::c10::detail::torchCheckFail(                              \
-        __func__, __FILE__, static_cast<uint32_t>(__LINE__),    \
-        ::c10::str(                                             \
-            #cond " INTERNAL ASSERT FAILED at "                 \
-            C10_STRINGIZE(__FILE__)                             \
-            ":"                                                 \
-            C10_STRINGIZE(__LINE__)                             \
-            ", please report a bug to PyTorch. ",               \
-            ::c10::str(__VA_ARGS__)                             \
-        ));                                                     \
+// It would be nice if we could build a combined string literal out of
+// the TORCH_INTERNAL_ASSERT prefix and a user-provided string literal
+// as the first argument, but there doesn't seem to be any good way to
+// do that while still supporting having a first argument that isn't a
+// string literal.
+#define TORCH_INTERNAL_ASSERT(cond, ...)                     \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                      \
+    ::c10::detail::torchInternalAssertFail(                  \
+        __func__, __FILE__, static_cast<uint32_t>(__LINE__), \
+        #cond "INTERNAL ASSERT FAILED at "                   \
+        C10_STRINGIZE(__FILE__)                              \
+        ":"                                                  \
+        C10_STRINGIZE(__LINE__)                              \
+        ", please report a bug to PyTorch. ",                \
+        c10::str(__VA_ARGS__));                              \
   }
 #endif
 
@@ -362,6 +371,17 @@ namespace detail {
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg);
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const char* msg);
 
+// The c10::str() call that creates userMsg can have 1 of 3 return
+// types depending on the number and types of arguments passed to
+// TORCH_INTERNAL_ASSERT.  0 arguments will get a
+// CompileTimeEmptyString, 1 const char * will be passed straight
+// through, and anything else will get converted to std::string.
+[[noreturn]] C10_API void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, const char* userMsg);
+[[noreturn]] inline C10_API void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, ::c10::detail::CompileTimeEmptyString userMsg) {
+  torchCheckFail(func, file, line, condMsg);
+}
+[[noreturn]] C10_API void torchInternalAssertFail(const char *func, const char *file, uint32_t line, const char* condMsg, const std::string& userMsg);
+
 } // namespace detail
 } // namespace c10
 
@@ -418,6 +438,10 @@ namespace detail {
 // Like TORCH_CHECK, but raises TypeErrors instead of Errors.
 #define TORCH_CHECK_TYPE(cond, ...) \
   TORCH_CHECK_WITH_MSG(TypeError, cond, "TYPE", __VA_ARGS__)
+
+// Like TORCH_CHECK, but raises NotImplementedErrors instead of Errors.
+#define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
+  TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
 
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<

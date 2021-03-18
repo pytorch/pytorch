@@ -143,6 +143,9 @@ class _BatchNorm(_NormBase):
 
 class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
 
+    weight: UninitializedParameter  # type: ignore[assignment]
+    bias: UninitializedParameter  # type: ignore[assignment]
+
     def __init__(self, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
         super(_LazyBatchNorm, self).__init__(
             # affine and track_running_stats are hardcoded to False to
@@ -256,6 +259,9 @@ class LazyBatchNorm1d(_LazyBatchNorm):
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
@@ -359,6 +365,9 @@ class LazyBatchNorm2d(_LazyBatchNorm):
     from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
 
     Args:
         eps: a value added to the denominator for numerical stability.
@@ -465,6 +474,9 @@ class LazyBatchNorm3d(_LazyBatchNorm):
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
@@ -565,7 +577,7 @@ class SyncBatchNorm(_BatchNorm):
         >>> # creating process group (optional)
         >>> # ranks is a list of int identifying rank ids.
         >>> ranks = list(range(8))
-        >>> r1, r2 = ranks[:4], ranks[4:] 
+        >>> r1, r2 = ranks[:4], ranks[4:]
         >>> # Note: every rank calls into new_group for every
         >>> # process group created, even if that rank is not
         >>> # part of the group.
@@ -605,6 +617,10 @@ class SyncBatchNorm(_BatchNorm):
             raise ValueError('expected at least 2D input (got {}D input)'
                              .format(input.dim()))
 
+    def _check_non_zero_input_channels(self, input):
+        if input.size(1) == 0:
+            raise ValueError('SyncBatchNorm number of input channels should be non-zero')
+
     def _specify_ddp_gpu_num(self, gpu_size):
         if gpu_size > 1:
             raise ValueError('SyncBatchNorm is only supported for DDP with single GPU per process')
@@ -616,6 +632,7 @@ class SyncBatchNorm(_BatchNorm):
             raise ValueError('SyncBatchNorm expected input tensor to be on GPU')
 
         self._check_input_dim(input)
+        self._check_non_zero_input_channels(input)
 
         # exponential_average_factor is set to self.momentum
         # (when it is available) only so that it gets updated
@@ -701,7 +718,7 @@ class SyncBatchNorm(_BatchNorm):
             >>> # creating process group (optional)
             >>> # ranks is a list of int identifying rank ids.
             >>> ranks = list(range(8))
-            >>> r1, r2 = ranks[:4], ranks[4:] 
+            >>> r1, r2 = ranks[:4], ranks[4:]
             >>> # Note: every rank calls into new_group for every
             >>> # process group created, even if that rank is not
             >>> # part of the group.

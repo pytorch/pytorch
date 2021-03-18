@@ -11,6 +11,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import suppress_warnings
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.onnx import OperatorExportTypes
+from torch.testing import FileCheck
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -358,12 +359,7 @@ class TestONNXExport(JitTestCase):
                 for n_n in b.nodes():
                     nodes_b.append(n_n.kind())
                 nodes.append(nodes_b)
-
-        self.assertEqual(
-            nodes,
-            ['aten::dim', 'prim::Constant', 'aten::eq', 'prim::If',
-             ['prim::Constant', 'aten::t', 'aten::addmm'],
-             ['prim::Constant', 'aten::t', 'aten::matmul', 'aten::add']])
+        FileCheck().check("aten::t").check_next("aten::matmul").check_next("aten::add").run(graph)
 
     def test_onnx_export_shape_reshape(self):
         class Foo(torch.nn.Module):

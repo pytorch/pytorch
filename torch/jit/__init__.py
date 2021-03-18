@@ -1,5 +1,8 @@
 import torch._C
 
+from contextlib import contextmanager
+from typing import Iterator
+
 from torch.utils import set_module
 
 # These are imported so users can access them from the `torch.jit` module
@@ -54,7 +57,10 @@ _wait = wait
 
 def export_opnames(m):
     r"""
-        Returns a list of operator names of a script module and its submodules
+        Generates new bytecode for a Script module and returns what the op list
+        would be for a Script Module based off the current code base. If you
+        have a LiteScriptModule and want to get the currently present
+        list of ops call _export_operator_list instead.
     """
     return torch._C._export_opnames(m._c)
 
@@ -134,6 +140,19 @@ def isinstance(obj, target_type):
         m(y)
     """
     return _isinstance(obj, target_type)
+
+
+# Context manager for globally hiding source ranges when printing graphs.
+# Note that these functions are exposed to Python as static members of the
+# Graph class, so mypy checks need to be skipped.
+@contextmanager
+def _hide_source_ranges() -> Iterator[None]:
+    old_enable_source_ranges = torch._C.Graph.global_print_source_ranges  # type: ignore
+    try:
+        torch._C.Graph.set_global_print_source_ranges(False)  # type: ignore
+        yield
+    finally:
+        torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore
 
 
 if not torch._C._jit_init():
