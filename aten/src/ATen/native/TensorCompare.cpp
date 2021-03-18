@@ -201,7 +201,7 @@ namespace {
 
 // DO NOT USE THIS -- it's just an implementation detail of wrapped_scalar tensor below.
 at::Tensor scalar_to_tensor_default_dtype(
-    Scalar s,
+    const Scalar& s,
     const Device device = at::kCPU) {
   if (s.isFloatingPoint()) {
     return at::scalar_tensor(
@@ -228,7 +228,7 @@ at::Tensor scalar_to_tensor_default_dtype(
 // as being below tensor types rather than as the default dtype (perhaps we should?).  This wouldn't matter
 // if we just supported type normal type promotion on torch.where, however.
 Tensor wrapped_scalar_tensor(
-    Scalar scalar,
+    const Scalar& scalar,
     Device device,
     bool use_default_dtype = false) {
   at::Tensor tensor;
@@ -256,15 +256,15 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   return at::_s_where(b_condition, b_self, b_other);
 }
 
-Tensor where(const Tensor& condition, Scalar self, const Tensor& other) {
+Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
   return at::where(condition, wrapped_scalar_tensor(self, other.device()), other);
 }
 
-Tensor where(const Tensor& condition, const Tensor& self, Scalar other) {
+Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
   return at::where(condition, self, wrapped_scalar_tensor(other, self.device()));
 }
 
-Tensor where(const Tensor& condition, Scalar self, Scalar other) {
+Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
   const auto device = condition.device();
   const Tensor& other_t = wrapped_scalar_tensor(other, device, /*use_default_dtype=*/true);
   const Tensor& self_t = wrapped_scalar_tensor(self, device, /*use_default_dtype=*/true);
@@ -292,11 +292,10 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
 std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return at::native::mode_out(values, indices, self, dim, keepdim);
+  return at::native::mode_out(self, dim, keepdim, values, indices);
 }
 
-std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
-                                       const Tensor& self, int64_t dim, bool keepdim) {
+std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool keepdim, Tensor& values, Tensor& indices) {
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
               "mode only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -321,12 +320,12 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
   if (self.is_quantized()) {
     Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
-    at::native::max_out(max, max_indices, self.int_repr(), dim, keepdim);
+    at::native::max_out(self.int_repr(), dim, keepdim, max, max_indices);
     // TODO: qscheme
     return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point()), max_indices);
   } else {
     Tensor max = at::empty({0}, self.options());
-    return at::native::max_out(max, max_indices, self, dim, keepdim);
+    return at::native::max_out(self, dim, keepdim, max, max_indices);
   }
 }
 
@@ -354,8 +353,7 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
   }
 }
 
-std::tuple<Tensor&,Tensor&> max_out(Tensor& max, Tensor& max_indices,
-                                      const Tensor& self, int64_t dim, bool keepdim) {
+std::tuple<Tensor&,Tensor&> max_out(const Tensor& self, int64_t dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   auto result = [&]() {
     NoNamesGuard guard;
     return max_out_impl(max, max_indices, self, dim, keepdim);
@@ -369,11 +367,11 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
   if (self.is_quantized()) {
     Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
-    at::native::min_out(min, min_indices, self.int_repr(), dim, keepdim);
+    at::native::min_out(self.int_repr(), dim, keepdim, min, min_indices);
     return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(min, self.q_scale(), self.q_zero_point()), min_indices);
   } else {
     Tensor min = at::empty({0}, self.options());
-    return at::native::min_out(min, min_indices, self, dim, keepdim);
+    return at::native::min_out(self, dim, keepdim, min, min_indices);
   }
 }
 
@@ -434,8 +432,12 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
   }
 }
 
-std::tuple<Tensor&,Tensor&> min_out(Tensor& min, Tensor& min_indices,
-                                    const Tensor& self, int64_t dim, bool keepdim) {
+std::tuple<Tensor&, Tensor&> min_out(
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim,
+    Tensor& min,
+    Tensor& min_indices) {
   auto result = [&]() {
     NoNamesGuard guard;
     return min_out_impl(min, min_indices, self, dim, keepdim);
@@ -445,21 +447,18 @@ std::tuple<Tensor&,Tensor&> min_out(Tensor& min, Tensor& min_indices,
   return result;
 }
 
-
 // Named tensor overloads
 
 std::tuple<Tensor, Tensor> min(const Tensor& self, Dimname dim, bool keepdim) {
   return at::min(self, dimname_to_position(self, dim), keepdim);
 }
-std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
-                                      const Tensor& self, Dimname dim, bool keepdim) {
+std::tuple<Tensor &,Tensor &> min_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& min, Tensor& min_indices) {
   return at::min_out(min, min_indices, self, dimname_to_position(self, dim), keepdim);
 }
 std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
   return at::max(self, dimname_to_position(self, dim), keepdim);
 }
-std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
-                                      const Tensor& self, Dimname dim, bool keepdim) {
+std::tuple<Tensor&, Tensor&> max_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
 }
 Tensor argmax(const Tensor& self, Dimname dim, bool keepdim) {
@@ -474,8 +473,7 @@ Tensor argsort(const Tensor& self, Dimname dim, bool keepdim) {
 std::tuple<Tensor, Tensor> mode(const Tensor& self, Dimname dim, bool keepdim) {
   return at::mode(self, dimname_to_position(self, dim), keepdim);
 }
-std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
-                                       const Tensor& self, Dimname dim, bool keepdim) {
+std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {
   return at::mode_out(values, indices, self, dimname_to_position(self, dim), keepdim);
 }
 
