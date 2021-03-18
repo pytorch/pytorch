@@ -121,7 +121,14 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
         elif self.target is Target.ANONYMOUS_DEFINITION:
             impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
 
-            args_exprs_str = ', '.join(a.name for a in args)
+            args_exprs = []
+            for a in args:
+                # TODO: this is a big HACK, figure out better way...
+                if 'legacy' in impl_name and 'optional<Tensor>' in a.type:
+                    args_exprs.append(f"c10::value_or_else({a.name}, [] {{return Tensor();}})")
+                else:
+                    args_exprs.append(a.name)
+            args_exprs_str = ', '.join(args_exprs)
 
             return_kw = "    return "
 
@@ -138,7 +145,12 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 )
 
                 # Only tensor like arguments are eligible
-                device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
+                tensor_arg_name = next(
+                    (f'{a.name}' for a in candidate_args if not isinstance(a.type, OptionalType) and a.type.is_tensor_like()),
+                    None)
+                optional_tensor_arg_name = next(
+                    (f'{a.name}' for a in candidate_args if isinstance(a.type, OptionalType) and a.type.is_tensor_like()),
+                    None)
 
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
 
@@ -161,9 +173,13 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
     globalContext().lazyInitCUDA();
     {cuda_guard_from_tensor_options}
 """
-                elif f.device_guard and device_of is not None:
+                elif f.device_guard and tensor_arg_name is not None:
                     cuda_guard = f"""\
-    const OptionalDeviceGuard device_guard(device_of({device_of}));
+    const OptionalDeviceGuard device_guard(device_of({tensor_arg_name}));
+"""
+                elif f.device_guard and optional_tensor_arg_name is not None:
+                    cuda_guard = f"""\
+    const OptionalDeviceGuard device_guard(device_or_default({optional_tensor_arg_name}));
 """
                 else:
                     cuda_guard = """\
