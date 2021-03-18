@@ -734,7 +734,7 @@ class DistributedDataParallel(Module):
         # call _rebuild_buckets before the peak memory usage increases
         # during forward computation.
         # This should be called only once during whole training period.
-        if self.reducer._rebuild_buckets():
+        if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
             logging.info("Reducer buckets have been rebuilt in this iteration.")
 
         if self.require_forward_param_sync:

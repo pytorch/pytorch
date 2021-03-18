@@ -340,24 +340,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def("static_runtime::pure_inputs() -> Tensor", []() -> at::Tensor {
     return at::randn({1});
   });
+  m.def("static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor");
   m.def(
-      "static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor",
-      [](const at::Tensor& self, ArrayRef<int64_t> dims) -> at::Tensor {
-        at::Tensor out = at::empty_like(self);
-        at::native::copy_(out, self);
-        return out.permute(dims);
-      });
-  m.def(
-      "static_runtime::to_copy(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
-      [](const at::Tensor& self,
-         at::ScalarType dtype,
-         bool non_blocking,
-         bool copy,
-         c10::optional<c10::MemoryFormat> format) -> at::Tensor {
-        at::Tensor out = at::empty_like(self);
-        at::native::copy_(out, self);
-        return out.to(dtype, non_blocking, copy, format);
-      });
+      "static_runtime::to_copy(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
 }
 
 void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -413,6 +398,44 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
     auto* new_node = p.second;
     old_node->replaceAllUsesWith(new_node);
     old_node->destroy();
+  }
+}
+
+void FuseSigridTransformsListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
+  auto nodes = graph->nodes();
+  for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+    Node* sigrid_node = *it;
+    auto kind = sigrid_node->kind();
+    // TODO: make it work the TorchBind version
+    if (strcmp(kind.toQualString(), "fb::sigrid_transforms") == 0) {
+      const Value* sigrid_out = sigrid_node->outputs()[0];
+      if (sigrid_out->uses().size() > 1) {
+        continue;
+      }
+
+      Node* list_unpack_node = sigrid_out->uses()[0].user;
+      if (list_unpack_node->kind() != prim::ListUnpack) {
+        continue;
+      }
+
+      auto list_unpack_outputs = list_unpack_node->outputs();
+      if (list_unpack_outputs.empty()) {
+        continue;
+      }
+
+      // handle outputs
+      for (Value* out : list_unpack_outputs) {
+        Value* new_out = sigrid_node->addOutput();
+        new_out->copyMetadata(out);
+        out->replaceAllUsesWith(new_out);
+      }
+
+      auto it_next = it;
+      ++it_next; // it_next points to list_unpack
+      it_next.destroyCurrent(); // remove list_unpack
+
+      sigrid_node->eraseOutput(0);
+    }
   }
 }
 
