@@ -542,7 +542,7 @@ void scan_dim(const Tensor& self, Tensor& result,
   }
 }
 
-Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   result.resize_(self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
@@ -581,7 +581,7 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
 
 Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _logcumsumexp_out_cuda(result, self, dim);
+  return _logcumsumexp_out_cuda(self, dim, result);
 }
 
 Tensor& _cumsum_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {

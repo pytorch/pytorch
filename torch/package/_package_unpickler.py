@@ -11,6 +11,7 @@ class PackageUnpickler(pickle._Unpickler):  # type: ignore
     This behaves the same as a normal unpickler, except it uses `importer` to
     find any global names that it encounters while unpickling.
     """
+
     def __init__(self, importer: Importer, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._importer = importer
