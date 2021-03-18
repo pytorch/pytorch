@@ -12,7 +12,7 @@ namespace c10 {
 
 namespace detail {
 
-template <typename I, std::enable_if_t<std::is_integral<I>{}, int> = 0>
+template <typename I, typename std::enable_if_t<std::is_integral<I>{}, int> = 0>
 struct integer_iterator : std::iterator<std::input_iterator_tag, I> {
     explicit integer_iterator(I value) : value(value) {}
 
@@ -45,7 +45,7 @@ struct integer_iterator : std::iterator<std::input_iterator_tag, I> {
 
 } // namespace detail
 
-template <typename I, std::enable_if_t<std::is_integral<I>{}, bool> = true>
+template <typename I, typename std::enable_if_t<std::is_integral<I>{}, bool> = true>
 struct integer_range {
  public:
     integer_range(I begin, I end) : begin_(begin), end_(end) {}
@@ -64,8 +64,8 @@ struct integer_range {
 template <
     typename Integer1,
     typename Integer2,
-    std::enable_if_t<std::is_integral<Integer1>::value, bool> = true,
-    std::enable_if_t<std::is_integral<Integer2>::value, bool> = true
+    typename std::enable_if_t<std::is_integral<Integer1>::value, bool> = true,
+    typename std::enable_if_t<std::is_integral<Integer2>::value, bool> = true
 >
 integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
     //If end<=begin then the range is empty; we can achieve this effect by
@@ -75,7 +75,7 @@ integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
 
 /// Creates an integer range for the half-open interval [0, end)
 /// If end<=begin, then the range is empty
-template <typename Integer, std::enable_if_t<std::is_integral<Integer>::value, bool> = true>
+template <typename Integer, typename std::enable_if_t<std::is_integral<Integer>::value, bool> = true>
 integer_range<Integer> irange(Integer end) {
     //If end<=begin then the range is empty; we can achieve this effect by
     //choosing the larger of {0, end} as the loop terminator
