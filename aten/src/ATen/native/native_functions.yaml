@@ -1177,6 +1177,14 @@
   dispatch:
     CUDA: cudnn_convolution_transpose_backward_weight
 
+- func: cudnn_convolution_relu(Tensor self, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
+  dispatch:
+    CUDA: cudnn_convolution_relu
+
+- func: cudnn_convolution_add_relu(Tensor self, Tensor weight, Tensor z, Scalar? alpha, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
+  dispatch:
+    CUDA: cudnn_convolution_add_relu
+
 # NB: input is special cased in a way I don't quite understand
 - func: cudnn_grid_sampler(Tensor self, Tensor grid) -> Tensor output
   dispatch:
