@@ -5,7 +5,7 @@ from torch.overrides import is_tensor_like
 import collections
 from itertools import product
 import warnings
-from typing import Callable, Union, Optional, Iterable, List, Dict
+from typing import Callable, Union, Optional, Iterable, List, Dict, Tuple
 from torch._vmap_internals import vmap
 import functools
 
@@ -36,7 +36,7 @@ def make_jacobians(tensors, tensors_is_inputs, dim=None, dtype=None):
     You can think of this as representing a single row or column of the entire jacobian.
     This is to be used by the fast version of gradcheck.
     """
-    out: List[torch.Tensors] = []
+    out: List[torch.Tensor] = []
     assert isinstance(tensors, tuple)
     for t in tensors:
         if is_float_or_complex_tensor(t) and (t.requires_grad or not tensors_is_inputs):
@@ -109,8 +109,11 @@ def iter_tensor(x_tensor):
             yield (x_tensor, x_idx, d_idx)
 
 
-def get_numerical_jacobian(fn, inputs, outputs, target=None, eps=1e-3, grad_out=1.0):
-    """
+def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3, grad_out=1.0):
+    """Computes the numerical jacobian for a given fn and inputs. Outputs can be provided
+    to avoid one extra invocation of fn. Returns M * N jacobians where M is the number of
+    input tensors that require grad, and N is the number of output float/complex tensors.
+
     input: input to `fn`
     target: the Tensors wrt whom Jacobians are calculated (default=`input`)
     grad_out: grad output value used to calculate gradients.
@@ -118,8 +121,9 @@ def get_numerical_jacobian(fn, inputs, outputs, target=None, eps=1e-3, grad_out=
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
     """
-    # handle when target does not require grad (skip in that case)
     jacobians: List[Tuple[torch.Tensor]] = []
+    if outputs is None:
+        outputs = fn(inputs)
     if target is None:
         target = inputs
     for i, inp in enumerate(iter_tensors(target, True)):
@@ -128,7 +132,12 @@ def get_numerical_jacobian(fn, inputs, outputs, target=None, eps=1e-3, grad_out=
 
 
 def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
+    """Computes the numerical jacobians wrt to a single input. Returns N jacobian
+    tensors, where N is the number of outputs. Input must require grad.
+    """
+    assert input.requires_grad
     jacobians = make_jacobians(outputs, False, input.numel(), input.dtype)
+
     def update_jacobians(x, idx, d_idx, is_mkldnn=False):
         # compute_jacobian only works for pure real
         # or pure imaginary delta
@@ -186,7 +195,7 @@ def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
         is_mkldnn = x_tensor.layout == torch._mkldnn  # type: ignore # mypy: torch nas no attr _mkldnn
         if is_mkldnn and len(input) != 1:
             raise ValueError('gradcheck currently only supports functions with 1 input, but got: ',
-                                len(input))
+                             len(input))
         update_jacobians(x_tensor, x_idx, flat_idx, is_mkldnn=is_mkldnn)
 
     return jacobians

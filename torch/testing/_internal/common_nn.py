@@ -4862,7 +4862,7 @@ class NNTestCase(TestCase):
             res += get_numerical_jacobian(fw, input, eps=1e-6),
         if jacobian_parameters:
             param, _ = self._get_parameters(module)
-            res += torch.cat([get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param], 0),
+            res += torch.cat([get_numerical_jacobian(fw, input, target=p, eps=1e-6) for p in param], 0),
         return res
 
     def check_jacobian(self, module, input: _TensorOrTensors, jacobian_input=True):
