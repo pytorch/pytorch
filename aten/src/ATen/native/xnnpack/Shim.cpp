@@ -60,9 +60,8 @@ bool use_linear(
 
 Tensor linear(
     const Tensor&,
-    const Tensor&, const c10::optional<Tensor>& _opt) {
-  const Tensor&  = c10::value_or_else(_opt, [] {return Tensor();});
-
+    const Tensor&,
+    const c10::optional<Tensor>&) {
   TORCH_CHECK(false, internal::kError);
 }
 

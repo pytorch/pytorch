@@ -146,13 +146,25 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
 }
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
-    const Tensor& input_t, const Tensor& grad_output_t, const Tensor& weight_t,
+    const Tensor& input_t,
+    const Tensor& grad_output_t,
+    const Tensor& weight_t,
     // Unused: but we require them to be passed so that double backwards
     // has access
-    const Tensor& running_mean, const Tensor& running_var,
-    const Tensor& save_mean_t, const Tensor& save_var_t,
-    double epsilon)
-{
+    const optional<Tensor>& running_mean_opt,
+    const optional<Tensor>& running_var_opt,
+    const optional<Tensor>& save_mean_t_opt,
+    const optional<Tensor>& save_var_t_opt,
+    double epsilon) {
+  const Tensor& running_mean =
+      c10::value_or_else(running_mean_opt, [] { return Tensor(); });
+  const Tensor& running_var =
+      c10::value_or_else(running_var_opt, [] { return Tensor(); });
+  const Tensor& save_mean_t =
+      c10::value_or_else(save_mean_t_opt, [] { return Tensor(); });
+  const Tensor& save_var_t =
+      c10::value_or_else(save_var_t_opt, [] { return Tensor(); });
+
   TensorArg input{ input_t, "input", 1 },
             grad_output{ grad_output_t, "grad_output", 2 },
             weight{ weight_t, "weight", 3 },
@@ -211,7 +223,6 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
 }
-
 }}  // namespace native
 
 #endif
