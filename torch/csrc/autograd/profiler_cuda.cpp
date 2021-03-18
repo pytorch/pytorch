@@ -64,6 +64,15 @@ struct CUDAMethods : public CUDAStubs {
     ::nvtxRangePop();
   }
 
+  void onEachDevice(std::function<void(int)> op) const override {
+    at::cuda::OptionalCUDAGuard device_guard;
+    int count = at::cuda::device_count();
+    for(int i = 0; i < count; i++) {
+      device_guard.set_index(i);
+      op(i);
+    }
+  }
+
   void synchronize() const override {
     cudaDeviceSynchronize();
   }

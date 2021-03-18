@@ -52,6 +52,9 @@ struct TORCH_API CUDAStubs {
   virtual bool enabled() const {
     return false;
   }
+  virtual void onEachDevice(std::function<void(int)> op) const {
+    fail();
+  }
   virtual void synchronize() const {
     fail();
   }
