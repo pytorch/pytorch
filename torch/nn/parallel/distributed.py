@@ -229,6 +229,11 @@ class DistributedDataParallel(Module):
             >>>     dist_autograd.backward(context_id, loss)
             >>>     dist_optim.step()
 
+    .. note::
+        To let a non-DDP model load a state dict from a DDP model,
+        :meth:`~torch.nn.modules.utils.consume_prefix_in_state_dict_if_present`
+        needs to be applied to strip the prefix "module." in the DDP state dict before loading.
+
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
         function of the output of this module) are distributed synchronization
@@ -729,7 +734,7 @@ class DistributedDataParallel(Module):
         # call _rebuild_buckets before the peak memory usage increases
         # during forward computation.
         # This should be called only once during whole training period.
-        if self.reducer._rebuild_buckets():
+        if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
             logging.info("Reducer buckets have been rebuilt in this iteration.")
 
         if self.require_forward_param_sync:
@@ -859,8 +864,7 @@ class DistributedDataParallel(Module):
     # the models have buffers that should be synchronized in the forward pass.
     def _check_and_sync_module_buffers(self):
         if self.will_sync_module_buffers():
-            my_rank = dist.get_rank(self.process_group)
-            authoritative_rank = self._find_common_rank(my_rank, False)
+            authoritative_rank = self._find_common_rank(self._distributed_rank, False)
             self._distributed_broadcast_coalesced(
                 self.modules_buffers[0], self.broadcast_bucket_size, authoritative_rank
             )
@@ -871,8 +875,7 @@ class DistributedDataParallel(Module):
         # Agree upon the process that will be the authoritative model copy.
         # The current rank is a candidate for being the authoritative copy if
         # is_last_joiner=True. We break ties via picking the larger rank.
-        my_rank = dist.get_rank(self.process_group)
-        self._authoritative_rank = self._find_common_rank(my_rank, is_last_joiner)
+        self._authoritative_rank = self._find_common_rank(self._distributed_rank, is_last_joiner)
         self._sync_params_and_buffers(authoritative_rank=self._authoritative_rank)
 
     # Schedule allreduce ops to match those scheduled in the reducer's backward
@@ -1015,7 +1018,7 @@ class DistributedDataParallel(Module):
                 warnings.simplefilter("once")
                 while not all_procs_joined:
                     if i > WARN_THRESHOLD:
-                        my_rank = dist.get_rank(self.process_group)
+                        my_rank = self._distributed_rank
                         warnings.warn(
                             "Detected uneven input skew of greater "
                             f"than {WARN_THRESHOLD}. This means that rank {my_rank} "
@@ -1254,7 +1257,9 @@ class DistributedDataParallel(Module):
                 # upon a rank to sync module buffers from, since rank 0 may
                 # already have been joined and have stale module buffers.
                 if self.ddp_uneven_inputs_config.ddp_join_enabled:
-                    authoritative_rank = self._find_common_rank(dist.get_rank(), True)
+                    authoritative_rank = self._find_common_rank(
+                        self._distributed_rank, True
+                    )
                 else:
                     # The process with rank 0 is considered the authoritative copy.
                     authoritative_rank = 0
@@ -1304,6 +1309,10 @@ class DistributedDataParallel(Module):
             raise ValueError(
                 "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
             )
+
+    @property
+    def _distributed_rank(self):
+        return dist.get_rank(self.process_group)
 
     @staticmethod
     def _set_params_and_buffers_to_ignore_for_model(
