@@ -248,6 +248,8 @@ namespace c10 {
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
+  _(aten, orgqr)                     \
+  _(aten, linalg_householder_product)\
   _(aten, transpose)                 \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
