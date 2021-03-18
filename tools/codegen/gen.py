@@ -460,6 +460,8 @@ def compute_out_convention_refactor(g: Union[StructuredNativeFunctions, NativeFu
 
             # pre_name: spaces/enter + type + spaces/enter
             pre_name_match = re.escape(arg.type) 
+            if pre_name_match in ['bool', 'int64_t', 'c10::optional<int64_t>', 'c10::optional<bool>']:
+                pre_name_match = '(?:const\\s*)?' + pre_name_match
             pre_name_match = pre_name_match.replace("\\&", "&")                              # Don't need to escape &  
             pre_name_match = pre_name_match.replace("\\ ", "\\s*")                           # match any whitespaces                             
             pre_name_match = pre_name_match.replace('Tensor', '(?:Tensor|SparseTensor)')
