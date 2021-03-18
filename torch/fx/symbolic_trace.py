@@ -51,11 +51,14 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # instead, let's make python think that args and kwargs are normal variables
 
 class CPatchManager(object):
+    """
+    Calls patch_function in order to intercept functions at the C-extension level
+    """
     def __init__(self, tracer):
         self.tracer = tracer
-
+        patched_fns = [torch.randn, torch.rand, torch.randint]
         def patched_impl(to_patch, args, kwargs):
-            return tracer.create_proxy('call_function', torch.randn, args, kwargs)
+            return tracer.create_proxy('call_function', to_patch, args, kwargs)
 
         c_patch_enabled = True
 
@@ -71,7 +74,7 @@ class CPatchManager(object):
         def trace_func(frame, action, arg):
             if action == 'c_call':
                 if c_patch_enabled:
-                    if arg == torch.randn:
+                    if arg in patched_fns:
                         torch._C._fx.patch_function(arg, patched_in)
 
         self.func = trace_func

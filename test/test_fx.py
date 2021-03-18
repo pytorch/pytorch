@@ -2155,6 +2155,13 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
+    def test_randn(self):
+        def f():
+            return torch.randn(3, 3)
+
+        fx_f = symbolic_trace(f)
+        assert(any(i.target == torch.randn for i in fx_f.graph.nodes))
+
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
     _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
