@@ -88,12 +88,6 @@ enum class DispatchKey : uint8_t {
   QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
   QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
-  ComplexCPU, // lives out of tree at
-  // https://gitlab.com/pytorch-complex/pytorch-cpu-strided-complex
-  ComplexCUDA, // and
-  // https://gitlab.com/pytorch-complex/pytorch-cuda-strided-complex
-  // tested at test/cpp_extensions/complex_registration_extension.cpp
-  // TODO: Remove Complex dispatch keys when Complex is moved in tree
 
   // This backend is to support custom RNGs; it lets you go
   // to a different kernel if you pass in a generator that is not a
@@ -150,6 +144,42 @@ enum class DispatchKey : uint8_t {
   // has named dimension propagation that doesn't match that of its
   // constituent parts.
   Named,
+
+  // Note [InplaceOrView key]
+  // InplaceOrView key is used by inplace or view ops to register a kernel
+  // that does additional setup for future autograd computation.
+  //
+  // 1. For inplace ops this kernel does version bump
+  // 2. For view ops this kernel does `as_view` setup where we properly setup
+  //    DifferentiableViewMeta on the view tensors.
+  //
+  // For other ops it's fallthrough kernel since there's no extra
+  // work to do.
+  //
+  // Note [Dream: skip VariableType kernel when requires_grad=false]
+  //
+  // In an ideal world where we can skip VariableType kernel for inputs
+  // with requires_grad=false, instead of a fallthrough kernel, we'll
+  // register a kernel shown below to all functional ops as well:
+  // torch::Tensor my_functional_op(...) {
+  //   {
+  //     // Note for every op in VariableType, you need to go through
+  //     // `AutoDispatchBelowInplaceOrView` guard exactly once to add the
+  //     // key to TLS excluded set. If you don't go through it at all,
+  //     // inplace/view ops called through `at::` inside your backend
+  //     // kernel will dispatch to InplaceOrView kernels and do a lot
+  //     // of extra work.
+  //     at::AutoDispatchBelowInplaceOrView guard(true);
+  //     at::redispatch::my_functional_op(...);
+  //   }
+  // }
+  // But this work is currently blocked since it adds an extra dispatch
+  // for all ops and it's non-trivial overhead at model level(a few percents).
+  // Thus our current approach takes advantage of the fact every kernel go
+  // through VariableType kernel first and pulls the `at::AutoDispatchBelowInplaceOrView` guard of functional ops
+  // up to the `VariableType` kernel. Thus we only add the extra dispatch
+  // to view/inplace ops to minimize its perf impact to real models.
+  InplaceOrView,
 
   // Note [Alias Dispatch Key : Autograd]
   // All backends are oblivious to autograd; autograd is handled as a
