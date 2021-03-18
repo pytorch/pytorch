@@ -772,6 +772,7 @@ terrible spacing
         # Test Tensor/Tensor callsite
         for op in ops_to_test:
             relu_functional = torch.nn.functional.relu
+
             class WrapperMod(torch.nn.Module):
                 def forward(self, x, y):
                     return op(relu_functional(x), relu_functional(y))
@@ -786,6 +787,7 @@ terrible spacing
         # Test Tensor/scalar callsite
         for op in ops_to_test:
             relu_functional = torch.nn.functional.relu
+
             class WrapperMod(torch.nn.Module):
                 def forward(self, x):
                     return op(relu_functional(x), 42)
@@ -802,6 +804,7 @@ terrible spacing
             if op is operator.mod:
                 continue
             relu_functional = torch.nn.functional.relu
+
             class WrapperMod(torch.nn.Module):
                 def forward(self, x):
                     return op(42, relu_functional(x))

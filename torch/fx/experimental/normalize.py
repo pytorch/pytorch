@@ -3,7 +3,7 @@ import torch.fx
 import inspect
 import operator
 import numbers
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 from torch.fx.node import Argument, Target
 from torch._jit_internal import boolean_dispatched
 
@@ -139,7 +139,7 @@ class NormalizeOperators(AnnotateTypesWithSchema):
 
         traced = NormalizeOperators(traced).transform()
     """
-    binary_magic_method_remap = {
+    binary_magic_method_remap : Dict[Callable[[Any, Any], Any], Callable[[Any, Any], Any]]= {
         operator.add : torch.add,
         operator.mul : torch.mul,
         operator.sub : torch.sub,
@@ -159,6 +159,8 @@ class NormalizeOperators(AnnotateTypesWithSchema):
         #
         # Normalize operators according to the magic methods implemented on tensors here:
         # https://github.com/pytorch/pytorch/blob/28c5d90b679c6b38bf4183ec99f16d933c2f1bcd/tools/autograd/templates/python_variable_methods.cpp#L1137
+
+        assert callable(target)
 
         if target in self.binary_magic_method_remap:
             assert len(args) == 2
