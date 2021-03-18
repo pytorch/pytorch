@@ -24,6 +24,7 @@ enum class QueryType : uint8_t {
   CHECK,
   WAIT,
   GETNUMKEYS,
+  WATCH_KEY,
   DELETE_KEY
 };
 
@@ -31,7 +32,23 @@ enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
 enum class WaitResponseType : uint8_t { STOP_WAITING };
 
+enum class WatchResponseType : uint8_t { KEY_UPDATED };
+
 } // anonymous namespace
+
+// TCPStoreListener class methods
+ListenThread::ListenThread(int listenSocket)
+  : storeListenSocket_(listenSocket) {
+}
+
+ListenThread::~ListenThread() {
+}
+
+void ListenThread::run() {
+}
+
+void ListenThread::addCallback(std::string key, CallbackFunction cb) {
+}
 
 // TCPStoreDaemon class methods
 // Simply start the daemon thread
@@ -146,6 +163,9 @@ void TCPStoreDaemon::query(int socket) {
   } else if (qt == QueryType::DELETE_KEY) {
     deleteHandler(socket);
 
+  } else if (qt == QueryType::WATCH_KEY) {
+    watchHandler(socket);
+
   } else {
     throw std::runtime_error("Unexpected query type");
   }
@@ -258,6 +278,13 @@ void TCPStoreDaemon::waitHandler(int socket) {
     }
     keysAwaited_[socket] = numKeysToAwait;
   }
+}
+
+void TCPStoreDaemon::watchHandler(int socket) {
+  std::string key = tcputil::recvString(socket);
+
+  // record the socket to respond to when the key is updated
+  watchedSockets_[key].push_back(socket);
 }
 
 bool TCPStoreDaemon::checkKeys(const std::vector<std::string>& keys) const {
@@ -427,18 +454,27 @@ TCPStore::TCPStore(
           tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
       if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
         waitForWorkers();
-      }
+      } 
+
+      // socket to handle requests from server
+      listenSocket_ = tcputil::connect(
+          tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
+      tcpStoreListener_ = std::make_unique<ListenThread>(listenSocket_);
+
   } catch (const std::exception&) {
     if (isServer_) {
         tcpStoreDaemon_ = nullptr;
         tcputil::closeSocket(masterListenSocket_);
     }
+    tcputil::closeSocket(listenSocket_);
     throw;
   }
 }
 
 TCPStore::~TCPStore() {
   tcputil::closeSocket(storeSocket_);
+  tcputil::closeSocket(listenSocket_);
+  tcpStoreListener_ = nullptr;
   if (isServer_) {
     // Store daemon should end because of closed connection.
     // daemon destructor should join the thread
@@ -514,6 +550,15 @@ bool TCPStore::deleteKey(const std::string& key) {
   tcputil::sendString(storeSocket_, regKey);
   auto numDeleted = tcputil::recvValue<int64_t>(storeSocket_);
   return (numDeleted == 1);
+}
+
+void TCPStore::watchKey(const std::string& key, CallbackFunction callback) {
+  std::string regKey = regularPrefix_ + key;
+
+  tcpStoreListener_->addCallback(regKey, callback);
+
+  tcputil::sendValue<QueryType>(listenSocket_, QueryType::WATCH_KEY);
+  tcputil::sendString(listenSocket_, regKey, true);
 }
 
 int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {
