@@ -549,7 +549,6 @@ _(aten, nuclear_norm) \
 _(aten, numel) \
 _(aten, ones) \
 _(aten, ones_like) \
-_(aten, orgqr) \
 _(aten, ormqr) \
 _(aten, pairwise_distance) \
 _(aten, _euclidean_dist) \

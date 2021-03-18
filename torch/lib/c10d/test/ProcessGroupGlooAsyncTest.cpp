@@ -49,9 +49,9 @@ class AsyncTest {
     auto store = c10::make_intrusive<::c10d::FileStore>(path_, size);
 
     // Use tiny timeout to make this test run fast
-    ::c10d::ProcessGroupGloo::Options options;
-    options.timeout = std::chrono::milliseconds(50);
-    options.devices.push_back(
+    auto options = ::c10d::ProcessGroupGloo::Options::create();
+    options->timeout = std::chrono::milliseconds(50);
+    options->devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
