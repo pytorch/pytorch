@@ -207,7 +207,7 @@ cmake_dependent_option(
     "USE_CUDNN" OFF)
 cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
-    "USE_CUDA" OFF)
+    "USE_CUDA;BUILD_TEST" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
