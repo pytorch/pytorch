@@ -915,7 +915,10 @@ if __name__ == '__main__':
         print(f"No tests in reports found in {args.folder}")
         sys.exit(0)
 
-    send_report_to_scribe(reports_by_file)
+    try:
+        send_report_to_scribe(reports_by_file)
+    except Exception as e:
+        print(f"error encountered when uploading to scribe: {e}")
 
     # longest_tests can contain duplicates as the same tests can be spawned from different files
     longest_tests : List[TestCase] = []
@@ -931,7 +934,10 @@ if __name__ == '__main__':
     obj = assemble_s3_object(reports_by_file, total_seconds=total_time)
 
     if args.upload_to_s3:
-        send_report_to_s3(obj)
+        try:
+            send_report_to_s3(obj)
+        except Exception as e:
+            print(f"error encountered when uploading to s3: {e}")
 
     print(f"Total runtime is {datetime.timedelta(seconds=int(total_time))}")
     print(f"{len(longest_tests)} longest tests of entire run:")

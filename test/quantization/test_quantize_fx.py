@@ -634,7 +634,6 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(model_device, device)
 
     @skipIfNoFBGEMM
-    @unittest.skip("dict doesnot work in fx?")
     def test_dict_output(self):
         """ Make sure quantization runs for models with dictionary output
         """
@@ -648,7 +647,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         dict_input = {"input": torch.randn(1, 1, 1, 1)}
         m = M().eval()
-        qconfig_dict = {"": default_qconfig}
+        qconfig_dict = {"object_type": [(torch.nn.Conv2d, default_qconfig)]}
         m = prepare_fx(m, qconfig_dict)
         m(dict_input)
         m = convert_fx(m)
