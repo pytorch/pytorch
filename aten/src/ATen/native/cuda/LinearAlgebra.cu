@@ -7,6 +7,9 @@
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/Reduce.cuh>
+#include <ATen/native/SharedReduceOps.h>
+#include <ATen/native/ReduceOps.h>
 
 namespace at { namespace native {
 
@@ -47,7 +50,9 @@ Tensor prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_ten
     ld_tensor = tensor_strides[fast_dim];
   } else {
     transpose_tensor = !transpose_result;
-    if (tensor.is_contiguous()) {
+    // gemm call requires leading dimension and stride parameters to be non-zero
+    bool is_stride_non_zero = tensor.stride(1) != 0 && tensor.stride(2) != 0;
+    if (tensor.is_contiguous() && is_stride_non_zero) {
       tensor_ = tensor;
     } else {
       tensor_ = tensor.clone(at::MemoryFormat::Contiguous);
@@ -60,7 +65,7 @@ Tensor prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_ten
 
 namespace {
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
@@ -76,7 +81,13 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes = self_.sizes();
-  TORCH_CHECK(mat1_sizes[1] == mat2_sizes[0], "mat1 dim 1 must match mat2 dim 0");
+  TORCH_CHECK(
+      mat1_sizes[1] == mat2_sizes[0],
+      "mat1 dim 1 must match mat2 dim 0",
+      " mat1 dim1:",
+      mat1_sizes[1],
+      " mat2 dim0: ",
+      mat2_sizes[0]);
   TORCH_CHECK(self__sizes[0] == mat1_sizes[0], "self_ dim 0 must match mat1 dim 0");
   TORCH_CHECK(self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
 
@@ -150,7 +161,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   return result;
 }
 
-Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(self.dim() == 3, "self must be a 3D tensor");
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -172,6 +183,17 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
     result.resize_as_(self);
     if (beta.to<c10::complex<double>>() != 0.0) {
       result.copy_(self);
+    }
+  }
+
+  // handle pathological cases that blas may not like
+  if (result.numel() == 0) {
+    return result;
+  } else if (batch1_sizes[2] == 0) {
+    if (beta.to<c10::complex<double>>() == 0.0) {
+      return result.zero_();
+    } else {
+      return result.mul_(beta);
     }
   }
 
@@ -234,7 +256,7 @@ Tensor& baddbmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& 
 
 } // anonymous namespace
 
-Tensor& mm_out_cuda(Tensor& result, const Tensor& self, const Tensor& mat2) {
+Tensor& mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   result.resize_({ self.size(0), mat2.size(1) });
   return addmm_out_cuda_impl(result, result, self, mat2, 0, 1);
 }
@@ -246,7 +268,7 @@ Tensor mm_cuda(const Tensor& self, const Tensor& mat2) {
 
 Tensor& addmm_out_cuda(Tensor &out, const Tensor &self,
                         const Tensor &mat1, const Tensor &mat2,
-                        Scalar beta, Scalar alpha) {
+                        const Scalar& beta, const Scalar& alpha) {
   {
     at::NoNamesGuard guard;
     Tensor& result = addmm_out_cuda_impl(out, self, mat1, mat2, beta, alpha);
@@ -256,19 +278,19 @@ Tensor& addmm_out_cuda(Tensor &out, const Tensor &self,
 }
 
 Tensor addmm_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
-                  Scalar beta, Scalar alpha) {
+                  const Scalar& beta, const Scalar& alpha) {
   Tensor out = at::empty({0}, self.options());
   addmm_out_cuda(out, self, mat1, mat2, beta, alpha);
   return out;
 }
 
 Tensor& addmm__cuda(Tensor& self, const Tensor& mat1, const Tensor& mat2,
-                    Scalar beta, Scalar alpha) {
+                    const Scalar& beta, const Scalar& alpha) {
   addmm_out_cuda(self, self, mat1, mat2, beta, alpha);
   return self;
 }
 
-Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& baddbmm_out_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
   Tensor self_;
   if (&result != &self) {
     std::tie(self_) = expand_size(self, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
@@ -285,16 +307,16 @@ Tensor& baddbmm_out_cuda(Tensor &result, const Tensor& self, const Tensor& batch
   return result;
 }
 
-Tensor baddbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor baddbmm_cuda(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   Tensor out = at::empty({0}, self.options());
-  return baddbmm_out_cuda(out, self, batch1, batch2, beta, alpha);
+  return baddbmm_out_cuda(self, batch1, batch2, beta, alpha, out);
 }
 
-Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  return baddbmm_out_cuda(self, self, batch1, batch2, beta, alpha);
+Tensor& baddbmm__cuda(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+  return baddbmm_out_cuda(self, batch1, batch2, beta, alpha, self);
 }
 
-Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
+Tensor& bmm_out_cuda(const Tensor& batch1, const Tensor& batch2, Tensor &result) {
   result.resize_({ batch1.size(0), batch1.size(1), batch2.size(2) });
   Scalar beta(0.0);
   Scalar alpha(1.0);
@@ -310,72 +332,7 @@ Tensor& bmm_out_cuda(Tensor &result, const Tensor& batch1, const Tensor& batch2)
 
 Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({0}, self.options());
-  return native::bmm_out_cuda(result, self, mat2);
-}
-
-Tensor& addbmm_out_cuda(Tensor& out, const Tensor& self,
-                        const Tensor& batch1, const Tensor& batch2,
-                        Scalar beta, Scalar alpha) {
-  TORCH_CHECK(batch1.dim() == 3 && batch2.dim() == 3,
-              "Batch tensors should be 3D, got dimensions ", batch1.dim(),
-              " and ", batch2.dim());
-
-  Tensor self_;
-  if (&out != &self) {
-    std::tie(self_) = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm");
-  } else {
-    self_ = self;
-  }
-
-  TORCH_CHECK(out.device() == self_.device() &&
-              out.device() == batch1.device() &&
-              out.device() == batch2.device(),
-              "Expected all tensors to be on the same device. Found: ",
-              out.device(), ", ", self_.device(), ", ",
-              batch1.device(), " and ", batch2.device());
-  TORCH_CHECK(self_.dim() == 2,
-              "2D tensor expected, got ", self_.dim(), "D tensor for input");
-  int64_t batchnum = batch1.size(0);
-  int64_t m1d1 = batch1.size(1);
-  int64_t innerdim = batch1.size(2);
-  int64_t m2d2 = batch2.size(2);
-  TORCH_CHECK(batchnum == batch2.size(0),
-              "equal number of batches expected");
-  TORCH_CHECK(m1d1 == self_.size(0),
-              "first dimension of batch1  must match first dimension of input");
-  TORCH_CHECK(m2d2 == self_.size(1),
-              "second dimension of batch2 must match second dimension of input");
-  TORCH_CHECK(innerdim == batch2.size(1),
-              "second dimension of batch1 must match first dimension of batch2");
-
-  if (&out != &self) {
-    at::native::resize_as_(out, self_);
-    if (beta.to<c10::complex<double>>() != 0.0) {
-      at::native::copy_(out, self_);
-    }
-  }
-
-  for (int64_t i=0; i<batchnum; i++) {
-    addmm_out_cuda(out, out, batch1[i], batch2[i], beta, alpha);
-    beta = 1;
-  }
-  return out;
-}
-
-Tensor& addbmm__cuda(Tensor& self,
-                     const Tensor& batch1, const Tensor& batch2,
-                     Scalar beta, Scalar alpha) {
-  addbmm_out_cuda(self, self, batch1, batch2, beta, alpha);
-  return self;
-}
-
-Tensor addbmm_cuda(const Tensor& self,
-                   const Tensor& batch1, const Tensor& batch2,
-                   Scalar beta, Scalar alpha)
-{
-  Tensor out = at::empty({0}, self.options());
-  addbmm_out_cuda(out, self, batch1, batch2, beta, alpha);
-  return out;
+  return native::bmm_out_cuda(self, mat2, result);
 }
 
 namespace {
@@ -488,7 +445,7 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
 
 namespace {
 
-void addr_kernel_cuda(TensorIterator &iter, Scalar beta, Scalar alpha) {
+void addr_kernel_cuda(TensorIterator &iter, const Scalar& beta, const Scalar& alpha) {
   if (iter.dtype() == ScalarType::Bool) {
     using scalar_t = bool;
     auto beta_val = beta.to<scalar_t>();
@@ -544,8 +501,62 @@ void addr_kernel_cuda(TensorIterator &iter, Scalar beta, Scalar alpha) {
   });
 }
 
+// This reduction accumulates results as the type `acc_t`. By default, when
+// `scalar_t` is complex, `acc_t` is the downgraded real number type.
+// Otherwise, `acc_t` and `scalar_t` are the same type.
+template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>::type, typename out_t=typename scalar_value_type<scalar_t>::type>
+void linalg_vector_norm_kernel_cuda_impl(TensorIterator& iter, Scalar ord) {
+  double ord_val;
+  if (ord.isFloatingPoint()) {
+     ord_val = ord.to<double>();
+  } else {
+     TORCH_CHECK(false, "linalg.vector_norm expects ord to be float");
+  }
+  if (iter.numel() == 0) {
+    iter.output().fill_((ord_val < 0) ? INFINITY : 0);
+    return;
+  }
+  if (ord_val == 0) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormZeroOps<scalar_t, acc_t>(), 0);
+  } else if (ord_val == 1) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOneOps<scalar_t, acc_t>(), 0);
+  } else if (ord_val == 2) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormTwoOps<scalar_t, acc_t>(), 0);
+  } else if (ord_val == INFINITY) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMaxOps<scalar_t, acc_t>(), 0);
+  } else if (ord_val == -INFINITY) {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMinOps<scalar_t, acc_t>(), std::numeric_limits<acc_t>::infinity());
+  } else {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOps<scalar_t, acc_t>{ static_cast<acc_t>(ord_val) }, 0);
+  }
+  // For complex outputs, the above kernels do not touch the imaginary values,
+  // so we must zero them out
+  if (isComplexType(iter.output().scalar_type())) {
+    at::imag(iter.output()).zero_();
+  }
+}
+
+static void linalg_vector_norm_kernel_cuda(TensorIterator& iter, Scalar ord) {
+  if (iter.output().scalar_type() == kHalf) {
+    return linalg_vector_norm_kernel_cuda_impl<at::Half, float>(iter, ord);
+  } else if (iter.input_dtype() == kHalf && iter.output().scalar_type() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return linalg_vector_norm_kernel_cuda_impl<at::Half, float, float>(iter, ord);
+  }
+  else if(iter.output().scalar_type() == kBFloat16) {
+    return linalg_vector_norm_kernel_cuda_impl<at::BFloat16, float>(iter, ord);
+  } else if (iter.input_dtype() == kBFloat16 && iter.output().scalar_type() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return linalg_vector_norm_kernel_cuda_impl<at::BFloat16, float, float>(iter, ord);
+  }
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.input_dtype(), "linalg_vector_norm_cuda", [&] {
+    linalg_vector_norm_kernel_cuda_impl<scalar_t>(iter, ord);
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(addr_stub, &addr_kernel_cuda);
+REGISTER_DISPATCH(linalg_vector_norm_stub, &linalg_vector_norm_kernel_cuda);
 
 }}

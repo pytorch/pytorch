@@ -226,7 +226,13 @@ void ProfilerThreadLocalState::pushRange(
     evt.setSequenceNr(fn.seqNr());
     evt.setFwdThreadId(fn.forwardThreadId());
     evt.setScope((uint8_t)fn.scope());
-#ifndef C10_MOBILE
+    if (config_.with_flops) {
+      evt.setExtraArgs(saveExtraArgs(fn));
+      evt.setFlops(computeFlops(std::string(fn.name().str()), evt.extraArgs()));
+    }
+
+// TODO: will unify the two macros BUILD_LITE_INTERPRETER and C10_MOBILE soon.
+#if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
     // backward nodes source range corresponds to the forward node
     // TODO: consider using C++ stack trace
     if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
@@ -414,10 +420,10 @@ void pushProfilingCallbacksLegacy() {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
-      [](const at::RecordFunction& fn) {
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
-          return;
+          return nullptr;
         }
         bool record_cuda =
             state_ptr->config().state == ProfilerState::CUDA;
@@ -432,8 +438,10 @@ void pushProfilingCallbacksLegacy() {
         } else {
           state_ptr->pushRange(fn, record_cuda, msg);
         }
+
+        return nullptr;
       },
-      [](const at::RecordFunction& fn) {
+      [](const at::RecordFunction& fn, at::ObserverContext*) {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
@@ -449,8 +457,6 @@ void pushProfilingCallbacksLegacy() {
     .needsIds(true));
   state_ptr->setCallbackHandle(handle);
 }
-
-const int kCUDAWarmupStart = 5;
 
 } // namespace
 
@@ -511,23 +517,6 @@ void enableProfilerLegacy(const ProfilerConfig& new_config) {
 
   pushProfilingCallbacksLegacy();
 
-  if (new_config.state == ProfilerState::CUDA) {
-    // event recording appears to have some startup overhead, so we need to
-    // to generate some dummy events first before recording synchronization events
-    for (int idx = 0; idx < kCUDAWarmupStart; ++idx) {
-      cuda_stubs()->onEachDevice([state](int /* unused */) {
-          state->mark("__cuda_startup");
-          cuda_stubs()->synchronize();
-      });
-    }
-
-    // cuda events must be on the same device, so we need a start event recorded
-    // for each gpu. we then use this event to synchronize time on the GPU
-    // with the CPU clock.
-    cuda_stubs()->onEachDevice([state](int d) {
-        state->mark("__cuda_start_event");
-    });
-  }
   state->mark("__start_profile", false);
 }
 

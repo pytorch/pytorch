@@ -103,8 +103,8 @@ nn_functional_tests = [
     ('tanh', (S, S, S), (), '', (True,)),
     ('sigmoid', (S, S, S), (), '', (True,)),
     ('log_softmax', (S, S, S), (0,), '', (True,)),
-    ('linear', (S, S), ((M, S),), '', (True, ['aten::t', 'aten::matmul'])),
-    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::add', 'aten::mm'])),
+    ('linear', (S, S), ((M, S),), '', (True, ['aten::linear'])),
+    ('linear', (S, S), ((M, S), (M,)), 'addmm', (True, ['aten::linear'])),
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
@@ -129,9 +129,11 @@ nn_functional_tests = [
     ('cross_entropy', (3, S), (torch.randint(S, (3,), dtype=torch.int64),),),
     ('binary_cross_entropy_with_logits', (3,), (torch.empty(3).random_(2), ),),
     ('smooth_l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
+    ('huber_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('l1_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('mse_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('smooth_l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
+    ('huber_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('l1_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('mse_loss', (3, S), ((torch.rand(3, S)),), 'with_grad'),
     ('margin_ranking_loss', (3, S), ((3, S), (S,)),),
@@ -140,6 +142,7 @@ nn_functional_tests = [
     ('multilabel_soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('cosine_embedding_loss', (S, S), ((S, S), non_differentiable(torch.rand(S,))),),
     ('pixel_shuffle', (1, 9, 4, 4), (3,),),
+    ('pixel_unshuffle', (1, 1, 12, 12), (3,),),
     ('affine_grid', (S, 2, 3), (torch.Size([S, 1, 7, 7]),),),
     ('pad', (3, 3, 4, 2), ([1, 1],),),
     ('pairwise_distance', (S, S), ((S, S),),),
@@ -289,14 +292,15 @@ def gen_script_fn_and_args(method_name, func_type, *args, **kwargs):
     CU = torch.jit.CompilationUnit(script)
     return CU.the_method, tensors
 
-# create a script function from (name, func_type, output_process_fn),
-# returns a function takes in (args, kwargs) and runs the compiled function and
-# then applies the post process fn to the outputs
-def create_script_fn(self, method_name, func_type, output_process_fn):
+# create a script function from (name, func_type),
+# returns a function takes in (args, kwargs) and runs the compiled function
+def create_script_fn(self, method_name, func_type):
+    # function returns tuple containing original output and
+    # filtered output to be used in checking gradients
     def script_fn(*args, **kwargs):
         fn, tensors = gen_script_fn_and_args(method_name, func_type, *args, **kwargs)
         self.assertExportImport(fn.graph, tensors)
-        output = output_process_fn(fn(*tensors))
+        output = fn(*tensors)
         # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         script_fn.last_graph = fn.graph_for(*tensors)  # type: ignore[attr-defined]
         return output
@@ -526,8 +530,14 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
         constructor_args = kwargs.get('constructor_args', ())
 
     # Set up inputs from tuple of sizes or constructor fn
+    input_dtype = torch.double
     if 'input_fn' in kwargs:
         input = kwargs['input_fn']()
+        if isinstance(input, torch.Tensor):
+            input = (input,)
+
+        if all(tensor.is_complex() for tensor in input):
+            input_dtype = torch.cdouble
     else:
         input = (kwargs['input_size'],)
 
@@ -542,7 +552,7 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
             input = (input,)
         input = input + (kwargs['target_fn'](),)
 
-    args_variable, kwargs_variable = create_input(input)
+    args_variable, kwargs_variable = create_input(input, dtype=input_dtype)
     f_args_variable = deepcopy(unpack_variables(args_variable))
     out_var = deepcopy(f_args_variable)
 

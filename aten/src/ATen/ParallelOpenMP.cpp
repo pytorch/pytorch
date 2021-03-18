@@ -1,4 +1,5 @@
 #include <ATen/Config.h>
+#include <ATen/core/jit_type.h>
 #if AT_PARALLEL_OPENMP
 #include <ATen/Parallel.h>
 
@@ -8,7 +9,14 @@
 #include <mkl.h>
 #endif
 
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+
 namespace at {
+#if AT_MKLDNN_ENABLED()
+namespace native { namespace mkldnn {
+void clear_computation_cache();
+}} // namespace native::mkldnn
+#endif
 
 namespace {
 // Number of threads set by the user
@@ -48,6 +56,15 @@ void set_num_threads(int nthreads) {
   // MKL / non-MKL boundary of OpenMP usage
   // See https://github.com/pytorch/pytorch/issues/13757
   mkl_set_dynamic(false);
+#endif
+#ifdef USE_PTHREADPOOL
+  // because PyTorch uses caffe2::pthreadpool() in QNNPACK
+  caffe2::PThreadPool* const pool = caffe2::pthreadpool();
+  TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
+  pool->set_thread_count(nthreads);
+#endif
+#if AT_MKLDNN_ENABLED()
+  at::native::mkldnn::clear_computation_cache();
 #endif
 }
 

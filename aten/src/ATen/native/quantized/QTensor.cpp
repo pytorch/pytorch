@@ -43,8 +43,12 @@ Tensor quantize_per_channel_cpu(
   auto quantizer = make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
   return quantizer->quantize(self);
 }
+Tensor dequantize_cpu(const Tensor& self) {
+  TORCH_CHECK(!self.is_quantized());
+  return self.to(at::kFloat);
+}
 
-Tensor dequantize_quant(const Tensor& self) {
+Tensor dequantize_quantized_cpu(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
@@ -126,11 +130,6 @@ Tensor& set_storage_quantized_(
 QScheme qscheme_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   return quantizer->qscheme();
-}
-
-Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
-  get_qtensorimpl(self)->set_quantizer_(quantizer);
-  return self;
 }
 
 Tensor quantized_clone(

@@ -1,9 +1,4 @@
-set(extra_src)
-
-# IF AVX FOUND
-if(C_AVX_FOUND)
-  list(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX.cpp)
-endif(C_AVX_FOUND)
+set(Aten_TH_AVX_extra_src)
 
 set(hdr
   THGeneral.h THHalf.h THAllocator.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h
@@ -14,19 +9,20 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorRandom.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMoreMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorEvenMoreMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorLapack.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THVector.cpp
-  ${extra_src}
   )
 # Remember that PARENT_SCOPE variables are not in the current scope
 set(ATen_TH_SRCS ${ATen_TH_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} ${ATen_TH_SRCS} PARENT_SCOPE)
+
+# Aten_TH_AVX_extra_src is used in aten/src/ATen/CMakeLists.txt
+# when built with BUILD_LITE_INTERPRETER=1
+set(Aten_TH_AVX_extra_src ${Aten_TH_AVX_extra_src} PARENT_SCOPE)
 ######################################################
 
 
@@ -79,13 +75,7 @@ install(FILES
   THHalf.h
   THTensor.hpp
   THStorageFunctions.hpp
-  THGenerator.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
-
-install(FILES
-  vector/AVX.h
-  ../ATen/native/cpu/avx_mathfun.h
-  DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/vector")
 
 install(FILES
   generic/THBlas.cpp
@@ -103,9 +93,6 @@ install(FILES
   generic/THTensorLapack.h
   generic/THTensorMath.cpp
   generic/THTensorMath.h
-  generic/THTensorRandom.cpp
-  generic/THTensorRandom.h
-  generic/THVectorDispatch.cpp
   generic/THVector.h
   # See Note [TH abstraction violation]
   generic/THTensorFastGetSet.hpp

@@ -183,6 +183,8 @@ C10_EXPORT bool RoIAlignOp<float, CUDAContext>::RunOnDevice() {
           R.dim32(1),
           Y->mutable_data<float>(),
           aligned_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

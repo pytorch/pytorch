@@ -1,7 +1,6 @@
 import collections
 import warnings
 
-import torch._six
 import torch.cuda
 from typing import Optional, Sequence, Union
 
@@ -79,7 +78,7 @@ def reduce(inputs: Sequence[torch.Tensor],
                 "nccl.reduce with an output tensor list is deprecated. "
                 "Please specify a single output tensor with argument 'output' instead instead.")
             _output = outputs[root]
-    elif not isinstance(output, torch.Tensor) and isinstance(output, torch._six.container_abcs.Sequence):
+    elif not isinstance(output, torch.Tensor) and isinstance(output, collections.abc.Sequence):
         # User called old API with positional arguments of list of output tensors.
         warnings.warn(
             "nccl.reduce with an output tensor list is deprecated. "

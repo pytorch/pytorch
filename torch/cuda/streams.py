@@ -9,6 +9,7 @@ if not hasattr(torch._C, '_CudaStreamBase'):
     torch._C.__dict__['_CudaStreamBase'] = _dummy_type('_CudaStreamBase')
     torch._C.__dict__['_CudaEventBase'] = _dummy_type('_CudaEventBase')
     torch._C.__dict__['_CudaGraphBase'] = _dummy_type('_CudaGraphBase')
+    torch._C.__dict__['_graph_pool_handle'] = _dummy_type('_graph_pool_handle')
 
 class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
@@ -17,7 +18,7 @@ class Stream(torch._C._CudaStreamBase):
     device, independent from other streams.  See :ref:`cuda-semantics` for
     details.
 
-    Arguments:
+    Args:
         device(torch.device or int, optional): a device on which to allocate
             the stream. If :attr:`device` is ``None`` (default) or a negative
             integer, this will use the current device.
@@ -36,7 +37,7 @@ class Stream(torch._C._CudaStreamBase):
     def wait_event(self, event):
         r"""Makes all future work submitted to the stream wait for an event.
 
-        Arguments:
+        Args:
             event (Event): an event to wait for.
 
         .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
@@ -56,7 +57,7 @@ class Stream(torch._C._CudaStreamBase):
         All future work submitted to this stream will wait until all kernels
         submitted to a given stream at the time of call complete.
 
-        Arguments:
+        Args:
             stream (Stream): a stream to synchronize.
 
         .. note:: This function returns without waiting for currently enqueued
@@ -67,7 +68,7 @@ class Stream(torch._C._CudaStreamBase):
     def record_event(self, event=None):
         r"""Records an event.
 
-        Arguments:
+        Args:
             event (Event, optional): event to record. If not given, a new one
                 will be allocated.
 
@@ -123,7 +124,7 @@ class Event(torch._C._CudaEventBase):
     same device may record the event. However, streams on any device can wait on
     the event.
 
-    Arguments:
+    Args:
         enable_timing (bool, optional): indicates if the event should measure time
             (default: ``False``)
         blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)
@@ -204,3 +205,4 @@ class Event(torch._C._CudaEventBase):
             return '<torch.cuda.Event uninitialized>'
 
 _Graph = torch._C._CudaGraphBase
+_graph_pool_handle = torch._C._graph_pool_handle

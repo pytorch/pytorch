@@ -17,7 +17,7 @@ using PredictorParameters = std::map<std::string, std::shared_ptr<Blob>>;
 /**
  * Stores parameters nessasary for creating a PredictorInterface object.
  */
-struct CAFFE2_API PredictorConfig {
+struct TORCH_API PredictorConfig {
   // A map of parameter name to Tensor object. Predictor is supposed to
   // guarantee constness of all these Tensor objects.
   std::shared_ptr<PredictorParameters> parameters;
@@ -41,14 +41,14 @@ struct CAFFE2_API PredictorConfig {
   std::shared_ptr<Workspace> ws;
 };
 
-CAFFE2_API Workspace makeWorkspace(std::shared_ptr<PredictorParameters> parameters);
+TORCH_API Workspace makeWorkspace(std::shared_ptr<PredictorParameters> parameters);
 
-CAFFE2_API PredictorConfig makePredictorConfig(
+TORCH_API PredictorConfig makePredictorConfig(
     const MetaNetDef& net,
     Workspace* parent = nullptr,
     bool run_init = true);
 
-CAFFE2_API PredictorConfig makePredictorConfig(
+TORCH_API PredictorConfig makePredictorConfig(
     const NetDef& init_net,
     const NetDef& run_net,
     Workspace* parent = nullptr,

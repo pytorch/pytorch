@@ -4,15 +4,28 @@
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <sstream>
+#include <stdexcept>
 
 #ifdef USE_KINETO
 #include <pthread.h>
+#include <torch/cuda.h>
 #include <libkineto.h>
-#endif
+
+#include <unistd.h>
+#include <sys/syscall.h>
+
+// TODO: TO be removed, once this properly works from libkineto
+// Literal copy-n-paste from third_party/kineto/libkineto/src/WeakSymbols.cpp
+extern "C" {
+// This function is needed to avoid superfluous dependency on GNU OpenMP library when cuPTI is linked statically
+// For more details see https://github.com/pytorch/pytorch/issues/51026
+__attribute__((weak)) int acc_get_device_type() {
+  throw std::runtime_error("Dummy implementation of acc_get_device_type is not supposed to be called!");
+}
+} // extern "C"
 
 namespace torch { namespace autograd { namespace profiler {
 
-#ifdef USE_KINETO
 namespace {
 // TODO: consider TLS (tid + tls counter)
 uint64_t next_correlation_id() {
@@ -25,7 +38,17 @@ inline int64_t getTimeUs() {
   return duration_cast<microseconds>(high_resolution_clock::now().time_since_epoch()).count();
 }
 
+// Getting the linux tid is expensive, so cache it.
+// Caching linux pids and tids is not advisable in the general case,
+// but this is only for profiling purposes and we don't need to handle
+// special cases during fork, clone etc.
+pid_t cachedTid() {
+  static thread_local pid_t tid{syscall(SYS_gettid)};
+  return tid;
+}
+
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
+std::string stacksToStr(const std::vector<std::string>& stacks);
 
 struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   using ProfilerThreadLocalState::ProfilerThreadLocalState;
@@ -42,7 +65,6 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.endTime = getTimeUs();
     op.opType = std::string(fn.name().str());
     op.device = 0;
-    op.threadId = ctx->startThreadId;
     op.correlation = ctx->correlationId;
     // optimization - postpone shapesToStr till finalizeCPUTrace
     // is called from disableProfiler
@@ -58,8 +80,10 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.inputNames = "[]";
     op.outputNames = "[]";
 
-    //
-    op.threadId = pthread_self();
+    // setting both pthread and linux tid for Kineto
+    op.sysThreadId = cachedTid();
+    op.pthreadId = pthread_self();
+
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
       kineto_events_.emplace_back();
@@ -71,10 +95,13 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
           .fwdThreadId(ctx->fwdThreadId)
           .scope(ctx->recFunScope);
       if (ctx->shapes && !ctx->shapes->empty()) {
-          kineto_events_.back().shapes(*ctx->shapes);
+        kineto_events_.back().shapes(*ctx->shapes);
       }
       if (ctx->stack && !ctx->stack->empty()) {
         kineto_events_.back().stack(*ctx->stack);
+      }
+      if (ctx->extraArgs && !ctx->extraArgs->empty()) {
+        kineto_events_.back().flops(computeFlops(std::string(fn.name().str()), *ctx->extraArgs));
       }
       cpu_trace->activities.emplace_back(std::move(op));
     }
@@ -118,6 +145,9 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
       } else {
         cpu_trace->activities[idx].inputDims = "[]";
       }
+      if (kineto_events_[idx].hasStack()) {
+        cpu_trace->activities[idx].callStack = stacksToStr(kineto_events_[idx].stack());
+      }
     }
   }
 
@@ -136,7 +166,7 @@ void pushProfilingCallbacks() {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
-      [](const at::RecordFunction& fn) {
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state != ProfilerState::KINETO) {
           return std::make_unique<KinetoObserverContext>();
@@ -152,6 +182,10 @@ void pushProfilingCallbacks() {
 
         if (state_ptr->config().report_input_shapes) {
           ctx_ptr->shapes = inputSizes(fn);
+        }
+
+        if (state_ptr->config().with_flops) {
+          ctx_ptr->extraArgs = saveExtraArgs(fn);
         }
 
         ctx_ptr->sequenceNr = fn.seqNr();
@@ -210,6 +244,14 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   return oss.str();
 }
 
+std::string stacksToStr(const std::vector<std::string>& stacks) {
+  std::ostringstream oss;
+  std::copy(stacks.begin(), stacks.end(), std::ostream_iterator<std::string>(oss, ";"));
+  auto rc = oss.str();
+  rc.pop_back();
+  return rc;
+}
+
 } // namespace
 
 void prepareProfiler(
@@ -241,7 +283,7 @@ void prepareProfiler(
   }
 
   if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init();
+    libkineto_init(/*cpuOnly=*/!torch::cuda::is_available(), /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
   }
 
@@ -312,7 +354,12 @@ KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
   device_resource_id_ = activity.resourceId();
   start_us_ = activity.timestamp();
   duration_us_ = activity.duration();
-  correlation_id_ = activity.correlationId();
+  // Set the correlation id for the PyTorch CPU ops.
+  // Note: skip setting the correlation ids for other activities to avoid
+  // an incorrect attribution of CUDA kernels.
+  if (activity.type() == libkineto::ActivityType::CPU_OP) {
+    correlation_id_ = activity.correlationId();
+  }
   activity_type_ = (uint8_t)activity.type();
   if (activity.linkedActivity()) {
     linked_correlation_id_ = activity.linkedActivity()->correlationId();
@@ -356,14 +403,6 @@ void ProfilerResult::save(const std::string& path) {
   saved_ = true;
 }
 
-#endif
 
-bool kinetoAvailable() {
-#ifdef USE_KINETO
-  return true;
-#else
-  return false;
-#endif
-}
-
-}}}
+}}} // namespace torch::autograd::profiler
+#endif /* USE_KINETO */

@@ -60,7 +60,7 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       std::vector<at::Device> devices,
       int rank,
       c10d::OpType opType,
-      const char* profilingTitle) override {
+      const char* profilingTitle, const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
         devices, simulate_error_, rank, opType);
   }
@@ -117,7 +117,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       std::vector<at::Device> devices,
       int rank,
       c10d::OpType opType,
-      const char* profilingTitle) override {
+      const char* profilingTitle, const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
         devices, set_timedout_error_, rank, opType);
   }
@@ -178,7 +178,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
-  options->opTimeout = std::chrono::milliseconds(1000);
+  options->timeout = std::chrono::milliseconds(1000);
   ProcessGroupNCCLSimulateErrors pg(
       store_, 0, 1, options);
 
@@ -207,7 +207,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
-  options->opTimeout = std::chrono::milliseconds(3000);
+  options->timeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLTimedOutErrors pg(
       store_, 0, 1, options);
 
@@ -230,7 +230,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   }
 
   auto options = c10d::ProcessGroupNCCL::Options::create();
-  options->opTimeout = std::chrono::milliseconds(3000);
+  options->timeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLSimulateErrors pg(
       store_, 0, 1, options);
 

@@ -471,6 +471,7 @@ struct CodeImpl {
   // keep this around.
   std::shared_ptr<Graph> graph_;
   c10::optional<std::vector<GraphExecutor*>> grad_executors_;
+  c10::optional<std::vector<GraphExecutor*>> forward_executors_;
   PreprocessGraph preprocess_;
 
   // map from unique of nodes to register in register table
@@ -744,8 +745,9 @@ struct CodeImpl {
 
     // Emit the expected type.
     size_t types_start = type_table_.size();
+    auto types = node->tys(attr::types);
     for (size_t i = 0; i < num_inputs; i++) {
-      emitType(node->outputs()[i]->type());
+      emitType(types[i]);
     }
     insertInstruction(TYPECHECK, types_start, num_inputs);
   }
@@ -789,9 +791,6 @@ struct CodeImpl {
     insertInstruction(PROFILE_OP, profile_function_table_.size());
     if (node->cast<ProfileOp>()) {
       profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
-    } else if (node->cast<ProfileOptionalOp>()) {
-      profile_function_table_.push_back(
-          node->cast<ProfileOptionalOp>()->getCallback());
     } else if (node->cast<ProfileIValueOp>()) {
       profile_function_table_.push_back(
           node->cast<ProfileIValueOp>()->getCallback());
@@ -846,7 +845,7 @@ struct CodeImpl {
 
   void emitTupleConstruct(Node* node) {
     bool named =
-        node->output()->type()->expect<TupleType>()->name().has_value();
+        node->output()->type()->expectRef<TupleType>().name().has_value();
     if (named) {
       emitContainerConstruct(NAMED_TUPLE_CONSTRUCT, node);
     } else {
@@ -891,6 +890,10 @@ struct CodeImpl {
   }
 
   void emitWarn(Node* node) {
+    if (FLAGS_torch_jit_disable_warning_prints) {
+      return;
+    }
+
     emitLoadInputs(node->inputs());
     int32_t idx = -1;
     if (node->hasAttribute(attr::warn_id)) {
@@ -933,7 +936,7 @@ struct CodeImpl {
         break;
       case prim::CallFunction:
         emitCall(
-            node->inputs().at(0)->type()->expect<FunctionType>()->function(),
+            node->inputs().at(0)->type()->expectRef<FunctionType>().function(),
             node->inputs().slice(1));
         break;
       case prim::CallMethod:
@@ -950,7 +953,6 @@ struct CodeImpl {
         emitBailOut(node);
         break;
       case prim::profile_ivalue:
-      case prim::profile_optional:
       case prim::profile:
         emitProfile(node);
         break;
@@ -1014,6 +1016,18 @@ struct CodeImpl {
       }
     }
     return *grad_executors_;
+  }
+
+  const std::vector<GraphExecutor*>& diff_graph_op_executors() {
+    if (!forward_executors_) {
+      forward_executors_.emplace();
+      for (Operation& op : operator_table_) {
+        if (auto executor = detail::getDifferentiableGraphOpExecutor(op)) {
+          forward_executors_->push_back(executor);
+        }
+      }
+    }
+    return *forward_executors_;
   }
 
   void dump(std::ostream& out, size_t i) const {
@@ -1190,7 +1204,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         Instruction inst = frame.function->instructions_[frame.pc];
         switch (inst.op) {
           case ENTER: {
-            auto obj = peek(stack, 0, 1);
+            const auto& obj = peek(stack, 0, 1);
             TORCH_INTERNAL_ASSERT(obj.isObject());
             entered_objects.push_back(obj);
             ++frame.pc;
@@ -1198,7 +1212,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case EXIT: {
             auto obj = entered_objects.back().toObject();
             auto& f = obj->type()->getMethod("__exit__");
-            push(stack, obj);
+            push(stack, std::move(obj));
             entered_objects.pop_back();
             push(stack, IValue());
             push(stack, IValue());
@@ -1393,7 +1407,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             if (!frame_id_ref.has_value()) {
               frame_id_ref = Frame::num_frames++;
             }
-            auto callback = frame.function->profile_function_table_[inst.X];
+            const auto& callback =
+                frame.function->profile_function_table_[inst.X];
             push(stack, c10::IValue{static_cast<int64_t>(*frame_id_ref)});
             callback(stack);
             ++frame.pc;
@@ -1414,9 +1429,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
               auto& input = peek(stack, i, num_inputs);
-              auto t = input.toTensor();
+              auto& t = input.toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X + i];
-              auto expected_type = expected->cast<TensorType>();
+              auto* expected_type = expected->castRaw<TensorType>();
               if (t.defined() && !expected_type->matchTensor(t)) {
                 push(stack, false);
                 break;
@@ -1435,9 +1450,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               // so it's safe to pass this guard check
               push(stack, true);
             } else {
-              auto t = stack.back().toTensor();
+              auto& t = stack.back().toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X];
-              auto expected_type = expected->cast<TensorType>();
+              auto* expected_type = expected->castRaw<TensorType>();
               if (t.defined() &&
                   !frames.back().symbols2dims.bindSymbolicShapes(
                       t.sizes(), expected_type->symbolic_sizes())) {
@@ -1485,13 +1500,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case NAMED_TUPLE_CONSTRUCT: {
-            auto type =
-                frame.function->type_table_[inst.X]->expect<TupleType>();
-            namedTupleConstruct(stack, type, inst.N);
+            namedTupleConstruct(
+                stack,
+                frame.function->type_table_[inst.X]->expect<TupleType>(),
+                inst.N);
             ++frame.pc;
           } break;
           case LIST_CONSTRUCT: {
-            auto type = frame.function->type_table_[inst.X]->expect<ListType>();
+            const auto& type =
+                frame.function->type_table_[inst.X]->expectRef<ListType>();
             listConstruct(stack, type, inst.N);
             ++frame.pc;
           } break;
@@ -1544,7 +1561,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto range = node->sourceRange().source();
             if (range->filename()) {
               drop(stack, 1);
-              const auto msg = pop(stack).toStringRef();
+              const auto& msg = stack.back().toStringRef();
               if (need_warn) {
                 auto line = range->starting_line_no() +
                     range->lineno_for_offset(node->sourceRange().start());
@@ -1555,11 +1572,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 // will print the exception as configured.
                 c10::Warning::warn(location, msg, /*verbatim=*/true);
               }
+              stack.pop_back();
             } else {
-              const auto msg = pop(stack).toStringRef();
+              const auto& msg = stack.back().toStringRef();
               if (need_warn) {
                 TORCH_WARN(msg);
               }
+              stack.pop_back();
             }
             ++frame.pc;
           } break;
@@ -1712,6 +1731,10 @@ Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
+}
+
+const std::vector<GraphExecutor*>& Code::diff_graph_op_executors() {
+  return pImpl->diff_graph_op_executors();
 }
 
 size_t Code::num_bailouts() const {
