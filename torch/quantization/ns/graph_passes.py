@@ -421,8 +421,6 @@ def create_a_shadows_b(
     end_node_b_to_matched_subgraph_a_and_name = {}
     for match_name, match in matched_subgraph_pairs.items():
         subgraph_a, subgraph_b = match
-        assert subgraph_b.start_node is subgraph_b.end_node or True, \
-            "Shadowing subgraphs of B with multiple nodes is not yet handled."
         start_node_b_to_matched_subgraph_a_and_name[subgraph_b.start_node] = \
             (subgraph_a, match_name)
         end_node_b_to_matched_subgraph_a_and_name[subgraph_b.end_node] = \
