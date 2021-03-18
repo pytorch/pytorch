@@ -55,8 +55,6 @@ run_tests() {
     done
 
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-        $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"
-        $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM"
         $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
         $SCRIPT_HELPERS_DIR/test_custom_backend.bat
         $SCRIPT_HELPERS_DIR/test_libtorch.bat
