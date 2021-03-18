@@ -377,8 +377,9 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   qembedding_bag_inputs.push_back(none); // compressed_indices_mapping
   qembedding_bag_inputs.push_back(embedding_bag_inputs[inputs_size - 2]);
 
-  TORCH_CHECK(embedding_bag_inputs[inputs_size - 1]->mustBeNone(),
-    "Expected aten::embedding_bag padding_idx input to be None");
+  TORCH_CHECK(
+      embedding_bag_inputs[inputs_size - 1]->mustBeNone(),
+      "Expected aten::embedding_bag padding_idx input to be None");
 
   Node* qembedding_bag =
       g->create(Symbol::fromQualString(quant_fn), qembedding_bag_inputs);
