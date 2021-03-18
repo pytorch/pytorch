@@ -11,7 +11,6 @@
 #include <algorithm>
 #include <fcntl.h>
 #include <system_error>
-#include <typeinfo>
 
 namespace c10d {
 
@@ -193,7 +192,6 @@ void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {
 void TCPStoreDaemon::query(int socket) {
   QueryType qt;
   tcputil::recvBytes<QueryType>(socket, &qt, 1);
-  // std::cout << "Received query " + std::string(qt) + " from socket " + std::to_string(socket) << std::endl;
 
   if (qt == QueryType::SET) {
     setHandler(socket);
@@ -532,7 +530,6 @@ TCPStore::TCPStore(
       // Connect to the daemon
       storeSocket_ = tcputil::connect(
           tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-
       if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
         waitForWorkers();
       } 

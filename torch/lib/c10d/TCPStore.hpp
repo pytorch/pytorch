@@ -150,8 +150,6 @@ class TCPStore : public Store {
   c10::optional<int> numWorkers_;
   const std::string initKey_;
   const std::string regularPrefix_;
-  
-  std::unordered_map<std::string, CallbackFunction> keyToCallbacks_;
 
   // Only needs to be launched as the server
   std::unique_ptr<TCPStoreDaemon> tcpStoreDaemon_ = nullptr;
