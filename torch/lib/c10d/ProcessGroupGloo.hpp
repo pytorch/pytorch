@@ -176,6 +176,10 @@ class ProcessGroupGloo : public ProcessGroup {
 
   virtual ~ProcessGroupGloo();
 
+  c10::intrusive_ptr<Options> getOptions() {
+    return options_;
+  }
+
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
@@ -249,6 +253,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
+  const c10::intrusive_ptr<Options> options_;
 
   // Every Gloo context represents a set of connections to its peers.
   // In order to use more than one device (or allow for parallelism on

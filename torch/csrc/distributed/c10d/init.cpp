@@ -1168,7 +1168,8 @@ Arguments:
           py::arg("rank"),
           py::arg("size"),
           py::arg("timeout") = std::chrono::milliseconds(10 * 1000), // NOLINT
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def_property_readonly("options", &::c10d::ProcessGroupGloo::getOptions);
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -1197,7 +1198,9 @@ Arguments:
               py::arg("rank"),
               py::arg("size"),
               py::arg("timeout") = kProcessGroupDefaultTimeout,
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def_property_readonly(
+              "options", &::c10d::ProcessGroupNCCL::getOptions);
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL, "Options")
