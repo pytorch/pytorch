@@ -34,11 +34,11 @@ DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
     : AutogradMeta(self_impl),
       backward_info_(std::move(backward_info)),
       forward_info_(std::move(forward_info)),
-      creation_meta(creation_meta) {
+      creation_meta_(creation_meta) {
   is_view_ = true;
   if (backward_info_.has_value()) {
     self_impl->set_version_counter(impl::version_counter(backward_info_.value().base_));
-    attr_version = self_impl->version_counter().current_version();
+    attr_version_ = self_impl->version_counter().current_version();
   }
 }
 
@@ -164,7 +164,7 @@ namespace impl {
   }
 
   void create_cpp_hook(const Variable& self) {
-    auto &list = materialize_autograd_meta(self)->cpp_hooks_list;
+    auto &list = materialize_autograd_meta(self)->cpp_hooks_list_;
     list.reset(new hooks_list());
     std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, self.output_nr()));
     clear_hooks(self);
@@ -471,7 +471,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
 }
 
 void VariableHooks::remove_hook(const Tensor& self, unsigned pos) const {
-  auto &list = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_list;
+  auto &list = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_list_;
   TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
   (*list)[pos] = nullptr;
@@ -481,7 +481,7 @@ unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(
   TORCH_CHECK(self.requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
-  auto &list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list;
+  auto &list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list_;
   if(!list) {
     torch::autograd::impl::create_cpp_hook(self);
   }
