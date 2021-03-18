@@ -1625,6 +1625,50 @@ def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
 
     return samples
 
+def sample_inputs_lerp(op_info, device, dtype, requires_grad):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        # no broadcast
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 0.4)),
+        # broadcast rhs
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), 0.4)),
+        # scalar tensor
+        SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 0.4)),
+        # broadcast rhs scalar-tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 0.4)),
+        # broadcast rhs with weight tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), _make_tensor_helper((S, S)))),
+        # broadcast rhs and weight tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, 1)), _make_tensor_helper((S,)))),
+
+        # Broadcasts `self` : Issue with inplace-variants
+        # Reference: https://github.com/pytorch/pytorch/issues/50747
+        # SampleInput((_make_tensor_helper((S,)), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper(()), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
+    )  # type: ignore
+
+    if dtype.is_complex:
+        samples = samples + (  # type: ignore
+            # no broadcast
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 1.2 + 0.1j)),
+            # broadcast rhs
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 5.4 + 9j)),
+            # scalar tensor
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 0.4j)),
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 6.1 + 0.004j)),
+            # broadcast rhs scalar-tensor
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 1 + 2j)),
+        )
+
+    return samples
+
 # Foreach pointwise ops
 foreach_pointwise_op_db: List[OpInfo] = [
     ForeachFuncInfo('addcmul'),
