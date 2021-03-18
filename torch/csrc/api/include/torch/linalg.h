@@ -44,6 +44,14 @@ inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo
   return torch::linalg_eigvalsh_out(result, self, uplo);
 }
 
+inline Tensor householder_product(const Tensor& input, const Tensor& tau) {
+  return torch::linalg_householder_product(input, tau);
+}
+
+inline Tensor& householder_product_out(Tensor& result, const Tensor& input, const Tensor& tau) {
+  return torch::linalg_householder_product_out(result, input, tau);
+}
+
 inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<std::string> driver) {
   return torch::linalg_lstsq(self, b, cond, driver);
 }
@@ -62,6 +70,14 @@ inline Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scala
 
 inline Tensor& norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+inline Tensor vector_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return torch::linalg_vector_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
+}
+
+inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  return torch::linalg_vector_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
 inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermitian) {
@@ -170,6 +186,17 @@ inline Tensor eigvalsh(const Tensor& self, std::string uplo) {
 
 inline Tensor& eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
   return detail::eigvalsh_out(result, self, uplo);
+}
+
+/// Computes the product of Householder matrices
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.householder_product
+inline Tensor householder_product(const Tensor& input, const Tensor& tau) {
+  return detail::householder_product(input, tau);
+}
+
+inline Tensor& householder_product_out(Tensor& result, const Tensor& input, const Tensor& tau) {
+  return detail::householder_product_out(result, input, tau);
 }
 
 inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<std::string> driver) {
