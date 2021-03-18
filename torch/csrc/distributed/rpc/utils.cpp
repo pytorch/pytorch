@@ -564,6 +564,7 @@ void populateRemoteProfiledEvents(
             e.setCudaUs(it->second->cudaElapsedUs(e));
           } else {
             TORCH_WARN("Found a pop event without a corresponding push event");
+            e.setCudaUs(0);
           }
         }
       }

@@ -458,8 +458,6 @@ void pushProfilingCallbacksLegacy() {
   state_ptr->setCallbackHandle(handle);
 }
 
-const int kCUDAWarmupStart = 5;
-
 } // namespace
 
 void registerCUDAMethods(CUDAStubs* stubs) {
