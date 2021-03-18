@@ -45,16 +45,6 @@ void window_function_checks(
       window_length);
 }
 
-// bool inputs are considered integral
-static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
-  for (Scalar& s : l) {
-    if (!s.isIntegral(true)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 } // namespace
 
 DEFINE_DISPATCH(complex_stub);
@@ -62,31 +52,36 @@ DEFINE_DISPATCH(polar_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor arange(Scalar end, const TensorOptions& options) {
+Tensor arange(const Scalar& end, const TensorOptions& options) {
   return native::arange(/*start=*/0, end, options);
 }
 
-Tensor arange(Scalar start, Scalar end, const TensorOptions& options) {
+Tensor arange(const Scalar& start, const Scalar& end, const TensorOptions& options) {
   return native::arange(start, end, /*step=*/1, options);
 }
 
 Tensor arange(
-    Scalar start,
-    Scalar end,
-    Scalar step,
+    const Scalar& start,
+    const Scalar& end,
+    const Scalar& step,
     const TensorOptions& options) {
-  bool set_to_integral_dtype = !options.has_dtype() && allIntegral({start, end, step});
+  bool set_to_integral_dtype = !options.has_dtype() &&
+       // bool inputs are considered integral
+       start.isIntegral(true) &&
+       end.isIntegral(true) &&
+       step.isIntegral(true);
+
   Tensor result = set_to_integral_dtype
       ? at::empty({0}, options.dtype(at::ScalarType::Long))
       : at::empty({0}, options);
   return at::arange_out(result, start, end, step);
 }
 
-Tensor& arange_out(Tensor& result, Scalar end) {
+Tensor& arange_out(const Scalar& end, Tensor& result) {
   return at::arange_out(result, /*start=*/0, end);
 }
 
-Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
+Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
   return at::arange_out(result, start, end, /*step=*/1);
 }
 
@@ -117,7 +112,7 @@ void complex_check_dtype(
               " for argument 'out'");
 }
 
-Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
+Tensor& complex_out(const Tensor& real, const Tensor& imag, Tensor& result) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
       .add_output(result)
@@ -137,7 +132,7 @@ Tensor complex(const Tensor& real, const Tensor& imag) {
   return at::complex_out(result, real, imag);
 }
 
-Tensor& polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
+Tensor& polar_out(const Tensor& abs, const Tensor& angle, Tensor& result) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
       .add_output(result)
@@ -188,10 +183,9 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<Sca
   return t;
 }
 
-Tensor& empty_out(
-    Tensor& result,
-    IntArrayRef size,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor& empty_out(IntArrayRef size,
+    c10::optional<c10::MemoryFormat> optional_memory_format,
+    Tensor& result) {
   // Preferably, this argument would not be accepted by _out, but the code
   // generator requires the out and non-out overloads to match exactly
   TORCH_CHECK(
@@ -364,12 +358,12 @@ Tensor eye(int64_t n, int64_t m, const TensorOptions& options) {
   return at::eye_out(tensor, n, m);
 }
 
-Tensor& eye_out_cpu(Tensor& result, int64_t n) {
+Tensor& eye_out_cpu(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
-  return native::eye_out_cpu(result, n, n);
+  return native::eye_out_cpu(n, n, result);
 }
 
-Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
+Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
@@ -394,7 +388,7 @@ namespace {
 
 // Performs dtype inference for full
 TensorOptions infer_full_options(
-  Scalar fill_value,
+  const Scalar& fill_value,
   const TensorOptions& options) {
 
   if (!options.has_dtype()) {
@@ -417,7 +411,7 @@ TensorOptions infer_full_options(
 
 } // anonymous namespace
 
-Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options) {
+Tensor full(IntArrayRef size, const Scalar& fill_value, const TensorOptions& options) {
   TORCH_CHECK(options.layout() != kSparse,
     "full(...) is not implemented for sparse layout");
 
@@ -425,7 +419,7 @@ Tensor full(IntArrayRef size, Scalar fill_value, const TensorOptions& options) {
   return result.fill_(fill_value);
 }
 
-Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
+Tensor& full_out(IntArrayRef size, const Scalar& fill_value, Tensor& result) {
   TORCH_CHECK(!result.is_sparse(),
     "full(...) is not implemented for sparse layout");
 
@@ -435,7 +429,7 @@ Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
 
 Tensor full_like(
     const Tensor& self,
-    Scalar fill_value,
+    const Scalar& fill_value,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
@@ -445,7 +439,7 @@ Tensor full_like(
 Tensor new_full(
     const Tensor& self,
     IntArrayRef size,
-    Scalar fill_value,
+    const Scalar& fill_value,
     const TensorOptions& options
     ) {
   return at::full(size, fill_value, self.options().merge_in(options));
@@ -453,8 +447,8 @@ Tensor new_full(
 
 namespace {
 TensorOptions linspace_logspace_infer_options(
-    Scalar start,
-    Scalar end,
+    const Scalar& start,
+    const Scalar& end,
     const TensorOptions& options) {
   auto result_options = options;
   if (start.isComplex() || end.isComplex()) {
@@ -480,8 +474,8 @@ TensorOptions linspace_logspace_infer_options(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor linspace(
-    Scalar start,
-    Scalar end,
+    const Scalar& start,
+    const Scalar& end,
     c10::optional<int64_t> steps,
     const TensorOptions& options) {
   const auto steps_ = steps.value_or(100);
@@ -494,8 +488,8 @@ Tensor linspace(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor logspace(
-    Scalar start,
-    Scalar end,
+    const Scalar& start,
+    const Scalar& end,
     c10::optional<int64_t> steps,
     double base,
     const TensorOptions& options) {
@@ -513,7 +507,7 @@ Tensor ones(IntArrayRef size, const TensorOptions& options) {
 }
 
 Tensor& ones_out(Tensor& result, IntArrayRef size) {
-  return native::full_out(result, size, /*fill_value=*/1.);
+  return native::full_out(size, /*fill_value=*/1., result);
 }
 
 Tensor ones_like(
@@ -526,7 +520,7 @@ Tensor ones_like(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
+Tensor scalar_tensor(const Scalar& s, const TensorOptions& options) {
   if (options.device() == at::kCPU) {
     // This is a fast track to skip device dispatch for making scalar tensor on CPU.
     // See https://github.com/pytorch/pytorch/pull/29915 for more detailed perf
@@ -746,17 +740,17 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, c10::optional<Generator> gen
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ range ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor range(
-    Scalar start,
-    Scalar end,
-    Scalar step,
+    const Scalar& start,
+    const Scalar& end,
+    const Scalar& step,
     const TensorOptions& options) {
   Tensor result = at::empty({0}, options);
   return at::range_out(result, start, end, step);
 }
 
 Tensor range(
-    Scalar start,
-    Scalar end,
+    const Scalar& start,
+    const Scalar& end,
     const TensorOptions& options) {
   return at::native::range(start, end, 1, options);
 }
@@ -1130,7 +1124,7 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
 
 Tensor full(
     IntArrayRef size,
-    Scalar fill_value,
+    const Scalar& fill_value,
     optional<DimnameList> names,
     const TensorOptions& options) {
 
