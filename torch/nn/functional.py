@@ -1927,8 +1927,9 @@ def embedding(
         input (LongTensor): Tensor containing indices into the embedding matrix
         weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
             and number of columns equal to the embedding size
-        padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
-                                         (initialized to zeros) whenever it encounters the index.
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
+                                     therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
+                                     i.e. it remains as a fixed "pad".
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
                                     Note: this will modify :attr:`weight` in-place.
@@ -1982,13 +1983,15 @@ def embedding(
     else:
         padding_idx = -1
     if max_norm is not None:
+        # Note [embedding_renorm contiguous]
         # `embedding_renorm_` will call .contiguous() on input anyways, so we
         # call it here and take advantage of the improved locality in the
         # `embedding` call below too.
         input = input.contiguous()
+        # Note [embedding_renorm set_grad_enabled]
         # XXX: equivalent to
         # with torch.no_grad():
-        #   torch.nembedding_renorm_
+        #   torch.embedding_renorm_
         # remove once script supports set_grad_enabled
         _no_grad_embedding_renorm_(weight, input, max_norm, norm_type)
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)

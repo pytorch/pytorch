@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
-    skipCUDAMemoryLeakCheckIf, BytesIOContext,
+    skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor, _wrap_warn_once)
 from multiprocessing.reduction import ForkingPickler
@@ -2581,6 +2581,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertEqual(output3, output1)
                     self.assertEqual(output3, output2)
 
+        @noarchTest
         def test_empty_meta(self):
             x = torch.empty(2 ** 20, 2 ** 20, device='meta')
             y = torch.empty(2 ** 20, device='meta')
@@ -2588,10 +2589,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
             self.assertRaises(RuntimeError, lambda: z[0][0].item())
 
+        @noarchTest
         def test_upsample_nearest1d_meta(self):
-            # TODO: this is not a sustainable way of testing meta functions,
-            # but I want some quick scaffolding first before a more
-            # integrated testing strategy
+            # TODO: this test should be triggered by test_nn.py but right
+            # now meta is not enabled (and even if it was, we are probably
+            # missing too many meta functions to get through the test unmolested)
+
             # NB: Can't make the exponent too big, or it will overflow
             # signed 64-bit integer
             x = torch.empty(2 * 10 ** 8, 3, 2 * 10 ** 8, device='meta')
@@ -2599,12 +2602,47 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
             self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
+            # TODO: the out tests cannot be triggered by test_nn.py because
+            # we don't actually do out= arguments for nn functions, so there
+            # is no public API by which to get the out version
+
             # interpolate doesn't seem to support out=
             # (not sure why passing None here doesn't work? How strange...)
             z = torch.empty(0, device='meta')
             torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 8,), 2, out=z)
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
             self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
+
+        @noarchTest
+        def test_upsample_nearest2d_meta(self):
+            # TODO: the out tests cannot be triggered by test_nn.py because
+            # we don't actually do out= arguments for nn functions, so there
+            # is no public API by which to get the out version
+
+            # Make sure we don't clobber strides of out tensor.  NB: this
+            # test must be done on 2d/3d, because 1d doesn't have any meaningful
+            # layout support
+            x = torch.empty(4, 3, 8, 8, device='meta')
+            out = torch.empty(4, 3, 16, 16, device='meta', memory_format=torch.channels_last)
+            torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+
+            x = torch.empty(4, 3, 8, 8, device='meta', memory_format=torch.channels_last)
+            out = torch.empty(4, 3, 16, 16, device='meta')
+            torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
+            self.assertTrue(out.is_contiguous())
+
+            # But if resize occurs, do clobber
+            x = torch.empty(4, 3, 8, 8, device='meta', memory_format=torch.channels_last)
+            out = torch.empty(0, device='meta')
+            torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+
+        @noarchTest
+        def test_detach_meta(self):
+            x = torch.empty(2, device='meta')
+            # This used to segfault
+            self.assertRaises(RuntimeError, lambda: x.detach().storage())
 
         def test_normal_shape(self):
             warned = False
@@ -3723,6 +3761,17 @@ class TestTorchDeviceType(TestCase):
         # Tests that negative lambda fails
         with self.assertRaises(RuntimeError):
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
+
+    @onlyCUDA
+    @dtypesIfCUDA(torch.half, torch.float)
+    def test_exponential_no_zero(self, device, dtype):
+        # naively, 0 in exponential can be generated with probability 2^-24
+        # so we need more samples to check if it's not generated
+        # instead of doing one
+        # don't test CPU, that would be a long test
+        x = torch.empty(50000000, device=device, dtype=dtype).exponential_()
+        self.assertTrue(x.min() > 0)
+
 
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())
@@ -5546,27 +5595,6 @@ class TestTorchDeviceType(TestCase):
         x = torch.randn(4, 3, 8, 8, 8, device=device)
         ndhwc = x.contiguous(memory_format=torch.channels_last_3d)
         y = ndhwc.permute(0, 1, 4, 3, 2).permute(0, 1, 4, 3, 2)
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
-
-    def test_memory_format_preserved_after_upsample(self, device):
-        x = torch.randn(4, 3, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last)
-        y = torch._C._nn.upsample_nearest2d(nhwc, (2, 2))
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
-
-        x = torch.randn(4, 3, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last)
-        y = torch._C._nn.upsample_bilinear2d(nhwc, (2, 2), True)
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last))
-
-        x = torch.randn(4, 3, 8, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last_3d)
-        y = torch._C._nn.upsample_nearest3d(nhwc, (2, 2, 2))
-        self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
-
-        x = torch.randn(4, 3, 8, 8, 8, device=device)
-        nhwc = x.contiguous(memory_format=torch.channels_last_3d)
-        y = torch._C._nn.upsample_trilinear3d(nhwc, (2, 2, 2), True)
         self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
 
     def test_memory_format_propagation_rules(self, device):
