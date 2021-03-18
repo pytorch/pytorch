@@ -86,7 +86,7 @@ struct DeepAndWideFast : torch::nn::Module {
       at::native::mul_out(prealloc_tensors[1], prealloc_tensors[0], sigma_);
 
       at::native::clamp_out(
-          prealloc_tensors[2], prealloc_tensors[1], -10.0, 10.0);
+          prealloc_tensors[1], -10.0, 10.0, prealloc_tensors[2]);
 
       // Potential optimization: original tensor could be pre-transposed.
       // prealloc_tensors[3] = at::native::transpose(user_emb, 1, 2);
