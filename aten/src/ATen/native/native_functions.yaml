@@ -8533,7 +8533,6 @@
     CUDA: legacy::cuda::_thnn_conv_depthwise2d_forward_out
 
 - func: thnn_conv_depthwise2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, int[2] dilation) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CUDA: legacy::cuda::_thnn_conv_depthwise2d_forward

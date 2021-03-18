@@ -986,7 +986,9 @@ Tensor & _thnn_multi_margin_loss_forward_out(Tensor & output, const Tensor & sel
     }
     return output;
 }
-Tensor _thnn_multi_margin_loss_forward(const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const Tensor & weight, int64_t reduction) {
+Tensor _thnn_multi_margin_loss_forward(const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto output_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
@@ -1067,7 +1069,9 @@ Tensor & _thnn_multi_margin_loss_backward_out(Tensor & grad_input, const Tensor 
     }
     return grad_input;
 }
-Tensor _thnn_multi_margin_loss_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const Tensor & weight, int64_t reduction) {
+Tensor _thnn_multi_margin_loss_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const Scalar& p, const Scalar& margin, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto grad_input_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
@@ -1322,7 +1326,9 @@ std::tuple<Tensor &,Tensor &> _thnn_nll_loss_forward_out(Tensor & output, Tensor
     }
     return std::tuple<Tensor &, Tensor &>(output, total_weight);
 }
-std::tuple<Tensor,Tensor> _thnn_nll_loss_forward(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+std::tuple<Tensor,Tensor> _thnn_nll_loss_forward(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto output_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
@@ -1413,7 +1419,9 @@ Tensor & _thnn_nll_loss_backward_out(Tensor & grad_input, const Tensor & grad_ou
     }
     return grad_input;
 }
-Tensor _thnn_nll_loss_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
+Tensor _thnn_nll_loss_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto grad_input_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
@@ -1506,7 +1514,9 @@ std::tuple<Tensor &,Tensor &> _thnn_nll_loss2d_forward_out(Tensor & output, Tens
     }
     return std::tuple<Tensor &, Tensor &>(output, total_weight);
 }
-std::tuple<Tensor,Tensor> _thnn_nll_loss2d_forward(const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index) {
+std::tuple<Tensor,Tensor> _thnn_nll_loss2d_forward(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto output_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
@@ -1597,7 +1607,9 @@ Tensor & _thnn_nll_loss2d_backward_out(Tensor & grad_input, const Tensor & grad_
     }
     return grad_input;
 }
-Tensor _thnn_nll_loss2d_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const Tensor & weight, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
+Tensor _thnn_nll_loss2d_backward(const Tensor & grad_output, const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, const Tensor & total_weight) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto grad_input_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
@@ -2051,7 +2063,9 @@ std::tuple<Tensor &,Tensor &,Tensor &> _thnn_conv2d_forward_out(Tensor & output,
     }
     return std::tuple<Tensor &, Tensor &, Tensor &>(output, columns, ones);
 }
-std::tuple<Tensor,Tensor,Tensor> _thnn_conv2d_forward(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
+std::tuple<Tensor,Tensor,Tensor> _thnn_conv2d_forward(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding) {
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto output_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
@@ -2305,7 +2319,9 @@ Tensor & _thnn_conv_depthwise2d_forward_out(Tensor & output, const Tensor & self
     }
     return output;
 }
-Tensor _thnn_conv_depthwise2d_forward(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
+Tensor _thnn_conv_depthwise2d_forward(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto output_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
