@@ -39,7 +39,7 @@ py::object cast_handle_sequence(std::vector<py::handle> objs) {
 }
 
 void flatten_rec(PyObject* obj, ParsedArgs& args) {
-  auto as_variable = [](at::Tensor tensor) // Wrap tensor as Variable
+  auto as_variable = [](at::Tensor& tensor) // Wrap tensor as Variable
   {
     PyObject* wappred_obj = THPVariable_Wrap(tensor);
     return reinterpret_cast<THPVariable*>(wappred_obj)->cdata;
