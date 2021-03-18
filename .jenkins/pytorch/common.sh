@@ -76,9 +76,7 @@ if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
     else
       # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
       # https://github.com/pytorch/pytorch/pull/16645
-      SCCACHE_LOG=debug SCCACHE_START_SERVER=1 SCCACHE_NO_DAEMON=1 sccache
-      exit
-      # SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=debug sccache --start-server
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 SCCACHE_STARTUP_TIMEOUT_MS=30000 RUST_LOG=sccache::server=debug sccache --start-server
     fi
 
     # Report sccache stats for easier debugging
