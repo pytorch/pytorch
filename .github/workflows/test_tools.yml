@@ -20,6 +20,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # mypy version copied from .circleci/docker/common/install_conda.sh
+        run: |
+          set -eux
+          pip install -r requirements.txt
+          pip install mypy==0.770
       - name: Run tests
         run: python -m unittest discover -vs tools/test -p 'test_*.py'
