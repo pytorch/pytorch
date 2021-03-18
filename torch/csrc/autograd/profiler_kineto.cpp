@@ -11,6 +11,9 @@
 #include <torch/cuda.h>
 #include <libkineto.h>
 
+#include <unistd.h>
+#include <sys/syscall.h>
+
 // TODO: TO be removed, once this properly works from libkineto
 // Literal copy-n-paste from third_party/kineto/libkineto/src/WeakSymbols.cpp
 extern "C" {
@@ -35,6 +38,15 @@ inline int64_t getTimeUs() {
   return duration_cast<microseconds>(high_resolution_clock::now().time_since_epoch()).count();
 }
 
+// Getting the linux tid is expensive, so cache it.
+// Caching linux pids and tids is not advisable in the general case,
+// but this is only for profiling purposes and we don't need to handle
+// special cases during fork, clone etc.
+pid_t cachedTid() {
+  static thread_local pid_t tid{syscall(SYS_gettid)};
+  return tid;
+}
+
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
 std::string stacksToStr(const std::vector<std::string>& stacks);
 
@@ -53,7 +65,6 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.endTime = getTimeUs();
     op.opType = std::string(fn.name().str());
     op.device = 0;
-    op.threadId = ctx->startThreadId;
     op.correlation = ctx->correlationId;
     // optimization - postpone shapesToStr till finalizeCPUTrace
     // is called from disableProfiler
@@ -69,8 +80,10 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.inputNames = "[]";
     op.outputNames = "[]";
 
-    //
-    op.threadId = pthread_self();
+    // setting both pthread and linux tid for Kineto
+    op.sysThreadId = cachedTid();
+    op.pthreadId = pthread_self();
+
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
       kineto_events_.emplace_back();
@@ -270,7 +283,7 @@ void prepareProfiler(
   }
 
   if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init(!torch::cuda::is_available());
+    libkineto_init(/*cpuOnly=*/!torch::cuda::is_available(), /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
   }
 
