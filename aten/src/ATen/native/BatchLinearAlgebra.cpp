@@ -848,7 +848,8 @@ static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
 std::tuple<Tensor, Tensor> _solve_helper_cpu(const Tensor& self, const Tensor& A) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  auto infos = at::empty({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
+  // infos might not get filled for empty inputs therefore at::zeros is used instead of at::empty
+  auto infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cpu", [&]{
     apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
@@ -1074,7 +1075,7 @@ static void apply_inverse(Tensor& self, Tensor& infos_lu, Tensor& infos_getri) {
   int lwork = -1;
   scalar_t wkopt;
   lapackGetri<scalar_t>(n, self_data, lda, ipiv_data, &wkopt, lwork, &info);
-  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
 
@@ -1115,7 +1116,7 @@ Tensor inverse(const Tensor &self) {
   return at::_inverse_helper(self);
 }
 
-Tensor& inverse_out(Tensor &result, const Tensor &self) {
+Tensor& inverse_out(const Tensor &self, Tensor &result) {
   checkSameDevice("inverse", result, self);
   checkLinalgCompatibleDtype("inverse", result, self);
   Tensor result_tmp = at::inverse(self);
@@ -1319,7 +1320,7 @@ Tensor _cholesky_helper_cpu(const Tensor& self, bool upper) {
 }
 
 Tensor cholesky(const Tensor &self, bool upper) {
-  if (self.size(-1) == 0) {
+  if (self.numel() == 0) {
     return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   squareCheckInputs(self);
@@ -1342,6 +1343,9 @@ Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
 }
 
 Tensor linalg_cholesky(const Tensor &self) {
+  if (self.numel() == 0) {
+    return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
   squareCheckInputs(self);
   return at::_cholesky_helper(self, /*upper=*/false).tril_();
 }
@@ -1626,7 +1630,7 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
   int lwork = -1;
   scalar_t wkopt;
   lapackGeqrf<scalar_t>(m, n, self_data, m, tau_data, &wkopt, lwork, &info);
-  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
   for (const auto i : c10::irange(batch_size)) {
@@ -1742,7 +1746,7 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
 DEFINE_DISPATCH(orgqr_stub);
 
 /*
-  The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
+  The householder_product (orgqr) function allows reconstruction of an orthogonal (or unitary) matrix Q,
   from a sequence of elementary reflectors, such as is produced by the geqrf function.
 
   Args:
@@ -1753,7 +1757,7 @@ DEFINE_DISPATCH(orgqr_stub);
 
   For further details, please see the LAPACK/MAGMA documentation.
 */
-Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, Tensor& infos) {
+Tensor& householder_product_out_info(const Tensor& input, const Tensor& tau, Tensor& result, Tensor& infos) {
   TORCH_INTERNAL_ASSERT(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT(input.size(-2) >= input.size(-1));
   TORCH_INTERNAL_ASSERT(input.size(-1) >= tau.size(-1));
@@ -1778,6 +1782,13 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
   TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
 
+  // tau tensor must be contiguous
+  Tensor tau_ = tau;
+  if (!tau.is_contiguous()) {
+    tau_ = at::empty(tau.sizes(), tau.options(), MemoryFormat::Contiguous);
+    tau_.copy_(tau);
+  }
+
   // orgqr_stub (apply_orgqr) performs calculations in-place and result must be a copy of input
   result.copy_(input);
 
@@ -1786,23 +1797,50 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   infos.fill_(0);
 
   auto n = input.size(-1);
-  result = orgqr_stub(result.device().type(), result, tau, infos, n);
+  result = orgqr_stub(result.device().type(), result, tau_, infos, n);
   return result;
 }
 
-Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
-  TORCH_CHECK(input.dim() >= 2, "orgqr: input must have at least 2 dimensions.");
-  TORCH_CHECK(input.size(-2) >= input.size(-1), "orgqr: input.shape[-2] must be greater than or equal to input.shape[-1]");
-  TORCH_CHECK(input.size(-1) >= tau.size(-1), "orgqr: input.shape[-1] must be greater than or equal to tau.shape[-1]");
+Tensor& linalg_householder_product_out(const Tensor& input, const Tensor& tau, Tensor& result) {
+  TORCH_CHECK(input.dim() >= 2, "torch.linalg.householder_product: input must have at least 2 dimensions.");
+  TORCH_CHECK(
+      input.size(-2) >= input.size(-1),
+      "torch.linalg.householder_product: input.shape[-2] must be greater than or equal to input.shape[-1]");
+  TORCH_CHECK(
+      input.size(-1) >= tau.size(-1),
+      "torch.linalg.householder_product: input.shape[-1] must be greater than or equal to tau.shape[-1]");
 
-  TORCH_CHECK(tau.scalar_type() == input.scalar_type(),
-    "orgqr: tau dtype ", tau.scalar_type(), " does not match input dtype ", input.scalar_type());
-  TORCH_CHECK(input.device() == tau.device(),
-              "orgqr: Expected input and tau to be on the same device, but found input on ",
-              input.device(), " and tau on ", tau.device(), " instead.");
+  TORCH_CHECK(
+      input.dim() - tau.dim() == 1,
+      "torch.linalg.householder_product: Expected tau to have one dimension less than input, but got tau.ndim equal to ",
+      tau.dim(),
+      " and input.ndim is equal to ",
+      input.dim());
+  if (input.dim() > 2) {
+    auto expected_batch_tau_shape = IntArrayRef(input.sizes().data(), input.dim() - 2); // input.shape[:-2]
+    auto actual_batch_tau_shape = IntArrayRef(tau.sizes().data(), tau.dim() - 1); // tau.shape[:-1]
+    TORCH_CHECK(
+        actual_batch_tau_shape.equals(expected_batch_tau_shape),
+        "torch.linalg.householder_product: Expected batch dimensions of tau to be equal to input.shape[:-2], but got ",
+        actual_batch_tau_shape);
+  }
 
-  checkSameDevice("orgqr", result, input);
-  checkLinalgCompatibleDtype("orgqr", result, input);
+  TORCH_CHECK(
+      tau.scalar_type() == input.scalar_type(),
+      "torch.linalg.householder_product: tau dtype ",
+      tau.scalar_type(),
+      " does not match input dtype ",
+      input.scalar_type());
+  TORCH_CHECK(
+      input.device() == tau.device(),
+      "torch.linalg.householder_product: Expected input and tau to be on the same device, but found input on ",
+      input.device(),
+      " and tau on ",
+      tau.device(),
+      " instead.");
+
+  checkSameDevice("torch.linalg.householder_product", result, input);
+  checkLinalgCompatibleDtype("torch.linalg.householder_product", result, input);
 
   // TODO: uncomment the following when passing incorrectly sized 'result' is not allowed
   // if (result.numel() != 0) {
@@ -1829,27 +1867,37 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   // we have to allocate a temporary tensor
   if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
-    result_tmp = orgqr_out_info(input, tau, result_tmp, infos);
+    result_tmp = householder_product_out_info(input, tau, result_tmp, infos);
     at::native::resize_output(result, result_tmp.sizes());
     result.copy_(result_tmp);
   } else {
     // use result's storage directly
-    result = orgqr_out_info(input, tau, result, infos);
+    result = householder_product_out_info(input, tau, result, infos);
   }
 
   // Now check LAPACK/MAGMA error codes
   if (result.dim() > 2) {
-    batchCheckErrors(infos, "orgqr");
+    batchCheckErrors(infos, "torch.linalg.householder_product");
   } else {
-    singleCheckErrors(infos.item().toInt(), "orgqr");
+    singleCheckErrors(infos.item().toInt(), "torch.linalg.householder_product");
   }
   return result;
 }
 
-Tensor orgqr(const Tensor& input, const Tensor& tau) {
+Tensor linalg_householder_product(const Tensor& input, const Tensor& tau) {
   Tensor result = at::empty({0}, input.options());
-  result = at::orgqr_outf(input, tau, result);
+  result = at::linalg_householder_product_outf(input, tau, result);
   return result;
+}
+
+// torch.orgqr is an alias of torch.linalg.householder_product
+// torch.linalg.householder_product is the preferred new function
+Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
+  return at::linalg_householder_product_outf(input, tau, result);
+}
+
+Tensor orgqr(const Tensor& input, const Tensor& tau) {
+  return at::linalg_householder_product(input, tau);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2041,7 +2089,7 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
   }
 
   lapackSymeig<scalar_t, value_t>(jobz, uplo, n, self_data, n, eigvals_data, &wkopt, lwork, rwork_data, &info);
-  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
   for (const auto i : c10::irange(batch_size)) {
@@ -2197,7 +2245,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   int lwork = -1;
   scalar_t wkopt;
   lapackSvd<scalar_t, value_t>(jobz, m, n, self_data, lda, S_data, U_data, lda, VT_data, ldvt, &wkopt, lwork, rwork_data, iwork_data, &info);
-  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
+  lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
 
@@ -2413,7 +2461,7 @@ struct LapackLstsqHelper {
   }
   self_type& set_ldb(int ldb) { this->ldb = ldb; return *this; }
   self_type& set_work() {
-    lwork = static_cast<int>(real_impl<scalar_t, value_t>(work_opt));
+    lwork = std::max<int>(1, real_impl<scalar_t, value_t>(work_opt));
     work = at::empty({lwork}, scalar_type);
     work_ptr = work.data_ptr<scalar_t>();
     return *this;
@@ -2459,7 +2507,7 @@ struct LapackLstsqHelper {
         break;
       // case LapackLstsqDriverType::Gelsd:
       default:
-        rwork_len = static_cast<int64_t>(rwork_opt);
+        rwork_len = std::max<int64_t>(1, rwork_opt);
     }
     rwork = at::empty({rwork_len}, c10::toValueType(scalar_type));
     rwork_ptr = rwork.data_ptr<value_t>();
@@ -2482,7 +2530,7 @@ struct LapackLstsqHelper {
   self_type& set_iwork() {
     // handle `iwork` workspace array (relevant only for `?gelsd`)
     if (LapackLstsqDriverType::Gelsd == driver_type) {
-      iwork = at::empty({iwork_opt}, at::kInt);
+      iwork = at::empty({std::max<int>(1, iwork_opt)}, at::kInt);
       iwork_ptr = iwork.data_ptr<int>();
     }
     return *this;

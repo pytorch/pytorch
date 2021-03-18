@@ -510,9 +510,9 @@ class TORCH_API Tensor {
   Tensor index(std::initializer_list<at::indexing::TensorIndex> indices) const;
 
   Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor const & rhs);
-  Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar v);
+  Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, const Scalar& v);
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs);
-  Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Scalar v);
+  Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, const Scalar& v);
 
   Tensor cpu() const;
   Tensor cuda() const;
@@ -646,16 +646,16 @@ class TORCH_API Tensor {
   // users who should use the API provided in torch/csrc/autograd.h
 
   /// This function returns the forward gradient for this Tensor at the given level.
-  const Tensor& fw_grad(uint64_t level) const {
-    return impl_->fw_grad(level, *this);
+  const Tensor& _fw_grad(uint64_t level) const {
+    return impl_->_fw_grad(level, *this);
   }
 
   /// This function can be used to set the value of the forward grad.
   /// Note that the given new_grad might not be used directly if it has different
   /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
   /// new_grad content will be copied into a new Tensor
-  void set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) {
-    impl_->set_fw_grad(new_grad, *this, level, is_inplace_op);
+  void _set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) {
+    impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
   }
 
 
