@@ -1,7 +1,6 @@
 import torch
 import torch.fx
 import inspect
-import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 from torch.fx.node import Argument, Target
 from torch._jit_internal import boolean_dispatched
@@ -128,7 +127,9 @@ class NormalizeArgs(Transformer):
                 def proxy_to_tensor(a):
                     return torch.Tensor() if isinstance(a, torch.fx.Proxy) else a
                 args_for_analysis = torch.fx.node.map_aggregate(args, proxy_to_tensor)
+                assert isinstance(args_for_analysis, tuple)
                 kwargs_for_analysis = torch.fx.node.map_aggregate(kwargs, proxy_to_tensor)
+                assert isinstance(kwargs_for_analysis, dict)
                 bound_args = candidate_signature.bind(*args_for_analysis, **kwargs_for_analysis)
                 bound_args.apply_defaults()
 
