@@ -24,6 +24,7 @@ Functions
 .. autofunction:: eigvalsh
 .. autofunction:: matrix_rank
 .. autofunction:: norm
+.. autofunction:: vector_norm
 .. autofunction:: pinv
 .. autofunction:: svd
 .. autofunction:: solve
@@ -32,3 +33,4 @@ Functions
 .. autofunction:: inv
 .. autofunction:: qr
 .. autofunction:: lstsq
+.. autofunction:: householder_product
