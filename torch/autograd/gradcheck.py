@@ -23,7 +23,7 @@ def is_float_or_complex_tensor(obj):
     return isinstance(obj, torch.Tensor) and (obj.is_floating_point() or obj.is_complex())
 
 
-def make_jacobians(tensors, tensors_is_inputs, dim=None, dtype=None):
+def make_jacobians(tensors, tensors_is_inputs, dim=None, dtype=None, device=None):
     """make_jacobians makes zero-filled tensors from inputs/outputs to be filled row-by-row
      or col-by-col. If tensors is inputs, for each tensor, returns a new zero-filled tensor
     with height of `t.numel` and width of `dim`. Otherwise, the new tensor will have height
@@ -38,15 +38,21 @@ def make_jacobians(tensors, tensors_is_inputs, dim=None, dtype=None):
     """
     out: List[torch.Tensor] = []
     assert isinstance(tensors, tuple)
+
+    assert not tensors_is_inputs or (dtype is None and device is None), \
+        "as tensors already has dtype/device information, we should not pass it in"
+    assert tensors_is_inputs or (dtype is not None and device is not None), \
+        "dtype and device of jacobian should be the same as that of the input"
+
+    options = {"dtype": dtype, "device": device, "layout": torch.strided}
     for t in tensors:
         if is_float_or_complex_tensor(t) and (t.requires_grad or not tensors_is_inputs):
-            dt = t.dtype if dtype is None else dtype
             if dim is None:
-                out.append(t.new_zeros((t.nelement(),), dtype=dt, layout=torch.strided))
+                out.append(t.new_zeros((t.nelement(),), **options))
             elif tensors_is_inputs:
-                out.append(t.new_zeros((t.nelement(), dim), dtype=dt, layout=torch.strided))
+                out.append(t.new_zeros((t.nelement(), dim), **options))
             else:
-                out.append(t.new_zeros((dim, t.nelement()), dtype=dt, layout=torch.strided))
+                out.append(t.new_zeros((dim, t.nelement()), **options))
     if not out:
         return None
     return tuple(out)
@@ -123,7 +129,7 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3, grad
     """
     jacobians: List[Tuple[torch.Tensor]] = []
     if outputs is None:
-        outputs = fn(inputs)
+        outputs = _as_tuple(fn(inputs))
     if target is None:
         target = inputs
     for i, inp in enumerate(iter_tensors(target, True)):
@@ -136,7 +142,7 @@ def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
     tensors, where N is the number of outputs. Input must require grad.
     """
     assert input.requires_grad
-    jacobians = make_jacobians(outputs, False, input.numel(), input.dtype)
+    jacobians = make_jacobians(outputs, False, input.numel(), input.dtype, input.device)
 
     def update_jacobians(x, idx, d_idx, is_mkldnn=False):
         # compute_jacobian only works for pure real
@@ -149,10 +155,10 @@ def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
                 if is_mkldnn:
                     inp = [x.to_mkldnn()]
                 else:
-                    inp = inputs
+                    inp = _as_tuple(inputs)
                 return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
-            orig = x[idx].item()
+            orig = x[idx].clone()
             x[idx] = orig - delta
             outa = fn_out()
             x[idx] = orig + delta
@@ -189,7 +195,9 @@ def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
                     #            = real(grad_out.conj() * ds_dx)
                     d[d_idx] = torch.real(grad_out.conjugate() * ds_dx)
                 else:   # R -> R
-                    d[d_idx] = ds_dx * grad_out
+                    # skip if grad_out is complex but output is real
+                    if not isinstance(grad_out, complex):
+                        d[d_idx] = ds_dx * grad_out
 
     for x_tensor, x_idx, flat_idx in iter_tensor(input):
         is_mkldnn = x_tensor.layout == torch._mkldnn  # type: ignore # mypy: torch nas no attr _mkldnn
@@ -197,7 +205,6 @@ def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
             raise ValueError('gradcheck currently only supports functions with 1 input, but got: ',
                              len(input))
         update_jacobians(x_tensor, x_idx, flat_idx, is_mkldnn=is_mkldnn)
-
     return jacobians
 
 
@@ -621,7 +628,8 @@ def gradcheck(
         return check_no_differentiable_outputs(fail_test, func, tupled_inputs, _as_tuple(func_out), eps)
 
     numerical = transpose(get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps))
-    numerical_from_imag_grad_out = transpose(get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps, grad_out=1j))
+    if any(isinstance(o, torch.Tensor) and o.is_complex() for o in _as_tuple(func_out)):
+        numerical_from_imag_grad_out = transpose(get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps, grad_out=1j))
 
     # recompute because get_numerical_jacobians
     outputs = _differentiable_outputs(func(*tupled_inputs))

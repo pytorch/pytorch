@@ -3999,6 +3999,13 @@ class TestAutograd(TestCase):
             gradcheck(lambda x: torch.tensor([x]), x)
         self.assertFalse(gradcheck(lambda x: torch.tensor([x]), x, raise_exception=False))
 
+    def test_gradcheck_input_output_different_device(self):
+        x = torch.ones((1,), device="cuda", requires_grad=True)
+        gradcheck(lambda x: x.to("cpu"), (x,))
+
+        x = torch.ones((1,), device="cpu", requires_grad=True)
+        gradcheck(lambda x: x.to("cuda"), (x,))
+
     def test_gradcheck_check_batched_grad(self):
         x = torch.rand(10, requires_grad=True).to_sparse()
         # runtime error while compute batched grad (print big error)
