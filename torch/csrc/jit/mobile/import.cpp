@@ -304,9 +304,9 @@ void BytecodeDeserializer::parseMethods(
       if (op_code == OP) {
         if (has_debug_info) {
           auto module_debug_tuple =
-            module_debug_info_list[X].toTuple()->elements();
+              module_debug_info_list[X].toTuple()->elements();
           std::string module_debug_info =
-            module_debug_tuple[0].toString()->string();
+              module_debug_tuple[0].toString()->string();
           int64_t debug_handle = module_debug_tuple[1].toInt();
           function->set_module_info(module_debug_info, i);
           function->append_instruction(op_code, X, N, debug_handle);
@@ -449,7 +449,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   auto m = mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   std::unique_ptr<MobileDebugTable> debug_table =
-    std::make_unique<MobileDebugTable>(reader_);
+      std::make_unique<MobileDebugTable>(reader_);
   m.setDebugTable(std::move(debug_table));
 #endif
   return m;

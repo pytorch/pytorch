@@ -64,8 +64,8 @@ bool InterpreterState::run(Stack& stack) {
       switch (inst.op) {
         case OP: {
           if (at::hasGlobalCallbacks()) {
-            if (auto* mobile_debug_info =
-                    static_cast<MobileDebugInfo*>(c10::ThreadLocalDebugInfo::get(
+            if (auto* mobile_debug_info = static_cast<MobileDebugInfo*>(
+                    c10::ThreadLocalDebugInfo::get(
                         c10::DebugInfoKind::MOBILE_RUNTIME_INFO))) {
               mobile_debug_info->setOpIdx(pc);
             }
@@ -215,9 +215,9 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         case WARN: {
           drop(stack, 1);
-          // Note: Please don't move the pop(stack) code below into the TORCH_WARN
-          // macro since TORCH_WARN fails to evaluate its arguments when
-          // STRIP_ERROR_MESSAGES is defined (which happens for production
+          // Note: Please don't move the pop(stack) code below into the
+          // TORCH_WARN macro since TORCH_WARN fails to evaluate its arguments
+          // when STRIP_ERROR_MESSAGES is defined (which happens for production
           // mobile builds). This will cause the stack to be in an inconsistent
           // state. It has previously resulted in a SEV (S22350).
           const auto& sref = stack.back().toStringRef();

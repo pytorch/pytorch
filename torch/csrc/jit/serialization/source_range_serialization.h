@@ -33,6 +33,7 @@ class SourceRangePickler {
 class SourceRangeDeserializer {
  public:
   SourceRange deserialize(const c10::IValue& iv);
+
  private:
   std::shared_ptr<Source> deserialize_source(const c10::IValue& iv);
   std::unordered_map<

@@ -31,7 +31,8 @@ SourceRange SourceRangeDeserializer::deserialize(const c10::IValue& iv) {
   return SourceRange(source_, start_, end_);
 }
 
-std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(const c10::IValue& iv) {
+std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
+    const c10::IValue& iv) {
   auto tup = iv.toTuple();
   if (cached_sources.count(tup)) {
     return cached_sources.at(tup);
@@ -40,8 +41,7 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(const c10::I
   auto tup_elems = tup->elements();
   TORCH_INTERNAL_ASSERT(tup_elems.size() == 3);
   std::string text_ = tup_elems[0].toString()->string();
-  c10::optional<std::string> filename_ =
-      tup_elems[1].toOptional<std::string>();
+  c10::optional<std::string> filename_ = tup_elems[1].toOptional<std::string>();
   int64_t starting_line_no_ = tup_elems[2].toInt();
 
   auto source = std::make_shared<Source>(
@@ -85,7 +85,7 @@ std::vector<char> SourceRangePickler::pickle(
       source_range_tag = it->second;
     }
     std::vector<c10::IValue> row_elems{
-      (int64_t)range.bytes,
+        (int64_t)range.bytes,
         static_cast<int64_t>(source_range_tag),
         srs->serialize(range.range)};
     ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
@@ -119,7 +119,8 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     auto tup_elems = val.toTuple()->elements();
     if (tup_elems.size() == 2) {
       // This path is for BC.
-      // After this change debug_pkl stores {byte_offset, source_range_tag, source_range}
+      // After this change debug_pkl stores {byte_offset, source_range_tag,
+      // source_range}
       int64_t offset = tup_elems[0].toInt();
       auto source_range = deserializer->deserialize(tup_elems[1]);
       unpickled_records->emplace_back(offset, std::move(source_range));

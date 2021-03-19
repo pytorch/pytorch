@@ -127,7 +127,6 @@ class TORCH_API Module {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   std::unique_ptr<MobileDebugTable> debug_table_;
 #endif
-
 };
 } // namespace mobile
 } // namespace jit

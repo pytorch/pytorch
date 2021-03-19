@@ -180,7 +180,7 @@ struct TORCH_API SourceRange {
 };
 
 struct SourceRangeHasher {
-public:
+ public:
   size_t operator()(const torch::jit::SourceRange& key) const;
 };
 
@@ -208,7 +208,7 @@ struct TaggedRange {
 };
 using SourceRangeRecords = std::vector<TaggedRange>;
 using SourceRangeTagMap =
-  std::unordered_map<SourceRange, int32_t, SourceRangeHasher>;
+    std::unordered_map<SourceRange, int32_t, SourceRangeHasher>;
 
 } // namespace jit
 } // namespace torch

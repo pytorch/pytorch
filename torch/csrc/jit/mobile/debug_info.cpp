@@ -14,21 +14,22 @@ MobileDebugTable::MobileDebugTable(
   const std::vector<std::string>& record_names = reader->getAllRecords();
   const c10::string_view suffix("debug_pkl");
   for (const auto& record_name : record_names) {
-    if (c10::string_view(
-          record_name.data(), record_name.size()).ends_with(suffix)) {
+    if (c10::string_view(record_name.data(), record_name.size())
+            .ends_with(suffix)) {
       at::DataPtr debug_data;
       size_t debug_size;
       std::tie(debug_data, debug_size) = reader->getRecord(record_name);
       auto ivalues =
-        jit::unpickle(
-            reinterpret_cast<const char*>(debug_data.get()), debug_size)
-        .toTuple()
-        ->elements();
+          jit::unpickle(
+              reinterpret_cast<const char*>(debug_data.get()), debug_size)
+              .toTuple()
+              ->elements();
       std::unique_ptr<SourceRangeDeserializer> deserializer =
-        std::make_unique<SourceRangeDeserializer>();
+          std::make_unique<SourceRangeDeserializer>();
       for (auto& val : ivalues) {
         auto tup_elems = val.toTuple()->elements();
-        TORCH_CHECK(tup_elems.size() == 3,
+        TORCH_CHECK(
+            tup_elems.size() == 3,
             "Source debug tuple must have three elements:"
             "byte_offset, source_tag, source_range");
         int64_t debug_handle = tup_elems[1].toInt();

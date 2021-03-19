@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
@@ -14,7 +15,6 @@
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
@@ -133,10 +133,9 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       opnames.emplace_back(node->schema().operator_name());
       if (save_mobile_debug_info) {
         std::string root_scope_string = getModuleTypeName(module, "top");
-        auto source_range =
-          node->sourceRange().findSourceRangeThatGenerated() ?
-          node->sourceRange().findSourceRangeThatGenerated().value() :
-          node->sourceRange();
+        auto source_range = node->sourceRange().findSourceRangeThatGenerated()
+            ? node->sourceRange().findSourceRangeThatGenerated().value()
+            : node->sourceRange();
         int64_t source_range_tag{-1};
         const auto& it = source_range_tag_map.find(source_range);
         if (it != source_range_tag_map.end()) {
@@ -309,7 +308,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
           c10::ivalue::Tuple::create({std::move(path), source_debug_tag}));
     }
     auto module_debug_info =
-      Table({{"module_debug_info", Tup(module_debug_tuples)}});
+        Table({{"module_debug_info", Tup(module_debug_tuples)}});
     debug_info_vals = Tup({func.qualname().qualifiedName(), module_debug_info});
   }
   return std::make_pair(bytecode_vals, debug_info_vals);
@@ -334,9 +333,8 @@ void setstateTuple(
       return;
     }
     if (setstate.isGraphFunction()) {
-      auto func_tuple =
-          getFunctionTuple(
-              module, setstate, save_mobile_debug_info, source_range_map);
+      auto func_tuple = getFunctionTuple(
+          module, setstate, save_mobile_debug_info, source_range_map);
       elements.push_back(func_tuple.first);
       qn_cache.emplace(qn);
       if (save_mobile_debug_info) {
@@ -372,12 +370,8 @@ void moduleMethodsTuple(
     if (qn_cache.find(qn) != qn_cache.end()) {
       continue;
     }
-    auto func_tuple =
-        getFunctionTuple(
-            module,
-            method.function(),
-            save_mobile_debug_info,
-            source_range_map);
+    auto func_tuple = getFunctionTuple(
+        module, method.function(), save_mobile_debug_info, source_range_map);
     elements.push_back(func_tuple.first);
     qn_cache.emplace(qn);
     if (save_mobile_debug_info) {
@@ -561,8 +555,8 @@ class ScriptModuleSerializer {
       std::string debugFilename = filename + ".debug_pkl";
       SourceRangePickler source_range_pickler;
       updateSourceRangeTags(item.value().ranges());
-      auto range_data =
-        source_range_pickler.pickle(item.value().ranges(), source_range_tags_);
+      auto range_data = source_range_pickler.pickle(
+          item.value().ranges(), source_range_tags_);
       writer_.writeRecord(
           debugFilename,
           range_data.data(),
@@ -655,10 +649,10 @@ class ScriptModuleSerializer {
   // 4. During deserialization, read all the debug_pkl, to construct a map
   //    of <unique_tag, SourceRange> and use tag saved with OPs in bytecode
   //    to lookup the source range.
-  // Strictly speaking we will serialize InlinedCallStack directly, which contains
-  // SourceRange. This way we have access to entire callstack and not just source
-  // information about where the node is, since bytecode inlines the graph before
-  // saving it.
+  // Strictly speaking we will serialize InlinedCallStack directly, which
+  // contains SourceRange. This way we have access to entire callstack and not
+  // just source information about where the node is, since bytecode inlines the
+  // graph before saving it.
   SourceRangeTagMap source_range_tags_;
   int64_t current_source_range_tag_;
 };
