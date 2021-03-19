@@ -1558,7 +1558,7 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
 #ifdef USE_CUSOLVER
   return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
 #else
-  return _cholesky_solve_helper_magma(self, A, upper);
+  return _cholesky_solve_helper_cuda_magma(self, A, upper);
 #endif
 }
 
