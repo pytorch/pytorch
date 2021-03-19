@@ -26,6 +26,7 @@
       - [Use CCache](#use-ccache)
       - [Use a faster linker](#use-a-faster-linker)
     - [C++ frontend development tips](#c-frontend-development-tips)
+    - [GDB integration](#gdb-integration)
   - [CUDA development tips](#cuda-development-tips)
   - [Windows development tips](#windows-development-tips)
     - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
@@ -734,6 +735,69 @@ When compiling PyTorch from source, the test runner binary will be written to
 framework, which you can read up about to learn how to configure the test runner. When
 submitting a new feature, we care very much that you write appropriate tests.
 Please follow the lead of the other tests to see how to write a new test case.
+
+### GDB integration
+
+If you are debugging pytorch inside gdb, you might be interested in
+[pytorch-gdb](tools/gdb/pytorch-gdb.py). This script extends GDB by
+introducing some pytorch-specific commands which you can use from the GDB
+prompt. In particular, `torch-tensor-repr` prints a human-readable repr of an
+at::Tensor object. Example of usage:
+
+```
+$ gdb python
+GNU gdb (Ubuntu 9.2-0ubuntu1~20.04) 9.2
+[...]
+(gdb) # insert a breakpoint when we call .neg()
+(gdb) break at::native:neg
+No source file named at::native.
+Make breakpoint pending on future shared library load? (y or [n]) y
+Breakpoint 1 (at::native:neg) pending.
+
+(gdb) run
+[...]
+>>> import torch
+>>> t = torch.tensor([1, 2, 3, 4], dtype=torch.float64)
+>>> t
+tensor([1., 2., 3., 4.], dtype=torch.float64)
+>>> t.neg()
+
+Breakpoint 1, at::native::neg (self=...) at [...]/pytorch/aten/src/ATen/native/UnaryOps.cpp:520
+520     Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
+(gdb) # the default repr of 'self' is not very useful
+(gdb) p self
+$1 = (const at::Tensor &) @0x7ffff72ed780: {impl_ = {target_ = 0x5555559df6e0}}
+(gdb) torch-tensor-repr self
+Python-level repr of self:
+tensor([1., 2., 3., 4.], dtype=torch.float64)
+```
+
+GDB tries to automatically load `pytorch-gdb` thanks to the
+[.gdbinit](.gdbinit) at the root of the pytorch repo. Howevever, due to
+security reasons GDB refuses to load it:
+
+```
+$ gdb
+warning: File "/path/to/pytorch/.gdbinit" auto-loading has been declined by your `auto-load safe-path' set to "$debugdir:$datadir/auto-load".
+To enable execution of this file add
+        add-auto-load-safe-path /path/to/pytorch/.gdbinit
+line to your configuration file "/home/YOUR-USERNAME/.gdbinit".
+To completely disable this security protection add
+        set auto-load safe-path /
+line to your configuration file "/home/YOUR-USERNAME/.gdbinit".
+For more information about this security protection see the
+"Auto-loading safe path" section in the GDB manual.  E.g., run from the shell:
+        info "(gdb)Auto-loading safe path"
+(gdb)
+```
+
+As gdb itself suggests, the best way to enable auto-loading of `pytorch-gdb`
+is to add the following line to your `~/.gdbinit` (i.e., the `.gdbinit` file
+which is in your home # directory, NOT `/path/to/pytorch/.gdbinit`):
+```
+add-auto-load-safe-path /path/to/pytorch/.gdbinit
+```
+
 
 ## CUDA development tips
 
