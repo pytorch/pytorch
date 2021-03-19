@@ -273,6 +273,9 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     return grad;
   }
 
+  // To enable complex support.
+  // From this line on `input_conj` and output_conj`
+  // are interchangeable with `input` and `output`.
   auto input_conj = input.conj();
   auto output_conj = output.conj();
 
