@@ -240,7 +240,7 @@ static void mode_kernel_impl(
   auto self_dim_size = ensure_nonempty_size(self, dim);
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "mode_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kBool, self.scalar_type(), "mode_cpu", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
       auto* values_data_bytes = data[0];
       auto* indices_data_bytes = data[1];

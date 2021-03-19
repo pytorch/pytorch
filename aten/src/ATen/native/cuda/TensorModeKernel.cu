@@ -253,7 +253,7 @@ void mode_kernel_impl(
   auto indices_transposed = indices.transpose(dim, ndim - 1);
 
   // Call mode
-  AT_DISPATCH_ALL_TYPES_AND(kHalf, self.scalar_type(), "cuda_mode", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, self.scalar_type(), "cuda_mode", [&] {
     // Requirements for fused kernel implementation:
     //
     // 1. sliceSize <= 2 * max threads per block
