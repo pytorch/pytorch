@@ -4554,6 +4554,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(0, x.index_fill(0, index, -1).dim())
         self.assertEqual(0, x.index_fill_(0, index, -1).dim())
 
+    # The test fails for zero-dimensional tensors on XLA
+    @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_dtypes())
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
