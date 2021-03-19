@@ -987,6 +987,47 @@ class ShapeFuncInfo(OpInfo):
                                             **kwargs)
         self.ref = ref
 
+def sample_inputs_foreach(self, device, dtype, N):
+    tensors = [make_tensor((N, N), device, dtype) for _ in range(N)]
+    return tensors
+
+
+def get_foreach_method_names(name):
+    # get torch inplace reference function
+    method_name = "_foreach_" + name
+    method_name_inplace = "_foreach_" + name + "_"
+
+    method = getattr(torch, method_name, None)
+    method_inplace = getattr(torch, method_name_inplace, None)
+
+    ref = getattr(torch.Tensor, name, None)
+
+    return method, method_inplace, ref
+
+class ForeachUnaryFuncInfo(OpInfo):
+    """Early version of a specialized OpInfo for foreach unary functions"""
+    def __init__(self,
+                 name,
+                 dtypes=floating_and_complex_types(),
+                 dtypesIfCPU=all_types_and_complex(),
+                 dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+                 dtypesIfROCM=None,
+                 safe_casts_outputs=True,
+                 sample_inputs_func=sample_inputs_foreach,
+                 **kwargs):
+        super(ForeachUnaryFuncInfo, self).__init__("_foreach_" + name,
+                                                   dtypes=dtypes,
+                                                   dtypesIfCPU=dtypesIfCPU,
+                                                   dtypesIfCUDA=dtypesIfCUDA,
+                                                   dtypesIfROCM=dtypesIfROCM,
+                                                   safe_casts_outputs=safe_casts_outputs,
+                                                   sample_inputs_func=sample_inputs_func,
+                                                   **kwargs)
+
+        foreach_method, foreach_method_inplace, torch_ref_method = get_foreach_method_names(name)
+        self.method_variant = foreach_method
+        self.inplace_variant = foreach_method_inplace
+        self.ref = torch_ref_method
 
 class HermitianOpInfo(OpInfo):
     """Operator information for Hermitian functions
@@ -1561,7 +1602,6 @@ def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
 
     return samples
 
-
 def sample_inputs_lerp(op_info, device, dtype, requires_grad):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -1606,6 +1646,94 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
 
     return samples
 
+foreach_unary_op_db: List[OpInfo] = [
+    ForeachUnaryFuncInfo('exp'),
+    ForeachUnaryFuncInfo('acos'),
+    ForeachUnaryFuncInfo('asin'),
+    ForeachUnaryFuncInfo('atan'),
+    ForeachUnaryFuncInfo('cos'),
+    ForeachUnaryFuncInfo('cosh'),
+    ForeachUnaryFuncInfo('log'),
+    ForeachUnaryFuncInfo('log10'),
+    ForeachUnaryFuncInfo('log2'),
+    ForeachUnaryFuncInfo('tan'),
+    ForeachUnaryFuncInfo('tanh'),
+    ForeachUnaryFuncInfo('sin'),
+    ForeachUnaryFuncInfo('sinh'),
+
+    ForeachUnaryFuncInfo('neg',
+                         dtypes=all_types_and_complex(),
+                         dtypesIfCPU=all_types_and_complex(),
+                         dtypesIfCUDA=all_types_and_complex(),
+                         sample_inputs_func=sample_inputs_foreach,
+                         safe_casts_outputs=False),
+
+    ForeachUnaryFuncInfo('sqrt',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_and_complex_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('ceil',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('erf',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('erfc',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('expm1',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('floor',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('log1p',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('round',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('frac',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('reciprocal',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('sigmoid',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('trunc',
+                         dtypes=floating_types(),
+                         dtypesIfCPU=floating_types_and(torch.bfloat16),
+                         dtypesIfCUDA=floating_types_and(torch.half)),
+
+    ForeachUnaryFuncInfo('abs',
+                         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+                         dtypesIfCPU=all_types_and_complex_and(torch.bfloat16, torch.half),
+                         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
+                         safe_casts_outputs=False)
+]
 
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
