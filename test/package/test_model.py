@@ -6,7 +6,7 @@ from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter, sys_importer
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
 
 try:
     from torchvision.models import resnet18
@@ -27,10 +27,11 @@ except ImportError:
 class ModelTest(PackageTestCase):
     """End-to-end tests packaging an entire model."""
 
+    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
     def test_resnet(self):
         resnet = resnet18()
 
-        f1 = BytesIO()
+        f1 = self.temp()
 
         # create a package that will save it along with its code
         with PackageExporter(f1, verbose=False) as e:
@@ -43,8 +44,6 @@ class ModelTest(PackageTestCase):
             buf = StringIO()
             debug_graph = e._write_dep_graph(failing_module="torch")
             self.assertIn("torchvision.models.resnet", debug_graph)
-
-        f1.seek(0)
 
         # we can now load the saved model
         i = PackageImporter(f1)
@@ -183,6 +182,8 @@ class ModelTest(PackageTestCase):
         # - more difficult to edit the code after the model is created
         with PackageExporter(f1, verbose=False) as e:
             e.save_pickle("model", "pickled", resnet)
+
+        f1.seek(0)
 
         i = PackageImporter(f1)
         loaded = i.load_pickle("model", "pickled")
