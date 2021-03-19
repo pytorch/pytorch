@@ -1,8 +1,8 @@
 import inspect
 from functools import wraps
-from typing import Any, Callable, Optional, Type, Union
+from typing import Any, Callable, Optional, Type, Union, get_type_hints
 from torch.utils.data import IterDataPipe
-from torch.utils.data.typing import _DataPipeType
+from torch.utils.data.typing import _DataPipeType, _DataPipeAlias
 
 
 ######################################################
@@ -107,21 +107,31 @@ class non_deterministic(object):
 ######################################################
 # typing
 ######################################################
-def force_typing(f):
+# Construct-time checking
+# Validate each DataPipe with hint as a subtype of the hint.
+def validate_typing(f):
     signature = inspect.signature(f)
+    hints = get_type_hints(f)
 
     @wraps(f)
     def wrapper(*args, **kwargs):
         bound = signature.bind(*args, **kwargs)
         for argument_name, value in bound.arguments.items():
-            if argument_name == 'self':
-                continue
-            if isinstance(value, IterDataPipe):
-                if not hasattr(value, 'type'):
-                    raise TypeError("Argument '{}' must have attribute 'type'".format(argument_name))
-                if not isinstance(value.type, _DataPipeType):
-                    raise TypeError("Type of argument '{}' must be _DataPipeType, but {} is found"
-                                    .format(argument_name, type(value.type)))
+            if argument_name in hints and \
+                    (isinstance(hints[argument_name], _DataPipeAlias) or
+                     hints[argument_name] == IterDataPipe):
+                hint = hints[argument_name]
+                if not isinstance(value, IterDataPipe):
+                    raise TypeError("Expected argument '{}' as a IterDataPipe, but found {}"
+                                    .format(argument_name, type(value)))
+                if isinstance(hint, _DataPipeAlias):
+                    hint = hint.__origin__
+                    if hasattr(value, 'type'):
+                        if not value.type.issubtype(hint.type):
+                            raise TypeError("Expected type of argument '{}' as a subtype of "
+                                            "hint {}, but {} found"
+                                            .format(argument_name, hint.type, value.type))
+                    value.type = copy.deepcopy(hint.type)  # type: ignore
 
         return f(*args, **kwargs)
 

@@ -3,7 +3,6 @@
 
 import collections
 import copy
-import inspect
 import numbers
 from typing import Any, Dict, List, Set, Tuple, TypeVar, Union, get_type_hints
 from typing import _type_repr  # type: ignore
@@ -233,32 +232,6 @@ class _DataPipeAlias:
     @staticmethod
     def fixed_type_init(sub_cls, *args, **kwargs):
         _DataPipeAlias.static_check_iter(sub_cls)
-        # Construct-time checking
-        if '__init__' in sub_cls.__dict__:
-            init_fn = sub_cls.__dict__['__init__']
-            signature = inspect.signature(init_fn)
-            hints = get_type_hints(init_fn)
-
-            def new_init(self, *args, **kwargs):
-                # Prevent circular import
-                from torch.utils.data import IterDataPipe
-                bound = signature.bind(self, *args, **kwargs)
-                for argument_name, value in bound.arguments.items():
-                    if value == self:
-                        continue
-                    if argument_name in hints and isinstance(hints[argument_name], _DataPipeAlias):
-                        hint = hints[argument_name].__origin__
-                        if not isinstance(value, IterDataPipe):
-                            raise TypeError('Expected argument {} as a IterDataPipe, but found {}'
-                                            .format(argument_name, type(value)))
-                        if hasattr(value, 'type'):
-                            if not value.type.issubtype(hint.type):
-                                raise TypeError('Expected type of argument {} as a subtype of hint {}, '
-                                                'but {} found'
-                                                .format(argument_name, hint.type, value.type))
-                        value.type = copy.deepcopy(hint.type)  # type: ignore
-                init_fn(self, *args, **kwargs)
-            sub_cls.__init__ = new_init
 
     @staticmethod
     def nonfixed_type_init(sub_cls, *args, **kwargs):
@@ -267,8 +240,8 @@ class _DataPipeAlias:
             init_fn = sub_cls.__dict__['__init__']
 
             def new_init(self, *args, **kwargs):
-                init_fn(self, *args, **kwargs)
                 self.type = copy.deepcopy(self.type)
+                init_fn(self, *args, **kwargs)
         else:
             def new_init(self, *args, **kwargs):
                 self.type = copy.deepcopy(self.type)

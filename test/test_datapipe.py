@@ -581,28 +581,30 @@ class TestTyping(TestCase):
                 self.assertFalse(issubtype(t1, t2))
 
         T = TypeVar('T', int, str)
-        S = TypeVar('S', bool, str, int, Tuple[int, T])
-        self.assertTrue(issubtype(T, S))
-        self.assertFalse(issubtype(S, T))
-        self.assertTrue(issubtype(S, T_co))
-
-        # Optional/Union
+        S = TypeVar('S', bool, Union[str, int], Tuple[int, T])
         types = ((int, Optional[int]),
-                 (int, Union[int, dict]),
                  (List, Union[int, list]),
+                 (Tuple[int, str], S),
+                 (T, S),
+                 (S, T_co),
                  (T, Union[S, Set]))
         for sub, par in types:
             self.assertTrue(issubtype(sub, par))
             self.assertFalse(issubtype(par, sub))
 
-        subscriptable_type = {
+        subscriptable_types = {
             List: 1,
-            Tuple: None,
+            Tuple: 2,  # use 2 parameters
             Set: 1,
             Dict: 2,
-            Optional: 1,
         }
-        #  def _test_nested(alias, base, n, params, 
+        for subscript_type, n in subscriptable_types.items():
+            for ts in itertools.combinations(types, n):
+                subs, pars = zip(*ts)
+                sub = subscript_type[subs]
+                par = subscript_type[pars]
+                self.assertTrue(issubtype(sub, par))
+                self.assertFalse(issubtype(par, sub))
 
     # Static checking annotation
     def test_compile_time(self):
@@ -671,6 +673,37 @@ class TestTyping(TestCase):
         dp2 = ValidDP3(5)
         self.assertEqual(dp1.type, dp2.type)
         self.assertNotEqual(id(dp1.type), id(dp2.type))
+
+    def test_construct_time(self):
+        from torch.utils.data import validate_typing
+
+        class DP0(IterDataPipe[Tuple]):
+            @validate_typing
+            def __init__(self, dp: IterDataPipe):
+                self.dp = dp
+
+            def __iter__(self) -> Iterator[Tuple]:
+                for d in self.dp:
+                    yield d, str(d)
+
+
+        class DP1(IterDataPipe[int]):
+            @validate_typing
+            def __init__(self, dp: IterDataPipe[Tuple[int, str]]):
+                self.dp = dp
+
+            def __iter__(self) -> Iterator[int]:
+                for a, b in self.dp:
+                    yield a
+
+        # Non-DataPipe input with DataPipe hint
+        datasource = [(1, '1'), (2, '2'), (3, '3')]
+        with self.assertRaisesRegex(TypeError, r"Expected argument 'dp' as a IterDataPipe"):
+            dp = DP0(datasource)
+
+        dp = DP0(IDP(range(10)))
+        with self.assertRaisesRegex(TypeError, r"Expected type of argument 'dp' as a subtype"):
+            dp = DP1(dp)
 
 
 if __name__ == '__main__':
