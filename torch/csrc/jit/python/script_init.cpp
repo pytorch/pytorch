@@ -44,7 +44,6 @@
 #include <tuple>
 #include <utility>
 #include <vector>
-#include "torch/custom_class_detail.h"
 
 namespace torch {
 namespace jit {
@@ -1501,7 +1500,6 @@ void initJitScriptBindings(PyObject* module) {
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);
         cu->register_type(classType);
-
         std::vector<ResolverPtr> methodRcbs, propRcbs;
         std::vector<Def> methodDefs;
         std::vector<Property> props;
