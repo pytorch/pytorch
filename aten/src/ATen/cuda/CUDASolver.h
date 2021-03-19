@@ -153,7 +153,7 @@ void potrs<c10::complex<double>>(CUDASOLVER_POTRS_ARGTYPES(c10::complex<double>)
 
 
 #define CUDASOLVER_POTRS_BATCHED_ARGTYPES(Dtype)  \
-    cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, Dtype *Aarray[], int lda, Dtype *Barray[], int ldb, int *info, int batchSize 
+    cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, Dtype *Aarray[], int lda, Dtype *Barray[], int ldb, int *info, int batchSize
 
 template<class Dtype>
 void potrsBatched(CUDASOLVER_POTRS_BATCHED_ARGTYPES(Dtype)) {
