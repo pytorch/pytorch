@@ -887,7 +887,6 @@ static std::ostream& operator<<(
 
 #ifdef USE_ROCM
 static const char* device_resource_string = R"(
-#include <hip/hip_runtime.h>
 #define POS_INFINITY INFINITY
 #define NEG_INFINITY -INFINITY
 
@@ -930,6 +929,11 @@ void CudaCodeGen::Initialize() {
   metavar_rewriter_ =
       std::make_unique<GPUMetaVarRewriter>(cuda_analysis_.get());
 
+#if __HIP_PLATFORM_HCC__
+#if ROCM_VERSION < 40200
+  os() << "#include <hip/hip_runtime.h>" << std::endl;
+#endif
+#endif
   os() << device_resource_string << shared_resource_string;
 
   if (has_random_) {
