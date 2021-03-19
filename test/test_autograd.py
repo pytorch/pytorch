@@ -945,6 +945,11 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad, torch.zeros(2, 2))
 
         reset_grad()
+        torch.autograd.backward(fn(), gradient, inputs=y)
+        self.assertEqual(y.grad, y_grad_expected)
+        self.assertEqual(x.grad, torch.zeros(2, 2))
+
+        reset_grad()
         self.assertRaisesRegex(RuntimeError, 'cannot be empty',
                                lambda: torch.autograd.backward(fn(), gradient, inputs=[]))
 
@@ -6759,6 +6764,17 @@ class TestAutogradForwardMode(TestCase):
             # version of the tangent alive
             del dual
             self.assertIsNone(tangent_ref())
+
+    def test_size_check(self):
+        foo = torch.rand(2)
+        tangent = torch.rand(3)
+
+        with fwAD.dual_level():
+            with self.assertRaisesRegex(RuntimeError, "Trying to set a forward gradient that has a different size"):
+                dual = fwAD.make_dual(foo, tangent)
+
+            dual = fwAD.make_dual(foo, tangent[1:])
+
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):

@@ -70,8 +70,6 @@ class DispatchKey(Enum):
     QuantizedCPU = auto()
     QuantizedCUDA = auto()
     QuantizedXPU = auto()
-    ComplexCPU = auto()
-    ComplexCUDA = auto()
     CustomRNGKeyId = auto()
     MkldnnCPU = auto()
     SparseCPU = auto()
@@ -145,7 +143,6 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
     return dk in {
         DispatchKey.CUDA,
         DispatchKey.QuantizedCUDA,
-        DispatchKey.ComplexCUDA,
         DispatchKey.SparseCUDA,
         DispatchKey.AutogradCUDA,
         DispatchKey.CUDATensorId,
@@ -470,6 +467,55 @@ class StructuredNativeFunctions:
             out=out,
         )
 
+def is_foreach_op(name: str) -> bool:
+    return str(name) in set([
+        '_amp_foreach_non_finite_check_and_unscale_',
+        '_foreach_add_.ScalarList',
+        '_foreach_sub_.ScalarList',
+        '_foreach_mul_.ScalarList',
+        '_foreach_div_.ScalarList',
+        '_foreach_add_.Scalar',
+        '_foreach_sub_.Scalar',
+        '_foreach_mul_.Scalar',
+        '_foreach_div_.Scalar',
+        '_foreach_add_.List',
+        '_foreach_sub_.List',
+        '_foreach_mul_.List',
+        '_foreach_div_.List',
+        '_foreach_exp_',
+        '_foreach_sqrt_',
+        '_foreach_abs_',
+        '_foreach_acos_',
+        '_foreach_asin_',
+        '_foreach_atan_',
+        '_foreach_ceil_',
+        '_foreach_cos_',
+        '_foreach_cosh_',
+        '_foreach_erf_',
+        '_foreach_erfc_',
+        '_foreach_expm1_',
+        '_foreach_floor_',
+        '_foreach_log_',
+        '_foreach_log10_',
+        '_foreach_log1p_',
+        '_foreach_log2_',
+        '_foreach_neg_',
+        '_foreach_tan_',
+        '_foreach_tanh_',
+        '_foreach_sin_',
+        '_foreach_sinh_',
+        '_foreach_round_',
+        '_foreach_lgamma_',
+        '_foreach_frac_',
+        '_foreach_reciprocal_',
+        '_foreach_sigmoid_',
+        '_foreach_trunc_',
+        '_foreach_addcmul_.Scalar',
+        '_foreach_addcdiv_.Scalar',
+        '_foreach_addcmul_.ScalarList',
+        '_foreach_addcdiv_.ScalarList',
+        '_foreach_zero_'])
+
 # The function schema is undoubtedly the most important data structure
 # in all of the codegen, as it defines the type signature for operators,
 # and most of the code generation we do is type directed (e.g., look at
@@ -579,53 +625,7 @@ class FunctionSchema:
                 "Must return as many arguments as there are out arguments"
         if self.name.name.inplace:
             # TODO: fixme
-            if str(self.name) not in [
-                    '_amp_foreach_non_finite_check_and_unscale_',
-                    '_foreach_add_.ScalarList',
-                    '_foreach_sub_.ScalarList',
-                    '_foreach_mul_.ScalarList',
-                    '_foreach_div_.ScalarList',
-                    '_foreach_add_.Scalar',
-                    '_foreach_sub_.Scalar',
-                    '_foreach_mul_.Scalar',
-                    '_foreach_div_.Scalar',
-                    '_foreach_add_.List',
-                    '_foreach_sub_.List',
-                    '_foreach_mul_.List',
-                    '_foreach_div_.List',
-                    '_foreach_exp_',
-                    '_foreach_sqrt_',
-                    '_foreach_abs_',
-                    '_foreach_acos_',
-                    '_foreach_asin_',
-                    '_foreach_atan_',
-                    '_foreach_ceil_',
-                    '_foreach_cos_',
-                    '_foreach_cosh_',
-                    '_foreach_erf_',
-                    '_foreach_erfc_',
-                    '_foreach_expm1_',
-                    '_foreach_floor_',
-                    '_foreach_log_',
-                    '_foreach_log10_',
-                    '_foreach_log1p_',
-                    '_foreach_log2_',
-                    '_foreach_neg_',
-                    '_foreach_tan_',
-                    '_foreach_tanh_',
-                    '_foreach_sin_',
-                    '_foreach_sinh_',
-                    '_foreach_round_',
-                    '_foreach_lgamma_',
-                    '_foreach_frac_',
-                    '_foreach_reciprocal_',
-                    '_foreach_sigmoid_',
-                    '_foreach_trunc_',
-                    '_foreach_addcmul_.Scalar',
-                    '_foreach_addcdiv_.Scalar',
-                    '_foreach_addcmul_.ScalarList',
-                    '_foreach_addcdiv_.ScalarList',
-                    '_foreach_zero_']:
+            if not is_foreach_op(str(self.name)):
                 assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:
