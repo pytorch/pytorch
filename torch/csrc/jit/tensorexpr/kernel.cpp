@@ -1064,20 +1064,20 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::batch_norm: {
-      bool noWeight = false;
-      bool noBias = false;
+      bool hasWeight = true;
+      bool hasBias = true;
 
       if (v->node()->input(1)->node()->kind() == prim::Constant) {
         const auto val = toIValue(v->node()->input(1)).value();
         if (val.isNone()) {
-          noWeight = true;
+          hasWeight = false;
         }
       }
 
       if (v->node()->input(2)->node()->kind() == prim::Constant) {
         const auto val = toIValue(v->node()->input(2)).value();
         if (val.isNone()) {
-          noBias = true;
+          hasBias = false;
         }
       }
 
@@ -1085,52 +1085,49 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       return Compute(
           "aten_batch_norm",
           c10::fmap<DimArg>(shape),
-          [this, v, noWeight, noBias](const std::vector<VarHandle>& axes) {
+          [this, v, hasWeight, hasBias](const std::vector<VarHandle>& axes) {
             TORCH_INTERNAL_ASSERT(axes.size() >= 2);
             auto const& n = v->node();
-
-            // parameter list: input, weight, bias, mean, var, training,
-            // momentum, eps, cudnn_enabled
-            Tensor* input = tensors_.at(n->inputs()[0]->unique());
-            Tensor* mean = tensors_.at(n->inputs()[3]->unique());
-            Tensor* var = tensors_.at(n->inputs()[4]->unique());
-            ExprHandle eps = constant(n->inputs()[7]);
-
             // axes: N, C, H, W
-            std::vector<VarHandle> c(axes.begin() + 1, axes.begin() + 2);
-            if (noWeight && noBias) {
-              auto inv_var = rsqrt(var->call(c) + eps);
-              auto output =
-                  input->call(axes) * inv_var - mean->call(c) * inv_var;
-              return demoteOutput(output, n->output());
-            } else if (noWeight) {
-              Tensor* bias = tensors_.at(n->inputs()[2]->unique());
+            std::vector<ExprHandle> indices(axes.begin(), axes.end());
+            ExprHandle c = indices[1];
 
-              auto inv_var = rsqrt(var->call(c) + eps);
-              auto bias_v = bias->call(c);
-              auto beta = bias_v - mean->call(c) * inv_var;
-              auto output = input->call(axes) * inv_var + beta;
-              return demoteOutput(output, n->output());
-            } else if (noBias) {
-              Tensor* weight = tensors_.at(n->inputs()[1]->unique());
-
-              auto inv_var = rsqrt(var->call(c) + eps);
-              auto weight_v = weight->call(c);
-              auto alpha = inv_var * weight_v;
-              auto output = input->call(axes) * alpha - mean->call(c) * alpha;
-              return demoteOutput(output, n->output());
-            } else {
-              Tensor* weight = tensors_.at(n->inputs()[1]->unique());
-              Tensor* bias = tensors_.at(n->inputs()[2]->unique());
-
-              auto inv_var = rsqrt(var->call(c) + eps);
-              auto weight_v = weight->call(c);
-              auto bias_v = bias->call(c);
-              auto alpha = inv_var * weight_v;
-              auto beta = bias_v - mean->call(c) * alpha;
-              auto output = input->call(axes) * alpha + beta;
-              return demoteOutput(output, n->output());
+            // Parameter list:
+            // input, weight, bias, mean, var, training, momentum, eps,
+            // cudnn_enabled
+            std::vector<ExprHandle> inputs = {
+                tensorOrConstant(n->input(0), indices), // input
+                tensorOrConstant(n->input(3), {c}), // mean
+                tensorOrConstant(n->input(4), {c}), // var
+                constant(n->input(7)) // eps
+            };
+            if (hasWeight) {
+              inputs.push_back(tensorOrConstant(n->input(1), {c}));
             }
+            if (hasBias) {
+              inputs.push_back(tensorOrConstant(n->input(2), {c}));
+            }
+            promoteInputs(inputs);
+
+            ExprHandle input = inputs[0];
+            ExprHandle mean = inputs[1];
+            ExprHandle var = inputs[2];
+            ExprHandle eps = inputs[3];
+            ExprHandle weight = FloatImm::make(1);
+            ExprHandle bias = FloatImm::make(0);
+
+            if (hasWeight) {
+              weight = inputs[4];
+            }
+            if (hasBias) {
+              bias = inputs[5];
+            }
+
+            auto inv_var = rsqrt(var + eps);
+            auto alpha = inv_var * weight;
+            auto beta = bias - mean * alpha;
+            auto output = input * alpha + beta;
+            return demoteOutput(output, n->output());
           });
     } break;
 

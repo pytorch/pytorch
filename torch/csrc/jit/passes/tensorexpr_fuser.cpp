@@ -984,7 +984,8 @@ class TensorExprFuser {
 
     // Only fuse aten::batch_norm when the parameter 'training' is false
     if (node->kind() == aten::batch_norm) {
-      REQ(!toIValue(node->input(5)).value().toBool())
+      REQ(node->input(5)->node()->kind() == prim::Constant);
+      REQ(!toIValue(node->input(5)).value().toBool());
     }
 
     REQ(tensorexpr::isSupported(node));
