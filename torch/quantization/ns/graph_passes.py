@@ -143,6 +143,7 @@ def _insert_dtype_cast_after_node(
     gm_b: GraphModule,
     graph_c: Graph,
     node_name_prefix: str,
+    logger_cls: Callable,
 ) -> Union[Node, List[Node]]:
     """
     Given a starting graph C (derived from graph B) of
@@ -163,9 +164,9 @@ def _insert_dtype_cast_after_node(
     dtype_cast_op = None
     dtype_cast_mod_cls = None
     node_input_type_a, _node_output_type_a = \
-        get_node_first_input_and_output_type(node_a, gm_a)
+        get_node_first_input_and_output_type(node_a, gm_a, logger_cls)
     node_input_type_c, _node_output_type_c = \
-        get_node_first_input_and_output_type(node_c, gm_b)
+        get_node_first_input_and_output_type(node_c, gm_b, logger_cls)
 
     if (
         (node_input_type_a == NodeInputOrOutputType.FP32 and
@@ -517,9 +518,16 @@ def create_a_shadows_b(
 
                 # cast dtype from the dtype of node_c's input to the dtype of
                 # node_a's input (dequant, etc)
+                prev_node_c = node_c.args[0]
+                if should_log_inputs:
+                    # skip the input logger when inserting a dtype cast
+                    if isinstance(prev_node_c, Node):
+                        prev_node_c = prev_node_c.args[0]
+                    elif isinstance(prev_node_c, list):
+                        prev_node_c = [arg.args[0] for arg in prev_node_c]
                 dtype_cast_node = _insert_dtype_cast_after_node(
-                    subgraph_a.start_node, node_c, node_c.args[0], gm_a, gm_b, graph_c,
-                    node_b.name + '_dtype_cast_')
+                    subgraph_a.start_node, node_c, prev_node_c, gm_a, gm_b, graph_c,
+                    node_b.name + '_dtype_cast_', logger_cls)
                 # note: not inserting to env_c because all nodes which use the dtype
                 #   casts are copied from graph_a
                 #
