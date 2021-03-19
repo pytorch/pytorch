@@ -2677,21 +2677,22 @@
 - func: mode.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
+  structured_delegate: mul.out
   variants: function, method
   dispatch:
-    CPU, CUDA: mul
     SparseCPU, SparseCUDA: mul_sparse
     MkldnnCPU: mkldnn_mul
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: mul.out
   variants: method
   dispatch:
-    CPU, CUDA: mul_
     SparseCPU, SparseCUDA: mul_sparse_
     MkldnnCPU: mkldnn_mul_
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: mul_out
     SparseCPU: mul_out_sparse_cpu
