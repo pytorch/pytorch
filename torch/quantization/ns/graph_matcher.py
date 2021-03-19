@@ -9,6 +9,7 @@ import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
+import torch.nn.intrinsic as nni
 toq = torch.ops.quantized
 
 from torch.fx import GraphModule
@@ -33,6 +34,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[Callable]]:
             # leaving that as a problem for a future PR to solve.
             nniqat.ConvBn2d,
             nniq.ConvReLU2d,
+            nni.ConvReLU2d,
         ]),
         # linear modules
         'torch.nn.Linear': set([

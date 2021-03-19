@@ -32,6 +32,7 @@ from torch.quantization.ns.graph_matcher import (
 )
 from torch.quantization.ns.numeric_suite_core_apis_fx import (
     extract_weights,
+    _extract_weights_impl,
     add_loggers,
     OutputLogger,
     add_shadow_loggers,
@@ -314,12 +315,15 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
-        results = extract_weights('fp32_prepared', mp, 'int8', mq)
-        self.assertTrue(
-            len(results) == results_len,
-            f"expected len {results_len}, got len {len(results)}")
-        self.assert_ns_compare_dict_valid(results)
-        return results
+
+        # test both the public API as well as the internal GraphModule API
+        for extract_weights_fun in (extract_weights, _extract_weights_impl):
+            results = extract_weights_fun('fp32_prepared', mp, 'int8', mq)
+            self.assertTrue(
+                len(results) == results_len,
+                f"expected len {results_len}, got len {len(results)}")
+            self.assert_ns_compare_dict_valid(results)
+            return results
 
     def _test_match_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
@@ -403,8 +407,14 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_extract_weights_mod(self):
-        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
-        self._test_extract_weights(m, results_len=2)
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.Conv2d(1, 1, 1),
+            nn.Conv2d(1, 1, 1),
+            nn.ReLU(),
+        ).eval()
+        print(m)
+        self._test_extract_weights(m, results_len=3)
 
     @skipIfNoFBGEMM
     def test_extract_weights_fun(self):
