@@ -1266,6 +1266,10 @@ Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
   Tensor self_broadcasted, A_broadcasted;
   std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "cholesky_solve");
+
+  if (self_broadcasted.numel() == 0 || A_broadcasted.numel() == 0) {
+    return at::empty_like(self_broadcasted, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
   return at::_cholesky_solve_helper(self_broadcasted, A_broadcasted, upper);
 }
 

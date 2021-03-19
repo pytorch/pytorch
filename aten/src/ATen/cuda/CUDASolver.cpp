@@ -467,6 +467,83 @@ void potrfBatched<c10::complex<double>>(
 }
 
 
+template<>
+void potrs<float>(
+    cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, const float *A, int lda, float *B, int ldb, int *devInfo
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSpotrs(handle, uplo, n, nrhs, A, lda, B, ldb, devInfo));
+}
+
+template<>
+void potrs<double>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, const double *A, int lda, double *B, int ldb, int *devInfo
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDpotrs(handle, uplo, n, nrhs, A, lda, B, ldb, devInfo));
+}
+
+template<>
+void potrs<c10::complex<float>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, const c10::complex<float> *A, int lda, c10::complex<float> *B, int ldb, int *devInfo
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCpotrs(
+    handle, uplo, n, nrhs,
+    reinterpret_cast<const cuComplex*>(A),
+    lda,
+    reinterpret_cast<cuComplex*>(B),
+    ldb, devInfo));
+}
+
+template<>
+void potrs<c10::complex<double>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, const c10::complex<double> *A, int lda, c10::complex<double> *B, int ldb, int *devInfo
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZpotrs(
+    handle, uplo, n, nrhs,
+    reinterpret_cast<const cuDoubleComplex*>(A),
+    lda,
+    reinterpret_cast<cuDoubleComplex*>(B),
+    ldb, devInfo));
+}
+
+template<>
+void potrsBatched<float>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, float *Aarray[], int lda, float *Barray[], int ldb, int *info, int batchSize 
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSpotrsBatched(handle, uplo, n, nrhs, Aarray, lda, Barray, ldb, info, batchSize));
+}
+
+template<>
+void potrsBatched<double>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, double *Aarray[], int lda, double *Barray[], int ldb, int *info, int batchSize 
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDpotrsBatched(handle, uplo, n, nrhs, Aarray, lda, Barray, ldb, info, batchSize));
+}
+
+template<>
+void potrsBatched<c10::complex<float>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, c10::complex<float> *Aarray[], int lda, c10::complex<float> *Barray[], int ldb, int *info, int batchSize 
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCpotrsBatched(
+    handle, uplo, n, nrhs,
+    reinterpret_cast<cuComplex**>(Aarray),
+    lda,
+    reinterpret_cast<cuComplex**>(Barray),
+    ldb, info, batchSize));
+}
+
+template<>
+void potrsBatched<c10::complex<double>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, c10::complex<double> *Aarray[], int lda, c10::complex<double> *Barray[], int ldb, int *info, int batchSize 
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZpotrsBatched(
+    handle, uplo, n, nrhs,
+    reinterpret_cast<cuDoubleComplex**>(Aarray),
+    lda,
+    reinterpret_cast<cuDoubleComplex**>(Barray),
+    ldb, info, batchSize));
+}
+
+
 template <>
 void orgqr_buffersize<float>(
     cusolverDnHandle_t handle,
@@ -593,6 +670,12 @@ void xpotrf(
   TORCH_CUSOLVER_CHECK(cusolverDnXpotrf(
     handle, params, uplo, n, dataTypeA, A, lda, computeType, bufferOnDevice, workspaceInBytesOnDevice, bufferOnHost, workspaceInBytesOnHost, info
   ));
+}
+
+void xpotrs(
+    cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, int64_t nrhs, cudaDataType dataTypeA, const void *A,
+    int64_t lda, cudaDataType dataTypeB, void *B, int64_t ldb, int *info) {
+  TORCH_CUSOLVER_CHECK(cusolverDnXpotrs(handle, params, uplo, n, nrhs, dataTypeA, A, lda, dataTypeB, B, ldb, info));
 }
 
 

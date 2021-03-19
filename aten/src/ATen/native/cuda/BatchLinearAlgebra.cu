@@ -1543,7 +1543,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
 #endif
 }
 
-Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
+Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bool upper) {
   int64_t info = 0;
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
@@ -1552,6 +1552,14 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
   });
   TORCH_CHECK(info == 0, "MAGMA cholesky_solve : invalid argument: ", -info);
   return self_working_copy;
+}
+
+Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
+#ifdef USE_CUSOLVER
+  return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+#else
+  return _cholesky_solve_helper_magma(self, A, upper);
+#endif
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
