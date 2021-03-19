@@ -35,6 +35,9 @@ struct TORCH_API LazyStreamContext {
   LazyStreamContext() = default;
   virtual ~LazyStreamContext() = default;
   virtual void waitForCurrentStreams(const std::vector<torch::Tensor>& = {}) {}
+  virtual std::set<c10::DeviceIndex> devices() const {
+    return {};
+  }
 
 #ifdef USE_CUDA_NOT_ROCM
   virtual std::vector<CUDAStream> getReservedStreams() const {
@@ -102,6 +105,14 @@ struct TORCH_CUDA_CPP_API CudaLazyStreamContext : public LazyStreamContext {
     } else {
       return iter->second;
     }
+  }
+
+  std::set<c10::DeviceIndex> devices() const override {
+    std::set<c10::DeviceIndex> devices;
+    for (const auto& entry : streams_) {
+      devices.insert(entry.first);
+    }
+    return devices;
   }
 
  private:
