@@ -878,7 +878,7 @@ def repeat_interleave(g, self, repeats, dim=None):
         reps = sym_help._size_helper(g, input, dim)
         reps = unsqueeze(g, reps, 0)
         repeats = g.op("Expand", repeats, reps)
-    elif repeats_dim == 1:
+    elif repeats_dim == 1 and input_sizes[dim] == 0:
         reps = sym_help._size_helper(g, input, dim)
         reps = unsqueeze(g, reps, 0)
     else:
