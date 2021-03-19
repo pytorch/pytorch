@@ -40,7 +40,7 @@ Tensor &addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, co
   return result;
 }
 
-Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha) {
+Tensor &addmv_out(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha, Tensor& result) {
   { // scope of NoNamesGuard
 
   at::NoNamesGuard guard;
@@ -80,15 +80,15 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
 
 Tensor addmv(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha) {
   Tensor result = at::empty({mat.size(0)}, mat.options());
-  return native::addmv_out(result, self, mat, vec, beta, alpha);
+  return native::addmv_out(self, mat, vec, beta, alpha, result);
 }
 
 Tensor &addmv_(Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha) {
-  return native::addmv_out(self, self, mat, vec, beta, alpha);
+  return native::addmv_out(self, mat, vec, beta, alpha, self);
 }
 
 Tensor &mv_out(Tensor& result, const Tensor &self, const Tensor &vec) {
-  return native::addmv_out(result, result, self, vec, 0, 1);
+  return native::addmv_out(result, self, vec, 0, 1, result);
 }
 
 Tensor mv(const Tensor &self, const Tensor &vec) {
