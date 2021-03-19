@@ -265,20 +265,23 @@ def extract_weights(
 def _add_loggers_one_model(
     model_name: str,
     model: GraphModule,
-    nodes_and_names_to_instrument: List[Tuple[Node, str]],
+    nodes_and_names_to_instrument_inputs: List[Tuple[Node, str]],
+    nodes_and_names_to_instrument_outputs: List[Tuple[Node, str]],
     logger_cls: Callable,
-    should_log_inputs: bool,
 ) -> nn.Module:
 
     # TODO(future PR): do not observe nodes we do not care
     #   about (both fp32, denylist, etc)
-    node_to_instrument_to_ref_name: Dict[Node, str] = {}
-    for node, ref_name in nodes_and_names_to_instrument:
-        node_to_instrument_to_ref_name[node] = ref_name
+    node_to_instrument_inputs_to_ref_name: Dict[Node, str] = {}
+    node_to_instrument_outputs_to_ref_name: Dict[Node, str] = {}
+    for node, ref_name in nodes_and_names_to_instrument_inputs:
+        node_to_instrument_inputs_to_ref_name[node] = ref_name
+    for node, ref_name in nodes_and_names_to_instrument_outputs:
+        node_to_instrument_outputs_to_ref_name[node] = ref_name
 
     model = remove_observers_add_loggers(
-        model, node_to_instrument_to_ref_name, logger_cls, model_name,
-        should_log_inputs=should_log_inputs)
+        model, node_to_instrument_inputs_to_ref_name,
+        node_to_instrument_outputs_to_ref_name, logger_cls, model_name)
     return model
 
 
@@ -291,20 +294,27 @@ def _add_loggers_impl(
     should_log_inputs: bool,
 ) -> Tuple[nn.Module, nn.Module]:
     matched_subgraph_pairs = get_matching_subgraph_pairs(gm_a, gm_b)
-    nodes_and_names_to_instrument_a = []
-    nodes_and_names_to_instrument_b = []
+    nodes_and_names_to_instrument_inputs_a = []
+    nodes_and_names_to_instrument_inputs_b = []
+    nodes_and_names_to_instrument_outputs_a = []
+    nodes_and_names_to_instrument_outputs_b = []
     for match_name, (subgraph_a, subgraph_b) in matched_subgraph_pairs.items():
-        # Note: for matching activations we always use the end nodes,
+        # Note: for matching inputs we use start_node, such as observing
+        # the input of linear in linear-relu
+        if should_log_inputs:
+            nodes_and_names_to_instrument_inputs_a.append((subgraph_a.start_node, match_name))
+            nodes_and_names_to_instrument_inputs_b.append((subgraph_b.start_node, match_name))
+        # Note: for matching activations we always use end_node,
         # such as observing the output of relu in linear-relu
-        nodes_and_names_to_instrument_a.append((subgraph_a.end_node, match_name))
-        nodes_and_names_to_instrument_b.append((subgraph_b.end_node, match_name))
+        nodes_and_names_to_instrument_outputs_a.append((subgraph_a.end_node, match_name))
+        nodes_and_names_to_instrument_outputs_b.append((subgraph_b.end_node, match_name))
 
     new_model_a = _add_loggers_one_model(
-        name_a, gm_a, nodes_and_names_to_instrument_a, logger_cls,
-        should_log_inputs=should_log_inputs)
+        name_a, gm_a, nodes_and_names_to_instrument_inputs_a,
+        nodes_and_names_to_instrument_outputs_a, logger_cls)
     new_model_b = _add_loggers_one_model(
-        name_b, gm_b, nodes_and_names_to_instrument_b, logger_cls,
-        should_log_inputs=should_log_inputs)
+        name_b, gm_b, nodes_and_names_to_instrument_inputs_b,
+        nodes_and_names_to_instrument_outputs_b, logger_cls)
     return (new_model_a, new_model_b)
 
 

@@ -65,10 +65,10 @@ def _insert_logger_after_node(
 
 def remove_observers_add_loggers(
     gm: GraphModule,
-    node_to_instrument_to_ref_node_name: Dict[Node, str],
+    node_to_instrument_inputs_to_ref_node_name: Dict[Node, str],
+    node_to_instrument_outputs_to_ref_node_name: Dict[Node, str],
     logger_cls: Callable,
     model_name: str,
-    should_log_inputs: bool,
 ) -> GraphModule:
     """
     Takes the graph of gm, removes all observers, adds loggers to the output
@@ -92,13 +92,17 @@ def remove_observers_add_loggers(
             # remove activation post process node
             env[node.name] = env[node.args[0].name]
 
-        elif node in node_to_instrument_to_ref_node_name:
-            ref_name = node_to_instrument_to_ref_node_name[node]
-            if should_log_inputs:
+        elif (
+            (node in node_to_instrument_inputs_to_ref_node_name) or
+            (node in node_to_instrument_outputs_to_ref_node_name)
+        ):
+
+            if node in node_to_instrument_inputs_to_ref_node_name:
+                ref_name = node_to_instrument_inputs_to_ref_node_name[node]
                 if type(node.args[0]) == Node:
                     # create a single input logger
                     prev_node = env[node.args[0].name]
-                    env[prev_node.name] = _insert_logger_after_node(
+                    env[node.args[0].name] = _insert_logger_after_node(
                         prev_node, gm, logger_cls, '_ns_logger_', node.name,
                         model_name, ref_name, NSSingleResultValuesType.NODE_INPUT.value,
                         index_within_arg=0)
@@ -114,12 +118,16 @@ def remove_observers_add_loggers(
                     raise AssertionError(f"type {type(node.args[0])} is not handled yet")
 
             # ensure env is populated with base node
+            # Note: runs for both inputs and outputs
             env[node.name] = new_graph.node_copy(node, load_arg)
-            # add the logger after the base node
-            env[node.name] = _insert_logger_after_node(
-                env[node.name], gm, logger_cls, '_ns_logger_', node.name,
-                model_name, ref_name, NSSingleResultValuesType.NODE_OUTPUT.value,
-                index_within_arg=0)
+
+            if node in node_to_instrument_outputs_to_ref_node_name:
+                ref_name = node_to_instrument_outputs_to_ref_node_name[node]
+                # add the logger after the base node
+                env[node.name] = _insert_logger_after_node(
+                    env[node.name], gm, logger_cls, '_ns_logger_', node.name,
+                    model_name, ref_name, NSSingleResultValuesType.NODE_OUTPUT.value,
+                    index_within_arg=0)
 
         else:
             env[node.name] = new_graph.node_copy(node, load_arg)

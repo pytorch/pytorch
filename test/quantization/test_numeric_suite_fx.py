@@ -553,16 +553,19 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_linear_fp16_activations(self):
-        qconfig_dict = {'': torch.quantization.float16_static_qconfig}
-        m = LinearReluFunctional().eval()
-        expected_occurrence = {
-            ns.call_module(OutputLogger): 1,
-        }
-        res = self._test_match_activations(
-            m, (torch.randn(4, 4),),
-            prepared_expected_node_occurrence=expected_occurrence,
-            results_len=1,
-            qconfig_dict=qconfig_dict)
+        for should_log_inputs in (True, False):
+            qconfig_dict = {'': torch.quantization.float16_static_qconfig}
+            m = LinearReluFunctional().eval()
+            num_loggers = 2 if should_log_inputs else 1
+            expected_occurrence = {
+                ns.call_module(OutputLogger): num_loggers,
+            }
+            res = self._test_match_activations(
+                m, (torch.randn(4, 4),),
+                prepared_expected_node_occurrence=expected_occurrence,
+                results_len=1,
+                qconfig_dict=qconfig_dict,
+                should_log_inputs=should_log_inputs)
 
     @skipIfNoFBGEMM
     def test_linear_fp16_shadow_activations(self):
