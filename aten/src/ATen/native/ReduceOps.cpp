@@ -1087,7 +1087,7 @@ Tensor &any_out(const Tensor &self, int64_t dim, bool keepdim, Tensor &result) {
   }
 }
 
-Tensor &amin_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:",
               self.scalar_type(), result.scalar_type());
   auto sizes = self.sizes();
@@ -1133,7 +1133,7 @@ Tensor amax(const Tensor& self, IntArrayRef dim, bool keepdim) {
   return at::amax_out(result, self, dim, keepdim);
 }
 
-Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
+Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim, Tensor& result) {
   Tensor in;
   if (dim) {
     auto sizes = self.sizes();
@@ -1170,7 +1170,7 @@ Tensor argmax(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
   return at::native::argmax_out(self, dim, keepdims, result);
 }
 
-Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
+Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim, Tensor& result) {
   Tensor in;
   if (dim) {
     auto sizes = self.sizes();
