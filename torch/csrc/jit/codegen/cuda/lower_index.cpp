@@ -416,9 +416,25 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
 
 void IndexLowering::visit(const kir::BroadcastOp* bop) {
   TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(bop));
+
+  const auto out_tv = bop->out()->as<kir::TensorView>();
+  const auto out_domain = out_tv->domain();
+
+  const bool is_block_broadcast = out_domain->hasBlockBroadcast();
+
   const auto out = lowerDstIndex(bop->out());
   const auto in = lowerSrcIndex(bop->in(), bop->out());
-  pushBack(ir_builder_.create<kir::BroadcastOp>(out, in));
+  auto indexed_expr = ir_builder_.create<kir::BroadcastOp>(out, in);
+  pushBack(indexed_expr);
+
+  if (is_block_broadcast) {
+    const auto pred = PredicateCompute::getInlinePredicate(
+        bop,
+        scope_utils::getLoops(active_scope_expr_),
+        ir_builder_.create<kir::Bool>(true),
+        false);
+    indexed_expr->setPredicate(pred);
+  }
 }
 
 void IndexLowering::visit(const kir::Allocate* allocate) {

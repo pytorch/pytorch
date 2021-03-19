@@ -554,7 +554,12 @@ class CudaKernelGenerator : private kir::IrVisitor {
                << (thread_z ? "true" : "false") << ">(\n";
       indent() << kTab << gen(node->out()) << ",\n";
       indent() << kTab << gen(node->in()) << ",\n";
-      indent() << kTab << "static_cast<" << data_type << "*>(shared_mem));\n";
+      indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
+      if (node->predicate() == nullptr) {
+        indent() << kTab << "true);\n";
+      } else {
+        indent() << kTab << genInline(node->predicate()) << ");\n";
+      }
     } else {
       indent() << gen(node->out()) << "\n";
       indent() << kTab << " = " << gen(node->in()) << ";\n";

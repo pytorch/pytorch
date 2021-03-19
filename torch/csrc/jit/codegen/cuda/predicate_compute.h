@@ -46,7 +46,7 @@ class PredicateCompute {
       const kir::Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
       kir::Bool* thread_pred,
-      bool ignore_block_grid_reductions = true);
+      bool ignore_block_grid_external_ops = true);
 };
 
 class TORCH_CUDA_CU_API UnswitchPredicate {

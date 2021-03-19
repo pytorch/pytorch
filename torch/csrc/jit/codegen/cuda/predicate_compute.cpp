@@ -200,7 +200,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     const kir::Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
     kir::Bool* thread_pred,
-    bool ignore_block_grid_reductions) {
+    bool ignore_block_grid_external_ops) {
   FUSER_PERF_SCOPE("getInlinePredicate");
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
 
@@ -209,10 +209,13 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   }
 
   // Handle these elsewhere
-  if (ignore_block_grid_reductions) {
-    if (auto reduction_op = dynamic_cast<const kir::ReductionOp*>(expr)) {
-      const auto domain = reduction_op->out()->as<kir::TensorView>()->domain();
-      if (domain->hasBlockReduction() || domain->hasGridReduction()) {
+  if (ignore_block_grid_external_ops) {
+    if (expr->outputs().size() > 0 &&
+        expr->outputs()[0]->isA<kir::TensorView>()) {
+      const auto domain = expr->outputs()[0]->as<kir::TensorView>()->domain();
+      if ((expr->isA<kir::ReductionOp>() &&
+           (domain->hasBlockReduction() || domain->hasGridReduction())) ||
+          (expr->isA<kir::BroadcastOp>() && domain->hasBlockBroadcast())) {
         return ir_builder.create<kir::Bool>(true);
       }
     }

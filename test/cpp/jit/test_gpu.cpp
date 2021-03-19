@@ -13973,6 +13973,46 @@ TEST(NVFuserTest, FusionIssue757_CUDA) {
   testValidate(&fusion, outputs, inputs, {t4}, __LINE__, __FILE__);
 }
 
+// See issue #759
+TEST(NVFuserTest, FusionPredicatedBlockBroadcast_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {1});
+  auto tv2 = broadcast(tv1, {false, true});
+  auto tv3 = makeSymbolicTensor(2);
+  fusion.addInput(tv3);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  tv4->split(0, 4);
+  tv1->computeAt(tv4, -1);
+
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(1)->parallelize(ParallelType::TIDy);
+  tv1->axis(-1)->parallelize(ParallelType::TIDx);
+
+  int numel_x = 100;
+  int numel_y = 101;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  at::Tensor t3 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0, t3};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0.sum({1});
+  auto t2 = t1.unsqueeze(-1).expand({numel_x, numel_y});
+  auto t4 = t2 + t3;
+
+  testValidate(&fusion, outputs, inputs, {t4}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
