@@ -36,7 +36,7 @@ PyObject* replacement_method(PyObject* self, PyObject* args, PyObject* kwargs) {
   PyObject* args_ =
       Py_BuildValue("(OOO)", to_restore->patched_method, args, kwargs);
   if (!args_) {
-    goto exit;  // NOLINT
+    goto exit; // NOLINT
   }
   result = PyEval_CallObject(to_restore->patch_fn, args_);
   Py_DECREF(args_);
@@ -84,7 +84,7 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
       PyBytes_FromStringAndSize((const char*)&to_restore, sizeof(ToRestore));
   patch_method_c->m_ml = &ReplacementMethod;
 #if PY_VERSION_HEX >= 0x03080000
-    patch_method_c->vectorcall = NULL;
+  patch_method_c->vectorcall = NULL;
 #endif
   return Py_None;
 }
