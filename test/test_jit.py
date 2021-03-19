@@ -1089,8 +1089,8 @@ class TestJit(JitTestCase):
         def fn(t, n: Optional[int]):
             return torch.fft.fftn(t, n)
 
-            A = torch.rand(2, 3)
-            self.checkScript(fn, (A, 3, ))
+            a = torch.rand(2, 3)
+            self.checkScript(fn, (a, 3, ))
 
     def test_torch_complex(self):
         def fn(real, img):

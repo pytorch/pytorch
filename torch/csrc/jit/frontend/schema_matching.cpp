@@ -19,15 +19,10 @@ static inline bool isIntOrFloatUsedAsList(
     const Value* value,
     const Argument& arg) {
   // Look for int[N] or float[N]
-  const auto& v_type = value->type();
+  auto v_type = value->type();
   // Check if value is optional Type of Int or Float
   if (value->type()->kind() == OptionalType::Kind) {
-    auto opt_v_type = unwrapOptional(value->type());
-    if (opt_v_type != FloatType::get() && opt_v_type != IntType::get())
-      return false;
-    auto arg_type = unwrapOptional(arg.type());
-    auto list_type = arg_type->cast<ListType>();
-    return list_type && list_type->getElementType() == opt_v_type && arg.N();
+    v_type = unwrapOptional(value->type());
   }
   if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
