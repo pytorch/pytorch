@@ -191,8 +191,8 @@ class IterableDataset(Dataset[T_co]):
             raise Exception("Attempt to override existing reduce_ex_hook")
         IterableDataset.reduce_ex_hook = hook_fn
 
-    # TODO: Determinin if force all IterableDataset and IterDataPipe with annotation
     #  def __init_subclass__(cls, *args, **kwargs):
+    #      # TODO: Determinin if force all IterableDataset and IterDataPipe with annotation
     #      if not hasattr(cls, 'type'):
     #          raise TypeError('Class {} needs to be specified with type'.format(cls.__name__))
 

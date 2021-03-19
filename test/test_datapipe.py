@@ -581,28 +581,30 @@ class TestTyping(TestCase):
                 self.assertFalse(issubtype(t1, t2))
 
         T = TypeVar('T', int, str)
-        S = TypeVar('S', bool, str, int, Tuple[int, T])
-        self.assertTrue(issubtype(T, S))
-        self.assertFalse(issubtype(S, T))
-        self.assertTrue(issubtype(S, T_co))
-
-        # Optional/Union
+        S = TypeVar('S', bool, Union[str, int], Tuple[int, T])
         types = ((int, Optional[int]),
-                 (int, Union[int, dict]),
                  (List, Union[int, list]),
+                 (Tuple[int, str], S),
+                 (T, S),
+                 (S, T_co),
                  (T, Union[S, Set]))
         for sub, par in types:
             self.assertTrue(issubtype(sub, par))
             self.assertFalse(issubtype(par, sub))
 
-        subscriptable_type = {
+        subscriptable_types = {
             List: 1,
-            Tuple: None,
+            Tuple: 2,  # use 2 parameters
             Set: 1,
             Dict: 2,
-            Optional: 1,
         }
-        #  def _test_nested(alias, base, n, params, 
+        for subscript_type, n in subscriptable_types.items():
+            for ts in itertools.combinations(types, n):
+                subs, pars = zip(*ts)
+                sub = subscript_type[subs]
+                par = subscript_type[pars]
+                self.assertTrue(issubtype(sub, par))
+                self.assertFalse(issubtype(par, sub))
 
     # Static checking annotation
     def test_compile_time(self):
