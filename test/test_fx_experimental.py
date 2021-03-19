@@ -1,4 +1,5 @@
 import torch
+import operator
 import unittest
 import sys
 from typing import Callable, Dict, Union, List
@@ -23,6 +24,7 @@ from torch.fx.experimental.partitioner_utils import (
 from torch.fx.experimental.fuser import fuse
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.normalize import NormalizeArgs
+from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 
 try:
@@ -854,6 +856,47 @@ class {test_classname}(torch.nn.Module):
                     if submod_class == nn_class:
                         self.assertEqual(len(node.args), 0)
 
+    @skipIfNoTorchVision
+    def test_annotate_returns_with_schema(self):
+        m = resnet18()
+
+        traced_modules = symbolic_trace(m)
+        traced_modules_annotated = AnnotateTypesWithSchema(traced_modules).transform()
+        for node in traced_modules_annotated.graph.nodes:
+            if node.type is None:
+                check = (node.op, node.target)
+                self.assertTrue(check in {('placeholder', 'x'), ('call_function', operator.add),
+                                          ('call_function', torch.flatten), ('output', 'output')})
+
+        # Smoke test torchscript compilation since now we're emitting type annotations
+        torch.jit.script(traced_modules_annotated)
+
+        class FunctionalTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                # `leaves` contains the set of standard `nn.Modules` that are not
+                # currently symbolically traceable. Ideally this set would be empty
+                leaves = set([torch.nn.BatchNorm2d])
+                return type(m) in leaves
+
+        traced_functionals = torch.fx.GraphModule(m, FunctionalTracer().trace(m))
+
+        traced_functionals_annotated = AnnotateTypesWithSchema(traced_functionals).transform()
+        for node in traced_functionals_annotated.graph.nodes:
+            if node.type is None:
+                check = (node.op, node.target)
+                excluded_nodes = {
+                    ('placeholder', 'x'),
+                    ('call_function', torch.conv2d),
+                    # Return type differs based on boolean dispatch :(
+                    ('call_function', torch.nn.functional.max_pool2d),
+                    ('call_function', operator.add),
+                    ('call_function', torch.flatten),
+                    ('output', 'output'),
+                }
+                self.assertTrue(check in excluded_nodes)
+
+        # Smoke test torchscript compilation since now we're emitting type annotations
+        torch.jit.script(traced_functionals_annotated)
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
@@ -888,8 +931,6 @@ class {test_classname}(torch.nn.Module):
 
         traced = symbolic_trace_with_rewrite(foo)
 
-    # TODO: Add support and coverage for pickling non-parameter/buffer Tensor
-    # attributes.
     def test_to_folder(self):
         class Test(torch.nn.Module):
             def __init__(self):
@@ -897,10 +938,11 @@ class {test_classname}(torch.nn.Module):
                 self.W = torch.nn.Parameter(torch.randn(2))
                 self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
-                self.register_buffer('attr', torch.randn(2))
+                self.attr = torch.randn(2)
+                self.register_buffer('attr2', torch.randn(2))
 
             def forward(self, x):
-                return self.linear(self.seq(self.W + self.attr + x))
+                return self.linear(self.seq(self.W + self.attr + self.attr2 + x))
 
         mod = symbolic_trace(Test())
         module_name = 'Foo'

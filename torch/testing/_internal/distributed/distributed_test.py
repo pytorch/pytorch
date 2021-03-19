@@ -88,11 +88,19 @@ COLLECTIVES_OBJECT_TEST_LIST = [
 PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.NCCL,
     dist.Backend.GLOO,
+    dist.Backend.MPI,
 ]
 
 # Allowlist of distributed backends where profiling is supported with use_cuda=True
 CUDA_PROFILING_SUPPORTED_BACKENDS = [
-    dist.Backend.GLOO
+    dist.Backend.GLOO,
+    dist.Backend.MPI,
+]
+
+# Allowlist of distributed backends where profiling is supported for p2p ops
+SEND_RECV_PROFILING_SUPPORTED_BACKENDS = [
+    dist.Backend.MPI,
+    dist.Backend.GLOO,
 ]
 
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
@@ -948,9 +956,8 @@ class DistributedTest:
 
                 self._barrier()
 
-            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
             backend = dist.get_backend()
-            if backend == "gloo":
+            if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                 for event_name in [f"{backend}:send", f"{backend}:recv"]:
                     events = get_profiling_event(event_name, prof)
                     # Each rank sends/recvs from all other ranks.
@@ -1005,9 +1012,8 @@ class DistributedTest:
                         dist.send(tensor, dst)  # recv
                         dist.send(tensor, dst)  # irecv
 
-            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
             backend = dist.get_backend()
-            if backend == "gloo":
+            if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                 for event_name in [f"{backend}:send", f"{backend}:recvAnySource"]:
                     events = get_profiling_event(event_name, prof)
                     # Each rank sends/recvs from other rank twice.
@@ -1052,9 +1058,8 @@ class DistributedTest:
                         # Send mode
                         dist.send(tensor, dst, tag=rank)
 
-            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
             backend = dist.get_backend()
-            if backend == "gloo":
+            if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                 for event_name in [f"{backend}:send", f"{backend}:recv"]:
                     events = get_profiling_event(event_name, prof)
                     # Each rank sends/recvs from all other ranks
@@ -1086,9 +1091,8 @@ class DistributedTest:
 
                 self._barrier()
 
-            # TODO: enable distributed profiling for MPI (https://github.com/pytorch/pytorch/issues/47477)
             backend = dist.get_backend()
-            if backend == "gloo":
+            if backend in SEND_RECV_PROFILING_SUPPORTED_BACKENDS:
                 expected_event_name = f"{backend}:send" if rank == 0 else f"{backend}:recv"
                 events = get_profiling_event(expected_event_name, prof)
                 event_count = sum(e.count for e in events)
@@ -1214,7 +1218,7 @@ class DistributedTest:
             store = dist.PrefixStore(new_port, store)
 
             opts = dist.ProcessGroupNCCL.Options()
-            opts.is_high_priority = False
+            opts.is_high_priority_stream = False
             group_id = dist.ProcessGroupNCCL(store, rank, size, opts)
 
             self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU, True)
