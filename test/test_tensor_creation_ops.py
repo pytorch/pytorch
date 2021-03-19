@@ -3129,6 +3129,7 @@ class TestRandomTensorCreation(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
+    @onlyCUDA  # this test is flaky on CPU: https://github.com/pytorch/pytorch/issues/54282
     def test_randperm(self, device):
         if device == 'cpu':
             rng_device = None
