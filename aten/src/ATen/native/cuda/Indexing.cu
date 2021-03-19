@@ -939,7 +939,7 @@ namespace {
 
 template <typename mask_t>
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool, kHalf, kBFloat16, iter.common_dtype(), "masked_fill_", [&]() {
         const auto value_ = value.to<scalar_t>();
         gpu_kernel(
