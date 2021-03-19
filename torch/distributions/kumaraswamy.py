@@ -21,7 +21,7 @@ class Kumaraswamy(TransformedDistribution):
 
     Example::
 
-        >>> m = Kumaraswamy(torch.Tensor([1.0]), torch.Tensor([1.0]))
+        >>> m = Kumaraswamy(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Kumaraswamy distribution with concentration alpha=1 and beta=1
         tensor([ 0.1729])
 

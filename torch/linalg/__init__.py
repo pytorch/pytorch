@@ -840,7 +840,7 @@ Args:
     compute_uv (bool, optional): whether to compute `U` and `V` or not. Defaults to True.
     out (tuple, optional): a tuple of three tensors to use for the outputs. If compute_uv=False,
                            the 1st and 3rd arguments must be tensors, but they are ignored. E.g. you can
-                           pass `(torch.Tensor(), out_S, torch.Tensor())`
+                           pass `(torch.tensor([]), out_S, torch.tensor([]))`
 
 Example::
 
