@@ -50,12 +50,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normal variables
 
-ENABLE_CTRACING = True
-def enable_ctracing(flag):
-    global ENABLE_CTRACING
-    ENABLE_CTRACING = flag
-
-class CPatchManager(object):
+class _CPatchManager(object):
     """
     Calls patch_function in order to intercept functions at the C-extension level
     """
@@ -86,8 +81,7 @@ class CPatchManager(object):
         self.func = trace_func
 
     def __enter__(self):
-        global ENABLE_CTRACING
-        if ENABLE_CTRACING:
+        if self.tracer.enable_cpatching:
             sys.setprofile(self.func)
 
     def __exit__(self, type, value, tb):
@@ -103,7 +97,7 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, )) -> None:
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), enable_cpatching: bool = True) -> None:
         """
         Construct a Tracer object.
 
@@ -112,6 +106,16 @@ class Tracer(TracerBase):
             autowrap_modules (List[ModuleType]): defaults to `[math]`,
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap().
+
+            Allows you to enable/disable monkeypatching of torch functions at the
+            C-level (which captures functins like randn).
+
+            C-level monkeypatching works by directly modifying the PyCFunctionObject*
+            so that calling it returns a different function.
+
+            Turning this on is likely to slow down tracing performance.
+
+            This is enabled by default.
         """
 
         super().__init__()
@@ -125,6 +129,7 @@ class Tracer(TracerBase):
         # Python modules to apply autowrap to at the start, in addition to
         # modules we see while tracing
         self._autowrap_search: List[ModuleType] = list(autowrap_modules)
+        self.enable_cpatching = enable_cpatching
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
 
@@ -401,7 +406,7 @@ class Tracer(TracerBase):
                             self._autowrap_function_ids)
             return self.call_module(mod, forward, args, kwargs)
 
-        with CPatchManager(self):
+        with _CPatchManager(self):
             with _Patcher() as patcher:
                 # allow duplicate patches to support the case of nested calls
                 patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
@@ -648,7 +653,7 @@ def wrap(fn_or_name : Union[str, Callable]):
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
 
-def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> GraphModule:
+def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None, enable_cpatching: bool = True) -> GraphModule:
     """Symbolic tracing API
 
     Given an ``nn.Module`` or function instance ``root``, this function will return a ``GraphModule``
@@ -663,7 +668,7 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
         GraphModule: a Module created from the recorded operations from ``root``.
 
     """
-    tracer = Tracer()
+    tracer = Tracer(enable_cpatching=enable_cpatching)
     graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
     return GraphModule(tracer.root, graph, name)

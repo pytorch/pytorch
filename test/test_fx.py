@@ -18,7 +18,7 @@ from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, enable_ctracing
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
 import torch._C._fx  # type: ignore
 from torch.fx.node import Target, Argument
 from torch.fx.passes import shape_prop
@@ -2187,27 +2187,26 @@ class TestFX(JitTestCase):
         from torchvision.models.resnet import resnet18
         rn = resnet18()
 
-        sys.setprofile(trace_func)
-        rn(torch.rand(1, 3, 224, 224))
-        print("testing print patch")
-        sys.setprofile(None)
+        try:
+            sys.setprofile(trace_func)
+            rn(torch.rand(1, 3, 224, 224))
+            print("testing print patch")
+        finally:
+            sys.setprofile(None)
         assert(cnt != 0)
 
     def test_randn(self):
         def f():
             return torch.randn(3, 3)
 
-        enable_ctracing(False)
-        fx_f = symbolic_trace(f)
-        assert(all(i.target != torch.randn for i in fx_f.graph.nodes))
-
-        enable_ctracing(True)
-        fx_f = symbolic_trace(f)
+        fx_f = symbolic_trace(f, enable_cpatching=True)
         assert(any(i.target == torch.randn for i in fx_f.graph.nodes))
 
-        enable_ctracing(False)
-        fx_f = symbolic_trace(f)
+        fx_f = symbolic_trace(f, enable_cpatching=False)
         assert(all(i.target != torch.randn for i in fx_f.graph.nodes))
+
+        fx_f = symbolic_trace(f, enable_cpatching=True)
+        assert(any(i.target == torch.randn for i in fx_f.graph.nodes))
 
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch

@@ -1,5 +1,4 @@
 #include <torch/csrc/utils/pybind.h>
-#include <iostream>
 
 namespace torch {
 namespace fx {
@@ -14,7 +13,17 @@ struct ToRestore {
   PyObject* patch_fn;
 };
 
+class DecRefGuard {
+ public:
+  DecRefGuard(PyObject *obj) : obj(obj) { }
+  ~DecRefGuard() {
+    Py_DECREF(obj);
+  }
+ private:
+  PyObject *obj;
+};
 PyObject* replacement_method(PyObject* self, PyObject* args, PyObject* kwargs) {
+  DecRefGuard self_guard(self);
   // restore the implementation immediately so that patch_fn lives for as little
   // as possible
   ToRestore* to_restore = (ToRestore*)PyBytes_AsString(self);
@@ -31,24 +40,16 @@ PyObject* replacement_method(PyObject* self, PyObject* args, PyObject* kwargs) {
   } else {
     kwargs = PyDict_New();
   }
+  DecRefGuard kwargs_guard(kwargs);
 
   PyObject* result = nullptr;
   PyObject* args_ =
       Py_BuildValue("(OOO)", to_restore->patched_method, args, kwargs);
   if (!args_) {
-    goto exit; // NOLINT
+    return result;
   }
   result = PyEval_CallObject(to_restore->patch_fn, args_);
   Py_DECREF(args_);
-  if (!result) {
-    goto exit; // NOLINT
-  }
-
-exit:
-  Py_DECREF(to_restore->patched_method);
-  Py_DECREF(to_restore->patch_fn);
-  Py_DECREF(self);
-  Py_DECREF(kwargs);
   return result;
 }
 
@@ -69,7 +70,9 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
     PyErr_SetString(PyExc_RuntimeError, "not a CFunction");
     return nullptr;
   }
+  DecRefGuard patch_fn_guard(to_restore.patch_fn);
   Py_INCREF(to_restore.patch_fn);
+  DecRefGuard patched_method_guard(to_restore.patched_method);
   Py_INCREF(to_restore.patched_method);
   PyCFunctionObject* patch_method_c =
       ((PyCFunctionObject*)to_restore.patched_method);
