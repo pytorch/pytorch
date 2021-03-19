@@ -73,6 +73,19 @@ static bool participatesInCurrentLevel(const Tensor& self, const Tensor& other) 
   return participatesInCurrentLevel(self) || participatesInCurrentLevel(other);
 }
 
+Tensor mean_batching_rule(const Tensor& self, optional<ScalarType> dtype) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::Batched);
+    return self.mean(dtype);
+  }
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  VmapDimVector dims;
+  for (int64_t i = 1; i < self_physical.tensor().dim(); i++) {
+    dims.push_back(i);
+  }
+  auto result = at::mean(self_physical.tensor(), dims, /*keepdim*/false, dtype);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+} 
 
 Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
   if (!participatesInCurrentLevel(self)) {
@@ -897,8 +910,6 @@ Tensor unwrap_and_call(const Tensor& input, ExtraArgs... args) {
   }
   // guard against the user passing in a batch of scalar tensors with batch
   auto* input_batched = unsafeGetBatchedImpl(input);
-  std::cout << input_batched->bdims() << ", ";
-  std::cout << maybeCurrentDynamicLayer()->layerId() << std::endl;
   auto output_physical = Func(input_batched->value(), args...);
   auto old_bdims = input_batched->bdims();
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
@@ -926,6 +937,31 @@ Tensor pow_scalar_Tensor_batching_rule(Scalar other, const Tensor& self) {
   auto old_bdims = self_batched->bdims();
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
+
+// Tensor ones_like_batching_rule(const Tensor& self, optional<MemoryFormat> memory_format) {
+//   if (!participatesInCurrentLevel(self)) {
+//     c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::Batched);
+//     return at::ones_like(self, memory_format);
+//   }
+// 
+//   TORCH_CHECK(!memory_format.has_value() || memory_format == MemoryFormat::Preserve
+//       || memory_format == MemoryFormat::Contiguous,
+//       "NYI: Tensor.clone(memory_format) inside vmap is only supported with ",
+//       "memory_format torch.preserve_format or torch.contiguous_format (got ",
+//       *memory_format, ")");
+// 
+//   if (memory_format == MemoryFormat::Contiguous) {
+//     auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
+//     auto output_physical = at::clone(physical_view.tensor(), memory_format);
+//     return physical_view.getPhysicalToLogicalMap().apply(output_physical);
+//   }
+// 
+//   TORCH_INTERNAL_ASSERT(!memory_format.has_value() || memory_format == MemoryFormat::Preserve);
+//   auto* self_batched = unsafeGetBatchedImpl(self);
+//   auto output_physical = at::clone(self_batched->value(), memory_format);
+//   auto old_bdims = self_batched->bdims();
+//   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+// }
 
 Tensor clone_batching_rule(const Tensor& self, optional<MemoryFormat> memory_format) {
   if (!participatesInCurrentLevel(self)) {
@@ -1058,8 +1094,13 @@ Tensor bmm_batching_rule(const Tensor& self, const Tensor& other) {
 }
 
 Tensor mm_batching_rule(const Tensor& self, const Tensor& other) {
-  auto self_batched = isBatchedTensor(self);
-  auto other_batched = isBatchedTensor(other);
+  if (!participatesInCurrentLevel(self, other)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::Batched);
+    return at::mm(self, other);
+  }
+
+  auto self_batched = participatesInCurrentLevel(self);
+  auto other_batched = participatesInCurrentLevel(other);
 
   TORCH_CHECK(/*logical*/self.dim() == 2 && /*logical*/other.dim() == 2,
       "mm(self, other): Shape mismatch: expected matrix "
@@ -1069,18 +1110,28 @@ Tensor mm_batching_rule(const Tensor& self, const Tensor& other) {
   // See Note [Batching rules for matmul-like operators] for why we have cases
   if (self_batched && !other_batched) {
     auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+    c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::Batched);
     auto result = at::matmul(self_physical.tensor(), other);
-    return self_physical.getPhysicalToLogicalMap().apply(result);
+    result = self_physical.getPhysicalToLogicalMap().apply(result);
+    TORCH_INTERNAL_ASSERT(result.dim() == 2);
+    return result;
   }
   if (!self_batched && other_batched) {
     auto other_physical = MultiBatchVmapTransform::logicalToPhysical(other);
+    c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::Batched);
     auto result = at::matmul(self, other_physical.tensor());
-    return other_physical.getPhysicalToLogicalMap().apply(result);
+    result = other_physical.getPhysicalToLogicalMap().apply(result);
+    TORCH_INTERNAL_ASSERT(result.dim() == 2);
+    return result;
   }
   if (self_batched && other_batched) {
     auto physical_args = MultiBatchVmapTransform::logicalToPhysical({self, other});
+    c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::Batched);
     auto result = at::matmul(physical_args[0].tensor(), physical_args[1].tensor());
-    return physical_args[0].getPhysicalToLogicalMap().apply(result.squeeze(-1).squeeze(-1));
+    TORCH_INTERNAL_ASSERT(result.dim() == 3);
+    result = physical_args[0].getPhysicalToLogicalMap().apply(result);
+    TORCH_INTERNAL_ASSERT(result.dim() == 2);
+    return result;
   }
   TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
 }
@@ -1160,6 +1211,29 @@ Tensor new_empty_batching_rule(
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
   auto result = physical_view.tensor().new_empty(physical_size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  return physical_view.getPhysicalToLogicalMap().apply(result);
+}
+
+Tensor addmm_batching_rule(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
+  // Decomposition that is probably not very fast...
+  return at::add(self * beta, at::mm(mat1, mat2), alpha);
+}
+
+Tensor ones_like_batching_rule(
+    const Tensor& self,
+    optional<ScalarType> dtype,
+    optional<Layout> layout,
+    optional<Device> device,
+    optional<bool> pin_memory,
+    optional<MemoryFormat> memory_format) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::Batched);
+    auto options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+    return at::ones_like(self, options, memory_format);
+  }
+  auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  auto result = at::ones_like(physical_view.tensor(), options, memory_format);
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
@@ -1256,7 +1330,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
-//   m.impl("sum.dim_IntList", sum_batching_rule);
+  m.impl("mean", mean_batching_rule);
+  m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
   m.impl("conj", native::conj);
   m.impl("flatten.using_ints", flatten_batching_rule);
@@ -1302,6 +1377,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("unsqueeze_", unsqueeze__batching_rule);
   m.impl("view", view_batching_rule);
   m.impl("view_as", native::view_as); // composite wrt autograd
+
+  m.impl("addmm", addmm_batching_rule);
 // 
 //   // clamp operations
 //   m.impl("clamp", clamp_batching_rule);
@@ -1355,6 +1432,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("to.dtype_layout", to_dtype_layout_batching_rule);
 #undef TO_BATCHING_RULE
   m.impl("clone", clone_batching_rule);
+  // m.impl("ones_like", ones_like_batching_rule);
 
   using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, Scalar);
   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
@@ -1415,7 +1493,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 //   m.impl("mv", mv_batching_rule);
 //   m.impl("dot", dot_batching_rule);
 //   m.impl("bmm", bmm_batching_rule);
-//   m.impl("mm", mm_batching_rule);
+  m.impl("mm", mm_batching_rule);
 // 
   // cat/stack
   m.impl("cat", cat_batching_rule);
@@ -1428,6 +1506,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 //   m.impl("diagonal_backward", diagonal_backward_batching_rule);
 // 
 //   // Tensor.new_* operators
+  m.impl("ones_like", ones_like_batching_rule);
 //   m.impl("new_empty", new_empty_batching_rule);
   m.impl("new_empty_strided", new_empty_strided_batching_rule);
 //   m.impl("new_zeros", new_zeros_batching_rule);
