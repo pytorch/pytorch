@@ -2,7 +2,7 @@ import torch
 import torch.fx
 import inspect
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union, get_args
+from typing import Any, Dict, List, Optional, Tuple, Union
 from torch.fx.node import Argument, Target
 from torch._jit_internal import boolean_dispatched
 
@@ -55,7 +55,6 @@ class NormalizeArgs(Transformer):
             assert callable(target)
             torch_op_schemas = get_signature_for_torch_op(target)
             if torch_op_schemas:
-                print('!' * 20, 'trying for op', target)
                 signature = self._find_overload_with_type_check(torch_op_schemas, args, kwargs)
                 if signature:
                     new_kwargs = self._args_kwargs_to_normalized_kwargs(signature, args, kwargs)
@@ -127,44 +126,32 @@ class NormalizeArgs(Transformer):
                 # This is safe because `__torch_function__` can only dispatch proxie
                 # args for Tensors or containers containing Tensors
                 def proxy_to_tensor(a):
-                    if isinstance(a, torch.fx.Proxy):
-                        return torch.Tensor()
+                    return torch.Tensor() if isinstance(a, torch.fx.Proxy) else a
                 args_for_analysis = torch.fx.node.map_aggregate(args, proxy_to_tensor)
                 kwargs_for_analysis = torch.fx.node.map_aggregate(kwargs, proxy_to_tensor)
                 bound_args = candidate_signature.bind(*args_for_analysis, **kwargs_for_analysis)
                 bound_args.apply_defaults()
 
-                def does_arg_match_param_type_annotation(arg, type):
-                    origin_type = getattr(parameter.annotation, '__origin__', parameter.annotation)
+                def does_arg_match_param_type_annotation(arg, t):
+                    origin_type = getattr(t, '__origin__', t)
 
-                    if origin_type is Tuple:
-                        if not isinstance(arg, tuple):
-                            return False
-                        contained_types = get_args(type)
-                        assert len(contained_types) == 1
-                        return all(does_arg_match_param_type_annotation(a, contained_types[0]) for a in arg)
-                    elif origin_type is List:
+                    if origin_type is list:
                         # PythonArgParser accepts tuples for `List`-typed arguments
                         if not isinstance(arg, (list, tuple)):
                             return False
-                        contained_types = get_args(type)
+                        contained_types = getattr(t, '__args__')
                         assert len(contained_types) == 1
                         return all(does_arg_match_param_type_annotation(a, contained_types[0]) for a in arg)
                     elif origin_type is Union:
-                        contained_types = get_args(type)
+                        contained_types = getattr(t, '__args__')
                         return any(does_arg_match_param_type_annotation(arg, t) for t in contained_types)
-                    elif origin_type is None:
-                        if type is torch.Tensor:
-                            # Python arg parser accepts int, float and complex for Tensor-typed
-                            # parameters
-                            # https://github.com/pytorch/pytorch/blob/19792b45dbf30b4555c4a87512e624cdd4aa6e4c/torch/csrc/utils/python_arg_parser.cpp#L1077-L1100?  # noqa
-                            return type(bound_arg) in {torch.Tensor, int, float, complex}
-                        else:
-                            # Primitive types
-                            return issubclass(type(arg), type)
+                    elif t is torch.Tensor:
+                        # Python arg parser accepts int, float and complex for Tensor-typed
+                        # parameters
+                        # https://github.com/pytorch/pytorch/blob/19792b45dbf30b4555c4a87512e624cdd4aa6e4c/torch/csrc/utils/python_arg_parser.cpp#L1077-L1100?  # noqa
+                        return type(bound_arg) in {torch.Tensor, int, float, complex}
                     else:
-                        raise RuntimeError(f'Unsupported schema matching type {type}. Please '
-                                           f'report a bug to PyTorch!')
+                        return issubclass(type(arg), t)
 
 
                 # Signature.bind does not check types. Do secondary checking here
