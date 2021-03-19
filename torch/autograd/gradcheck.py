@@ -53,8 +53,6 @@ def make_jacobians(tensors, tensors_is_inputs, dim=None, dtype=None, device=None
                 out.append(t.new_zeros((t.nelement(), dim), **options))
             else:
                 out.append(t.new_zeros((dim, t.nelement()), **options))
-    if not out:
-        return None
     return tuple(out)
 
 

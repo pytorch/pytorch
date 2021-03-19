@@ -3999,6 +3999,9 @@ class TestAutograd(TestCase):
             gradcheck(lambda x: torch.tensor([x]), x)
         self.assertFalse(gradcheck(lambda x: torch.tensor([x]), x, raise_exception=False))
 
+        # succeed when no outputs at all
+        self.assertTrue(gradcheck(lambda x: (), (x,)))
+
     def test_gradcheck_input_output_different_device(self):
         x = torch.ones((1,), device="cuda", requires_grad=True)
         gradcheck(lambda x: x.to("cpu"), (x,))
