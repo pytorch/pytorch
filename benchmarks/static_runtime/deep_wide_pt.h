@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/torch.h>
 #include <ATen/CPUFunctions.h>
 #include <ATen/NativeFunctions.h>
+#include <torch/torch.h>
 
 struct DeepAndWide : torch::nn::Module {
   DeepAndWide(int num_features = 50) {
@@ -68,15 +68,16 @@ struct DeepAndWideFast : torch::nn::Module {
 
       auto pred = at::native::sigmoid(fc1);
 
-      prealloc_tensors = {wide_offset,
-                          wide_normalized,
-                          wide_preproc,
-                          user_emb_t,
-                          dp_unflatten,
-                          dp,
-                          input,
-                          fc1,
-                          pred};
+      prealloc_tensors = {
+          wide_offset,
+          wide_normalized,
+          wide_preproc,
+          user_emb_t,
+          dp_unflatten,
+          dp,
+          input,
+          fc1,
+          pred};
       allocated = true;
 
       return pred;
@@ -87,7 +88,7 @@ struct DeepAndWideFast : torch::nn::Module {
       at::cpu::mul_out(prealloc_tensors[1], prealloc_tensors[0], sigma_);
 
       at::native::clamp_out(
-          prealloc_tensors[2], prealloc_tensors[1], -10.0, 10.0);
+          prealloc_tensors[1], -10.0, 10.0, prealloc_tensors[2]);
 
       // Potential optimization: original tensor could be pre-transposed.
       // prealloc_tensors[3] = at::native::transpose(user_emb, 1, 2);
@@ -103,7 +104,7 @@ struct DeepAndWideFast : torch::nn::Module {
 
       // Potential optimization: call MKLDNN directly.
       at::native::bmm_out_cpu(
-          prealloc_tensors[4], ad_emb_packed, prealloc_tensors[3]);
+          ad_emb_packed, prealloc_tensors[3], prealloc_tensors[4]);
 
       if (prealloc_tensors[5].data_ptr() != prealloc_tensors[4].data_ptr()) {
         // in unlikely case that the input tensor changed we need to
