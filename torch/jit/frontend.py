@@ -377,6 +377,7 @@ def get_default_args_for_class(cls):
     # Get method defaults. Property defaults do not need to be considered
     # because setters cannot be invoked without a value.
     defaults = {method_name: get_default_args(method_impl) for method_name, method_impl in methods}
+
     return defaults
 
 
@@ -388,6 +389,7 @@ class WithItemBuilder(Builder):
         end = start + len(pretty_node_names[ast.With])
         op_vars = item.optional_vars
         r = ctx.make_range(lineno, start, end)
+
         return WithItem(r, build_expr(ctx, item.context_expr), build_expr(ctx, op_vars) if op_vars else None)
 
 
