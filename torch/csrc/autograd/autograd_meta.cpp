@@ -123,6 +123,10 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
     // TODO(alband) remove this spurious version counter bump
     auto new_grad = new_grad_;
 
+    TORCH_CHECK(self.is_same_size(new_grad_), "Trying to set a forward gradient that has a different size than that "
+                "of the original Tensor, this is not supported. Tensor is of size ", self.sizes(), " while the given "
+                "forward gradient is of size ", new_grad_.sizes(), ".");
+
     if (is_inplace_op && is_view_) {
       auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
 
@@ -139,7 +143,7 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
         auto view_info = this_view_meta->get_forward_view();
         auto& base = view_info.base_;
 
-        if (!base.fw_grad(level).defined()) {
+        if (!base._fw_grad(level).defined()) {
           // Enforce same meta here to make sure that the view op below is always valid
           Tensor new_base_fw_grad;
           if (has_same_meta(new_grad, base)) {
@@ -161,7 +165,7 @@ void AutogradMeta::set_fw_grad(const Variable& new_grad_, const Variable& self, 
             new_grad = new_fw_grad_value;
           }
 
-          base.set_fw_grad(new_base_fw_grad, level, /* is_inplace_op */ false);
+          base._set_fw_grad(new_base_fw_grad, level, /* is_inplace_op */ false);
         }
       }
     }
@@ -195,7 +199,7 @@ const Variable& AutogradMeta::fw_grad(uint64_t level, const Variable& self) cons
       const auto& view_info = this_view_meta->get_forward_view();
       const auto& base = view_info.base_;
 
-      const auto& base_val = base.fw_grad(level);
+      const auto& base_val = base._fw_grad(level);
       if (base_val.defined()) {
         // Lazy initialization of fw_grad_
         this_view_meta->fw_grad_ = std::make_shared<ForwardGrad>();
