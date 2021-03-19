@@ -19,4 +19,7 @@ Functions
 -----------------------
 
 .. autofunction:: entr
+.. autofunction:: erf
+.. autofunction:: erfc
+.. autofunction:: erfinv
 .. autofunction:: gammaln

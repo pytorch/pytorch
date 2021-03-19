@@ -13,7 +13,7 @@ from .utils import _single, _pair, _triple, _reverse_repeat_tuple
 from torch._torch_docs import reproducibility_notes
 
 from ..common_types import _size_1_t, _size_2_t, _size_3_t
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
 
 convolution_notes = \
     {"groups_note": r"""* :attr:`groups` controls the connections between inputs and outputs.
@@ -51,10 +51,11 @@ class _ConvNd(Module):
         ...
 
     _in_channels: int
+    _reversed_padding_repeated_twice: List[int]
     out_channels: int
     kernel_size: Tuple[int, ...]
     stride: Tuple[int, ...]
-    padding: Tuple[int, ...]
+    padding: Union[str, Tuple[int, ...]]
     dilation: Tuple[int, ...]
     transposed: bool
     output_padding: Tuple[int, ...]
@@ -80,6 +81,15 @@ class _ConvNd(Module):
             raise ValueError('in_channels must be divisible by groups')
         if out_channels % groups != 0:
             raise ValueError('out_channels must be divisible by groups')
+        valid_padding_strings = {'same', 'valid'}
+        if isinstance(padding, str):
+            if padding not in valid_padding_strings:
+                raise ValueError(
+                    "Invalid padding string {!r}, should be one of {}".format(
+                        padding, valid_padding_strings))
+            if padding == 'same' and any(s != 1 for s in stride):
+                raise ValueError("padding='same' is not supported for strided convolutions")
+
         valid_padding_modes = {'zeros', 'reflect', 'replicate', 'circular'}
         if padding_mode not in valid_padding_modes:
             raise ValueError("padding_mode must be one of {}, but got padding_mode='{}'".format(
@@ -98,7 +108,19 @@ class _ConvNd(Module):
         # `F.pad` if needed (e.g., for non-zero padding types that are
         # implemented as two ops: padding + conv). `F.pad` accepts paddings in
         # reverse order than the dimension.
-        self._reversed_padding_repeated_twice = _reverse_repeat_tuple(self.padding, 2)
+        if isinstance(self.padding, str):
+            self._reversed_padding_repeated_twice = [0, 0] * len(kernel_size)
+            if padding == 'same':
+                for d, k, i in zip(dilation, kernel_size,
+                                   range(len(kernel_size) - 1, -1, -1)):
+                    total_padding = d * (k - 1)
+                    left_pad = total_padding // 2
+                    self._reversed_padding_repeated_twice[2 * i] = left_pad
+                    self._reversed_padding_repeated_twice[2 * i + 1] = (
+                        total_padding - left_pad)
+        else:
+            self._reversed_padding_repeated_twice = _reverse_repeat_tuple(self.padding, 2)
+
         if transposed:
             self.weight = Parameter(torch.Tensor(
                 in_channels, out_channels // groups, *kernel_size))
@@ -164,8 +186,9 @@ class Conv1d(_ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a one-element tuple.
 
-    * :attr:`padding` controls the amount of implicit padding on both sides
-      for :attr:`padding` number of points.
+    * :attr:`padding` controls the amount of padding applied to the input. It
+      can be either a string {{'valid', 'same'}} or a tuple of ints giving the
+      amount of implicit padding applied on both sides.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
@@ -178,12 +201,17 @@ class Conv1d(_ConvNd):
     Note:
         {cudnn_reproducibility_note}
 
+    Note:
+        ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+        the input so the output has the shape as the input. However, this mode
+        doesn't support any stride values other than 1.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to both sides of
+        padding (int, tuple or str, optional): Padding added to both sides of
             the input. Default: 0
         padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
@@ -235,7 +263,7 @@ class Conv1d(_ConvNd):
         out_channels: int,
         kernel_size: _size_1_t,
         stride: _size_1_t = 1,
-        padding: _size_1_t = 0,
+        padding: Union[str, _size_1_t] = 0,
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -245,7 +273,7 @@ class Conv1d(_ConvNd):
         # type Union[int, Tuple[int]] and kernel_size_ has type Tuple[int]
         kernel_size_ = _single(kernel_size)
         stride_ = _single(stride)
-        padding_ = _single(padding)
+        padding_ = padding if isinstance(padding, str) else _single(padding)
         dilation_ = _single(dilation)
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size_, stride_, padding_, dilation_,
@@ -287,8 +315,9 @@ class Conv2d(_ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
 
-    * :attr:`padding` controls the amount of implicit padding on both
-      sides for :attr:`padding` number of points for each dimension.
+    * :attr:`padding` controls the amount of padding applied to the input. It
+      can be either a string {{'valid', 'same'}} or a tuple of ints giving the
+      amount of implicit padding applied on both sides.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
@@ -308,12 +337,17 @@ class Conv2d(_ConvNd):
     Note:
         {cudnn_reproducibility_note}
 
+    Note:
+        ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+        the input so the output has the shape as the input. However, this mode
+        doesn't support any stride values other than 1.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to both sides of
+        padding (int, tuple or str, optional): Padding added to all four sides of
             the input. Default: 0
         padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
@@ -373,7 +407,7 @@ class Conv2d(_ConvNd):
         out_channels: int,
         kernel_size: _size_2_t,
         stride: _size_2_t = 1,
-        padding: _size_2_t = 0,
+        padding: Union[str, _size_2_t] = 0,
         dilation: _size_2_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -381,7 +415,7 @@ class Conv2d(_ConvNd):
     ):
         kernel_size_ = _pair(kernel_size)
         stride_ = _pair(stride)
-        padding_ = _pair(padding)
+        padding_ = padding if isinstance(padding, str) else _pair(padding)
         dilation_ = _pair(dilation)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size_, stride_, padding_, dilation_,
@@ -416,8 +450,9 @@ class Conv3d(_ConvNd):
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
-    * :attr:`padding` controls the amount of implicit padding on both
-      sides for :attr:`padding` number of points for each dimension.
+    * :attr:`padding` controls the amount of padding applied to the input. It
+      can be either a string {{'valid', 'same'}} or a tuple of ints giving the
+      amount of implicit padding applied on both sides.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
@@ -436,12 +471,18 @@ class Conv3d(_ConvNd):
     Note:
         {cudnn_reproducibility_note}
 
+    Note:
+        ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+        the input so the output has the shape as the input. However, this mode
+        doesn't support any stride values other than 1.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
+        padding (int, tuple or str, optional): Padding added to all six sides of
+            the input. Default: 0
         padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
@@ -498,7 +539,7 @@ class Conv3d(_ConvNd):
         out_channels: int,
         kernel_size: _size_3_t,
         stride: _size_3_t = 1,
-        padding: _size_3_t = 0,
+        padding: Union[str, _size_3_t] = 0,
         dilation: _size_3_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -506,19 +547,32 @@ class Conv3d(_ConvNd):
     ):
         kernel_size_ = _triple(kernel_size)
         stride_ = _triple(stride)
-        padding_ = _triple(padding)
+        padding_ = padding if isinstance(padding, str) else _triple(padding)
         dilation_ = _triple(dilation)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size_, stride_, padding_, dilation_,
             False, _triple(0), groups, bias, padding_mode)
 
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+        if self.padding_mode != "zeros":
+            return F.conv3d(
+                F.pad(
+                    input, self._reversed_padding_repeated_twice, mode=self.padding_mode
+                ),
+                weight,
+                bias,
+                self.stride,
+                _triple(0),
+                self.dilation,
+                self.groups,
+            )
+        return F.conv3d(
+            input, weight, bias, self.stride, self.padding, self.dilation, self.groups
+        )
+
     def forward(self, input: Tensor) -> Tensor:
-        if self.padding_mode != 'zeros':
-            return F.conv3d(F.pad(input, self._reversed_padding_repeated_twice, mode=self.padding_mode),
-                            self.weight, self.bias, self.stride, _triple(0),
-                            self.dilation, self.groups)
-        return F.conv3d(input, self.weight, self.bias, self.stride,
-                        self.padding, self.dilation, self.groups)
+        return self._conv_forward(input, self.weight, self.bias)
+
 
 
 class _ConvTransposeNd(_ConvNd):
@@ -688,6 +742,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose1d')
 
+        assert isinstance(self.padding, tuple)
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
@@ -832,6 +887,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
 
+        assert isinstance(self.padding, tuple)
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
@@ -973,6 +1029,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose3d')
 
+        assert isinstance(self.padding, tuple)
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
@@ -1055,6 +1112,9 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
@@ -1113,6 +1173,9 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
     the ``in_channels`` argument of the :class:`Conv2d` that is inferred from
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
 
     Args:
         out_channels (int): Number of channels produced by the convolution
@@ -1173,6 +1236,9 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
@@ -1232,6 +1298,9 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
@@ -1290,6 +1359,9 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
 
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
     Args:
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
@@ -1347,6 +1419,9 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
     the ``in_channels`` argument of the :class:`ConvTranspose3d` that is inferred from
     the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight` and `bias`.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
 
     Args:
         out_channels (int): Number of channels produced by the convolution

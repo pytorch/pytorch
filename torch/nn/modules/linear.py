@@ -181,7 +181,7 @@ class Bilinear(Module):
 
 
 class LazyLinear(LazyModuleMixin, Linear):
-    r"""A :class:`torch.nn.Linear` module with lazy initialization.
+    r"""A :class:`torch.nn.Linear` module where `in_features` is inferred.
 
     In this module, the `weight` and `bias` are of :class:`torch.nn.UninitializedParameter`
     class. They will be initialized after the first call to ``forward`` is done and the
@@ -211,6 +211,7 @@ class LazyLinear(LazyModuleMixin, Linear):
 
     cls_to_become = Linear  # type: ignore[assignment]
     weight: UninitializedParameter
+    bias: UninitializedParameter  # type: ignore[assignment]
 
     def __init__(self, out_features: int, bias: bool = True) -> None:
         # bias is hardcoded to False to avoid creating tensor

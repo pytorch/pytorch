@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import unittest
 from torch.testing._internal.jit_utils import JitTestCase
 
 from torch.testing import FileCheck
@@ -10,7 +11,6 @@ from torch.testing._internal.common_utils import set_default_dtype
 from torch.jit._recursive import wrap_cpp_module
 from typing import Any
 from itertools import product
-import unittest
 
 import io
 
@@ -25,6 +25,13 @@ if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
+
+TEST_CUDA = torch.cuda.is_available()
+TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
+TEST_CUDNN = False
+if TEST_CUDA and not TEST_ROCM:  # Skip ROCM
+    torch.ones(1).cuda()  # initialize cuda context
+    TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0')))
 
 class TestFreezing(JitTestCase):
     def test_freeze_module(self):
@@ -1017,6 +1024,24 @@ class TestFreezing(JitTestCase):
         m_f = torch._C._freeze_module(m_s._c)
         self.assertTrue(m_f.hasattr('conv1'))
 
+    def test_freeze_module_no_forward(self):
+
+        class FreezeMe(nn.Module):
+            def __init__(self):
+                super(FreezeMe, self).__init__()
+                self.lin = nn.Linear(10, 1)
+
+            @torch.jit.export
+            def foo(self, x):
+                return self.lin(x)
+
+        m = FreezeMe()
+        m_s = torch.jit.script(m)
+        m_s.eval()
+        m_f = torch._C._freeze_module(m_s._c, preservedAttrs=['foo'])
+        input = torch.ones(10)
+        self.assertEqual(m_s.foo(input), m_f.foo(input))
+
 
     def test_freeze_module_in_training_mode(self):
         class Net(nn.Module):
@@ -1310,10 +1335,10 @@ class TestFreezing(JitTestCase):
         self.assertEqual(mod_eager(True), frozen_mod(True))
         self.assertEqual(mod_eager(False), frozen_mod(False))
 
-    def test_freeze_module_with_non_static_module_dict_index(self):
+    def test_freeze_module_with_non_static_module_container_index(self):
         """
-        Test that a Module contained a non-static ModuleDict index
-        cannot be frozen.
+        Test that Modules containing non-static ModuleDict or ModuleList
+        indexing cannot be frozen.
         """
         @torch.jit.interface
         class ModuleInterface(torch.nn.Module):
@@ -1327,8 +1352,7 @@ class TestFreezing(JitTestCase):
 
                 return inp
 
-        # Test annotation of submodule.
-        class Mod(torch.nn.Module):
+        class ModWithDict(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.d = torch.nn.ModuleDict({"module": ImplementsInterface()})
@@ -1337,9 +1361,23 @@ class TestFreezing(JitTestCase):
                 value: ModuleInterface = self.d[key]
                 return value.forward(x)
 
-        m = torch.jit.script(Mod())
+        m = torch.jit.script(ModWithDict())
         m.eval()
-        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleDictIndex is not supported"):
+        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleContainerIndex is not supported"):
+            mf = torch._C._freeze_module(m._c)
+
+        class ModWithList(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.ModuleList([ImplementsInterface()])
+
+            def forward(self, x: torch.Tensor, idx: int) -> Any:
+                value: ModuleInterface = self.l[idx]
+                return value.forward(x)
+
+        m = torch.jit.script(ModWithList())
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleContainerIndex is not supported"):
             mf = torch._C._freeze_module(m._c)
 
     def test_freeze_non_module_class_getattr(self):
@@ -1730,3 +1768,50 @@ class TestFrozenOptimizations(JitTestCase):
             self.run_pass("convert_frozen_ops_to_mkldnn", frozen.graph)
             inp = torch.rand([4, 3, 4, 4])
             self.assertEqual(frozen(inp), mod(inp))
+
+    @unittest.skipIf(not TEST_CUDNN, "requires CUDNN")
+    def test_freeze_conv_relu_fusion(self):
+        conv_bias = [True, False]
+        conv_ops = [nn.Conv2d]
+        add_z = [True, False]
+        use_tracing = [True, False]
+        for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, add_z, use_tracing):
+            class Net(nn.Module):
+                def __init__(self, in_channels, out_channels, **kwargs):
+                    super(Net, self).__init__()
+                    self.conv = conv(in_channels, out_channels, bias=use_bias, **kwargs)
+                    self.relu = nn.ReLU(inplace=True)
+                    self.add_z = add_z
+
+                def forward(self, x):
+                    z = self.conv(x)
+                    out = self.conv(x)
+                    if self.add_z:
+                        out += z
+                    out = self.relu(out)
+                    return out
+
+            mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
+
+            inps = [5, 3, 4]
+            if conv == nn.Conv2d:
+                inps.append(inps[-1])
+            if conv == nn.Conv3d:
+                inps.append(inps[-1])
+                inps.append(inps[-1])
+            inp = torch.rand(inps).cuda()
+
+            if tracing:
+                scripted_mod = torch.jit.trace(mod_eager, (inp))
+            else:
+                scripted_mod = torch.jit.script(mod_eager)
+
+            frozen_mod = torch.jit.freeze(scripted_mod)
+            FileCheck().check("aten::relu").run(frozen_mod.graph)
+            self.run_pass("fuse_frozen_conv_add_relu", frozen_mod.graph)
+            if add_z:
+                FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
+            else:
+                FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
+
+            self.assertEqual(mod_eager(inp), frozen_mod(inp))

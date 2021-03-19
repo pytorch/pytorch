@@ -2987,6 +2987,9 @@ Computes the error function of each element. The error function is defined as fo
 .. math::
     \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erf`.
+
 Args:
     {input}
 
@@ -3009,6 +3012,9 @@ The complementary error function is defined as follows:
 .. math::
     \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erfc`.
+
 Args:
     {input}
 
@@ -3031,6 +3037,8 @@ The inverse error function is defined in the range :math:`(-1, 1)` as:
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erfinv`.
 
 Args:
     {input}
@@ -3248,6 +3256,36 @@ Example::
 
     >>> torch.frac(torch.tensor([1, 2.5, -3.2]))
     tensor([ 0.0000,  0.5000, -0.2000])
+""")
+
+add_docstr(torch.frexp,
+           r"""
+frexp(input, *, out=None) -> (Tensor mantissa, Tensor exponent)
+
+Decomposes :attr:`input` into mantissa and exponent tensors
+such that :math:`\text{input} = \text{mantissa} \times 2^{\text{exponent}}`.
+
+The range of mantissa is the open interval (-1, 1).
+
+Supports float inputs.
+
+Args:
+    input (Tensor): the input tensor
+
+
+Keyword args:
+    out (tuple, optional): the output tensors
+
+Example::
+
+    >>> x = torch.arange(9.)
+    >>> mantissa, exponent = torch.frexp(x)
+    >>> mantissa
+    >>> tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
+    >>> exponent
+    >>> tensor([0, 1, 2, 2, 3, 3, 3, 3, 4], dtype=torch.int32)
+    >>> torch.ldexp(mantissa, exponent)
+    tensor([0., 1., 2., 3., 4., 5., 6., 7., 8.])
 """)
 
 add_docstr(torch.from_numpy,
@@ -4847,7 +4885,7 @@ If :math:`m < n`, :func:`lstsq` solves the least-norm problem:
 
 .. math::
 
-   \begin{array}{ll}
+   \begin{array}{llll}
    \min_X & \|X\|_2 & \text{subject to} & AX = B.
    \end{array}
 
@@ -6650,21 +6688,9 @@ Example::
 
 add_docstr(torch.orgqr,
            r"""
-orgqr(input, input2) -> Tensor
+orgqr(input, tau) -> Tensor
 
-Computes the orthogonal matrix `Q` of a QR factorization, from the `(input, input2)`
-tuple returned by :func:`torch.geqrf`.
-
-This directly calls the underlying LAPACK function `?orgqr`.
-See `LAPACK documentation for orgqr`_ for further details.
-
-Args:
-    input (Tensor): the `a` from :func:`torch.geqrf`.
-    input2 (Tensor): the `tau` from :func:`torch.geqrf`.
-
-.. _LAPACK documentation for orgqr:
-    https://software.intel.com/en-us/mkl-developer-reference-c-orgqr
-
+Alias for :func:`torch.linalg.householder_product`.
 """)
 
 add_docstr(torch.ormqr,
@@ -8968,7 +8994,7 @@ Example::
 
 add_docstr(torch.triangular_solve,
            r"""
-triangular_solve(input, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+triangular_solve(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
 
 Solves a system of equations with a triangular coefficient matrix :math:`A`
 and multiple right-hand sides :math:`b`.
@@ -8980,11 +9006,11 @@ with the default keyword arguments.
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
 
-Supports real-valued and complex-valued inputs.
+Supports input of float, double, cfloat and cdouble data types.
 
 Args:
-    input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
-                :math:`*` is zero of more batch dimensions (:math:`b`)
+    b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
+                :math:`*` is zero of more batch dimensions
     A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
                 where :math:`*` is zero or more batch dimensions
     upper (bool, optional): whether to solve the upper-triangular system
@@ -9579,11 +9605,10 @@ Keyword args:
 
 Example::
 
-    >>> torch.empty(2, 3)
-    tensor(1.00000e-08 *
-           [[ 6.3984,  0.0000,  0.0000],
-            [ 0.0000,  0.0000,  0.0000]])
-
+    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
+    >>> torch.empty_like(a)
+    tensor([[0, 0, 0],
+            [0, 0, 0]], device='cuda:0', dtype=torch.int32)
 """.format(**factory_common_args))
 
 add_docstr(torch.empty_like,
