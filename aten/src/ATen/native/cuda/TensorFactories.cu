@@ -122,10 +122,10 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
   auto opt = TensorOptions().device(result.device());
 
   // See note [Number of bits required for randperm]
-  const double log_threshold = std::log(0.9);
+  const double log_threshold_12 = std::log(0.9) * 12;
   double nd = static_cast<double>(n);
   int bits = std::min(64,
-    static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / (12 * log_threshold)))));
+    static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / log_threshold_12))));
 
   if (n == 0) {
     return result;
