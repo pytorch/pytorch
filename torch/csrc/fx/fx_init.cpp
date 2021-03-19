@@ -8,7 +8,7 @@ struct ToRestore {
   PyObject* m_self;
   PyMethodDef* m_ml;
 #if PY_VERSION_HEX >= 0x03080000
-    vectorcallfunc vectorcall;
+  vectorcallfunc vectorcall;
 #endif
   PyObject* patched_method;
   PyObject* patch_fn;
@@ -23,7 +23,7 @@ PyObject* replacement_method(PyObject* self, PyObject* args, PyObject* kwargs) {
   patch_method_c->m_self = to_restore->m_self;
   patch_method_c->m_ml = to_restore->m_ml;
 #if PY_VERSION_HEX >= 0x03080000
-    patch_method_c->vectorcall = to_restore->vectorcall;
+  patch_method_c->vectorcall = to_restore->vectorcall;
 #endif
 
   if (kwargs) {
@@ -76,7 +76,7 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
   to_restore.m_self = patch_method_c->m_self;
   to_restore.m_ml = patch_method_c->m_ml;
 #if PY_VERSION_HEX >= 0x03080000
-    to_restore.vectorcall = patch_method_c->vectorcall;
+  to_restore.vectorcall = patch_method_c->vectorcall;
 #endif
 
   patch_method_c->m_self =
