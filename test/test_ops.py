@@ -402,7 +402,7 @@ class TestCommon(JitCommonTestCase):
                     '''
                     # remove the first input tensor
                     script = fn_template.format(
-                        c=", " if len(args_kw[1:]) > 1 else "",
+                        c=", " if len(args_kw[1:]) > 1 or len(args_annot_kw[1:]) >= 1 else "",
                         args_annot_kw=", ".join(args_annot_kw[1:]),
                         args_kw=", ".join(args_kw[1:]),
                         alias_name=variant_name,
@@ -430,7 +430,7 @@ class TestCommon(JitCommonTestCase):
                 scripted(*inp, *sample.args, **sample.kwargs)
                 inp = (clone_input_helper(input) for input in sample.input)
                 graph = scripted.graph_for(*inp, *sample.args, **sample.kwargs)
-                FileCheck().check(op_name).check_not(variant_name).run(graph)
+                FileCheck().check(op.aten_name).check_not(variant_name).run(graph)
 
             # Test tracing:
             for variant in variants:
