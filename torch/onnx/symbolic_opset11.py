@@ -933,5 +933,4 @@ def repeat_interleave(g, self, repeats, dim=None):
     # the zero'th dimension (by default). In order to avoid this and concatenate
     # along the dimension provided, some post-processing is required
     loop_out = g.op("Transpose", loop_out, perm_i=perm_i)
-    return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(input_sizes)))  
- 
+    return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(input_sizes)))
