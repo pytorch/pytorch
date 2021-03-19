@@ -17,9 +17,9 @@ from tools.codegen.utils import *
 
 try:
     # use faster C loader if available
-    from yaml import CLoader as Loader
+    from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import Loader  # type: ignore
+    from yaml import SafeLoader as Loader  # type: ignore
 
 def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
     with open(derivatives_yaml_path, 'r') as f:
