@@ -13,8 +13,11 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict
+from typing import Any, Dict, Optional, List, Tuple
 
+import monkeytype
+from monkeytype import trace as monkeytype_trace
+from _monkey_config_jit import JitTypeTraceStore, JitTypeTraceConfig
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -787,7 +790,7 @@ def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
-def script(obj, optimize=None, _frames_up=0, _rcb=None):
+def script(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional[List[Tuple]]=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
@@ -949,6 +952,13 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         )
 
     qualified_name = _qualified_name(obj)
+    if example_inputs:
+        s = JitTypeTraceStore()
+        monkeytype_config = JitTypeTraceConfig(s)
+        with monkeytype_trace(monkeytype_config):
+            for example_input in example_inputs:
+                obj(*example_input)
+
     if inspect.isclass(obj):
         # If this type is a `nn.Module` subclass, they probably meant to pass
         # an instance instead of a Module
