@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy,
     gradcheck, IS_WINDOWS)
 from torch.testing._internal.common_methods_invocations import (
-    unary_ufuncs)
+    unary_ufuncs, _NOTHING)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyOnCPUAndCUDA,
     onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
@@ -25,11 +25,7 @@ from torch.testing import (
 if TEST_SCIPY:
     import scipy
 
-def scipy_filter(op):
-    # Refer [scipy reference filter]
-    return op.ref is not None
-
-scipy_filtered_ufuncs = list(filter(scipy_filter, unary_ufuncs))
+reference_filtered_ops = list(filter(lambda op: op.ref is not _NOTHING, unary_ufuncs))
 
 # Tests for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -343,14 +339,14 @@ class TestUnaryUfuncs(TestCase):
     #   1D tensors and a large 2D tensor with interesting and extremal values
     #   and discontiguities.
     @suppress_warnings
-    @ops(scipy_filtered_ufuncs)
+    @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
         tensors = generate_numeric_tensors(device, dtype,
                                            domain=op.domain)
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @ops(scipy_filtered_ufuncs, allowed_dtypes=floating_and_complex_types_and(
+    @ops(reference_filtered_ops, allowed_dtypes=floating_and_complex_types_and(
         torch.bfloat16, torch.half, torch.int8, torch.int16, torch.int32, torch.int64
     ))
     def test_reference_numerics_hard(self, device, dtype, op):
@@ -362,7 +358,7 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @ops(scipy_filtered_ufuncs,
+    @ops(reference_filtered_ops,
          allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half))
     def test_reference_numerics_extremal(self, device, dtype, op):
         handles_extremals = (op.handles_complex_extremals if

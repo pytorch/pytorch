@@ -1516,6 +1516,55 @@ def sample_inputs_lerp(op_info, device, dtype, requires_grad):
     return samples
 
 
+def scipy_reference_wrapper(ref):
+    # Note [scipy reference filter]
+    # SciPy is not available in all build environments.
+    # If an operator uses a scipy function for reference and Scipy
+    # is not available, we return `_NOTHING`.
+    #
+    # This way we can skip reference tests where Scipy is required
+    # but not available while allowing other tests which don't depend
+    # on reference function.
+
+    # Note: reference wrapped with this function may unconditionally call scipy,
+    #       as they would only be executed if SciPy is available.
+    if TEST_SCIPY:
+        return ref
+
+    return _NOTHING
+
+
+def reference_sigmoid(x):
+    # 'scipy.special.expit' not supported for the input types
+    if x.dtype in [np.complex64, np.complex128]:
+        return (1 / (1 + np.exp(-x)))
+    return scipy.special.expit(x)
+
+
+def reference_lgamma(x):
+    # scipy.special.gammaln returns `-inf` when input is `-inf`.
+    # While Pytorch, C and C++, all return `inf` when input is `-inf`.
+    # Reference:
+    # https://en.cppreference.com/w/cpp/numeric/math/lgamma
+    # https://en.cppreference.com/w/c/numeric/math/lgamma
+
+    # To handle the above discrepancy,
+    # we replace -inf with inf so values
+    # that were originally -inf map to inf as expected
+    if x.dtype.kind == 'f':
+        x = np.where(x == float('-inf'), np.array(float('inf'), dtype=x.dtype), x)
+
+    out = scipy.special.gammaln(x)
+
+    if x.dtype == np.float16:
+        # `scipy.special.gammaln` returns output of float32 when input is float16,
+        # while `torch.lgamma` preserves `float16`. But due to smaller range of float16,
+        # Pytorch version outputs `inf` while SciPy returns finite values.
+        out = out.astype(np.float16)
+
+    return out
+
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -2949,69 +2998,9 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
            test_inplace_grad=False,
            supports_out=False,
-           sample_inputs_func=sample_inputs_trace)
-]
-
-
-def scipy_wrapper(ref_name):
-    if TEST_SCIPY:
-        return _getattr_qual(scipy, ref_name)
-
-    # Note: [scipy reference filter]
-    # SciPy is not available in all build environments.
-    # If an operator uses a scipy function for reference and Scipy
-    # is not available, we return `None`.
-    #
-    # This way we can skip reference tests where Scipy is required
-    # but not available while allowing other tests which don't depend
-    # on reference function.
-    return None
-
-
-def scipy_manual_reference_wrapper(ref):
-    # Refer [scipy reference filter]
-    # Note: reference wrapped with this function may unconditionally call scipy,
-    #       as they would only be executed if SciPy is available.
-    if TEST_SCIPY:
-        return ref
-
-    return None
-
-
-def reference_sigmoid(x):
-    # 'scipy.special.expit' not supported for the input types
-    if x.dtype in [np.complex64, np.complex128]:
-        return (1 / (1 + np.exp(-x)))
-    return scipy.special.expit(x)
-
-
-def reference_lgamma(x):
-    # scipy.special.gammaln returns `-inf` when input is `-inf`.
-    # While Pytorch, C and C++, all return `inf` when input is `-inf`.
-    # Reference:
-    # https://en.cppreference.com/w/cpp/numeric/math/lgamma
-    # https://en.cppreference.com/w/c/numeric/math/lgamma
-
-    # To handle the above discrepancy,
-    # we replace -inf with inf so values
-    # that were originally -inf map to inf as expected
-    if x.dtype.kind == 'f':
-        x = np.where(x == float('-inf'), np.array(float('inf'), dtype=x.dtype), x)
-
-    out = scipy.special.gammaln(x)
-
-    if x.dtype == np.float16:
-        # `scipy.special.gammaln` returns output of float32 when input is float16,
-        # while `torch.lgamma` preserves `float16`. But due to smaller range of float16,
-        # Pytorch version outputs `inf` while SciPy returns finite values.
-        out = out.astype(np.float16)
-
-    return out
-
-
-op_db_scipy_reference: List[OpInfo] = [
+           sample_inputs_func=sample_inputs_trace),
     UnaryUfuncInfo('sigmoid',
-                   ref=scipy_manual_reference_wrapper(reference_sigmoid),
+                   ref=scipy_reference_wrapper(reference_sigmoid),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
                    skips=(
@@ -3033,7 +3022,7 @@ op_db_scipy_reference: List[OpInfo] = [
                    assert_autodiffed=True,
                    test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
     UnaryUfuncInfo('digamma',
-                   ref=scipy_wrapper("special.digamma"),
+                   ref=scipy_reference_wrapper(lambda x: scipy.special.digamma(x)),
                    decorators=(precisionOverride({torch.float16: 5e-1}),),
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCPU=all_types_and(torch.bool),
@@ -3046,7 +3035,7 @@ op_db_scipy_reference: List[OpInfo] = [
                                 device_type='cuda', dtypes=[torch.float16]),),
                    safe_casts_outputs=True),
     UnaryUfuncInfo('erf',
-                   ref=scipy_wrapper("special.erf"),
+                   ref=scipy_reference_wrapper(lambda x: scipy.special.erf(x)),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
                    dtypes=all_types_and(torch.bool),
@@ -3059,7 +3048,7 @@ op_db_scipy_reference: List[OpInfo] = [
                    assert_autodiffed=True,
                    safe_casts_outputs=True),
     UnaryUfuncInfo('erfc',
-                   ref=scipy_wrapper("special.erfc"),
+                   ref=scipy_reference_wrapper(lambda x: scipy.special.erfc(x)),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
                    dtypes=all_types_and(torch.bool),
@@ -3072,7 +3061,7 @@ op_db_scipy_reference: List[OpInfo] = [
                    assert_autodiffed=True,
                    safe_casts_outputs=True),
     UnaryUfuncInfo('erfinv',
-                   ref=scipy_wrapper("special.erfinv"),
+                   ref=scipy_reference_wrapper(lambda x: scipy.special.erfinv(x)),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2,
                                                   torch.float32: 1e-4}),),
@@ -3084,18 +3073,18 @@ op_db_scipy_reference: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                active_if=LooseVersion(scipy.__version__) < "1.4.0"),
+                                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                active_if=LooseVersion(scipy.__version__) < "1.4.0"),
+                                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                active_if=LooseVersion(scipy.__version__) < "1.4.0"),
+                                active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
                        # RuntimeError: "pow" not implemented for 'BFloat16'
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 dtypes=[torch.bfloat16]),
                    )
                    ),
     UnaryUfuncInfo('lgamma',
-                   ref=scipy_manual_reference_wrapper(reference_lgamma),
+                   ref=scipy_reference_wrapper(reference_lgamma),
                    aliases=('special.gammaln', ),
                    decorators=(precisionOverride({torch.float16: 7e-1}),),
                    dtypes=all_types_and(torch.bool),
@@ -3125,7 +3114,7 @@ op_db_scipy_reference: List[OpInfo] = [
                    ),
                    safe_casts_outputs=True),
     UnaryUfuncInfo('logit',
-                   ref=scipy_wrapper("special.logit"),
+                   ref=scipy_reference_wrapper(lambda x: scipy.special.logit(x)),
                    domain=(0, 1),
                    decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                   torch.float16: 5e-1}),),
@@ -3136,7 +3125,6 @@ op_db_scipy_reference: List[OpInfo] = [
                    safe_casts_outputs=True),
 ]
 
-op_db = op_db + op_db_scipy_reference
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
