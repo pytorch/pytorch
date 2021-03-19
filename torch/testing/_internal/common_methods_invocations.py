@@ -1547,18 +1547,16 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
 
 
 def sample_inputs_entr(op_info, device, dtype, requires_grad):
-    low, high = op_info.domain
-    low = low if low is None else low + op_info._domain_eps
-    high = high if high is None else high - op_info._domain_eps
+    low, _ = op_info.domain
 
     if requires_grad:
         low = 0
 
     return (SampleInput(make_tensor((L,), device, dtype,
-                                    low=low, high=high,
+                                    low=low,
                                     requires_grad=requires_grad)),
             SampleInput(make_tensor((), device, dtype,
-                                    low=low, high=high,
+                                    low=low,
                                     requires_grad=requires_grad)))
 
 

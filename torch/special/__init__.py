@@ -9,11 +9,11 @@ Tensor = torch.Tensor
 entr = _add_docstr(_special.special_entr,
                    r"""
 entr(input, *, out=None) -> Tensor
-Computes the entropy on :attr:`input`, elementwise.
+Computes the entropy on :attr:`input` (as defined below), elementwise.
 
 .. math::
     \text{entr(x)} = \begin{cases}
-        -x * \log(x)  & x > 0 \\
+        -x * \ln(x)  & x > 0 \\
         0 &  x = 0.0 \\
         -\infty & x < 0
     \end{cases}
