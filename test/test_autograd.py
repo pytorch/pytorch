@@ -3955,7 +3955,7 @@ class TestAutograd(TestCase):
         gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp, nondet_tol=1e-5, check_batched_grad=False)
         gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp, nondet_tol=1e-5, check_batched_grad=False)
 
-    def test_gradcheck_test_inputs(self):
+    def test_gradcheck_validates_inputs(self):
         # when inputs are not dense, but check_sparse_nnz is false
         x = torch.rand(10, requires_grad=True).to_sparse()
         with self.assertRaisesRegex(RuntimeError, 'dense when check_sparse_nnz is set to False.'):
@@ -4034,24 +4034,24 @@ class TestAutograd(TestCase):
                                    raise_exception=False))
 
         # when backward not multiplied by grad_output (non-sparse case)
-        def fn(x):
+        def fn2(x):
             y = x.clone()
             y.register_hook(lambda x: x + 1e-2)
             return y
         x = torch.ones(1, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, 'backward not multiplied by grad_output'):
-            gradcheck(fn, (x,), atol=1e-1)
-        self.assertFalse(gradcheck(fn, (x,), atol=1e-1, raise_exception=False))
+            gradcheck(fn2, (x,), atol=1e-1)
+        self.assertFalse(gradcheck(fn2, (x,), atol=1e-1, raise_exception=False))
 
         # when backward not multiplied by grad_output (sparse case)
-        def fn(x):
+        def fn3(x):
             y = x.clone().to_dense()
             y.register_hook(lambda x: x + 1e-2)
             return y
         x = torch.ones(1, requires_grad=True).to_sparse()
         with self.assertRaisesRegex(RuntimeError, 'backward not multiplied by grad_output'):
-            gradcheck(fn, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False)
-        self.assertFalse(gradcheck(fn, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False,
+            gradcheck(fn3, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False)
+        self.assertFalse(gradcheck(fn3, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False,
                                    raise_exception=False))
 
         # when layout of grad_input is not the same as input
@@ -4083,14 +4083,8 @@ class TestAutograd(TestCase):
                 gradcheck(fn, (x,))
             self.assertFalse(gradcheck(fn, (x,), raise_exception=False))
 
-        # TODO: when we complete backward but grad inputs (the output of .grad()) is not none
-
-    def test_gradcheck_check_analytical_jacobian_attributes(self):
-        # TODO: when grad_input is incorrect dtype/size
-        pass
-
     def test_gradcheck_jacobian_mismatch(self):
-        def fn(x):
+        def fn(x):  # R -> R, C -> C
             y = x.clone()
             y.register_hook(lambda x: x + 1e-2)
             return y
@@ -4098,6 +4092,28 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Jacobian mismatch for output 0 with respect to input 0'):
             gradcheck(fn, (x,))
         self.assertFalse(gradcheck(fn, (x,), raise_exception=False))
+
+        x_c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
+        with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
+            gradcheck(fn, (x_c,))
+        self.assertFalse(gradcheck(fn, (x_c,), raise_exception=False))
+
+        def fn2(x):  # R -> C
+            y = torch.complex(x, x)
+            y.register_hook(lambda x: x + 1e-2)
+            return y
+        x = torch.ones(2, 2, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
+            gradcheck(fn2, (x,))
+        self.assertFalse(gradcheck(fn2, (x,), raise_exception=False))
+
+        def fn3(x):  # C -> R
+            y = torch.real(x)
+            y.register_hook(lambda x: x + 1e-2)
+            return y
+        with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1'):
+            gradcheck(fn3, (x_c,))
+        self.assertFalse(gradcheck(fn3, (x_c,), raise_exception=False))
 
     def test_version_counter(self):
         x = torch.randn(1, 2)
