@@ -107,15 +107,15 @@ class Tracer(TracerBase):
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap().
 
-            Allows you to enable/disable monkeypatching of torch functions at the
-            C-level (which captures functins like randn).
+            enable:cpatching (bool): defaults to `True`,
+                Allows you to enable/disable monkeypatching of torch functions at the
+                C-level (which captures functins like randn).
 
-            C-level monkeypatching works by directly modifying the PyCFunctionObject*
-            so that calling it returns a different function.
+                C-level monkeypatching works by directly modifying the PyCFunctionObject*
+                so that calling it returns a different function.
 
-            Turning this on is likely to slow down tracing performance.
+                Turning this on is likely to slow down tracing by 1.5-3x.
 
-            This is enabled by default.
         """
 
         super().__init__()
@@ -663,6 +663,7 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optio
         root (Union[torch.nn.Module, Callable]): Module or function to be traced and converted
             into a Graph representation.
         concrete_args (Optional[Dict[str, any]]): Concrete arguments that should not be treated as Proxies.
+        enable_cpatching: Enables C-level patching of functions (captures things like `torch.randn`)
 
     Returns:
         GraphModule: a Module created from the recorded operations from ``root``.
