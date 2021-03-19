@@ -12,6 +12,10 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/LinearAlgebra.h>
+#include <ATen/native/IndexingUtils.h>
+#include <ATen/native/ReduceOps.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
@@ -28,6 +32,7 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(addr_stub);
+DEFINE_DISPATCH(linalg_vector_norm_stub);
 
 // Helper function for det methods.
 // For pivoted LU factorization A = P * L * U. Since we always have det(L) = 1,
@@ -1767,51 +1772,6 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
   return result;
 }
 
-// Performs vector norm
-// This function mostly serves as a wrapper for at::norm, but it overrides a few cases
-// for numpy compatibility. These cases are corrected within this wrapper, rather than
-// in at::norm itself, to avoid breaking backward compatibility.
-static Tensor& _linalg_norm_vector_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, std::vector<int64_t> dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  Tensor result_;
-  bool case_was_overridden = false;
-  if (opt_ord.has_value()) {
-    TORCH_INTERNAL_ASSERT(dim.size() == 1);
-    auto ord = opt_ord.value().toDouble();
-    Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
-    if (std::abs(ord) == INFINITY) {
-      // The ord = +/-infinity case is overridden because at::norm does not match numpy
-      // when the input contains extreme values (like nan or +/-inf) or if the input
-      // size is degenerate (like size(0), size(0, N), etc)
-      case_was_overridden = true;
-      self_ = self_.abs();
-      result_ = _norm_min_max(self_, ord, dim[0], keepdim);
-    } else if ((self_.numel() == 0) && (ord < 0)) {
-      // For negative orders with degenerate input sizes, at::norm's result does not
-      // match numpy. It should always be infinity.
-      auto mask = make_dim_mask(dim[0], self_.dim());
-      allocate_reduction_result(result, self_, mask, keepdim, result.scalar_type());
-      return result.fill_(INFINITY);
-    }
-  } else {
-    // If ord == None, need to check for unique dims because at::norm does not check it
-    // for this case.
-    std::vector<int64_t> dim_(dim);
-    maybe_wrap_dims(dim_, self.dim());
-    bool unique_dims = (std::unique(dim_.begin(), dim_.end())) == dim_.end();
-    TORCH_CHECK(unique_dims, "Expected dims to be different, got this instead: (", dim, ")");
-  }
-  if (!case_was_overridden) {
-    if (opt_dtype.has_value()) {
-      result_ = at::norm(self.to(opt_dtype.value()), opt_ord, dim, keepdim);
-    } else {
-      result_ = at::norm(self, opt_ord, dim, keepdim);
-    }
-  }
-  resize_output(result, result_.sizes());
-  result.copy_(result_);
-  return result;
-}
-
 static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const optional<Scalar>& opt_num_ord, optional<std::string> opt_str_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   // Callers must give the ord argument as either a number, a string, or neither.
   // Since the user-facing API has no direct control over how this function is called, this is an internal assert.
@@ -1840,7 +1800,11 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
     // 'ord' is int or None
     std::vector<int64_t> dim_ = opt_dim.has_value() ? opt_dim.value().vec() : make_dim_list(ndim);
     if (!opt_num_ord.has_value() || dim_.size() == 1) {
-      _linalg_norm_vector_out(result, self, opt_num_ord, dim_, keepdim, opt_dtype);
+      Tensor result_ = at::linalg_vector_norm(self, opt_num_ord, opt_dim, keepdim, opt_dtype);
+      // TODO: Resize and copy should be avoided with
+      //       https://github.com/pytorch/pytorch/issues/52712
+      resize_output(result, result_.sizes());
+      result.copy_(result_);
     } else if (dim_.size() == 2) {
       _linalg_norm_matrix_out(result, self, opt_num_ord.value(), dim_, keepdim, opt_dtype);
     } else {
@@ -1849,6 +1813,90 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, const op
     }
   }
   return result;
+}
+
+static Tensor& linalg_vector_norm_impl(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
+  // Casting a large integer to a double will introduce some error, but for
+  // practical purposes, it won't matter since a large order will usually
+  // give an infinite result
+  auto ord = opt_ord.value_or(2).toDouble();
+
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "linalg.vector_norm only supports CPU and CUDA device types, but got: ",
+              self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "linalg.vector_norm only supports strided layout, but got: ", self.layout());
+
+  if (opt_dtype.has_value() && isComplexType(self.scalar_type())) {
+    TORCH_CHECK(isComplexType(opt_dtype.value()),
+      "linalg.vector_norm expected complex 'dtype', since input is complex, ",
+      "but got ", opt_dtype.value());
+  }
+
+  ScalarType in_dtype = opt_dtype.value_or(self.scalar_type());
+  TORCH_CHECK(
+      at::isFloatingType(in_dtype) || at::isComplexType(in_dtype),
+      "linalg.vector_norm only supports floating point and complex dtypes, but got: ",
+      toString(in_dtype));
+
+  IntArrayRef dim = opt_dim.value_or(IntArrayRef{});
+
+  if (self.numel() == 0) {
+    // TODO: The question about how to handle negative orders when the input
+    // is empty has not been settled yet. For now, we raise an error. Issue:
+    // https://github.com/pytorch/pytorch/issues/52783
+    TORCH_CHECK(ord >= 0,
+      "linalg.vector_norm of negative order cannot be performed on an empty tensor");
+
+    // For NumPy compatibility, we can only perform order infinity reduction
+    // (max/min) on a tensor with zero elements if the dimensions to reduce are
+    // nonzero. Otherwise, throw an error.
+    if (ord == INFINITY) {
+      bool has_identity = true;
+
+      if (dim.size() == 0) {
+        has_identity = false;
+      } else {
+        for (int64_t dim_num : dim) {
+          if (self.size(dim_num) == 0) {
+            has_identity = false;
+            break;
+          }
+        }
+      }
+      TORCH_CHECK(has_identity,
+        "linalg.vector_norm cannot compute the infinity norm on an empty ",
+        "dimension because the operation does not have an identity");
+    }
+  }
+  Tensor self_;
+  if (self.device().type() == c10::kCPU && isComplexType(self.scalar_type()) && std::abs(ord) == INFINITY) {
+    // TODO: This at::abs() call is used so that the at::abs() call in the
+    // backward function produces an identical result for complex inputs.
+    // However, it would be ideal if we could incorporate this into
+    // linalg_vector_norm_stub. See issue:
+    // https://github.com/pytorch/pytorch/issues/52648
+    self_ = self.to(in_dtype).abs();
+    in_dtype = toValueType(in_dtype);
+  } else {
+    self_ = self;
+  }
+  ScalarType out_dtype = opt_dtype.value_or(toValueType(self.scalar_type()));
+  TORCH_CHECK(!result.defined() || out_dtype == result.scalar_type(),
+    "linalg.vector_norm expected out tensor dtype ", out_dtype,
+    " but got: ", result.scalar_type());
+  auto iter = make_reduction("vector_norm", result, self_, dim, keepdim, in_dtype, out_dtype);
+  linalg_vector_norm_stub(iter.device_type(), iter, ord);
+  return result;
+}
+
+Tensor linalg_vector_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  Tensor result;
+  return at::native::linalg_vector_norm_impl(self, opt_ord, opt_dim, keepdim, opt_dtype, result);
+}
+
+Tensor& linalg_vector_norm_out(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
+  return at::native::linalg_vector_norm_impl(self, opt_ord, opt_dim, keepdim, opt_dtype, result);
 }
 
 // Numerical or None norms
