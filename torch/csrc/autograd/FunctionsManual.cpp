@@ -41,18 +41,18 @@ bool isDefined(const c10::optional<Tensor>& t) {
 }
 
 bool isFwGradDefined(const c10::optional<Tensor>& t) {
-  return t.has_value() && t->defined() && t->fw_grad(/*level */ 0).defined();
+  return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
 }
 
-Tensor toLegacyTensor(const c10::optional<Tensor>& t) {
+Tensor toNonOptTensor(const c10::optional<Tensor>& t) {
   return t.has_value() ? *t : Tensor();
 }
 
-Tensor toLegacyFwGrad(const c10::optional<Tensor>& t) {
-  return (t.has_value() && t->defined()) ? t->fw_grad(/*level */ 0) : Tensor();
+Tensor toNonOptFwGrad(const c10::optional<Tensor>& t) {
+  return (t.has_value() && t->defined()) ? t->_fw_grad(/*level */ 0) : Tensor();
 }
 
-Tensor toLegacyPrimal(const c10::optional<Tensor>& t) {
+Tensor toNonOptPrimal(const c10::optional<Tensor>& t) {
   return (t.has_value() && t->defined()) ? t->_fw_primal(/*level */ 0) : Tensor();
 }
 
@@ -212,6 +212,53 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   } else {
     self_scaled = self * self.abs().pow(p - 2);
     scale_v = grad / norm.pow(p - 1);
+  }
+  // handle case at 0 where we return a subgradient containing 0
+  scale_v.masked_fill_(norm == 0, 0);
+  return self_scaled * scale_v;
+}
+
+Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const optional<Scalar>& opt_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
+  size_t ndim = self.sizes().size();
+  auto ord = opt_ord.value_or(2.0).toDouble();
+  auto dim = opt_dim.value_or(IntArrayRef({}));
+  Tensor self_scaled;
+  Tensor scale_v;
+
+  if (!keepdim && self.dim() != 0) {
+    grad = unsqueeze_multiple(grad, dim, ndim);
+    norm = unsqueeze_multiple(norm, dim, ndim);
+  }
+
+  if (ord == 0.0) {
+    return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  } else if (ord == 1.0) {
+    return self.sgn() * grad;
+  } else if (ord == 2.0) {
+    self_scaled = self;
+    scale_v = grad / norm;
+  } else if (std::isinf(ord)) {
+    // Find the elements from `self` that equal the norm result
+    Tensor is_equal_to_norm;
+
+    is_equal_to_norm = (self.abs() == norm);
+
+    // Need to explicitly check for nan in the input and output since `nan ==
+    // nan` is false
+    is_equal_to_norm = is_equal_to_norm.logical_or_(self.isnan().logical_and_(norm.isnan())).type_as(self);
+
+    self_scaled = self.sgn() * is_equal_to_norm;
+    Tensor nb_max = is_equal_to_norm.count_nonzero(dim);
+    if (self.dim() != 0) {
+      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
+    }
+    scale_v = grad / nb_max;
+  } else if (ord < 2.0) {
+    self_scaled = self.sgn() * self.abs().pow(ord - 1);
+    scale_v = grad / norm.pow(ord - 1);
+  } else {
+    self_scaled = self * self.abs().pow(ord - 2);
+    scale_v = grad / norm.pow(ord - 1);
   }
   // handle case at 0 where we return a subgradient containing 0
   scale_v.masked_fill_(norm == 0, 0);
@@ -2739,11 +2786,11 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
   // for half inputs, save_mean, save_invstd are float (ideally, we would cast
   // everything else, but not now)
-  auto mu = unsqueeze_dim1(training ? toLegacyTensor(save_mean).to(input.scalar_type()) : toLegacyTensor(running_mean), input);
+  auto mu = unsqueeze_dim1(training ? toNonOptTensor(save_mean).to(input.scalar_type()) : toNonOptTensor(running_mean), input);
   auto input_sub_mu = input - mu;
   auto sigma2_eps_neg_1_2 = unsqueeze_dim1(
-      training ? toLegacyTensor(save_invstd).to(input.scalar_type())
-               : toLegacyTensor(running_var).add(Scalar(eps)).pow(-0.5),
+      training ? toNonOptTensor(save_invstd).to(input.scalar_type())
+               : toNonOptTensor(running_var).add(Scalar(eps)).pow(-0.5),
       input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
@@ -2922,10 +2969,10 @@ infinitely_differentiable_native_layer_norm_backward(
   if (grad_input_mask[1] && dY.defined()) {
     dgamma = (dY_tensor * (X_tensor - mean_tensor) * rstd_tensor)
                  .sum(0)
-                 .reshape_as(toLegacyTensor(gamma));
+                 .reshape_as(toNonOptTensor(gamma));
   }
   if (grad_input_mask[2] && dY.defined()) {
-    dbeta = dY_tensor.sum(0).reshape_as(toLegacyTensor(gamma));
+    dbeta = dY_tensor.sum(0).reshape_as(toNonOptTensor(gamma));
   }
 
   return std::make_tuple(dX, dgamma, dbeta);
@@ -3011,10 +3058,10 @@ infinitely_differentiable_native_group_norm_backward(
     }
   }
   if (grad_input_mask[1] && dY.defined()) {
-    dgamma = ((ds - db * mean_tensor) * rstd_tensor).sum(0).reshape_as(toLegacyTensor(gamma));
+    dgamma = ((ds - db * mean_tensor) * rstd_tensor).sum(0).reshape_as(toNonOptTensor(gamma));
   }
   if (grad_input_mask[2] && dY.defined()) {
-    dbeta = db.sum(0).reshape_as(toLegacyTensor(gamma));
+    dbeta = db.sum(0).reshape_as(toNonOptTensor(gamma));
   }
 
   return std::make_tuple(dX, dgamma, dbeta);
