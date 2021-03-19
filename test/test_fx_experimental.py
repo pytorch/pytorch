@@ -883,6 +883,19 @@ class {test_classname}(torch.nn.Module):
             if node.target == torch.add:
                 assert len(node.args) == 0
 
+        # Tensor/scalar
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.add(3, x)
+
+        traced = torch.fx.symbolic_trace(Foo())
+        normalized = NormalizeArgs(traced).transform()
+        x, y = torch.randn(3, 4), torch.randn(3, 4)
+        torch.testing.assert_allclose(normalized(x, y), traced(x, y))
+        for node in normalized.graph.nodes:
+            if node.target == torch.add:
+                assert len(node.args) == 0
+
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
         m = resnet18()

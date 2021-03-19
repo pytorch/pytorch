@@ -137,6 +137,12 @@ class NormalizeArgs(Transformer):
                         if isinstance(bound_arg, torch.fx.Proxy):
                             if parameter.annotation is not torch.Tensor:
                                 raise TypeError()
+                        elif parameter.annotation is torch.Tensor:
+                            # Python arg parser accepts int, float and complex for Tensor-typed
+                            # parameters
+                            # https://github.com/pytorch/pytorch/blob/19792b45dbf30b4555c4a87512e624cdd4aa6e4c/torch/csrc/utils/python_arg_parser.cpp#L1077-L1100?  # noqa
+                            if type(bound_arg) not in {torch.Tensor, int, float, complex}:
+                                raise TypeError()
                         elif not issubclass(type(bound_arg), parameter.annotation):
                             raise TypeError()
                 found_signature = candidate_signature
