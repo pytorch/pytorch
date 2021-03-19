@@ -7812,16 +7812,17 @@ sgn(input, *, out=None) -> Tensor
 
 Returns a new tensor with the signs (definition below) of the elements of :attr:`input`.
 
+This function is an extension of torch.sign() to complex tensors.
+It is equivalent to torch.sign() for non-complex tensors,
+and for complex tensors it computes a new tensor whose elements have
+the same angles as the corresponding elements of :attr:`input` and
+absolute values (i.e. magnitudes) of one.
+
 .. math::
     \text{out}_{i} = \begin{cases}
                     0 & |\text{{input}}_i| == 0 \\
                     \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|} & \text{otherwise}
                     \end{cases}
-
-.. note::
-    For complex tensors, this function returns a new tensor whose elements
-    have the same angles as the corresponding elements of :attr:`input`
-    and absolute values (i.e. magnitudes) of one.
 
 """ + r"""
 Args:
