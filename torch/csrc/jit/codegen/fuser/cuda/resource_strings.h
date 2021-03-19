@@ -14,8 +14,7 @@ not know how to handle int*_t integer types, so typedefs help it handle those
 cases*/
 
 #ifdef __HIP_PLATFORM_HCC__
-static auto type_declarations_template = CodeTemplate(
-R"(
+static auto type_declarations_template = CodeTemplate(R"(
 ${RuntimeHeader}
 ${HalfHeader}
 ${RandHeader}
@@ -212,7 +211,7 @@ void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
 // converted to half with __float2half() when writing to a half tensor.
 #ifdef __HIP_PLATFORM_HCC__
 constexpr auto half_support_literal =
-R"(
+    R"(
 typedef __half half;
 )";
 #else
