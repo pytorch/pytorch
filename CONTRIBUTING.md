@@ -738,11 +738,11 @@ Please follow the lead of the other tests to see how to write a new test case.
 
 ### GDB integration
 
-If you are debugging pytorch inside gdb, you might be interested in
-[pytorch-gdb](tools/gdb/pytorch-gdb.py). This script extends GDB by
-introducing some pytorch-specific commands which you can use from the GDB
-prompt. In particular, `torch-tensor-repr` prints a human-readable repr of an
-at::Tensor object. Example of usage:
+If you are debugging pytorch inside GDB, you might be interested in
+[pytorch-gdb](tools/gdb/pytorch-gdb.py). This script introduces some
+pytorch-specific commands which you can use from the GDB prompt. In
+particular, `torch-tensor-repr` prints a human-readable repr of an at::Tensor
+object. Example of usage:
 
 ```
 $ gdb python
@@ -773,8 +773,7 @@ tensor([1., 2., 3., 4.], dtype=torch.float64)
 ```
 
 GDB tries to automatically load `pytorch-gdb` thanks to the
-[.gdbinit](.gdbinit) at the root of the pytorch repo. Howevever, due to
-security reasons GDB refuses to load it:
+[.gdbinit](.gdbinit) at the root of the pytorch repo. Howevever, auto-loadings is disabled by default, because of security reasons:
 
 ```
 $ gdb
@@ -793,7 +792,7 @@ For more information about this security protection see the
 
 As gdb itself suggests, the best way to enable auto-loading of `pytorch-gdb`
 is to add the following line to your `~/.gdbinit` (i.e., the `.gdbinit` file
-which is in your home # directory, NOT `/path/to/pytorch/.gdbinit`):
+which is in your home directory, **not** `/path/to/pytorch/.gdbinit`):
 ```
 add-auto-load-safe-path /path/to/pytorch/.gdbinit
 ```
