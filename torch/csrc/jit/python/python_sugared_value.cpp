@@ -1,22 +1,17 @@
 #include <torch/csrc/jit/python/python_sugared_value.h>
 
-#include <pybind11/cast.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
-//#include <torch/csrc/jit/cuda/cuda.h>
 #include <climits>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
-#include "ATen/core/ivalue.h"
-#include "ATen/core/jit_type.h"
-#include "ATen/core/qualified_name.h"
 
 #include <Python.h>
 
@@ -250,11 +245,12 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     }
   }
 
-  py::object member = getattr(loc, field);
   if (field == "Stream" || field == "Event") {
     auto class_type = getCustomClass("__torch__.torch.classes.cuda." + field);
     return std::make_shared<ClassValue>(class_type);
   }
+
+  py::object member = getattr(loc, field);
   // note: is_constant = true because we consider that global properties
   // on modules like math.pi or torch.float to be constants
   // even though it is possible, though rare, for someone to mutate them
