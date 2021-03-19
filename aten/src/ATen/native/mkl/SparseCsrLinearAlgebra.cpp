@@ -9,7 +9,7 @@
 namespace at {
 namespace native {
 using namespace at::sparse;
-Tensor _sparse_mm_mkl_(
+TORCH_API Tensor _sparse_mm_mkl_(
     Tensor& self,
     const SparseTensor& sparse_,
     const Tensor& dense,
@@ -165,7 +165,7 @@ static bool inline is_mkl_int32_index() {
 #endif
 }
 
-Tensor _sparse_mm_mkl_(
+TORCH_API Tensor _sparse_mm_mkl_(
     Tensor& self,
     const SparseTensor& sparse_,
     const Tensor& dense,
