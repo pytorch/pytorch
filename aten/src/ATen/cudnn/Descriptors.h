@@ -301,6 +301,23 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
 #endif
 };
 
+struct TORCH_CUDA_CPP_API ActivationDescriptor
+    : public Descriptor<
+          cudnnActivationStruct,
+          &cudnnCreateActivationDescriptor,
+          &cudnnDestroyActivationDescriptor> {
+  void set(cudnnActivationMode_t mode) {
+    AT_ASSERT(
+        mode == CUDNN_ACTIVATION_RELU,
+        "TODO: support more cuDNN activation modes");
+    AT_CUDNN_CHECK(cudnnSetActivationDescriptor(
+        mut_desc(),
+        mode,
+        cudnnNanPropagation_t::CUDNN_NOT_PROPAGATE_NAN,
+        std::numeric_limits<double>::max()));
+  }
+};
+
 union Constant
 {
   float f;
