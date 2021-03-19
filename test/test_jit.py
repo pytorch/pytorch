@@ -10274,7 +10274,7 @@ dedent """
         def complex_fn(x, y):
             # type: (complex, BroadcastingList3[complex]) -> List[complex]
             return y
-        self.assertEqual(complex_fn(2.0 + 2j, 1.0 + 2j), complex_fn(2.0+4j, [1.0 + 2j, 1.0 + 2j, 1.0 + 2j]))
+        self.assertEqual(complex_fn(2.0 + 2j, 1.0 + 2j), complex_fn(2.0 + 4j, [1.0 + 2j, 1.0 + 2j, 1.0 + 2j]))
         self.assertEqual(complex_fn(2.0 + 4j, 1.0 + 2j), complex_fn(1.0 + 2j, (1.0 + 2j, 1.0 + 2j, 1.0 + 2j)))
 
         # @torch.jit.script
@@ -13446,20 +13446,20 @@ dedent """
         self.assertEqual(opt_list_tuple_caller((2., 3.)), 4)
 
         @torch.jit.script
-        def opt_list(x):
+        def opt_list_complex(x):
             # type: (Optional[List[complex]]) -> int
             return 2
 
         @torch.jit.script
-        def broadcast_opt_list(x):
+        def broadcast_opt_list_complex(x):
             # type: (Optional[BroadcastingList2[complex]]) -> int
             return 2
 
         @torch.jit.script
-        def opt_list_tuple_caller(x):
+        def opt_list_tuple_caller_complex(x):
             # type: (Tuple[complex, complex]) -> int
-            return opt_list(x) + broadcast_opt_list(x)
-        self.assertEqual(opt_list_tuple_caller((2.3 - 5.2j, -3.2j)), 4)
+            return opt_list_complex(x) + broadcast_opt_list_complex(x)
+        self.assertEqual(opt_list_tuple_caller_complex((2.3 - 5.2j, -3.2j)), 4)
 
     def test_lhs_indexing(self):
         def foo(a, b):
