@@ -438,8 +438,13 @@ def compute_out_convention_refactor(g: Union[StructuredNativeFunctions, NativeFu
     for n in ns:
         if n in seen:
             continue
-        if "legacy::" in n:
+
+        # special mode, only generate command for legacy methods
+        if "legacy::" not in n:
             continue
+
+        n = n.split('::')[-1]
+
         seen.add(n)
 
         opt_tensor_index = []
@@ -495,7 +500,7 @@ def compute_out_convention_refactor(g: Union[StructuredNativeFunctions, NativeFu
     
     {g.loc}
     fastmod '{method_match}{params_match}' '{output_header_pattern}
-{output_body_pattern}' aten/src/ATen/native/
+{output_body_pattern}' aten/src/ATen/cuda/LegacyTHFunctionsCUDA.cpp
 """)
 
 
