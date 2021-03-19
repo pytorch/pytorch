@@ -5617,6 +5617,8 @@ for op in (('add', 'add'), ('mul', 'multiply'), ('div', 'divide')):
                dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                test_inplace_grad=True,
                supports_out=True,
+               decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                                              torch.float16: 5e-1}),),
         ))
 
 op_db.append(
@@ -5628,6 +5630,8 @@ op_db.append(
                dtypesIfCUDA=all_types_and_complex_and(torch.half),
                test_inplace_grad=True,
                supports_out=True,
+               decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                                              torch.float16: 5e-1}),),
         ))
 
 # Common operator groupings
