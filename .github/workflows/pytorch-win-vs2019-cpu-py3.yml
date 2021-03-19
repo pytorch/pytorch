@@ -18,6 +18,10 @@ env:
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   IN_CI: 1
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
     runs-on: windows-2019
