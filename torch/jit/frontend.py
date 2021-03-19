@@ -174,7 +174,6 @@ def get_jit_class_def(cls, self_name):
                            method[0],
                            self_name=self_name,
                            is_classmethod=is_classmethod(method[1])) for method in methods]
-
     properties = get_class_properties(cls, self_name)
 
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
@@ -324,6 +323,7 @@ def build_param_list(ctx, py_args, self_name):
             if arg is not None:
                 ctx_range = build_expr(ctx, arg).range()
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
+
     result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
     result += [build_param(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
     return result
@@ -376,7 +376,6 @@ def get_default_args_for_class(cls):
     # Get method defaults. Property defaults do not need to be considered
     # because setters cannot be invoked without a value.
     defaults = {method_name: get_default_args(method_impl) for method_name, method_impl in methods}
-
     return defaults
 
 
@@ -388,7 +387,6 @@ class WithItemBuilder(Builder):
         end = start + len(pretty_node_names[ast.With])
         op_vars = item.optional_vars
         r = ctx.make_range(lineno, start, end)
-
         return WithItem(r, build_expr(ctx, item.context_expr), build_expr(ctx, op_vars) if op_vars else None)
 
 
