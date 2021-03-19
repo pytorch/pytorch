@@ -70,9 +70,9 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
   if (!PyCFunction_Check(to_restore.patched_method)) {
     std::stringstream err;
     err << "Patched object ";
-    PyObject *obj_repr = PyObject_Repr(to_restore.patched_method);
+    PyObject* obj_repr = PyObject_Repr(to_restore.patched_method);
     if (PyUnicode_Check(obj_repr)) {
-        err << PyUnicode_AS_DATA(obj_repr) << " ";
+      err << PyUnicode_AS_DATA(obj_repr) << " ";
     }
     err << " is not a CFunction. Please report a bug to PyTorch!";
     PyErr_SetString(PyExc_RuntimeError, err.str().c_str());
