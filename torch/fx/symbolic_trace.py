@@ -50,7 +50,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normal variables
 
-ENABLE_CTRACING = False
+ENABLE_CTRACING = True
 def enable_ctracing(flag):
     global ENABLE_CTRACING
     ENABLE_CTRACING = flag
