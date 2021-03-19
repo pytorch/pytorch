@@ -162,7 +162,7 @@ def checkpoint(function, *args, **kwargs):
     The output of :attr:`function` can contain non-Tensor values and gradient
     recording is only performed for the Tensor values. Note that if the output
     consists of nested structures (ex: custom objects, lists, dicts etc.)
-    consisting of Tensors, these Tensors nested in custom structures would not
+    consisting of Tensors, these Tensors nested in custom structures will not
     be considered as part of autograd.
 
     .. warning::
