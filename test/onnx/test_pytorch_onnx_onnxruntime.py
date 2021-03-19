@@ -415,9 +415,18 @@ class TestONNXRuntime(unittest.TestCase):
         dropout = 0.2
         tied = False
         batchsize = 5
-        model = word_language_model.RNNModel(model_name, ntokens, emsize,
-                                             nhid, nlayers, dropout, tied,
-                                             batchsize)
+        if model_name == "GRU":
+            model = word_language_model.RNNModelWithTensorHidden(model_name, ntokens, emsize,
+                                                nhid, nlayers, dropout, tied,
+                                                batchsize)
+        elif model_name == "LSTM":
+            model = word_language_model.RNNModelWithTupleHidden(model_name, ntokens, emsize,
+                                                nhid, nlayers, dropout, tied,
+                                                batchsize)
+        else:
+            model = word_language_model.RNNModel(model_name, ntokens, emsize,
+                                                nhid, nlayers, dropout, tied,
+                                                batchsize)
         x = torch.arange(0, ntokens).long().view(-1, batchsize)
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_test(model, (x, model.hidden))
@@ -586,7 +595,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_word_language_model_RNN_RELU(self):
         self.run_word_language_model("RNN_RELU")
 
-    @disableScriptTest()
+    @disableScriptTest()  # scripting prim::unchecked_cast prim::setattr
     def test_word_language_model_LSTM(self):
         self.run_word_language_model("LSTM")
 
