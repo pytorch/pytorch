@@ -25,6 +25,7 @@ def generate_workflow_file(
     output_file_path = GITHUB_DIR / f'workflows/{workflow["build_environment"]}.yml'
     with open(output_file_path, 'w') as output_file:
         output_file.write(workflow_template.render(**workflow))
+        output_file.write('\n')
     return output_file_path
 
 
