@@ -192,7 +192,6 @@ def get_type_line(source):
     elif len(type_lines) == 1:
         # Only 1 type line, quit now
         return type_lines[0][1].strip()
-
     # Parse split up argument types according to PEP 484
     # https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code
     return_line = None
@@ -277,6 +276,7 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
 
 
 def try_ann_to_type(ann, loc):
+    #print("Ann here top -- ", ann)
     if ann is None:
         return TensorType.getInferred()
     if inspect.isclass(ann) and issubclass(ann, torch.Tensor):
@@ -297,10 +297,12 @@ def try_ann_to_type(ann, loc):
             raise ValueError(f"Unknown type annotation: '{ann.__args__[1]}' at {loc.highlight()}")
         return DictType(key, value)
     if is_optional(ann):
+        #print("Ann is optional - ", ann)
         if issubclass(ann.__args__[1], type(None)):
             contained = ann.__args__[0]
         else:
             contained = ann.__args__[1]
+        #print(contained)
         valid_type = try_ann_to_type(contained, loc)
         msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
         assert valid_type, msg.format(repr(ann), repr(contained))

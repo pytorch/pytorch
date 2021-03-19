@@ -451,7 +451,7 @@ def _get_device_attr(get_member):
 
 def _get_current_device_index():
     # current device index
-    return _get_device_attr(lambda m: m.current_device())
+    return _get_device_attr(lambda m:m.current_device())
 
 
 def _get_all_device_indices():

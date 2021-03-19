@@ -376,7 +376,7 @@ class StreamContext(object):
             torch.cuda.set_stream(self.dst_prev_stream)  # type: ignore
         torch.cuda.set_stream(self.src_prev_stream)  # type: ignore
 
-def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ignore
+def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext: # type: ignore
     r"""Wrapper around the Context-manager StreamContext that
         selects a given stream.
     Arguments:
