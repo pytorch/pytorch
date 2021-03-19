@@ -173,7 +173,7 @@ struct ExtractVariables : IterArgs<ExtractVariables> {
   variable_list& list_;
   ExtractVariables(std::vector<bool>& is_var, variable_list& list) : is_var_(is_var), list_(list) {}
   void operator()(const c10::optional<at::Tensor>& x) {
-    if (x) {
+    if (x.has_value() && x.value().defined()) {
       is_var_.push_back(true);
       list_.emplace_back(x.value());
     } else {

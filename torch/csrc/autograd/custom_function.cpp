@@ -140,8 +140,8 @@ std::vector<c10::optional<Variable>> _wrap_outputs(const variable_list &input_va
     // return and input that is a view as is).
     // See NOTE [ View + Inplace detection ] for why we replace everything by a warning.
     if (!(is_input && is_modified) && var.is_view()) {
-      // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
+      // is_view() => diff_view_meta
+      auto diff_view_meta = impl::get_view_autograd_meta(var);
       diff_view_meta->set_creation_meta(CreationMeta::IN_CUSTOM_FUNCTION);
     }
 
@@ -157,10 +157,11 @@ std::vector<c10::optional<Variable>> _wrap_outputs(const variable_list &input_va
   // See NOTE [ View + Inplace detection ] for more details
   if (num_diff_outputs > 1) {
     for (auto& var: outputs) {
-      if (var.has_value() && var->is_view()) {
-        // NB: is_view() ==> get_autograd_meta()
-        auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(*var));
-        diff_view_meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
+      if (var.has_value()) {
+        auto diff_view_meta = impl::get_view_autograd_meta(var.value());
+        if (diff_view_meta) {
+          diff_view_meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
+        }
       }
     }
   }
