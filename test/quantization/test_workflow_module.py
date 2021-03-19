@@ -1436,7 +1436,7 @@ class TestFakeQuantize(TestCase):
                 self.assertTrue(
                     torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
                     "Expected dX={} to match X.grad={}, X={}, s={}, z={}, axis={}, dout={}, mask={}, n_bits={}".format(
-                        dX_expected, dX_actual, X_base, scale_base, zero_point_base, axis, dout, n_bits))
+                        dX_expected, dX_actual, X_base, scale_base, zero_point_base, axis, dout, mask, n_bits))
                 self.assertTrue(
                     torch.allclose(dScale_expected * grad_factor, dScale_actual, rtol=tolerance, atol=tolerance),
                     "Expected dScale={} to match scale.grad={}, X={}, s={}, z={}, dout={}, n_bits={}".format(
