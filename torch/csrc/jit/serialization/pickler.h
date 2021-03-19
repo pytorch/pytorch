@@ -149,6 +149,10 @@ class TORCH_API Pickler {
     return tensor_data_;
   }
 
+  void updateArchiveName(std::string archive_name) {
+    archive_name_ = archive_name;
+  }
+
   void pushEmptyDict();
   void pushDict(const IValue& ivalue);
   void pushInt(int64_t value);
@@ -206,6 +210,7 @@ class TORCH_API Pickler {
     }
   }
 
+
   // These convert values to bytes and add them to the stack (NB: since T is to
   // the left of a '::', its type cannot be deduced by the compiler so one must
   // explicitly instantiate the template, i.e. push<int>(int) works, push(int)
@@ -259,6 +264,8 @@ class TORCH_API Pickler {
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
   std::vector<at::Tensor> tensor_data_;
+  at::optional<std::string> archive_name_;
+
   std::unordered_map<const void*, uint32_t> memoized_storage_map_;
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;

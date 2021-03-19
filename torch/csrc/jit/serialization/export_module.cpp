@@ -413,6 +413,9 @@ class ScriptModuleSerializer {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
     std::vector<c10::ClassTypePtr> memoizedClassTypes;
+    if (archive_name == "constants") {
+      std::cout << "writing constant" << std::endl;
+    }
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
@@ -422,6 +425,7 @@ class ScriptModuleSerializer {
           return type_name_uniquer_.getUniqueName(t);
         },
         &memoizedClassTypes);
+    data_pickle.updateArchiveName(archive_name);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
@@ -430,6 +434,7 @@ class ScriptModuleSerializer {
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
+      std::cout << "fname: " << fname << std::endl;
       writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
     }
     std::string fname = archive_name + ".pkl";

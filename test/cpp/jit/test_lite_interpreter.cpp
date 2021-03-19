@@ -596,7 +596,12 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
 
   std::stringstream ss;
   c._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
+//  c._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/test.ptl");
+    mobile::Module bc = _load_for_mobile(ss);
+//  mobile::Module bc = _load_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example.ptl");
+//  Module m = load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example.ptl");
+//  m._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
+  Module m = load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
 
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
