@@ -96,10 +96,7 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<Sc
 //   ceil(log2(n - (6 n^2 + 1) / (12 log(q))))
 //
 // Reference
-// [1] https://arxiv.org/abs/xxxxx.xxxx
-// ^^^^ I uploaded that doc to arxiv, and it will be public next Monday,
-// I will wait and update the link here. Now this doc can be accessed at:
-// https://github.com/zasdfgbnm/things/blob/master/2021Q1/randperm.pdf
+// [1] https://osf.io/af2hy/
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
