@@ -134,7 +134,7 @@ static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
   return mask;
 }
 
-inline Tensor shape_from_dim_mask(const Tensor& self, DimMask mask, bool keepdim) {
+inline DimVector shape_from_dim_mask(const Tensor& self, DimMask mask, bool keepdim) {
   auto shape = DimVector(self.sizes());
   for (int dim = shape.size() - 1; dim >= 0; dim--) {
     if (mask[dim]) {
