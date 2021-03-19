@@ -127,7 +127,7 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   // keyset.set_excluded(exclude);
   // c10::impl::_force_tls_local_dispatch_key_set(keyset);
 
-  // std::cout << "dynamicLayerFrontFallback " << op.operator_name() << " " << layer.key() << " " << dynamicLayerStack.size() << std::endl;
+  // std::cout << "dynamicLayerFrontFallback " << op.operator_name() << " " << layer.key() << " " << layer.layerId() << std::endl;
 
   // Re-dispatch
   op.callBoxed(stack);

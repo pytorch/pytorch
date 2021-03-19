@@ -1,5 +1,6 @@
 #include <ATen/VmapTransforms.h>
 #include <ATen/ATen.h>
+#include <ATen/DynamicLayer.h>
 
 namespace at {
 
@@ -236,28 +237,35 @@ getLevelsAndLargestLogicalDim(TensorList logical_tensors) {
   return { levels, largest_logical_dim };
 }
 
+static Tensor moveDimToFrontAndUnsqueeze(Tensor tensor, optional<int64_t> dim, int64_t example_ndim) {
+  if (dim) {
+    tensor = tensor.movedim(*dim, 0);
+  } else {
+    tensor = tensor.unsqueeze(0);
+  }
+  auto ndim = tensor.dim() - 1;
+  for (int64_t i = 0; i < example_ndim - ndim; i++) {
+    tensor = tensor.unsqueeze(1);
+  }
+  return tensor;
+}
+
 VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logical_tensors) {
-  // Figure out the highest vmap level
-  int64_t max_vmap_level = -1;
-  int64_t batch_size = -1;
+  auto cur_level = maybeCurrentDynamicLayer().value().layerId();
+  auto bdim_size = -1;
+
+  // Figure out the batch size first
   for (const auto& logical_tensor : logical_tensors) {
     auto* batched = maybeGetBatchedImpl(logical_tensor);
-    if (!batched) {
+    if (!batched || (batched->bdims().back().level() != cur_level)) {
       continue;
     }
-    int64_t candidate = batched->bdims().front().level();
-    if (candidate < max_vmap_level) {
-      continue;
-    }
-    max_vmap_level = candidate;
-    auto bdim = batched->bdims().front().dim();
-    batch_size = batched->value().size(bdim);
+    bdim_size = batched->value().size(batched->bdims().back().dim());
   }
-  TORCH_INTERNAL_ASSERT(max_vmap_level > 0);
-  TORCH_INTERNAL_ASSERT(batch_size >= 0);
+  TORCH_INTERNAL_ASSERT(bdim_size != -1);
 
   std::bitset<kVmapNumLevels> levels;
-  levels[max_vmap_level] = 1;
+  levels[cur_level] = 1;
 
   // figure out the example ndim
   int64_t max_example_dim = -1;
@@ -265,18 +273,22 @@ VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logi
     max_example_dim = std::max(logical_tensor.dim(), max_example_dim);
   }
 
-  // unsqueeze extra dim from all tensors and expand it
   VmapPhysicalViewVec result;
   for (const auto& logical_tensor : logical_tensors) {
     auto* batched = maybeGetBatchedImpl(logical_tensor);
-    if (batched && batched->bdims().front().level() == max_vmap_level) {
-      Tensor tensor = alignBatchDimsAtFront(logical_tensor, levels, max_example_dim);
-      result.emplace_back(std::move(tensor), levels);
+    if (!batched || (batched->bdims().back().level() != cur_level)) {
+      // Unsqueeze dim 0, expand it to the correct shape
+      c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::Batched);
+      auto value = moveDimToFrontAndUnsqueeze(logical_tensor, {}, max_example_dim);
+      result.emplace_back(std::move(value), levels);
       continue;
     }
-    Tensor tensor = logical_tensor;
-    result.emplace_back(std::move(tensor), levels);
+    c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::Batched);
+    auto physical = batched->value();
+    auto value = moveDimToFrontAndUnsqueeze(physical, batched->bdims().back().dim(), max_example_dim);
+    result.emplace_back(std::move(value), levels);
   }
+
   return result;
 }
 
