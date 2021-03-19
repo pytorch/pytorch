@@ -74,6 +74,29 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<Sc
   return t;
 }
 
+// [Number of bits required for randperm]
+//
+// randperm is implemented by sorting an arange tensor of size n
+// with randomly generated keys. Random keys are assumed to be different
+// from each other. Under this assumption, all different permutations have
+// the same probability.
+//
+// However, there is a problem here:
+// For better performance, these N random keys are generated independently,
+// and there is no effort to make sure they are different. When two keys are
+// identical, stable sorting algorithms will not permute these two keys.
+// As a result, (0, 1) will appear more often than (1, 0).
+//
+// We do not spend computation resource to check for duplicate keys, because this
+// can be expensive performancewise. Instead, we carefully choose the number of bits
+// in these keys, so that the probability of having duplicate keys is under a threshold.
+//
+// Let q be the threshold probability for having non-duplicate keys, then it can be
+// proved that[1] the number of bits required is:
+//   ceil(log2(n - (6 n^2 + 1) / (12 log(q))))
+//
+// Reference
+// [1] https://arxiv.org/abs/xxxxx.xxxx
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
@@ -98,10 +121,11 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
 
   auto opt = TensorOptions().device(result.device());
 
-  constexpr double threshold_probability = 0.9;
+  // See note [Number of bits required for randperm]
+  const double log_threshold = std::log(0.9);
   double nd = static_cast<double>(n);
   int bits = std::min(64,
-    static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / (12 * std::log(threshold_probability))))));
+    static_cast<int>(std::ceil(std::log2(nd - (6 * nd * nd + 1) / (12 * log_threshold)))));
 
   if (n == 0) {
     return result;
