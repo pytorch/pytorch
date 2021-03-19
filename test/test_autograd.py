@@ -4079,6 +4079,16 @@ class TestAutograd(TestCase):
         # TODO: when grad_input is incorrect dtype/size
         pass
 
+    def test_gradcheck_jacobian_mismatch(self):
+        def fn(x):
+            y = x.clone()
+            y.register_hook(lambda x: x + 1e-2)
+            return y
+        x = torch.ones(2, 2, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, 'Jacobian mismatch for output 0 with respect to input 0'):
+            gradcheck(fn, (x,))
+        self.assertFalse(gradcheck(fn, (x,), raise_exception=False))
+
     def test_version_counter(self):
         x = torch.randn(1, 2)
 

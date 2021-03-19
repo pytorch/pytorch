@@ -520,9 +520,9 @@ def _differentiable_outputs(x):
     return tuple(o for o in _as_tuple(x) if o.requires_grad)
 
 
-def get_notallclose_msg(a, n, i, j, error_str='') -> str:
+def get_notallclose_msg(analytical, numerical, output_idx, input_idx, error_str='') -> str:
     return error_str + 'Jacobian mismatch for output %d with respect to input %d,\n' \
-        'numerical:%s\nanalytical:%s\n' % (i, j, n, a)
+        'numerical:%s\nanalytical:%s\n' % (output_idx, input_idx, numerical, analytical)
 
 def transpose(m):
     out: List[List[torch.Tensor]] = []
