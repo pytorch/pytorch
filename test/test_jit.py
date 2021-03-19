@@ -10277,10 +10277,10 @@ dedent """
         self.assertEqual(complex_fn(2.0 + 2j, 1.0 + 2j), complex_fn(2.0 + 4j, [1.0 + 2j, 1.0 + 2j, 1.0 + 2j]))
         self.assertEqual(complex_fn(2.0 + 4j, 1.0 + 2j), complex_fn(1.0 + 2j, (1.0 + 2j, 1.0 + 2j, 1.0 + 2j)))
 
-        # @torch.jit.script
-        # def float_fn_call():
-        #     print(complex_fn(1.0, 1.0))
-        #     print(complex_fn(1.0, (1.0, 1.0, 1.0)))
+        @torch.jit.script
+        def complex_fn_call():
+            print(complex_fn(1.0 + 0j, 1.0 + 0j))
+            print(complex_fn(1.0 + 0j, (1.0 + 0j, 1.0 + 0j, 1.0 + 0j)))
 
         @torch.jit.script
         def int_fn(x):
