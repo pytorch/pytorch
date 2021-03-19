@@ -155,7 +155,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
     auto keys = at::empty(result.sizes(), opt.dtype(kInt)).random_(
       std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), generator);
     auto keys_tmp = at::empty_like(keys);
-    AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm_out_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       at::cuda::cub::sort_pairs<int, scalar_t>(
         keys.data_ptr<int>(), keys_tmp.data_ptr<int>(),
         range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data),
@@ -165,7 +165,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
     auto keys = at::empty(result.sizes(), opt.dtype(kLong)).random_(
       std::numeric_limits<int64_t>::min(), std::numeric_limits<int64_t>::max(), generator);
     auto keys_tmp = at::empty_like(keys);
-    AT_DISPATCH_ALL_TYPES(result.scalar_type(), "randperm_out_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, result.scalar_type(), "randperm_out_cuda", [&] {
       at::cuda::cub::sort_pairs<int64_t, scalar_t>(
         keys.data_ptr<int64_t>(), keys_tmp.data_ptr<int64_t>(),
         range.data_ptr<scalar_t>(), reinterpret_cast<scalar_t*>(shuffled_data),
