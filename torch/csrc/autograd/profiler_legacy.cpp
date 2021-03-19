@@ -458,8 +458,6 @@ void pushProfilingCallbacksLegacy() {
   state_ptr->setCallbackHandle(handle);
 }
 
-const int kCUDAWarmupStart = 5;
-
 } // namespace
 
 void registerCUDAMethods(CUDAStubs* stubs) {
@@ -519,23 +517,6 @@ void enableProfilerLegacy(const ProfilerConfig& new_config) {
 
   pushProfilingCallbacksLegacy();
 
-  if (new_config.state == ProfilerState::CUDA) {
-    // event recording appears to have some startup overhead, so we need to
-    // to generate some dummy events first before recording synchronization events
-    for (int idx = 0; idx < kCUDAWarmupStart; ++idx) {
-      cuda_stubs()->onEachDevice([state](int /* unused */) {
-          state->mark("__cuda_startup");
-          cuda_stubs()->synchronize();
-      });
-    }
-
-    // cuda events must be on the same device, so we need a start event recorded
-    // for each gpu. we then use this event to synchronize time on the GPU
-    // with the CPU clock.
-    cuda_stubs()->onEachDevice([state](int d) {
-        state->mark("__cuda_start_event");
-    });
-  }
   state->mark("__start_profile", false);
 }
 

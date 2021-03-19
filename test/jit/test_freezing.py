@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import unittest
 from torch.testing._internal.jit_utils import JitTestCase
 
 from torch.testing import FileCheck
@@ -10,7 +11,6 @@ from torch.testing._internal.common_utils import set_default_dtype
 from torch.jit._recursive import wrap_cpp_module
 from typing import Any
 from itertools import product
-import unittest
 
 import io
 
@@ -25,6 +25,13 @@ if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
+
+TEST_CUDA = torch.cuda.is_available()
+TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
+TEST_CUDNN = False
+if TEST_CUDA and not TEST_ROCM:  # Skip ROCM
+    torch.ones(1).cuda()  # initialize cuda context
+    TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0')))
 
 class TestFreezing(JitTestCase):
     def test_freeze_module(self):
@@ -1734,7 +1741,8 @@ class TestFrozenOptimizations(JitTestCase):
             scripted_mod = torch.jit.script(mod)
             scripted_mod = torch.jit.freeze(scripted_mod)
             self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
-            FileCheck().check("aten::to_mkldnn").check_not("aten::add_").check("aten::div_").run(scripted_mod.graph)
+            # add gets uninplaced and reinplaced
+            FileCheck().check("aten::to_mkldnn").check("aten::add_").check("aten::div_").run(scripted_mod.graph)
             inp = torch.rand([20, 20])
             self.assertEqual(scripted_mod(inp), mod(inp))
             self.assertEqual(scripted_mod(inp), mod(inp))
@@ -1763,6 +1771,52 @@ class TestFrozenOptimizations(JitTestCase):
             inp = torch.rand([4, 3, 4, 4])
             self.assertEqual(frozen(inp), mod(inp))
 
+    @unittest.skipIf(not TEST_CUDNN, "requires CUDNN")
+    def test_freeze_conv_relu_fusion(self):
+        conv_bias = [True, False]
+        conv_ops = [nn.Conv2d]
+        add_z = [True, False]
+        use_tracing = [True, False]
+        for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, add_z, use_tracing):
+            class Net(nn.Module):
+                def __init__(self, in_channels, out_channels, **kwargs):
+                    super(Net, self).__init__()
+                    self.conv = conv(in_channels, out_channels, bias=use_bias, **kwargs)
+                    self.relu = nn.ReLU(inplace=True)
+                    self.add_z = add_z
+
+                def forward(self, x):
+                    z = self.conv(x)
+                    out = self.conv(x)
+                    if self.add_z:
+                        out += z
+                    out = self.relu(out)
+                    return out
+
+            mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
+
+            inps = [5, 3, 4]
+            if conv == nn.Conv2d:
+                inps.append(inps[-1])
+            if conv == nn.Conv3d:
+                inps.append(inps[-1])
+                inps.append(inps[-1])
+            inp = torch.rand(inps).cuda()
+
+            if tracing:
+                scripted_mod = torch.jit.trace(mod_eager, (inp))
+            else:
+                scripted_mod = torch.jit.script(mod_eager)
+
+            frozen_mod = torch.jit.freeze(scripted_mod)
+            FileCheck().check("aten::relu").run(frozen_mod.graph)
+            self.run_pass("fuse_frozen_conv_add_relu", frozen_mod.graph)
+            if add_z:
+                FileCheck().check("aten::cudnn_convolution_add_relu").run(frozen_mod.graph)
+            else:
+                FileCheck().check("aten::cudnn_convolution_relu").run(frozen_mod.graph)
+
+            self.assertEqual(mod_eager(inp), frozen_mod(inp))
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
     def setUp(self):
