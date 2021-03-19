@@ -1,3 +1,4 @@
+import itertools
 import os
 import pickle
 import random
@@ -13,7 +14,7 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import IterDataPipe, RandomSampler, DataLoader
-from typing import Any, Dict, Iterator, List, Tuple, Type, TypeVar
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, TypeVar, Set, Union
 
 import torch.utils.data.datapipes as dp
 from torch.utils.data.datapipes.utils.decoder import (
@@ -560,15 +561,57 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(zipped_dp), exp)
 
 
-class TestDataPipeTyping(TestCase):
+class TestTyping(TestCase):
+    def test_subtype(self):
+        from torch.utils.data.typing import issubtype
+
+        basic_type = (int, str, bool, float, complex,
+                      list, tuple, dict, set, T_co)
+        for t in basic_type:
+            self.assertTrue(issubtype(t, t))
+            self.assertTrue(issubtype(t, Any))
+            if t == T_co:
+                self.assertTrue(issubtype(Any, t))
+            else:
+                self.assertFalse(issubtype(Any, t))
+        for t1, t2 in itertools.product(basic_type, basic_type):
+            if t1 == t2 or t2 == T_co:
+                self.assertTrue(issubtype(t1, t2))
+            else:
+                self.assertFalse(issubtype(t1, t2))
+
+        T = TypeVar('T', int, str)
+        S = TypeVar('S', bool, str, int, Tuple[int, T])
+        self.assertTrue(issubtype(T, S))
+        self.assertFalse(issubtype(S, T))
+        self.assertTrue(issubtype(S, T_co))
+
+        # Optional/Union
+        types = ((int, Optional[int]),
+                 (int, Union[int, dict]),
+                 (List, Union[int, list]),
+                 (T, Union[S, Set]))
+        for sub, par in types:
+            self.assertTrue(issubtype(sub, par))
+            self.assertFalse(issubtype(par, sub))
+
+        subscriptable_type = {
+            List: 1,
+            Tuple: None,
+            Set: 1,
+            Dict: 2,
+            Optional: 1,
+        }
+        #  def _test_nested(alias, base, n, params, 
+
+    # Static checking annotation
     def test_compile_time(self):
-        # Static checking annotation
         with self.assertRaisesRegex(TypeError, r"No return annotation"):
             class InvalidDP1(IterDataPipe[int]):
                 def __iter__(self):
                     yield 0
 
-        with self.assertRaisesRegex(TypeError, r"Iterator is required as"):
+        with self.assertRaisesRegex(TypeError, r"Expected Iterator as the return"):
             class InvalidDP2(IterDataPipe[int]):
                 def __iter__(self) -> str:
                     yield 0
