@@ -15,12 +15,13 @@ struct ToRestore {
 
 class DecRefGuard {
  public:
-  DecRefGuard(PyObject *obj) : obj(obj) { }
+  DecRefGuard(PyObject* obj) : obj(obj) {}
   ~DecRefGuard() {
     Py_DECREF(obj);
   }
+
  private:
-  PyObject *obj;
+  PyObject* obj;
 };
 PyObject* replacement_method(PyObject* self, PyObject* args, PyObject* kwargs) {
   DecRefGuard self_guard(self);
