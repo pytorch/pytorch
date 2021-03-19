@@ -65,7 +65,7 @@ class _LU(torch.autograd.Function):
         P, L, U = torch.lu_unpack(LU, pivots)
 
         # To make sure MyPy infers types right
-        assert (L is not None) and (U is not None)
+        assert (L is not None) and (U is not None) and (P is not None)
 
         # phi_L = L^H B_grad * 1_L
         phi_L = (L.transpose(-1, -2).conj() @ LU_grad).tril_()
