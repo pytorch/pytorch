@@ -662,6 +662,7 @@ from torch import testing as testing
 import torch.backends.cuda
 import torch.backends.mkl
 import torch.backends.mkldnn
+import torch.backends.mlc
 import torch.backends.openmp
 import torch.backends.quantized
 from torch import quantization as quantization
