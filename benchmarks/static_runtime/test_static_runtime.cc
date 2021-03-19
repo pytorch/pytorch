@@ -148,6 +148,7 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
   testStaticRuntime(reshape_script_3, args);
   testStaticRuntime(reshape_script_4, args);
   testStaticRuntime(reshape_script_5, args);
+  testStaticRuntime(reshape_inplace_script, args);
 }
 
 TEST(StaticRuntime, IndividualOps_flatten) {
