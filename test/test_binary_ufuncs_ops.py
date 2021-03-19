@@ -1,26 +1,19 @@
 import torch
 import numpy as np
 
-import warnings
 import math
 from itertools import product, chain
 from numbers import Number
-import random
-import unittest
 
-from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
-    suppress_warnings, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy,
-    gradcheck, IS_WINDOWS)
+    make_tensor, )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyOnCPUAndCUDA,
-    onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
-    OpDTypes)
+    instantiate_device_type_tests, ops)
 from torch.testing import (
-    floating_types_and, all_types_and_complex_and, floating_types, floating_and_complex_types_and)
+    floating_and_complex_types_and)
 
 # Interesting values and extremal values for different dtypes
 _unsigned_int_vals = (0, 1, 55, 127)

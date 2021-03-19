@@ -412,13 +412,13 @@ class _BinaryUfuncInfo(OpInfo):
                  supports_sparse=False,
                  **kwargs):
         super(_BinaryUfuncInfo, self).__init__(name,
-                                             dtypes=dtypes,
-                                             dtypesIfCPU=dtypesIfCPU,
-                                             dtypesIfCUDA=dtypesIfCUDA,
-                                             dtypesIfROCM=dtypesIfROCM,
-                                             sample_inputs_func=sample_inputs_func,
-                                             supports_sparse=supports_sparse,
-                                             **kwargs)
+                                               dtypes=dtypes,
+                                               dtypesIfCPU=dtypesIfCPU,
+                                               dtypesIfCUDA=dtypesIfCUDA,
+                                               dtypesIfROCM=dtypesIfROCM,
+                                               sample_inputs_func=sample_inputs_func,
+                                               supports_sparse=supports_sparse,
+                                               **kwargs)
         self.ref = ref
         self.domain = domain
         self.handles_large_floats = handles_large_floats
@@ -4498,28 +4498,27 @@ op_db: List[OpInfo] = [
 for op in (('add', 'add'), ('mul', 'multiply'), ('div', 'divide')):
     op_db.append(
         _BinaryUfuncInfo(op[0],
-               aliases = (op[1],),
-               ref=getattr(np, op[1]),
-               dtypes=all_types_and_complex(),
-               dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-               test_inplace_grad=True,
-               supports_out=True,
-               decorators=(precisionOverride({torch.bfloat16: 5e-1,
-                                              torch.float16: 5e-1}),),
-        ))
+                         aliases=(op[1],),
+                         ref=getattr(np, op[1]),
+                         dtypes=all_types_and_complex(),
+                         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                         test_inplace_grad=True,
+                         supports_out=True,
+                         decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                                                        torch.float16: 5e-1}),),
+                         ))
 
-op_db.append(
-        _BinaryUfuncInfo('sub',
-               aliases = ('subtract',),
-               ref=np.subtract,
-               # skip subtraction of bool types
-               dtypes=all_types_and_complex(),
-               dtypesIfCUDA=all_types_and_complex_and(torch.half),
-               test_inplace_grad=True,
-               supports_out=True,
-               decorators=(precisionOverride({torch.bfloat16: 5e-1,
-                                              torch.float16: 5e-1}),),
-        ))
+op_db.append(_BinaryUfuncInfo('sub',
+                              aliases=('subtract',),
+                              ref=np.subtract,
+                              # skip subtraction of bool types
+                              dtypes=all_types_and_complex(),
+                              dtypesIfCUDA=all_types_and_complex_and(torch.half),
+                              test_inplace_grad=True,
+                              supports_out=True,
+                              decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                                                             torch.float16: 5e-1}),),
+                              ))
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
