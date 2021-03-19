@@ -196,7 +196,7 @@ class TestRemoveMutation(JitTestCase):
 
     def test_lists_insert(self):
         def successful_remove():
-            a = torch.jit.annotate(List[int], [])
+            a : List[int] = []
             a.insert(0, 1)
             a.insert(0, 2)
             a.insert(-10, 3)
