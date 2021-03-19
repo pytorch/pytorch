@@ -8740,8 +8740,28 @@
 - func: special_gammaln.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
   variants: function
-  dispatch:
-    CPU, CUDA: special_gammaln_out
+
+- func: special_erf(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_erf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_erfc(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_erfc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+
+- func: special_erfinv(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
 
 ## Functions related to the fast Fourier transform and the torch.fft namespace
 # Note [FFT namespace binding]
