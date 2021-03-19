@@ -3,7 +3,7 @@ import os
 import sys
 from tempfile import NamedTemporaryFile
 
-from torch.testing._internal.common_utils import IS_WINDOWS, IS_FBCODE, IS_SANDCASTLE, TestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
 
 
 class PackageTestCase(TestCase):
@@ -12,10 +12,6 @@ class PackageTestCase(TestCase):
         self._temporary_files = []
 
     def temp(self):
-        # Use a buffer instead of a temporary file in fbcode.
-        if IS_FBCODE or IS_SANDCASTLE:
-            return io.BytesIO()
-
         t = NamedTemporaryFile()
         name = t.name
         if IS_WINDOWS:

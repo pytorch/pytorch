@@ -1,4 +1,4 @@
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from textwrap import dedent
@@ -30,7 +30,7 @@ class ModelTest(PackageTestCase):
     def test_resnet(self):
         resnet = resnet18()
 
-        f1 = self.temp()
+        f1 = BytesIO()
 
         # create a package that will save it along with its code
         with PackageExporter(f1, verbose=False) as e:
@@ -56,7 +56,7 @@ class ModelTest(PackageTestCase):
         # functions exist also to get at the private modules in each package
         torchvision = i.import_module("torchvision")
 
-        f2 = self.temp()
+        f2 = BytesIO()
         # if we are doing transfer learning we might want to re-save
         # things that were loaded from a package.
         # We need to tell the exporter about any modules that
@@ -111,7 +111,7 @@ class ModelTest(PackageTestCase):
         # get our normal torchvision resnet
         resnet = resnet18()
 
-        f1 = self.temp()
+        f1 = BytesIO()
         # Option 1: save by pickling the whole model
         # + single-line, similar to torch.jit.save
         # - more difficult to edit the code after the model is created
@@ -133,7 +133,7 @@ class ModelTest(PackageTestCase):
             )
             e.save_source_string("model", src, is_package=True)
 
-        f2 = self.temp()
+        f2 = BytesIO()
         # Option 2: save with state dict
         # - more code to write to save/load the model
         # + but this code can be edited later to adjust adapt the model later
@@ -172,7 +172,7 @@ class ModelTest(PackageTestCase):
     def test_script_resnet(self):
         resnet = resnet18()
 
-        f1 = self.temp()
+        f1 = BytesIO()
         # Option 1: save by pickling the whole model
         # + single-line, similar to torch.jit.save
         # - more difficult to edit the code after the model is created
