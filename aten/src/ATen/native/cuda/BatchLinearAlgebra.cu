@@ -1619,7 +1619,7 @@ AT_ERROR("cholesky: MAGMA library not found in "
 #endif
 }
 
-Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
+Tensor _cholesky_helper_cuda_magma(const Tensor& self, bool upper) {
   std::vector<int64_t> infos(batchCount(self), 0);
 
   Tensor result;
@@ -1649,6 +1649,23 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   }
 
   return upper ? result.transpose_(-1, -2) : result;
+}
+
+// Todo: cusolverDnXpotrfBatched has some numerical issue and is not used
+//     here. Batched cholesky is dispatched to magma.
+//     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
+//     See https://github.com/pytorch/pytorch/issues/53879.
+Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
+#ifdef USE_CUSOLVER
+  if (batchCount(self) == 1 || !use_magma_) {
+    return _cholesky_helper_cuda_cusolver(self, upper);
+  }
+  else {
+    return _cholesky_helper_cuda_magma(self, upper);
+  }
+#else
+  return _cholesky_helper_cuda_magma(self, upper);
+#endif
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2071,15 +2088,15 @@ AT_ERROR("symeig: MAGMA library not found in "
 
   scalar_t* work;
   magma_int_t* iwork;
-  lwork = magma_int_cast(real_impl<scalar_t, value_t>(wkopt), "work_size");
-  liwork = magma_int_cast(iwkopt, "iwork_size");
+  lwork = magma_int_cast(std::max<int64_t>(1, real_impl<scalar_t, value_t>(wkopt)), "work_size");
+  liwork = magma_int_cast(std::max<int64_t>(1, iwkopt), "iwork_size");
   ALLOCATE_ARRAY(work, scalar_t, lwork);
   ALLOCATE_ARRAY(iwork, magma_int_t, liwork);
 
   value_t* rwork = nullptr;
   c10::Storage storage_rwork;
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-    lrwork = magma_int_cast(rwkopt, "rwork_size");
+    lrwork = magma_int_cast(std::max<int64_t>(1, rwkopt), "rwork_size");
     storage_rwork = pin_memory<value_t>(lrwork);
     rwork = static_cast<value_t*>(storage_rwork.data());
   }
@@ -2271,9 +2288,9 @@ AT_ERROR("svd: MAGMA library not found in "
   value_t* rwork = nullptr;
 
   magma_int_t* iwork;
-  ALLOCATE_ARRAY(iwork, magma_int_t, 8 * mn);
+  ALLOCATE_ARRAY(iwork, magma_int_t, std::max<magma_int_t>(1, 8 * mn));
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
-    auto lrwork = computeLRWorkDim(jobchar, m, n);
+    auto lrwork = std::max<int64_t>(1, computeLRWorkDim(jobchar, m, n));
     storage_rwork = pin_memory<value_t>(lrwork);
     rwork = static_cast<value_t*>(storage_rwork.data());
   }
@@ -2286,7 +2303,7 @@ AT_ERROR("svd: MAGMA library not found in "
   magma_int_t lwork = -1;
   scalar_t wkopt;
   magmaSvd<scalar_t, value_t>(jobz, m, n, self_data, lda, S_data, U_data, lda, VT_data, ldvt, &wkopt, lwork, rwork, iwork, &info);
-  lwork = magma_int_cast(real_impl<scalar_t, value_t>(wkopt), "work_size");
+  lwork = magma_int_cast(std::max<int64_t>(1, real_impl<scalar_t, value_t>(wkopt)), "work_size");
   scalar_t* work;
   ALLOCATE_ARRAY(work, scalar_t, lwork);
 
@@ -2458,9 +2475,9 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   TORCH_CHECK(info == 0, "MAGMA lu_solve : invalid argument: ", -info);
   return self_working_copy;
 }
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cuda(
     const Tensor& a, const Tensor& b, double cond, c10::optional<std::string> driver_name) {
 #ifndef USE_MAGMA
@@ -2475,8 +2492,8 @@ AT_ERROR("torch.linalg.lstsq: MAGMA library not found in "
     auto ldda = std::max<magma_int_t>(1, m);
     auto lddb = std::max<magma_int_t>(1, std::max(m, n));
     auto nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
-    auto lwork = (m - n + nb) * (nrhs + nb) + nrhs * nb;
-    Tensor hwork = at::empty({static_cast<int64_t>(lwork)}, a.scalar_type());
+    magma_int_t lwork = magma_int_cast(std::max<int64_t>(1, (m - n + nb) * (nrhs + nb) + nrhs * nb), "work_size");
+    Tensor hwork = at::empty({lwork}, a.scalar_type());
     auto* hwork_ptr = hwork.data_ptr<scalar_t>();
     magma_int_t info;
 
@@ -2495,7 +2512,6 @@ AT_ERROR("torch.linalg.lstsq: MAGMA library not found in "
   return std::make_tuple(b, rank, singular_values);
 #endif
 }
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 }}  // namespace at::native
 
