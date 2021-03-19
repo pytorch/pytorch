@@ -615,6 +615,11 @@ node [shape=box];
         if self.buffer:
             self.buffer.flush()
 
+        # If self.buffer is a BytesIO, rewind it in anticipation
+        # of a read in the near future.
+        if isinstance(self.buffer, io.BytesIO):
+            self.buffer.seek(0)
+
     def _filename(self, package, resource):
         package_path = package.replace(".", "/")
         resource = _normalize_path(resource)

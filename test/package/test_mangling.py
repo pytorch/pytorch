@@ -6,6 +6,7 @@ from torch.package._mangling import (
     is_mangled,
 )
 from torch.testing._internal.common_utils import run_tests
+import io
 
 try:
     from .common import PackageTestCase
@@ -84,6 +85,8 @@ class TestMangling(PackageTestCase):
 
         importer1 = PackageImporter(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
+        if isinstance(f1, io.BytesIO):
+            f1.seek(0)
         importer2 = PackageImporter(f1)
         loaded2 = importer2.load_pickle("obj", "obj.pkl")
 
