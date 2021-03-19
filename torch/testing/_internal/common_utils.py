@@ -1644,12 +1644,6 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
 
     return result
 
-def prod_single_zero(dim_size, device=torch.device('cpu'), dtype=torch.float):
-    result = torch.randn(dim_size, dim_size, device=device, dtype=dtype)
-    result[0, 1] = 0
-    return result
-
-
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l
     A = torch.randn(l, l, dtype=dtype, device=device)
