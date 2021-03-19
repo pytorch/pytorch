@@ -413,7 +413,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Conv2d(1, 1, 1),
             nn.ReLU(),
         ).eval()
-        print(m)
         self._test_extract_weights(m, results_len=3)
 
     @skipIfNoFBGEMM
