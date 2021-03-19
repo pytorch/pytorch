@@ -43,11 +43,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::QuantizedXPU:
       return "QuantizedXPU";
 
-    case DispatchKey::ComplexCPU:
-      return "ComplexCPU";
-    case DispatchKey::ComplexCUDA:
-      return "ComplexCUDA";
-
     case DispatchKey::CustomRNGKeyId:
       return "CustomRNGKeyId";
 
@@ -78,6 +73,9 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Meta:
       return "Meta";
+
+    case DispatchKey::InplaceOrView:
+      return "InplaceOrView";
 
     case DispatchKey::Autograd:
       return "Autograd";
