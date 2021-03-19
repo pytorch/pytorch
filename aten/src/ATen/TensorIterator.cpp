@@ -307,8 +307,8 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   //   - checks that all tensors are on the same device, if requested
   //   - checks that the common dtype can safely cast to each output, if requested
   //   - creates temporaries for CPU operations, if needed and requested
-  int max_cpu_scalars_on_cuda = config.allow_cpu_scalars_ ? 1 : 0;
-  int current_cpu_scalars_on_cuda = 0;
+  int max_cpu_scalars_on_non_cpu = config.allow_cpu_scalars_ ? 1 : 0;
+  int current_cpu_scalars_on_non_cpu = 0;
   for (auto& op : operands_) {
     if (!op.is_type_defined()) {
       op.target_dtype = common_dtype_;
@@ -324,12 +324,12 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     // Checks all tensors are on the same device, if requested
     if (config.check_all_same_device_) {
       // Handles CPU scalars on CUDA kernels that support them
-      if ((common_device.is_cuda() || common_device.is_xpu()) &&
+      if (!common_device.is_cpu() &&
           config.allow_cpu_scalars_ && !op.is_output && op.tensor.dim() == 0 &&
           op.tensor.device().is_cpu()) {
-        TORCH_CHECK(current_cpu_scalars_on_cuda < max_cpu_scalars_on_cuda,
-                    "Trying to pass too many CPU scalars to CUDA kernel!");
-        ++current_cpu_scalars_on_cuda;
+        TORCH_CHECK(current_cpu_scalars_on_non_cpu < max_cpu_scalars_on_non_cpu,
+                    "Trying to pass too many CPU scalars to non-CPU kernel!");
+        ++current_cpu_scalars_on_non_cpu;
       } else if (op.device != common_device) {
         TORCH_CHECK(false,
                     "Expected all tensors to be on the same device, but "
@@ -857,7 +857,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
 TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
   TORCH_INTERNAL_ASSERT(out1.defined());
   TORCH_INTERNAL_ASSERT(out2.defined());
-  TORCH_CHECK((!a.is_cuda() && !out1.is_cuda() && !out2.is_cuda()) || (a.device() == out1.device() && out1.device() == out2.device()),
+  TORCH_CHECK((a.is_cpu() && out1.is_cpu() && out2.is_cpu()) || (a.device() == out1.device() && out1.device() == out2.device()),
       "reduce_op(): expected input and both outputs to be on same device, but input is on ", a.device(),
       ", output1 is on ", out1.device(), " and output2 is on", out2.device());
   TORCH_CHECK(out1.dim() == out2.dim(), "reduce_op(): expected both outputs to have same number of dims, but output1 has ", out1.dim(),
