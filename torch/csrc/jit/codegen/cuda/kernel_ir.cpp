@@ -97,14 +97,12 @@ IterDomain::IterDomain(
   setName(iter_domain->name());
 }
 
+//! Note that the parallel dimension, if available, may be different
+//! from the actual extent of this IterDomain as the parallel
+//! dimension is determined by the largest extent of IterDomains
+//! sharing the same loop.
 Val* IterDomain::extent() const {
   TORCH_INTERNAL_ASSERT(extent_ != nullptr);
-  if (isThread()) {
-    if (extent_->isScalar() && extent_->isConst()) {
-      return extent_;
-    }
-    return NamedScalar::getParallelDim(parallelType());
-  }
   return extent_;
 }
 

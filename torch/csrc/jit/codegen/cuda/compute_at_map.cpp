@@ -357,18 +357,15 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
     TORCH_INTERNAL_ASSERT(
         concrete_id != nullptr, "Could not concretize an IterDomain set.");
 
-    // If parallel mode, parallelize the the concrete id
-    // TODO: Would be good to simply keep a parallelization map and make lookups
-    // to it through lowering.
-    if (mapping_mode_ == MappingMode::PARALLEL) {
-      auto parallel_map_it = parallel_type_map_.find(set);
-      if (parallel_map_it != parallel_type_map_.end()) {
-        concrete_id->parallelize(parallel_map_it->second);
-      }
-    }
-
     for (auto id : *set) {
       concrete_id_map_[id] = concrete_id;
+      if (mapping_mode_ == MappingMode::PARALLEL) {
+        auto parallel_map_it = parallel_type_map_.find(set);
+        // Parallelize all IterDomains to simplify lowering and codegen
+        if (parallel_map_it != parallel_type_map_.end()) {
+          id->parallelize(parallel_map_it->second);
+        }
+      }
     }
   }
 
