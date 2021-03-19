@@ -1025,6 +1025,9 @@
 - func: _convolution.deprecated(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
+- func: _convolution_mode(Tensor input, Tensor weight, Tensor? bias, int[] stride, str padding, int[] dilation, int groups) -> Tensor
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+
 - func: _convolution_nogroup(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
@@ -1039,6 +1042,15 @@
 
 - func: conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+
+- func: conv1d.padding(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, str padding="valid", int[1] dilation=1, int groups=1) -> Tensor
+  cpp_no_default_args: ['bias', 'stride', 'padding']
+
+- func: conv2d.padding(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, str padding="valid", int[2] dilation=1, int groups=1) -> Tensor
+  cpp_no_default_args: ['bias', 'stride', 'padding']
+
+- func: conv3d.padding(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, str padding="valid", int[3] dilation=1, int groups=1) -> Tensor
+  cpp_no_default_args: ['bias', 'stride', 'padding']
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
   dispatch:
@@ -1176,6 +1188,14 @@
 - func: cudnn_convolution_transpose_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
   dispatch:
     CUDA: cudnn_convolution_transpose_backward_weight
+
+- func: cudnn_convolution_relu(Tensor self, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
+  dispatch:
+    CUDA: cudnn_convolution_relu
+
+- func: cudnn_convolution_add_relu(Tensor self, Tensor weight, Tensor z, Scalar? alpha, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
+  dispatch:
+    CUDA: cudnn_convolution_add_relu
 
 # NB: input is special cased in a way I don't quite understand
 - func: cudnn_grid_sampler(Tensor self, Tensor grid) -> Tensor output
@@ -5908,14 +5928,11 @@
     CPU: legacy::cpu::_th_geqrf
     CUDA: legacy::cuda::_th_geqrf
 
-- func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: orgqr_out
-
+# orgqr, alias for linalg_householder_product
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
   variants: method, function
-  dispatch:
-    CPU, CUDA: orgqr
+
+- func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: ormqr.out(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -8724,8 +8741,28 @@
 - func: special_gammaln.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
   variants: function
-  dispatch:
-    CPU, CUDA: special_gammaln_out
+
+- func: special_erf(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_erf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_erfc(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_erfc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+
+- func: special_erfinv(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_erfinv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
 
 ## Functions related to the fast Fourier transform and the torch.fft namespace
 # Note [FFT namespace binding]
@@ -8977,6 +9014,17 @@
   dispatch:
     DefaultBackend: linalg_eigvalsh_out
 
+- func: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_householder_product
+
+- func: linalg_householder_product.out(Tensor input, Tensor tau, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_householder_product_out
+
 - func: _linalg_inv_out_helper_(Tensor(a!) self, Tensor(b!) infos_lu, Tensor(c!) infos_getri) -> Tensor(a!)
   variants: function
   dispatch:
@@ -9036,6 +9084,17 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
+
+- func: linalg_vector_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    DefaultBackend: linalg_vector_norm
+
+- func: linalg_vector_norm.out(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    DefaultBackend: linalg_vector_norm_out
 
 - func: linalg_svd.U(Tensor self, bool full_matrices=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
