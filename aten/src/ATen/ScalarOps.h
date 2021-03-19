@@ -52,7 +52,7 @@ inline at::Tensor scalar_to_tensor(const Scalar& s, const Device device = at::kC
 namespace at {
 namespace native {
 
-static Tensor wrapped_scalar_tensor(const Scalar& scalar, const Device device = at::kCPU) {
+inline Tensor wrapped_scalar_tensor(const Scalar& scalar, const Device device = at::kCPU) {
   auto tensor = scalar_to_tensor(scalar, device);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
