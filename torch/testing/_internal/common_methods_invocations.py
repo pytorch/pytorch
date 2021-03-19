@@ -18,7 +18,8 @@ from torch.testing import \
      all_types_and_complex_and, all_types_and, all_types_and_complex,
      integral_types_and)
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCPUIfNoMkl,
+    (skipIf, skipMeta, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+     skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
@@ -419,6 +420,65 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
                             keepdim=keepdim,
                             dim=(0, 1))))
         return inputs
+
+def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad):
+    size_1D = (S,)
+    size_2D = (2, 2)
+
+    test_cases = [
+        # input size, ord, dim args
+        (size_1D, None, None),
+        (size_1D, None, (0,)),
+        (size_1D, 0, None),
+        (size_1D, 0, (0,)),
+        (size_1D, 0.9, None),
+        (size_1D, 0.9, (0,)),
+        (size_1D, 1, None),
+        (size_1D, 1, (0,)),
+        (size_1D, -2.1, None),
+        (size_1D, -2.1, (0,)),
+        (size_1D, inf, None),
+        (size_1D, inf, (0,)),
+        (size_1D, -inf, None),
+        (size_1D, -inf, (0,)),
+
+        (size_2D, None, None),
+        (size_2D, None, (0,)),
+        (size_2D, None, (-1, 0)),
+        (size_2D, 0, None),
+        (size_2D, 0, (0,)),
+        (size_2D, 0, (-1, 0)),
+        (size_2D, 0.9, None),
+        (size_2D, 0.9, (0,)),
+        (size_2D, 0.9, (-1, 0)),
+        (size_2D, 1, None),
+        (size_2D, 1, (0,)),
+        (size_2D, 1, (-1, 0)),
+        (size_2D, -2.1, None),
+        (size_2D, -2.1, (0,)),
+        (size_2D, -2.1, (-1, 0)),
+        (size_2D, inf, None),
+        (size_2D, inf, (0,)),
+        (size_2D, inf, (-1, 0)),
+        (size_2D, -inf, None),
+        (size_2D, -inf, (0,)),
+        (size_2D, -inf, (-1, 0)),
+    ]
+    inputs = []
+
+    for test_size, ord, dim in test_cases:
+        for keepdim in [False, True]:
+            inputs.append(SampleInput(
+                make_tensor(
+                    test_size, device, dtype,
+                    low=None, high=None,
+                    requires_grad=requires_grad),
+                args=(ord,),
+                kwargs=dict(
+                    keepdim=keepdim,
+                    dim=dim)))
+
+    return inputs
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     input = SampleInput((make_tensor((S, S), device, dtype,
@@ -1050,6 +1110,37 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False):
         out.append(SampleInput((a, b)))
     return out
 
+def sample_inputs_householder_product(op_info, device, dtype, requires_grad):
+    """
+    This function generates input for torch.linalg.householder_product (torch.orgqr).
+    The first argument should be a square matrix or batch of square matrices, the second argument is a vector or batch of vectors.
+    Empty, square, rectangular, batched square and batched rectangular input is generated.
+    """
+    # Each column of the matrix is getting multiplied many times leading to very large values for
+    # the Jacobian matrix entries and making the finite-difference result of grad check less accurate.
+    # That's why gradcheck with the default range [-9, 9] fails and [-2, 2] is used here.
+    samples = (
+        SampleInput((make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((S + 1, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((2, 1, S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((2, 1, S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((2, 1, S + 1, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((2, 1, S,), device, dtype, low=-2, high=2, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((0, 0), device, dtype, low=None, high=None, requires_grad=requires_grad),
+                    make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+
+        SampleInput((make_tensor((S, S), device, dtype, low=-2, high=2, requires_grad=requires_grad),
+                    make_tensor((0,), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+    )
+
+    return samples
+
 def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False):
     """
     This function generates always positive-definite input for torch.linalg.cholesky using
@@ -1532,6 +1623,52 @@ def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
     )
 
     return samples
+
+
+def sample_inputs_lerp(op_info, device, dtype, requires_grad):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    samples = (
+        # no broadcast
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 0.4)),
+        # broadcast rhs
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), 0.4)),
+        # scalar tensor
+        SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 0.4)),
+        # broadcast rhs scalar-tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 0.4)),
+        # broadcast rhs with weight tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), _make_tensor_helper((S, S)))),
+        # broadcast rhs and weight tensor
+        SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, 1)), _make_tensor_helper((S,)))),
+
+        # Broadcasts `self` : Issue with inplace-variants
+        # Reference: https://github.com/pytorch/pytorch/issues/50747
+        # SampleInput((_make_tensor_helper((S,)), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper(()), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), 0.4)),
+        # SampleInput((_make_tensor_helper((S, 1)), _make_tensor_helper((S, S)), _make_tensor_helper((S, 1)))),
+    )  # type: ignore
+
+    if dtype.is_complex:
+        samples = samples + (  # type: ignore
+            # no broadcast
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 1.2 + 0.1j)),
+            # broadcast rhs
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)), 5.4 + 9j)),
+            # scalar tensor
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 0.4j)),
+            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()), 6.1 + 0.004j)),
+            # broadcast rhs scalar-tensor
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 0.4j)),
+            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper(()), 1 + 2j)),
+        )
+
+    return samples
+
 
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
@@ -2176,6 +2313,20 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 active_if=IS_WINDOWS),
                    )),
+    OpInfo('linalg.householder_product',
+           aten_name='linalg_householder_product',
+           op=torch.linalg.householder_product,
+           aliases=('orgqr', ),
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           # TODO: backward uses in-place operations that vmap doesn't like
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           sample_inputs_func=sample_inputs_householder_product,
+           decorators=[skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack,
+                       # gradgrad checks are slow
+                       DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'), ]),
+
     OpInfo('inverse',
            op=torch.inverse,
            dtypes=floating_and_complex_types(),
@@ -2269,6 +2420,23 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_invertible,
            output_func=itemgetter(1),
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
+    OpInfo('linalg.vector_norm',
+           op=torch.linalg.vector_norm,
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           test_inplace_grad=False,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           sample_inputs_func=sample_inputs_linalg_vector_norm,
+           aten_name='linalg_vector_norm',
+           skips=(
+               # TODO: remove this once `pow` is implemented for float16
+               #       and bfloat16 on CPU. Issue:
+               #       https://github.com/pytorch/pytorch/issues/50789
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cpu',
+                        dtypes=[torch.float16, torch.bfloat16]),
+               # linalg.vector_norm does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
@@ -2728,6 +2896,21 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.bfloat16])),
                    safe_casts_outputs=True,
                    handles_complex_extremals=False),
+    OpInfo('lerp',
+           dtypes=floating_and_complex_types(),
+           # Reference: https://github.com/pytorch/pytorch/issues/54048
+           # CUDA and ROCM don't support complex inputs
+           dtypesIfCUDA=floating_types_and(torch.half),
+           dtypesIfROCM=floating_types_and(torch.half),
+           sample_inputs_func=sample_inputs_lerp,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.cfloat, torch.cdouble]),
+               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
+           ),
+           assert_autodiffed=True),
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
            op=torch.linalg.inv,
@@ -3044,6 +3227,7 @@ if TEST_SCIPY:
                        safe_casts_outputs=True),
         UnaryUfuncInfo('erf',
                        ref=scipy.special.erf,
+                       aliases=('special.erf', ),
                        decorators=(precisionOverride({torch.float16: 1e-2,
                                                       torch.bfloat16: 1e-2}),),
                        dtypes=all_types_and(torch.bool),
@@ -3057,6 +3241,7 @@ if TEST_SCIPY:
                        safe_casts_outputs=True),
         UnaryUfuncInfo('erfc',
                        ref=scipy.special.erfc,
+                       aliases=('special.erfc', ),
                        decorators=(precisionOverride({torch.float16: 1e-2,
                                                       torch.bfloat16: 1e-2}),),
                        dtypes=all_types_and(torch.bool),
@@ -3070,6 +3255,7 @@ if TEST_SCIPY:
                        safe_casts_outputs=True),
         UnaryUfuncInfo('erfinv',
                        ref=scipy.special.erfinv,
+                       aliases=('special.erfinv', ),
                        decorators=(precisionOverride({torch.float16: 1e-2,
                                                       torch.bfloat16: 1e-2,
                                                       torch.float32: 1e-4}),),
@@ -3445,12 +3631,8 @@ def method_tests():
         ('remainder', (S, 1, S), (non_differentiable(torch.rand(S, S) + 1.5),), 'tensor_broadcast_all'),
         ('remainder', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
         ('remainder', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
-        ('lerp', (S, S, S), ((S, S, S), 0.4), 'no_broadcast', (True,)),
-        ('lerp', (S, S, S), ((S,), 0.4), 'broadcast_rhs', (True,)),
         ('lerp', (S,), ((S, S, S), 0.4), 'broadcast_lhs', (True,)),
         ('lerp', (S, 1, S), ((S, S), 0.4), 'broadcast_all', (True,)),
-        ('lerp', (), ((), 0.4), 'scalar', (True,)),
-        ('lerp', (S, S, S), ((), 0.4), 'scalar_broadcast_rhs', (True,)),
         ('lerp', (), ((S, S, S), 0.4), 'scalar_broadcast_lhs', (True,)),
         ('lerp', (S, 1, S), ((S, S), (S, 1, 1, S)), 'tensor_broadcast_all', (True,)),
         ('mean', (S, S, S), NO_ARGS, '', (True,)),
