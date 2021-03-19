@@ -1348,34 +1348,36 @@
 
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  structured_delegate: div.out
   dispatch:
-    CPU, CUDA: div
     SparseCPU, SparseCUDA: div_sparse
 
 - func: div_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  structured_delegate: div.out
   dispatch:
-    CPU, CUDA: div_
     SparseCPU, SparseCUDA: div_sparse_
 
 - func: div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
 - func: div.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: div
+  structured_delegate: div.out_mode
 
 - func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU, CUDA: div_
+  structured_delegate: div.out_mode
 
 - func: div.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: div_out
+    CPU, CUDA: div_out_mode
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
