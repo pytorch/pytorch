@@ -163,7 +163,7 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
     case Backend::SparseCsrCPU:
       return DispatchKey::SparseCsrCPU;
     case Backend::SparseCsrCUDA:
-      return DispatchKey::SparseCsrCUDA;  
+      return DispatchKey::SparseCsrCUDA;
     case Backend::MkldnnCPU:
       return DispatchKey::MkldnnCPU;
     case Backend::Vulkan:

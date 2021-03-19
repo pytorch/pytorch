@@ -1,9 +1,9 @@
 #pragma once
 
+#include <ATen/SparseTensorImpl.h>
+#include <ATen/SparseTensorUtils.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/SparseTensorImpl.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
 
@@ -37,17 +37,30 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
 
   void resize_and_clear_(int64_t nnz_size, IntArrayRef size);
   void resize_as_(const Tensor& src);
-  void set_member_tensors(const Tensor& crow_indices, const Tensor& col_indices,
-                                 const Tensor& values);
-  
-  Tensor crow_indices() const { return crow_indices_; }
-  Tensor col_indices() const { return col_indices_; }
-  Tensor values() const { return values_; }
-  int nnz() const { return values_.size(0); }
+  void set_member_tensors(
+      const Tensor& crow_indices,
+      const Tensor& col_indices,
+      const Tensor& values);
 
- private :
-  
-  explicit SparseCsrTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
-                               at::Tensor crow_indices, at::Tensor col_indices, at::Tensor values);
+  Tensor crow_indices() const {
+    return crow_indices_;
+  }
+  Tensor col_indices() const {
+    return col_indices_;
+  }
+  Tensor values() const {
+    return values_;
+  }
+  int nnz() const {
+    return values_.size(0);
+  }
+
+ private:
+  explicit SparseCsrTensorImpl(
+      at::DispatchKeySet key_set,
+      const caffe2::TypeMeta& data_type,
+      at::Tensor crow_indices,
+      at::Tensor col_indices,
+      at::Tensor values);
 };
 } // namespace at

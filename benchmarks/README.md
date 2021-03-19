@@ -1,7 +1,5 @@
 # PyTorch Benchmarks
 
-NOTE: This folder is currently work in progress.
-
 This folder contains scripts that produce reproducible timings of various PyTorch features.
 
 It also provides mechanisms to compare PyTorch with other frameworks.

@@ -936,22 +936,7 @@ class Tensor(torch._C._TensorBase):
         elif self.is_sparse_csr:
             return self
         else:
-            ro = [0]
-            co = []
-            vals: List[Any] = []
-
-            for irow in range(shape[0]):
-                row = self[irow, :]
-                selection = row != fill_value
-                select_nums = row[selection]
-                ro.append(ro[-1] + len(select_nums))
-                co.extend(torch.nonzero(selection).flatten().tolist())
-                vals.extend(select_nums.flatten().tolist())
-
-            return torch.sparse_csr_tensor(torch.tensor(ro, dtype=torch.int32), 
-                                           torch.tensor(co, dtype=torch.int32),
-                                           torch.tensor(vals, dtype=self.dtype),
-                                           size=shape, dtype=self.dtype)
+            return self.to_sparse().to_sparse_csr()
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):

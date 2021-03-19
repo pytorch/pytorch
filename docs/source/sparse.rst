@@ -415,7 +415,7 @@ and ``col_indices`` if it is not present.
 Operations on sparse CSR tensors
 --------------------------------
 
-The simplest way of constructing a sparse CSR tensor from a strided or sparse COO 
+The simplest way of constructing a sparse CSR tensor from a strided or sparse COO
 tensor is to use :meth:`tensor.to_sparse_csr`. Any zeros in the (strided) tensor will
 be interpreted as missing values in the sparse tensor:
 
