@@ -7806,13 +7806,11 @@ add_docstr(torch.sgn,
            r"""
 sgn(input, *, out=None) -> Tensor
 
-Returns a new tensor with the signs (definition below) of the elements of :attr:`input`.
-
 This function is an extension of torch.sign() to complex tensors.
-It is equivalent to torch.sign() for non-complex tensors,
-and for complex tensors it computes a new tensor whose elements have
+It computes a new tensor whose elements have
 the same angles as the corresponding elements of :attr:`input` and
-absolute values (i.e. magnitudes) of one.
+absolute values (i.e. magnitudes) of one for complex tensors and
+is equivalent to torch.sign() for non-complex tensors.
 
 .. math::
     \text{out}_{i} = \begin{cases}
