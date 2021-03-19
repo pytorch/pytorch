@@ -44,6 +44,8 @@ class ModelTest(PackageTestCase):
             debug_graph = e._write_dep_graph(failing_module="torch")
             self.assertIn("torchvision.models.resnet", debug_graph)
 
+        f1.seek(0)
+
         # we can now load the saved model
         i = PackageImporter(f1)
         r2 = i.load_pickle("model", "model.pkl")
@@ -77,6 +79,8 @@ class ModelTest(PackageTestCase):
             # using functions like save_state_dict and load_state_dict to transfer state
             # to the correct code objects.
             e.save_pickle("model", "model.pkl", r2)
+
+        f2.seek(0)
 
         i2 = PackageImporter(f2)
         r3 = i2.load_pickle("model", "model.pkl")
@@ -161,6 +165,7 @@ class ModelTest(PackageTestCase):
         input = torch.rand(1, 3, 224, 224)
         results = []
         for m in [f1, f2]:
+            m.seek(0)
             importer = PackageImporter(m)
             the_model = importer.import_module("model").load()
             r = the_model(input)
