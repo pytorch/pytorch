@@ -674,7 +674,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "self" should represent the Tensor whose forward grad is accessed. It is
    *     required when dealing with view.
    */
-  const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const;
+  const at::Tensor& _fw_grad(uint64_t level, const at::Tensor& self) const;
 
   /**
    * Sets the forward gradient for this Tensor.
@@ -694,7 +694,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "is_inplace_op" is a boolean flag that tells if this gradient was generated
    *     by an inplace operation or an out of place one. This allows better error checking.
    */
-  void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
+  void _set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
