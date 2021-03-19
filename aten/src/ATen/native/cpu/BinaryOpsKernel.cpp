@@ -95,7 +95,7 @@ void atan2_kernel(TensorIterator& iter) {
 
 // Note: Undefined behavior when performing subtraction is intentionally
 // ignored.
-void sub_kernel(TensorIterator& iter, const Scalar& alpha_scalar) __ubsan_ignore_undefined__ {
+void sub_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) __ubsan_ignore_undefined__ {
   add_kernel(iter, -alpha_scalar);
 }
 
