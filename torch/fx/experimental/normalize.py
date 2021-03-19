@@ -119,6 +119,7 @@ class NormalizeArgs(Transformer):
         Perform overload resolution on a list of schema given `args` and `kwargs
         """
         found_signature = None
+        print(candidate_signatures)
         for candidate_signature in candidate_signatures:
             try:
                 bound_args = candidate_signature.bind(*args, **kwargs)
@@ -142,4 +143,5 @@ class NormalizeArgs(Transformer):
                 break
             except TypeError:
                 continue
+        print('found signature', found_signature)
         return found_signature
