@@ -37,9 +37,6 @@ CC="clang" CXX="clang++" LDSHARED="clang --shared" \
   USE_ASAN=1 USE_CUDA=0 USE_MKLDNN=0 \
   python setup.py install
 
-# export test times so that potential sharded tests that'll branch off this build will use consistent data
-python test/run_test.py --export-past-test-times
-
 # Test building via the sdist source tarball
 python setup.py sdist
 mkdir -p /tmp/tmp

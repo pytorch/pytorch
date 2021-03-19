@@ -365,8 +365,12 @@ def print_to_stderr(message):
 
 # Convert something like pytorch_windows_vs2019_py36_cuda10.1_build to pytorch_windows_vs2019_py36_cuda10.1
 def get_stripped_CI_job() -> str:
-    job = os.environ.get("CIRCLE_JOB", "")
-    return job.rstrip('0123456789').rstrip('_test').rstrip('_build')
+    job = os.environ.get("CIRCLE_JOB", "").rstrip('0123456789')
+    if job.endswith('_test'):
+        job = job[:len(job) - len('_test')]
+    elif job.endswith('_build'):
+        job = job[:len(job) - len('_build')]
+    return job
 
 
 # This function returns a list of S3 test time reports. This function can run into errors if HAVE_BOTO3 = False
