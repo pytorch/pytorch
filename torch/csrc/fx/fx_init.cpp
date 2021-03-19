@@ -36,12 +36,12 @@ PyObject* replacement_method(PyObject* self, PyObject* args, PyObject* kwargs) {
   PyObject* args_ =
       Py_BuildValue("(OOO)", to_restore->patched_method, args, kwargs);
   if (!args_) {
-    goto exit;
+    goto exit;  // NOLINT
   }
   result = PyEval_CallObject(to_restore->patch_fn, args_);
   Py_DECREF(args_);
   if (!result) {
-    goto exit;
+    goto exit; // NOLINT
   }
 
 exit:
@@ -52,14 +52,15 @@ exit:
   return result;
 }
 
-static PyMethodDef ReplacementMethod = {
-    "replace",
-    (PyCFunction)(void (*)(void))replacement_method,
-    METH_VARARGS | METH_KEYWORDS,
-    "Replaced method implementation."};
 
 static PyObject* patch_function(PyObject* self, PyObject* args) {
-  ToRestore to_restore;
+  static PyMethodDef ReplacementMethod = {
+      "replace",
+      (PyCFunction)(void (*)())replacement_method,
+      METH_VARARGS | METH_KEYWORDS,
+      "Replaced method implementation."};
+
+  ToRestore to_restore = {};
   if (!PyArg_ParseTuple(
           args, "OO", &to_restore.patched_method, &to_restore.patch_fn)) {
     return nullptr;
@@ -83,30 +84,29 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
       PyBytes_FromStringAndSize((const char*)&to_restore, sizeof(ToRestore));
   patch_method_c->m_ml = &ReplacementMethod;
 #if PY_VERSION_HEX >= 0x03080000
-  //   patch_method_c->vectorcall = NULL;
+    patch_method_c->vectorcall = NULL;
 #endif
   return Py_None;
 }
 
-static PyMethodDef PatchMethods[] = {
-    {"patch_function", patch_function, METH_VARARGS, "Save"},
-    {nullptr},
-};
-
-static struct PyModuleDef path = {
-    PyModuleDef_HEAD_INIT,
-    "patch", /* name of module */
-    "", /* module documentation, may be NULL */
-    -1, /* size of per-interpreter state of the module, or -1 if the module
-           keeps state in global variables. */
-    PatchMethods};
 
 void initFx(PyObject* module) {
+  static std::array<PyMethodDef, 2> PatchMethods = {{
+      {"patch_function", patch_function, METH_VARARGS, "Save"},
+      {nullptr},
+  }};
+
+  static struct PyModuleDef path = {
+      PyModuleDef_HEAD_INIT,
+      "patch", /* name of module */
+      "", /* module documentation, may be NULL */
+      -1, /* size of per-interpreter state of the module, or -1 if the module
+            keeps state in global variables. */
+      PatchMethods.data()};
   PyObject* patch = PyModule_Create(&path);
   if (!patch) {
     throw python_error();
   }
-  // steals a reference to linalg
   if (PyModule_AddObject(module, "_fx", patch) != 0) {
     throw python_error();
   }
