@@ -1140,7 +1140,7 @@ Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
     if (self.ndimension() != 0) {
       TORCH_CHECK(self.size(dim.value()) != 0, "Expected reduction dim ", dim.value(), " to be non-zero");
     }
-    
+
     auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
     if (sizes[wrap_dim] == 1) {
       if (keepdim) {

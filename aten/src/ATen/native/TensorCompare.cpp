@@ -296,7 +296,7 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
 // This function should be called when you are reducing a zero-dim tensor and want to
 // simply resize the output and return it.
 void zero_numel_tensor_resize(const Tensor& result, const Tensor& result_indices, const Tensor& self, int64_t dim,
-                              bool keepdim) {         
+                              bool keepdim) {
   TORCH_CHECK(self.sizes().size() != 0 && self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero");
   std::vector<int64_t> sizes;
   if (keepdim) {
