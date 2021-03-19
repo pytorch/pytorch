@@ -1058,7 +1058,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return toSimple(g.insertConstant(py::cast<double>(obj), loc));
     } else if (PyComplex_CheckExact(obj.ptr())) {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
-      return toSimple(g.insertConstant(static_cast<c10::complex<double>>(c_obj), loc));
+      return toSimple(
+          g.insertConstant(static_cast<c10::complex<double>>(c_obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
       return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {

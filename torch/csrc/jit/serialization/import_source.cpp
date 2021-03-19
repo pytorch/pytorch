@@ -223,12 +223,14 @@ struct SourceImporterImpl : public Resolver,
           graph->insertConstant(std::numeric_limits<double>::quiet_NaN(), loc));
     }
     if (name == "infj") {
-      return std::make_shared<SimpleValue>(
-          graph->insertConstant(c10::complex<double>(0, std::numeric_limits<double>::infinity()), loc));
+      return std::make_shared<SimpleValue>(graph->insertConstant(
+          c10::complex<double>(0, std::numeric_limits<double>::infinity()),
+          loc));
     }
     if (name == "nanj") {
-      return std::make_shared<SimpleValue>(
-          graph->insertConstant(c10::complex<double>(0, std::numeric_limits<double>::quiet_NaN()), loc));
+      return std::make_shared<SimpleValue>(graph->insertConstant(
+          c10::complex<double>(0, std::numeric_limits<double>::quiet_NaN()),
+          loc));
     }
     if (name == "__torch__") {
       return std::make_shared<ClassNamespaceValue>(

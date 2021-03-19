@@ -151,7 +151,7 @@ class TestComplex(JitTestCase):
 
             if res_python != res_script:
                 msg = ("Failed on {const_name}. Python: {res_python}, Script: {res_script}"
-                        .format(const_name=const_name, res_python=res_python, res_script=res_script))
+                    .format(const_name=const_name, res_python=res_python, res_script=res_script))
                 self.assertEqual(res_python, res_script, msg=msg)
 
         float_consts = ['pi', 'e', 'tau', 'inf', 'nan']
