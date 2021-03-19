@@ -167,6 +167,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       return MethodValue(value_, prop->getter->name())
           .call(loc, m, {}, {}, /*n_binders=*/1);
     }
+    if (classType->hasClassAttribute(field)) {
+      ErrorReport report(loc);
+      report << "Class attribute '" << field << "' is not supported. "
+        "Please change it into instance attribute";
+      throw report;
+    }
   } else if (auto iface = value_->type()->cast<InterfaceType>()) {
     // accessing methods of interfaces
     if (auto schema = iface->getMethod(field)) {

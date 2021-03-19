@@ -1890,7 +1890,8 @@ struct TORCH_API ClassType : public NamedType {
       c10::optional<QualifiedName> qualifiedName,
       std::weak_ptr<CompilationUnit> cu,
       bool is_module = false,
-      std::string doc_string = "");
+      std::string doc_string = "",
+      const std::vector<std::string>& classAttributes = std::vector<std::string>());
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
@@ -1989,6 +1990,17 @@ struct TORCH_API ClassType : public NamedType {
                attributes_.cend(),
                [&](const ClassAttribute& attr) { return attr.getName() == name; }) !=
         attributes_.cend();
+  }
+
+  bool hasClassAttribute(const std::string& name) const {
+    if (droppedClassAttributes_.empty()){
+      return false;
+    }
+    return std::find(
+      droppedClassAttributes_.begin(),
+      droppedClassAttributes_.end(),
+      name
+    ) != droppedClassAttributes_.end();
   }
 
   at::ArrayRef<TypePtr> containedTypes() const override {
@@ -2213,7 +2225,8 @@ struct TORCH_API ClassType : public NamedType {
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
       bool is_module,
-      std::string doc_string);
+      std::string doc_string,
+      const std::vector<std::string>& classAttributes);
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     const auto& n = name().value();
@@ -2237,8 +2250,11 @@ struct TORCH_API ClassType : public NamedType {
   // Holds method attributes
   std::weak_ptr<CompilationUnit> compilation_unit_;
 
-  // Holds all atrributes, attribute details are found on ClassAttribute
+  // Holds all atrributes successfully compiled.
+  // Attribute details are found on ClassAttribute
   std::vector<ClassAttribute> attributes_;
+  // Holds all atrributes dropped during compilation
+  std::vector<std::string> droppedClassAttributes_;
   // Construct mirroring attributes_, only around due to the fact that `containedTypes()` method returns an ArrayRef.
   // Never fill this without using the appropriate provideNewClassAttribute method
   std::vector<TypePtr> attributeTypes_;
