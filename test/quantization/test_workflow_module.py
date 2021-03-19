@@ -1,5 +1,6 @@
 # Torch
 import torch
+import sys
 from torch.quantization import (
     MinMaxObserver,
     PerChannelMinMaxObserver,
@@ -136,8 +137,9 @@ def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, p
     Xq = Xq.permute(tuple(permute_axis_list))
     mask = (Xq >= quant_min) * (Xq <= quant_max)
     res = torch.zeros_like(dY)
-    res[mask] = dY[mask]
-    print('mask={}, dY={},  res={}'.format(mask, dY, res))
+    sss = torch.masked_select(dY, mask)
+    print('mask={}, dY={},  res={}'.format(mask, dY, sss), file=sys.stderr)
+    res.masked_scatter_(mask, sss)
     return res, mask
 
 # Reference method for quantization.
