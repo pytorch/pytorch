@@ -466,7 +466,7 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
   Tensor exclusive_reverse_nocp = at::cat({ones, narrow_reverse}, dim);
   Tensor exclusive_reverse = reverse_dim(exclusive_reverse_nocp.cumprod(dim), dim);
 
-  return grad * (exclusive_normal * exclusive_reverse);
+  return grad * (exclusive_normal * exclusive_reverse).conj();
 }
 
 // note that the gradient for prod is equivalent to:
@@ -482,7 +482,7 @@ Tensor prod_backward(const Tensor& grad, const Tensor& input, const Tensor& resu
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
-    return (grad * result) / input;
+    return grad * (result / input).conj();
   } else if (zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
@@ -504,7 +504,7 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
   Tensor slice_zero_count = zero_mask.sum(dim, true);
   int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
   if (total_zeros == 0) {
-    return (grad * result) / input;
+    return grad * (result / input).conj();
   } else {
     return prod_safe_zeros_backward(grad, input, dim);
   }
