@@ -84,7 +84,7 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
       PyBytes_FromStringAndSize((const char*)&to_restore, sizeof(ToRestore));
   patch_method_c->m_ml = &ReplacementMethod;
 #if PY_VERSION_HEX >= 0x03080000
-  patch_method_c->vectorcall = NULL;
+  patch_method_c->vectorcall = nullptr;
 #endif
   return Py_None;
 }
