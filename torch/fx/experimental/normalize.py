@@ -119,7 +119,6 @@ class NormalizeArgs(Transformer):
         Perform overload resolution on a list of schema given `args` and `kwargs
         """
         found_signature = None
-        print(candidate_signatures)
         for candidate_signature in candidate_signatures:
             try:
                 bound_args = candidate_signature.bind(*args, **kwargs)
@@ -129,19 +128,19 @@ class NormalizeArgs(Transformer):
                 for k, parameter in candidate_signature.parameters.items():
                     bound_arg = bound_args.arguments[k]
                     if parameter.annotation is not inspect.Signature.empty:
-                        annotation = (eval(parameter.annotation) if isinstance(parameter.annotation, str)
-                                      else parameter.annotation)
+                        # We're the only ones to generate these signatures, we don't use
+                        # string type annotations, so we should be good here
+                        assert not isinstance(parameter.annotation, str)
 
                         # Assuming that all proxied arguments are of Tensor type because that's the only
                         # thing __torch_function__ currently supports
                         if isinstance(bound_arg, torch.fx.Proxy):
-                            if annotation is not torch.Tensor:
+                            if parameter.annotation is not torch.Tensor:
                                 raise TypeError()
-                        elif not issubclass(type(bound_arg), annotation):
+                        elif not issubclass(type(bound_arg), parameter.annotation):
                             raise TypeError()
                 found_signature = candidate_signature
                 break
             except TypeError:
                 continue
-        print('found signature', found_signature)
         return found_signature
