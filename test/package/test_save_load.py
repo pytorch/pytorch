@@ -150,8 +150,6 @@ class TestSaveLoad(PackageTestCase):
 
         importer1 = PackageImporter(f1)
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
-        if isinstance(f1, BytesIO):
-            f1.seek(0)
         importer2 = PackageImporter(f1)
         loaded2 = importer2.load_pickle("obj", "obj.pkl")
 

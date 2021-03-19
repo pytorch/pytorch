@@ -1,4 +1,3 @@
-import io
 import os
 import sys
 from tempfile import NamedTemporaryFile
