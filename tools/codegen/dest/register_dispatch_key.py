@@ -121,14 +121,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
         elif self.target is Target.ANONYMOUS_DEFINITION:
             impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
 
-            args_exprs = []
-            for a in args:
-                # TODO: this is a big HACK, figure out better way...
-                if 'legacy' in impl_name and 'optional<Tensor>' in a.type:
-                    args_exprs.append(f"c10::value_or_else({a.name}, [] {{return Tensor();}})")
-                else:
-                    args_exprs.append(a.name)
-            args_exprs_str = ', '.join(args_exprs)
+            args_exprs_str = ', '.join(a.name for a in args)
 
             return_kw = "    return "
 

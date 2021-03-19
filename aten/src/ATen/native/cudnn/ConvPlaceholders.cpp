@@ -1,5 +1,5 @@
-#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAConfig.h> // for the definition of AT_CUDNN_ENABLED
 #include <ATen/native/ConvUtils.h>
 
 namespace at { namespace native {
@@ -91,6 +91,30 @@ void raw_cudnn_convolution_backward_weight_out(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
   AT_ERROR("raw_cudnn_convolution_backward_weight_out: ATen not compiled with cuDNN support");
+}
+
+Tensor cudnn_convolution_relu(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_t,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups) {
+  AT_ERROR("cudnn_convolution_relu: ATen not compiled with cuDNN support");
+}
+
+Tensor cudnn_convolution_add_relu(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const Tensor& z_t,
+    const c10::optional<Scalar>& alpha,
+    const c10::optional<Tensor>& bias_t,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups) {
+  AT_ERROR("cudnn_convolution_add_relu: ATen not compiled with cuDNN support");
 }
 
 #endif  // AT_CUDNN_ENABLED

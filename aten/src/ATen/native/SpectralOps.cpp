@@ -518,7 +518,7 @@ Tensor& fft_rfftfreq_out(Tensor& out, int64_t n, double d) {
   TORCH_CHECK(at::isFloatingType(dtype) || at::isComplexType(dtype),
               "rfftfreq requires a floating point or complex dtype");
   // TODO: arange doesn't have complex support
-  native::arange_out(out, n/2 + 1);
+  native::arange_out(n/2 + 1, out);
   return out.mul_(1.0 / (n * d));  // Slightly faster than div_(n*d)
 }
 
