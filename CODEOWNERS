@@ -30,3 +30,10 @@
 # or remove yourself from it.
 /test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang
 /torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang
+
+# ONNX Export
+/torch/csrc/jit/passes/onnx.h @bowenbao @neginraoof @spandantiwari
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @neginraoof @spandantiwari
+/torch/csrc/jit/passes/onnx/ @bowenbao @neginraoof @spandantiwari
+/torch/onnx/ @bowenbao @neginraoof @spandantiwari
+/test/onnx/ @bowenbao @neginraoof @spandantiwari
