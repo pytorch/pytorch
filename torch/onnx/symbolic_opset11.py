@@ -849,7 +849,7 @@ def repeat_interleave(g, self, repeats, dim=None):
         dim = 0
     else:
         dim = sym_help._maybe_get_scalar(dim)
-    
+
     repeats_dim = sym_help._get_tensor_rank(repeats)
     repeats_sizes = sym_help._get_tensor_sizes(repeats)
     input_sizes = sym_help._get_tensor_sizes(input)
@@ -870,7 +870,7 @@ def repeat_interleave(g, self, repeats, dim=None):
         if input_size is None:
             input_sizes[idx], input_sizes_temp[idx] = 0, -1
     perm_i[0], perm_i[dim] = perm_i[dim], perm_i[0]
-    
+
     # Cases when repeats is a single value tensor and dim has unknown input size
     if (repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1)) and input_sizes[dim] == 0:
         if not sym_help._is_tensor(repeats):
@@ -883,12 +883,12 @@ def repeat_interleave(g, self, repeats, dim=None):
         reps = unsqueeze(g, reps, 0)
     else:
         return torch.onnx.symbolic_opset9.repeat_interleave(g, self, repeats, final_dim)
-        
+
     reps_like = g.op("ConstantOfShape", g.op("Shape", repeats),
-            value_t=torch.tensor([1], dtype=torch.long))
+                     value_t=torch.tensor([1], dtype=torch.long))
     r_splits = split(g, repeats, reps_like, 0)
     i_splits = split(g, input, reps_like, dim)
-    
+
     input_sizes[dim], input_sizes_temp[dim] = -1, 1
 
     # Create a loop to iterate over each value along the dimension
@@ -933,4 +933,5 @@ def repeat_interleave(g, self, repeats, dim=None):
     # the zero'th dimension (by default). In order to avoid this and concatenate
     # along the dimension provided, some post-processing is required
     loop_out = g.op("Transpose", loop_out, perm_i=perm_i)
-    return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(input_sizes)))   
+    return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(input_sizes)))  
+ 

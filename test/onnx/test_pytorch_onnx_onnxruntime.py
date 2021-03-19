@@ -58,8 +58,7 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                        dynamic_axes=dynamic_axes,
                        input_names=input_names, output_names=output_names,
                        fixed_batch_size=fixed_batch_size, training=training,
-                       onnx_shape_inference=onnx_shape_inference,
-                       verbose=True)
+                       onnx_shape_inference=onnx_shape_inference)
 
     # compute onnxruntime output prediction
     ort_sess = onnxruntime.InferenceSession(f.getvalue())
@@ -3758,7 +3757,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([[1, 2, 4], [3, 4, 7]])
         another_x = torch.tensor([[7, 8], [5, 6]])
         self.run_test(SingleDynamicModel(), x, test_with_inputs=[another_x],
-                      input_names=['input_1'],  dynamic_axes={'input_1' : {1 : 'w'}})
+                      input_names=['input_1'], dynamic_axes={'input_1' : {1 : 'w'}})
 
         class SingleDynamicModel2(torch.nn.Module):
             def forward(self, x):
@@ -3768,7 +3767,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([[1, 2], [3, 4]])
         another_x = torch.tensor([[7, 8], [5, 6]])
         self.run_test(SingleDynamicModel2(), x, test_with_inputs=[another_x],
-                      input_names=['input_1'],  dynamic_axes={'input_1' : {0 : 'h'}})
+                      input_names=['input_1'], dynamic_axes={'input_1' : {0 : 'h'}})
 
         class AllDynamicModel(torch.nn.Module):
             def forward(self, x):
@@ -3778,7 +3777,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([[1, 2, 4, 16], [3, 9, 27, 81], [2, 3, 5, 7]])
         another_x = torch.tensor([[7, 8], [5, 6]])
         self.run_test(AllDynamicModel(), x, test_with_inputs=[another_x],
-                      input_names=['input_1'],  dynamic_axes={'input_1' : {0 : 'h', 1 : 'w'}})
+                      input_names=['input_1'], dynamic_axes={'input_1' : {0 : 'h', 1 : 'w'}})
 
     def test_view(self):
         class ViewModel(torch.nn.Module):
