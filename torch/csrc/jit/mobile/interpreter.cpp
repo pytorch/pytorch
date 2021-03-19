@@ -21,7 +21,8 @@ InterpreterState::InterpreterState(std::shared_ptr<Code> code)
 }
 
 namespace {
-thread_local int64_t exception_pc_{-1};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static thread_local int64_t exception_pc_{-1};
 void createObject(Stack& stack, const at::ClassTypePtr& type) {
   auto userObj = c10::ivalue::Object::create(
       c10::StrongTypePtr(type->compilation_unit(), type),
@@ -140,7 +141,9 @@ bool InterpreterState::run(Stack& stack) {
           auto userObj = pop(stack).toObject();
           // Mobile only: since the number of slots is not known, resize the
           // numAttributes before setSlot.
-          while (userObj->type()->numAttributes() <= inst.X) {
+          // clang-tidy complains about size_t compare with int32_t (inst.X)
+          // hence the cast
+          while (static_cast<int32_t>(userObj->type()->numAttributes()) <= inst.X) {
             std::stringstream ss;
             ss << userObj->type()->numAttributes();
             userObj->type()->addAttribute(ss.str(), c10::NoneType::create());
@@ -198,8 +201,8 @@ bool InterpreterState::run(Stack& stack) {
           ++pc;
         } break;
         case NAMED_TUPLE_CONSTRUCT: {
-          auto type = code_->types_[inst.X]->expect<at::TupleType>();
-          namedTupleConstruct(stack, type, inst.N);
+          namedTupleConstruct(
+              stack, code_->types_[inst.X]->expect<at::TupleType>(), inst.N);
           ++pc;
         } break;
         case CREATE_OBJECT: {

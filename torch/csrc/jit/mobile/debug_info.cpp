@@ -17,7 +17,7 @@ MobileDebugTable::MobileDebugTable(
     if (c10::string_view(record_name.data(), record_name.size())
             .ends_with(suffix)) {
       at::DataPtr debug_data;
-      size_t debug_size;
+      size_t debug_size{0};
       std::tie(debug_data, debug_size) = reader->getRecord(record_name);
       auto ivalues =
           jit::unpickle(
