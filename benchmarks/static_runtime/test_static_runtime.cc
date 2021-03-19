@@ -28,26 +28,34 @@ static at::Tensor getTensor(const at::IValue& ival) {
 }
 
 void compareTensorLists(
-    const std::vector<IValue>& l, /* values */
-    const std::vector<IValue>& r /* expects */) {
+    const std::vector<IValue>& l, /* expects */
+    const std::vector<IValue>& r /* values */) {
   EXPECT_TRUE(l.size() == r.size());
   for (int i = 0; i < l.size(); ++i) {
     ASSERT_TRUE(l[i].isTensor());
     ASSERT_TRUE(r[i].isTensor());
-    LOG(INFO) << "output " << i << ": \n" << l[i] << std::endl;
-    LOG(INFO) << "expect " << i << ": \n" << r[i] << std::endl;
-    EXPECT_TRUE(l[i].toTensor().equal(r[i].toTensor()));
+    LOG(INFO) << "expect " << i << ": \n" << l[i] << std::endl;
+    LOG(INFO) << "output " << i << ": \n" << r[i] << std::endl;
+    if (! l[i].toTensor().defined()) {
+      EXPECT_TRUE(! r[i].toTensor().defined());
+    } else {
+      EXPECT_TRUE(l[i].toTensor().equal(r[i].toTensor()));
+    }
   }
 }
 
 void compareTensorLists(
-    const std::vector<at::Tensor>& l, /* values */
-    const std::vector<at::Tensor>& r /* expects */) {
+    const std::vector<at::Tensor>& l, /* expects */
+    const std::vector<at::Tensor>& r /* values */) {
   EXPECT_TRUE(l.size() == r.size());
   for (int i = 0; i < l.size(); ++i) {
-    LOG(INFO) << "output " << i << ": \n" << l[i] << std::endl;
-    LOG(INFO) << "expect " << i << ": \n" << r[i] << std::endl;
-    EXPECT_TRUE(l[i].equal(r[i]));
+    LOG(INFO) << "expect " << i << ": \n" << l[i] << std::endl;
+    LOG(INFO) << "output " << i << ": \n" << r[i] << std::endl;
+    if (! l[i].defined()) {
+      EXPECT_TRUE(! r[i].defined());
+    } else {
+      EXPECT_TRUE(l[i].equal(r[i]));
+    }
   }
 }
 
@@ -99,6 +107,21 @@ TEST(StaticRuntime, UnaryOps) {
   testStaticRuntime(aten_sum_1_true, args);
 }
 
+TEST(StaticRuntime, EmbeddingBag) {
+  at::Tensor weight = torch::ones({3, 11}, at::ScalarType::Float);
+  at::Tensor input = torch::tensor({0, 1, 0, 2});
+  at::Tensor offset = torch::tensor({0, 2, 4});
+
+  std::vector<IValue> args{weight, input, offset};
+
+  testStaticRuntime(embedding_bag_default, args);
+  testStaticRuntime(embedding_bag_mean, args);
+  testStaticRuntime(embedding_bag_max, args);
+  testStaticRuntime(embedding_bag_sum_last_offset, args);
+  testStaticRuntime(embedding_bag_mean_last_offset, args);
+  testStaticRuntime(embedding_bag_max_last_offset, args);
+}
+
 TEST(StaticRuntime, IndividualOps_Binary) {
   auto a = at::randn({2, 3});
   auto b = at::ones({2, 3});
@@ -125,6 +148,7 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
   testStaticRuntime(reshape_script_3, args);
   testStaticRuntime(reshape_script_4, args);
   testStaticRuntime(reshape_script_5, args);
+  testStaticRuntime(reshape_inplace_script, args);
 }
 
 TEST(StaticRuntime, IndividualOps_flatten) {

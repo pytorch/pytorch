@@ -98,7 +98,7 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
 static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & second, int64_t dimension, int64_t index) {
   int64_t first_dims = first.dim();
   int64_t second_dims = second.dim();
-  TORCH_CHECK(first_dims == second_dims, "Tensors must have same number of dimensions: got ",
+  TORCH_CHECK(first_dims == second_dims, "torch.cat(): Tensors must have same number of dimensions: got ",
               first_dims, " and ", second_dims);
   for (int64_t dim = 0; dim < first_dims; dim++) {
     if (dim == dimension) {
@@ -106,7 +106,7 @@ static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor
     }
     int64_t first_dim_size = first.sizes()[dim];
     int64_t second_dim_size = second.sizes()[dim];
-    TORCH_CHECK(first_dim_size == second_dim_size, "Sizes of tensors must match except in dimension ",
+    TORCH_CHECK(first_dim_size == second_dim_size, "torch.cat(): Sizes of tensors must match except in dimension ",
                 dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim,
                 " (The offending index is ", index, ")");
   }
@@ -152,8 +152,8 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   }
   const Tensor& notSkippedTensor = *pnotSkippedTensor;
 
-  TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
-  TORCH_CHECK(dim <= notSkippedTensor.dim(), "dimension ", dim, "out of range");
+  TORCH_CHECK(tensors.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
+  TORCH_CHECK(dim <= notSkippedTensor.dim(), "torch.cat(): dimension ", dim, "out of range");
 
   // when the input tensors are of the same size and strides,
   // reuse the same iterator for all input tensors
@@ -277,7 +277,7 @@ static void check_cat_no_zero_dim(TensorList tensors) {
   }
 }
 
-Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
+Tensor & cat_out(TensorList tensors, int64_t dim, Tensor & result) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
@@ -289,7 +289,7 @@ Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   return result;
 }
 
-Tensor& cat_out(Tensor& result, TensorList tensors, Dimname dim) {
+Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
   TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
 }
@@ -1532,7 +1532,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
 }
 
 // torch.row_stack, alias for torch.vstack
-Tensor& row_stack_out(Tensor& result, TensorList tensors) {
+Tensor& row_stack_out(TensorList tensors, Tensor& result) {
   return at::vstack_out(result, tensors);
 }
 
