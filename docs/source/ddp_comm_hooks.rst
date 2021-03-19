@@ -38,6 +38,7 @@ Particularly, :class:`torch.distributed.GradBucket` represents a bucket of gradi
 .. autofunction:: torch.distributed.GradBucket.get_tensors
 .. autofunction:: torch.distributed.GradBucket.get_per_parameter_tensors
 .. autofunction:: torch.distributed.GradBucket.is_the_last_bucket_to_allreduce
+.. autofunction:: torch.distributed.GradBucket.set_tensor
 
 Default Communication Hooks
 ---------------------------
@@ -46,8 +47,14 @@ Default communication hooks are simple **stateless** hooks, so the input state
 in ``register_comm_hook`` is either a process group or ``None``.
 The input ``bucket`` is a :class:`torch.distributed.GradBucket` object.
 
-.. automodule:: torch.distributed.algorithms.ddp_comm_hooks.default_hooks
-    :members:
+.. currentmodule:: torch.distributed.algorithms.ddp_comm_hooks.default_hooks
+.. autofunction:: allreduce_hook
+.. autofunction:: fp16_compress_hook
+
+Additionally, a communication hook wraper is provided to support :meth:`~fp16_compress_hook` as a wrapper,
+which can be combined with other communication hooks.
+
+.. autofunction:: fp16_compress_wrapper
 
 PowerSGD Communication Hook
 ---------------------------
