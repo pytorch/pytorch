@@ -83,10 +83,37 @@ IValue readArchiveAndTensors(
     return len;
   };
 
-  std::string archive_name_plus_slash = archive_name + "/";
+  const std::string slash = "/";
+  std::string archive_name_plus_slash = archive_name + slash;
   auto read_record = [&](const std::string& name) {
-    std::string ss = archive_name_plus_slash + name;
-    return std::get<0>(stream_reader.getRecord(ss));
+    std::size_t found = name.find(slash);
+
+// In version 4, the tensor root_key doesn't include the parent path
+// To support backward compatibility, when the name doesn't include slash
+// assume it's version 4 and attach the archive_name_plus_slash
+// The example tensor format is:
+// torch._utils._rebuild_tensor_v2(
+//     pers.obj(('storage', torch.FloatStorage, '17', 'cpu', 22736),),
+//     0,
+//     (1, 464, 7, 7),
+//     (22736, 49, 7, 1),
+//     False,
+//     collections.OrderedDict())
+    if (found == std::string::npos){
+      std::string ss = archive_name_plus_slash + name;
+      return std::get<0>(stream_reader.getRecord(ss));
+    }
+
+// In version 4+, the tensor root_key will include the parent path.
+// The example tensor format is:
+// torch._utils._rebuild_tensor_v2(
+//     pers.obj(('storage', torch.FloatStorage, 'constants/17', 'cpu', 22736),),
+//     0,
+//     (1, 464, 7, 7),
+//     (22736, 49, 7, 1),
+//     False,
+//     collections.OrderedDict())
+    return std::get<0>(stream_reader.getRecord(name));
   };
 
   Unpickler unpickler(
