@@ -45,7 +45,7 @@ using binary_clamp_fn_alpha =
 
 DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
 DECLARE_DISPATCH(binary_clamp_fn_alpha, add_clamp_stub);
-DECLARE_DISPATCH(binary_fn_alpha, sub_stub);
+DECLARE_DISPATCH(structured_binary_fn_alpha, sub_stub);
 DECLARE_DISPATCH(structured_binary_fn, mul_stub);
 DECLARE_DISPATCH(binary_fn, div_true_stub);
 DECLARE_DISPATCH(binary_fn, div_floor_stub);

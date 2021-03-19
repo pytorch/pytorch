@@ -20,6 +20,14 @@ TORCH_META_FUNC2(add, Tensor) (
   native::alpha_check(dtype(), alpha);
 }
 
+TORCH_META_FUNC2(sub, Tensor) (
+  const Tensor& self, const Tensor& other, const Scalar& alpha
+) {
+  native::sub_check(self, other);
+  build_binary_op(maybe_get_output(), self, other);
+  native::alpha_check(dtype(), alpha);
+}
+
 TORCH_META_FUNC2(mul, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
@@ -84,6 +92,13 @@ TORCH_IMPL_FUNC(add_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
 ) {
   add_stub(device_type(), *this, alpha);
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
+}
+
+TORCH_IMPL_FUNC(sub_out) (
+  const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
+) {
+  sub_stub(device_type(), *this, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
 }
 
@@ -393,34 +408,12 @@ Tensor& multiply_(Tensor& self, const Scalar& other) {
   return self.mul_(other);
 }
 
-Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  sub_check(self, other);
-  auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter.dtype(), alpha);
-  sub_stub(iter.device_type(), iter, alpha);
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
-  return result;
-}
-
-Tensor sub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  sub_check(self, other);
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter.dtype(), alpha);
-  sub_stub(iter.device_type(), iter, alpha);
-  return iter.output();
-}
-
-Tensor& sub_(Tensor& self, const Tensor& other, const Scalar& alpha) {
-  return native::sub_out(self, self, other, alpha);
-}
-
 Tensor sub(const Tensor& self, const Scalar& other, const Scalar& alpha) {
-  return native::sub(self, wrapped_scalar_tensor(other), alpha);
+  return at::sub(self, wrapped_scalar_tensor(other), alpha); // redispatch!
 }
 
 Tensor& sub_(Tensor& self, const Scalar& other, const Scalar& alpha) {
-  return native::sub_(self, wrapped_scalar_tensor(other), alpha);
+  return self.sub_(wrapped_scalar_tensor(other), alpha); // redispatch!
 }
 
 // subtract, alias for sub
@@ -493,7 +486,7 @@ Tensor tanh_backward(const Tensor& grad_output, const Tensor& output) {
 }
 
 Tensor rsub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  return native::sub(other, self, alpha);
+  return at::sub(other, self, alpha); // redispatch!
 }
 
 Tensor& atan2_out(Tensor& result, const Tensor& self, const Tensor& other) {

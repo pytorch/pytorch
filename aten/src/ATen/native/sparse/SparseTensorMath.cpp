@@ -448,7 +448,7 @@ Tensor& sub_sparse_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   return native::add_sparse_(self, other, -alpha);
 }
 
-Tensor& sub_out_sparse(Tensor& r, const Tensor& self, const Tensor& other, const Scalar& alpha) {
+Tensor& sub_out_sparse(const Tensor& self, const Tensor& other, const Scalar& alpha, Tensor& r) {
   sub_check(self, other);
   return at::add_out(r, self, other, -alpha);  // redispatch!
 }
