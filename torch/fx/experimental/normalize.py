@@ -1,7 +1,7 @@
 import torch
 import torch.fx
 import inspect
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from torch.fx.node import Argument, Target
 from torch._jit_internal import boolean_dispatched
 
@@ -54,16 +54,10 @@ class NormalizeArgs(Transformer):
             assert callable(target)
             torch_op_schemas = get_signature_for_torch_op(target)
             if torch_op_schemas:
-                # Iterate through all of the schema until we find one that matches
-                # If one matches, populate `new_kwargs` with the combined args/kwargs
-                # values. If none matches, `new_kwargs` will be None
-                for candidate_signature in torch_op_schemas:
-                    try:
-                        candidate_signature.bind(args, kwargs)
-                        new_kwargs = self._args_kwargs_to_normalized_kwargs(candidate_signature, args, kwargs)
-                        break
-                    except TypeError:
-                        continue
+                signature = self._find_overload_with_type_check(torch_op_schemas, args, kwargs)
+                if signature:
+                    new_kwargs = self._args_kwargs_to_normalized_kwargs(signature, args, kwargs)
+
         if new_kwargs:
             # FIXME: `target(**kwargs)` doesn't keep things specified as kwargs
             # in kwargs
@@ -117,3 +111,35 @@ class NormalizeArgs(Transformer):
             new_kwargs[param] = bound_args.arguments[param]
 
         return new_kwargs
+
+    def _find_overload_with_type_check(
+            self, candidate_signatures : List[inspect.Signature],args : Tuple[Argument, ...],
+            kwargs : Dict[str, Any]) -> Optional[inspect.Signature]:
+        """
+        Perform overload resolution on a list of schema given `args` and `kwargs
+        """
+        found_signature = None
+        for candidate_signature in candidate_signatures:
+            try:
+                bound_args = candidate_signature.bind(*args, **kwargs)
+                bound_args.apply_defaults()
+
+                # Signature.bind does not check types. Do secondary checking here
+                for k, parameter in candidate_signature.parameters.items():
+                    bound_arg = bound_args.arguments[k]
+                    if parameter.annotation is not inspect.Signature.empty:
+                        annotation = (eval(parameter.annotation) if isinstance(parameter.annotation, str)
+                                      else parameter.annotation)
+
+                        # Assuming that all proxied arguments are of Tensor type because that's the only
+                        # thing __torch_function__ currently supports
+                        if isinstance(bound_arg, torch.fx.Proxy):
+                            if annotation is not torch.Tensor:
+                                raise TypeError()
+                        elif not issubclass(type(bound_arg), annotation):
+                            raise TypeError()
+                found_signature = candidate_signature
+                break
+            except TypeError:
+                continue
+        return found_signature
