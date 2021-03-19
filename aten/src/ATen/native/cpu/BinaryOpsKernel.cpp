@@ -99,7 +99,7 @@ void sub_kernel(TensorIterator& iter, const Scalar& alpha_scalar) __ubsan_ignore
   add_kernel(iter, -alpha_scalar);
 }
 
-void mul_kernel(TensorIterator& iter) {
+void mul_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
   } else {

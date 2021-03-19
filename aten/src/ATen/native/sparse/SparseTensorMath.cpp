@@ -85,7 +85,7 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, cons
 // Values of uncoalesced tensor corresponding to the same indices are summed
 // and log1p(summed_value) != log1p(v1) + log1p(v2)
 
-SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
+SparseTensor& log1p_out_sparse(const SparseTensor& t, SparseTensor& r) {
   TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(
@@ -106,7 +106,7 @@ SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
 
 SparseTensor log1p_sparse(const SparseTensor& t) {
   auto result = get_result_tensor_for_unary_op(t);
-  return log1p_out_sparse(result, t);
+  return log1p_out_sparse(t, result);
 }
 
 SparseTensor& log1p_sparse_(SparseTensor& t) {
@@ -302,10 +302,9 @@ SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, cons
 // floor_divide(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
-SparseTensor& floor_divide_out_sparse_zerodim(
-  SparseTensor& result,
-  const SparseTensor& dividend,
-  const Tensor& divisor) {
+SparseTensor& floor_divide_out_sparse_zerodim(const SparseTensor& dividend,
+  const Tensor& divisor,
+  SparseTensor& result) {
   TORCH_CHECK(divisor.dim() == 0, "Sparse floor division requires a scalar or ",
     "zero-dim dense tensor divisor (got shape ", divisor.sizes(), " for divisor)");
   TORCH_CHECK(!divisor.is_sparse(), "Sparse floor division requires a scalar or ",
@@ -351,15 +350,15 @@ SparseTensor& floor_divide_out_sparse_zerodim(
 Tensor floor_divide_sparse(const Tensor& self, const Tensor& value) {
   auto commonDtype = at::result_type(self, value);
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
-  return floor_divide_out_sparse_zerodim(result, self, value);
+  return floor_divide_out_sparse_zerodim(self, value, result);
 }
 
 Tensor& floor_divide_sparse_(Tensor& self, const Tensor& value) {
-  return floor_divide_out_sparse_zerodim(self, self, value);
+  return floor_divide_out_sparse_zerodim(self, value, self);
 }
 
 SparseTensor& floor_divide_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, const Scalar& value) {
-  return floor_divide_out_sparse_zerodim(r, t, wrapped_scalar_tensor(value));
+  return floor_divide_out_sparse_zerodim(t, wrapped_scalar_tensor(value), r);
 }
 
 // --------------------------------------------------------------------
@@ -703,7 +702,7 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
   return at::mul_out(self, self, other);  // redispatch!
 }
 
-SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor& src_) {
+SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTensor& r) {
   if (src_.dim() == 0) {
     return mul_out_sparse_zerodim(r, t_, src_);
   } else if (t_.dim() == 0) {
@@ -983,11 +982,10 @@ Tensor _sparse_mm(
 // NB: Despite its suggestive name, this actually only exists so that
 // we can redispatch to addmm_out; this is NOT an implementation of
 // the sparse masking version of mm
-SparseTensor& _sparse_mm_out(
-  SparseTensor& result,
-  const SparseTensor& sparse,
+SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
   const Tensor& dense
-) {
+,
+  SparseTensor& result) {
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
 }
@@ -1475,7 +1473,7 @@ Tensor any_sparse(const Tensor& self) {
 
 Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
   Tensor result = at::empty({}, mat2.options());
-  return bmm_out_sparse_cpu(result, self, mat2);
+  return bmm_out_sparse_cpu(self, mat2, result);
 }
 
 // Search a sorted strided array for the rightmost instance of a value.
@@ -1519,7 +1517,7 @@ scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAccessor<sca
   return mid_ind;
 }
 
-Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
+Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor& result) {
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
 
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
