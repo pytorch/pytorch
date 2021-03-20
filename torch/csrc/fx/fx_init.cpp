@@ -9,8 +9,8 @@ struct ToRestore {
 #if PY_VERSION_HEX >= 0x03080000
   vectorcallfunc vectorcall;
 #endif
-  PyObject* patched_method;
-  PyObject* patch_fn;
+  PyObject* original_fn; // The original method we are trying to patch
+  PyObject* patch_fn; // The function we're patching in place of original_fn
 };
 
 class DecRefGuard {
@@ -23,13 +23,14 @@ class DecRefGuard {
  private:
   PyObject* obj;
 };
+
 PyObject* replacement_method(PyObject* self, PyObject* args, PyObject* kwargs) {
   DecRefGuard self_guard(self);
   // restore the implementation immediately so that patch_fn lives for as little
   // as possible
   ToRestore* to_restore = (ToRestore*)PyBytes_AsString(self);
   PyCFunctionObject* patch_method_c =
-      ((PyCFunctionObject*)to_restore->patched_method);
+      ((PyCFunctionObject*)to_restore->original_fn);
   patch_method_c->m_self = to_restore->m_self;
   patch_method_c->m_ml = to_restore->m_ml;
 #if PY_VERSION_HEX >= 0x03080000
@@ -44,16 +45,30 @@ PyObject* replacement_method(PyObject* self, PyObject* args, PyObject* kwargs) {
   DecRefGuard kwargs_guard(kwargs);
 
   PyObject* result = nullptr;
+  // Creates a tuple of 3 python objects
   PyObject* args_ =
-      Py_BuildValue("(OOO)", to_restore->patched_method, args, kwargs);
+      Py_BuildValue("(OOO)", to_restore->original_fn, args, kwargs);
   if (!args_) {
-    return result;
+    return nullptr;
   }
+  DecRefGuard args_guard(args_);
+  // Calls the patched function with arguments of (original function, args, kwargs)
   result = PyEval_CallObject(to_restore->patch_fn, args_);
-  Py_DECREF(args_);
   return result;
 }
-
+// The general idea is that we're patching a PyCFunctionObject, which has a couple relevant parts:
+// m_ml: A PyMethodDef (the actual function to call)
+// m_self: The self arg.
+// vectorcall: An alternate calling convention (Python 3.8+)
+// Usually we call obj.m_ml(obj.m_self, args, kwargs). However, we want to patch
+// m_ml with ReplacementMethod (which calls our user-provided `patch_fn`). Thus,
+// we also replace `m_self` with `ToRestore`, which contains all the information
+// needed to restore the original function.
+//
+// `patch_function` parses the necessary information from the original PyCFunction
+// and then patches it. When that function is called, it calls
+// `replacement_method`, which then restores back the original `m_ml` and
+// `m_self` values, as well as calling the user-defined `patch_fn`.
 
 static PyObject* patch_function(PyObject* self, PyObject* args) {
   static PyMethodDef ReplacementMethod = {
@@ -64,13 +79,13 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
 
   ToRestore to_restore = {};
   if (!PyArg_ParseTuple(
-          args, "OO", &to_restore.patched_method, &to_restore.patch_fn)) {
+          args, "OO", &to_restore.original_fn, &to_restore.patch_fn)) {
     return nullptr;
   }
-  if (!PyCFunction_Check(to_restore.patched_method)) {
+  if (!PyCFunction_Check(to_restore.original_fn)) {
     std::stringstream err;
     err << "Patched object ";
-    PyObject* obj_repr = PyObject_Repr(to_restore.patched_method);
+    PyObject* obj_repr = PyObject_Repr(to_restore.original_fn);
     if (PyUnicode_Check(obj_repr)) {
       err << PyUnicode_AS_DATA(obj_repr) << " ";
     }
@@ -80,10 +95,10 @@ static PyObject* patch_function(PyObject* self, PyObject* args) {
   }
   DecRefGuard patch_fn_guard(to_restore.patch_fn);
   Py_INCREF(to_restore.patch_fn);
-  DecRefGuard patched_method_guard(to_restore.patched_method);
-  Py_INCREF(to_restore.patched_method);
+  DecRefGuard patched_method_guard(to_restore.original_fn);
+  Py_INCREF(to_restore.original_fn);
   PyCFunctionObject* patch_method_c =
-      ((PyCFunctionObject*)to_restore.patched_method);
+      ((PyCFunctionObject*)to_restore.original_fn);
 
   to_restore.m_self = patch_method_c->m_self;
   to_restore.m_ml = patch_method_c->m_ml;
