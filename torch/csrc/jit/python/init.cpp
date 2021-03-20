@@ -169,6 +169,10 @@ void initJITBindings(PyObject* module) {
           [](Module& module) {
             return NeZha_GetSplitModules(module);
           })
+      .def("_jit_nezha_update_ops", 
+          [](Module& module) {
+            return NeZha_UpdateOps(module);
+          })          
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def(

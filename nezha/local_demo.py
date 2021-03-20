@@ -11,6 +11,8 @@ import copy
 
 import nezha_helper
 
+torch.ops.load_library("/home/jay/repos/fatcat-z/pytorch/jay_my_ops/build/libonnx_ops.so")
+
 ############################## Preparation ##########################################################
 
 def measure_perf(model_pytorch, model_nezha, input):
@@ -63,9 +65,17 @@ class NeuralNet_All(nn.Module):
 
         return out
 
-class DummyModule(torch.nn.Module):
-    def forward(self, x):
-        return x;
+class TestModule(torch.nn.Module):
+    def __init__(self, file_name):
+        super(TestModule, self).__init__()
+        self.file_name = file_name
+
+    def forward(self, x, y:str):
+        new_y = '0'+y
+        new_size = int(new_y)
+
+        output = torch.ops.onnx_ops.dummy_ops(x, new_size)
+        return x
 
 def export_c_module(m, inputs, outputs, file_name):
     local_module = torch.jit.trace(DummyModule(), torch.ones(1))
@@ -74,9 +84,8 @@ def export_c_module(m, inputs, outputs, file_name):
 
 #####################################################################################################
 
-torch.classes.load_library("/home/jay/repos/fatcat-z/pytorch/jay_my_class/build/libcustom_class.so")
 
-test_onnx_cls = torch.classes.nezha_classes.ONNXRuntimeClass()
+# test_onnx_cls = torch.classes.nezha_classes.ONNXRuntimeClass()
 
 total_input_size=5
 total_hidden_size=4
@@ -84,23 +93,42 @@ total_num_classes=10
 dummy_input = torch.randn(32, 5)
 
 with torch.no_grad():
+
+    new_module = TestModule("my_onnx.onnx")
+    new_module.eval()
+    new_output = new_module(dummy_input, '5')
+
+    new_script_module = torch.jit.script(new_module)
+
+    x_module = torch._C._jit_nezha_update_ops(new_script_module._c)
+
+    print(x_module)
+
+    new_script_module._c = x_module
+    test_output = new_script_module(dummy_input, '5')
+
+    torch.onnx.export(new_module, (dummy_input, '5'), "test_example.onnx", verbose=True)
+
+    # all_C_modules = nezha_helper.split_modules(new_script_module._c)
+
+
     my_model = NeuralNet_All(total_input_size, total_hidden_size, total_num_classes)
     my_model.eval()
     output = my_model(dummy_input)
 
-    script_module = torch.jit.trace(my_model, dummy_input)
-    script_module.eval()
+    # script_module = torch.jit.trace(my_model, dummy_input)
+    # script_module.eval()
 
     # export_c_module(script_module._c, dummy_input, output, "my_nezha_test.onnx")
 
     # torch.onnx.export(script_module, dummy_input, "good_example.onnx", example_outputs=output)
 
-    module_file_name = "test_nezha.pt"
+    # module_file_name = "test_nezha.pt"
     # script_module.save(module_file_name)
-    torch.jit.save(script_module, module_file_name)
+    # torch.jit.save(script_module, module_file_name)
 
     # print(test_onnx_cls.inference(module_file_name, dummy_input, output))
-    print(nezha_helper.ort_inference(module_file_name, dummy_input, output))
+    # print(nezha_helper.ort_inference(module_file_name, dummy_input, output))
 
     # torch.ops.nezha_ops.split_graph(script_module._)
 
