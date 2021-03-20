@@ -1369,7 +1369,7 @@ class TestFakeQuantize(TestCase):
         Y_prime = torch.fake_quantize_per_channel_affine(
             X, scale, zero_point, axis, quant_min, quant_max)
         dout = torch.rand(X.shape, dtype=torch.float).to(device)
-        dX = _fake_quantize_per_channel_affine_grad_reference(
+        dX, _ = _fake_quantize_per_channel_affine_grad_reference(
             dout, X, scale, zero_point, axis, quant_min, quant_max)
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
@@ -1389,7 +1389,7 @@ class TestFakeQuantize(TestCase):
             Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
             dout = torch.rand(X.shape, dtype=torch.float).to(device)
-            dX = _fake_quantize_per_channel_affine_grad_reference(
+            dX, _ = _fake_quantize_per_channel_affine_grad_reference(
                 dout, X, scale, zero_point, axis, quant_min, quant_max)
             Y_prime.backward(dout)
             np.testing.assert_allclose(
@@ -1520,7 +1520,7 @@ class TestFakeQuantize(TestCase):
         # Test backward
         dout = torch.rand(X.shape, dtype=torch.float, device=device)
         Y_prime.backward(dout)
-        dX = _fake_quantize_per_channel_affine_grad_reference(dout, X, fq_module.scale,
+        dX, _ = _fake_quantize_per_channel_affine_grad_reference(dout, X, fq_module.scale,
                                                               fq_module.zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
