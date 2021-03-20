@@ -199,8 +199,8 @@ TEST(RandomPermutationTest, TestIslandShuffle) {
         break;
       }
     }
-    EXPECT_TRUE(passed1);
-    EXPECT_TRUE(passed2);
+    ASSERT_TRUE(passed1);
+    ASSERT_TRUE(passed2);
   }
   ASSERT_TRUE(shuffled1);
   ASSERT_TRUE(shuffled2);
