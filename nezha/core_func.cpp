@@ -1,6 +1,11 @@
 //#include<core_func.h>
+#include <torch/script.h>
+
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/extension.h>
+
+#include <torch/csrc/jit/python/python_ir.h>
+#include <torch/csrc/utils/pybind.h>
 
 static void updateGraph(std::shared_ptr<torch::jit::Graph> graph){
     if (graph == nullptr){
@@ -100,8 +105,45 @@ std::vector<torch::jit::Module> split_modules(
     return splitModules;
 }
 
+py::object ort_inference(std::string file_name, torch::Tensor inputs, torch::Tensor outputs) {
+// std::string ort_inference(std::string file_name, torch::Tensor input) {
+    torch::jit::Module test_module = torch::jit::load(file_name);
+
+    py::object onnx = py::module::import("torch.onnx");
+
+    onnx.attr("export_c_module")(test_module, inputs, outputs, "/home/jay/work/test_nezha.onnx");
+
+    torch::Tensor new_input = torch::rand_like(inputs);
+    py::object my_output = onnx.attr("try_ort_inference")("/home/jay/work/test_nezha.onnx", new_input);
+    
+    return my_output;
+  }
 
 //pybind11 binding
 PYBIND11_MODULE (TORCH_EXTENSION_NAME, m) {
     m.def ("split_modules", &split_modules, "split a module into several ones.");
+    m.def ("ort_inference", &ort_inference, "inference a module by ORT.");
 }
+
+
+// Test code in /home/jay/repos/fatcat-z/pytorch/torch/onnx/__init__.py file.
+
+// class DummyModule(torch.nn.Module):
+//     def forward(self, x):
+//         return x
+
+// def export_c_module(m, inputs, outputs, file_name):
+//     local_module = torch.jit.trace(DummyModule(), torch.ones(1))
+//     local_module._c = m
+//     torch.onnx.export(local_module, inputs, file_name, example_outputs=outputs)
+
+// def try_ort_inference(file_name, inputs):
+//     ort_sess = ort.InferenceSession(file_name)
+//     input_name = ort_sess.get_inputs()[0].name
+//     label_name = ort_sess.get_outputs()[0].name
+
+//     my_input, _ = torch.jit._flatten(inputs)
+//     my_inputs = [to_numpy(inp) for inp in my_input]
+
+//     ort_outs = ort_sess.run([label_name], {input_name: my_inputs[0]})
+//     return torch.from_numpy(ort_outs[0])

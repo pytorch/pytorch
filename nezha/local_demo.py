@@ -1,3 +1,4 @@
+import io
 import torch
 import numpy as np
 from torch import nn
@@ -7,6 +8,8 @@ from contextlib import contextmanager
 
 import time
 import copy
+
+import nezha_helper
 
 ############################## Preparation ##########################################################
 
@@ -60,7 +63,20 @@ class NeuralNet_All(nn.Module):
 
         return out
 
+class DummyModule(torch.nn.Module):
+    def forward(self, x):
+        return x;
+
+def export_c_module(m, inputs, outputs, file_name):
+    local_module = torch.jit.trace(DummyModule(), torch.ones(1))
+    local_module._c = m
+    torch.onnx.export(local_module, inputs, file_name, example_outputs=outputs)
+
 #####################################################################################################
+
+torch.classes.load_library("/home/jay/repos/fatcat-z/pytorch/jay_my_class/build/libcustom_class.so")
+
+test_onnx_cls = torch.classes.nezha_classes.ONNXRuntimeClass()
 
 total_input_size=5
 total_hidden_size=4
@@ -70,17 +86,38 @@ dummy_input = torch.randn(32, 5)
 with torch.no_grad():
     my_model = NeuralNet_All(total_input_size, total_hidden_size, total_num_classes)
     my_model.eval()
-    pytorch_model = copy.deepcopy(my_model)
+    output = my_model(dummy_input)
 
-    my_results = my_model(dummy_input)
+    script_module = torch.jit.trace(my_model, dummy_input)
+    script_module.eval()
 
-    my_model = SmartModule(my_model)
-    final_outputs = my_model(dummy_input)
+    # export_c_module(script_module._c, dummy_input, output, "my_nezha_test.onnx")
 
-    [np.testing.assert_allclose(my_results, final_outputs, rtol=1e-03, atol=1e-05)]
-    print('===================== Results are expected ===========================')
+    # torch.onnx.export(script_module, dummy_input, "good_example.onnx", example_outputs=output)
 
-    # measure performance
-    measure_perf(pytorch_model, my_model, dummy_input)
+    module_file_name = "test_nezha.pt"
+    # script_module.save(module_file_name)
+    torch.jit.save(script_module, module_file_name)
+
+    # print(test_onnx_cls.inference(module_file_name, dummy_input, output))
+    print(nezha_helper.ort_inference(module_file_name, dummy_input, output))
+
+    # torch.ops.nezha_ops.split_graph(script_module._)
+
+    # pytorch_model = copy.deepcopy(my_model)
+
+    # my_results = my_model(dummy_input)
+
+    # my_model = SmartModule(my_model)
+
+    # test_model = torch.jit.trace(my_model, torch.randn(1, 2))
+
+    # final_outputs = my_model(dummy_input)
+
+    # [np.testing.assert_allclose(my_results, final_outputs, rtol=1e-03, atol=1e-05)]
+    # print('===================== Results are expected ===========================')
+
+    # # measure performance
+    # measure_perf(pytorch_model, my_model, dummy_input)
 
 print('End')
