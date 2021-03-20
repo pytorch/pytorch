@@ -6435,7 +6435,7 @@ Keyword args:
 Example::
 
     >>> eps = torch.finfo(torch.float32).eps
-    >>> torch.nextafter(torch.Tensor([1, 2]), torch.Tensor([2, 1])) == torch.Tensor([eps + 1, 2 - eps])
+    >>> torch.nextafter(torch.tensor([1.0, 2.0]), torch.tensor([2.0, 1.0])) == torch.tensor([eps + 1, 2 - eps])
     tensor([True, True])
 
 """.format(**common_args))
