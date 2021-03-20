@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 #include "ATen/core/interned_strings.h"
+#include "jit/ir/ir.h"
 #include "jit/passes/constant_propagation.h"
 #include <torch/csrc/jit/passes/peephole.h>
 
@@ -1074,6 +1075,12 @@ class TensorExprFuser {
     }
   }
 
+  static void insertMessageBefore(std::string msg, Node* n) {
+    WithInsertPoint wip {n};
+    auto msg_const = n->owningGraph()->insertConstant(msg);
+    n->owningGraph()->insert(prim::Print, {msg_const});
+  }
+
   void specializeSizeOnInput(Value* inp, Block* target, std::unordered_map<Value*, Value*>& value_map) {
     TORCH_INTERNAL_ASSERT(inp->node()->kind() == aten::size || inp->node()->kind() == prim::If);
     GRAPH_DEBUG("@@@ Looking up aten::size %", getHeader(inp->node()));
@@ -1200,6 +1207,16 @@ class TensorExprFuser {
       splitNode(sizes[i], tb, true_map);
       splitNode(sizes[i], fb, false_map);
     }
+
+
+    static auto const INSERT_PRINTS = std::getenv("INSERT_PRINTS");
+
+    if (INSERT_PRINTS) {
+      insertMessageBefore(std::string("pass for Node") + getHeader(typecheck), tb->nodes().end()->prev());
+      insertMessageBefore(std::string("fail for Node") + getHeader(typecheck), fb->nodes().end()->prev());
+    }
+
+
 
 
     for (int64_t i = sizes.size() - 1; i >= 0; i--) {
