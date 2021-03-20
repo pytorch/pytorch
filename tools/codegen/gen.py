@@ -393,6 +393,19 @@ struct TORCH_API {name} : public {parent_class} {{
 
 refactor_count = 0
 
+def decorate_type(type: str) -> str:
+    type = re.escape(type)
+    if type in ['bool', 'int64_t', 'c10::optional<int64_t>', 'c10::optional<bool>']:
+        type = '(?:const\\s*)?' + type
+    type = type.replace("\\&", "&")                              # Don't need to escape &
+    type = type.replace("\\ ", "\\s*")                           # match any whitespaces
+    type = type.replace('Tensor', '(?:Tensor|SparseTensor)')
+    type = type.replace('c10::optional', '(?:c10::)?optional')
+    type = type.replace('MemoryFormat', '(?:c10::)?MemoryFormat')
+    type = type.replace('std::array<bool,', 'std::array<bool\\s*,\\s*')
+
+    return type
+
 @with_native_function
 def compute_out_convention_refactor(g: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
     if isinstance(g, StructuredNativeFunctions) or local.use_c10_dispatcher() is UseC10Dispatcher.full:
@@ -417,6 +430,18 @@ def compute_out_convention_refactor(g: Union[StructuredNativeFunctions, NativeFu
             print('quit because of ', arg.argument)
             return []
 
+
+
+    to_move = 0
+    for i in range(2):
+        if args[i].argument.type.is_tensor_like() and args[i].argument.is_write:
+            to_move += 1
+        else:
+            break
+    if to_move == 0:
+        print(f'WARNING: Nothing generated for {g.func.name} ::: {n}')
+        return []
+
     global refactor_count
     refactor_count += 1
     if refactor_count > 100:
@@ -436,28 +461,24 @@ def compute_out_convention_refactor(g: Union[StructuredNativeFunctions, NativeFu
             continue
         seen.add(n)
 
-        if n == 'math_addr_out':
-            print(f)
+        begin_out_tensor_pattern = f'\\s*{decorate_type("Tensor &")}[^,]*'
+        if to_move == 1:
+            current_signature = "([\s&\*]+{}\\s*\\()({}),\\s*({}[^,)]*)\\)(\\s*\\{{)".format(
+                re.escape(n),
+                begin_out_tensor_pattern,
+                "[^,]*,\\s*".join(decorate_type(a.type) for a in args[1:])
+            )
+        else:
+            current_signature = "([\s&\*]+{}\\s*\\()({},{}),\\s*({}[^,)]*)\\)(\\s*\\{{)".format(
+                re.escape(n),
+                begin_out_tensor_pattern,
+                "[^,]*,\\s*".join(decorate_type(a.type) for a in args[2:])
+            )
 
-        current_signature = "([\s&\*]+{}\\s*\\()([^T(){{}}]*Tensor\s*&[^,]*),\\s*({}[^,)]*)\\)(\\s*\\{{)".format(
-#                re.escape(returns_type).replace("\\&", "&").replace("\\ ", "\\s*"),
-            re.escape(n),
-            "[^,]*,\\s*".join(re.escape(a.type).replace("\\&", "&").replace("\\ ", "\\s*") for a in args[1:])
-#                "\\s*,\\s*".join(re.escape(a.no_default().decl()).replace("\\ ", "\\s*") for a in args)
-        )
-
-        current_signature = current_signature.replace('Tensor', '(?:Tensor|SparseTensor)')
-        current_signature = current_signature.replace('c10::optional', '(?:c10::)?optional')
-        current_signature = current_signature.replace('MemoryFormat', '(?:c10::)?MemoryFormat')
-
-#        with local.parametrize(
-#            use_c10_dispatcher=UseC10Dispatcher.full,
-#        ):
-#            returns_type = native.returns_type(f.func.returns)
-#            args = native.arguments(f.func)
-#            c10full_signature = "{} {}({}) {{".format(returns_type, n, ', '.join(a.no_default().decl() for a in args))
         rs.append(f"""\
-  - fastmod '{current_signature}' '${{1}}${{3}}, ${{2}})${{4}}' aten/src/ATen/native/
+
+  {g.loc}
+  fastmod '{current_signature}' '${{1}}${{3}}, ${{2}})${{4}}' aten/src/ATen/native/
 """)
 
     return rs
