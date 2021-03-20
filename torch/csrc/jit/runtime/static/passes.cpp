@@ -377,10 +377,30 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
       continue;
     }
     DCHECK(n->outputs().size() == 1);
-    auto* out = n->output();
-    if (out->uses().size() > 1) {
+
+    // In cases of having in-place ops in the graph, only replace the op with
+    // the copy version for ops with input with number of use == 1. Example:
+    //
+    // def forward(self, inp: Tensor, shape: List[int]):
+    //   a = inp + inp
+    //   b = a.reshape(shape)
+    //   c = b.sigmoid_()
+    //   d = c + c
+    //   e = a + a
+    //   f = b + b
+    //   return (d, e, f)
+    //
+    // b and c are aliases of a, sigmoid_ changes b, c, as well as a. e should
+    // equal to d in this case. If we replace reshape with the copy version, b
+    // and c are no longer aliases of a, the value of e would change as a
+    // result. To keep static runtime consistent with the jit interpreter, here
+    // we choose not to replace reshape with the copy version
+    auto* in = n->input(0);
+    if (in->uses().size() > 1) {
       continue;
     }
+
+    auto* out = n->output();
     if (db.mayContainAlias({out}, graph->outputs())) {
       continue;
     }

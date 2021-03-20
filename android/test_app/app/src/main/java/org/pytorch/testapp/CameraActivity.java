@@ -25,6 +25,7 @@ import androidx.camera.core.PreviewConfig;
 import androidx.core.app.ActivityCompat;
 import java.nio.FloatBuffer;
 import org.pytorch.IValue;
+import org.pytorch.MemoryFormat;
 import org.pytorch.Module;
 import org.pytorch.PyTorchAndroid;
 import org.pytorch.Tensor;

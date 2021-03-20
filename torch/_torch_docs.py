@@ -2987,6 +2987,9 @@ Computes the error function of each element. The error function is defined as fo
 .. math::
     \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erf`.
+
 Args:
     {input}
 
@@ -3009,6 +3012,9 @@ The complementary error function is defined as follows:
 .. math::
     \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erfc`.
+
 Args:
     {input}
 
@@ -3031,6 +3037,8 @@ The inverse error function is defined in the range :math:`(-1, 1)` as:
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erfinv`.
 
 Args:
     {input}
@@ -6427,7 +6435,7 @@ Keyword args:
 Example::
 
     >>> eps = torch.finfo(torch.float32).eps
-    >>> torch.nextafter(torch.Tensor([1, 2]), torch.Tensor([2, 1])) == torch.Tensor([eps + 1, 2 - eps])
+    >>> torch.nextafter(torch.tensor([1.0, 2.0]), torch.tensor([2.0, 1.0])) == torch.tensor([eps + 1, 2 - eps])
     tensor([True, True])
 
 """.format(**common_args))

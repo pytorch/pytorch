@@ -171,7 +171,7 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {
 
   static const JNINativeMethod methods[] = {
       {"imageYUV420CenterCropToFloatBuffer",
-       "(Ljava/nio/ByteBuffer;IILjava/nio/ByteBuffer;Ljava/nio/ByteBuffer;IIIIIII[F[FLjava/nio/Buffer;I)V",
+       "(Ljava/nio/ByteBuffer;IILjava/nio/ByteBuffer;Ljava/nio/ByteBuffer;IIIIIII[F[FLjava/nio/Buffer;II)V",
        (void*)pytorch_vision_jni::imageYUV420CenterCropToFloatBuffer},
   };
   int rc = env->RegisterNatives(
