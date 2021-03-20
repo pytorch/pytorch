@@ -11,7 +11,6 @@
 #include <ATen/native/CPUBlas.h>
 
 #include <algorithm>
-#include <iostream>
 
 namespace at {
 namespace native {

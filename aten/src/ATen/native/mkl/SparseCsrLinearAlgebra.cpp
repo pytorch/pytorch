@@ -9,7 +9,7 @@
 namespace at {
 namespace native {
 using namespace at::sparse;
-Tensor _sparse_mm_mkl_(
+TORCH_API Tensor _sparse_mm_mkl_(
     Tensor& self,
     const SparseTensor& sparse_,
     const Tensor& dense,
@@ -207,6 +207,7 @@ Tensor& _sparse_mm_mkl_(
       });
   return self;
 }
+
 } // namespace native
 } // namespace at
 
