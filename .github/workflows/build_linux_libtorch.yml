@@ -1,4 +1,4 @@
-name: Build Linux Conda Packages
+name: Build Linux libtorch
 
 on:
   # TODO: These are only runnable from workflow_dispatch, we need to eventually add
@@ -23,10 +23,10 @@ jobs:
         id: set-matrix
         run: |
           # outputting for debugging purposes
-          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py conda)
+          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py libtorch)
           echo "${MATRIX}"
           echo "::set-output name=matrix::${MATRIX}"
-  build-conda:
+  build-libtorch:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: generate-build-matrix
     runs-on: linux.2xlarge
@@ -37,23 +37,17 @@ jobs:
     container:
       image: ${{ matrix.container_image }}
     env:
-      DESIRED_PYTHON: ${{ matrix.python_version }}
+      # TODO: remove this var from the libtorch builder script(s)
+      DESIRED_PYTHON: '3.7'
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_VERSION: ${{ matrix.GPU_ARCH_VERSION }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
-      NO_BUILD_SUFFIX: True
-      # TODO: This is a legacy variable, we should just default all build to use
-      #       this folder within the conda/build_pytorch.sh script
-      TORCH_CONDA_BUILD_FOLDER: pytorch-nightly
-      # TODO: Another legacy env variable that isn't useful anymore, should default
-      #       to pytorch within the scripts directly
-      ANACONDA_USER: pytorch
-      PYTORCH_FINAL_PACKAGE_DIR: /remote
-      # We specify the CONDA_BLD_PATH here since conda creates extremely long paths
-      # for its default build path
-      CONDA_BLD_PATH: /build
+      BUILD_PYTHONLESS: 1
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      # TODO: remove this and bake env var into the Docker image
+      DESIRED_DEVTOOLSET: ${{ matrix.devtoolset }}
       PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
     steps:
@@ -83,15 +77,20 @@ jobs:
       #       in specific locations
       - name: Symlink repositories to root directory (for legacy scripts purposes)
         run: |
-          mv $(pwd)/pytorch /pytorch
-          mv $(pwd)/builder /builder
+          ln -s $(pwd)/pytorch /pytorch
+          ln -s $(pwd)/builder /builder
       # TODO: Bundle the correct build script in the base container image so
       #       that we don't have to do this type of specification
-      - name: Build PyTorch binary
+      - name: Build PyTorch binary (CUDA specific)
+        if: ${{ matrix.gpu_arch_type == 'cuda' }}
         run: |
-          /builder/conda/build_pytorch.sh
+          /builder/manywheel/build.sh
+      - name: Build PyTorch binary (CPU specific)
+        if: ${{ matrix.gpu_arch_type == 'cpu' }}
+        run: |
+          /builder/manywheel/build_cpu.sh
       - uses: actions/upload-artifact@v2
         with:
-          name: pytorch-conda-py${{ matrix.python_version }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
-          path: /remote/**/*.bz2
+          name: pytorch-libtorch-${{ matrix.libtorch_variant }}-${{ matrix.devtoolset }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
+          path: /remote/**/*.zip
       # TODO: Add a step here for uploading binaries
