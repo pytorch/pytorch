@@ -107,7 +107,7 @@ class Tracer(TracerBase):
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap().
 
-            enable:cpatching (bool): defaults to `True`,
+            enable_cpatching (bool): defaults to `True`,
                 Allows you to enable/disable monkeypatching of torch functions at the
                 C-level (which captures functins like randn).
 
