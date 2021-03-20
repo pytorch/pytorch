@@ -32,8 +32,8 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     const Tensor& self,
     const SparseTensor& op1,
     const Tensor& op2,
-    Scalar beta,
-    Scalar alpha) {
+    const Scalar& beta,
+    const Scalar& alpha) {
   Tensor expand_self;
   AT_ASSERT(op1.is_sparse_csr());
   std::tie(expand_self) =
@@ -184,17 +184,17 @@ Tensor addmm_sparse_csr_dense_cpu(
     const Tensor& self,
     const SparseTensor& sparse,
     const Tensor& dense,
-    Scalar beta,
-    Scalar alpha) {
+    const Scalar& beta,
+    const Scalar& alpha) {
   Tensor r = at::empty({0}, self.options());
   at::addmm_out(r, self, sparse, dense, beta, alpha);
   return r;
 }
 
 SparseTensor& _sparse_csr_mm_out(
-    SparseTensor& result,
     const SparseTensor& sparse,
-    const Tensor& dense) {
+    const Tensor& dense,
+    SparseTensor& result) {
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0.0, 1.0); // redispatch!
 }
@@ -203,8 +203,8 @@ Tensor _sparse_csr_addmm(
     const Tensor& t,
     const SparseTensor& sparse,
     const Tensor& dense,
-    Scalar beta,
-    Scalar alpha) {
+    const Scalar& beta,
+    const Scalar& alpha) {
   // _sparse_addmm forward is functionally equivalent to addmm; it's
   // just the backward that is different.  This technically does an
   // unnecessary redispatch, I was too lazy to make it not do that
@@ -212,14 +212,14 @@ Tensor _sparse_csr_addmm(
 }
 
 // Functions for element-wise addition.
-Tensor add_sparse_csr(const Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor add_sparse_csr(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
   return at::add_out(result, self, other, alpha); // redispatch!
 }
 
-Tensor& add_sparse_csr_(Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor& add_sparse_csr_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   return at::add_out(self, self, other, alpha); // redispatch!
 }
 
@@ -227,7 +227,7 @@ Tensor& add_out_dense_sparse_csr_cpu(
     Tensor& out,
     const Tensor& dense,
     const SparseTensor& src,
-    Scalar alpha) {
+    const Scalar& alpha) {
   AT_ASSERT(dense.layout() == kStrided);
   AT_ASSERT(src.is_sparse_csr());
   AT_ASSERT(dense.device() == kCPU);
@@ -315,7 +315,7 @@ Tensor& add_out_dense_sparse_csr_cpu(
 Tensor& add_out_sparse_csr_cpu(
     const Tensor& self,
     const SparseTensor& other,
-    Scalar alpha,
+    const Scalar& alpha,
     SparseTensor& out) {
   if (self.layout() == kStrided) {
     return add_out_dense_sparse_csr_cpu(out, self, other, alpha);

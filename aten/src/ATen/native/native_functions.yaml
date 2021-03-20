@@ -661,7 +661,7 @@
 - func: _baddbmm_mkl_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: function
 
-- func: _sparse_mm_mkl_(Tensor(a!) self, Tensor sparse_, Tensor dense, Tensor t, Scalar alpha, Scalar beta) -> Tensor
+- func: _sparse_mm_mkl_(Tensor(a!) self, Tensor sparse_, Tensor dense, Tensor t, Scalar alpha=1, Scalar beta=1) -> Tensor(a!)
   variants: function
 
 - func: baddbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)

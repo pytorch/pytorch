@@ -984,8 +984,7 @@ Tensor _sparse_mm(
 // we can redispatch to addmm_out; this is NOT an implementation of
 // the sparse masking version of mm
 SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
-  const Tensor& dense
-,
+  const Tensor& dense,
   SparseTensor& result) {
   Tensor t = at::zeros({}, dense.options());
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!

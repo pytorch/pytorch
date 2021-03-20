@@ -14,8 +14,8 @@ Tensor _sparse_mm_mkl_(
     const SparseTensor& sparse_,
     const Tensor& dense,
     const Tensor& t,
-    Scalar alpha,
-    Scalar beta) {
+    const Scalar& alpha,
+    const Scalar& beta) {
 #if _MSC_VER
   AT_ERROR("sparse_mm_mkl: MKL support is disabled on Windows");
 #else
@@ -139,8 +139,8 @@ static inline void sparse_mm_mkl_template(
     const Tensor& values,
     const Tensor& dense,
     const Tensor& t,
-    Scalar alpha,
-    Scalar beta,
+    const Scalar& alpha,
+    const Scalar& beta,
     IntArrayRef size,
     IntArrayRef dense_size) {
   sparse_mm_mkl_impl(
@@ -165,13 +165,13 @@ static bool inline is_mkl_int32_index() {
 #endif
 }
 
-Tensor _sparse_mm_mkl_(
+Tensor& _sparse_mm_mkl_(
     Tensor& self,
     const SparseTensor& sparse_,
     const Tensor& dense,
     const Tensor& t,
-    Scalar alpha,
-    Scalar beta) {
+    const Scalar& alpha,
+    const Scalar& beta) {
   if (is_mkl_int32_index()) {
     if (sparse_.crow_indices().scalar_type() != kInt) {
       TORCH_WARN(

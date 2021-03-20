@@ -610,44 +610,43 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
   if (r.idx == 0) {
     const int SIZE_ARRAY_ARG = 3, TYPE_INFERENCE_ARG = 4, DEVICE_TYPE_ARG = 7, REQ_GRAD_ARG = 8;
     bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
-    const auto inferred_dispatch_key = denseTypeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
+    const auto inferred_options = typeIdWithDefault(r, DEVICE_TYPE_ARG, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(DEVICE_TYPE_ARG));
 
-    Tensor crow_indices =  internal_new_from_data(inferred_dispatch_key,
+    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), 
+                                           r.pyobject(VALUES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
+                                           /*type_inference=*/type_inference);
+    Tensor crow_indices =  internal_new_from_data(values.options(),
       crow_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(CROW_INDICES_ARG),
       /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/false);
-    Tensor col_indices = internal_new_from_data(inferred_dispatch_key, 
+    Tensor col_indices = internal_new_from_data(values.options(),
       col_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(COL_INDICES_ARG),
       /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/false);
-    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), 
-                                           r.pyobject(VALUES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
-                                           /*type_inference=*/type_inference);
+
     return at::sparse_csr_tensor(crow_indices, col_indices, values, r.intlist(SIZE_ARRAY_ARG),
-                                 options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparseCsr))
-                                 .set_requires_grad(r.toBool(REQ_GRAD_ARG));
+                                 values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(REQ_GRAD_ARG));
   } else if (r.idx == 1) {
     const int TYPE_INFERENCE_ARG = 3;
     bool type_inference = r.isNone(TYPE_INFERENCE_ARG);
-    const auto inferred_dispatch_key = denseTypeIdWithDefault(r, 6, dispatch_key);
+    const auto inferred_options = typeIdWithDefault(r, 6, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(3, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(6));
 
-    Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(6),
+    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(6),
                                            r.pyobject(2), /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
-    Tensor crow_indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()),
+    Tensor crow_indices = internal_new_from_data(values.options(),
       crow_indices_scalar_type, r.deviceOptional(6),
       r.pyobject(0), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/false);
-    Tensor col_indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), 
-      col_indices_scalar_type, r.deviceOptional(6),
+    Tensor col_indices = internal_new_from_data(values.options(), col_indices_scalar_type, r.deviceOptional(6),
       r.pyobject(1), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/false);
     return at::sparse_csr_tensor(crow_indices, col_indices, values, 
-                                 options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparseCsr)).set_requires_grad(r.toBool(7));
+                                 values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(7));
   }
   throw std::runtime_error("sparse_csr_tensor(): invalid arguments");  
 }

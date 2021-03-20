@@ -92,26 +92,26 @@ class TestSparseCSR(TestCase):
 
     def test_sparse_csr_from_dense(self):
         sp = torch.tensor([[1, 2], [3, 4]]).to_sparse_csr()
-        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32), sp.crow_indices())
-        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32), sp.col_indices())
+        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int64), sp.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int64), sp.col_indices())
         self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=torch.int64), sp.values())
 
         dense = torch.tensor([[4, 5, 0], [0, 0, 0], [1, 0, 0]])
         sparse = dense.to_sparse_csr()
-        self.assertEqual(torch.tensor([0, 2, 2, 3], dtype=torch.int32), sparse.crow_indices())
-        self.assertEqual(torch.tensor([0, 1, 0], dtype=torch.int32), sparse.col_indices())
+        self.assertEqual(torch.tensor([0, 2, 2, 3], dtype=torch.int64), sparse.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 0], dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([4, 5, 1]), sparse.values())
 
         dense = torch.tensor([[0, 0, 0], [0, 0, 1], [1, 0, 0]])
         sparse = dense.to_sparse_csr()
-        self.assertEqual(torch.tensor([0, 0, 1, 2], dtype=torch.int32), sparse.crow_indices())
-        self.assertEqual(torch.tensor([2, 0], dtype=torch.int32), sparse.col_indices())
+        self.assertEqual(torch.tensor([0, 0, 1, 2], dtype=torch.int64), sparse.crow_indices())
+        self.assertEqual(torch.tensor([2, 0], dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([1, 1]), sparse.values())
 
         dense = torch.tensor([[2, 2, 2], [2, 2, 2], [2, 2, 2]])
         sparse = dense.to_sparse_csr()
-        self.assertEqual(torch.tensor([0, 3, 6, 9], dtype=torch.int32), sparse.crow_indices())
-        self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int32), sparse.col_indices())
+        self.assertEqual(torch.tensor([0, 3, 6, 9], dtype=torch.int64), sparse.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9), sparse.values())
 
     def test_dense_convert(self):
