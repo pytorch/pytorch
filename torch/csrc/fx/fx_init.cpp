@@ -52,12 +52,13 @@ PyObject* replacement_method(PyObject* self, PyObject* args, PyObject* kwargs) {
     return nullptr;
   }
   DecRefGuard args_guard(args_);
-  // Calls the patched function with arguments of (original function, args, kwargs)
+  // Calls the patched function with arguments of (original function, args,
+  // kwargs)
   result = PyEval_CallObject(to_restore->patch_fn, args_);
   return result;
 }
-// The general idea is that we're patching a PyCFunctionObject, which has a couple relevant parts:
-// m_ml: A PyMethodDef (the actual function to call)
+// The general idea is that we're patching a PyCFunctionObject, which has a
+// couple relevant parts: m_ml: A PyMethodDef (the actual function to call)
 // m_self: The self arg.
 // vectorcall: An alternate calling convention (Python 3.8+)
 // Usually we call obj.m_ml(obj.m_self, args, kwargs). However, we want to patch
@@ -65,8 +66,8 @@ PyObject* replacement_method(PyObject* self, PyObject* args, PyObject* kwargs) {
 // we also replace `m_self` with `ToRestore`, which contains all the information
 // needed to restore the original function.
 //
-// `patch_function` parses the necessary information from the original PyCFunction
-// and then patches it. When that function is called, it calls
+// `patch_function` parses the necessary information from the original
+// PyCFunction and then patches it. When that function is called, it calls
 // `replacement_method`, which then restores back the original `m_ml` and
 // `m_self` values, as well as calling the user-defined `patch_fn`.
 
