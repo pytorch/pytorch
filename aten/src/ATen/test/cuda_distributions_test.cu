@@ -2,7 +2,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/native/cuda/TensorFactories.cuh>
 
 #include <cuda.h>
