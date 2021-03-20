@@ -80,26 +80,31 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<Sc
   return t;
 }
 
-// [Number of bits required for randperm]
+// [Algorithm of randperm]
 //
-// randperm is implemented by sorting an arange tensor of size n
-// with randomly generated keys. Random keys are assumed to be different
-// from each other. Under this assumption, all different permutations have
-// the same probability.
+// randperm is implemented by sorting an arange tensor of size n with randomly
+// generated keys. When random keys are different from each other, all different
+// permutations have the same probability.
 //
-// However, there is a problem here:
+// However, there is a pitfall here:
 // For better performance, these N random keys are generated independently,
-// and there is no effort to make sure they are different. When two keys are
-// identical, stable sorting algorithms will not permute these two keys.
+// and there is no effort to make sure they are different at the time of generation.
+// When two keys are identical, stable sorting algorithms will not permute these two keys.
 // As a result, (0, 1) will appear more often than (1, 0).
 //
-// We do not spend computation resource to check for duplicate keys, because this
-// can be expensive performancewise. Instead, we carefully choose the number of bits
-// in these keys, so that the probability of having duplicate keys is under a threshold.
+// To overcome this pitfall we first carefully choose the number of bits in these keys,
+// so that the probability of having duplicate keys is under a threshold. Let q be the
+// threshold probability for having non-duplicate keys, then it can be proved that[1]
+// the number of bits required is: ceil(log2(n - (6 n^2 + 1) / (12 log(q))))
 //
-// Let q be the threshold probability for having non-duplicate keys, then it can be
-// proved that[1] the number of bits required is:
-//   ceil(log2(n - (6 n^2 + 1) / (12 log(q))))
+// Then after sort, we lauch a separate kernel that additionally shuffles any islands
+// of values whose keys matched. The algorithm of this kernel is as follows:
+// Each thread reads its key and the keys of its neighbors to tell if it's part of an island.
+// For each island, the first thread in the island sees a key match at index i+1 but not index i-1.
+// This thread considers itself the "island leader". The island leader then reads more indices to
+// the right to figure out how big the island is. Most likely, the island will be very small,
+// just a few values. The island leader then rolls that many RNG, uses them to additionally
+// shuffle values within the island, and writes them out.
 //
 // Reference
 // [1] https://osf.io/af2hy/
@@ -107,15 +112,21 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<Sc
 template<typename T, typename scalar_t>
 __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T mask, int n, PhiloxCudaState philox_args) {
   int tid = threadIdx.x + blockDim.x * blockIdx.x;
+
+  // find the beginning of islands
   if (tid >= n - 1) return;  // out of range
   if ((keys[tid] & mask) != (keys[tid + 1] & mask)) return;  // not in an island
   if (tid != 0 && (keys[tid] & mask) != (keys[tid - 1] & mask)) return;  // not the beginning of an island
+
+  // find the size of islands
+  int island_size = 0;
+  while ((keys[tid + ++island_size] & mask) == (keys[tid] & mask));
+
+  // do random permutation inside each island.
   data += tid;
   auto seeds = at::cuda::philox::unpack(philox_args);
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds), tid, std::get<1>(seeds), &state);
-  int island_size = 0;
-  while ((keys[tid + ++island_size] & mask) == (keys[tid] & mask));
   for (int i = island_size - 1; i > 0; i--) {
     unsigned int r = curand(&state) % (i + 1);
     if (i != r) {
@@ -164,7 +175,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> ge
 
   auto opt = TensorOptions().device(result.device());
 
-  // See note [Number of bits required for randperm]
+  // See note [Algorithm of randperm]
   const double log_threshold_12 = std::log(0.9) * 12;
   double nd = static_cast<double>(n);
   int bits = std::min(64,
