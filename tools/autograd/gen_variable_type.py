@@ -91,7 +91,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum',
-    'eig', 'lerp', 'linalg_vector_norm'
+    'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.

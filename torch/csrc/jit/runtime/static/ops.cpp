@@ -231,20 +231,6 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
-  return [](ProcessedNode* p_node) {
-    const auto& in0_t = p_node->Input(0).toTensor();
-    const auto& in1_t = p_node->Input(1).toTensor();
-    const auto in2_s = p_node->Input(2).toScalar();
-    if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = create_empty_from(in0_t);
-    }
-    auto& out_t = p_node->Output(0).toTensor();
-    fastResizeToZero(out_t);
-    at::cpu::add_out(out_t, in0_t, in1_t, in2_s);
-  };
-});
-
 REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
@@ -254,7 +240,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::mul_out(out_t, in0_t, in1_t);
+    at::cpu::mul_out(out_t, in0_t, in1_t);
   };
 });
 
