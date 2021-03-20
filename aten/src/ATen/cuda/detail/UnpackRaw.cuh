@@ -1,3 +1,5 @@
+#pragma once
+
 // No "#pragma once" because this is a raw definition that can be copied by jit codegen.
 // Eager mode clients should not include this file directly, instead,
 // they should #include <ATen/cuda/CUDAGraphsUtils.cuh>, which has a #pragma once.
