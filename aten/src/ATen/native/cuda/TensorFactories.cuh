@@ -16,7 +16,7 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
   // find the beginning of islands
   if (tid >= n - 1) return;  // out of range
   if ((keys[tid] & mask) != (keys[tid + 1] & mask)) return;  // not in an island
-  if (tid != 0 && (keys[tid] & mask) != (keys[tid - 1] & mask)) return;  // not the beginning of an island
+  if (tid != 0 && (keys[tid] & mask) == (keys[tid - 1] & mask)) return;  // not the beginning of an island
 
   // find the size of islands
   int island_size = 0;

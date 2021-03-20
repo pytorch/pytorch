@@ -154,8 +154,8 @@ TEST(DistributionsTest, TestPhiloxIncrementSmallMultinomialTensor) {
 }
 
 __managed__ int keys[] = {
-  1, 1 << 15 + 1,  1 << 16 + 1,
-  2, 1 << 14 + 2
+  1, (1 << 15) + 1,  (1 << 16) + 1,
+  2, (1 << 14) + 2
 };
 
 __managed__ int values[] = { 1, 2, 3, 4, 5 };
@@ -174,6 +174,7 @@ TEST(RandomPermutationTest, TestIslandShuffle) {
   bool shuffled1 = false;
   bool shuffled2 = false;
   for (int i = 0; i < 100; i++) {
+    cudaDeviceSynchronize();
     randperm_handle_duplicate_keys(keys, values, 8, 5, c10::nullopt);
     cudaDeviceSynchronize();
     std::vector<int> slice1 = {values[0], values[1], values[2]};
