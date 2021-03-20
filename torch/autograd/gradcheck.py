@@ -5,7 +5,7 @@ from torch.overrides import is_tensor_like
 import collections
 from itertools import product
 import warnings
-from typing import Callable, Union, Optional, Iterable, List, Dict
+from typing import Callable, Union, Optional, Iterable, List, Dict, Tuple
 from torch._vmap_internals import vmap
 import functools
 
@@ -19,21 +19,41 @@ def zero_gradients(x):
             zero_gradients(elem)
 
 
-def make_jacobian(input, num_out):
-    if is_tensor_like(input):
-        if not input.is_floating_point() and not input.is_complex():
-            return None
-        if not input.requires_grad:
-            return None
-        return input.new_zeros((input.nelement(), num_out), dtype=input.dtype, layout=torch.strided)
-    elif isinstance(input, collections.abc.Iterable) and not isinstance(input, str):
-        jacobians = list(filter(
-            lambda x: x is not None, (make_jacobian(elem, num_out) for elem in input)))
-        if not jacobians:
-            return None
-        return type(input)(jacobians)  # type: ignore
-    else:
-        return None
+def is_float_or_complex_tensor(obj):
+    return isinstance(obj, torch.Tensor) and (obj.is_floating_point() or obj.is_complex())
+
+
+def make_jacobians(tensors, tensors_is_inputs, dim=None, dtype=None, device=None):
+    """make_jacobians makes zero-filled tensors from inputs/outputs to be filled row-by-row
+     or col-by-col. If tensors is inputs, for each tensor, returns a new zero-filled tensor
+    with height of `t.numel` and width of `dim`. Otherwise, the new tensor will have height
+     of `dim` and width of `t.numel`.
+
+    NOTE: this is actually the *tranpose* of the jacobian. There is no particular reason we
+    favor the transpose. A possible todo is to "untranspose" what this fn generates.
+
+    If dim is None, the returned zero-filled tensor will be 1-d and have size (t.numel,).
+    You can think of this as representing a single row or column of the entire jacobian.
+    This is to be used by the fast version of gradcheck.
+    """
+    out: List[torch.Tensor] = []
+    assert isinstance(tensors, tuple)
+
+    assert not tensors_is_inputs or (dtype is None and device is None), \
+        "as tensors already has dtype/device information, we should not pass it in"
+    assert tensors_is_inputs or (dtype is not None and device is not None), \
+        "dtype and device of jacobian should be the same as that of the input"
+
+    options = {"dtype": dtype, "device": device, "layout": torch.strided}
+    for t in tensors:
+        if is_float_or_complex_tensor(t) and (t.requires_grad or not tensors_is_inputs):
+            if dim is None:
+                out.append(t.new_zeros((t.nelement(),), **options))
+            elif tensors_is_inputs:
+                out.append(t.new_zeros((t.nelement(), dim), **options))
+            else:
+                out.append(t.new_zeros((dim, t.nelement()), **options))
+    return tuple(out)
 
 
 def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_grad: bool = False) -> Iterable[torch.Tensor]:
@@ -77,7 +97,7 @@ def iter_tensor(x_tensor):
             for x_idx in product(*[range(m) for m in x_values.size()[1:]]):
                 indices = x_indices[i].tolist() + list(x_idx)
                 d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
-                yield x_value, x_idx, d_idx
+                yield (x_value, x_idx, d_idx)
     elif x_tensor.layout == torch._mkldnn:  # type: ignore
         # Use .data here to get around the version check
         x_tensor = x_tensor.data
@@ -85,12 +105,37 @@ def iter_tensor(x_tensor):
             # this is really inefficient, but without indexing implemented, there's
             # not really a better way than converting back and forth
             x_tensor_dense = x_tensor.to_dense()
-            yield x_tensor_dense, x_idx, d_idx
+            yield (x_tensor_dense, x_idx, d_idx)
     else:
         # Use .data here to get around the version check
         x_tensor = x_tensor.data
         for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
-            yield x_tensor, x_idx, d_idx
+            yield (x_tensor, x_idx, d_idx)
+
+
+def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3, grad_out=1.0):
+    """Computes the numerical jacobian for a given fn and inputs. Outputs can be provided
+    to avoid one extra invocation of fn. Returns M * N jacobians where M is the number of
+    input tensors that require grad, and N is the number of output float/complex tensors.
+
+    input: input to `fn`
+    target: the Tensors wrt whom Jacobians are calculated (default=`input`)
+    grad_out: grad output value used to calculate gradients.
+
+    Note that `target` may not even be part of `input` to `fn`, so please be
+    **very careful** in this to not clone `target`.
+    """
+    jacobians: List[Tuple[torch.Tensor]] = []
+    if outputs is None:
+        outputs = _as_tuple(fn(inputs))
+    if target is None:
+        target = inputs
+    for i, inp in enumerate(iter_tensors(target, True)):
+        if inp.layout == torch._mkldnn and len(inputs) != 1:  # type: ignore # no attr _mkldnn
+            raise ValueError('gradcheck currently only supports functions with 1 input, but got: ',
+                                len(inputs))
+        jacobians += [get_numerical_jacobian_helper(fn, inp, inputs, outputs, eps, grad_out)]
+    return jacobians
 
 
 def compute_gradient(fn, inputs, x, idx, delta, eps):
@@ -102,68 +147,63 @@ def compute_gradient(fn, inputs, x, idx, delta, eps):
     is_mkldnn= x.layout == torch._mkldnn  # type: ignore # no attr _mkldnn
 
     def fn_out():
-        if not is_mkldnn:
-            # x is a view into input and so this works
-            return fn(inputs).clone()
+        if is_mkldnn:
+            inp = [x.to_mkldnn()]
         else:
-            # convert the dense tensor back to have mkldnn layout
-            return fn([x.to_mkldnn()])
+            inp = _as_tuple(inputs)
+        return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
-    orig = x[idx].item()
+    orig = x[idx].clone()
     x[idx] = orig - delta
     outa = fn_out()
     x[idx] = orig + delta
     outb = fn_out()
     x[idx] = orig
-    r = (outb - outa) / (2 * eps)
-    return r.detach().reshape(-1)
+
+    def compute(a, b):
+        ret = (b - a) / (2 * eps)
+        return ret.detach().reshape(-1)
+
+    return tuple(compute(a, b) for (a, b) in zip(outa, outb))
 
 
-def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
+def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
+    """Computes the numerical jacobians wrt to a single input. Returns N jacobian
+    tensors, where N is the number of outputs. Input must require grad.
     """
-    input: input to `fn`
-    target: the Tensors wrt whom Jacobians are calculated (default=`input`)
-    grad_out: grad output value used to calculate gradients.
+    assert input.requires_grad
+    jacobians = make_jacobians(outputs, False, input.numel(), input.dtype, input.device)
 
-    Note that `target` may not even be part of `input` to `fn`, so please be
-    **very careful** in this to not clone `target`.
-    """
-    if target is None:
-        target = inputs
-    output_size = fn(inputs).numel()
-    jacobian = make_jacobian(target, output_size)
+    for x, idx, d_idx in iter_tensor(input):
+        # compute gradient only works for pure real or pure imaginary delta
+        # for details on the algorithm used here, refer:
+        # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
+        # s = fn(z) where z = x for real valued input
+        # and z = x + yj for complex valued input
+        ds_dx_tup = compute_gradient(fn, inputs, x, idx, eps, eps)
+        if x.is_complex():  # C -> C, C -> R
+            ds_dy_tup = compute_gradient(fn, inputs, x, idx, eps * 1j, eps)
 
-    # It's much easier to iterate over flattened lists of tensors.
-    # These are reference to the same objects in jacobian, so any changes
-    # will be reflected in it as well.
-    x_tensors = iter_tensors(target, True)
-    j_tensors = iter_tensors(jacobian)
-
-    for x_tensor, d in zip(x_tensors, j_tensors):
-        for x, idx, d_idx in iter_tensor(x_tensor):
-            # compute_jacobian only works for pure real or pure imaginary delta
-            # for details on the algorithm used here, refer:
-            # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
-            # s = fn(z) where z = x for real valued input
-            # and z = x + yj for complex valued input
-            ds_dx = compute_gradient(fn, inputs, x, idx, eps, eps)
-            if x.is_complex():  # C -> C, C -> R
-                ds_dy = compute_gradient(fn, inputs, x, idx, eps * 1j, eps)
+            for ds_dx, ds_dy, d in zip(ds_dx_tup, ds_dy_tup, jacobians):
                 # conjugate wirtinger derivative
                 conj_w_d = 0.5 * (ds_dx + ds_dy * 1j)
                 # wirtinger derivative
                 w_d = 0.5 * (ds_dx - ds_dy * 1j)
                 d[d_idx] = grad_out.conjugate() * conj_w_d + grad_out * w_d.conj()
-            elif ds_dx.is_complex():  # R -> C
-                # w_d = conj_w_d = 0.5 * ds_dx
-                # dL_dz_conj = 0.5 * [grad_out.conj() * ds_dx + grad_out * ds_dx.conj()]
-                #            = 0.5 * [grad_out.conj() * ds_dx + (grad_out.conj() * ds_dx).conj()]
-                #            = 0.5 * 2 * real(grad_out.conj() * ds_dx)
-                #            = real(grad_out.conj() * ds_dx)
-                d[d_idx] = torch.real(grad_out.conjugate() * ds_dx)
-            else:   # R -> R
-                d[d_idx] = ds_dx * grad_out
-    return jacobian
+        else:
+            for ds_dx, d in zip(ds_dx_tup, jacobians):
+                if ds_dx.is_complex():  # R -> C
+                    # w_d = conj_w_d = 0.5 * ds_dx
+                    # dL_dz_conj = 0.5 * [grad_out.conj() * ds_dx + grad_out * ds_dx.conj()]
+                    #            = 0.5 * [grad_out.conj() * ds_dx + (grad_out.conj() * ds_dx).conj()]
+                    #            = 0.5 * 2 * real(grad_out.conj() * ds_dx)
+                    #            = real(grad_out.conj() * ds_dx)
+                    d[d_idx] = torch.real(grad_out.conjugate() * ds_dx)
+                else:   # R -> R
+                    # skip if grad_out is complex but output is real
+                    if not isinstance(grad_out, complex):
+                        d[d_idx] = ds_dx * grad_out
+    return jacobians
 
 
 def check_jacobians_equal(j1, j2, atol):
@@ -175,7 +215,7 @@ def check_jacobians_equal(j1, j2, atol):
 
 
 def combine_jacobian_rows(jacobians_rows, inputs, output):
-    out_jacobians = make_jacobian(inputs, output.numel())
+    out_jacobians = make_jacobians(inputs, True, output.numel())
     diff_input_list = list(iter_tensors(inputs, True))
     correct_grad_sizes = True
     correct_grad_types = True
@@ -296,12 +336,10 @@ def check_outputs(outputs) -> None:
 def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> bool:
     # When there are no differentiable outputs, numerical gradient for a function is
     # expected to be zero.
-    for i, o in enumerate(func_out):
-        def fn(input):
-            return _as_tuple(func(*input))[i]
-        numerical = get_numerical_jacobian(fn, inputs, eps=eps)
-        for n in numerical:
-            if torch.ne(n, 0).sum() > 0:
+    jacobians_inputs_outputs = get_numerical_jacobian(func, inputs, func_out, eps=eps)
+    for jacobian_inputs in jacobians_inputs_outputs:
+        for jacobian in jacobian_inputs:
+            if torch.ne(jacobian, 0).sum() > 0:
                 return fail_test('Numerical gradient for function expected to be zero')
     return True
 
@@ -491,6 +529,14 @@ def get_notallclose_msg(analytical, numerical, output_idx, input_idx, error_str=
     return error_str + 'Jacobian mismatch for output %d with respect to input %d,\n' \
         'numerical:%s\nanalytical:%s\n' % (output_idx, input_idx, numerical, analytical)
 
+def transpose(m):
+    out: List[List[torch.Tensor]] = []
+    for j in range(len(m[0])):
+        out.append([])
+        for i in range(len(m)):
+            out[j].append(m[i][j])
+    return out
+
 
 # Note [VarArg of Tensors]
 # ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -577,33 +623,35 @@ def gradcheck(
     check_outputs(outputs)
 
     if not outputs:
-        return check_no_differentiable_outputs(fail_test, func, tupled_inputs, func_out, eps)
+        return check_no_differentiable_outputs(fail_test, func, tupled_inputs, _as_tuple(func_out), eps)
+
+    numerical = transpose(get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps))
+    if any(isinstance(o, torch.Tensor) and o.is_complex() for o in _as_tuple(func_out)):
+        numerical_from_imag_grad_out = transpose(get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps, grad_out=1j))
+
+    # recompute because get_numerical_jacobians
+    outputs = _differentiable_outputs(func(*tupled_inputs))
 
     for i, o in enumerate(outputs):
-        def fn(input):
-            return _as_tuple(func(*input))[i]
-
         analytical, failed = check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, 1.0,
                                                                   check_grad_dtypes, raise_exception)
         if failed:
             return False
-        numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
 
         if o.is_complex():
             analytical_from_imag_grad_out, failed = check_analytical_jacobian_attributes(
                 tupled_inputs, o, nondet_tol, 1j, check_grad_dtypes, raise_exception)
             if failed:
                 return False
-            numerical_from_imag_grad_out = get_numerical_jacobian(fn, tupled_inputs, eps=eps, grad_out=1j)
 
         inp_tensors = iter_tensors(tupled_inputs, True)
 
-        for j, (a, n, inp) in enumerate(zip(analytical, numerical, inp_tensors)):
+        for j, (a, n, inp) in enumerate(zip(analytical, numerical[i], inp_tensors)):
             if a.numel() != 0 or n.numel() != 0:
                 if o.is_complex():    # C -> C, R -> C
-                    if not torch.allclose(analytical_from_imag_grad_out[j], numerical_from_imag_grad_out[j], rtol, atol):
+                    if not torch.allclose(analytical_from_imag_grad_out[j], numerical_from_imag_grad_out[i][j], rtol, atol):
                         return fail_test(get_notallclose_msg(analytical_from_imag_grad_out[j],
-                                                             numerical_from_imag_grad_out[j], i, j,
+                                                             numerical_from_imag_grad_out[i][j], i, j,
                                                              "Gradients failed to compare equal for grad output = 1j. "))
                 if inp.is_complex():  # C -> R, C -> C
                     if not torch.allclose(a, n, atol, rtol):
