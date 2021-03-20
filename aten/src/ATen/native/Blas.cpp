@@ -62,7 +62,7 @@ Tensor &addmv_out(const Tensor &self, const Tensor &mat, const Tensor &vec, cons
     if (beta.toComplexDouble() == 0.0) {
       result.zero_();
     } else {
-      at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
+      at::native::mul_out(self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())), result);
     }
   } else {
     if (!result.is_same(self_)) {
@@ -87,13 +87,13 @@ Tensor &addmv_(Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar&
   return native::addmv_out(self, mat, vec, beta, alpha, self);
 }
 
-Tensor &mv_out(Tensor& result, const Tensor &self, const Tensor &vec) {
+Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
   return native::addmv_out(result, self, vec, 0, 1, result);
 }
 
 Tensor mv(const Tensor &self, const Tensor &vec) {
   Tensor result = at::empty({self.size(0)}, self.options());
-  return native::mv_out(result, self, vec);
+  return native::mv_out(self, vec, result);
 }
 
 inline void dot_check(const Tensor& self, const Tensor& other) {

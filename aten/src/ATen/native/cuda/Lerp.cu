@@ -46,16 +46,16 @@ void lerp_scalar_cuda(at::Tensor& ret, const at::Tensor& self, const at::Tensor&
 namespace at {
 namespace native {
 
-Tensor& lerp_cuda_tensor_out(Tensor& result, const Tensor& self,
-                            const Tensor& end, const Tensor& weight) {
+Tensor& lerp_cuda_tensor_out(const Tensor& self,
+                            const Tensor& end, const Tensor& weight, Tensor& result) {
   Tensor b_self, b_end, b_weight;
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_out_cuda");
   lerp_cuda(result, b_self, b_end, b_weight);
   return result;
 }
 
-Tensor& lerp_cuda_scalar_out(Tensor& result, const Tensor& self,
-                            const Tensor& end, const Scalar& weight) {
+Tensor& lerp_cuda_scalar_out(const Tensor& self,
+                            const Tensor& end, const Scalar& weight, Tensor& result) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_out_cuda");
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "lerp_out_cuda", [&]{

@@ -254,7 +254,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::mul_out(out_t, in0_t, in1_t);
+    at::native::mul_out(in0_t, in1_t, out_t);
   };
 });
 
@@ -270,7 +270,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::addmm_cpu_out(out_t, in0_t, in1_t, in2_t, in3_s, in4_s);
+    at::native::addmm_cpu_out(in0_t, in1_t, in2_t, in3_s, in4_s, out_t);
   };
 });
 
@@ -540,7 +540,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
     auto& out_t = p_node->Output(0).toTensor();
     if (!te->supports(in0_t)) {
       fastResizeToZero(out_t);
-      at::native::threshold_out(out_t, in0_t, 0, 0);
+      at::native::threshold_out(in0_t, 0, 0, out_t);
     } else {
       at::native::resize_as_(out_t, in0_t, c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
@@ -558,7 +558,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     auto& out_t = p_node->Output(0).toTensor();
     if (!te->supports(in0_t)) {
       fastResizeToZero(out_t);
-      at::native::tanh_out(out_t, in0_t);
+      at::native::tanh_out(in0_t, out_t);
     } else {
       at::native::resize_as_(out_t, in0_t, c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
@@ -579,7 +579,7 @@ REGISTER_OPERATOR_FUNCTOR(
         auto& out_t = p_node->Output(0).toTensor();
         if (!te->supports(in0_t)) {
           fastResizeToZero(out_t);
-          at::native::sigmoid_out(out_t, in0_t);
+          at::native::sigmoid_out(in0_t, out_t);
         } else {
           at::native::resize_as_(out_t, in0_t, c10::nullopt);
           (*te)(
@@ -606,7 +606,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       const double in1_d =
           p_node->inputs().size() > 1 ? p_node->Input(1).toDouble() : -1.0;
       fastResizeToZero(out_t);
-      at::native::logit_out(out_t, in0_t, in1_d);
+      at::native::logit_out(in0_t, in1_d, out_t);
     } else {
       at::native::resize_as_(out_t, in0_t, c10::nullopt);
       (*te)(out_t.data_ptr<float>(), in0_t.data_ptr<float>(), in0_t.numel());
@@ -850,14 +850,14 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
     fastResizeToZero(output);
     if (p_node->inputs().size() > 2) {
       at::native::sum_out(
-          output,
           self,
           dim,
           p_node->Input(2).toBool(),
-          p_node->Input(3).toOptional<at::ScalarType>());
+          p_node->Input(3).toOptional<at::ScalarType>(),
+          output);
       return;
     }
-    at::native::sum_out(output, self, dim);
+    at::native::sum_out(self, dim, false /* keep_dim */, c10::nullopt, output);
   };
 });
 

@@ -612,7 +612,7 @@ static void addbmm_impl_(
   }
 }
 
-Tensor& addbmm_out(Tensor& result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
+Tensor& addbmm_out(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
   Tensor b_self = std::get<0>(expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out"));
   {
     at::NoNamesGuard guard;
@@ -623,15 +623,15 @@ Tensor& addbmm_out(Tensor& result, const Tensor& self, const Tensor& batch1, con
 }
 
 Tensor &addbmm_(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  return native::addbmm_out(self, self, batch1, batch2, beta, alpha);
+  return native::addbmm_out(self, batch1, batch2, beta, alpha, self);
 }
 
 Tensor addbmm(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
   Tensor result = at::empty({0}, self.options());
-  return native::addbmm_out(result, self, batch1, batch2, beta, alpha);
+  return native::addbmm_out(self, batch1, batch2, beta, alpha, result);
 }
 
-Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+Tensor& addmm_cpu_out(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Tensor &result) {
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
   Tensor b_self = std::get<0>(expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out"));
@@ -645,25 +645,25 @@ Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, co
 
 Tensor addmm_cpu(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   Tensor result = at::empty({0}, self.options());
-  return addmm_cpu_out(result, self, mat1, mat2, beta, alpha);
+  return addmm_cpu_out(self, mat1, mat2, beta, alpha, result);
 }
 
 Tensor &addmm_cpu_(Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
-  return addmm_cpu_out(self, self, mat1, mat2, beta, alpha);
+  return addmm_cpu_out(self, mat1, mat2, beta, alpha, self);
 }
 
 Tensor& mm_cpu_out(const Tensor & self, const Tensor & mat2, Tensor & result) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
-  return addmm_cpu_out(result, result, self, mat2, 0, 1);
+  return addmm_cpu_out(result, self, mat2, 0, 1, result);
 }
 
 Tensor mm_cpu(const Tensor & self, const Tensor & mat2) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   Tensor result = at::empty({self.sizes()[0], mat2.sizes()[1]}, self.options());
-  return addmm_cpu_out(result, result, self, mat2, 0, 1);
+  return addmm_cpu_out(result, self, mat2, 0, 1, result);
 }
 
 template <typename scalar_t, bool is_bmm>
@@ -1582,14 +1582,13 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   //    strided tensor result, even if the input is sparse.
   auto options = self.options().layout(c10::Layout::Strided).dtype(toValueType(self.scalar_type()));
   Tensor result = at::empty({0}, options);
-  return at::native::frobenius_norm_out(result, self, dim, keepdim);
+  return at::native::frobenius_norm_out(self, dim, keepdim, result);
 }
 
-Tensor &frobenius_norm_out(
-    Tensor& result,
-    const Tensor& self,
+Tensor &frobenius_norm_out(const Tensor& self,
     IntArrayRef dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& result) {
   TORCH_CHECK(
       dim.size() <= 2,
       "Expected at most 2 dimensions, but got ",
@@ -1624,20 +1623,20 @@ Tensor nuclear_norm(const Tensor& self, bool keepdim) {
   return at::native::nuclear_norm(self, IntArrayRef({0, 1}), keepdim);
 }
 
-Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
+Tensor &nuclear_norm_out(const Tensor& self, bool keepdim, Tensor& result) {
   TORCH_CHECK(
       self.dim() == 2,
       "Expected a tensor with 2 dimensions, but got a tensor with ",
       self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-  return at::native::nuclear_norm_out(result, self, IntArrayRef({0, 1}), keepdim);
+  return at::native::nuclear_norm_out(self, IntArrayRef({0, 1}), keepdim, result);
 }
 
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   Tensor result = at::empty({0}, self.options().dtype(toValueType(self.scalar_type())));
-  return at::native::nuclear_norm_out(result, self, dim, keepdim);
+  return at::native::nuclear_norm_out(self, dim, keepdim, result);
 }
 
-Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
   auto dim_ = dim.vec();
   maybe_wrap_dims(dim_, self.dim());

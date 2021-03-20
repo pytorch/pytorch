@@ -631,7 +631,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   return at::mm(t1, t2).reshape(rsizes);
 }
 
-Tensor &tensordot_out(Tensor& result, const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
+Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
   result.copy_(at::native::tensordot(input1, input2, dims1, dims2));
   return result;
 }
