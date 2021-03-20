@@ -72,7 +72,7 @@ if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
     # Save sccache logs to file
     sccache --stop-server || true
     rm ~/sccache_error.log || true
-    if [[ -n "${SKIP_SCCACHE_INITIALIZATION}" ]]; then
+    if [[ -n "${SKIP_SCCACHE_INITIALIZATION:-}" ]]; then
       # sccache --start-server seems to hang forever on self hosted runners for GHA
       # so let's just go ahead and skip the --start-server altogether since it seems
       # as though sccache still gets used even when the sscache server isn't started

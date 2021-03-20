@@ -63,6 +63,7 @@ jobs:
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS \
             -e SCCACHE_BUCKET \
+            -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -72,6 +73,10 @@ jobs:
             -w /var/lib/jenkins/workspace \
             ${DOCKER_IMAGE} \
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Build Artifacts
         with:
@@ -84,8 +89,6 @@ jobs:
       - name: Clean up docker images
         if: always()
         run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
   test:
