@@ -343,6 +343,7 @@ std::tuple<Tensor, Tensor> nll_loss_forward_cpu(
     const Tensor& target, const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
 
   auto output = at::empty({0}, self.options());
@@ -380,6 +381,7 @@ Tensor nll_loss_backward_cpu(
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
 
   auto grad_input = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -401,6 +403,7 @@ Tensor & nll_loss_out(Tensor & output, const Tensor & self, const Tensor & targe
 }
 
 Tensor nll_loss(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
 
   return std::get<0>(at::nll_loss_forward(self, target, weight, reduction, ignore_index));

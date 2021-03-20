@@ -555,6 +555,7 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
 at::Tensor conv1d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
@@ -564,6 +565,7 @@ at::Tensor conv1d(
 at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
@@ -573,6 +575,7 @@ at::Tensor conv2d(
 at::Tensor conv3d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
@@ -686,6 +689,7 @@ at::Tensor conv3d(
 at::Tensor conv_transpose1d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
@@ -695,6 +699,7 @@ at::Tensor conv_transpose1d(
 at::Tensor conv_transpose2d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
@@ -704,6 +709,7 @@ at::Tensor conv_transpose2d(
 at::Tensor conv_transpose3d(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   return at::convolution(input, weight, bias, stride, padding, dilation,
@@ -714,6 +720,7 @@ at::Tensor convolution(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   auto& ctx = at::globalContext();
@@ -728,6 +735,7 @@ at::Tensor convolution_overrideable(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
@@ -738,6 +746,7 @@ at::Tensor _convolution(
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias_r = c10::value_or_else(bias_r_opt, [] {return Tensor();});
 
 
@@ -960,6 +969,7 @@ at::Tensor _convolution(
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled)
 {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias_r = c10::value_or_else(bias_r_opt, [] {return Tensor();});
 
   return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN());
@@ -971,6 +981,7 @@ at::Tensor _convolution_nogroup(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
 
@@ -1061,6 +1072,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32,
     std::array<bool, 3> output_mask) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& ggI = c10::value_or_else(ggI_opt, [] {return Tensor();});
   const Tensor& ggW_r = c10::value_or_else(ggW_r_opt, [] {return Tensor();});
   const Tensor& ggb = c10::value_or_else(ggb_opt, [] {return Tensor();});

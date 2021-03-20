@@ -24,6 +24,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
     int64_t HxW,
     int64_t group,
     double eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& gamma = c10::value_or_else(gamma_opt, [] {return Tensor();});
   const Tensor& beta = c10::value_or_else(beta_opt, [] {return Tensor();});
 
@@ -45,6 +46,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
     int64_t HxW,
     int64_t group,
     std::array<bool, 3> grad_input_mask) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& gamma = c10::value_or_else(gamma_opt, [] {return Tensor();});
 
   Tensor dX;
@@ -81,6 +83,7 @@ Tensor group_norm(
     int64_t num_groups, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enabled, deprecated */) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
@@ -134,6 +137,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     int64_t HxW,
     int64_t group,
     double eps) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 

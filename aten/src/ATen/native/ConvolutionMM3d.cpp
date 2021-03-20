@@ -636,6 +636,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_forward_cpu(
     IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   auto output = at::empty({0}, self.options());
@@ -781,6 +782,7 @@ Tensor slow_conv3d(
     IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   return std::get<0>(at::slow_conv3d_forward(

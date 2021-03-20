@@ -370,6 +370,7 @@ Tensor quantized_batch_norm(
     double eps,
     double output_scale,
     int64_t output_zero_point) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 

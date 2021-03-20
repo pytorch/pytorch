@@ -385,6 +385,7 @@ Tensor conv_depthwise3d_cuda(
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   TORCH_CHECK(input.device() == weight.device(), "expects input and weight tensors to be on the same device.");

@@ -12,6 +12,7 @@ namespace at { namespace native {
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     bool training, double exponential_average_factor, double epsilon) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
@@ -22,6 +23,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& input, const Tensor& grad_output, const Tensor& weight, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
     double epsilon, const Tensor& reservedSpace) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
@@ -59,6 +61,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input_t, const Tensor& weight_t, const c10::optional<Tensor>& bias_t_opt, const c10::optional<Tensor>& running_mean_t_opt, const c10::optional<Tensor>& running_var_t_opt,
     bool training, double exponential_average_factor, double epsilon)
 {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias_t = c10::value_or_else(bias_t_opt, [] {return Tensor();});
   const Tensor& running_mean_t = c10::value_or_else(running_mean_t_opt, [] {return Tensor();});
   const Tensor& running_var_t = c10::value_or_else(running_var_t_opt, [] {return Tensor();});
@@ -235,6 +238,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const c10::optional<Tensor>& save_var_t_opt,
     double epsilon,
     const Tensor& reserveSpace) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& running_mean =
       c10::value_or_else(running_mean_opt, [] { return Tensor(); });
   const Tensor& running_var =

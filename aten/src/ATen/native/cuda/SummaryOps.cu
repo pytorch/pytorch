@@ -363,6 +363,7 @@ namespace native {
 Tensor _bincount_cuda(
     const Tensor& self, const c10::optional<Tensor>& weights_opt,
     int64_t minlength) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& weights = c10::value_or_else(weights_opt, [] {return Tensor();});
 
   // See Note [Writing Nondeterministic Operations]

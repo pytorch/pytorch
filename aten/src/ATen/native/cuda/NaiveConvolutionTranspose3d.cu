@@ -911,6 +911,7 @@ Tensor slow_conv_transpose3d_cuda(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);

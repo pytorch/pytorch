@@ -259,6 +259,7 @@ _embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
                    const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
 
   return _embedding_bag_cuda(
@@ -279,6 +280,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
                    const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
 
   auto indices_arg = TensorArg(indices, "indices", 1);
@@ -350,6 +352,7 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    const Tensor &max_indices,
                                    int64_t num_weights,
                                    bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
 
   // See Note [Writing Nondeterministic Operations]

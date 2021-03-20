@@ -1511,6 +1511,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 std::tuple<Tensor, Tensor> lstm_cell(
     const Tensor& input, TensorList hx,
     const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
   const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
 
@@ -1529,6 +1530,7 @@ _thnn_differentiable_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_op
     const Tensor& hidden_gates, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt,
     const Tensor& cx,
     const Tensor& cy) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& grad_hy = c10::value_or_else(grad_hy_opt, [] {return Tensor();});
   const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
   const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
@@ -1581,6 +1583,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
     const Tensor& input_gates,
     const Tensor& hidden_gates,
     const Tensor& hx, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt){
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
   const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
 
@@ -1619,6 +1622,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
 Tensor gru_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
   const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
 
@@ -1631,6 +1635,7 @@ Tensor gru_cell(
 Tensor rnn_tanh_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
   const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
 
@@ -1643,6 +1648,7 @@ Tensor rnn_tanh_cell(
 Tensor rnn_relu_cell(
     const Tensor& input, const Tensor& hx,
     const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
   const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
 

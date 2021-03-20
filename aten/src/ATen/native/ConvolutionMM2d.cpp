@@ -482,6 +482,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_forward_cpu(
     IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   auto output = at::empty({0}, self.options());
@@ -601,6 +602,7 @@ Tensor & thnn_conv2d_out(Tensor & output, const Tensor & self, const Tensor & we
 }
 
 Tensor thnn_conv2d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt, IntArrayRef stride, IntArrayRef padding) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   return std::get<0>(at::thnn_conv2d_forward(self, weight, kernel_size, bias, stride, padding));

@@ -10,6 +10,7 @@ namespace native {
 Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   TORCH_CHECK(false, "mkldnn_linear: ATen not compiled with MKLDNN support");
@@ -44,6 +45,7 @@ namespace native {
 Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight_t, const c10::optional<Tensor>& bias_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
   const int64_t dim = self.dim();

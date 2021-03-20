@@ -34,6 +34,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
     bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
     ) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& weight_buf_r = c10::value_or_else(weight_buf_r_opt, [] {return Tensor();});
   const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
   const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
@@ -49,6 +50,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
   const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
   const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
@@ -913,6 +915,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
     bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
     ) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& weight_buf_r = c10::value_or_else(weight_buf_r_opt, [] {return Tensor();});
   const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
   const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
@@ -1292,6 +1295,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
   const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
   const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});

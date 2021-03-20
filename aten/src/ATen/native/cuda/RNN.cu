@@ -500,6 +500,7 @@ void gru_backward_impl(const Tensor& grad_hy, const Tensor& workspace,
 std::tuple<Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_cuda(
       const Tensor& input_gates, const Tensor& hidden_gates,
       const Tensor& cx, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
   const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
 
@@ -543,6 +544,7 @@ void checkLSTMBackwardSizes(const TensorArg& grad_hy, const TensorArg& grad_cy,
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward_cuda( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
       const Tensor& cx, const Tensor& cy,
       const Tensor& workspace, bool has_bias) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& grad_hy = c10::value_or_else(grad_hy_opt, [] {return Tensor();});
   const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
 
@@ -572,6 +574,7 @@ static constexpr int64_t GRU_WORKSPACE_MULTIPLIER = 5;
 std::tuple<Tensor, Tensor> _thnn_fused_gru_cell_cuda(
       const Tensor& input_gates, const Tensor& hidden_gates,
       const Tensor& hx, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
   const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
 
