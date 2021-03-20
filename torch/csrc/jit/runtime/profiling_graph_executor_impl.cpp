@@ -129,6 +129,23 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
+static void setRequiresGradOnDiffGraph(Node* dnode) {
+  auto gi = dnode->g(attr::Subgraph)->inputs();
+  for (size_t i = 0; i < dnode->inputs().size(); i++) {
+    if (auto ty = dnode->input(i)->type()->cast<TensorType>()) {
+      auto gi_ty = gi[i]->type()->expect<TensorType>();
+      gi[i]->setType(gi_ty->withRequiresGrad(ty->requires_grad()));
+      GRAPH_DEBUG(
+          "Setting ",
+          *gi_ty->withRequiresGrad(ty->requires_grad()),
+          " on ",
+          gi[i],
+          " ",
+          gi[i]->debugName());
+    }
+  }
+}
+
 bool guardDifferentiableGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   bool all_inputs_seen = true;
@@ -174,6 +191,7 @@ bool guardDifferentiableGraph(Node* dnode) {
               t->requiresGrad().value_or(true));
         },
         prim::RequiresGradCheck);
+    setRequiresGradOnDiffGraph(dnode);
     return true;
   } else {
     // we inline the differentiable graph as a fallback

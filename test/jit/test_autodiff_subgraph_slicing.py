@@ -9,6 +9,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import num_profiled_runs
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -47,6 +48,26 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
                 self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
+
+
+
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Simple Executor doesn't support gradients")
+    def test_prune_grad(self):
+        @torch.jit.script
+        def t(input, bias):
+            return torch.nn.functional.relu(input + bias)
+        input = torch.randn(2, 8, requires_grad=True)
+        bias = torch.randn(8, requires_grad=False)    # bias does NOT require grad
+        NUM_PROFILED_RUNS  = 1
+        with num_profiled_runs(NUM_PROFILED_RUNS):
+            WARMUP = 3 # 2 runs to reach backward + 1 to optimize it
+            for x in range(WARMUP):
+                o = t(input, bias)
+                o.sum().backward()
+
+            bwd_graph = list(list(t.get_debug_state().execution_plans.values())[0].code.grad_executor_states()[0].execution_plans.values())[0].graph
+            tup = next(bwd_graph.outputs())
+            self.assertEqual(len(list(tup.node().inputs())), 1)
 
     def test_simple_merge(self):
         # o --> o
