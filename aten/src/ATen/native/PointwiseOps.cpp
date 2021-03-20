@@ -65,7 +65,7 @@ Tensor& addcdiv_(
 Tensor& addcdiv_out(const Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
-    const Scalar& value, 
+    const Scalar& value,
     Tensor& result) {
   if (isIntegralType(tensor1.scalar_type(), /*includeBool=*/ true)
       && isIntegralType(tensor2.scalar_type(), /*includeBool=*/ true)) {

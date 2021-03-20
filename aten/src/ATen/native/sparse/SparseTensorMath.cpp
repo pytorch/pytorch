@@ -200,7 +200,7 @@ SparseTensor sqrt_sparse(const SparseTensor& t) {
 
 // TODO: add in-place variant
 
-SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, const Scalar& value) {
+SparseTensor& pow_out_sparse_scalar(const SparseTensor& t_, const Scalar& value, SparseTensor& r) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t_.is_sparse());
   TORCH_CHECK(value.toDouble() != 0, "pow: cannot raise to zeroth power on sparse tensor; it would make the result tensor dense");
@@ -220,7 +220,7 @@ SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, con
 
 SparseTensor pow_sparse_scalar(const SparseTensor& t, const Scalar& value) {
   SparseTensor r = at::empty({0}, t.options());
-  pow_out_sparse_scalar(r, t, value);
+  pow_out_sparse_scalar(t, value, r);
   return r;
 }
 
