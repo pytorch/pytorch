@@ -67,41 +67,50 @@ declare -f -t trap_add
 
 trap_add cleanup EXIT
 
-# if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
-#   if which sccache > /dev/null; then
-#     # Save sccache logs to file
-#     sccache --stop-server || true
-#     rm ~/sccache_error.log || true
-#     if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
-#       SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
-#     else
-#       # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
-#       # https://github.com/pytorch/pytorch/pull/16645
-#       SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 SCCACHE_STARTUP_TIMEOUT_MS=30000 RUST_LOG=sccache::server=debug sccache --start-server
-#     fi
+if [[ "$BUILD_ENVIRONMENT" != *pytorch-win-* ]]; then
+  if which sccache > /dev/null; then
+    # Save sccache logs to file
+    sccache --stop-server || true
+    rm ~/sccache_error.log || true
+    if [[ -n "${SKIP_SCCACHE_INITIALIZATION}" ]]; then
+      # sccache --start-server seems to hang forever on self hosted runners for GHA
+      # so let's just go ahead and skip the --start-server altogether since it seems
+      # as though sccache still gets used even when the sscache server isn't started
+      # explicitly
+      echo "Skipping sccache server initialization, setting environment variables"
+      export SCCACHE_IDLE_TIMEOUT=1200
+      export SCCACHE_ERROR_LOG=~/sccache_error.log
+      export RUST_LOG=sccache::server=error
+    elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
+    else
+      # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
+      # https://github.com/pytorch/pytorch/pull/16645
+      SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=1200 RUST_LOG=sccache::server=error sccache --start-server
+    fi
 
-#     # Report sccache stats for easier debugging
-#     sccache --zero-stats
-#     function sccache_epilogue() {
-#       echo '=================== sccache compilation log ==================='
-#       python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
-#       echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
-#       sccache --show-stats
-#       sccache --stop-server || true
-#     }
-#     trap_add sccache_epilogue EXIT
-#   fi
+    # Report sccache stats for easier debugging
+    sccache --zero-stats
+    function sccache_epilogue() {
+      echo '=================== sccache compilation log ==================='
+      python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
+      echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
+      sccache --show-stats
+      sccache --stop-server || true
+    }
+    trap_add sccache_epilogue EXIT
+  fi
 
-#   if which ccache > /dev/null; then
-#     # Report ccache stats for easier debugging
-#     ccache --zero-stats
-#     ccache --show-stats
-#     function ccache_epilogue() {
-#       ccache --show-stats
-#     }
-#     trap_add ccache_epilogue EXIT
-#   fi
-# fi
+  if which ccache > /dev/null; then
+    # Report ccache stats for easier debugging
+    ccache --zero-stats
+    ccache --show-stats
+    function ccache_epilogue() {
+      ccache --show-stats
+    }
+    trap_add ccache_epilogue EXIT
+  fi
+fi
 
 # It's called a COMPACT_JOB_NAME because it's distinct from the
 # Jenkin's provided JOB_NAME, which also includes a prefix folder
