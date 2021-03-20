@@ -738,6 +738,35 @@ def sample_inputs_index_select(op_info, device, dtype, requires_grad):
                         0, torch.tensor(0, dtype=torch.int64, device=device))),
             )
 
+# Missing to test the nondeterminism of the operation
+# https://github.com/pytorch/pytorch/issues/53352
+def sample_inputs_index_add(op_info, device, dtype, requires_grad):
+    # These testa are pretty much the same as those from index_copy.
+    # Perhaps merge?
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    t = make_arg((S, S))
+    s = make_arg((S, S))
+    # non-contiguous target
+    t_nonctg = t.transpose(0, 1)
+    # non-contiguous source
+    s_nonctg = s.transpose(0, 1)
+
+    idx = make_arg((S,), dtype=torch.int64, low=0, high=S)
+    idx_nonctg = make_arg((S,), dtype=torch.int64, low=0, high=S, discontiguous=True)
+    idx_neg = -idx - 1
+    samples = [SampleInput((tensor, 1, idx, source))
+               for tensor, idx, source in product([t, t_nonctg], [idx, idx_nonctg], [s, s_nonctg])]
+
+    # Add scalar cases
+    scalar_sizes = [(), (1,)]
+    ts = (make_arg(size) for size in scalar_sizes)
+    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1) for size in scalar_sizes)
+    ss = (make_arg(size) for size in scalar_sizes)
+
+    samples.extend(SampleInput((t, 0, idx, s)) for t, idx, s in product(ts, idxs, ss))
+    return samples
+
 def sample_inputs_sort(op_info, device, dtype, requires_grad):
     def apply_grad(t):
         if dtype in floating_types_and(torch.float16, torch.bfloat16):
@@ -3179,14 +3208,14 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
            skips=(
-               # https://github.com/pytorch/pytorch/issues/49707
-               SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                        dtypes=[torch.float16, torch.bfloat16]),
-               SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=[torch.float16, torch.bfloat16]),
                # index_select does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out')
+               SkipInfo('TestCommon', 'test_out'),
            ),
            sample_inputs_func=sample_inputs_index_select),
+    OpInfo('index_add',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_index_add),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16),
            # sort on CUDA is still in the TH, no torch.bool/torch.float16 support yet
@@ -4042,11 +4071,6 @@ def method_tests():
         ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
-        ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', (), [0]),
-        ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', (), [0]),
-        ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', (), [0]),
-        ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'alert_nondeterministic', (), [0],
-            [expectedAlertNondeterministic('index_add_cuda_', 'cuda')]),
         ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', (), [0]),
         ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim_alert_nondeterministic', (), [0],
             [skipMeta, expectedAlertNondeterministic('index_copy')]),
