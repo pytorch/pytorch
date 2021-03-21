@@ -133,18 +133,17 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3, grad
     for i, inp in enumerate(iter_tensors(target, True)):
         if inp.layout == torch._mkldnn and len(inputs) != 1:  # type: ignore # no attr _mkldnn
             raise ValueError('gradcheck currently only supports functions with 1 input, but got: ',
-                                len(inputs))
+                             len(inputs))
         jacobians += [get_numerical_jacobian_helper(fn, inp, inputs, outputs, eps, grad_out)]
     return jacobians
 
 
-def compute_gradient(fn, inputs, x, idx, delta, eps):
+def compute_gradient(fn, inputs, x, idx, delta, eps, is_mkldnn):
     """Perturbs inputs in-place by delta as to obtain the gradient
     of each of the outputs wrt to x at idx.
     """
     # we currently assume that the norm of delta equals eps
     assert(delta == eps or delta == (eps * 1j))
-    is_mkldnn= x.layout == torch._mkldnn  # type: ignore # no attr _mkldnn
 
     def fn_out():
         if is_mkldnn:
@@ -173,6 +172,7 @@ def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
     """
     assert input.requires_grad
     jacobians = make_jacobians(outputs, False, input.numel(), input.dtype, input.device)
+    is_mkldnn = input.layout == torch._mkldnn  # type: ignore # no attr _mkldnn
 
     for x, idx, d_idx in iter_tensor(input):
         # compute gradient only works for pure real or pure imaginary delta
@@ -180,9 +180,9 @@ def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
         # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
         # s = fn(z) where z = x for real valued input
         # and z = x + yj for complex valued input
-        ds_dx_tup = compute_gradient(fn, inputs, x, idx, eps, eps)
+        ds_dx_tup = compute_gradient(fn, inputs, x, idx, eps, eps, is_mkldnn)
         if x.is_complex():  # C -> C, C -> R
-            ds_dy_tup = compute_gradient(fn, inputs, x, idx, eps * 1j, eps)
+            ds_dy_tup = compute_gradient(fn, inputs, x, idx, eps * 1j, eps, is_mkldnn)
 
             for ds_dx, ds_dy, d in zip(ds_dx_tup, ds_dy_tup, jacobians):
                 # conjugate wirtinger derivative

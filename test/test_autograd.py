@@ -4002,15 +4002,6 @@ class TestAutograd(TestCase):
         # succeed when no outputs at all
         self.assertTrue(gradcheck(lambda x: (), (x,)))
 
-    @onlyCUDA
-    def test_gradcheck_input_output_different_device(self):
-        x = torch.ones((1,), device="cuda", requires_grad=True)
-        gradcheck(lambda x: x.to("cpu"), (x,))
-
-        x = torch.ones((1,), device="cpu", requires_grad=True)
-        gradcheck(lambda x: x.to("cuda"), (x,))
-
-
     def test_gradcheck_check_batched_grad(self):
         x = torch.rand(10, requires_grad=True).to_sparse()
         # runtime error while compute batched grad (print big error)
@@ -7860,6 +7851,14 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(fn, (vec))
         gradgradcheck(fn, (vec))
+
+    @onlyCUDA
+    def test_gradcheck_input_output_different_device(self, device):
+        x = torch.ones((1,), device="cuda", requires_grad=True)
+        gradcheck(lambda x: x.to("cpu"), (x,))
+
+        x = torch.ones((1,), device="cpu", requires_grad=True)
+        gradcheck(lambda x: x.to("cuda"), (x,))
 
     def test_logcumsumexp_large_value(self, device):
         a = torch.rand(4, 4, 4, dtype=torch.double, requires_grad=True)
