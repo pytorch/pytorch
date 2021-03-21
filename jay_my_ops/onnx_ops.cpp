@@ -6,6 +6,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
+#include <torch/csrc/autograd/function_hook.h>
+
 torch::Tensor dummyOps(torch::Tensor testData, int64_t value) {
     printf(" ===== from dummyOps =====\n");
     auto tempValue = torch::ones(value);
@@ -22,11 +24,12 @@ torch::Tensor fake_ops(torch::Tensor testData, int64_t value) {
 
 torch::Tensor ort_inference_ops(std::string file_name, torch::Tensor inputs) {
     py::object onnx = py::module::import("torch.onnx");
-    // torch::Tensor new_input = torch::rand_like(inputs);
     py::object my_output = onnx.attr("try_ort_inference")(file_name, inputs);
-    auto final_output = torch::jit::toIValue(my_output, c10::TensorType::get());
+    torch::jit::InferredType my_type = torch::jit::tryToInferType(my_output);
+    // auto final_output = torch::jit::toIValue(my_output, my_type.type()); // toIValue() failed to be exported by pybind11.
+    auto final_output = py::cast<torch::autograd::Variable>(my_output);
 
-    return final_output.toTensor();
+    return final_output;
 }
 
 TORCH_LIBRARY(onnx_ops, m) {
