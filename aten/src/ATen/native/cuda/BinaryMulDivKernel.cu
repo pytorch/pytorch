@@ -66,15 +66,16 @@ static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t
   floor_(scalar_t a) {
   return std::floor(a);
 }
-template <typename scalar_t>
-static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t, float>::value, scalar_t>::type
-  copysign_(scalar_t a, scalar_t b) {
+template <typename scalar_t1, typename scalar_t2>
+static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t1, float>::value && std::is_same<scalar_t2, float>::value, scalar_t1>::type
+  copysign_(scalar_t1 a, scalar_t2 b) {
   return std::copysignf(a, b);
 }
-template <typename scalar_t>
-static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t, float>::value, scalar_t>::type
-  copysign_(scalar_t a, scalar_t b) {
-  return std::copysign(a, b);
+template <typename scalar_t1, typename scalar_t2>
+static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t1, float>::value || !std::is_same<scalar_t2, float>::value, std::_Common_float_type_t<scalar_t1, scalar_t2>>::type
+  copysign_(scalar_t1 a, scalar_t2 b) {
+  using scalar_t = std::_Common_float_type_t<scalar_t1, scalar_t2>;
+  return std::copysign(static_cast<scalar_t>(a), static_cast<scalar_t>(b));
 }
 #else
 #define ceil_ std::ceil
