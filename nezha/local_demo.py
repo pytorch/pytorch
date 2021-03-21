@@ -59,6 +59,7 @@ class NeuralNet_All(nn.Module):
     def forward(self, x):
         out = self.fc1(x)
         out = self.relu(out)
+        out = torch.ops.onnx_ops.dummy_ops(out, out.shape[1])        
         out = self.fc2(out)
         out = self.relu(out)
         out = self.relu(out)
@@ -71,11 +72,11 @@ class TestModule(torch.nn.Module):
         self.file_name = file_name
 
     def forward(self, x, y:str):
-        new_y = '0'+y
+        new_y = '0' + y
         new_size = int(new_y)
 
-        output = torch.ops.onnx_ops.dummy_ops(x, new_size)
-        return x
+        output = torch.ops.onnx_ops.dummy_ops(x, x.shape[1])
+        return output
 
 def export_c_module(m, inputs, outputs, file_name):
     local_module = torch.jit.trace(DummyModule(), torch.ones(1))
@@ -94,20 +95,20 @@ dummy_input = torch.randn(32, 5)
 
 with torch.no_grad():
 
-    new_module = TestModule("my_onnx.onnx")
-    new_module.eval()
-    new_output = new_module(dummy_input, '5')
+    # new_module = TestModule("my_onnx.onnx")
+    # new_module.eval()
+    # new_output = new_module(dummy_input, '5')
 
-    new_script_module = torch.jit.script(new_module)
+    # new_script_module = torch.jit.script(new_module)
 
-    x_module = torch._C._jit_nezha_update_ops(new_script_module._c)
+    # x_module = torch._C._jit_nezha_update_ops(new_script_module._c)
 
-    print(x_module)
+    # print(x_module)
 
-    new_script_module._c = x_module
-    test_output = new_script_module(dummy_input, '5')
+    # new_script_module._c = x_module
+    # test_output = new_script_module(dummy_input, '5')
 
-    torch.onnx.export(new_module, (dummy_input, '5'), "test_example.onnx", verbose=True)
+    # torch.onnx.export(new_module, (dummy_input, '5'), "test_example.onnx", verbose=True)
 
     # all_C_modules = nezha_helper.split_modules(new_script_module._c)
 
@@ -117,7 +118,10 @@ with torch.no_grad():
     output = my_model(dummy_input)
 
     # script_module = torch.jit.trace(my_model, dummy_input)
-    # script_module.eval()
+    script_module = torch.jit.script(my_model)
+    script_module.eval()
+
+    script_module._c = torch._C._jit_nezha_update_ops(script_module._c)
 
     # export_c_module(script_module._c, dummy_input, output, "my_nezha_test.onnx")
 

@@ -57,7 +57,7 @@ Module NeZha_UpdateOps(
     WithInsertPoint guard(selectedNode);
     auto* new_node =
         selectedNode->owningGraph()->insertNode(selectedNode->owningGraph()->create(
-            Symbol::fromQualString("onnx_ops::ort_inference_ops"),
+            Symbol::fromQualString("onnx_ops::fake_ops"),
             selectedNode->inputs(),
             selectedNode->outputs().size()));
     for (size_t i = 0; i < selectedNode->outputs().size(); ++i) {
