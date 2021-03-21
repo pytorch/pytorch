@@ -224,7 +224,7 @@ std::tuple<Tensor, Tensor> ragged_indices_to_padded_tensor_and_mask(
     }
   }
 
-  return {padded_tensor, mask_tensor};
+  return std::tuple<Tensor, Tensor>{padded_tensor, mask_tensor};
 }
 
 TORCH_LIBRARY(padded, m) {
