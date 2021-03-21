@@ -2183,7 +2183,6 @@ class TestReductions(TestCase):
     def test_tensor_compare_ops_empty(self, device):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
-        empty_input = torch.randn((), device=device)
         test_functions = [
             ('amax', torch.amax, {}),
             ('amin', torch.amin, {}),
@@ -2196,17 +2195,18 @@ class TestReductions(TestCase):
         ]
 
         for name, fn, dtype in test_functions:
-            # Check if reduction happens along the specified dim with and without keepdim.
+            Check if reduction happens along the specified dim with and without keepdim.
             error_msg = f"test function: {name}"
             self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=2), msg=error_msg)
             self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=-1), msg=error_msg)
 
-            self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=2, keepdim=True), msg=error_msg)
-            self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=-1, keepdim=True), msg=error_msg)
+            self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=2, keepdim=True),
+                msg=error_msg)
+            self.assertEqual(torch.empty((2, 0, 1), device=device, **dtype), fn(master_input, dim=-1, keepdim=True),
+                msg=error_msg)
 
             # Check if function raises error on specified zero'd dimension as reduction dim.
-            self.assertRaisesRegex(RuntimeError, "Expected reduction dim", lambda: fn(master_input, dim=1))
-            self.assertRaisesRegex(IndexError, "Dimension out of range", lambda: fn(empty_input, dim=1))
+            self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input, dim=1))
 
     def test_tensor_reduce_ops_empty(self, device):
         shape = (2, 0, 4)

@@ -8,8 +8,6 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/NamedTensorUtils.h>
 
-#include <c10/util/irange.h>
-
 namespace at { namespace native {
 
 DEFINE_DISPATCH(where_kernel);
@@ -291,29 +289,6 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
   return ret;
 }
 
-// Resize the result tensor and indices when result.numel() == 0 depending on values of
-// dim and keepdim for returning tensors containing reduction results.
-// This function should be called when you are reducing a zero-dim tensor and want to
-// simply resize the output and return it.
-void zero_numel_tensor_resize(const Tensor& result, const Tensor& result_indices, const Tensor& self, int64_t dim,
-                              bool keepdim) {
-  TORCH_CHECK(self.sizes().size() != 0 && self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero");
-  std::vector<int64_t> sizes;
-  if (keepdim) {
-    sizes = ensure_nonempty_vec(self.sizes().vec());
-    sizes[dim] = 1;
-  }
-  else {
-    for (const auto d : c10::irange(self.dim())) {
-      if (d != dim) {
-        sizes.push_back(self.sizes()[d]);
-      }
-    }
-  }
-  result.resize_(sizes);
-  result_indices.resize_(sizes);
-}
-
 std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
@@ -380,14 +355,13 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
               "expected device ", self.device(), " but got ",
               max_indices.device(), " for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
-
   if (self.numel() == 0) {
     zero_numel_tensor_resize(max, max_indices, self, dim, keepdim);
     return std::forward_as_tuple(max, max_indices);
   }
   else if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
     // case where self.numel() == 1. The result does not need to be reshaped
-    // as a case of reduction in this case.
+    // as a case of reduction in this case.  
     TORCH_CHECK(!self.is_complex(), "max does not support complex inputs.");
     AT_ASSERT(max.dim() == 0);
     max_indices.resize_({}).fill_(0);

@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -243,6 +244,44 @@ static TensorIterator make_reduction(
     bool keepdim, ScalarType dtype)
 {
   return make_reduction(name, result1, result2, self, dim, keepdim, dtype, dtype);
+}
+
+static void zero_numel_check_dims(const Tensor& self, int64_t dim) {
+  if (self.ndimension() == 0) {
+    TORCH_CHECK_INDEX(dim == 0 || dim == -1, "Expected reduction dim -1 or 0 for scalar but got ", dim);
+  }
+  else {
+    TORCH_CHECK_INDEX(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
+  }
+}
+
+static void zero_numel_check_dims(const Tensor& self, IntArrayRef dim) {
+  for (const int64_t d : dim) {
+    zero_numel_check_dims(self, d);
+  }
+}
+
+// Resize the result tensor and indices when result.numel() == 0 depending on values of
+// dim and keepdim for returning tensors containing reduction results.
+// This function should be called when you are reducing a zero-dim tensor and want to
+// simply resize the output and return it.
+static void zero_numel_tensor_resize(const Tensor& result, const Tensor& result_indices, const Tensor& self, int64_t dim,
+                              bool keepdim) {
+  zero_numel_check_dims(self, dim);
+  std::vector<int64_t> sizes;
+  if (keepdim) {
+    sizes = ensure_nonempty_vec(self.sizes().vec());
+    sizes[dim] = 1;
+  }
+  else {
+    for (const auto d : c10::irange(self.dim())) {
+      if (d != dim) {
+        sizes.push_back(self.sizes()[d]);
+      }
+    }
+  }
+  result.resize_(sizes);
+  result_indices.resize_(sizes);
 }
 
 }}  // at::native

@@ -1097,11 +1097,7 @@ Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& resu
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:",
               self.scalar_type(), result.scalar_type());
   auto sizes = self.sizes();
-  if (self.ndimension() != 0) {
-    for (const auto d : dim) {
-      TORCH_CHECK(self.size(d) != 0, "Expected reduction dim ", d, " to be non-zero");
-    }
-  }
+  zero_numel_check_dims(self, dim);
 
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
   auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
@@ -1119,12 +1115,7 @@ Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
 
 Tensor &amax_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
-  auto sizes = self.sizes();
-  if (self.ndimension() != 0) {
-    for (const auto d : dim) {
-      TORCH_CHECK(self.size(d) != 0, "Expected reduction dim ", d, " to be non-zero");
-    }
-  }
+  zero_numel_check_dims(self, dim);
 
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
   if (iter.numel() == 0) {
@@ -1143,9 +1134,7 @@ Tensor& argmax_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
   Tensor in;
   if (dim) {
     auto sizes = self.sizes();
-    if (self.ndimension() != 0) {
-      TORCH_CHECK(self.size(dim.value()) != 0, "Expected reduction dim ", dim.value(), " to be non-zero");
-    }
+    zero_numel_check_dims(self, dim.value());
 
     auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
     if (sizes[wrap_dim] == 1) {
@@ -1180,9 +1169,7 @@ Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
   Tensor in;
   if (dim) {
     auto sizes = self.sizes();
-    if (self.ndimension() != 0) {
-      TORCH_CHECK(self.size(dim.value()) != 0, "Expected reduction dim ", dim.value(), " to be non-zero");
-    }
+    zero_numel_check_dims(self, dim.value());
 
     auto wrap_dim = maybe_wrap_dim(dim.value(), self.dim());
     if (sizes[wrap_dim] == 1) {
