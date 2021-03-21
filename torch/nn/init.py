@@ -82,7 +82,11 @@ def calculate_gain(nonlinearity, param=None):
 
     .. warning::
         In order to implement `Self-Normalizing Neural Networks`_ ,
-        you should use `nonlinearity='linear'` instead of `nonlinearity='selu'`.
+        you should use ``nonlinearity='linear'`` instead of ``nonlinearity='selu'``.
+        This gives the initial weights a variance of ``1 / N``,
+        which is necessary to induce a stable fixed point in the forward pass.
+        In contrast, the default gain for ``SELU`` sacrifices the normalisation
+        effect for more stable gradient flow in rectangular layers.
 
     Args:
         nonlinearity: the non-linear function (`nn.functional` name)
