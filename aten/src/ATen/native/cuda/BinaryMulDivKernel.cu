@@ -66,6 +66,16 @@ static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t
   floor_(scalar_t a) {
   return std::floor(a);
 }
+template <typename scalar_t>
+static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t, float>::value, scalar_t>::type
+  trunc_(scalar_t a) {
+  return std::truncf(a);
+}
+template <typename scalar_t>
+static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t, float>::value, scalar_t>::type
+  trunc_(scalar_t a) {
+  return std::trunc(a);
+}
 template <typename scalar_t1, typename scalar_t2>
 static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t1, float>::value && std::is_same<scalar_t2, float>::value, scalar_t1>::type
   copysign_(scalar_t1 a, scalar_t2 b) {
@@ -80,6 +90,7 @@ static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t
 #else
 #define ceil_ std::ceil
 #define floor_ std::floor
+#define trunc_ std::trunc
 #define copysign_ std::copysign
 #endif
 
@@ -121,13 +132,13 @@ void div_trunc_kernel_cuda(TensorIteratorBase& iter) {
       auto inv_b = accscalar_t(1.0) / iter.scalar_value<accscalar_t>(2);
       iter.remove_operand(2);
       gpu_kernel(iter, [inv_b] GPU_LAMBDA (scalar_t a) -> scalar_t {
-        return std::trunc(a * inv_b);
+        return trunc_(a * inv_b);
       });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, dtype, "div_trunc_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
-        return std::trunc(a / b);
+        return trunc_(a / b);
       });
     });
   }
