@@ -9,7 +9,9 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#ifdef USE_TENSORPIPE
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
+#endif // USE_TENSORPIPE
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
