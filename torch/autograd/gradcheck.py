@@ -97,7 +97,7 @@ def iter_tensor(x_tensor):
             for x_idx in product(*[range(m) for m in x_values.size()[1:]]):
                 indices = x_indices[i].tolist() + list(x_idx)
                 d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
-                yield (x_value, x_idx, d_idx)
+                yield x_value, x_idx, d_idx
     elif x_tensor.layout == torch._mkldnn:  # type: ignore
         # Use .data here to get around the version check
         x_tensor = x_tensor.data
@@ -105,12 +105,12 @@ def iter_tensor(x_tensor):
             # this is really inefficient, but without indexing implemented, there's
             # not really a better way than converting back and forth
             x_tensor_dense = x_tensor.to_dense()
-            yield (x_tensor_dense, x_idx, d_idx)
+            yield x_tensor_dense, x_idx, d_idx
     else:
         # Use .data here to get around the version check
         x_tensor = x_tensor.data
         for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
-            yield (x_tensor, x_idx, d_idx)
+            yield x_tensor, x_idx, d_idx
 
 
 def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3, grad_out=1.0):
@@ -152,7 +152,7 @@ def compute_gradient(fn, inputs, x, idx, delta, eps, is_mkldnn):
             inp = _as_tuple(inputs)
         return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
-    orig = x[idx].clone()
+    orig = x[idx].item()
     x[idx] = orig - delta
     outa = fn_out()
     x[idx] = orig + delta
