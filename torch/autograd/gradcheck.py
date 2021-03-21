@@ -48,10 +48,11 @@ def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_
 
 
 def iter_tensor(x_tensor):
-    """Iteration over different types of tensors: sparse, dense, and mkldnn.
-    Provides a dense view of the original tensor, current index into that tensor, as well as
-    a corresponding "flat index" which translates to a given row/col in the jacobian matrix.
-    The provided "view" is obtained from `.data` so to avoid the version counter bump.
+    """For strided and sparse tensors, provides a "view" of the original tensor.
+    Updates through the view update the original, but do not bump version count.
+    For mkldnn tensors, however, the returned tensor will be a dense *copy*.
+    Also provides the current index into that tensor, as well as a corresponding
+    "flat index" which translates to a given row/col in the jacobian matrix.
     """
     if x_tensor.is_sparse:
         def get_stride(size):
