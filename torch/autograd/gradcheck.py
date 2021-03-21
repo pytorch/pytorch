@@ -20,7 +20,7 @@ def zero_gradients(x):
 
 
 def is_float_or_complex_tensor(obj):
-    return isinstance(obj, torch.Tensor) and (obj.is_floating_point() or obj.is_complex())
+    return is_tensor_like(obj) and (obj.is_floating_point() or obj.is_complex())
 
 
 def make_jacobians(tensors, tensors_is_inputs, dim=None, dtype=None, device=None):
@@ -68,12 +68,17 @@ def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_
 
 
 def iter_tensor(x_tensor):
-    """Iteration over different types of tensors: sparse, dense, and mkldnn.
-    Provides a dense view of the original tensor, current index into that tensor, as well as
-    a corresponding "flat index" which translates to a given row/col in the jacobian matrix.
-    The provided "view" is obtained from `.data` so to avoid the version counter bump.
+    """Generator that returns a tensor, index into that tensor, and a flat index
+    translating to the col or row in the jacobian. If `x_tensor is strided, the
+    returned tensor will share storage with the passed in `x_tensor`. Otherwise,
+    if the tensor layout is sparse or mkldnn, the provided tensor will be a dense
+    copy.
     """
     if x_tensor.is_sparse:
+        # .coalesce() updates the tensor such that it is no longer part
+        # of the backward graph of the original output
+        x_tensor = x_tensor.clone()
+
         def get_stride(size):
             dim = len(size)
             tmp = 1
@@ -147,8 +152,10 @@ def compute_gradient(fn, inputs, x, idx, delta, eps, is_mkldnn):
 
     def fn_out():
         if is_mkldnn:
+            # convert the dense tensor back to have mkldnn layout
             inp = [x.to_mkldnn()]
         else:
+            # x is a view into input and so this works
             inp = _as_tuple(inputs)
         return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
@@ -628,9 +635,6 @@ def gradcheck(
     numerical = transpose(get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps))
     if any(isinstance(o, torch.Tensor) and o.is_complex() for o in _as_tuple(func_out)):
         numerical_from_imag_grad_out = transpose(get_numerical_jacobian(func, tupled_inputs, outputs, eps=eps, grad_out=1j))
-
-    # recompute because get_numerical_jacobians
-    outputs = _differentiable_outputs(func(*tupled_inputs))
 
     for i, o in enumerate(outputs):
         analytical, failed = check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, 1.0,
