@@ -75,10 +75,6 @@ def iter_tensor(x_tensor):
     copy.
     """
     if x_tensor.is_sparse:
-        # .coalesce() updates the tensor such that it is no longer part
-        # of the backward graph of the original output
-        x_tensor = x_tensor.clone()
-
         def get_stride(size):
             dim = len(size)
             tmp = 1
@@ -143,7 +139,7 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3, grad
     return jacobians
 
 
-def compute_gradient(fn, inputs, x, idx, delta, eps, is_mkldnn):
+def compute_gradient(fn, inputs, x, idx, delta, eps, layout):
     """Perturbs inputs in-place by delta as to obtain the gradient
     of each of the outputs wrt to x at idx.
     """
@@ -151,9 +147,11 @@ def compute_gradient(fn, inputs, x, idx, delta, eps, is_mkldnn):
     assert(delta == eps or delta == (eps * 1j))
 
     def fn_out():
-        if is_mkldnn:
+        if layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
             # convert the dense tensor back to have mkldnn layout
             inp = [x.to_mkldnn()]
+        elif layout == torch.sparse_coo:
+            inp = [a.clone() for a in _as_tuple(inputs)]
         else:
             # x is a view into input and so this works
             inp = _as_tuple(inputs)
@@ -179,7 +177,6 @@ def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
     """
     assert input.requires_grad
     jacobians = make_jacobians(outputs, False, input.numel(), input.dtype, input.device)
-    is_mkldnn = input.layout == torch._mkldnn  # type: ignore # no attr _mkldnn
 
     for x, idx, d_idx in iter_tensor(input):
         # compute gradient only works for pure real or pure imaginary delta
@@ -187,9 +184,9 @@ def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
         # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
         # s = fn(z) where z = x for real valued input
         # and z = x + yj for complex valued input
-        ds_dx_tup = compute_gradient(fn, inputs, x, idx, eps, eps, is_mkldnn)
+        ds_dx_tup = compute_gradient(fn, inputs, x, idx, eps, eps, input.layout)
         if x.is_complex():  # C -> C, C -> R
-            ds_dy_tup = compute_gradient(fn, inputs, x, idx, eps * 1j, eps, is_mkldnn)
+            ds_dy_tup = compute_gradient(fn, inputs, x, idx, eps * 1j, eps, input.layout)
 
             for ds_dx, ds_dy, d in zip(ds_dx_tup, ds_dy_tup, jacobians):
                 # conjugate wirtinger derivative
