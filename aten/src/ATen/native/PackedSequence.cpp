@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
+#include <torch/library.h>
+
 namespace at { namespace native {
 
 void checkLongTensor(const Tensor& tensor) {
@@ -180,6 +182,53 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   }
 
   return std::make_tuple(output, lengths_t);
+}
+
+
+std::tuple<Tensor, Tensor> ragged_indices_to_padded_tensor_and_mask(
+    const std::vector<std::vector<int64_t>>& indices,
+    int64_t pad_value,
+    int64_t max_batch_len,
+    int64_t max_seq_len) {
+  // TODO: potential optimization: if there is a reliable way to allocate a
+  // tensor with storage backed by zero-scrubbed pages, then we can use that
+  // in the case that `pad_value` = 0 (common case). Then we don't have to
+  // touch the padded entries, as the OS has done that for us already.
+  // Similarly for the mask tensor we would only have to touch the
+  // elements that are past the end of each sequence.
+  TORCH_CHECK(indices.size() >= max_batch_len);
+  Tensor padded_tensor = at::empty({max_batch_len, max_seq_len}, at::kLong);
+  Tensor mask_tensor = at::empty({max_batch_len, max_seq_len}, at::kLong);
+
+  int64_t *padded_buf = padded_tensor.data_ptr<int64_t>();
+  int64_t *mask_buf = mask_tensor.data_ptr<int64_t>();
+
+  for (size_t i = 0; i < max_batch_len; ++i) {
+    const std::vector<int64_t>& sequence = indices[i];
+    int64_t *padded_row_ptr = padded_buf + max_seq_len * i;
+    int64_t *mask_row_ptr = mask_buf + max_seq_len * i;
+    int64_t numel_to_copy = std::min(static_cast<int64_t>(sequence.size()), max_seq_len);
+
+    // Beg the dragon for autovectorization
+    size_t j = 0;
+    for (; j < numel_to_copy; ++j) {
+      padded_row_ptr[j] = sequence[j];
+      mask_row_ptr[j] = static_cast<int64_t>(1);
+    }
+
+    // Now write out remainder values. padded_buf gets `pad_value`
+    // values and mask gets 0's
+    for (; j < max_seq_len; ++j) {
+      padded_row_ptr[j] = pad_value;
+      mask_row_ptr[j] = static_cast<int64_t>(0);
+    }
+  }
+
+  return {padded_tensor, mask_tensor};
+}
+
+TORCH_LIBRARY(padded, m) {
+  m.def("ragged_indices_to_padded_tensor_and_mask", ragged_indices_to_padded_tensor_and_mask);
 }
 
 }} // namespace at::native
