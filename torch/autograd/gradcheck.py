@@ -93,13 +93,12 @@ def iter_tensor(x_tensor):
             yield x_tensor, x_idx, d_idx
 
 
-def compute_gradient(fn, inputs, x, idx, delta, eps):
+def compute_gradient(fn, inputs, x, idx, delta, eps, is_mkldnn):
     """Perturbs inputs in-place by delta as to obtain the gradient
     of each of the outputs wrt to x at idx.
     """
     # we currently assume that the norm of delta equals eps
     assert(delta == eps or delta == (eps * 1j))
-    is_mkldnn= x.layout == torch._mkldnn  # type: ignore # no attr _mkldnn
 
     def fn_out():
         if not is_mkldnn:
@@ -140,15 +139,16 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
     j_tensors = iter_tensors(jacobian)
 
     for x_tensor, d in zip(x_tensors, j_tensors):
+        is_mkldnn = x_tensor.layout == torch._mkldnn  # type: ignore # no attr _mkldnn
         for x, idx, d_idx in iter_tensor(x_tensor):
             # compute_jacobian only works for pure real or pure imaginary delta
             # for details on the algorithm used here, refer:
             # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
             # s = fn(z) where z = x for real valued input
             # and z = x + yj for complex valued input
-            ds_dx = compute_gradient(fn, inputs, x, idx, eps, eps)
+            ds_dx = compute_gradient(fn, inputs, x, idx, eps, eps, is_mkldnn)
             if x.is_complex():  # C -> C, C -> R
-                ds_dy = compute_gradient(fn, inputs, x, idx, eps * 1j, eps)
+                ds_dy = compute_gradient(fn, inputs, x, idx, eps * 1j, eps, is_mkldnn)
                 # conjugate wirtinger derivative
                 conj_w_d = 0.5 * (ds_dx + ds_dy * 1j)
                 # wirtinger derivative
