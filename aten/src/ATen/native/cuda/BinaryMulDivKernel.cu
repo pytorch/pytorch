@@ -45,6 +45,43 @@ struct MulFunctor<bool> {
   }
 };
 
+#if defined(_MSC_VER) && _MSC_VER >= 1928
+template <typename scalar_t>
+static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t, float>::value, scalar_t>::type
+  ceil_(scalar_t a) {
+  return std::ceilf(a);
+}
+template <typename scalar_t>
+static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t, float>::value, scalar_t>::type
+  ceil_(scalar_t a) {
+  return std::ceil(a);
+}
+template <typename scalar_t>
+static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t, float>::value, scalar_t>::type
+  floor_(scalar_t a) {
+  return std::floorf(a);
+}
+template <typename scalar_t>
+static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t, float>::value, scalar_t>::type
+  floor_(scalar_t a) {
+  return std::floor(a);
+}
+template <typename scalar_t>
+static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t, float>::value, scalar_t>::type
+  copysign_(scalar_t a, scalar_t b) {
+  return std::copysignf(a, b);
+}
+template <typename scalar_t>
+static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t, float>::value, scalar_t>::type
+  copysign_(scalar_t a, scalar_t b) {
+  return std::copysign(a, b);
+}
+#else
+#define ceil_ std::ceil
+#define floor_ std::floor
+#define copysign_ std::copysign
+#endif
+
 
 void div_true_kernel_cuda(TensorIteratorBase& iter) {
   if (iter.is_cpu_scalar(2)) {
@@ -136,12 +173,12 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 
         scalar_t floordiv;
         if (div != 0) {
-          floordiv = std::floor(div);
+          floordiv = floor_(div);
           if (div - floordiv > scalar_t(0.5)) {
             floordiv += scalar_t(1.0);
           }
         } else {
-          floordiv = std::copysign(scalar_t(0), a * inv_b);
+          floordiv = copysign_(scalar_t(0), a * inv_b);
         }
         return floordiv;
       });
@@ -157,12 +194,12 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
 
         scalar_t floordiv;
         if (div != 0) {
-          floordiv = std::floor(div);
+          floordiv = floor_(div);
           if (div - floordiv > scalar_t(0.5)) {
             floordiv += scalar_t(1.0);
           }
         } else {
-          floordiv = std::copysign(scalar_t(0), a / b);
+          floordiv = copysign_(scalar_t(0), a / b);
         }
         return floordiv;
       });
