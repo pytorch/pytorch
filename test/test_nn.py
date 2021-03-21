@@ -3735,6 +3735,12 @@ class TestNN(NNTestCase):
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
         self.assertEqual(F.threshold(x, 0, 99), expected)
 
+    def test_threshold_bfloat16(self):
+        x = torch.randn(100)
+        expected = F.threshold(x, 0, 0).bfloat16().float()
+        res_bf16 = F.threshold(x.bfloat16(), 0, 0).float()
+        self.assertEqual(res_bf16, expected)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_embedding_max_norm_unsorted_repeating_indices(self):
         def create_embedding(device):
