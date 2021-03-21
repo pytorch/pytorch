@@ -68,11 +68,11 @@ def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_
 
 
 def iter_tensor(x_tensor):
-    """Generator that returns a tensor, index into that tensor, and a flat index
-    translating to the col or row in the jacobian. If `x_tensor is strided, the
-    returned tensor will share storage with the passed in `x_tensor`. Otherwise,
-    if the tensor layout is sparse or mkldnn, the provided tensor will be a dense
-    copy.
+    """For strided and sparse tensors, provides a "view" of the original tensor.
+    Updates through the view update the original, but do not bump version count.
+    For mkldnn tensors, however, the returned tensor will be a dense *copy*.
+    Also provides the current index into that tensor, as well as a corresponding
+    "flat index" which translates to a given row/col in the jacobian matrix.
     """
     if x_tensor.is_sparse:
         def get_stride(size):
