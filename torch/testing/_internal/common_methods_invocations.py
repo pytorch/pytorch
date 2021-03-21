@@ -3112,7 +3112,9 @@ op_db: List[OpInfo] = [
            skips=(
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+               # see https://github.com/pytorch/pytorch/issues/54381
+               SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda'))),
     HermitianOpInfo('linalg.pinv',
                     variant_test_name='hermitian',
                     aten_name='linalg_pinv',
@@ -3126,7 +3128,9 @@ op_db: List[OpInfo] = [
                     skips=(
                         # cuda gradchecks are slow
                         # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
+                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+                        # see https://github.com/pytorch/pytorch/issues/54381
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda'))
                     ),
     OpInfo('eig',
            op=torch.eig,
@@ -3188,7 +3192,9 @@ op_db: List[OpInfo] = [
            skips=(
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+               # see https://github.com/pytorch/pytorch/issues/54381
+               SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda'))),
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
