@@ -47,32 +47,32 @@ struct MulFunctor<bool> {
 
 #if defined(_MSC_VER) && _MSC_VER >= 1928
 template <typename scalar_t>
-static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t, float>::value, scalar_t>::type
+static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t, double>::value, scalar_t>::type
   ceil_(scalar_t a) {
-  return std::ceilf(a);
+  return std::ceilf(static_cast<float>(a));
 }
 template <typename scalar_t>
-static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t, float>::value, scalar_t>::type
+static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t, double>::value, scalar_t>::type
   ceil_(scalar_t a) {
   return std::ceil(a);
 }
 template <typename scalar_t>
-static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t, float>::value, scalar_t>::type
+static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t, double>::value, scalar_t>::type
   floor_(scalar_t a) {
-  return std::floorf(a);
+  return std::floorf(static_cast<float>(a));
 }
 template <typename scalar_t>
-static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t, float>::value, scalar_t>::type
+static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t, double>::value, scalar_t>::type
   floor_(scalar_t a) {
   return std::floor(a);
 }
 template <typename scalar_t>
-static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t, float>::value, scalar_t>::type
+static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t, double>::value, scalar_t>::type
   trunc_(scalar_t a) {
-  return std::truncf(a);
+  return std::truncf(static_cast<float>(a));
 }
 template <typename scalar_t>
-static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t, float>::value, scalar_t>::type
+static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t, double>::value, scalar_t>::type
   trunc_(scalar_t a) {
   return std::trunc(a);
 }
@@ -82,10 +82,19 @@ static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t1
   return std::copysignf(a, b);
 }
 template <typename scalar_t1, typename scalar_t2>
-static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t1, float>::value || !std::is_same<scalar_t2, float>::value, std::_Common_float_type_t<scalar_t1, scalar_t2>>::type
+static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t1, c10::Half>::value && std::is_same<scalar_t2, c10::Half>::value, scalar_t1>::type
   copysign_(scalar_t1 a, scalar_t2 b) {
-  using scalar_t = std::_Common_float_type_t<scalar_t1, scalar_t2>;
-  return std::copysign(static_cast<scalar_t>(a), static_cast<scalar_t>(b));
+    return std::copysignf(static_cast<float>(a), static_cast<float>(b));
+}
+template <typename scalar_t1, typename scalar_t2>
+static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t1, c10::BFloat16>::value && std::is_same<scalar_t2, c10::BFloat16>::value, scalar_t1>::type
+  copysign_(scalar_t1 a, scalar_t2 b) {
+    return std::copysignf(static_cast<float>(a), static_cast<float>(b));
+}
+template <typename scalar_t1, typename scalar_t2>
+static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t1, double>::value || std::is_same<scalar_t2, double>::value, double>::type
+  copysign_(scalar_t1 a, scalar_t2 b) {
+  return std::copysign(static_cast<double>(a), static_cast<double>(b));
 }
 #else
 #define ceil_ std::ceil
