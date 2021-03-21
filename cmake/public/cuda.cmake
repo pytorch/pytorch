@@ -541,7 +541,7 @@ list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 list(APPEND CUDA_NVCC_FLAGS "--expt-extended-lambda")
 
 # Temporary fix for https://github.com/pytorch/pytorch/issues/54382
-if (MSVC and MSVC_VERSION GREATER_EQUAL 1928)
+if(MSVC AND MSVC_VERSION GREATER_EQUAL 1928)
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/win_tmp/tmp_includes)
   file(DOWNLOAD https://raw.githubusercontent.com/microsoft/STL/12c684bba78f9b032050526abdebf14f58ca26a3/stl/inc/cmath ${CMAKE_BINARY_DIR}/win_tmp/tmp_includes/cmake)
   list(APPEND CUDA_NVCC_FLAGS "-I${CMAKE_BINARY_DIR}/win_tmp/tmp_includes")
