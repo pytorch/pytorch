@@ -128,7 +128,7 @@ class TestSparseCSR(TestCase):
         crow_indices = torch.tensor([0, 3, 5])
         col_indices = torch.tensor([0, 1, 2, 0, 1])
         values = torch.tensor([1, 2, 1, 3, 4])
-        csr = torch.sparse_csr_tensor(crow_indices, col_indices, 
+        csr = torch.sparse_csr_tensor(crow_indices, col_indices,
                                       values, dtype=torch.double)
         dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=torch.double)
         self.assertEqual(csr.to_dense(), dense)
