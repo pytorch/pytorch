@@ -1348,34 +1348,36 @@
 
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  structured_delegate: div.out
   dispatch:
-    CPU, CUDA: div
     SparseCPU, SparseCUDA: div_sparse
 
 - func: div_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
+  structured_delegate: div.out
   dispatch:
-    CPU, CUDA: div_
     SparseCPU, SparseCUDA: div_sparse_
 
 - func: div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
 - func: div.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
   variants: function, method
-  dispatch:
-    CPU, CUDA: div
+  structured_delegate: div.out_mode
 
 - func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
   variants: method
-  dispatch:
-    CPU, CUDA: div_
+  structured_delegate: div.out_mode
 
 - func: div.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: div_out
+    CPU, CUDA: div_out_mode
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
@@ -4187,21 +4189,22 @@
     MkldnnCPU: mkldnn_zero_
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sub_out
     SparseCPU, SparseCUDA: sub_out_sparse
 
 - func: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function, method
+  structured_delegate: sub.out
   dispatch:
-    CPU, CUDA: sub
     SparseCPU, SparseCUDA: sub_sparse
 
 - func: sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   variants: method
+  structured_delegate: sub.out
   dispatch:
-    CPU, CUDA: sub_
     SparseCPU, SparseCUDA: sub_sparse_
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -6418,45 +6421,43 @@
     QuantizedCPU: equal_quantized_cpu
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: pow_out
+    CPU, CUDA: pow_Tensor_Tensor_out
 
 - func: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
+  structured_delegate: pow.Tensor_Tensor_out
   variants: method, function
-  dispatch:
-    CPU, CUDA: pow
 
 - func: pow.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  structured: True
   dispatch:
-    CPU, CUDA: pow_out
+    CPU, CUDA: pow_Scalar_out
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
-  dispatch:
-    CPU, CUDA: pow
+  structured_delegate: pow.Scalar_out
 
 - func: pow.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: pow_out
+    CPU, CUDA: pow_Tensor_Scalar_out
     SparseCPU, SparseCUDA: pow_out_sparse_scalar
 
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
+  structured_delegate: pow.Tensor_Scalar_out
   variants: function, method
   dispatch:
-    CPU, CUDA: pow
     SparseCPU, SparseCUDA: pow_sparse_scalar
 
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
+  structured_delegate: pow.Tensor_Scalar_out
   variants: method
-  dispatch:
-    CPU, CUDA: pow_
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
+  structured_delegate: pow.Tensor_Tensor_out
   variants: method
-  dispatch:
-    CPU, CUDA: pow_
 
 - func: float_power.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
