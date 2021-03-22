@@ -886,7 +886,7 @@ def sample_inputs_index_copy(op_info, device, dtype, requires_grad):
     idxs = (make_arg(size, dtype=torch.int64, low=0, high=1) for size in scalar_sizes)
     ss = (make_arg(size) for size in scalar_sizes)
 
-    samples.extend(SampleInput(t, args=( 0, idx, s)) for t, idx, s in product(ts, idxs, ss))
+    samples.extend(SampleInput(t, args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
     return samples
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
