@@ -329,6 +329,9 @@ Tensor& i0_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(re
 Tensor i0(const Tensor& self) { return unary_op_impl(self, at::i0_out); }
 Tensor& i0_(Tensor& self) { return unary_op_impl_(self, at::i0_out); }
 
+Tensor& special_i0e_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, i0e_stub); }
+Tensor special_i0e(const Tensor& self) { return unary_op_impl_float(self, i0e_stub); }
+
 Tensor& log_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, log_stub); }
 Tensor log(const Tensor& self) { return unary_op_impl_float(self, log_stub); }
 Tensor& log_(Tensor& self) { return unary_op_impl_(self, at::log_out); }
@@ -756,6 +759,7 @@ DEFINE_DISPATCH(floor_stub);
 DEFINE_DISPATCH(frac_stub);
 DEFINE_DISPATCH(frexp_stub);
 DEFINE_DISPATCH(i0_stub);
+DEFINE_DISPATCH(i0e_stub);
 DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);
 DEFINE_DISPATCH(log1p_stub);

@@ -1161,7 +1161,7 @@ calc_gcd(T a, T b) {
  */
 template <typename T>
 static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
- chbevl(T x, T array[], size_t len) {
+ chbevl(const T x,const T array[], size_t len) {
   T b0, b1, b2;
 
   b0 = array[0];
@@ -1186,87 +1186,98 @@ static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
  * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
-static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
-calc_i0(T _x) {
-  T x = std::abs(_x);
+inline const T* chebyshev_coefficients_A(){
   /* Chebyshev coefficients for exp(-x) I0(x)
    * in the interval [0,8].
    *
    * lim(x->0){ exp(-x) I0(x) } = 1.
    */
-  static T A[] = {
-    -4.41534164647933937950E-18,
-    3.33079451882223809783E-17,
-    -2.43127984654795469359E-16,
-    1.71539128555513303061E-15,
-    -1.16853328779934516808E-14,
-    7.67618549860493561688E-14,
-    -4.85644678311192946090E-13,
-    2.95505266312963983461E-12,
-    -1.72682629144155570723E-11,
-    9.67580903537323691224E-11,
-    -5.18979560163526290666E-10,
-    2.65982372468238665035E-9,
-    -1.30002500998624804212E-8,
-    6.04699502254191894932E-8,
-    -2.67079385394061173391E-7,
-    1.11738753912010371815E-6,
-    -4.41673835845875056359E-6,
-    1.64484480707288970893E-5,
-    -5.75419501008210370398E-5,
-    1.88502885095841655729E-4,
-    -5.76375574538582365885E-4,
-    1.63947561694133579842E-3,
-    -4.32430999505057594430E-3,
-    1.05464603945949983183E-2,
-    -2.37374148058994688156E-2,
-    4.93052842396707084878E-2,
-    -9.49010970480476444210E-2,
-    1.71620901522208775349E-1,
-    -3.04682672343198398683E-1,
-    6.76795274409476084995E-1
-  };
+  static const T coeff[] = {
+      -4.41534164647933937950E-18, 3.33079451882223809783E-17,
+      -2.43127984654795469359E-16, 1.71539128555513303061E-15,
+      -1.16853328779934516808E-14, 7.67618549860493561688E-14,
+      -4.85644678311192946090E-13, 2.95505266312963983461E-12,
+      -1.72682629144155570723E-11, 9.67580903537323691224E-11,
+      -5.18979560163526290666E-10, 2.65982372468238665035E-9,
+      -1.30002500998624804212E-8,  6.04699502254191894932E-8,
+      -2.67079385394061173391E-7,  1.11738753912010371815E-6,
+      -4.41673835845875056359E-6,  1.64484480707288970893E-5,
+      -5.75419501008210370398E-5,  1.88502885095841655729E-4,
+      -5.76375574538582365885E-4,  1.63947561694133579842E-3,
+      -4.32430999505057594430E-3,  1.05464603945949983183E-2,
+      -2.37374148058994688156E-2,  4.93052842396707084878E-2,
+      -9.49010970480476444210E-2,  1.71620901522208775349E-1,
+      -3.04682672343198398683E-1,  6.76795274409476084995E-1};
+  return coeff;
+};
 
+template <typename T>
+inline const T* chebyshev_coefficients_B(){
   /* Chebyshev coefficients for exp(-x) sqrt(x) I0(x)
    * in the inverted interval [8,infinity].
    *
    * lim(x->inf){ exp(-x) sqrt(x) I0(x) } = 1/sqrt(2pi).
    */
-  static T B[] = {
-    -7.23318048787475395456E-18,
-    -4.83050448594418207126E-18,
-    4.46562142029675999901E-17,
-    3.46122286769746109310E-17,
-    -2.82762398051658348494E-16,
-    -3.42548561967721913462E-16,
-    1.77256013305652638360E-15,
-    3.81168066935262242075E-15,
-    -9.55484669882830764870E-15,
-    -4.15056934728722208663E-14,
-    1.54008621752140982691E-14,
-    3.85277838274214270114E-13,
-    7.18012445138366623367E-13,
-    -1.79417853150680611778E-12,
-    -1.32158118404477131188E-11,
-    -3.14991652796324136454E-11,
-    1.18891471078464383424E-11,
-    4.94060238822496958910E-10,
-    3.39623202570838634515E-9,
-    2.26666899049817806459E-8,
-    2.04891858946906374183E-7,
-    2.89137052083475648297E-6,
-    6.88975834691682398426E-5,
-    3.36911647825569408990E-3,
-    8.04490411014108831608E-1
-  };
+  static const T coeff[] = {
+      -7.23318048787475395456E-18, -4.83050448594418207126E-18,
+      4.46562142029675999901E-17,  3.46122286769746109310E-17,
+      -2.82762398051658348494E-16, -3.42548561967721913462E-16,
+      1.77256013305652638360E-15,  3.81168066935262242075E-15,
+      -9.55484669882830764870E-15, -4.15056934728722208663E-14,
+      1.54008621752140982691E-14,  3.85277838274214270114E-13,
+      7.18012445138366623367E-13,  -1.79417853150680611778E-12,
+      -1.32158118404477131188E-11, -3.14991652796324136454E-11,
+      1.18891471078464383424E-11,  4.94060238822496958910E-10,
+      3.39623202570838634515E-9,   2.26666899049817806459E-8,
+      2.04891858946906374183E-7,   2.89137052083475648297E-6,
+      6.88975834691682398426E-5,   3.36911647825569408990E-3,
+      8.04490411014108831608E-1};
+
+  return coeff;
+};
+
+template <typename T>
+static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+calc_i0(T _x) {
+  T x = std::abs(_x);
 
   if (x <= 8.0) {
+    const auto A = chebyshev_coefficients_A<T>();
     T y = (x / 2.0) - 2.0;
     return static_cast<T>(std::exp(x) * chbevl(y, A, 30));
   }
 
+  const auto B = chebyshev_coefficients_B<T>();
   return static_cast<T>(std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, 25) / std::sqrt(x));
 }
 
 // Upcast bfloat16 input to float for numerical accuracy purposes
 inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }
+
+/*
+ * This function is derived from the implementation of the i0e function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ *
+ * Computes an approximation of the zeroth order modified Bessel function of the first kind.
+ * The approximation is actually two (sub)approximations, both using a Chebyshev polynomial expansion.
+ * One approximates the function over [0, 8], and the other over (8, infinity). This function takes the absolute value
+ * of all inputs to convert them into the domain of the approximation.
+ */
+template <typename T>
+static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+calc_i0e(T _x) {
+  T x = std::abs(_x);
+
+  if (x <= 8.0) {
+    auto A = chebyshev_coefficients_A<T>();
+    T y = (x / 2.0) - 2.0;
+    return static_cast<T>(chbevl(y, A, 30));
+  }
+
+  auto B = chebyshev_coefficients_B<T>();
+  return static_cast<T>(
+      chbevl(static_cast<T>(32.0 / x - 2.0), B, 25) / std::sqrt(x));
+}
+
+// Upcast bfloat16 input to float for numerical accuracy purposes
+inline c10::BFloat16 calc_i0e(c10::BFloat16 a) { return calc_i0e(static_cast<float>(a)); }

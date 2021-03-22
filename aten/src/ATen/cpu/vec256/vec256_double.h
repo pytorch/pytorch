@@ -164,6 +164,9 @@ public:
   Vec256<double> i0() const {
     return map(calc_i0);
   }
+  Vec256<double> i0e() const {
+    return map(calc_i0e);
+  }
   Vec256<double> igamma(const Vec256<double> &x) const {
     __at_align32__ double tmp[size()];
     __at_align32__ double tmp_x[size()];

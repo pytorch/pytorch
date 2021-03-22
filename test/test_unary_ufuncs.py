@@ -22,6 +22,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing import (
     floating_types_and, all_types_and_complex_and, floating_types, floating_and_complex_types_and)
 
+from hypothesis import strategies as st
+
 if TEST_SCIPY:
     import scipy
 
@@ -486,6 +488,7 @@ class TestUnaryUfuncs(TestCase):
             with self.assertRaises(RuntimeError):
                 op(input, out=output)
         else:
+            print("-------")
             res = op(input, out=output)
             self.assertTrue(res is output)
             self.assertEqual(output, expected.to(output.dtype))
@@ -1217,6 +1220,32 @@ class TestUnaryUfuncs(TestCase):
 
         t = torch.tensor([inf, -inf, nan], device=device, dtype=dtype)
         self.assertTrue(torch.i0(t).isnan().all())
+
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
+    @dtypes(torch.bfloat16, torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_special_i0e_vs_scipy(self, device, dtype):
+        def check_equal(t):
+            # Test by comparing to scipy
+            actual = torch.special.i0e(t)
+            if dtype is torch.bfloat16:
+                t = t.to(torch.float32)
+            expected = scipy.special.i0e(t.cpu().numpy())
+
+            # Casting down for dtype float16 is required since scipy upcasts to float32
+            if dtype is torch.bfloat16 or dtype is torch.float16:
+                expected = torch.from_numpy(expected).to(dtype)
+            self.assertEqual(actual, expected)
+
+        t = torch.tensor([], device=device, dtype=dtype)
+        check_equal(t)
+
+        t = torch.linspace(-65000, 65000, int(1e4), device=device, dtype=dtype)
+        check_equal(t)
+
+        if dtype != torch.half:
+            t = torch.linspace(-1e6, 1e6, int(1e4), device=device, dtype=dtype)
+            check_equal(t)
 
     # TODO: allow large opinfo values to be opted-into via metadata
     @dtypes(torch.long)
