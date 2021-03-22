@@ -342,11 +342,13 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   });
   m.def("static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor");
   m.def(
-      "static_runtime::to_copy(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
-  m.def(
       "static_runtime::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)");
   m.def(
       "static_runtime::flatten_copy.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)");
+  m.def(
+      "static_runtime::to_copy.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+  m.def(
+      "static_runtime::to_copy.prim_dtype(Tensor self, int dtype, bool non_blocking=False, bool copy=False) -> Tensor");
 }
 
 void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -378,12 +380,32 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
       {c10::Symbol::fromQualString("aten::reshape"),
        c10::Symbol::fromQualString("static_runtime::reshape_copy")},
       {c10::Symbol::fromQualString("aten::flatten"),
-       c10::Symbol::fromQualString("static_runtime::flatten_copy")},
-      {c10::Symbol::fromQualString("aten::to"),
+       c10::Symbol::fromQualString("static_runtime::flatten_copy")}};
+  const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>> supported_schema = {
+      {torch::schema(
+           "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
+       c10::Symbol::fromQualString("static_runtime::to_copy")},
+      {torch::schema(
+           "to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor"),
        c10::Symbol::fromQualString("static_runtime::to_copy")}};
+
+  auto match_schema = [&supported_schema](
+                          const Node* node, c10::Symbol& out_matched_symbol) {
+    for (auto& schema : supported_schema) {
+      if (node->matches(schema.first)) {
+        out_matched_symbol = schema.second;
+        return true;
+      }
+    }
+    return false;
+  };
+
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto* n : graph->nodes()) {
-    if (!supported.count(n->kind())) {
+    c10::Symbol new_symbol;
+    if (supported.count(n->kind())) {
+      new_symbol = supported.at(n->kind());
+    } else if (!match_schema(n, new_symbol)) {
       continue;
     }
     DCHECK(n->outputs().size() == 1);
@@ -414,7 +436,6 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
     if (db.mayContainAlias({out}, graph->outputs())) {
       continue;
     }
-    auto new_symbol = supported.at(n->kind());
     auto* new_node = graph->create(new_symbol, n->outputs().size());
     new_node->insertBefore(n);
     for (auto* input : n->inputs()) {
