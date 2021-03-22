@@ -19,7 +19,7 @@ if dist.is_available():
 if torch.distributed.rpc.is_available():
     RPC_AVAILABLE = True
     from torch.distributed.rpc import RRef
-from torch._utils import _get_device_index, _get_all_device_indices
+from torch._utils import _get_device_index, _get_current_device_index
 
 from ..modules import Module
 from ._functions import _get_stream
@@ -309,10 +309,8 @@ class DistributedDataParallel(Module):
                    only be provided when the input module resides on a single
                    CUDA device. For single-device modules, the i'th
                    :attr:`module` replica is placed on ``device_ids[i]``. For
-                   multi-device modules and CPU modules, ``device_ids`` must be
-                   ``None`` or an empty list, and input data for the forward
-                   pass must be placed on the correct device. (default: all
-                   visible devices for single-device modules)
+                   CPU modules, ``device_ids`` must be ``None`` or an empty list.
+                   Multi-device module is no longer supported.
         output_device (int or torch.device): Device location of output for
                       single-device CUDA modules. For multi-device modules and
                       CPU modules, it must be ``None``, and the module itself
@@ -388,6 +386,10 @@ class DistributedDataParallel(Module):
             "doesn't have any parameter that requires a gradient."
         )
 
+        assert (
+            device_ids is None or len(device_ids) <= 1
+        ), "Single-process multiple-device mode is no longer supported by DistributedDataParallel."
+
         self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
         distinct_device_types = {p.device.type for p in module.parameters()}
         assert len(distinct_device_types) == 1, (
@@ -406,9 +408,9 @@ class DistributedDataParallel(Module):
             self.device_ids = None
             self.output_device = None
         else:
-            # Use all devices by default for single-device GPU modules
+            # Use the current device by default for single-device GPU modules
             if device_ids is None:
-                device_ids = _get_all_device_indices()
+                device_ids = [_get_current_device_index()]
 
             self.device_ids = [_get_device_index(x, True) for x in device_ids]
 
