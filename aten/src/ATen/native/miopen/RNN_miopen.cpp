@@ -20,10 +20,6 @@ namespace at { namespace native {
             bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
             IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
             ) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
-  const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
-
         AT_ERROR("miopen_rnn : ATen not compiled with MIOpen support.");
     }
 
@@ -33,13 +29,6 @@ namespace at { namespace native {
             double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt,
             const Tensor& reserve, std::array<bool, 4> output_mask
             ) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
-  const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
-  const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
-  const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
-  const Tensor& dropout_state = c10::value_or_else(dropout_state_opt, [] {return Tensor();});
-
         AT_ERROR("miopen_rnn_backward: ATen not compiled with MIOpen support.");
     }
 
@@ -448,10 +437,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
         bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
         IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
         ) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
-  const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
-
+    // See [Note: hacky wrapper removal for optional tensor]
+    const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
+    const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
 
     check_attributes(input_r, weight, {hx, cx});
     auto input = input_r;
@@ -766,12 +754,12 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
         double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt,
         const Tensor& reserve, std::array<bool, 4> output_mask
         ) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
-  const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
-  const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
-  const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
-  const Tensor& dropout_state = c10::value_or_else(dropout_state_opt, [] {return Tensor();});
+    // See [Note: hacky wrapper removal for optional tensor]
+    const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
+    const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
+    const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
+    const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
+    const Tensor& dropout_state = c10::value_or_else(dropout_state_opt, [] {return Tensor();});
 
     if (!grad_output_r.defined() && !grad_hy_r.defined() && !grad_cy_r.defined()) {
         return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>(Tensor(), Tensor(), Tensor(), std::vector<Tensor>(weight.size()));

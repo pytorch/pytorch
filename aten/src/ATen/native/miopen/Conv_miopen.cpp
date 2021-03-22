@@ -16,9 +16,6 @@ at::Tensor miopen_convolution(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-
   AT_ERROR("miopen_convolution: ATen not compiled with MIOpen support");
 }
 
@@ -52,9 +49,6 @@ at::Tensor miopen_convolution_transpose(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-
   AT_ERROR("miopen_convolution_transpose: ATen not compiled with MIOpen support");
 }
 
@@ -83,9 +77,6 @@ at::Tensor miopen_depthwise_convolution(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt /* optional */,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-
   AT_ERROR("miopen_depthwise_convolution: ATen not compiled with MIOpen support");
 }
 

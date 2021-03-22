@@ -9,9 +9,6 @@ namespace at { namespace native {
 Tensor mkldnn_convolution(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-
   TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
 

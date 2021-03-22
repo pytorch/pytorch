@@ -15,23 +15,12 @@ namespace at { namespace native {
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     bool training, double exponential_average_factor, double epsilon) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-
   AT_ERROR("miopen_batch_norm: ATen not compiled with MIOpen support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     const Tensor& input, const Tensor& grad_output, const Tensor& weight, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
     double epsilon) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
-  const Tensor& save_var = c10::value_or_else(save_var_opt, [] {return Tensor();});
-
   AT_ERROR("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
 }
 

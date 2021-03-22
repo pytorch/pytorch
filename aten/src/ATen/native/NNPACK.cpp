@@ -13,9 +13,6 @@ at::Tensor _nnpack_spatial_convolution(
     const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     const IntArrayRef padding,
     const IntArrayRef stride) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-
   throw std::runtime_error(
       "nnpack_spatial_convolution: ATen not compiled with NNPACK support");
 }
