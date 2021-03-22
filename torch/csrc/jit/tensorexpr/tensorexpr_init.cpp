@@ -7,6 +7,7 @@
 #endif
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
@@ -372,6 +373,24 @@ void initTensorExprBindings(PyObject* module) {
       [](Stmt* stmt) { return IRSimplifier::simplify(stmt); },
       py::return_value_policy::reference);
 
+  using TSGraph = std::shared_ptr<Graph>;
+  py::class_<TensorExprKernel>(te, "TensorExprKernel")
+      .def(py::init<const TSGraph>())
+      .def("run", [](TensorExprKernel& self, Stack& stack) { self.run(stack); })
+      .def(
+          "fallback",
+          [](TensorExprKernel& self, Stack& stack) { self.fallback(stack); })
+      .def(
+          "get_code_gen_stmt",
+          [](TensorExprKernel& self) { return self.getCodeGenStmt(); },
+          py::return_value_policy::reference)
+      .def(
+          "get_code_text",
+          [](TensorExprKernel& self, const std::string& attr = "") {
+            return self.getCodeText(attr);
+          },
+          py::arg("attr") = "");
+
   py::class_<CodeGen>(te, "CodeGen")
       .def(
           "call",
@@ -384,7 +403,7 @@ void initTensorExprBindings(PyObject* module) {
             self.call(value_ptrs);
           })
       .def(
-          "getCodeText",
+          "get_code_text",
           [](CodeGen& self, const std::string& attr = "") {
             return self.getCodeText(attr);
           },
