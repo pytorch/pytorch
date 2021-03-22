@@ -675,5 +675,15 @@ class TestTyping(TestCase):
         self.assertNotEqual(id(dp1.type), id(dp2.type))
 
 
+        class ValidDP4(IterDataPipe):
+            r""" DataPipe without annotation"""
+            def __iter__(self):
+                raise NotImplementedError
+
+        dp = ValidDP4()
+        self.assertTrue(dp.type.param == Any)
+        self.assertNotEqual(id(ValidDP4.type), id(dp.type))
+
+
 if __name__ == '__main__':
     run_tests()

@@ -6,9 +6,8 @@ from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
-from torch.utils.data.typing import _DataPipeAlias
+from torch.utils.data.typing import _DataPipeMeta, _generic_new, _next_in_mro
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
-from typing import _tp_cache, _type_check  # type: ignore
 from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)
@@ -42,7 +41,7 @@ class Dataset(Generic[T_co]):
     # in pytorch/torch/utils/data/sampler.py
 
 
-class IterableDataset(Dataset[T_co]):
+class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
     r"""An iterable Dataset.
 
     All datasets that represent an iterable of data samples should subclass it.
@@ -147,6 +146,15 @@ class IterableDataset(Dataset[T_co]):
     functions: Dict[str, Callable] = {}
     reduce_ex_hook : Optional[Callable] = None
 
+    def __new__(cls, *args, **kwds):
+        if hasattr(cls, '_gorg') and cls._gorg is Generic:  # type: ignore
+            raise TypeError("Type Generic cannot be instantiated; "
+                            "it can be used only as a base class")
+        if hasattr(cls, '__next_in_mro__'):
+            return _generic_new(cls.__next_in_mro__, cls, *args, **kwds)  # type: ignore
+        else:
+            return _generic_new(_next_in_mro(cls), cls, *args, **kwds)
+
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
 
@@ -190,21 +198,6 @@ class IterableDataset(Dataset[T_co]):
         if IterableDataset.reduce_ex_hook is not None and hook_fn is not None:
             raise Exception("Attempt to override existing reduce_ex_hook")
         IterableDataset.reduce_ex_hook = hook_fn
-
-    #  def __init_subclass__(cls, *args, **kwargs):
-    #      # TODO: Determinin if force all IterableDataset and IterDataPipe with annotation
-    #      if not hasattr(cls, 'type'):
-    #          raise TypeError('Class {} needs to be specified with type'.format(cls.__name__))
-
-    @_tp_cache
-    def __class_getitem__(cls, param) -> _DataPipeAlias:
-        # TODO: add global switch for type checking at compile-time
-        if param is None:
-            raise TypeError('Can not take None as type parameter for {}'.format(cls.__name__))
-        if isinstance(param, Sequence):
-            param = Tuple[param]
-        _type_check(param, msg="Parameters for {} must be types".format(cls.__name__))
-        return _DataPipeAlias(cls, param)
 
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
