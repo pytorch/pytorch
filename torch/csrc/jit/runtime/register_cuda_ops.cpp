@@ -33,8 +33,9 @@ RegisterOperators const reg({
         "cuda::current_stream.int(int? val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
           auto idx = pop(stack).toOptional<int64_t>();
-          c10::DeviceIndex device_index =
-              idx.has_value() ? static_cast<c10::DeviceIndex>(idx.value()) : -1;
+          c10::DeviceIndex device_index = idx.has_value()
+              ? static_cast<c10::DeviceIndex>(idx.value())
+              : c10::cuda::current_device();
           auto s = c10::cuda::getCurrentCUDAStream(device_index);
           auto st = make_custom_class<torch::jit::CUDAStream>(s);
           push(stack, IValue(st));
@@ -56,8 +57,9 @@ RegisterOperators const reg({
         "cuda::default_stream.int(int? val) -> __torch__.torch.classes.cuda.Stream",
         [](Stack* stack) {
           auto idx = pop(stack).toOptional<int64_t>();
-          c10::DeviceIndex device_index =
-              idx.has_value() ? static_cast<c10::DeviceIndex>(idx.value()) : -1;
+          c10::DeviceIndex device_index = idx.has_value()
+              ? static_cast<c10::DeviceIndex>(idx.value())
+              : c10::cuda::current_device();
           auto s = c10::cuda::getDefaultCUDAStream(device_index);
           auto st = make_custom_class<torch::jit::CUDAStream>(s);
           push(stack, IValue(st));
