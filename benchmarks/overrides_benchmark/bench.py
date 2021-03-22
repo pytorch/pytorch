@@ -48,11 +48,11 @@ def main():
     NUM_REPEATS = args.nreps
     NUM_REPEAT_OF_REPEATS = args.nrepreps
 
-    types = torch.Tensor, SubTensor, WithTorchFunction, SubWithTorchFunction
+    types = torch.tensor, SubTensor, WithTorchFunction, SubWithTorchFunction
 
     for t in types:
-        tensor_1 = t(1)
-        tensor_2 = t(2)
+        tensor_1 = t([1.])
+        tensor_2 = t([2.])
 
         bench_min, bench_std = bench(tensor_1, tensor_2)
         print(
