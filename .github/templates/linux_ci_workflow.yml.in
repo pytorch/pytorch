@@ -73,10 +73,9 @@ jobs:
             -w /var/lib/jenkins/workspace \
             ${DOCKER_IMAGE} \
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
-      - name: Chown workspace
+      - name: Archive artifacts into zip
         run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
+          zip -r artifacts.zip dist build
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Build Artifacts
         with:
@@ -84,8 +83,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           path:
-            ${{ github.workspace }}/dist/**/*
-            ${{ github.workspace }}/build/**/*
+            artifacts.zip
       - name: Clean up docker images
         if: always()
         run: |
@@ -120,6 +118,7 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
       - name: Test PyTorch
         run: |
+          unzip artifacts.zip
           docker run \
             -e BUILD_ENVIRONMENT \
             -e IN_CI \
