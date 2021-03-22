@@ -19,14 +19,15 @@ from torch.testing._internal.common_utils import TEST_WITH_ROCM, shell, set_cwd,
 from torch.testing._internal.framework_utils import calculate_shards
 import torch.distributed as dist
 from typing import Dict, Optional, Tuple, List, Any
+from typing_extensions import TypedDict
 
 try:
-    import boto3  # type: ignore[import]
-    import botocore  # type: ignore[import]
-    import botocore.exceptions  # type: ignore[import]
-    HAVE_BOTO3 = True
+    sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from tools.stats_utils.s3_stat_parser import (get_S3_bucket_readonly, HAVE_BOTO3)
 except ImportError:
+    print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
     HAVE_BOTO3 = False
+
 
 TESTS = [
     'test_public_bindings',
@@ -376,25 +377,19 @@ def get_test_time_reports_from_S3() -> List[Dict[str, Any]]:
     job = os.environ.get("CIRCLE_JOB", "")
     job_minus_shard_number = job.rstrip('0123456789')
 
-    try:
-        s3 = boto3.resource("s3", config=botocore.config.Config(signature_version=botocore.UNSIGNED))
-        bucket = s3.Bucket(name="ossci-metrics")
-
-        reports = []
-        commit_index = 0
-        while len(reports) == 0 and commit_index < len(nightly_commits):
-            nightly_commit = nightly_commits[commit_index]
-            print(f'Grabbing reports from nightly commit: {nightly_commit}')
-            summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{job_minus_shard_number}")
-            for summary in summaries:
-                binary = summary.get()["Body"].read()
-                string = bz2.decompress(binary).decode("utf-8")
-                reports.append(json.loads(string))
-            commit_index += 1
-        return reports
-    except botocore.exceptions.ClientError as err:
-        print('Error Message: {}'.format(err.response['Error']['Message']))
-        return []
+    bucket = get_S3_bucket_readonly('ossci-metrics')
+    reports = []
+    commit_index = 0
+    while len(reports) == 0 and commit_index < len(nightly_commits):
+        nightly_commit = nightly_commits[commit_index]
+        print(f'Grabbing reports from nightly commit: {nightly_commit}')
+        summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{job_minus_shard_number}")
+        for summary in summaries:
+            binary = summary.get()["Body"].read()
+            string = bz2.decompress(binary).decode("utf-8")
+            reports.append(json.loads(string))
+        commit_index += 1
+    return reports
 
 
 def calculate_job_times(reports: List[Dict[str, Any]]) -> Dict[str, Tuple[float, int]]:
@@ -429,7 +424,8 @@ def pull_job_times_from_S3() -> Dict[str, Tuple[float, int]]:
     if HAVE_BOTO3:
         s3_reports = get_test_time_reports_from_S3()
     else:
-        print('Please install boto3 to enable using S3 test times for automatic sharding and test categorization.')
+        print('Uh oh, boto3 is not found. Either it is not installed or we failed to import s3_stat_parser.')
+        print('If not installed, please install boto3 for automatic sharding and test categorization.')
         s3_reports = []
 
     if len(s3_reports) == 0:
@@ -437,6 +433,18 @@ def pull_job_times_from_S3() -> Dict[str, Tuple[float, int]]:
         return dict()
 
     return calculate_job_times(s3_reports)
+
+
+class JobTimeJSON(TypedDict):
+    commit: str
+    job_times: Dict[str, float]
+
+
+def get_job_times_json(job_times: Dict[str, Tuple[float, int]]) -> JobTimeJSON:
+    return {
+        'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip(),
+        'job_times': {job: time for job, (time, _) in job_times.items()},
+    }
 
 
 def get_shard(which_shard: int, num_shards: int, tests: List[str]) -> List[str]:
@@ -730,6 +738,13 @@ def parse_args():
         help='additional arguments passed through to unittest, e.g., '
              'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
     parser.add_argument(
+        '--export-historic-test-times',
+        nargs='?',
+        type=str,
+        const='.pytorch-test-times',
+        help='dumps test times from previous S3 stats into a file, format JSON',
+    )
+    parser.add_argument(
         '--shard',
         nargs=2,
         type=int,
@@ -990,8 +1005,22 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
         message += f' Received signal: {signal_name}'
     return message
 
+def export_S3_test_times(test_times_filename: str, test_times: Dict[str, Tuple[float, int]]) -> None:
+    if os.path.exists(test_times_filename):
+        print(f'Overwriting existent file: {test_times_filename}')
+    with open(test_times_filename, 'w+') as file:
+        job_times_json = get_job_times_json(test_times)
+        json.dump(job_times_json, file)
+
 def main():
     options = parse_args()
+
+    test_times_filename = options.export_historic_test_times
+    if test_times_filename:
+        print(f'Exporting historic test times from S3 to {test_times_filename}, no tests will be run.')
+        export_S3_test_times(test_times_filename, pull_job_times_from_S3())
+        return
+
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
 
