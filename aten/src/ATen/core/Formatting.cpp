@@ -296,9 +296,11 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       }
     }
 
-    auto& fw_grad = tensor._fw_grad(/* level */ 0);
-    if (fw_grad.defined()) {
-      stream << ", tangent:" << std::endl << fw_grad;
+    if (tensor.requires_grad()) {
+      auto& fw_grad = tensor._fw_grad(/* level */ 0);
+      if (fw_grad.defined()) {
+        stream << ", tangent:" << std::endl << fw_grad;
+      }
     }
     stream << " ]";
   }
