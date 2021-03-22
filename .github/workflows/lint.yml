@@ -6,7 +6,7 @@ on:
     - master
   pull_request:
 
-# this is a different comment
+# this is a comment
 
 jobs:
   quick-checks:
