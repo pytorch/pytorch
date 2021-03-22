@@ -38,12 +38,11 @@ class Context;
 } // namespace transport
 
 namespace channel {
-template <typename TBuffer>
 class Context;
-using CpuContext = Context<CpuBuffer>;
+using CpuContext = Context;
 
 #ifdef USE_CUDA_NOT_ROCM
-using CudaContext = Context<CudaBuffer>;
+using CudaContext = Context;
 #endif
 
 } // namespace channel
