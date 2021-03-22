@@ -47,7 +47,7 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
 }
 
 template <bool ReLUFused = false>
-Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
+Tensor _add_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
   TORCH_CHECK(
       self.qscheme() == kPerTensorAffine,
       "Only per tensor affine is supported for now!!");
@@ -235,7 +235,7 @@ Tensor qadd_out(Tensor qa, Tensor qb, Tensor out) {
 
 
 template <bool ReLUFused = false>
-Tensor qadd_scalar(Tensor qa, Scalar b) {
+Tensor qadd_scalar(Tensor qa, const Scalar& b) {
   TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
               qa.qscheme() == kPerTensorSymmetric,
               "Only per tensor quantization is supported in Add.");
@@ -253,7 +253,7 @@ Tensor qadd_scalar2(Scalar b, Tensor qa) {
 }
 
 template <bool ReLUFused = false>
-Tensor qadd_scalar_out(Tensor qa, Scalar b, Tensor out) {
+Tensor qadd_scalar_out(Tensor qa, const Scalar& b, Tensor out) {
   check_inputs(qa, out);
   return _add_scalar_out<ReLUFused>(out, qa, b);
 }
