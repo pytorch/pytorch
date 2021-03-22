@@ -10,6 +10,12 @@ from torch.nn import functional as F
 from torch._C import MobileOptimizerType
 from torch.testing._internal.common_quantized import override_quantized_engine
 
+try:
+    import torchvision
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
 FileCheck = torch._C.FileCheck
 
 class TestOptimizer(TestCase):
@@ -427,6 +433,19 @@ class TestOptimizer(TestCase):
             m_res = m(data)
             m_optim_res = m_optim(data)
             torch.testing.assert_allclose(m_res, m_optim_res, rtol=1e-2, atol=1e-3)
+
+    @unittest.skipUnless(HAS_TORCHVISION, "Needs torchvision")
+    def test_mobilenet_optimize_for_mobile(self):
+        m = torchvision.models.mobilenet_v3_small()
+        m = torch.jit.script(m)
+        m = optimize_for_mobile(m)
+
+        # run forward 3 times until segfault, see https://github.com/pytorch/pytorch/issues/52463
+        x = torch.zeros(1, 3, 56, 56)
+        self.assertEqual(m(x).numel(), 1000)
+        self.assertEqual(m(x).numel(), 1000)
+        self.assertEqual(m(x).numel(), 1000)
+
 
 
 if __name__ == '__main__':

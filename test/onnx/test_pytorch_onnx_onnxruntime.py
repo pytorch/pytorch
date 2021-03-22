@@ -96,7 +96,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    example_outputs=None, do_constant_folding=True,
                    dynamic_axes=None, test_with_inputs=None,
                    input_names=None, output_names=None,
-                   fixed_batch_size=False, dict_check=True):
+                   fixed_batch_size=False, dict_check=True,
+                   training=None):
     model.eval()
     if input is None:
         input = torch.randn(batch_size, 3, 224, 224, requires_grad=True)
@@ -127,7 +128,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    example_outputs=output, do_constant_folding=do_constant_folding,
                                    keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                    dynamic_axes=dynamic_axes, input_names=input_names,
-                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=None,
+                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=training,
                                    onnx_shape_inference=self.onnx_shape_inference)
         # compute onnxruntime output prediction
         ort_outs = run_ort(ort_sess, input)
@@ -237,14 +238,20 @@ class TestONNXRuntime(unittest.TestCase):
 
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
-                 input_names=None, output_names=None, fixed_batch_size=False, dict_check=True):
+                 input_names=None, output_names=None, fixed_batch_size=False, dict_check=True,
+                 training=None):
         def _run_test(m):
             return run_model_test(self, m, batch_size=batch_size,
                                   input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
                                   do_constant_folding=do_constant_folding,
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
+<<<<<<< HEAD
                                   fixed_batch_size=fixed_batch_size, dict_check=dict_check)
+=======
+                                  fixed_batch_size=fixed_batch_size, dict_check=dict_check,
+                                  training=training)
+>>>>>>> d2415e518b1f8d69389ef6e8e55f0ee3864c34a5
         if self.is_script_test_enabled:
             script_model = torch.jit.script(model)
             _run_test(script_model)
@@ -1759,6 +1766,26 @@ class TestONNXRuntime(unittest.TestCase):
         ind = torch.tensor([1], dtype=torch.long)
         update = torch.ones(4)
         self.run_test(IndexPutModel(), (x, ind, update))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_singular(self):
+        class IndexPutBoolModel(torch.nn.Module):
+            def forward(self, mask, indices):
+                mask[indices] = True
+                return mask
+
+        mask = torch.zeros(100, dtype=torch.bool)
+        indices = (torch.rand(25) * mask.shape[0]).to(torch.int64)
+        self.run_test(IndexPutBoolModel(), (mask, indices))
+
+        class IndexPutFloatModel(torch.nn.Module):
+            def forward(self, mask, indices):
+                mask[indices] = torch.tensor(5.5)
+                return mask
+
+        mask = torch.rand(100, dtype=torch.float)
+        indices = (torch.rand(50) * mask.shape[0]).to(torch.int64)
+        self.run_test(IndexPutFloatModel(), (mask, indices))
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_accumulate(self):
@@ -6097,6 +6124,55 @@ class TestONNXRuntime(unittest.TestCase):
         x[2] = x[0] = 1
         embedding_matrix = torch.rand(10, 3)
         self.run_test(model, (x, embedding_matrix))
+
+        x = torch.randint(4, (4, 3, 2))
+        x[2] = 1
+        x[0][1] = 1
+        self.run_test(model, (x, embedding_matrix))
+        self.run_test(model, (x, embedding_matrix), training=torch.onnx.TrainingMode.TRAINING)
+
+        class EmbedModelWithoutPaddingIdx(torch.nn.Module):
+            def forward(self, input, emb):
+                return torch.nn.functional.embedding(input, emb)
+
+        model = EmbedModelWithoutPaddingIdx()
+        x = torch.randint(4, (4, 3, 2))
+        self.run_test(model, (x, embedding_matrix))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_embedding_module(self):
+        class EmbedModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(4, 3, padding_idx=1)
+                self.emb2 = torch.nn.Embedding(4, 3, padding_idx=1)
+                with torch.no_grad():
+                    self.emb2.weight[1] = torch.ones(3)
+
+            def forward(self, input):
+                return self.emb(input), self.emb2(input)
+
+        model = EmbedModel()
+        x = torch.randint(4, (4, ))
+        x[2] = x[0] = 1
+        self.run_test(model, (x, ))
+
+        x = torch.randint(4, (4, 3, 2))
+        x[2] = 1
+        x[0][1] = 1
+        self.run_test(model, (x, ))
+
+        class EmbedModelWithoutPaddingIdx(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(4, 3)
+
+            def forward(self, input):
+                return self.emb(input)
+
+        model = EmbedModelWithoutPaddingIdx()
+        x = torch.randint(4, (4, 3, 2))
+        self.run_test(model, (x, ))
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':

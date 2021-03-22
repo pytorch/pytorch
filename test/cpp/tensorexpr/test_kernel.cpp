@@ -510,6 +510,66 @@ TEST_F(Kernel, CatInputTypesPromotion) {
   }
 }
 
+TEST_F(Kernel, CatWoConditionals) {
+  getCatWoConditionals() = true;
+  const auto graph_string = R"IR(
+      graph(%a : Float(5, 3, 2, strides=[6, 2, 1], device=cpu),
+            %b : Float(5, 7, 2, strides=[14, 2, 1], device=cpu),
+            %c : Float(5, 9, 2, strides=[18, 2, 1], device=cpu)):
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
+        %r : Float(5, 19, 2, strides=[38, 2, 1]) = aten::cat(%inputs, %dim)
+        return (%r))IR";
+
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  TensorExprKernel k(graph);
+  Stmt* s = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *s;
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_cat
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_cat
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_cat)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({5, 7, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto c = at::rand({5, 9, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::cat({a, b, c}, 1);
+
+  std::vector<at::Tensor> inputs = {a, b, c};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+
+  // Check sizes
+  CHECK_EQ(o.sizes().size(), ref.sizes().size());
+  CHECK_EQ(o.dtype(), ref.dtype());
+  size_t num_el = 1;
+  for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+    CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+    num_el *= ref.sizes()[idx];
+  }
+
+  // Check the contents
+  for (size_t i = 0; i < num_el; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+}
+
 namespace {
 
 std::string dtypeConstant(ScalarType scalar_type) {
@@ -1039,6 +1099,29 @@ TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
   k.run(stack);
   auto o = stack[0].toTensor();
   auto ref = (a * b).sum(at::kFloat) * (a * b);
+  ASSERT_TRUE(at::allclose(o, ref));
+}
+
+TEST_F(Kernel, SanitizeNames_CUDA) {
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cuda:0),
+            %1 : Float(5, 3, strides=[3, 1], device=cuda:0)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %4 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
+        return (%4))IR";
+  KernelScope kernel_scope;
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  graph->inputs().at(0)->setDebugName("aten::add:");
+  graph->inputs().at(1)->setDebugName("aten::add_");
+  TensorExprKernel k(graph);
+  auto a = at::rand({5, 3}, TensorOptions(kCUDA).dtype(at::kFloat));
+  auto b = at::rand({5, 3}, TensorOptions(kCUDA).dtype(at::kFloat));
+  auto ref = a * (a * b);
+  std::vector<at::Tensor> inputs = {a, b};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
   ASSERT_TRUE(at::allclose(o, ref));
 }
 

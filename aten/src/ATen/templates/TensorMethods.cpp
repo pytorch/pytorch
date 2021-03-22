@@ -145,6 +145,15 @@ bool is_mkldnn(Tensor self) {
   return self.is_mkldnn();
 }
 
+bool Tensor::is_mlc() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_mlc();
+}
+
+bool is_mlc(Tensor self) {
+  return self.is_mlc();
+}
+
 bool Tensor::is_vulkan() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_vulkan();
@@ -186,7 +195,7 @@ bool is_quantized(Tensor self) {
         #name                                                       \
         " but found ",                                              \
         scalar_type());                                             \
-    return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
+    return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)

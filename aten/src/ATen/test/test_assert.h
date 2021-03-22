@@ -26,13 +26,6 @@ static inline void barf(const char *fmt, ...) {
     barf("%s:%u: %s: Assertion `%s` failed.", __FILE__, __LINE__, __func__, #cond); \
   }
 
-//note: msg must be a string literal
-//node: In, ##__VA_ARGS '##' suppresses the comma if __VA_ARGS__ is empty
-#define ASSERTM(cond, msg, ...) \
-  if (AT_EXPECT(!(cond), 0)) { \
-    barf("%s:%u: %s: Assertion `%s` failed: " msg , __FILE__, __LINE__, __func__, #cond,##__VA_ARGS__); \
-  }
-
 #define TRY_CATCH_ELSE(fn, catc, els)                           \
   {                                                             \
     /* avoid mistakenly passing if els code throws exception*/  \

@@ -98,7 +98,7 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
 static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & second, int64_t dimension, int64_t index) {
   int64_t first_dims = first.dim();
   int64_t second_dims = second.dim();
-  TORCH_CHECK(first_dims == second_dims, "Tensors must have same number of dimensions: got ",
+  TORCH_CHECK(first_dims == second_dims, "torch.cat(): Tensors must have same number of dimensions: got ",
               first_dims, " and ", second_dims);
   for (int64_t dim = 0; dim < first_dims; dim++) {
     if (dim == dimension) {
@@ -106,7 +106,7 @@ static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor
     }
     int64_t first_dim_size = first.sizes()[dim];
     int64_t second_dim_size = second.sizes()[dim];
-    TORCH_CHECK(first_dim_size == second_dim_size, "Sizes of tensors must match except in dimension ",
+    TORCH_CHECK(first_dim_size == second_dim_size, "torch.cat(): Sizes of tensors must match except in dimension ",
                 dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim,
                 " (The offending index is ", index, ")");
   }
@@ -152,8 +152,8 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   }
   const Tensor& notSkippedTensor = *pnotSkippedTensor;
 
-  TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
-  TORCH_CHECK(dim <= notSkippedTensor.dim(), "dimension ", dim, "out of range");
+  TORCH_CHECK(tensors.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
+  TORCH_CHECK(dim <= notSkippedTensor.dim(), "torch.cat(): dimension ", dim, "out of range");
 
   // when the input tensors are of the same size and strides,
   // reuse the same iterator for all input tensors
@@ -980,10 +980,14 @@ Tensor tile(const Tensor& self, IntArrayRef reps){
   return self.repeat(reps);
 }
 
+//
+// templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
+//
+template <typename Vec>
 Tensor alias_with_sizes_and_strides(
     const Tensor& self,
-    const c10::IntArrayRef sizes,
-    const c10::IntArrayRef strides) {
+    const Vec& sizes,
+    const Vec& strides) {
   Tensor self_;
   if (self.is_quantized()) {
     auto impl = c10::make_intrusive<QTensorImpl>(
@@ -1009,7 +1013,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
-  auto shape = infer_size(proposed_shape, self.numel());
+  DimVector shape = infer_size_dv(proposed_shape, self.numel());
 
   if (self.is_mkldnn()) {
     return at::_mkldnn_reshape(self, shape);
@@ -1973,9 +1977,9 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
     TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
   }
 
-  std::vector<int64_t> inferred_size;
+  DimVector inferred_size;
   try {
-    inferred_size = at::infer_size(sizes, self.size(dim));
+    inferred_size = at::infer_size_dv(sizes, self.size(dim));
   } catch (const std::runtime_error& e) {
     // at::infer_size would throw std::runtime_error for invalid size,
     // catch the runtime_error and display the error message in a more user-friendly way
@@ -2070,7 +2074,7 @@ Tensor numpy_T(const Tensor &self) {
 }
 
 Tensor view(const Tensor& self, IntArrayRef size) {
-  auto inferred_size = at::infer_size(size, self.numel());
+  at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
   auto stride = at::detail::computeStride(self.sizes(),
                                           self.strides(),
                                           inferred_size);

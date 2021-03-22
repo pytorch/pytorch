@@ -721,7 +721,7 @@ def preprocessor(
 
     orig_output_source = output_source
 
-    fout_path = os.path.join(output_directory, get_hip_file_path(filepath, is_pytorch_extension))
+    fout_path = os.path.abspath(os.path.join(output_directory, get_hip_file_path(filepath, is_pytorch_extension)))
     if not os.path.exists(os.path.dirname(fout_path)):
         clean_ctx.makedirs(os.path.dirname(fout_path))
 
@@ -829,9 +829,14 @@ def preprocessor(
         with open(fout_path, 'r', encoding='utf-8') as fout_old:
             do_write = fout_old.read() != output_source
     if do_write:
-        with clean_ctx.open(fout_path, 'w', encoding='utf-8') as fout:
-            fout.write(output_source)
-        return {"hipified_path": fout_path, "status": "ok"}
+        try:
+            with clean_ctx.open(fout_path, 'w', encoding='utf-8') as fout:
+                fout.write(output_source)
+            return {"hipified_path": fout_path, "status": "ok"}
+        except PermissionError as e:
+            print(f"{bcolors.WARNING}Failed to save {fout_path} with \"{e.strerror}\", leaving {fin_path} unchanged.{bcolors.ENDC}",
+                  file=sys.stderr)
+            return {"hipified_path": fin_path, "status": "skipped"}
     else:
         return {"hipified_path": fout_path, "status": "skipped"}
 
