@@ -96,7 +96,7 @@ Example::
 """.format(**common_args))
 
 i0e = _add_docstr(_special.special_i0e,
-                     r"""
+                  r"""
 i0(input, *, out=None) -> Tensor
 
 Computes the exponentially scaled zeroth order modified Bessel function of the first kind (as defined below)
