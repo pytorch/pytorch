@@ -61,26 +61,17 @@ class TestComplex(JitTestCase):
 
     def test_complex_math_ops(self):
         inf = float("inf")
-        NaN = float("nan")
-        vals = ([inf, NaN, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
+        vals = ([inf, float("nan"), 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
                 + [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
         complex_vals = tuple(complex(x, y) for x, y in product(vals, vals))
 
-        def checkMath(func_name, num_args, ret_type="complex", debug=False, vals=None, args_type=None):
+        def checkMath(func_name, vals=None):
             funcs_template = dedent('''
             def func(a):
-                # type: {args_type} -> {ret_type}
-                return cmath.{func}({args})
+                return cmath.{func}(a)
             ''')
-            if num_args == 1:
-                args = "a"
-            elif num_args == 2:
-                args = "a, b"
-            else:
-                raise RuntimeError("Test doesn't support more than 2 arguments")
-            if args_type is None:
-                args_type = "(complex)"
-            funcs_str = funcs_template.format(func=func_name, args=args, args_type=args_type, ret_type=ret_type)
+
+            funcs_str = funcs_template.format(func=func_name)
             scope = {}
             execWrapper(funcs_str, globals(), scope)
             cu = torch.jit.CompilationUnit(funcs_str)
@@ -98,19 +89,11 @@ class TestComplex(JitTestCase):
                     res_script = f_script(a)
                 except Exception as e:
                     res_script = e
-                if debug:
-                    print("in: ", a)
-                    print("out: ", res_python, res_script)
 
                 if res_python != res_script:
                     if isinstance(res_python, Exception):
                         continue
 
-                    if type(res_python) == type(res_script):
-                        if isinstance(res_python, tuple) and (cmath.isnan(res_python[0]) == cmath.isnan(res_script[0])):
-                            continue
-                        if isinstance(res_python, complex) and cmath.isnan(res_python) and cmath.isnan(res_script):
-                            continue
                     msg = ("Failed on {func_name} with input {a}. Python: {res_python}, Script: {res_script}"
                            .format(func_name=func_name, a=a, res_python=res_python, res_script=res_script))
                     self.assertEqual(res_python, res_script, msg=msg)
@@ -120,10 +103,10 @@ class TestComplex(JitTestCase):
 
         # --- Unary ops with complex valued output ---
         for op in unary_ops:
-            checkMath(op, 1)
+            checkMath(op)
 
         # --- Unary ops with floating point output --- (cmath.phase(), abs())
-        checkMath('phase', 1, ret_type="float")
+        checkMath('phase')
 
         def fn(x: complex):
             return abs(x)
