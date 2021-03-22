@@ -8,7 +8,7 @@ import types
 if TYPE_CHECKING:
     from .graph import Graph
 
-BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor]
+BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor, torch.device]
 base_types = BaseArgumentTypes.__args__  # type: ignore
 
 Target = Union[Callable[..., Any], str]

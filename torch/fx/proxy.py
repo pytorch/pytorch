@@ -8,6 +8,7 @@ from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
 from .node import Target, Node, Argument, base_types, map_aggregate
 
+in_concrete = False
 class TracerBase:
     graph: Graph
     record_stack_traces : bool = False
@@ -28,7 +29,7 @@ class TracerBase:
         return Proxy(node, self)
 
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
-                     name: Optional[str] = None, type_expr : Optional[Any] = None):
+                     name: Optional[str] = None, type_expr : Optional[Any] = None, base_value = None):
         '''
         Create a Node from the given arguments, then return the Node
         wrapped in a Proxy object.
@@ -38,12 +39,12 @@ class TracerBase:
         a default parameter, we use the ``args`` tuple. ``args`` is
         otherwise empty for ``placeholder`` Nodes.
         '''
-
+        # assert(base_value is not None)
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
         assert isinstance(args_, tuple)
         assert isinstance(kwargs_, dict)
-        proxy = self.proxy(self.create_node(kind, target, args_, kwargs_, name, type_expr))
+        proxy = Proxy(self.create_node(kind, target, args_, kwargs_, name, type_expr), self, base_value=base_value)
 
         # Optionally set stack trace on the created Node for debugging purposes
         if self.record_stack_traces:
@@ -92,6 +93,8 @@ class TracerBase:
             args = tuple(self.create_arg(elem) for elem in a)
             return type(a)(*args)  # type: ignore
         elif isinstance(a, (tuple, list)):
+            # if isinstance(a, torch.Size):
+            #     import pdb; pdb.set_trace()
             return type(a)(self.create_arg(elem) for elem in a)
         elif isinstance(a, dict):
             r = {}
@@ -126,6 +129,10 @@ class TracerBase:
         we don't know the value of the proxy, but a custom tracer can attach more
         information to the graph node using create_node and can choose to return a value.
         """
+        # import pdb; pdb.set_trace()
+        # self.graph.call_function()
+        # assert(isinstance(obj.base_value, bool))
+        return bool(obj.base_value)
         raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
 
     def iter(self, obj: 'Proxy') -> Iterator:
@@ -134,6 +141,9 @@ class TracerBase:
         we don't know the value of the proxy, but a custom tracer can attach more
         information to the graph node using create_node and can choose to return an iterator.
         """
+        # print(obj.base_value)
+        assert(isinstance(obj.base_value, Iterable))
+        return iter(obj.base_value)
         raise TraceError('Proxy object cannot be iterated. '
                          'This can be attempted when used in a for loop or as a *args or **kwargs function argument.')
 
@@ -154,7 +164,6 @@ class GraphAppendingTracer(TracerBase):
 class TraceError(ValueError):
     pass
 
-
 class Proxy:
     """
     ``Proxy`` objects are ``Node`` wrappers that flow through the
@@ -166,12 +175,37 @@ class Proxy:
     method around a raw ``Node`` so that you can use the overloaded
     operators to add additional things to a ``Graph``.
     """
-    def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None):
+    def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None, base_value=None):
+        if in_concrete:
+            import pdb; pdb.set_trace()
         if tracer is None:
             # This allows you to create a Proxy object around a raw Node
             tracer = GraphAppendingTracer(node.graph)
         self.tracer = tracer
         self.node = node
+        # if base_value is None or isinstance(base_value, Proxy) or callable(base_value):
+        #     import pdb; pdb.set_trace()
+        # assert(base_value is not None)
+        self.base_value = base_value
+
+    @property
+    def device(self):
+        return self.base_value.device
+
+    @property
+    def dtype(self):
+        return self.base_value.dtype
+
+    @property
+    def shape(self):
+        return self.base_value.shape
+
+    def size(self, *args):
+        return self.base_value.size(*args)
+
+    def dim(self):
+        return self.base_value.dim()
+
 
     def __repr__(self) -> str:
         return f'Proxy({self.node.name})'
@@ -202,6 +236,8 @@ class Proxy:
         return self.tracer.keys(self)
 
     def __len__(self):
+        print(self)
+        return len(self.base_value)
         raise RuntimeError("'len' is not supported in symbolic tracing by default. If you want "
                            "this call to be recorded, please call torch.fx.wrap('len') at "
                            "module scope")
@@ -212,18 +248,24 @@ class Proxy:
         if isinstance(orig_method, torch._C.ScriptMethod):
             assert isinstance(args[0], torch._C.ScriptMethod)
             args = (args[0].owner,) + args[1:]
+            # import pdb; pdb.set_trace()
+            # print(args[0].owner(*args[1:], **kwargs))
             return self.tracer.create_proxy('call_method', orig_method.name, args, kwargs)
         if torch.overrides.is_tensor_method_or_property(orig_method):
-            return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
+            meth = getattr(get_base_values(args[0]), orig_method.__name__)
+            base_value = meth(*get_base_values(args[1:]), **get_base_values(kwargs))
+            return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs, base_value=base_value)
         else:
+            base_value = orig_method(*get_base_values(args), **get_base_values(kwargs))
             return self.tracer.create_proxy('call_function', orig_method, args, kwargs,
-                                            name=self.tracer.graph._target_to_str(orig_method.__name__))
+                                            name=self.tracer.graph._target_to_str(orig_method.__name__), base_value=base_value)
 
 class Attribute(Proxy):
     def __init__(self, root: Proxy, attr: str):
         self.root = root
         self.attr = attr
         self.tracer = root.tracer
+        self.base_value = getattr(root.base_value, attr)
         self._node: Optional[Node] = None
 
     @property
@@ -231,18 +273,33 @@ class Attribute(Proxy):
         # the node for attributes is added lazily, since most will just be method calls
         # which do not rely on the getitem call
         if self._node is None:
-            self._node = self.tracer.create_proxy('call_function', getattr, (self.root, self.attr), {}).node
+            self._node = self.tracer.create_proxy('call_function', getattr, (self.root, self.attr), {}, base_value=self.base_value).node
         return self._node
 
     def __call__(self, *args, **kwargs):
-        return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs)
+        base_value = self.base_value(*get_base_values(args), **get_base_values(kwargs))
+        return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs, base_value=base_value)
+
+def get_base_values(x):
+    if isinstance(x, list):
+        return [i.base_value if isinstance(i, Proxy) else get_base_values(i) for i in x]
+    if isinstance(x, tuple):
+        return tuple(i.base_value if isinstance(i, Proxy) else get_base_values(i) for i in x)
+    if isinstance(x, dict):
+        return {k: v.base_value if isinstance(v, Proxy) else get_base_values(v) for k, v in x.items()}
+    if isinstance(x, Proxy):
+        return x.base_value
+    return x
 
 for method in magic_methods:
     def scope(method):
         def impl(*args, **kwargs):
             tracer = args[0].tracer
             target = getattr(operator, method)
-            return tracer.create_proxy('call_function', target, args, kwargs)
+            base_value = target(*get_base_values(args), **get_base_values(kwargs))
+            # print(target, get_base_values(args), kwargs)
+            # print('creating function: ', target, base_value)
+            return tracer.create_proxy('call_function', target, args, kwargs, base_value=base_value)
         impl.__name__ = method
         as_magic = f'__{method}__'
         setattr(Proxy, as_magic, impl)
@@ -253,7 +310,13 @@ def _define_reflectable(orig_method_name):
 
     def impl(self, rhs):
         target = getattr(operator, orig_method_name)
-        return self.tracer.create_proxy('call_function', target, (rhs, self), {})
+        base_value = target(get_base_values(rhs), get_base_values(self))
+        # print(target, base_value)
+        # print(get_base_values(rhs), get_base_values(self))
+        # print(rhs, self)
+        # print()
+        return base_value
+        return self.tracer.create_proxy('call_function', target, (rhs, self), {}, base_value=base_value)
     impl.__name__ = method_name
     impl.__qualname__ = method_name
     setattr(Proxy, method_name, impl)

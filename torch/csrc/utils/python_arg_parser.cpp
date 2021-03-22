@@ -428,6 +428,7 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
     if (PySequence_Size(obj) == 0) {
       return true;
     }
+    return true;
     auto item = py::reinterpret_steal<py::object>(
         PySequence_GetItem(obj, 0));
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints

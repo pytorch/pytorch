@@ -39,7 +39,9 @@ def _rebuild_from_type(func, type, args, dict):
     ret.__dict__ = dict
     return ret
 
-
+class TensorMeta(type):
+    def __instancecheck__(self, other):
+        return isinstance(self, other)
 # NB: If you subclass Tensor, and want to share the subclassed class
 # across processes, you must also update torch/multiprocessing/reductions.py
 # to define a ForkingPickler serialization mode for the class.
@@ -48,6 +50,7 @@ def _rebuild_from_type(func, type, args, dict):
 # torch/__init__.py.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C._TensorBase):
+    __metaclass__ = TensorMeta
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)

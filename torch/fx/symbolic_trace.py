@@ -14,7 +14,7 @@ import sys
 from .node import Argument, map_aggregate
 from .graph import Graph
 from .graph_module import GraphModule
-from .proxy import TracerBase, Proxy
+from .proxy import TracerBase, Proxy, get_base_values, in_concrete
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -59,7 +59,8 @@ class _CPatchManager(object):
         patched_fns = [torch.randn, torch.rand, torch.randint]
 
         def patched_impl(to_patch, args, kwargs):
-            return tracer.create_proxy('call_function', to_patch, args, kwargs)
+            base_value = to_patch(*args, **kwargs)
+            return tracer.create_proxy('call_function', to_patch, args, kwargs, base_value=base_value)
 
         c_patch_enabled = True
 
@@ -188,10 +189,13 @@ class Tracer(TracerBase):
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
         if isinstance(a, (torch.Tensor, ScriptObject)):
+            if a.dim() == 0:
+                return a
             qualname : Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
+            import pdb; pdb.set_trace()
             if not qualname:
                 i = 0
                 while True:
@@ -252,7 +256,7 @@ class Tracer(TracerBase):
                     return n
             raise NameError('module is not installed as a submodule')
 
-    def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
+    def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any], base_value = None) -> Any:
         """
         Method that specifies the behavior of this ``Tracer`` when it encounters
         a call to an ``nn.Module`` instance.
@@ -282,9 +286,9 @@ class Tracer(TracerBase):
         module_qualified_name = self.path_of_module(m)
         if not self.is_leaf_module(m, module_qualified_name):
             return forward(*args, **kwargs)
-        return self.create_proxy('call_module', module_qualified_name, args, kwargs)
+        return self.create_proxy('call_module', module_qualified_name, args, kwargs, base_value=base_value)
 
-    def create_args_for_root(self, root_fn, is_module, concrete_args=None):
+    def create_args_for_root(self, root_fn, is_module, concrete_args=None, specialized_args=None):
         """
         Create ``placeholder`` nodes corresponding to the signature of the ``root``
         Module. This method introspects root's signature and emits those
@@ -312,13 +316,17 @@ class Tracer(TracerBase):
         def proxy_placeholder(name: str):
             if concrete_args is not None and name in concrete_args:
                 return concrete_args[name]
+            base_value = None
+            if specialized_args is not None and name in specialized_args:
+                base_value = specialized_args[name]
             if name[0] == '*':
                 default = ()    # type: ignore
             else:
                 param = sig.parameters[name]
                 default = () if param.default is inspect.Parameter.empty else (param.default,)  # type: ignore
-            return self.create_proxy('placeholder', name, default, {},
-                                     type_expr=fn_for_analysis.__annotations__.get(name, None))
+            proxy = self.create_proxy('placeholder', name, default, {},
+                                     type_expr=fn_for_analysis.__annotations__.get(name, None), base_value=base_value)
+            return proxy
 
         args.extend(proxy_placeholder(next(names_iter)) for _ in range(skip_arg_idx, total_args))
 
@@ -332,7 +340,7 @@ class Tracer(TracerBase):
 
         return root_fn, args
 
-    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
+    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None, specialized_args = None) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
         can either be an ``nn.Module`` instance or a Python callable.
@@ -380,7 +388,7 @@ class Tracer(TracerBase):
         assert isinstance(fn, FunctionType)
 
         fn_globals = fn.__globals__  # run before it gets patched
-        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module), concrete_args)
+        fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module), concrete_args, specialized_args)
 
         parameter_proxy_cache : Dict[str, Proxy] = {}  # Reduce number of get_attr calls
 
@@ -389,11 +397,11 @@ class Tracer(TracerBase):
         @functools.wraps(_orig_module_getattr)
         def module_getattr_wrapper(mod, attr):
             attr_val = _orig_module_getattr(mod, attr)
-            if isinstance(attr_val, torch.nn.Parameter):
+            if isinstance(attr_val, torch.nn.Parameter) and in_concrete == 0:
                 for n, p in self.root.named_parameters():
                     if attr_val is p:
                         if n not in parameter_proxy_cache:
-                            parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {})
+                            parameter_proxy_cache[n] = self.create_proxy('get_attr', n, (), {}, base_value = attr_val)
                         return parameter_proxy_cache[n]
             return attr_val
 
@@ -402,9 +410,18 @@ class Tracer(TracerBase):
             def forward(*args, **kwargs):
                 return _orig_module_call(mod, *args, **kwargs)
 
+            base_value = None
+            if self.is_leaf_module(mod, self.path_of_module(mod)):
+                global in_concrete
+                in_concrete += 1
+                base_value = _orig_module_call(mod, *get_base_values(args), **get_base_values(kwargs))
+                in_concrete -= 1
+                if in_concrete > 0:
+                    return base_value
+                assert(in_concrete >= 0)
             _autowrap_check(patcher, getattr(getattr(mod, "forward", mod), "__globals__", {}),
                             self._autowrap_function_ids)
-            return self.call_module(mod, forward, args, kwargs)
+            return self.call_module(mod, forward, args, kwargs, base_value=base_value)
 
         with _CPatchManager(self):
             with _Patcher() as patcher:
@@ -653,8 +670,7 @@ def wrap(fn_or_name : Union[str, Callable]):
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
     return fn_or_name
 
-def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None,
-                   enable_cpatching: bool = True) -> GraphModule:
+def symbolic_trace(root : Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None, specialized_args = None, enable_cpatching = True) -> GraphModule:
     """Symbolic tracing API
 
     Given an ``nn.Module`` or function instance ``root``, this function will return a ``GraphModule``
