@@ -578,8 +578,6 @@ void Reducer::mark_variable_ready(VariableIndex index) {
           // ** In the hoped-for case where all params are used, DDP itself won't do any
           // blocking work between now and the re-zeroing, so the danger is real.
           auto local_used_maps_tmp = local_used_maps_[i].pin_memory();
-          // Defensively ensures a deep copy to a pinned temporary
-          TORCH_INTERNAL_ASSERT(local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr())
           local_used_maps_dev_[i].copy_(local_used_maps_tmp, true);
         } else {
           local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
