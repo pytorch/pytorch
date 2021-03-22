@@ -3,7 +3,7 @@
 # Allows this script to be invoked from any directory:
 cd "$(dirname "$0")"
 
-UNCOMMIT_CHANGE=$(git status -s | grep " config.yml" | wc -l | xargs)
+UNCOMMIT_CHANGE=$(git status -s | grep -c " config.yml")
 if [[ $UNCOMMIT_CHANGE != 0 ]]; then
     OLD_FILE=$(mktemp)
     cp config.yml "$OLD_FILE"
