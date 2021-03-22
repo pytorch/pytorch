@@ -246,12 +246,8 @@ class TestONNXRuntime(unittest.TestCase):
                                   do_constant_folding=do_constant_folding,
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
-<<<<<<< HEAD
-                                  fixed_batch_size=fixed_batch_size, dict_check=dict_check)
-=======
                                   fixed_batch_size=fixed_batch_size, dict_check=dict_check,
                                   training=training)
->>>>>>> d2415e518b1f8d69389ef6e8e55f0ee3864c34a5
         if self.is_script_test_enabled:
             script_model = torch.jit.script(model)
             _run_test(script_model)
