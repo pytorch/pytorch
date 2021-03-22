@@ -43,7 +43,7 @@ from typing import cast, Any, Dict, Iterable, Iterator, Optional
 import numpy as np
 
 from torch.testing._internal import expecttest
-from torch.testing import \
+from .._core import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type,
      floating_types_and, integral_types, complex_types)
 
