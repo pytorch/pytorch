@@ -1554,9 +1554,16 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
   return self_working_copy;
 }
 
+// Todo: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
+//     Batched cholesky_solve is dispatched to magma.
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
 #ifdef USE_CUSOLVER
-  return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+  if (batchCount(self) == 1 || !use_magma_) {
+    return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+  }
+  else {
+    return _cholesky_solve_helper_cuda_magma(self, A, upper);
+  }
 #else
   return _cholesky_solve_helper_cuda_magma(self, A, upper);
 #endif
