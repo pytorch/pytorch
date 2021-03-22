@@ -7806,12 +7806,17 @@ add_docstr(torch.sgn,
            r"""
 sgn(input, *, out=None) -> Tensor
 
-For complex tensors, this function returns a new tensor whose elemants have the same angle as that of the
-elements of :attr:`input` and absolute value 1. For a non-complex tensor, this function
-returns the signs of the elements of :attr:`input` (see :func:`torch.sign`).
+This function is an extension of torch.sign() to complex tensors.
+It computes a new tensor whose elements have
+the same angles as the corresponding elements of :attr:`input` and
+absolute values (i.e. magnitudes) of one for complex tensors and
+is equivalent to torch.sign() for non-complex tensors.
 
-:math:`\text{out}_{i} = 0`, if :math:`|{\text{{input}}_i}| == 0`
-:math:`\text{out}_{i} = \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|}`, otherwise
+.. math::
+    \text{out}_{i} = \begin{cases}
+                    0 & |\text{{input}}_i| == 0 \\
+                    \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|} & \text{otherwise}
+                    \end{cases}
 
 """ + r"""
 Args:
@@ -7822,8 +7827,8 @@ Keyword args:
 
 Example::
 
-    >>> x=torch.tensor([3+4j, 7-24j, 0, 1+2j])
-    >>> x.sgn()
+    >>> t = torch.tensor([3+4j, 7-24j, 0, 1+2j])
+    >>> t.sgn()
     tensor([0.6000+0.8000j, 0.2800-0.9600j, 0.0000+0.0000j, 0.4472+0.8944j])
 """.format(**common_args))
 
