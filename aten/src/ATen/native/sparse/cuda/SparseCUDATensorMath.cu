@@ -467,7 +467,7 @@ SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src
 // mul(SparseTensor, SparseTensor)  [broadcasts]
 // --------------------------------------------------------------------
 
-SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, const SparseTensor& src_) {
+SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& src_, SparseTensor& r_) {
   if (src_.dim() == 0) {
     return mul_out_sparse_zerodim(r_, t_, src_);
   } else if (t_.dim() == 0) {

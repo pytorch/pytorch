@@ -247,27 +247,32 @@ class DeviceTypeTestBase(TestCase):
             #   Test-sepcific decorators are applied to the original test,
             #   however.
             if op is not None:
-                active_decorators = []
-                if op.should_skip(generic_cls.__name__, name, cls.device_type, dtype):
-                    active_decorators.append(skipIf(True, "Skipped!"))
+                try:
+                    active_decorators = []
+                    if op.should_skip(generic_cls.__name__, name, cls.device_type, dtype):
+                        active_decorators.append(skipIf(True, "Skipped!"))
 
-                if op.decorators is not None:
-                    for decorator in op.decorators:
-                        # Can't use isinstance as it would cause a circular import
-                        if decorator.__class__.__name__ == 'DecorateInfo':
-                            if decorator.is_active(generic_cls.__name__, name, cls.device_type, dtype):
-                                active_decorators += decorator.decorators
-                        else:
-                            active_decorators.append(decorator)
+                    if op.decorators is not None:
+                        for decorator in op.decorators:
+                            # Can't use isinstance as it would cause a circular import
+                            if decorator.__class__.__name__ == 'DecorateInfo':
+                                if decorator.is_active(generic_cls.__name__, name, cls.device_type, dtype):
+                                    active_decorators += decorator.decorators
+                            else:
+                                active_decorators.append(decorator)
 
-                @wraps(test)
-                def test_wrapper(*args, **kwargs):
-                    return test(*args, **kwargs)
+                    @wraps(test)
+                    def test_wrapper(*args, **kwargs):
+                        return test(*args, **kwargs)
 
-                for decorator in active_decorators:
-                    test_wrapper = decorator(test_wrapper)
+                    for decorator in active_decorators:
+                        test_wrapper = decorator(test_wrapper)
 
-                test_fn = test_wrapper
+                    test_fn = test_wrapper
+                except Exception as ex:
+                    # Provides an error message for debugging before rethrowing the exception
+                    print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
+                    raise ex
             else:
                 test_fn = test
 

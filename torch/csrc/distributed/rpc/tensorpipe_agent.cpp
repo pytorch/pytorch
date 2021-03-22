@@ -135,16 +135,16 @@ constexpr int64_t kMultiplexedUvChannelPriority = 100;
 constexpr int64_t kBasicChannelPriority = 0;
 
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaIpcChannelPriority = 300;
+constexpr int64_t kCudaIpcChannelPriority = 301;
 #endif
 
 #if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
-constexpr int64_t kCudaGdrChannelPriority = 200;
+constexpr int64_t kCudaGdrChannelPriority = 201;
 #endif
 
 #ifdef USE_CUDA_NOT_ROCM
-constexpr int64_t kCudaXthChannelPriority = 400;
-constexpr int64_t kCudaBasicChannelPriority = 100;
+constexpr int64_t kCudaXthChannelPriority = 401;
+constexpr int64_t kCudaBasicChannelPriority = 101;
 #endif
 
 std::unique_ptr<TransportRegistration> makeUvTransport() {
