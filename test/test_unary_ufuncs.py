@@ -240,32 +240,6 @@ class TestUnaryUfuncs(TestCase):
                                                                             high,
                                                                             result.item()))
 
-    # Tests that fn == method == inplace == jit on a simple single tensor input
-    # TODO: should this jitting the method and inplace variants, too?
-    @ops(unary_ufuncs)
-    def test_variant_consistency(self, device, dtype, op):
-        def _fn(t):
-            return op(t)
-
-        t = make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
-        expected = op(t)
-
-        for alt, inplace in ((op.get_method(), False), (op.get_inplace(), True),
-                             (torch.jit.script(_fn), False)):
-            if alt is None:
-                continue
-
-            if inplace and not torch.can_cast(expected.dtype, dtype):
-                # Assert that RuntimeError is raised
-                # for inplace variant of Operators that
-                # promote integer input to floating dtype.
-                with self.assertRaises(RuntimeError):
-                    alt(t.clone())
-                continue
-
-            actual = alt(t.clone())
-            self.assertEqual(actual, expected, rtol=0, atol=0)
-
     # Helper for comparing torch tensors and numpy arrays
     # TODO: should this or assertEqual also validate that strides are equal?
     def assertEqualHelper(self, actual, expected, msg, *, dtype, exact_dtype=True, **kwargs):

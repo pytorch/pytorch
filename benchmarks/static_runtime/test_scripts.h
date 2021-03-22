@@ -74,6 +74,7 @@ const auto reshape_script_3 = R"JIT(
       return b.reshape(shape), g
 )JIT";
 
+// exercise reshape_copy and flatten_copy
 const auto reshape_script_4 = R"JIT(
   def forward(self, inp: Tensor, shape: List[int]):
       k = inp + inp
@@ -83,11 +84,12 @@ const auto reshape_script_4 = R"JIT(
       return b + c
 )JIT";
 
+// exercise reshape_copy
 const auto reshape_script_5 = R"JIT(
   def forward(self, inp: Tensor, shape: List[int]):
       a = inp + inp
       b = a.reshape(shape)
-      c = a.reshape(shape)
+      c = a.reshape(shape).relu()
       d = c + c
       e = d + d
       f = e * e
@@ -106,10 +108,13 @@ const auto reshape_inplace_script = R"JIT(
       return (d, e, f)
 )JIT";
 
+// exercise flatten_copy
 const auto flatten_script_1 = R"JIT(
   def forward(self, a: Tensor, start_dim: int, end_dim: int):
-      b = torch.flatten(a, start_dim, end_dim)
-      return b + b
+      b = a * a
+      c = torch.flatten(b, start_dim, end_dim)
+      d = torch.relu(c)
+      return d
 )JIT";
 
 const auto flatten_script_2 = R"JIT(
