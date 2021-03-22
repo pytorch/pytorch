@@ -1814,6 +1814,38 @@ foreach_unary_op_db: List[OpInfo] = [
                          safe_casts_outputs=False)
 ]
 
+def reference_sign(x):
+    if x.dtype == np.bool_:
+        # `np.sign` doesn't support `bool`.
+        # >>> np.sign(True)
+        # ufunc 'sign' did not contain a loop
+        # with signature matching types dtype('bool') -> dtype('bool')
+        return np.sign(x, dtype=np.uint8).astype(np.bool_)
+    return np.sign(x)
+
+
+def reference_sgn(x):
+    # NumPy doesn't have an equivalent to `torch.sgn` when the dtype is complex.
+    # For complex inputs, `np.sign` returns sign(x.real) + 0j if x.real != 0 else sign(x.imag) + 0j.
+    # while `torch.sgn` returns, 0 if abs(input) == 0 else input/abs(input)
+    if x.dtype not in [np.complex64, np.complex128]:
+        return reference_sign(x)
+
+    out = (x / np.abs(x))
+    if out.ndim == 0:
+        # Handle x == 0 case
+        if (x == 0):
+            # Can't assign to np.complex object
+            # So make a new one.
+            return np.array(complex(0, 0), dtype=x.dtype)
+        return out
+
+    # Handle x == 0 case
+    mask = (x == 0)
+    out[mask] = complex(0, 0)
+    return out
+
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -2787,6 +2819,34 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.int8]),
                    )),
+    UnaryUfuncInfo('sign',
+                   ref=reference_sign,
+                   dtypes=all_types_and(torch.bfloat16, torch.half),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16, torch.half),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/41245
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                dtypes=[torch.bfloat16, torch.float16, torch.float32, torch.float64]),
+                   )),
+    UnaryUfuncInfo('sgn',
+                   ref=reference_sgn,
+                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/41245
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                dtypes=[torch.bfloat16, torch.float16, torch.float32, torch.float64]),
+                       # Reference: https://github.com/pytorch/pytorch/issues/53958
+                       # Test fails in comparison on Nan as the `equal_nan` is True for
+                       # comparing the CPU tensors.
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                device_type='cpu', dtypes=[torch.complex64, torch.complex128]),
+                       # Reference: https://github.com/pytorch/pytorch/issues/48486
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                device_type='cpu', dtypes=[torch.complex64])
+                   )),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
                    dtypes=all_types_and(torch.bfloat16, torch.half),
@@ -3672,10 +3732,6 @@ def method_tests():
         ('atan2', (S, S, S), ((S,),), 'broadcast_rhs'),
         ('atan2', (S,), ((S, S, S),), 'broadcast_lhs'),
         ('atan2', (S, 1, S), ((S, S),), 'broadcast_all'),
-        ('sign', (S, S, S), NO_ARGS),
-        ('sign', (), NO_ARGS, 'scalar'),
-        ('sgn', (S, S, S), NO_ARGS),
-        ('sgn', (), NO_ARGS, 'scalar'),
         ('fmod', (S, S, S), (1.5,), '', (True,)),
         ('fmod', (), (1.5,), 'scalar', (True,)),
         ('fmod', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
