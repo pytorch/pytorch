@@ -4,7 +4,6 @@
 
 #include <c10/util/Exception.h>
 
-#include <algorithm>
 #include <iterator>
 #include <limits>
 #include <type_traits>
