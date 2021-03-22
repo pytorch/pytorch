@@ -68,8 +68,9 @@ def _is_new_style_class(cls):
 
 def _compile_and_register_class(obj, rcb, qualified_name):
     ast = get_jit_class_def(obj, obj.__name__)
+    class_attr = [a for a in dir(obj) if not(a.startswith('__') and a.endswith('__'))]
     defaults = torch.jit.frontend.get_default_args_for_class(obj)
-    torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb)
+    torch._C._jit_script_class_compile(qualified_name, ast, defaults, rcb, class_attr)
     torch.jit._state._add_script_class(obj, qualified_name)
 
 

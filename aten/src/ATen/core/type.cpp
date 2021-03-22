@@ -1574,20 +1574,24 @@ ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
-    std::string doc_string) {
+    std::string doc_string,
+    const std::vector<std::string>& classAttributes
+    ) {
   return ClassTypePtr(
-      new ClassType(std::move(qualifiedName), std::move(cu), is_module, std::move(doc_string)));
+      new ClassType(std::move(qualifiedName), std::move(cu), is_module, std::move(doc_string), std::move(classAttributes)));
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module = false,
-    std::string doc_string = "")
+    std::string doc_string = "",
+    const std::vector<std::string>& classAttributes = std::vector<std::string>())
     : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)),
       isModule_(is_module),
-      doc_string_(std::move(doc_string)) {}
+      doc_string_(std::move(doc_string)),
+      droppedClassAttributes_(std::move(classAttributes)) {}
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;

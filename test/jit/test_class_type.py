@@ -109,6 +109,26 @@ class TestClassType(JitTestCase):
                 def set_non_initialized(self, y):
                     self.bar = y  # can't assign to non-initialized attr
 
+    def test_class_attribute(self):
+        """
+        Test that inheritance is detected in
+        implicit scripting codepaths (e.g. try_ann_to_type).
+        """
+        @torch.jit.script
+        class TestClassAttr(object):
+            name = "TestClassAttr"
+            def __init__(self, x: int):
+                self.x = x
+        make_global(TestClassAttr)
+
+        def fn(a: TestClassAttr):
+            return a.name
+
+        x = TestClassAttr(1)
+        with self.assertRaisesRegex(RuntimeError, "Please change it into instance attribute"):
+            scripted_fn = torch.jit.script(fn)
+            sc = scripted_fn(x)
+
     def test_schema_human_readable(self):
         """
         Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal

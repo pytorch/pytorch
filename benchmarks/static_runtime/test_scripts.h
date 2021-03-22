@@ -95,6 +95,17 @@ const auto reshape_script_5 = R"JIT(
       return g
 )JIT";
 
+const auto reshape_inplace_script = R"JIT(
+  def forward(self, inp: Tensor, shape: List[int]):
+      a = inp + inp
+      b = a.reshape(shape)
+      c = b.sigmoid_()
+      d = c + c
+      e = a + a
+      f = b + b
+      return (d, e, f)
+)JIT";
+
 const auto flatten_script_1 = R"JIT(
   def forward(self, a: Tensor, start_dim: int, end_dim: int):
       b = torch.flatten(a, start_dim, end_dim)
