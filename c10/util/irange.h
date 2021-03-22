@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include <c10/util/Exception.h>
 
 #include <iterator>
