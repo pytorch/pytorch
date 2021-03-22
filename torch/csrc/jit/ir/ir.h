@@ -1088,6 +1088,10 @@ struct Graph {
   size_t next_unique_;
 
   std::unordered_map<std::string, Value*> unique_names_;
+  // name_base_suffix tracks largest suffix currently used by all names sharing
+  // same name_base. Key of this map is name_base, value is largest suffix
+  // numeric value.
+  std::unordered_map<std::string, size_t> name_base_suffix_;
 
   ScopePtr current_scope_;
 

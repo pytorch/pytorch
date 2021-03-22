@@ -149,6 +149,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
           newNnz,
           stride
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   }
 
@@ -166,6 +167,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   //   newNnz,
   //   stride
   // );
+  // C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   ////////////////////////////////////////////////////////////
   // unflatten indices if necessary
@@ -284,6 +286,7 @@ Tensor sparse_mask_helper_cuda(
               t_indices_pos_ti,
               t_values_ti,
               r_values_ti);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
   }
   return r_values;

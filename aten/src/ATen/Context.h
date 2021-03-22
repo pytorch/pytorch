@@ -73,6 +73,9 @@ class TORCH_API Context {
   bool hasXLA() const {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
+  bool hasMLC() const {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::MLC);
+  }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
   THCState* lazyInitCUDA() {
@@ -274,6 +277,10 @@ static inline bool hasHIP() {
 
 static inline bool hasXLA() {
   return globalContext().hasXLA();
+}
+
+static inline bool hasMLC() {
+  return globalContext().hasMLC();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.

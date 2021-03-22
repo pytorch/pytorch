@@ -187,7 +187,25 @@ const Expr* IRMutator::mutate(const Load* v) {
 }
 
 const Expr* IRMutator::mutate(const Buf* v) {
-  return v;
+  const Var* var = v->base_handle();
+  const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
+  if (!var_new) {
+    return nullptr;
+  }
+  bool any_change = var_new != var;
+
+  std::vector<const Expr*> dims_old = v->dims();
+  std::vector<const Expr*> dims_new(dims_old.size());
+  for (size_t i = 0; i < dims_old.size(); i++) {
+    dims_new[i] = dims_old[i]->accept_mutator(this);
+    any_change |= (dims_new[i] != dims_old[i]);
+  }
+
+  if (!any_change) {
+    return (Expr*)v;
+  }
+
+  return new Buf(var_new, dims_new, v->dtype());
 }
 
 const Expr* IRMutator::mutate(const Broadcast* v) {
@@ -425,34 +443,24 @@ Stmt* IRMutator::mutate(const ExternalCall* v) {
 }
 
 Stmt* IRMutator::mutate(const Allocate* v) {
-  const Var* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
-  bool any_change = buffer_var_new != buffer_var_old;
-
-  std::vector<const Expr*> dims_old = v->dims();
-  std::vector<const Expr*> dims_new(dims_old.size());
-  for (size_t i = 0; i < dims_old.size(); i++) {
-    dims_new[i] = dims_old[i]->accept_mutator(this);
-    any_change |= (dims_new[i] != dims_old[i]);
-  }
-
-  if (!any_change) {
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(buf_new);
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
-
-  return new Allocate(buffer_var_new, v->dtype(), dims_new);
+  return new Allocate(buf_new);
 }
 
 Stmt* IRMutator::mutate(const Free* v) {
-  const Expr* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
-  if (buffer_var_new == buffer_var_old) {
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(buf_new);
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
 
-  return new Free(buffer_var_new);
+  return new Free(buf_new);
 }
 
 Stmt* IRMutator::mutate(const Let* v) {
@@ -534,11 +542,11 @@ Stmt* StmtClone::mutate(const AtomicAdd* v) {
 }
 
 Stmt* StmtClone::mutate(const Allocate* v) {
-  return new Allocate(v->buffer_var(), v->dtype(), v->dims());
+  return new Allocate(v->buf());
 }
 
 Stmt* StmtClone::mutate(const Free* v) {
-  return new Free(v->buffer_var());
+  return new Free(v->buf());
 }
 
 Stmt* StmtClone::mutate(const Let* v) {

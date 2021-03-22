@@ -380,10 +380,12 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
     kernel::lstm_cell_forward<scalar_t, accscalar_t, index_type, 1>
       <<<grid, block, 0, stream>>>
         (input_gatesI, hidden_gatesI, input_biasI, hidden_biasI, cxI, hyI, cyI, workspaceI, hidden_size, numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     kernel::lstm_cell_forward<scalar_t, accscalar_t, index_type, 2>
       <<<grid, block, 0, stream>>>
         (input_gatesI, hidden_gatesI, input_biasI, hidden_biasI, cxI, hyI, cyI, workspaceI, hidden_size, numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -413,10 +415,12 @@ void lstm_backward_impl(const Tensor& grad_hy, const Tensor& grad_cy,
     kernel::lstm_cell_backward<scalar_t, accscalar_t, index_type, 1>
       <<<grid, block, 0, stream>>>
         (workspaceI, grad_gatesI, cxI, cyI, grad_hyI, grad_cyI, grad_cxI, hidden_size, numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     kernel::lstm_cell_backward<scalar_t, accscalar_t, index_type, 2>
       <<<grid, block, 0, stream>>>
         (workspaceI, grad_gatesI, cxI, cyI, grad_hyI, grad_cyI, grad_cxI, hidden_size, numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -446,10 +450,12 @@ void gru_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
     kernel::gru_cell_forward<scalar_t, accscalar_t, index_type, 1>
       <<<grid, block, 0, stream>>>
         (input_gatesI, hidden_gatesI, input_biasI, hidden_biasI, hxI, hyI, workspaceI, hidden_size, numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     kernel::gru_cell_forward<scalar_t, accscalar_t, index_type, 2>
       <<<grid, block, 0, stream>>>
         (input_gatesI, hidden_gatesI, input_biasI, hidden_biasI, hxI, hyI, workspaceI, hidden_size, numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -475,10 +481,12 @@ void gru_backward_impl(const Tensor& grad_hy, const Tensor& workspace,
     kernel::gru_cell_backward<scalar_t, accscalar_t, index_type, 1>
       <<<grid, block, 0, stream>>>
         (grad_input_gatesI, grad_hidden_gatesI, grad_hyI, grad_hxI, workspaceI, hidden_size, numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     kernel::gru_cell_backward<scalar_t, accscalar_t, index_type, 2>
       <<<grid, block, 0, stream>>>
         (grad_input_gatesI, grad_hidden_gatesI, grad_hyI, grad_hxI, workspaceI, hidden_size, numel);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 

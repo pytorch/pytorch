@@ -1,7 +1,7 @@
 #ifndef MPSCNNShaders_h
 #define MPSCNNShaders_h
 
-static const char* METAL_SHADERS = R"METAL_SHADERS(
+static const char* PT_METAL_SHADERS = R"PT_METAL_SHADERS(
 #include <metal_stdlib>
 using namespace metal;
 
@@ -18,73 +18,120 @@ constant ushort ushort_arg_9[[function_constant(9)]];
 constant float float_arg_0 [[function_constant(10)]];
 constant float float_arg_1 [[function_constant(11)]];
 
-
 inline constexpr ushort divRoundUp(ushort x, ushort y) { return (x + (y - 1)) / y; }
+
+enum broadcastOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+};
+
+void elementwise_broadcast_nonarray(texture2d<half, access::read> in0,
+                                   texture2d<half, access::read> in1,
+                                   texture2d<half, access::write> out,
+                                   ushort2 gid,
+                                   broadcastOp op) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+    ushort2 in0_stride = ushort2(in0.get_width() > 1, in0.get_height() > 1);
+    ushort2 in1_stride = ushort2(in1.get_width() > 1, in1.get_height() > 1);
+
+    ushort2 gid0 = gid.xy * in0_stride;
+    ushort2 gid1 = gid.xy * in1_stride;
+
+    if(op == Add) {
+        out.write(in0.read(gid0) + in1.read(gid1), gid);
+    } else if(op == Sub) {
+        out.write(in0.read(gid0) - in1.read(gid1), gid);
+    } else if(op == Mul) {
+        out.write(in0.read(gid0) * in1.read(gid1), gid);
+    } else if(op == Div) {
+        out.write(in0.read(gid0) / in1.read(gid1), gid);
+    }
+}
+
+void elementwise_broadcast(texture2d_array<half, access::read> in0,
+                           texture2d_array<half, access::read> in1,
+                           texture2d_array<half, access::write> out,
+                           ushort3 gid,
+                           broadcastOp op) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+        return;
+    }
+
+    ushort2 in0_stride = ushort2(in0.get_width() > 1, in0.get_height() > 1);
+    ushort2 in1_stride = ushort2(in1.get_width() > 1, in1.get_height() > 1);
+
+    ushort2 gid0 = gid.xy * in0_stride;
+    ushort2 gid1 = gid.xy * in1_stride;
+
+    if(op == Add) {
+        out.write(in0.read(gid0, gid.z) + in1.read(gid1, gid.z), gid.xy, gid.z);
+    } else if(op == Sub) {
+        out.write(in0.read(gid0, gid.z) - in1.read(gid1, gid.z), gid.xy, gid.z);
+    } else if(op == Mul) {
+        out.write(in0.read(gid0, gid.z) * in1.read(gid1, gid.z), gid.xy, gid.z);
+    } else if(op == Div) {
+        out.write(in0.read(gid0, gid.z) / in1.read(gid1, gid.z), gid.xy, gid.z);
+    }
+}
 
 kernel void elementwise_add_nonarray(texture2d<half, access::read> in0[[texture(0)]],
                                      texture2d<half, access::read> in1[[texture(1)]],
                                      texture2d<half, access::write> out[[texture(2)]],
                                      ushort2 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-        return;
-    }
-    out.write(in0.read(gid) + in1.read(gid), gid);
+    elementwise_broadcast_nonarray(in0, in1, out, gid, Add);
 }
 
 kernel void elementwise_add(texture2d_array<half, access::read> in0[[texture(0)]],
                             texture2d_array<half, access::read> in1[[texture(1)]],
                             texture2d_array<half, access::write> out[[texture(2)]],
                             ushort3 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-        return;
-    }
-    ushort2 gid_ = gid.xy;
-    out.write(in0.read(gid_, gid.z) + in1.read(gid_, gid.z), gid_, gid.z);
+    elementwise_broadcast(in0, in1, out, gid, Add);
 }
 
 kernel void elementwise_sub_nonarray(texture2d<half, access::read> in0[[texture(0)]],
                                      texture2d<half, access::read> in1[[texture(1)]],
                                      texture2d<half, access::write> out[[texture(2)]],
                                      ushort2 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-        return;
-    }
-    ushort2 gid2{0,0};
-    out.write(in0.read(gid) - in1.read(gid2), gid);
+    elementwise_broadcast_nonarray(in0, in1, out, gid, Sub);
 }
 
 kernel void elementwise_sub(texture2d_array<half, access::read> in0[[texture(0)]],
                             texture2d_array<half, access::read> in1[[texture(1)]],
                             texture2d_array<half, access::write> out[[texture(2)]],
                             ushort3 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-        return;
-    }
-    ushort2 gid1 = gid.xy;
-    ushort2 gid2{0,0};
-    out.write(in0.read(gid1, gid.z) - in1.read(gid2, gid.z), gid1, gid.z);
+    elementwise_broadcast(in0, in1, out, gid, Sub);
 }
+
 kernel void elementwise_mul_nonarray(texture2d<half, access::read> in0[[texture(0)]],
                                      texture2d<half, access::read> in1[[texture(1)]],
                                      texture2d<half, access::write> out[[texture(2)]],
                                      ushort2 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-        return;
-    }
-    ushort2 gid2{0,0};
-    out.write(in0.read(gid) * in1.read(gid2), gid);
+    elementwise_broadcast_nonarray(in0, in1, out, gid, Mul);
 }
 
 kernel void elementwise_mul(texture2d_array<half, access::read> in0[[texture(0)]],
                             texture2d_array<half, access::read> in1[[texture(1)]],
                             texture2d_array<half, access::write> out[[texture(2)]],
                             ushort3 gid[[thread_position_in_grid]]) {
-    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-        return;
-    }
-    ushort2 gid1 = gid.xy;
-    ushort2 gid2{0,0};
-    out.write(in0.read(gid1, gid.z) * in1.read(gid2, gid.z), gid1, gid.z);
+    elementwise_broadcast(in0, in1, out, gid, Mul);
+}
+
+kernel void elementwise_div_nonarray(texture2d<half, access::read> in0[[texture(0)]],
+                                     texture2d<half, access::read> in1[[texture(1)]],
+                                     texture2d<half, access::write> out[[texture(2)]],
+                                     ushort2 gid[[thread_position_in_grid]]) {
+    elementwise_broadcast_nonarray(in0, in1, out, gid, Div);
+}
+
+kernel void elementwise_div(texture2d_array<half, access::read> in0[[texture(0)]],
+                            texture2d_array<half, access::read> in1[[texture(1)]],
+                            texture2d_array<half, access::write> out[[texture(2)]],
+                            ushort3 gid[[thread_position_in_grid]]) {
+    elementwise_broadcast(in0, in1, out, gid, Div);
 }
 
 kernel void copy_nchw_to_metal(constant float* in[[buffer(0)]],
@@ -98,8 +145,6 @@ kernel void copy_nchw_to_metal(constant float* in[[buffer(0)]],
     }
     const ushort n = gid.z / divRoundUp(C, 4);
     const ushort c = gid.z - n * divRoundUp(C, 4);
-    // TODO: are the `else` branches needed?
-    // TODO: trick the optimizer for case where C == 4?
 #define CHW_TO_CHWP4(idx, n, c_, h, w)                                     \
 if ((c_) < C) {                                                          \
 trns[idx] = in[n * H * W * C + int(c_) * H * W + int(h) * W + int(w)]; \
@@ -125,8 +170,6 @@ kernel void copy_nchw_to_metal_nonarray(constant float* in[[buffer(0)]],
         return;
     }
     half4 trns;
-    // TODO: are the `else` branches needed?
-    // TODO: trick the optimizer for case where C % 4 == 0?
 #define CHW_TO_CHWP4(idx, c, h, w)                        \
 if ((c) < C) {                                          \
 trns[idx] = in[int(c) * H * W + int(h) * W + int(w)]; \
@@ -516,6 +559,6 @@ kernel void resize_nearest_nonarray(texture2d<half, access::sample> in[[texture(
     out.write(in.sample(s, float2(in_x, in_y)), gid.xy);
 }
 
-)METAL_SHADERS";
+)PT_METAL_SHADERS";
 
 #endif /* MPSCNNShaders_h */

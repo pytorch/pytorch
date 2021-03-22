@@ -127,7 +127,7 @@ static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
 static std::tuple<Tensor, int64_t, int64_t, int64_t>
 computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
   auto strides = computeLinearStride(src);
-  const auto& backend = src.type().backend();
+  const auto& device = src.options().device();
 
   // Compute the linear index by multiplying the indexing tensors by the
   // stride and summing them. All the indexing tensors have the same shape at
@@ -137,9 +137,9 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
   int64_t emptyBefore = 0, emptyAfter = 0, nElemBefore = 1, nElemAfter = 1, strideBefore =0;
   for (auto i = decltype(src.dim()){0}; i < src.dim(); i++) {
     if (indices[i].defined()) {
-      // Cast index to the longType matching src's backend
+      // Cast index to the longType matching src's device
       // This allows us to support ie indexing a cuda tensor with a cpu tensor
-      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i), check_range) * strides[i]).toBackend(backend);
+      Tensor index = (wrapIndexOnce(indices[i], i, src.size(i), check_range) * strides[i]).to(device);
       if (linearIndex.defined()) {
         linearIndex += index;
       } else {
@@ -939,7 +939,7 @@ namespace {
 
 template <typename mask_t>
 void masked_fill_kernel(TensorIterator& iter, Scalar value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+  AT_DISPATCH_ALL_TYPES_AND3(
       kBool, kHalf, kBFloat16, iter.common_dtype(), "masked_fill_", [&]() {
         const auto value_ = value.to<scalar_t>();
         gpu_kernel(
@@ -978,7 +978,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, Scalar value) {
       .add_output(self)
       .add_input(self)
       .add_input(b_mask)
-      .build();  
+      .build();
 
   if (b_mask.dtype() == at::ScalarType::Byte) {
     TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
