@@ -1,0 +1,6 @@
+version: 2.1
+jobs:
+  foo:
+    docker: 'ubuntu:20.04'
+    steps:
+      - run: echo 'hello world'
