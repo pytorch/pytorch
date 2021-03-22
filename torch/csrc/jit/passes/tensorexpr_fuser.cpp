@@ -159,6 +159,10 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::min.other(Tensor self, Tensor other) -> Tensor",
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
+
+      // TODO: enable once we have an out variant for conv2d to use in the NNC's
+      // external call or when we have a performant TE representation for conv
+      // "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
   };
   // clang-format on
 
@@ -174,6 +178,8 @@ bool isSupported(Node* node) {
   static const OperatorSet cuda_only_operator_set{
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
   };
+  static const OperatorSet cpu_only_operator_set{
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"};
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
@@ -212,6 +218,17 @@ bool isSupported(Node* node) {
       }
     }
 
+    // Operator is only supported on CPU.
+    if (node->isMemberOf(cpu_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || !device->is_cpu()) {
+        return false;
+      }
+    }
+
     // non-const dtype / device
     for (auto arg_name : {"dtype", "device"}) {
       if (auto index = node->schema().argumentIndexWithName(arg_name)) {
@@ -223,6 +240,24 @@ bool isSupported(Node* node) {
 
     if (FLAGS_torch_jit_disable_cat && node->kind() == aten::cat) {
       return false;
+    }
+
+    // We only support conv2d with constant strides/padding/dilation/groups
+    if (node->kind() == aten::conv2d) {
+      // Strides, padding and dilation are inputs 3, 4, and 5. They all must be
+      // an IntList of size 2.
+      for (size_t idx = 3; idx <= 5; idx++) {
+        if (node->input(idx)->node()->kind() != prim::Constant ||
+            !toIValue(node->input(idx))->isIntList() ||
+            toIValue(node->input(idx))->toIntList().size() != 2) {
+          return false;
+        }
+      }
+      // Groups is input 6. It must be a constant int.
+      if (node->input(6)->node()->kind() != prim::Constant ||
+          !toIValue(node->input(6))->isInt()) {
+        return false;
+      }
     }
 
     return true;
