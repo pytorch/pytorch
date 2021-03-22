@@ -16,8 +16,8 @@ struct TORCH_API StaticModuleOptions {
   bool cleanup_activations{true};
   bool enable_out_variant{true};
   bool optimize_memory{true};
-  bool optimize_output_memory{
-      false}; // to enable MemoryPlanner on output tensors
+  // to enable MemoryPlanner on output tensors
+  bool optimize_output_memory{false};
 };
 
 /// The static runime supports two execution modes.
@@ -81,7 +81,6 @@ class TORCH_API StaticModule {
   typedef enum {
     CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
     INPUT_VALUE = -1, // VALUE nodes representing graph inputs
-    OTHER_VALUE = 0 // other VALUE nodes (use non-negative index)
   } VALUE_KIND;
 
  private:
@@ -95,7 +94,7 @@ class TORCH_API StaticModule {
   //   if kind == CONSTANT_KIND: map to constants_[idx]
   //   if kind == INPUT_KIND: map to inputs_[idx]
   //   otherwise: map to nodes_[kind].outputs()[idx]
-  typedef std::pair<VALUE_KIND, int> DefInfo;
+  using DefInfo = std::pair<VALUE_KIND, int>;
 
  public:
   std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);

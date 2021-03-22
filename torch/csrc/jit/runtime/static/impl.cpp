@@ -346,7 +346,7 @@ GetMemoryPlanningCandidates(const std::shared_ptr<torch::jit::Graph>& graph) {
 // NB: This is a deterministic implementation, which makes it easier to tune
 // and debug.
 std::unordered_map<const Value*, std::vector<const Value*>>
-FindSameStorageValues(
+GenerateSameStorageValues(
     const LivenessInformation& lm,
     const std::pair<std::vector<const Value*>, std::vector<const Value*>>&
         optimizable,
@@ -584,7 +584,8 @@ StaticModule::StaticModule(
     if (!opts_.enable_out_variant) {
       values.first = {};
     }
-    value_to_same_storage_values_ = FindSameStorageValues(lm, values, alias_db);
+    value_to_same_storage_values_ =
+        GenerateSameStorageValues(lm, values, alias_db);
   }
 }
 
