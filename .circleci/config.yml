@@ -472,7 +472,7 @@ jobs:
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && export CIRCLE_JOB="$CIRCLE_JOB" && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -603,6 +603,7 @@ jobs:
           # =================== The following code will be executed inside Docker container ===================
           set -ex
           export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
+          export CIRCLE_JOB="$CIRCLE_JOB"
           ${PARALLEL_FLAGS}
           cd workspace
           EOL
@@ -636,7 +637,8 @@ jobs:
           export CIRCLE_JOB="$CIRCLE_JOB"
           export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
           cd workspace
-          python torch/testing/_internal/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          export PYTHONPATH="\${PWD}"
+          python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           EOL
           echo "(cat docker_commands.sh | docker exec -u jenkins -e LANG=C.UTF-8 -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
@@ -800,8 +802,9 @@ jobs:
             export CIRCLE_WORKFLOW_ID="$CIRCLE_WORKFLOW_ID"
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            export PYTHONPATH="$PWD"
             pip install typing_extensions boto3
-            python torch/testing/_internal/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+            python tools/print_test_stats.py --upload-to-s3 --compare-with-s3 test
           when: always
       - store_test_results:
           path: test/test-reports
@@ -1326,7 +1329,7 @@ jobs:
           command: |
             set -e
             export IN_CI=1
-            export CROSS_COMPILE_ARM=1
+            export CROSS_COMPILE_ARM64=1
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache

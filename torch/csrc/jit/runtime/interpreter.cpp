@@ -1204,7 +1204,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         Instruction inst = frame.function->instructions_[frame.pc];
         switch (inst.op) {
           case ENTER: {
-            auto obj = peek(stack, 0, 1);
+            const auto& obj = peek(stack, 0, 1);
             TORCH_INTERNAL_ASSERT(obj.isObject());
             entered_objects.push_back(obj);
             ++frame.pc;
@@ -1212,7 +1212,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case EXIT: {
             auto obj = entered_objects.back().toObject();
             auto& f = obj->type()->getMethod("__exit__");
-            push(stack, obj);
+            push(stack, std::move(obj));
             entered_objects.pop_back();
             push(stack, IValue());
             push(stack, IValue());
@@ -1407,7 +1407,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             if (!frame_id_ref.has_value()) {
               frame_id_ref = Frame::num_frames++;
             }
-            auto callback = frame.function->profile_function_table_[inst.X];
+            const auto& callback =
+                frame.function->profile_function_table_[inst.X];
             push(stack, c10::IValue{static_cast<int64_t>(*frame_id_ref)});
             callback(stack);
             ++frame.pc;
@@ -1430,7 +1431,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               auto& input = peek(stack, i, num_inputs);
               auto& t = input.toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X + i];
-              auto expected_type = expected->cast<TensorType>();
+              auto* expected_type = expected->castRaw<TensorType>();
               if (t.defined() && !expected_type->matchTensor(t)) {
                 push(stack, false);
                 break;
@@ -1451,7 +1452,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             } else {
               auto& t = stack.back().toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X];
-              auto expected_type = expected->cast<TensorType>();
+              auto* expected_type = expected->castRaw<TensorType>();
               if (t.defined() &&
                   !frames.back().symbols2dims.bindSymbolicShapes(
                       t.sizes(), expected_type->symbolic_sizes())) {
@@ -1499,9 +1500,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case NAMED_TUPLE_CONSTRUCT: {
-            auto type =
-                frame.function->type_table_[inst.X]->expect<TupleType>();
-            namedTupleConstruct(stack, type, inst.N);
+            namedTupleConstruct(
+                stack,
+                frame.function->type_table_[inst.X]->expect<TupleType>(),
+                inst.N);
             ++frame.pc;
           } break;
           case LIST_CONSTRUCT: {
@@ -1559,7 +1561,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto range = node->sourceRange().source();
             if (range->filename()) {
               drop(stack, 1);
-              const auto msg = pop(stack).toStringRef();
+              const auto& msg = stack.back().toStringRef();
               if (need_warn) {
                 auto line = range->starting_line_no() +
                     range->lineno_for_offset(node->sourceRange().start());
@@ -1570,11 +1572,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 // will print the exception as configured.
                 c10::Warning::warn(location, msg, /*verbatim=*/true);
               }
+              stack.pop_back();
             } else {
-              const auto msg = pop(stack).toStringRef();
+              const auto& msg = stack.back().toStringRef();
               if (need_warn) {
                 TORCH_WARN(msg);
               }
+              stack.pop_back();
             }
             ++frame.pc;
           } break;
