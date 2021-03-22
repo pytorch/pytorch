@@ -342,6 +342,8 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   bool is_view(const Tensor&) const override;
   const Tensor& base(const Tensor&) const override;
   const std::string& name(const Tensor&) const override;
+  bool is_leaf(const Tensor&) const override;
+  int64_t output_nr(const Tensor&) const override;
 };
 
 VariableHooks variableHooks;
@@ -363,6 +365,23 @@ Tensor VariableHooks::tensor_data(const Tensor& self) const {
     /*allow_tensor_metadata_change=*/self.unsafeGetTensorImpl()->allow_tensor_metadata_change());
   return at::Tensor(self_impl_copy);
 }
+
+bool VariableHooks::is_leaf(const Tensor & self) const {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->grad_fn_ == nullptr;
+  } else {
+    return true;
+  }
+}
+
+int64_t VariableHooks::output_nr(const Tensor & self) const {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->output_nr_;
+  } else {
+    return 0;
+  }
+}
+
 
 // Backward View Variables
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

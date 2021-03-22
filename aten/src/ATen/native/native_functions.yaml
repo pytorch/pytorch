@@ -59,9 +59,9 @@
   variants: method
 
 # True if this `Variable` is a leaf and thus does not have a `grad_fn`.
-- func: is_leaf(Tensor self) -> bool
-  manual_kernel_registration: True
-  variants: method
+#- func: is_leaf(Tensor self) -> bool
+  #manual_kernel_registration: True
+  #variants: method
 
 # Returns the output index of this variable from the forward operation that
 # produced it.  Conversely, it returns the input index of the gradient `Node` to
@@ -73,9 +73,9 @@
 #   assert y1.output_nr == 1
 #   assert y2.output_nr == 2
 #
-- func: output_nr(Tensor self) -> int
-  manual_kernel_registration: True
-  variants: method
+#- func: output_nr(Tensor self) -> int
+  #manual_kernel_registration: True
+  #variants: method
 
 - func: _version(Tensor self) -> int
   manual_kernel_registration: True

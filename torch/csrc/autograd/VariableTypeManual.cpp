@@ -132,22 +132,6 @@ Tensor data(const Tensor & self) {
   return self.variable_data();
 }
 
-bool is_leaf(const Tensor & self) {
-  if (impl::get_autograd_meta(self)) {
-    return impl::get_autograd_meta(self)->grad_fn_ == nullptr;
-  } else {
-    return true;
-  }
-}
-
-int64_t output_nr(const Tensor & self) {
-  if (impl::get_autograd_meta(self)) {
-    return impl::get_autograd_meta(self)->output_nr_;
-  } else {
-    return 0;
-  }
-}
-
 int64_t _version(const Tensor & self) {
   return self.unsafeGetTensorImpl()->version_counter().current_version();
 }
@@ -401,8 +385,6 @@ TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {
 TORCH_LIBRARY_IMPL(aten, Math, m) {
   m.impl("set_data", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::set_data)));
   m.impl("data", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::data)));
-  m.impl("is_leaf", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::is_leaf)));
-  m.impl("output_nr", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::output_nr)));
   m.impl("_version", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::_version)));
   m.impl("retain_grad", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::retain_grad)));
 }

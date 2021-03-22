@@ -52,6 +52,14 @@ Tensor Tensor::tensor_data() const {
   return impl::GetVariableHooks()->tensor_data(*this);
 }
 
+bool Tensor::is_leaf() const {
+  return impl::GetVariableHooks()->is_leaf(*this);
+}
+
+int64_t Tensor::output_nr() const {
+  return impl::GetVariableHooks()->output_nr(*this);
+}
+
 // View Variables
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

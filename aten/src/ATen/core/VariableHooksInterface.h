@@ -48,6 +48,8 @@ struct TORCH_API VariableHooksInterface {
   virtual bool is_view(const Tensor&) const = 0;
   virtual const Tensor& base(const Tensor&) const = 0;
   virtual const std::string& name(const Tensor&) const = 0;
+  virtual bool is_leaf(const Tensor&) const = 0;
+  virtual int64_t output_nr(const Tensor&) const = 0;
 };
 
 TORCH_API void SetVariableHooks(VariableHooksInterface* hooks);
