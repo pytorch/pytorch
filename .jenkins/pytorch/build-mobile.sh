@@ -9,6 +9,7 @@ set -eu -o pipefail
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Install torch & torchvision - used to download & trace test model.

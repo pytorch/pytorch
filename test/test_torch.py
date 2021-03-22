@@ -2638,6 +2638,19 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
             self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
 
+        @noarchTest
+        def test_detach_meta(self):
+            x = torch.empty(2, device='meta')
+            # This used to segfault
+            self.assertRaises(RuntimeError, lambda: x.detach().storage())
+
+        @noarchTest
+        def test_add_meta_scalar(self):
+            # From https://github.com/pytorch/pytorch/issues/53815
+            x = torch.empty(2, device='meta')
+            y = x + 2
+            self.assertEqual(y.size(), x.size())
+
         def test_normal_shape(self):
             warned = False
             for device in torch.testing.get_all_device_types():

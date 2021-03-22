@@ -20,7 +20,9 @@ namespace jit {
 
 namespace {
 
-void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
+void OptimizeGraph(
+    std::shared_ptr<torch::jit::Graph>& graph,
+    const StaticModuleOptions& opts) {
   Inline(*graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
@@ -33,7 +35,10 @@ void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO: we can avoid this guard by moving operations
   // to exposed folders.
 #ifdef FBCODE_CAFFE2
-  ReplaceWithCopy(graph);
+  if (opts.enable_out_variant) {
+    ReplaceWithCopy(graph);
+    FuseSigridTransformsListUnpack(graph);
+  }
 #endif
   ConstantPropagation(graph);
 }
@@ -432,14 +437,18 @@ FindSameStorageValues(
 
 } // namespace
 
-void PrepareGraphForStaticModule(std::shared_ptr<torch::jit::Graph> graph) {
-  OptimizeGraph(graph);
+void PrepareGraphForStaticModule(
+    std::shared_ptr<torch::jit::Graph> graph,
+    const StaticModuleOptions& opts) {
+  OptimizeGraph(graph, opts);
   CheckGraphEligibility(graph);
   RemoveSelfFromGraphInput(graph);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<c10::FunctionSchema>>
-PrepareForStaticModule(const torch::jit::Module& m) {
+PrepareForStaticModule(
+    const torch::jit::Module& m,
+    const StaticModuleOptions& opts) {
   auto module = m.copy();
   module.eval();
 
@@ -447,27 +456,29 @@ PrepareForStaticModule(const torch::jit::Module& m) {
 
   Method method = module.get_method("forward");
   auto graph = module.get_method("forward").graph();
-  PrepareGraphForStaticModule(graph);
+  PrepareGraphForStaticModule(graph, opts);
 
   c10::FunctionSchema s = RemoveSelfFromSchema(method.function().getSchema());
   return std::make_pair(graph, s);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<c10::FunctionSchema>>
-PrepareForStaticModule(std::shared_ptr<torch::jit::Graph> graph) {
-  PrepareGraphForStaticModule(graph);
+PrepareForStaticModule(
+    std::shared_ptr<torch::jit::Graph> graph,
+    const StaticModuleOptions& opts) {
+  PrepareGraphForStaticModule(graph, opts);
   return std::make_pair(graph, c10::nullopt);
 }
 
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(g), opts) {}
+    : StaticModule(PrepareForStaticModule(g, opts), opts) {}
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(m), opts) {}
+    : StaticModule(PrepareForStaticModule(m, opts), opts) {}
 
 StaticModule::StaticModule(
     std::pair<
@@ -1115,13 +1126,7 @@ ProcessedNode::ProcessedNode(
     : node_(node), inputs_(std::move(inputs)) {
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
-  if (node->kind() != prim::ListConstruct &&
-      node->kind() != prim::TupleConstruct &&
-      node->kind() != prim::ListUnpack) {
-    const Operator& op = node->getOperator();
-    TORCH_CHECK(op.hasOperation());
-    op_ = op.getOperation(node);
-  }
+
   if (enable_out_variants && canRunOutOfPlace(node)) {
     fn_ = getOutOfPlaceOperation(node);
     std::ostringstream ss;
@@ -1132,7 +1137,14 @@ ProcessedNode::ProcessedNode(
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Switch to native impl for node: " << ss.str();
-  } else {
+  } else if (
+      node->kind() != prim::ListConstruct &&
+      node->kind() != prim::TupleConstruct &&
+      node->kind() != prim::ListUnpack) {
+    const Operator& op = node->getOperator();
+    TORCH_CHECK(op.hasOperation());
+    op_ = op.getOperation(node);
+
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Fallback interpreter for node: " << ss.str();
