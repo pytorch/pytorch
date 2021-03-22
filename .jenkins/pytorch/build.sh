@@ -59,6 +59,17 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
+if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
+  export BUILD_CAFFE2=OFF
+fi
+
+if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+  export ATEN_THREADING=TBB
+  export USE_TBB=1
+elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+  export ATEN_THREADING=NATIVE
+fi
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 
