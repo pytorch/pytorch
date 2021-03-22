@@ -679,6 +679,33 @@ def sample_inputs_amax_amin(op_info, device, dtype, requires_grad):
                              args=args)
                  for size, args in test_cases)
 
+def sample_inputs_argmax_argmin(op_info, device, dtype, requires_grad):
+    test_cases = (
+        ((2, 2, 2), ()),
+        ((2, 2, 2), (0,)),
+        ((2, 2, 2), (1,)),
+        ((2, 2, 2), (2,)),
+        ((2, 2, 2), (2, True,)),
+        ((2, 2, 2), (None,)),
+        ((), (0,)),
+        ((), ()),
+        ((), (None, True,)),
+        ((1,), ()),
+        ((1,), (0,)),
+        ((1,), (0, True)),
+        ((2,), ()),
+        ((2,), (0,)),
+        ((2,), (0, True)),
+        ((2, 2, 3), ()),
+        ((2, 2, 3), (0,)),
+        ((2, 2, 3), (1,)),
+        ((2, 2, 3), (None, True)),
+    )
+    return tuple(SampleInput((make_tensor(size, device, dtype,
+                                          requires_grad=requires_grad)),
+                             args=args)
+                 for size, args in test_cases)
+
 def sample_inputs_diff(op_info, device, dtype, requires_grad):
     test_cases = (
         ((1,), 0, None, None),
@@ -1929,8 +1956,6 @@ op_db: List[OpInfo] = [
     OpInfo('amax',
            op=torch.amax,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_amax_amin,
            skips=(
@@ -1939,12 +1964,24 @@ op_db: List[OpInfo] = [
     OpInfo('amin',
            op=torch.amin,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_amax_amin,
            skips=(
                # amin does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),)),
+    OpInfo('argmax',
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_argmax_argmin,
+           skips=(
+               # argmax does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),)),
+    OpInfo('argmin',
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_argmax_argmin,
+           skips=(
+               # argmin does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),)),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
