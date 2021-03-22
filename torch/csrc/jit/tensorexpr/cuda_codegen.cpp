@@ -929,9 +929,18 @@ void CudaCodeGen::Initialize() {
   metavar_rewriter_ =
       std::make_unique<GPUMetaVarRewriter>(cuda_analysis_.get());
 
+  // Check whether the statement uses the Half type, if so add the
+  // half_support_literal.
+  Stmt* stmt_v = stmt();
+  HalfChecker halfChecker(buffer_args());
+  stmt_v->accept(&halfChecker);
+
 #if __HIP_PLATFORM_HCC__
 #if ROCM_VERSION < 40200
   os() << "#include <hip/hip_runtime.h>" << std::endl;
+  if (halfChecker.hasHalf()) {
+    os() << "#include <hip/hip_fp16.h>" << std::endl;
+  }
 #endif
 #endif
   os() << device_resource_string << shared_resource_string;
@@ -940,11 +949,6 @@ void CudaCodeGen::Initialize() {
     os() << philox_random_string << std::endl;
   }
 
-  // Check whether the statement uses the Half type, if so add the
-  // half_support_literal.
-  Stmt* stmt_v = stmt();
-  HalfChecker halfChecker(buffer_args());
-  stmt_v->accept(&halfChecker);
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
