@@ -1609,7 +1609,7 @@ class SiameseLoss(_Loss):
         self.margin = margin
 
     def forward(self, anchor: Tensor, positive: Tensor, label: Tensor) -> Tensor:
-        return F.siames_loss(anchor, positive, margin = self.margin, reduction = self.reduction)
+        return F.siamese_loss(anchor, positive, margin = self.margin, reduction = self.reduction)
 
 
 class CTCLoss(_Loss):
