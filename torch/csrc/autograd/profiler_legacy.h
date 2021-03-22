@@ -171,6 +171,10 @@ struct TORCH_API LegacyEvent {
     throw std::runtime_error("unknown event kind");
   }
 
+  EventKind kind() const {
+    return kind_;
+  }
+
   const char* name() const {
     return name_.str();
   }

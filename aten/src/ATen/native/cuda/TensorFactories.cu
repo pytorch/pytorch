@@ -24,12 +24,12 @@
 namespace at {
 namespace native {
 
-Tensor& eye_out_cuda(Tensor& result, int64_t n) {
+Tensor& eye_out_cuda(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
-  return at::native::eye_out_cuda(result, n, n);
+  return at::native::eye_out_cuda(n, n, result);
 }
 
-Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
+Tensor& eye_out_cuda(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
