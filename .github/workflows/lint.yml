@@ -10,6 +10,7 @@ jobs:
   quick-checks:
     runs-on: ubuntu-18.04
     steps:
+      - uses: technote-space/auto-cancel-redundant-workflow@v1
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
@@ -59,6 +60,7 @@ jobs:
   flake8-py3:
     runs-on: ubuntu-18.04
     steps:
+      - uses: technote-space/auto-cancel-redundant-workflow@v1
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
@@ -94,6 +96,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-18.04
     steps:
+      - uses: technote-space/auto-cancel-redundant-workflow@v1
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
@@ -196,6 +199,7 @@ jobs:
   cmakelint:
     runs-on: ubuntu-18.04
     steps:
+      - uses: technote-space/auto-cancel-redundant-workflow@v1
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
@@ -217,6 +221,7 @@ jobs:
   mypy:
     runs-on: ubuntu-18.04
     steps:
+      - uses: technote-space/auto-cancel-redundant-workflow@v1
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
