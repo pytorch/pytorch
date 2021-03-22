@@ -27,6 +27,7 @@ TYPE2ABC = {
 }
 
 
+# Check if the left-side type is a subtype for the right-side type
 def issubtype(left, right):
     left = TYPE2ABC.get(left, left)
     right = TYPE2ABC.get(right, right)
@@ -73,6 +74,7 @@ def issubtype(left, right):
     return all(_issubtype_with_constraints(variant, constraints) for variant in variants)
 
 
+# Check if the variant is a subtype for any of constraints
 def _issubtype_with_constraints(variant, constraints):
     if variant in constraints:
         return True
@@ -130,7 +132,8 @@ def _issubtype_with_constraints(variant, constraints):
                 return True
         # Constraint is not TypeVar or Union
         else:
-            if hasattr(constraint, '__origin__'):
+            # __origin__ can be None for list, tuple, ... in Python 3.6
+            if hasattr(constraint, '__origin__') and constraint.__origin__ is not None:
                 c_origin = constraint.__origin__
                 if v_origin == c_origin:
                     c_args = constraint.__args__
