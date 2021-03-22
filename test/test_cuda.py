@@ -1418,6 +1418,11 @@ class TestCuda(TestCase):
         x = torch.ones(240000, device='cuda', dtype=torch.float32)
         self.assertEqual(x.prod(), 1)
 
+        # test for complex types. Note 240k is divisible by 4
+        for dtype in [torch.cfloat, torch.cdouble]:
+            x = torch.ones(240000, device='cuda', dtype=dtype) * (0 + 1j)
+            self.assertEqual(x.prod(), 1)
+
     def test_multinomial_ext(self):
         # Test two corner cases from older PyTorch (Issue #4858)
         freqs = torch.cuda.FloatTensor([
