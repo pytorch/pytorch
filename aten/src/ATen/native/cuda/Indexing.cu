@@ -430,7 +430,7 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
   return false;
 }
 
-Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const at::Scalar alpha) {
+Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar & alpha) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("index_add_cuda_");
@@ -944,7 +944,7 @@ Tensor nonzero_cuda(const Tensor& self){
 namespace {
 
 template <typename mask_t>
-void masked_fill_kernel(TensorIterator& iter, Scalar value) {
+void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND3(
       kBool, kHalf, kBFloat16, iter.common_dtype(), "masked_fill_", [&]() {
         const auto value_ = value.to<scalar_t>();
@@ -960,7 +960,7 @@ void masked_fill_kernel(TensorIterator& iter, Scalar value) {
 
 } // anonymous namespace
 
-Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, Scalar value) {
+Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& value) {
   TORCH_CHECK(self.device() == mask.device(), "expected self and mask to be on the same device, but got mask on ",
     mask.device(), " and self on ", self.device());
   TORCH_CHECK(mask.scalar_type() == kByte || mask.scalar_type() == kBool,

@@ -311,16 +311,16 @@ Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_
 Tensor& gather_out(Tensor& result, const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
   reportNYIDimnameOverload("gather");
 }
-Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const at::Scalar alpha) {
+Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar& alpha) {
   reportNYIDimnameOverload("index_add");
 }
-Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const at::Scalar alpha) {
+Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar& alpha) {
   reportNYIDimnameOverload("index_add");
 }
-Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   return at::index_fill(self, dimname_to_position(self, dim), index, source);
 }
-Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   return self.index_fill_(dimname_to_position(self, dim), index, source);
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
@@ -347,10 +347,10 @@ Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Tenso
 Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   reportNYIDimnameOverload("scatter");
 }
 Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {

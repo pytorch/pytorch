@@ -7,6 +7,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
@@ -24,6 +25,12 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *noarch* ]]; then
+  export PYTORCH_TEST_SKIP_NOARCH=0
+else
+  export PYTORCH_TEST_SKIP_NOARCH=1
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -327,6 +334,7 @@ test_backward_compatibility() {
   set -x
   pushd test/backward_compatibility
   python -m venv venv
+  # shellcheck disable=SC1091
   . venv/bin/activate
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch
