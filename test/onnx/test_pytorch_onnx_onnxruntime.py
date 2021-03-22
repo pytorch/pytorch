@@ -70,6 +70,7 @@ def inline_flatten_list(inputs, res_list):
         res_list.append(i) if not isinstance(i, (list, tuple)) else inline_flatten_list(i, res_list)
     return res_list
 
+
 def run_ort(ort_sess, input):
     input_copy = copy.deepcopy(input)
     input, _ = torch.jit._flatten(input_copy)
