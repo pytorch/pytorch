@@ -1,6 +1,29 @@
 version: 2.1
+
+# Define the jobs we want to run for this project
 jobs:
-  foo:
-    docker: 'ubuntu:20.04'
+  build:
+    docker:
+      - image: ubuntu:20.04
+        # auth:
+        #   username: mydockerhub-user
+        #   password: $DOCKERHUB_PASSWORD  # context / project UI env-var reference
     steps:
-      - run: echo 'hello world'
+      - checkout
+      - run: echo "this is the build job"
+  test:
+    docker:
+      - image: ubuntu:20.04
+        # auth:
+        #   username: mydockerhub-user
+        #   password: $DOCKERHUB_PASSWORD  # context / project UI env-var reference
+    steps:
+      - checkout
+      - run: echo "this is the test job"
+
+# Orchestrate our job run sequence
+workflows:
+  build_and_test:
+    jobs:
+      - build
+      - test
