@@ -877,7 +877,7 @@ def sample_inputs_index_copy(op_info, device, dtype, requires_grad):
     idx_nonctg = torch.repeat_interleave(idx, 2, dim=-1)[::2]
     # index_copy_ does not support negative indices
     # idx_neg = -idx - 1
-    samples = [SampleInput((tensor, 1, idx, source))
+    samples = [SampleInput(tensor, args=(1, idx, source))
                for tensor, idx, source in product([t, t01], [idx, idx_nonctg], [s, s01])]
 
     # Add scalar cases
@@ -886,7 +886,7 @@ def sample_inputs_index_copy(op_info, device, dtype, requires_grad):
     idxs = (make_arg(size, dtype=torch.int64, low=0, high=1) for size in scalar_sizes)
     ss = (make_arg(size) for size in scalar_sizes)
 
-    samples.extend(SampleInput((t, 0, idx, s)) for t, idx, s in product(ts, idxs, ss))
+    samples.extend(SampleInput(t, args=( 0, idx, s)) for t, idx, s in product(ts, idxs, ss))
     return samples
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
@@ -3161,13 +3161,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index_fill),
     OpInfo('index_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           test_inplace_grad=False,
+           supports_inplace_autograd=False,
            supports_out=False,
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/49707
-               # Fails on cpu throwing: RuntimeError: "index_select" not implemented for 'Half' / 'BFloat16'
-               SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=[torch.float16, torch.bfloat16]),
-           ),
            sample_inputs_func=sample_inputs_index_copy),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
