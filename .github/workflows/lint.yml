@@ -6,6 +6,8 @@ on:
     - master
   pull_request:
 
+# this is a comment
+
 jobs:
   quick-checks:
     runs-on: ubuntu-18.04
