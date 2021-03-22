@@ -947,6 +947,9 @@ class AbstractTestCases:
                         added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor)
                         self.assertEqual(added, tensor)
 
+                        added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor, alpha=-1)
+                        self.assertEqual(added, -tensor)
+
         def test_take(self):
             def check(src, idx):
                 expected = src.contiguous().view(-1).index_select(
