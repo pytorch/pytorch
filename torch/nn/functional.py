@@ -4529,40 +4529,57 @@ def _pad_reflective(input: Tensor, padding: List[int]) -> Tensor:
         >>> x = torch.tensor([[[[0, 1, 2], [3, 4, 5]]]])  # Create tensor
         >>> # Example 1
         >>> padding = (1, 1, 1, 1)
-        >>> y = F.pad(x, padding, mode='reflective')
+        >>> y = F.pad(x, padding, mode='reflect')
         >>> print(y)
-        tensor([[[[0, 0, 1, 2, 2],
-                  [0, 0, 1, 2, 2],
-                  [3, 3, 4, 5, 5],
-                  [3, 3, 4, 5, 5]]]])
+        tensor([[[[4, 3, 4, 5, 4],
+                  [1, 0, 1, 2, 1],
+                  [4, 3, 4, 5, 4],
+                  [1, 0, 1, 2, 1]]]])
         >>> print(y.shape)
         torch.Size([1, 1, 4, 5])
-        >>> # Example 2
-        >>> padding = (1, 1, 2, 2)
-        >>> z = F.pad(x, padding, mode='reflective')
-        >>> print(z)
-        tensor([[[[3, 3, 4, 5, 5],
-                  [0, 0, 1, 2, 2],
-                  [0, 0, 1, 2, 2],
-                  [3, 3, 4, 5, 5],
-                  [3, 3, 4, 5, 5],
-                  [0, 0, 1, 2, 2]]]])
-        >>> print(z.shape)
-        torch.Size([1, 1, 6, 5])
     """
+    # checking empty input values
+    if (input.shape[1] == 0 or input.shape[2] == 0
+            or input.shape[3] == 0 or input.shape[4] == 0):
+        raise RuntimeError("4D or 5D (batch mode) tensor expected for input,"
+                           " but got: [ {} ]".format(input.shape))
+    # checking appropriate padding values
+    error_msg = "Padding size should be less than the corresponding input " \
+                "dimension, but got: padding ({}, {}) at dimension {} of input {}"
+    for i in range(input.dim() - 2):
+        for j in range(2):
+            if padding[-2 * (i + 1) + j] >= input.shape[i + 2]:
+                raise RuntimeError(error_msg.format(padding[2 * i],
+                                                    padding[2 * i + 1],
+                                                    i + 2,
+                                                    input.dim()))
+    pad_positive = [(i if i > 0 else 0) for i in padding]
 
-    input = torch.cat([input, input.flip([2])[:, :, 1:(padding[-1] + 1)]], dim=2)
-    input = torch.cat([input.flip([2])[:, :, -(padding[-2] + 1):-1], input], dim=2)
+    input = torch.cat([input, input.flip([2])[:, :, 1:(pad_positive[-1] + 1)]], dim=2)
+    input = torch.cat([input.flip([2])[:, :, -(pad_positive[-2] + 1):-1], input], dim=2)
 
-    if len(padding) > 2:
-        input = torch.cat([input, input.flip([3])[:, :, :, 1:(padding[-3] + 1)]], dim=3)
-        input = torch.cat([input.flip([3])[:, :, :, -(padding[-4] + 1):-1], input], dim=3)
+    # if len(padding) > 2:  # only len(padding) > 4 will use the function
+    input = torch.cat([input, input.flip([3])[:, :, :, 1:(pad_positive[-3] + 1)]], dim=3)
+    input = torch.cat([input.flip([3])[:, :, :, -(pad_positive[-4] + 1):-1], input], dim=3)
 
-    if len(padding) > 4:
-        input = torch.cat([input, input.flip([4])[:, :, :, :, 1:(padding[-5] + 1)]], dim=4)
-        input = torch.cat([input.flip([4])[:, :, :, :, -(padding[-6] + 1):-1], input], dim=4)
+    # if len(padding) > 4:  # only len(padding) > 4 will use the function
+    input = torch.cat([input, input.flip([4])[:, :, :, :, 1:(pad_positive[-5] + 1)]], dim=4)
+    input = torch.cat([input.flip([4])[:, :, :, :, -(pad_positive[-6] + 1):-1], input], dim=4)
 
-    return input
+    # remove padding for negative pad
+    negative_index = [i for i, _ in enumerate(padding) if _ < 0]
+    slice_list = [slice(None) for _ in range(input.dim())]
+
+    for index in negative_index:
+        dim = index // 2 + 2
+        if index % 2:
+            # right side
+            slice_list[dim] = slice(None, padding[index])
+        else:
+            # left side
+            slice_list[dim] = slice(-padding[index], None)
+
+    return input[slice_list]
 
 
 def multi_head_attention_forward(
