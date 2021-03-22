@@ -36,10 +36,6 @@ struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
     if (var.defined() && var.requires_grad()) {
       out = true;
     }
-    TORCH_CHECK(!tensor.defined() || !tensor.is_view()
-      || static_cast<DifferentiableViewMeta*>(tensor.unsafeGetTensorImpl()->autograd_meta())->get_creation_meta() != CreationMeta::NO_VARIABLE_TYPE_VIEW,
-      "A view created in InferenceMode without proper grad_fn setup is not allowed "
-      "to participate in autograd. To work around it, please clone() it before exiting InferenceMode.");
   }
   void operator()(const c10::optional<at::Tensor>& tensor) {
     if (tensor.has_value()) {
@@ -63,8 +59,8 @@ struct AssertNoInferenceTensor : IterArgs<AssertNoInferenceTensor> {
   using IterArgs<AssertNoInferenceTensor>::operator();
   void operator()(const at::Tensor& tensor) {
     const auto& var = static_cast<const Variable&>(tensor);
-     TORCH_CHECK(var.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::InplaceOrView),
-         "inference tensor cannot participate in autograd. make a feature request");
+     TORCH_CHECK(!var.unsafeGetTensorImpl()->is_inference_tensor(),
+         "Inference tensor cannot participate in autograd. make a feature request");
   }
   void operator()(const c10::optional<at::Tensor>& tensor) {
     if (tensor.has_value()) {

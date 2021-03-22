@@ -109,6 +109,9 @@ namespace impl {
   // a materialized structure, use materialize_autograd_meta instead.
   TORCH_API AutogradMeta* get_autograd_meta(const Variable&);
 
+  // WARNING: This will return a nullptr if the Tensor is not a view.
+  TORCH_API DifferentiableViewMeta* get_view_autograd_meta(const Variable&);
+
   // Returns the current autograd meta, materializing it if it was previously
   // none.  This counts as a *mutating* operation, so do not call it on
   // "read-only" operators; in particular, this is NOT thread safe
@@ -206,7 +209,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::shared_ptr<ForwardGrad> fw_grad_;
 
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
-  std::shared_ptr<hooks_list> cpp_hooks_list;
+  std::shared_ptr<hooks_list> cpp_hooks_list_;
 
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
@@ -449,7 +452,7 @@ struct TORCH_API ViewInfo {
 /// Given that this particular code example is ambiguous and can easily be replace by
 /// either moving both inside the no_grad block or both outside, we explicitly forbid
 /// it. For now, it is deprecated by a warning. This is achieved by setting
-/// creation_meta=CreationMeta::NO_GRAD_MODE for all differentiable views created
+/// creation_meta=CreationMeta::NO_GRAD_FN for all differentiable views created
 /// in no_grad mode.
 ///
 /// See Note [View + Inplace update for base tensor]
@@ -490,7 +493,7 @@ struct TORCH_API ViewInfo {
 /// Flag that gives more information about when this view was created:
 /// - IN_CUSTOM_FUNCTION should be set when the view is created inside a custom
 ///   autograd Function is returned.
-/// - NO_GRAD_MODE should be set when a view in created when GradMode is disabled
+/// - NO_GRAD_FN should be set when a view in created in GradMode(false)/InferenceMode
 /// - MULTI_OUTPUT_NODE should be set when a Node created by codegen code returns
 ///   multiple differentiable views
 /// - MULTI_OUTPUT_SAFE should be set when a view was returned by a function
@@ -498,12 +501,9 @@ struct TORCH_API ViewInfo {
 ///   exists. These are note considered as views for now for the view+inplace
 ///   logic! The graph won't be rewritten when an inplace is done, only a
 ///   warning will be thrown.
-/// - NO_VARIABLE_TYPE_VIEW should be set when a view of normal tensor was created in InferenceMode.
-///   Although view tensor went through as_view, it doesn't have proper grad_fn setup since VariableType
-///   kernels are skipped in InferenceMode.
 /// - DEFAULT is for all other cases
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
-                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE, NO_VARIABLE_TYPE_VIEW };
+                                   NO_GRAD_FN, MULTI_OUTPUT_SAFE};
 
 /// Handles correctly propagating CreationMeta when a new view is created from a previous view.
 /// In general, we don't want the new view to be _less_ restrictive than the previous view
@@ -529,9 +529,9 @@ private:
   /// any operation on this backward view is valid.
 
   /// The value of the version_counter at the time grad_fn was created. The
-  /// grad_fn field is stale if attr_version != version_counter.current_version().
-  uint32_t attr_version;
-  CreationMeta creation_meta;
+  /// grad_fn field is stale if attr_version_ != version_counter.current_version().
+  uint32_t attr_version_;
+  CreationMeta creation_meta_;
 
 public:
   /// requires_grad is a backward AD field so we only use the view specific logic
@@ -551,22 +551,22 @@ public:
 
   uint32_t get_attr_version() const {
     TORCH_CHECK(has_bw_view(), "attr_version can only exist for backward views.");
-    return attr_version;
+    return attr_version_;
   }
 
   void set_attr_version(uint32_t new_attr_version) {
     TORCH_CHECK(has_bw_view(), "attr_version can only exist for backward views.");
-    attr_version = new_attr_version;
+    attr_version_ = new_attr_version;
   }
 
   CreationMeta get_creation_meta() const {
     TORCH_CHECK(has_bw_view(), "creation_meta can only exist for backward views.");
-    return creation_meta;
+    return creation_meta_;
   }
 
   void set_creation_meta(CreationMeta new_creation_meta) {
     TORCH_CHECK(has_bw_view(), "creation_meta can only exist for backward views.");
-    creation_meta = new_creation_meta;
+    creation_meta_ = new_creation_meta;
   }
 
   bool has_fw_view() const {
