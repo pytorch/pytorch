@@ -2,12 +2,16 @@ import torch
 
 import math
 import random
+import numpy as np
+import unittest
 
 from torch.testing._internal.common_utils import \
     (TestCase, make_tensor, run_tests, slowTest)
 from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
+from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal import mypy_wrapper
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -681,6 +685,100 @@ class TestFrameworkUtils(TestCase):
                 sorted_shard_tests = sorted(calculated_shards[0][1] + calculated_shards[1][1])
                 # All the tests should be represented by some shard
                 self.assertEqual(sorted_tests, sorted_shard_tests)
+
+
+skip_if_no_cuda = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+
+
+class TestAsserts(TestCase):
+    def test_assert_tensors_equal_not_tensors(self):
+        a = torch.empty(())
+        b = np.empty(())
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_tensors_equal(a, b)
+
+    @unittest.expectedFailure
+    def test_assert_tensors_equal_complex_support(self):
+        a = torch.ones(1, dtype=torch.float32)
+        b = torch.ones(1, dtype=torch.complex64)
+
+        torch.testing.assert_tensors_equal(a, b, check_dtype=False)
+
+    @unittest.expectedFailure
+    def test_assert_tensors_equal_sparse_support(self):
+        a = torch.empty(())
+        b = torch.sparse_coo_tensor(size=())
+
+        torch.testing.assert_tensors_equal(a, b)
+
+    @unittest.expectedFailure
+    def test_assert_tensors_equal_quantized_support(self):
+        a = torch.ones(1, dtype=torch.int32)
+        b = torch.ones(1, dtype=torch.qint32)
+
+        torch.testing.assert_tensors_equal(a, b)
+
+    def test_assert_tensors_equal_mismatching_shape(self):
+        a = torch.empty(())
+        b = a.clone().reshape((1,))
+
+        with self.assertRaisesRegex(AssertionError, "shape"):
+            torch.testing.assert_tensors_equal(a, b)
+
+    @skip_if_no_cuda
+    def test_assert_tensors_equal_mismatching_device(self):
+        a = torch.empty((), device=torch.device("cpu"))
+        b = a.clone().to(torch.device("cuda"))
+
+        with self.assertRaisesRegex(AssertionError, "device"):
+            torch.testing.assert_tensors_equal(a, b)
+
+    @skip_if_no_cuda
+    def test_assert_tensors_equal_mismatching_device_no_check(self):
+        a = torch.empty((), device=torch.device("cpu"))
+        b = a.clone().to(torch.device("cuda"))
+
+        torch.testing.assert_tensors_equal(a, b, check_device=False)
+
+    def test_assert_tensors_equal_mismatching_dtype(self):
+        a = torch.empty((), dtype=torch.float)
+        b = a.clone().to(torch.int)
+
+        with self.assertRaisesRegex(AssertionError, "dtype"):
+            torch.testing.assert_tensors_equal(a, b)
+
+    def test_assert_tensors_equal_mismatching_dtype_no_check(self):
+        a = torch.ones((), dtype=torch.float)
+        b = a.clone().to(torch.int)
+
+        torch.testing.assert_tensors_equal(a, b, check_dtype=False)
+
+    # def test_assert_tensors_equal_mismatching_stride(self):
+    #     a = torch.empty((1, 2))
+    #     b = a.clone().as_strided(a.shape, a.stride()[::-1])
+    #
+    #     with self.assertRaisesRegex(AssertionError, "stride"):
+    #         torch.testing.assert_tensors_equal(a, b)
+    #
+    # def test_assert_tensors_equal_mismatching_stride_no_check(self):
+    #     a = torch.ones((), dtype=torch.float)
+    #     b = torch.ones((), dtype=torch.int)
+    #
+    #     torch.testing._assert_attributes_equal(a, b, check_dtype=False)
+
+    def test_assert_tensors_equal_mismatching_values(self):
+        a = torch.tensor(1)
+        b = torch.tensor(2)
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_tensors_equal(a, b)
+
+    def test_assert_tensors_equal(self):
+        a = torch.tensor(1)
+        b = torch.tensor(1)
+
+        torch.testing.assert_tensors_equal(a, b)
 
 
 if __name__ == '__main__':
