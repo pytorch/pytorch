@@ -1,9 +1,9 @@
 rem remove dot in cuda_version, fox example 11.1 to 111
 set VERSION_SUFFIX=%CUDA_VERSION:.=%
-if "%VERSION_SUFFIX%"=="cpu" (
+IF "%VERSION_SUFFIX%"=="cpu" (
     set CUDA_SUFFIX=cpu
 )
-else (
+ELSE (
     set CUDA_SUFFIX=cuda%VERSION_SUFFIX%
 )
 
