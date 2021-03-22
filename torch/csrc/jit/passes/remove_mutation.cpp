@@ -156,8 +156,9 @@ void MutationRemover::RemoveListMutation(Block* block) {
         int pos = toIValue(node->inputs().at(1))->toInt();
         int size = list_construct->inputs().size();
         // insert to neg position equals insert to std::max(pos+size, 0)
-        if (pos < 0)
+        if (pos < 0) {
           pos = std::max(pos + size, 0);
+        }
         // insert beyond current list length is the same as append
         pos = std::min(pos, size);
         list_construct->insertInput(pos, node->inputs().at(2));
