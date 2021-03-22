@@ -48,10 +48,10 @@ __global__ void ROIPoolForward(
     T bin_size_h = static_cast<T>(roi_height) / static_cast<T>(pooled_height);
     T bin_size_w = static_cast<T>(roi_width) / static_cast<T>(pooled_width);
 
-    int hstart = static_cast<int>(floor(static_cast<T>(ph) * bin_size_h));
-    int wstart = static_cast<int>(floor(static_cast<T>(pw) * bin_size_w));
-    int hend = static_cast<int>(ceil(static_cast<T>(ph + 1) * bin_size_h));
-    int wend = static_cast<int>(ceil(static_cast<T>(pw + 1) * bin_size_w));
+    int hstart = static_cast<int>(floorf(static_cast<T>(ph) * bin_size_h));
+    int wstart = static_cast<int>(floorf(static_cast<T>(pw) * bin_size_w));
+    int hend = static_cast<int>(ceilf(static_cast<T>(ph + 1) * bin_size_h));
+    int wend = static_cast<int>(ceilf(static_cast<T>(pw + 1) * bin_size_w));
 
     // Add roi offsets and clip to input boundaries
     hstart = min(max(hstart + roi_start_h, 0), height);
