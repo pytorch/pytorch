@@ -317,9 +317,6 @@ _(aten, empty_like) \
 _(aten, empty_strided) \
 _(aten, eq) \
 _(aten, equal) \
-_(aten, erf) \
-_(aten, erfc) \
-_(aten, erfinv) \
 _(aten, exp) \
 _(aten, expand) \
 _(aten, expand_as) \
