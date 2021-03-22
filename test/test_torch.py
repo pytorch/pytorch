@@ -913,10 +913,17 @@ class AbstractTestCases:
                             idx = torch.randperm(num_dest, dtype=dtype, device=device).narrow(0, 0, num_copy)
                             if not index_contig:
                                 idx = torch.testing.make_non_contiguous(idx)
+                            # index_add_ without alpha argument
                             dest2 = dest.clone()
                             dest.index_add_(0, idx, src)
                             for i in range(idx.size(0)):
                                 dest2[idx[i]] += src[i]
+                            self.assertEqual(dest, dest2)
+                            # index_add_ with alpha argument
+                            dest2 = dest.clone()
+                            dest.index_add_(0, idx, src, alpha=2)
+                            for i in range(idx.size(0)):
+                                dest2[idx[i]] += src[i] * 2
                             self.assertEqual(dest, dest2)
 
         # add coverage for issue with atomic add that appeared only for

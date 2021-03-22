@@ -4945,7 +4945,7 @@
 - func: index_add.alpha(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
   variants: function, method
 
-- func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source, Scalar alpha=1) -> Tensor
+- func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
   variants: function, method
 
 - func: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)

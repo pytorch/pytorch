@@ -496,8 +496,8 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
   return self;
 }
 
-Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  self.index_add_(dim, index, source, 1);
+Tensor& index_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.index_add_(dim, index, source, 1);
 }
 
 Tensor index_add_alpha(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
