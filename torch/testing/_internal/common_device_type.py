@@ -11,7 +11,7 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
@@ -247,27 +247,32 @@ class DeviceTypeTestBase(TestCase):
             #   Test-sepcific decorators are applied to the original test,
             #   however.
             if op is not None:
-                active_decorators = []
-                if op.should_skip(generic_cls.__name__, name, cls.device_type, dtype):
-                    active_decorators.append(skipIf(True, "Skipped!"))
+                try:
+                    active_decorators = []
+                    if op.should_skip(generic_cls.__name__, name, cls.device_type, dtype):
+                        active_decorators.append(skipIf(True, "Skipped!"))
 
-                if op.decorators is not None:
-                    for decorator in op.decorators:
-                        # Can't use isinstance as it would cause a circular import
-                        if decorator.__class__.__name__ == 'DecorateInfo':
-                            if decorator.is_active(generic_cls.__name__, name, cls.device_type, dtype):
-                                active_decorators += decorator.decorators
-                        else:
-                            active_decorators.append(decorator)
+                    if op.decorators is not None:
+                        for decorator in op.decorators:
+                            # Can't use isinstance as it would cause a circular import
+                            if decorator.__class__.__name__ == 'DecorateInfo':
+                                if decorator.is_active(generic_cls.__name__, name, cls.device_type, dtype):
+                                    active_decorators += decorator.decorators
+                            else:
+                                active_decorators.append(decorator)
 
-                @wraps(test)
-                def test_wrapper(*args, **kwargs):
-                    return test(*args, **kwargs)
+                    @wraps(test)
+                    def test_wrapper(*args, **kwargs):
+                        return test(*args, **kwargs)
 
-                for decorator in active_decorators:
-                    test_wrapper = decorator(test_wrapper)
+                    for decorator in active_decorators:
+                        test_wrapper = decorator(test_wrapper)
 
-                test_fn = test_wrapper
+                    test_fn = test_wrapper
+                except Exception as ex:
+                    # Provides an error message for debugging before rethrowing the exception
+                    print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
+                    raise ex
             else:
                 test_fn = test
 
@@ -346,6 +351,15 @@ class CPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+# The meta device represents tensors that don't have any storage; they have
+# all metadata (size, dtype, strides) but they don't actually do any compute
+class MetaTestBase(DeviceTypeTestBase):
+    device_type = 'meta'
+    _ignore_not_implemented_error = True
+
+    def _should_stop_test_suite(self):
+        return False
+
 class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
     _do_cuda_memory_leak_check = True
@@ -399,8 +413,11 @@ def get_device_type_test_bases():
                 test_bases.append(CUDATestBase)
         else:
             test_bases.append(CPUTestBase)
+            test_bases.append(MetaTestBase)
     else:
         test_bases.append(CPUTestBase)
+        if not TEST_SKIP_NOARCH:
+            test_bases.append(MetaTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
@@ -585,6 +602,12 @@ class skipCUDAIf(skipIf):
 
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='cuda')
+
+# Skips a test on Meta if the condition is true.
+class skipMetaIf(skipIf):
+
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='meta')
 
 def _has_sufficient_memory(device, size):
     if torch.device(device).type == 'cuda':
@@ -861,6 +884,12 @@ def skipCPUIfNoMkl(fn):
 def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
+# Skips a test on CUDA if cuSOLVER is not available
+def skipCUDAIfNoCusolver(fn):
+    version = _get_torch_cuda_version()
+    return skipCUDAIf(version < (10, 2), "cuSOLVER not available")(fn)
+
+# Skips a test if both cuSOLVER and MAGMA are not available
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
     version = _get_torch_cuda_version()
     if version >= (10, 2):
@@ -915,3 +944,6 @@ def skipCUDAIfCudnnVersionLessThan(version=0):
 
 def skipCUDAIfNoCudnn(fn):
     return skipCUDAIfCudnnVersionLessThan(0)(fn)
+
+def skipMeta(fn):
+    return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
