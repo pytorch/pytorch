@@ -835,6 +835,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.erfc: lambda input: -1,
         torch.special.erfinv: lambda input: -1,
         torch.special.gammaln: lambda input: -1,
+        torch.special.i0e: lambda input: -1,
         torch.t: lambda input: -1,
         torch.take: lambda input, index: -1,
         torch.tan: lambda input, out=None: -1,
