@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/util/irange.h>
 
 using namespace c10;
 using namespace c10::impl;
@@ -55,7 +56,7 @@ TEST(SizesAndStridesTest, Resize) {
   sz.resize(5);
   checkData(sz, {0, 0, 0, 0, 0}, {1, 0, 0, 0, 0});
 
-  for (int ii = 0; ii < sz.size(); ++ii) {
+  for (const auto ii : c10::irange(sz.size())) {
     sz.size_at_unchecked(ii) = ii + 1;
     sz.stride_at_unchecked(ii) = 2 * (ii + 1);
   }
@@ -113,7 +114,7 @@ TEST(SizesAndStridesTest, Resize) {
   // Give it different data than it had when it was small to avoid
   // getting it right by accident (i.e., because of leftover inline
   // storage when going small to big).
-  for (int ii = 0; ii < sz.size(); ++ii) {
+  for (const auto ii : c10::irange(sz.size())) {
     sz.size_at_unchecked(ii) = ii - 1;
     sz.stride_at_unchecked(ii) = 2 * (ii - 1);
   }
@@ -175,7 +176,7 @@ TEST(SizesAndStridesTest, SetViaData) {
 static SizesAndStrides makeSmall(int offset = 0) {
   SizesAndStrides small;
   small.resize(3);
-  for (int ii = 0; ii < small.size(); ++ii) {
+  for (const auto ii : c10::irange(small.size())) {
     small.size_at_unchecked(ii) = ii + 1 + offset;
     small.stride_at_unchecked(ii) = 2 * (ii + 1 + offset);
   }
@@ -186,7 +187,7 @@ static SizesAndStrides makeSmall(int offset = 0) {
 static SizesAndStrides makeBig(int offset = 0) {
   SizesAndStrides big;
   big.resize(8);
-  for (int ii = 0; ii < big.size(); ++ii) {
+  for (const auto ii : c10::irange(big.size())) {
     big.size_at_unchecked(ii) = ii - 1 + offset;
     big.stride_at_unchecked(ii) = 2 * (ii - 1 + offset);
   }

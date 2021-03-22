@@ -6,6 +6,8 @@
 #include <ATen/native/im2col.h>
 #include <ATen/native/vol2col.h>
 
+#include <c10/util/irange.h>
+
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/DilatedConvolutionUtils.h>
 
@@ -203,7 +205,7 @@ void slow_conv_dilated_all_cpu_template(
 
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(), "slow_conv_dilated<>", [&] {
     // For each elt in batch, do:
-    for (int elt = 0; elt < batchSize; elt++) {
+    for (const auto elt : c10::irange(batchSize)) {
       // Matrix multiply per output:
       Tensor input_n = input.select(0, elt);
 
@@ -233,7 +235,7 @@ void slow_conv_dilated_all_cpu_template(
           */
           // The following for-loop is equivalent to the above
           // gemm setup but avoids allocation of ones tensor:
-          for (int n = 0; n < nOutputPlane; n++) {
+          for (const auto n : c10::irange(nOutputPlane)) {
             output_n.select(0, n).fill_(bias[n]);
           }
         }

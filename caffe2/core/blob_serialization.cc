@@ -3,6 +3,8 @@
 #include <mutex>
 #include <sstream>
 
+#include <c10/util/irange.h>
+
 #include "caffe2/core/blob.h"
 #include "caffe2/utils/proto_utils.h"
 
@@ -154,7 +156,7 @@ void TensorSerializer::SerializeWithChunkSize(
   std::vector<std::future<void>> futures;
   if (tensor.numel() > chunk_size) {
     futures.reserve(FLAGS_caffe2_max_tensor_serializer_threads);
-    for (int i = 0; i < FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
+    for (const auto i : c10::irange(FLAGS_caffe2_max_tensor_serializer_threads)) {
       futures.emplace_back(std::async(std::launch::async, task));
     }
   }
@@ -267,7 +269,7 @@ void TensorSerializer::Serialize(
   proto.mutable_segment()->set_begin(chunkBegin);
   proto.mutable_segment()->set_end(chunkBegin + chunkSize);
 
-  for (int i = 0; i < input.dim(); ++i) {
+  for (const auto i : c10::irange(input.dim())) {
     proto.add_dims(input.size(i));
   }
   const TensorProto::DataType data_type = TypeMetaToDataType(input.dtype());
@@ -346,7 +348,7 @@ void TensorSerializer::Serialize(
       proto.mutable_string_data()->Reserve(chunkSize);
       if (chunkSize > 0) {
         const char* raw_data = static_cast<const char*>(input.raw_data());
-        for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
+        for (const auto i : c10::irange(chunkBegin, chunkBegin + chunkSize)) {
           proto.add_string_data(SerializeBlob(
               raw_data + i * input.itemsize(), input.dtype(), ""));
         }
@@ -639,7 +641,7 @@ void TensorDeserializer::DeserializeToTensor(
     case TensorProto_DataType_UNDEFINED: {
       Blob temp_blob;
       void* raw_ptr = nullptr;
-      for (int i = 0; i < chunkSize; ++i) {
+      for (const auto i : c10::irange(chunkSize)) {
         DeserializeBlob(tensor_proto.string_data(i), &temp_blob);
         if (i == 0) {
           raw_ptr = tensor->raw_mutable_data(temp_blob.meta());
