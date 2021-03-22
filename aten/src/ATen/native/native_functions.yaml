@@ -4930,13 +4930,19 @@
     CPU: legacy::cpu::_th_put_
     CUDA: legacy::cuda::_th_put_
 
-- func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source, Scalar alpha=1) -> Tensor(a!)
+- func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
+  variants: method
+
+- func: index_add_.alpha(Tensor(a!) self, int dim, Tensor index, Tensor source, *, Scalar alpha) -> Tensor(a!)
   variants: method
   dispatch:
     CPU: index_add_cpu_
     CUDA: index_add_cuda_
 
-- func: index_add(Tensor self, int dim, Tensor index, Tensor source, Scalar alpha=1) -> Tensor
+- func: index_add(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
+  variants: function, method
+
+- func: index_add.alpha(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
   variants: function, method
 
 - func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source, Scalar alpha=1) -> Tensor

@@ -496,8 +496,16 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
   return self;
 }
 
-Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
+Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  self.index_add_(dim, index, source, 1);
+}
+
+Tensor index_add_alpha(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
   return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source, alpha);
+}
+
+Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source);
 }
 
 // Check that indices fall within dimension array size
