@@ -320,7 +320,9 @@ def compute_aten_op(f: NativeFunction) -> str:
     return f'{{"aten::{f.func.name.name}", "{f.func.name.overload_name}"}},'
 
 # Generates MetaFunctions.h
-def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
+def compute_meta_function_declaration(g: StructuredNativeFunctions) -> Optional[str]:
+    if not g.structured:
+        return None
     with native_function_manager(g.out):
         name = meta.name(g)
         args = structured.meta_arguments(g)
@@ -929,7 +931,7 @@ def main() -> None:
     })
 
     cpu_fm.write('MetaFunctions.h', lambda: {
-        'declarations': list(map(compute_meta_function_declaration, structured_native_functions)),
+        'declarations': list(mapMaybe(compute_meta_function_declaration, structured_native_functions)),
     })
 
     schema_selector = selector

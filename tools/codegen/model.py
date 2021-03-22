@@ -416,11 +416,19 @@ SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
+#
+# NB: we create StructuredNativeFunctions *even if* the function is not
+# actually annotated structured.  Test the structured boolean to see if it
+# actually is structured or not.
 @dataclass(frozen=True)
 class StructuredNativeFunctions:
     functional: NativeFunction
     inplace: Optional[NativeFunction]
     out: NativeFunction
+
+    @property
+    def structured(self) -> bool:
+        return self.out.structured
 
     def __post_init__(self) -> None:
         test_sig: FunctionSchema = self.functional.func.signature()
@@ -431,17 +439,20 @@ class StructuredNativeFunctions:
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
                 )
         assert self.functional.func.kind() == SchemaKind.functional
-        assert self.functional.structured_delegate == self.out.func.name, \
-            f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
-            f"but its actual delegate is {self.out.func.name}"
         assert self.out.func.kind() == SchemaKind.out
-        assert self.out.structured
-        # For now, structured composite kernels are not supported (need some
-        # design work to figure out how to make the composite case work)
-        assert self.out.dispatch.keys() != {DispatchKey.Math}
         if self.inplace is not None:
             assert self.inplace.func.kind() == SchemaKind.inplace
-            assert self.inplace.structured_delegate == self.out.func.name
+
+        if self.structured:
+            # For now, structured composite kernels are not supported (need some
+            # design work to figure out how to make the composite case work)
+            assert self.out.dispatch.keys() != {DispatchKey.Math}
+
+            assert self.functional.structured_delegate == self.out.func.name, \
+                f"{self.functional.func.name} delegates to {self.functional.structured_delegate} " \
+                f"but its actual delegate is {self.out.func.name}"
+            if self.inplace is not None:
+                assert self.inplace.structured_delegate == self.out.func.name
 
     def signature(self) -> 'FunctionSchema':
         return self.out.func.signature()
@@ -454,10 +465,18 @@ class StructuredNativeFunctions:
 
     @staticmethod
     def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['StructuredNativeFunctions']:
-        functional = d.get(SchemaKind.functional)
-        inplace = d.get(SchemaKind.inplace)
-        out = d.get(SchemaKind.out)
-        if functional is None or out is None or not out.structured:
+        assert d
+        if len(d) == 1:
+            return None
+        d = dict(d)  # non-destructive updates please
+        functional = d.pop(SchemaKind.functional, None)
+        inplace = d.pop(SchemaKind.inplace, None)
+        out = d.pop(SchemaKind.out, None)
+        assert not d
+        assert functional is not None
+        # There are a few operators which only have functional/inplace variants;
+        # these don't count as structured for our purposes here
+        if out is None:
             return None
         return StructuredNativeFunctions(
             functional=functional,

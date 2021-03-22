@@ -52,7 +52,10 @@ class RegisterDispatchKey:
     @method_with_native_function
     def __call__(self, f: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
         if isinstance(f, StructuredNativeFunctions):
-            return self.gen_structured(f)
+            if f.structured:
+                return self.gen_structured(f)
+            else:
+                return list(mapMaybe(self.gen_unstructured, f.functions()))
         elif isinstance(f, NativeFunction):
             r = self.gen_unstructured(f)
             return [] if r is None else [r]
