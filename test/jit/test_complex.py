@@ -6,6 +6,7 @@ from typing import List, Dict
 from itertools import product
 from textwrap import dedent
 import cmath  # noqa
+from torch.testing._internal.common_utils import (IS_WINDOWS, IS_MACOS)
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -92,6 +93,9 @@ class TestComplex(JitTestCase):
 
                 if res_python != res_script:
                     if isinstance(res_python, Exception):
+                        continue
+
+                    if (a == complex(inf, nan) and IS_WINDOWS) or (a == complex(-inf, inf) and IS_MACOS):
                         continue
 
                     msg = ("Failed on {func_name} with input {a}. Python: {res_python}, Script: {res_script}"
