@@ -125,7 +125,8 @@ def FalsePred(_):
 def TruePred(_):
     return True
 
-_VC2019 = VcSpec(2019)
+# VC-19.28.29913 is incompatible with NVCC, rolling back to 14.27
+_VC2019 = VcSpec(2019, ["14", "27"], hide_version=True)
 
 WORKFLOW_DATA = [
     # VS2019 CUDA-10.1
