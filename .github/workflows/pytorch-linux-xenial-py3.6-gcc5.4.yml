@@ -73,6 +73,10 @@ jobs:
             -w /var/lib/jenkins/workspace \
             ${DOCKER_IMAGE} \
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v alpine chown -R "$(id -u):$(id -g)" .
       - name: Archive artifacts into zip
         run: |
           zip -r artifacts.zip dist build
