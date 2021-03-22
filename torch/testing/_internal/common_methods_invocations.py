@@ -344,6 +344,7 @@ class UnaryUfuncInfo(OpInfo):
                                              dtypesIfCPU=dtypesIfCPU,
                                              dtypesIfCUDA=dtypesIfCUDA,
                                              dtypesIfROCM=dtypesIfROCM,
+                                             default_test_dtypes=default_test_dtypes,
                                              sample_inputs_func=sample_inputs_func,
                                              supports_sparse=supports_sparse,
                                              **kwargs)
@@ -1855,7 +1856,7 @@ op_db: List[OpInfo] = [
                        # "rsqrt_cpu" not implemented for 'BFloat16'
                        SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                device_type='cpu', dtypes=[torch.cfloat]),
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestGradients', 'test_fn_grad',
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_method_grad',
@@ -1919,7 +1920,8 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            skips=(
                # "addmv_impl_cpu" not implemented for 'Half'
-               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16,)),
+               # at::cuda::blas::gemv: not implemented for N3c108BFloat16E
+               SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.float16, torch.bfloat16)),
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),),
