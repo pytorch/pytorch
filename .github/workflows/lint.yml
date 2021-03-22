@@ -22,10 +22,10 @@ jobs:
         uses: actions/checkout@v2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - name: Ensure consistent CircleCI YAML config
-        run: |
-          pip install -r requirements.txt
-          cd .circleci && ./ensure-consistency.py
+      # - name: Ensure consistent CircleCI YAML config
+      #   run: |
+      #     pip install -r requirements.txt
+      #     cd .circleci && ./ensure-consistency.py
       - name: Shellcheck Jenkins scripts
         # https://github.com/koalaman/shellcheck#installing-a-pre-compiled-binary
         run: |
