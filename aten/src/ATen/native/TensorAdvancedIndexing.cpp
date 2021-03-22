@@ -500,7 +500,7 @@ Tensor& index_add_(Tensor & self, int64_t dim, const Tensor & index, const Tenso
   return self.index_add_(dim, index, source, 1);
 }
 
-Tensor index_add_alpha(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
+Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
   return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source, alpha);
 }
 

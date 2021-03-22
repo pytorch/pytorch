@@ -738,7 +738,9 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad):
     idx_nonctg = make_arg((S,), dtype=torch.int64, low=0, high=S, discontiguous=True)
     idx_neg = -idx - 1
     samples = [SampleInput(tensor, args=(1, idx, source))
-               for tensor, idx, source in product([t, t_nonctg], [idx, idx_nonctg], [s, s_nonctg])]
+               for tensor, idx, source in product([t, t_nonctg], [idx, idx_nonctg, idx_neg], [s, s_nonctg])]
+    samples.extend(SampleInput(tensor, args=(1, idx, source), kwargs=dict(alpha=a))
+               for tensor, idx, source, a in product([t, t_nonctg], [idx, idx_nonctg, idx_neg], [s, s_nonctg], [-1, 0, 2]))
 
     # Add scalar cases
     scalar_sizes = [(), (1,)]
@@ -747,6 +749,7 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad):
     ss = (make_arg(size) for size in scalar_sizes)
 
     samples.extend(SampleInput(t, args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
+    samples.extend(SampleInput(t, args=(0, idx, s), kwargs=dict(alpha=a)) for t, idx, s, a in product(ts, idxs, ss, [-1, 0, 2]))
     return samples
 
 def sample_inputs_sort(op_info, device, dtype, requires_grad):
