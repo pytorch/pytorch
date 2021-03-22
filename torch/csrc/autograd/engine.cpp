@@ -145,23 +145,9 @@ static thread_local std::shared_ptr<ReadyQueue> local_ready_queue = nullptr;
 // and the function is responsible for properly acquiring them.
 //
 // The stream semantics of a backward() (or torch.autograd.grad()) call
-// with respect to surrounding ops are the same as for any other call:
-//
-// Safe
-//   with torch.cuda.stream(s):
-//       loss.backward()
-//       use grads populated by backward
-//
-// Not safe
-//   with torch.cuda.stream(s):
-//       loss.backward()
-//   use grads populated by backward
-//
-// Safe
-//   with torch.cuda.stream(s):
-//       loss.backward()
-//   torch.cuda.current_stream.wait_stream(s)
-//   use grads populated by backward
+// with respect to surrounding ops are the same as for any other call.
+// See "Stream semantics of backward passes" on
+// https://pytorch.org/docs/stable/notes/cuda.html
 //
 // Internally, backward() runs ops (including leaf nodes) on side threads.
 // And streams are thread local. So the engine achieves the above semantics
@@ -533,6 +519,7 @@ void GraphTask::exec_post_processing() {
     final_callbacks_[i]();
     cb_lock.lock();
   }
+  // std::cout << "exec_post_processing" << std::endl;
 }
 
 void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
@@ -749,7 +736,7 @@ void Engine::evaluate_function(
   int num_outputs = outputs.size();
   if (num_outputs == 0) { // Note: doesn't acquire the mutex
     // Records leaf stream (if applicable)
-    // See note "Streaming backwards"
+    // See Note [Streaming backwards]
     if (opt_parent_stream) {
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       graph_task->leaf_streams.emplace(*opt_parent_stream);
@@ -937,12 +924,13 @@ auto Engine::execute(const edge_list& roots,
   fut->wait();
 
   // Syncs leaf streams with ambient (current) streams of the thread that called execute().
-  // See note "Streaming backwards". leaf_streams is an unordered_set so it should only
+  // See Note [Streaming backwards]. leaf_streams is an unordered_set so it should only
   // hold a small number of streams to sync with.
   for (const auto& leaf_stream : graph_task->leaf_streams) {
     const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
     const auto current_stream = guard.getStream(leaf_stream.device());
-    // std::cout << "current stream " << guard.getStream(leaf_stream.device()) << std::endl;
+    // std::cout << "current stream " << guard.getStream(leaf_stream.device())
+    //           << ", leaf stream " << leaf_stream << std::endl;
     if (leaf_stream != current_stream) {
       auto event = c10::Event{c10::DeviceType::CUDA};
       event.record(leaf_stream);

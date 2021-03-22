@@ -220,37 +220,39 @@ the acts of
 
 have the same stream-semantics relationship as any group of ops::
 
+    s = torch.cuda.Stream()
+
     # Safe, grads are used in the same stream context as backward()
-    with torch.cuda.stream(strm):
+    with torch.cuda.stream(s):
         loss.backward()
         use grads
 
     # Unsafe
-    with torch.cuda.stream(strm):
+    with torch.cuda.stream(s):
         loss.backward()
     use grads
 
     # Safe, with synchronization
-    with torch.cuda.stream(strm):
+    with torch.cuda.stream(s):
         loss.backward()
-    torch.cuda.current_stream().wait_stream(strem)
+    torch.cuda.current_stream().wait_stream(s)
     use grads
 
     # Safe, populating initial grad and invoking backward are in the same stream context
-    with torch.cuda.stream(strm):
+    with torch.cuda.stream(s):
         loss.backward(gradient=torch.ones_like(loss))
 
     # Unsafe, populating initial_grad and invoking backward are in different stream contexts,
     # without synchronization
     initial_grad = torch.ones_like(loss)
-    with torch.cuda.stream(strm):
+    with torch.cuda.stream(s):
         loss.backward(gradient=initial_grad)
 
     # Safe, with synchronization
     initial_grad = torch.ones_like(loss)
-    strm.wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(strm):
-        initial_grad.record_stream(strm)
+    s.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(s):
+        initial_grad.record_stream(s)
         loss.backward(gradient=initial_grad)
 
 If your forward pass runs some independent ops in parallel on different streams,
