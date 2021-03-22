@@ -2181,7 +2181,7 @@ class TestOperatorSignatures(JitTestCase):
                 # loop via `else`, we haven't found a match
                 for schema in schemas:
                     try:
-                        bound_args = schema.bind(*sample_input.input, *sample_input.args, **sample_input.kwargs)
+                        bound_args = schema.bind(sample_input.input, *sample_input.args, **sample_input.kwargs)
                         bound_args.apply_defaults()
                         op(*bound_args.args, **bound_args.kwargs)
                         break
