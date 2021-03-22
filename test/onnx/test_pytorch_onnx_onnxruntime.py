@@ -890,6 +890,46 @@ class TestONNXRuntime(unittest.TestCase):
         z = torch.randn(2, 3)
         self.run_test(Model(), (x, None, z))
 
+    def test_primitive_input_integer(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: int, y):
+                return x + y
+
+        x = 3
+        y = torch.randint(10, (2, 3, 4))
+        self.run_test(Model(), (x, y))
+
+    def test_primitive_input_floating(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: float, y):
+                return x + y
+
+        x = 3.0
+        y = torch.randn(2, 3, 4)
+        self.run_test(Model(), (x, y))
+
+    def test_primitive_input_bool(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, flag: bool, x, y):
+                if flag:
+                    return x
+                else:
+                    return y
+
+        flag = True
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
+        self.run_test(torch.jit.script(Model()), (flag, x, y))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_cste_script(self):
         class MyModel(torch.jit.ScriptModule):
@@ -3171,7 +3211,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Model(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # scripting prim_dtype
     def test_lstm_no_hidden(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
@@ -3185,7 +3224,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(LSTMModel(), (input,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # scripting prim_dtype
     def test_lstm_proj_no_hidden(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
@@ -3627,6 +3665,18 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input):
                 return input > 1
         self._test_compare_ops(GreaterModel(), 1)
+
+    def test_gt_primitive(self):
+        class GreaterModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.y : int = 2
+
+            def forward(self, x: int):
+                return self.y > x
+
+        x = 3
+        self.run_test(GreaterModel(), (x, ))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_ge_scalar(self):

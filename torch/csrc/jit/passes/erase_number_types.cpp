@@ -6,13 +6,19 @@
 namespace torch {
 namespace jit {
 
+void SetNumTypeToTensorType(Value* v) {
+  if (v->type()->isSubtypeOf(NumberType::get())) {
+    v->setType(TensorType::fromNumberType(v->type()));
+  } else if (v->type()->isSubtypeOf(BoolType::get())) {
+    v->setType(TensorType::fromBoolType());
+  }
+}
+
 void EraseNumberTypesOnBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
     for (auto inp : it->inputs()) {
-      if (inp->type()->isSubtypeOf(NumberType::get())) {
-        inp->setType(TensorType::get());
-      }
+      SetNumTypeToTensorType(inp);
     }
     for (auto sub : it->blocks()) {
       EraseNumberTypesOnBlock(sub);
@@ -49,11 +55,7 @@ void EraseNumberTypesOnBlock(Block* block) {
       } break;
       default: {
         for (auto o : it->outputs()) {
-          if (o->type()->isSubtypeOf(NumberType::get())) {
-            o->setType(TensorType::fromNumberType(o->type()));
-          } else if (o->type()->isSubtypeOf(BoolType::get())) {
-            o->setType(TensorType::fromBoolType());
-          }
+          SetNumTypeToTensorType(o);
         }
       } break;
     }
@@ -61,6 +63,9 @@ void EraseNumberTypesOnBlock(Block* block) {
 }
 
 void EraseNumberTypes(const std::shared_ptr<Graph>& graph) {
+  for (auto inp : graph->inputs()) {
+    SetNumTypeToTensorType(inp);
+  }
   EraseNumberTypesOnBlock(graph->block());
 }
 } // namespace jit
