@@ -805,7 +805,6 @@ def create_script_dict(obj, type_hint=None):
         and can be passed between Python and TorchScript with reference semantics and
         zero copy overhead.
     """
-    # TODO: Does it make sense to pass in loc=None here?
     if type_hint:
         ty = ann_to_type(type_hint, None)
         return torch._C.ScriptDict(obj, ty)  # type: ignore

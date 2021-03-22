@@ -145,6 +145,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       } catch (py::cast_error& e) {
       }
 
+      TORCH_WARN(
+          "Script your dictionary using torch.jit.script in order to get reference semantics and reduced copy overhead between Python and TorchScript");
+
       // If not (i.e. it is a regular Python dictionary), make a new
       // c10::Dict.
       return createGenericDict(

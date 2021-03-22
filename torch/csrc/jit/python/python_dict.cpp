@@ -120,15 +120,25 @@ void initScriptDictBindings(PyObject* module) {
       .def(
           "__getitem__",
           [](const std::shared_ptr<ScriptDict>& self, py::object key) {
+            IValue value;
+
+            // Convert key to IValue.
             try {
-              auto value = self->getItem(
-                  toIValue(std::move(key), self->type()->getKeyType()));
-              return toPyObject(value);
-            } catch (const std::out_of_range& e) { // Key doesn't exist.
-              throw py::key_error();
-            } catch (const py::cast_error& e) { // Key isn't the right type.
+              value = toIValue(std::move(key), self->type()->getKeyType());
+            } catch (const py::cast_error& e) {
+              // It would be nice to throw py::type_error here but py::key_error
+              // needs to be thrown for parity with eager mode.
               throw py::key_error();
             }
+
+            // Call getItem on self.
+            try {
+              value = self->getItem(value);
+            } catch (const std::out_of_range& e) { // Key doesn't exist.
+              throw py::key_error();
+            }
+
+            return toPyObject(std::move(value));
           },
           py::return_value_policy::
               reference_internal) // Return value is a reference to an object
@@ -144,7 +154,7 @@ void initScriptDictBindings(PyObject* module) {
             try {
               key_ivalue = toIValue(std::move(key), self->type()->getKeyType());
             } catch (const py::cast_error& e) {
-              throw py::key_error();
+              throw py::type_error();
             }
 
             // Try to convert the value to an IValue.
@@ -152,7 +162,7 @@ void initScriptDictBindings(PyObject* module) {
               value_ivalue =
                   toIValue(std::move(value), self->type()->getValueType());
             } catch (const py::cast_error& e) {
-              throw py::value_error();
+              throw py::type_error();
             }
 
             self->setItem(key_ivalue, value_ivalue);
@@ -166,7 +176,7 @@ void initScriptDictBindings(PyObject* module) {
             try {
               key_ivalue = toIValue(std::move(key), self->type()->getKeyType());
             } catch (const py::cast_error& e) {
-              throw py::key_error();
+              throw py::type_error();
             }
 
             // If removed = false, that means the key didn't exist in the

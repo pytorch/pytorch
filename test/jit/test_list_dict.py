@@ -1827,16 +1827,16 @@ class TestScriptDict(JitTestCase):
         self._compare_eager_and_script(fn, data)
 
         # Check that using improperly typed keys and values
-        # throws KeyError and ValueError.
+        # throws TypeError.
         # _compare_eager_and_script cannot be used here since
         # the following uses of __setitem__ are valid in
         # Python.
         script_data = torch.jit.script(data)
 
-        with self.assertRaises(KeyError):
+        with self.assertRaises(TypeError):
             script_data["str"] = 3
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             script_data[3] = "str"
 
     def test_contains(self):
@@ -1873,10 +1873,10 @@ class TestScriptDict(JitTestCase):
         self._compare_eager_and_script(del_fn_raises, data)
 
         # Check that using an improperly typed key
-        # throws KeyError.
+        # throws TypeError.
         script_data = torch.jit.script(data)
 
-        with self.assertRaises(KeyError):
+        with self.assertRaises(TypeError):
             del script_data["str"]
 
     def test_len(self):

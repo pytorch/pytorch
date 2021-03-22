@@ -164,7 +164,6 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::BasicBlock* bb_;
   llvm::Value* value_{nullptr};
   llvm::JITTargetAddress kernelAddress_;
-  std::unique_ptr<void* []> argv_ { nullptr };
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
@@ -176,6 +175,9 @@ class LLVMCodeGenImpl : public IRVisitor {
   std::unordered_map<const Var*, llvm::Value*> varToVal_;
   std::unordered_map<const Block*, std::vector<const Var*>> scopeToVar_;
   const Block* scope_;
+
+  std::string llvmCode;
+  std::string asmCode;
 
  private:
   llvm::LLVMContext& getContext();
@@ -214,7 +216,6 @@ class LLVMCodeGenImpl : public IRVisitor {
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
-  void** getArgvAddress() const;
 
   void visit(const Add* v) override;
   void visit(const Sub* v) override;
@@ -268,34 +269,24 @@ class LLVMCodeGenImpl : public IRVisitor {
       llvm::Value* val);
 
   void optimize(llvm::Module& M);
+  std::string getLLVMCodeText() {
+    return llvmCode;
+  }
+  std::string getASMCodeText() {
+    return asmCode;
+  }
 };
 
 typedef void (*ParallelCallee)(int index, int8_t* packed_data);
 void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
   // TODO: preserve the func type.
   ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
-  // TODO: use absl::BlockingCounter or similar if less overhead is needed.
-  std::mutex m;
-  int remaining_tasks = stop - start; // GUARDED_BY m
-  std::condition_variable cv; // GUARDED_BY m
-  for (int index = start; index < stop; index++) {
-    if (index != stop - 1) {
-      at::intraop_launch([&, index]() {
-        callee(index, packed_data);
-        std::unique_lock<std::mutex> l(m);
-        remaining_tasks--;
-        cv.notify_one();
-      });
-      USE_TRIGGER(llvm_codegen_parallel_dispatched);
-    } else {
-      // the current thread handles the last one.
+  at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
+    for (int index = f_begin; index < f_end; index++) {
       callee(index, packed_data);
-      USE_TRIGGER(llvm_codegen_parallel_dispatched);
-      std::unique_lock<std::mutex> l(m);
-      remaining_tasks--;
-      cv.wait(l, [&] { return remaining_tasks == 0; });
     }
-  }
+  });
+  USE_TRIGGER(llvm_codegen_parallel_dispatched);
 }
 
 } // namespace tensorexpr
@@ -344,13 +335,15 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
     throw malformed_input("wrong number of args in call");
   }
 
-  void** argv = impl_->getArgvAddress();
+  constexpr unsigned nargs = 8;
+  c10::SmallVector<void*, nargs> argv;
+  argv.resize(buf_args.size());
   for (size_t i = 0, e = buf_args.size(); i < e; i++) {
     auto const& bufferArg = buf_args[i];
     auto const& callArg = args[i];
     argv[i] = argToPtr(bufferArg, callArg);
   }
-  value<float>(argv);
+  value<float>(argv.data());
   USE_TRIGGER(llvm_codegen_executed);
 }
 
@@ -369,12 +362,16 @@ void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
   return (void*)impl->getKernelAddress();
 }
 
-llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
-  return kernelAddress_;
+std::string LLVMCodeGen::getCodeText(const std::string& attr /*=""*/) {
+  if (attr == "asm") {
+    return impl_->getASMCodeText();
+  } else {
+    return impl_->getLLVMCodeText();
+  }
 }
 
-void** LLVMCodeGenImpl::getArgvAddress() const {
-  return argv_.get();
+llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
+  return kernelAddress_;
 }
 
 LLVMCodeGenImpl::LLVMCodeGenImpl(
@@ -439,7 +436,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   jit_->addModule(std::move(module_), std::move(context_));
   auto sym = jit_->findSymbol("wrapper");
   kernelAddress_ = assertSuccess(sym.getAddress());
-  argv_ = std::make_unique<void*[]>(params.size());
 
   USE_TRIGGER(llvm_codegen_created);
 }
@@ -558,22 +554,24 @@ void LLVMCodeGenImpl::emitKernel(
 
   // print graph debug info after optimization
   asmBuffer.set_size(0);
-  if (GRAPH_DEBUG_ENABLED) {
-    module_->print(asmStream, nullptr);
-    llvm::legacy::PassManager PM;
-    jit_->getTargetMachine().addPassesToEmitFile(
-        PM,
-        asmStream,
-        nullptr,
+  module_->print(asmStream, nullptr);
+  llvmCode = asmStream.str().str();
+  asmBuffer.set_size(0);
+  llvm::legacy::PassManager PM;
+  jit_->getTargetMachine().addPassesToEmitFile(
+      PM,
+      asmStream,
+      nullptr,
 #if LLVM_VERSION_MAJOR >= 10
-        llvm::CodeGenFileType::CGFT_AssemblyFile);
+      llvm::CodeGenFileType::CGFT_AssemblyFile);
 #else
-        llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
+      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
 #endif
-    PM.run(*module_);
-  }
+  PM.run(*module_);
+  asmCode = asmStream.str().str();
+
   GRAPH_DEBUG(
-      "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
+      "\nLLVM module after optimizations\n\n", llvmCode, "\n", asmCode, "\n");
 }
 
 // TODO: The binary ops are copypasta.

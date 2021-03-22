@@ -1,10 +1,25 @@
-#include <ATen/cuda/Exceptions.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
+#include <ATen/cuda/Exceptions.h>
 #include <ATen/Functions.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 
 namespace at {
 namespace cuda {
+
+MempoolId_t graph_pool_handle() {
+#if CUDA_VERSION >= 11000
+  // uuid count starts at 1. 0 is reserved to mean "wasn't set by graph_pool_handle".
+  static std::atomic<CaptureId_t> uuid{1};
+  // Sets just the second value, to distinguish it from MempoolId_ts created from
+  // cudaStreamGetCaptureInfo id_s in capture_begin.
+  return {0, uuid++};
+#else
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+  return {0, 0};
+#endif
+}
 
 /**
  * Note [CUDA Graph Wrapper Class]
@@ -22,6 +37,11 @@ namespace cuda {
  *     ops properly.  Their graphs would yield invalid numerics on replay.
  */
 
+/**
+ * Note [Interaction with CUDA graph capture] in CUDACachingAllocator.cpp
+ * describes memory management for captures.
+ */
+
 CUDAGraph::CUDAGraph()
   // CUDAStreams may not be default-constructed.
   : capture_stream_(at::cuda::getCurrentCUDAStream()) {
@@ -30,7 +50,7 @@ CUDAGraph::CUDAGraph()
 #endif
 }
 
-void CUDAGraph::capture_begin() {
+void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
 #if CUDA_VERSION >= 11000
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
@@ -58,16 +78,47 @@ void CUDAGraph::capture_begin() {
 
   capture_stream_ = stream;
   capture_gen_ = gen;
+  capture_dev_ = c10::cuda::current_device();
 
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, cudaStreamCaptureModeGlobal));
 
-  // Stashes the current graph's uuid.
+  // Stashes the current capture's uuid.
   cudaStreamCaptureStatus status;
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &id_));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
+
+  // Ensures uuid count starts at 1. 0 is reserved to mean "not set by cudaStreamGetCaptureInfo".
+  // (But how do we know GetCaptureInfo never sets id_ to 0? Because that's the current behavior,
+  // and I asked cuda devs to keep it that way, and they agreed.)
+  TORCH_INTERNAL_ASSERT(id_ > 0);
+  if (pool.first != 0 || pool.second != 0) {
+    // Either value being nonzero means the user supplied a pool to share.
+    // But only one should be nonzero.
+    // If pool was created by another graph's capture_begin, first should be nonzero.
+    // If pool was created by graph_pool_handle, second should be nonzero.
+    TORCH_INTERNAL_ASSERT(!(pool.first && pool.second));
+    mempool_id_ = pool;
+  } else {
+    // User did not ask us to share a mempool. Use our own id_ as our mempool_id_.
+    // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
+    mempool_id_ = {id_, 0};
+  }
+
+  // When CUDACachingAllocator allocates while a capture is underway, it calls cudaStreamGetCaptureInfo
+  // to get the current stream's capture id, if any. Here we tell CUDACachingAllocator: if the stream
+  // has a capture id matching this graph's id_, use the private pool mempool_id_ identifies.
+  //
+  // There's a small chance of a bad allocation here if another thread launches a kernel on
+  // capture_stream_ between the call to cudaStreamBeginCapture above and the call to
+  // notifyCaptureBegin below.
+  // But I don't think we need to worry about it because that use case makes no sense:
+  // The user has no business launching kernels on capture_stream_ from another thread
+  // while calling capture_begin. They'll have no idea if their side thread's
+  // kernel will end up as part of the capture or not.
+  c10::cuda::CUDACachingAllocator::notifyCaptureBegin(capture_dev_, id_, mempool_id_);
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
 #endif
@@ -79,6 +130,8 @@ void CUDAGraph::capture_end() {
 
   TORCH_CHECK(stream == capture_stream_,
               "Capture must end on the same stream it began on.");
+
+  c10::cuda::CUDACachingAllocator::notifyCaptureEnd(capture_dev_, id_);
 
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
   TORCH_CHECK(graph_ != NULL, "Invalid capture.");
@@ -149,6 +202,15 @@ void CUDAGraph::reset() {
   //
   // Calling reset() in the C++ destructor, with warnings instead of exceptions
   // if calls fail, is the compromise we chose.
+  //
+  // If capture_begin, the capture, or capture_end failed at some point, this CUDAGraph, the generator,
+  // and the allocator could end up in all kinds of weird states depending where failure occurred.
+  // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
+  // a Juptyer notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
+  if (has_graph_ || has_graph_exec_) {
+    // notifyCaptureDestroy may throw. How should we handle this?
+    c10::cuda::CUDACachingAllocator::notifyCaptureDestroy(capture_dev_, mempool_id_);
+  }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
   }
@@ -158,6 +220,17 @@ void CUDAGraph::reset() {
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
 #endif
+}
+
+// Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
+MempoolId_t CUDAGraph::pool() {
+#if CUDA_VERSION >= 11000
+  TORCH_CHECK(has_graph_exec_,
+              "Called CUDAGraph::pool() without a preceding successful capture.");
+#else
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+#endif
+  return mempool_id_;
 }
 
 CUDAGraph::~CUDAGraph() {

@@ -269,6 +269,65 @@ class TestCheckpoint(TestCase):
         out = checkpoint(run_fn, input_var, None)
         out.sum().backward()
 
+    def test_checkpoint_non_tensor_inputs_outputs(self):
+        def foo(t1, t2, scale, t3):
+            t4 = t1 + t2 * t3
+            t5 = t1 * t2 + t3
+            t4 *= scale
+            t5 *= scale
+            return scale, t4, None, True, t5, "bar", t1
+
+        t1 = torch.rand(10, requires_grad=True)
+        t2 = torch.rand(10, requires_grad=True)
+        t3 = torch.rand(10)
+        scale = random.randint(0, 10)
+        res = checkpoint(foo, t1, t2, scale, t3)
+        self.assertEqual(scale, res[0])
+        self.assertEqual((t1 + t2 * t3) * scale, res[1])
+        self.assertEqual(None, res[2])
+        self.assertEqual(True, res[3])
+        self.assertEqual((t1 * t2 + t3) * scale, res[4])
+        self.assertEqual("bar", res[5])
+        self.assertEqual(t1, res[6])
+
+        # Validate running backward.
+        res[1].sum().backward(retain_graph=True)
+        res[4].sum().backward(retain_graph=True)
+        res[6].sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "Trying to backward through the graph a second time"):
+            res[6].sum().backward()
+        t1_grad = t1.grad
+        t2_grad = t2.grad
+
+        # Reset grads, run without checkpoint and validate we receive same grads.
+        t1.grad = None
+        t2.grad = None
+        res = foo(t1, t2, scale, t3)
+        torch.autograd.backward([res[1].sum(), res[4].sum(), res[6].sum()])
+        self.assertEqual(t1.grad, t1_grad)
+        self.assertEqual(t2.grad, t2_grad)
+
+    def test_checkpoint_no_tensors(self):
+        def foo(t1, t2, scale, t3):
+            t4 = t1 + t2 * t3
+            t5 = t1 * t2 + t3
+            t4 *= scale
+            t5 *= scale
+            return scale, t4, None, True, t5, "bar", t1
+
+        t1 = random.random()
+        t2 = random.random()
+        t3 = random.random()
+        scale = random.randint(0, 10)
+        res = checkpoint(foo, t1, t2, scale, t3)
+        self.assertEqual(scale, res[0])
+        self.assertEqual((t1 + t2 * t3) * scale, res[1])
+        self.assertEqual(None, res[2])
+        self.assertEqual(True, res[3])
+        self.assertEqual((t1 * t2 + t3) * scale, res[4])
+        self.assertEqual("bar", res[5])
+        self.assertEqual(t1, res[6])
+
     def test_checkpoint_partial_grad(self):
         def run_fn(tensor1, tensor2):
             # tensor 2 is used for other application logic
