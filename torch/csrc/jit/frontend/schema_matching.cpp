@@ -15,13 +15,12 @@ static inline TypePtr unwrapOptional(TypePtr opt_type) {
   return opt_type;
 }
 
-static inline bool isIntOrFloatorComplexUsedAsList(
+static inline bool isIntOrFloatUsedAsList(
     const Value* value,
     const Argument& arg) {
-  // Look for int[N] or float[N] or complex[N]
+  // Look for int[N] or float[N]
   const auto& v_type = value->type();
-  if (v_type != FloatType::get() && v_type != IntType::get() &&
-      v_type != ComplexType::get())
+  if (v_type != FloatType::get() && v_type != IntType::get())
     return false;
   auto arg_type = unwrapOptional(arg.type());
   auto list_type = arg_type->cast<ListType>();
@@ -150,11 +149,10 @@ static Value* tryMatchArgument(
     TypeEnv& type_env) {
   Value* value = named_value.value(graph);
 
-  // Some functions that take lists of integers or floats or complex numbers for
-  // fixed size arrays also allow single ints/floats/complex numbers to be
-  // passed in their place. The single int/float is then repeated to the length
-  // of the list
-  if (isIntOrFloatorComplexUsedAsList(value, arg)) {
+  // Some functions that take lists of integers or floats for fixed size arrays
+  // also allow single ints/floats to be passed in their place. The single
+  // int/float is then repeated to the length of the list
+  if (isIntOrFloatUsedAsList(value, arg)) {
     std::vector<Value*> repeated(*arg.N(), value);
     value =
         graph.insertNode(graph.createList(value->type(), repeated))->output();
