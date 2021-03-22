@@ -442,7 +442,7 @@ Tensor _th_std(const Tensor & self, bool unbiased) {
             AT_ERROR("_th_std not supported on CPUType for ", dispatch_scalar_type);
     }
 }
-Tensor & _th_renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+Tensor & _th_renorm_out(Tensor & result, const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -468,7 +468,7 @@ Tensor & _th_renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t 
     }
     return result;
 }
-Tensor _th_renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+Tensor _th_renorm(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto result_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CPU, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
@@ -493,7 +493,7 @@ Tensor _th_renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
     }
     return result;
 }
-Tensor & _th_renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+Tensor & _th_renorm_(Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -517,7 +517,7 @@ Tensor & _th_renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
     }
     return self;
 }
-Tensor & _th_histc_out(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor & _th_histc_out(Tensor & result, const Tensor & self, int64_t bins, const Scalar& min, const Scalar& max) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -543,7 +543,7 @@ Tensor & _th_histc_out(Tensor & result, const Tensor & self, int64_t bins, Scala
     }
     return result;
 }
-Tensor _th_histc(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor _th_histc(const Tensor & self, int64_t bins, const Scalar& min, const Scalar& max) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto result_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CPU, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
