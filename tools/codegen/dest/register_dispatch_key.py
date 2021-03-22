@@ -138,12 +138,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 )
 
                 # Only tensor like arguments are eligible
-                tensor_arg_name = next(
-                    (f'{a.name}' for a in candidate_args if not isinstance(a.type, OptionalType) and a.type.is_tensor_like()),
-                    None)
-                optional_tensor_arg_name = next(
-                    (f'{a.name}' for a in candidate_args if isinstance(a.type, OptionalType) and a.type.is_tensor_like()),
-                    None)
+                device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
 
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
 
@@ -166,13 +161,9 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
     globalContext().lazyInitCUDA();
     {cuda_guard_from_tensor_options}
 """
-                elif f.device_guard and tensor_arg_name is not None:
+                elif f.device_guard and device_of is not None:
                     cuda_guard = f"""\
-    const OptionalDeviceGuard device_guard(device_of({tensor_arg_name}));
-"""
-                elif f.device_guard and optional_tensor_arg_name is not None:
-                    cuda_guard = f"""\
-    const OptionalDeviceGuard device_guard(device_or_default({optional_tensor_arg_name}));
+    const OptionalDeviceGuard device_guard(device_of({device_of}));
 """
                 else:
                     cuda_guard = """\
