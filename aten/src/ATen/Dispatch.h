@@ -10,7 +10,7 @@
 #include <c10/util/complex.h>
 #include <c10/util/string_view.h>
 
-#ifdef XPLAT_MOBILE_BUILD
+#ifdef TEMPLATE_SELECTIVE_BUILD
 #include <ATen/selected_mobile_ops.h>
 #else
 namespace at {
