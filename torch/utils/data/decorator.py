@@ -1,8 +1,9 @@
 import inspect
+import copy
 from functools import wraps
 from typing import Any, Callable, Optional, Type, Union, get_type_hints
 from torch.utils.data import IterDataPipe
-from torch.utils.data.typing import _DataPipeAlias
+from torch.utils.data.typing import _DataPipeMeta
 
 
 ######################################################
@@ -117,20 +118,17 @@ def validate_typing(f):
     def wrapper(*args, **kwargs):
         bound = signature.bind(*args, **kwargs)
         for argument_name, value in bound.arguments.items():
-            if argument_name in hints and \
-                    (isinstance(hints[argument_name], _DataPipeAlias) or
-                     hints[argument_name] == IterDataPipe):
+            if argument_name in hints and isinstance(hints[argument_name], _DataPipeMeta):
                 hint = hints[argument_name]
                 if not isinstance(value, IterDataPipe):
                     raise TypeError("Expected argument '{}' as a IterDataPipe, but found {}"
                                     .format(argument_name, type(value)))
-                if isinstance(hint, _DataPipeAlias):
-                    hint = hint.__origin__
-                    if hasattr(value, 'type'):
-                        if not value.type.issubtype(hint.type):
-                            raise TypeError("Expected type of argument '{}' as a subtype of "
-                                            "hint {}, but {} found"
-                                            .format(argument_name, hint.type, value.type))
+                if not value.type.issubtype(hint.type):
+                    raise TypeError("Expected type of argument '{}' as a subtype of "
+                                    "hint {}, but {} found"
+                                    .format(argument_name, hint.type, value.type))
+                # Replace by subtype from hint
+                if value.type != hint.type:
                     value.type = copy.deepcopy(hint.type)  # type: ignore
 
         return f(*args, **kwargs)

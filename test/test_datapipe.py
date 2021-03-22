@@ -273,7 +273,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
             (dp.iter.Map, IDP(arr), (lambda x: x, ), {}),
-            (dp.iter.Collate, IDP(arr), (lambda x: xi, ), {}),
+            (dp.iter.Collate, IDP(arr), (lambda x: x, ), {}),
             (dp.iter.Filter, IDP(arr), (lambda x: x >= 5, ), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
@@ -704,6 +704,16 @@ class TestTyping(TestCase):
         dp = DP0(IDP(range(10)))
         with self.assertRaisesRegex(TypeError, r"Expected type of argument 'dp' as a subtype"):
             dp = DP1(dp)
+
+
+        class ValidDP4(IterDataPipe):
+            r""" DataPipe without annotation"""
+            def __iter__(self):
+                raise NotImplementedError
+
+        dp = ValidDP4()
+        self.assertTrue(dp.type.param == Any)
+        self.assertNotEqual(id(ValidDP4.type), id(dp.type))
 
 
 if __name__ == '__main__':

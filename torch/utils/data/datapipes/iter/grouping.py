@@ -159,7 +159,7 @@ def default_sort_data_fn(datalist: List[Tuple[str, Any]]):
 
 
 @functional_datapipe('group_by_key')
-class GroupByKeyIterDataPipe(IterDataPipe):
+class GroupByKeyIterDataPipe(IterDataPipe[list]):
     r""" :class:`GroupByKeyIterDataPipe`.
 
     Iterable datapipe to group data from input iterable by keys which are generated from `group_key_fn`,
