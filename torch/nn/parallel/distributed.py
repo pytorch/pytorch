@@ -408,7 +408,6 @@ class DistributedDataParallel(Module):
         else:
             # Use all devices by default for single-device GPU modules
             if device_ids is None:
-                # Should
                 device_ids = _get_all_device_indices()
 
             self.device_ids = [_get_device_index(x, True) for x in device_ids]
