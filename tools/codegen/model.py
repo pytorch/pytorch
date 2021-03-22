@@ -320,6 +320,8 @@ class NativeFunction:
         category_override = e.pop('category_override', None)
         assert category_override is None or isinstance(category_override, str), f'not a str: {category_override}'
 
+        from tools.codegen.api import cpp
+
         raw_dispatch = e.pop('dispatch', None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
         dispatch: Dict[DispatchKey, str] = {}
@@ -335,8 +337,14 @@ class NativeFunction:
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
                     dispatch[dispatch_key] = v
+            assert dispatch != {DispatchKey.Math: cpp.name(func)}, \
+                "unnecessary dispatch table for this function; just delete the dispatch " \
+                "key entirely"
+            assert dispatch.keys() != {DispatchKey.Math}, \
+                f"unexpected name for singleton Math dispatch entry: expected {cpp.name(func)} " \
+                f"but got {dispatch[DispatchKey.Math]}.  Rename your implementation to the expected " \
+                "name, then delete the dispatch table"
         elif not structured and structured_delegate is None:
-            from tools.codegen.api import cpp
             dispatch[DispatchKey.Math] = cpp.name(func)
 
         assert not (DispatchKey.DefaultBackend in dispatch and DispatchKey.Math in dispatch), \
