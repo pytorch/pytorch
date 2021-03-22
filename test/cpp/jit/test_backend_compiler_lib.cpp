@@ -110,6 +110,15 @@ namespace {
 // Put here for demonstration of backend
 // as a whole piece. It's used when compilation is required. A dummy function
 // can be passed when there's no usage of compilation in runtime backend lib.
+#ifdef DELEGATE_RUNTIME
+// Runtime does not use preprocess(). Implement a dummy function to avoid extra
+// dependencies and size.
+c10::IValue preprocess(
+    const Module& mod,
+    const c10::Dict<IValue, IValue>& method_compile_spec) {
+  return method_compile_spec;
+}
+#else
 c10::IValue preprocess(
     const Module& mod,
     const c10::Dict<IValue, IValue>& method_compile_spec) {
@@ -152,6 +161,7 @@ c10::IValue preprocess(
   }
   return compiled;
 }
+#endif
 
 static auto cls = torch::jit::backend<BackendWithCompiler>(
     "backend_with_compiler_demo",
