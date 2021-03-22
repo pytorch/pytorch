@@ -3345,6 +3345,13 @@
   dispatch:
     DefaultBackend: celu_
 
+- func: siamese_loss(Tensor input1, Tensor input2, Tensor label, float margin=1.0, int reduction=Mean) -> Tensor
+  use_c10_dispatcher: fill
+  python_module: nn
+  dispatch:
+    CPU: siamese_loss
+    CUDA: legacy::cuda::siamese_loss
+
 - func: silu(Tensor self) -> Tensor
   python_module: nn
   dispatch:
