@@ -55,33 +55,6 @@ inline bool compute_requires_grad(Args&&... args) {
   return ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
 }
 
-struct AssertNoInferenceTensor : IterArgs<AssertNoInferenceTensor> {
-  using IterArgs<AssertNoInferenceTensor>::operator();
-  void operator()(const at::Tensor& tensor) {
-    const auto& var = static_cast<const Variable&>(tensor);
-     TORCH_CHECK(!var.unsafeGetTensorImpl()->is_inference_tensor(),
-         "Inference tensor cannot participate in autograd. make a feature request");
-  }
-  void operator()(const c10::optional<at::Tensor>& tensor) {
-    if (tensor.has_value()) {
-      (*this)(*tensor);
-    }
-  }
-};
-
-template <typename... Args>
-inline void assert_no_inference_tensor(Args&&... args) {
-  // Inside InferenceMode, inference tensor is allowed to go through
-  // VariableType kernel if any other inputs has Autograd keys.
-  // We haven't seen a use case mixing inference tensor and normal
-  // tensor outside InferenceMode yet, thus simply throw out error
-  // when it happens. We might consider supporting it if there's a
-  // valid use case in the future.
-  if (!InferenceMode::is_enabled()) {
-    AssertNoInferenceTensor().apply(std::forward<Args>(args)...);
-  }
-}
-
 inline void set_history(
     at::Tensor& variable,
     const std::shared_ptr<Node>& grad_fn) {

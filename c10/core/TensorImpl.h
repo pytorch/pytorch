@@ -222,8 +222,8 @@ struct C10_API NamedTensorMetaInterface {
 struct C10_API VariableVersion {
  private:
   struct VersionCounter : intrusive_ptr_target {
-    VersionCounter(uint32_t version) : version_(version) {}
-    std::atomic<uint32_t> version_;
+    VersionCounter(int32_t version) : version_(version) {}
+    std::atomic<int32_t> version_;
   };
   c10::intrusive_ptr<VersionCounter> version_counter_;
 
@@ -234,14 +234,16 @@ struct C10_API VariableVersion {
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
   // leaves it in a persistently undefined state. See
   // https://cplusplus.github.io/LWG/issue2334.
-  VariableVersion(uint32_t version = 0)
+  VariableVersion(int32_t version = 0)
       : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
 
-  void bump() noexcept {
+  void bump() {
+    TORCH_CHECK(version_counter_->version_ >= 0,
+        "Inplace update to inference tensor is not allowed.");
     ++version_counter_->version_;
   }
 
-  uint32_t current_version() const noexcept {
+  int32_t current_version() const noexcept {
     return version_counter_->version_;
   }
 };
@@ -1094,7 +1096,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return version_counter_;
   }
 
-  void bump_version() noexcept {
+  void bump_version() {
     version_counter_.bump();
   }
 

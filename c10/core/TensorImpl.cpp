@@ -88,6 +88,7 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   if (c10::InferenceMode::is_enabled()) {
     // See Note [Expected TLS state in InferenceMode] for why we don't add Autograd & InplaceOrView keys.
     key_set_ = key_set;
+    version_counter_ = VariableVersion(-1);
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]

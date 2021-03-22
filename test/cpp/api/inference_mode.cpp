@@ -311,25 +311,34 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
       c = torch::ones({1, 2, 3});
     }
 
-    ASSERT_THROWS_WITH(c.add(s), // go through kernels: VariableType(ERROR!), InplaceOrView(fallthrough), CPU
-      "Inference tensor cannot participate in autograd")
+    torch::Tensor out = c.add(s);  // go through kernels: VariableType, InplaceOrView(fallthrough), CPU
+    ASSERT_FALSE(is_inference_tensor(out));
+    ASSERT_EQ(out.requires_grad(), requires_grad);
   }
 }
 
 TEST(InferenceModeTest, TestMixInferenceAndNormalTensorInplaceOp) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
+    torch::Tensor a = s + 2;
     torch::Tensor c;
     {
       InferenceMode guard;
       c = torch::ones({1, 2, 3});
     }
 
-    ASSERT_THROWS_WITH(c.add_(s), // go through kernels: VariableType(ERROR!), InplaceOrView, CPU
-      "Inference tensor cannot participate in autograd")
+    a.add_(c); // go through kernels: VariableType, InferenceMode, CPU
 
-    ASSERT_THROWS_WITH(torch::add_out(c, s, s), // go through kernels: VariableType(ERROR!), InplaceOrView, CPU
-      "Inference tensor cannot participate in autograd")
+    ASSERT_THROWS_WITH(c.add_(s), // go through kernels: VariableType, InplaceOrView, CPU
+      "Inplace update to inference tensor is not allowed.")
+
+    if (requires_grad) {
+      ASSERT_THROWS_WITH(torch::add_out(c, s, s), // go through kernels: VariableType, InplaceOrView, CPU
+          "out=... arguments don't support automatic differentiation, but one of the arguments requires grad")
+    } else {
+      ASSERT_THROWS_WITH(torch::add_out(c, s, s), // go through kernels: VariableType, InplaceOrView, CPU
+          "Inplace update to inference tensor is not allowed")
+    }
   }
 }
 
