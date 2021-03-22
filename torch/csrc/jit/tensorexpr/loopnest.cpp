@@ -532,16 +532,67 @@ class FunctionInliner : public IRMutator {
         producer_(producer),
         outputs_(std::move(outputs)) {
     for (auto* i : producer->indices()) {
-      const Var* index_var = dynamic_cast<const Var*>(i);
-      if (index_var == nullptr) {
+      if (auto index_var = dynamic_cast<const Var*>(i)) {
+        index_vars_.insert(index_var);
+        producer_index_vars_.push_back(index_var);
+      } else if (dynamic_cast<const IntImm*>(i) != nullptr) {
+        // If the index can be a constant, then that dimension must have size 1
+        // (since we don't support in-place writes). Resolves issue 52581.
+        TORCH_INTERNAL_ASSERT(
+            dynamic_cast<const IntImm*>(i)->value() == 0,
+            "Constant index impression should always be zero");
+        producer_index_vars_.push_back(nullptr);
+      } else {
         throw std::logic_error("cannot inline Buf with compound indices");
       }
-      index_vars_.insert(index_var);
-      producer_index_vars_.push_back(index_var);
     }
   }
 
  private:
+  const Expr* mutate_loads(const Buf* buf, std::vector<const Expr*> dims) {
+    std::vector<const Var*> index_vars;
+    TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
+    for (size_t i = 0; i < buf->ndim(); i++) {
+      const Var* func_callee_arg = producer_index_vars_.at(i);
+      const Expr* func_caller_param = dims.at(i);
+      if (func_callee_arg == nullptr) {
+        TORCH_INTERNAL_ASSERT(
+            dynamic_cast<const IntImm*>(func_caller_param) != nullptr &&
+                dynamic_cast<const IntImm*>(func_caller_param)->value() == 0,
+            "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0");
+        continue;
+      }
+      if (func_callee_arg == nullptr)
+        continue;
+      auto iter = inline_mapping_.find(func_callee_arg);
+      if (iter != inline_mapping_.end()) {
+        throw std::runtime_error(
+            "Duplicated variables: " + func_callee_arg->name_hint());
+      }
+      // Add a mapping for each function parameter to it's source name.
+      inline_mapping_[func_callee_arg] = func_caller_param;
+      index_vars.push_back(func_callee_arg);
+    }
+
+    // Call the actual replacement.
+    const Expr* body = producer_->value();
+    const Expr* result = body->accept_mutator(this);
+
+    // Remove the mappings we created for this function parameters.
+    for (auto* v : index_vars) {
+      for (auto& pair : random_bindings_) {
+        if (pair.second.erase(v)) {
+          const Expr* inlined = inline_mapping_[v];
+          for (auto* nv : VarFinder::find(inlined)) {
+            pair.second.insert(nv);
+          }
+        }
+      }
+      inline_mapping_.erase(v);
+    }
+    return result;
+  }
+
   // For the target function, insert the caller/callee pair into the replacement
   // mapping.
   const Expr* mutate(const FunctionCall* v) override {
@@ -555,39 +606,7 @@ class FunctionInliner : public IRMutator {
       throw malformed_input(
           "Placeholder indexed access is inconsistent with its rank", v);
     }
-
-    std::vector<const Var*> index_vars;
-    TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
-    for (size_t i = 0; i < buf->ndim(); i++) {
-      const Var* func_callee_arg = producer_index_vars_.at(i);
-      const Expr* func_caller_param = v->param(i);
-      auto iter = inline_mapping_.find(func_callee_arg);
-      if (iter != inline_mapping_.end()) {
-        throw std::runtime_error(
-            "Duplicated variables: " + func_callee_arg->name_hint());
-      }
-      // Add a mapping for each function parameter to it's source name.
-      inline_mapping_[func_callee_arg] = func_caller_param;
-      index_vars.push_back(func_callee_arg);
-    }
-
-    // Call the actual replacement.
-    const Expr* body = producer_->value();
-    const Expr* result = body->accept_mutator(this);
-
-    // Remove the mappings we created for this function parameters.
-    for (auto* v : index_vars) {
-      for (auto& pair : random_bindings_) {
-        if (pair.second.erase(v)) {
-          const Expr* inlined = inline_mapping_[v];
-          for (auto* nv : VarFinder::find(inlined)) {
-            pair.second.insert(nv);
-          }
-        }
-      }
-      inline_mapping_.erase(v);
-    }
-    return result;
+    return mutate_loads(buf, v->params());
   }
 
   const Expr* mutate(const Load* v) override {
@@ -600,39 +619,7 @@ class FunctionInliner : public IRMutator {
       throw malformed_input(
           "Placeholder indexed access is inconsistent with its rank", v);
     }
-
-    std::vector<const Var*> index_vars;
-    TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
-    for (size_t i = 0; i < buf->ndim(); i++) {
-      const Var* func_callee_arg = producer_index_vars_.at(i);
-      const Expr* func_caller_param = v->indices()[i];
-      auto iter = inline_mapping_.find(func_callee_arg);
-      if (iter != inline_mapping_.end()) {
-        throw std::runtime_error(
-            "Duplicated variables: " + func_callee_arg->name_hint());
-      }
-      // Add a mapping for each function parameter to it's source name.
-      inline_mapping_[func_callee_arg] = func_caller_param;
-      index_vars.push_back(func_callee_arg);
-    }
-
-    // Call the actual replacement.
-    const Expr* body = producer_->value();
-    const Expr* result = body->accept_mutator(this);
-
-    // Remove the mappings we created for this function parameters.
-    for (auto* v : index_vars) {
-      for (auto& pair : random_bindings_) {
-        if (pair.second.erase(v)) {
-          const Expr* inlined = inline_mapping_[v];
-          for (auto* nv : VarFinder::find(inlined)) {
-            pair.second.insert(nv);
-          }
-        }
-      }
-      inline_mapping_.erase(v);
-    }
-    return result;
+    return mutate_loads(buf, v->indices());
   }
 
   // Replace the target variable with the caller expressions.
@@ -1329,6 +1316,62 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   p->replace_stmt(f, *outer);
 }
 
+std::vector<For*> LoopNest::distributeLoop(
+    For* loop,
+    const std::unordered_set<Stmt*>& pivots) {
+  TORCH_INTERNAL_ASSERT(loop);
+  auto root = loop->get_parent();
+  if (root == nullptr) {
+    throw malformed_input("Loop without parent: ", loop);
+  }
+  auto root_block = dynamic_cast<Block*>(root);
+  if (root_block == nullptr) {
+    throw malformed_input(
+        "Loop's parent must be a Block, instead found ", root);
+  }
+
+  // Extract bodies for all the loops after distribution.
+  std::vector<Block*> new_loop_bodies;
+  auto new_loop_body = new Block({});
+  while (auto s = loop->body()->front()) {
+    loop->body()->remove_stmt(s);
+    new_loop_body->append_stmt(s);
+    if (pivots.count(s)) {
+      new_loop_bodies.push_back(new_loop_body);
+      new_loop_body = new Block({});
+    }
+  }
+  if (!new_loop_body->empty()) {
+    new_loop_bodies.push_back(new_loop_body);
+  }
+
+  // The first loop body has to be in the original loop.
+  loop->body()->splice(loop->body()->begin(), new_loop_bodies.front());
+  std::vector<For*> new_loops = {loop};
+
+  // Create loops for all the remaining blocks.
+  // Add all the new loops to the parent block.
+  for (size_t i = 1; i < new_loop_bodies.size(); ++i) {
+    auto new_loop = loop->cloneWithNewBody(new_loop_bodies[i]);
+    root_block->insert_stmt_after(new_loop, new_loops.back());
+    new_loops.push_back(new_loop);
+  }
+
+  return new_loops;
+}
+
+std::vector<For*> LoopNest::distributeLoop(For* loop) {
+  std::unordered_set<Stmt*> stmtsInBlock(
+      loop->body()->begin(), loop->body()->end());
+  return distributeLoop(loop, stmtsInBlock);
+}
+
+std::vector<For*> LoopNest::distributeLoopOverInnerLoops(For* loop) {
+  auto loops = NodeFinder<For>::find(loop);
+  std::unordered_set<Stmt*> loopsSet(loops.begin(), loops.end());
+  return distributeLoop(loop, loopsSet);
+}
+
 For* findOuterFor(For* a, For* b) {
   Stmt* s = b; // guess b is the latter.
   while (s != nullptr) {
@@ -1681,6 +1724,54 @@ Stmt* LoopNest::getLoopBodyFor(const Buf* buf) const {
 
 bool LoopNest::hasLoopBodyFor(Tensor* t) const {
   return getLoopBodyFor(t) != nullptr;
+}
+
+For* LoopNest::getParentLoop(const Stmt* st) {
+  if (st == nullptr) {
+    return nullptr;
+  }
+  auto par = st->get_parent();
+  if (auto f = dynamic_cast<For*>(par)) {
+    return f;
+  }
+  return getParentLoop(par);
+}
+
+std::vector<For*> LoopNest::getEnclosingLoopNest(const Stmt* st) {
+  std::vector<For*> loops;
+  auto f = getParentLoop(st);
+  while (f) {
+    loops.push_back(f);
+    f = getParentLoop(f);
+  }
+  std::reverse(loops.begin(), loops.end());
+  return loops;
+}
+
+std::vector<const Stmt*> LoopNest::getAllWritesToBuf(const Buf* buf) const {
+  return WritesToBuf::find(root_stmt_, buf);
+}
+
+std::vector<For*> LoopNest::getAllInnermostLoopsWritingToBuf(
+    const Buf* buf) const {
+  auto writes = getAllWritesToBuf(buf);
+  std::vector<For*> innermost_loops;
+  innermost_loops.reserve(writes.size());
+  for (auto w : writes) {
+    innermost_loops.push_back(LoopNest::getParentLoop(w));
+  }
+  return innermost_loops;
+}
+
+std::vector<std::vector<For*>> LoopNest::getAllLoopNestsWritingToBuf(
+    const Buf* buf) const {
+  auto writes = getAllWritesToBuf(buf);
+  std::vector<std::vector<For*>> loopnests;
+  loopnests.reserve(writes.size());
+  for (auto w : writes) {
+    loopnests.emplace_back(LoopNest::getEnclosingLoopNest(w));
+  }
+  return loopnests;
 }
 
 Stmt* LoopNest::simplify() {

@@ -51,6 +51,19 @@ TORCH_API std::tuple<Tensor,Tensor> var_mean(const Tensor& self, int dim);
 TORCH_API Tensor std(const Tensor& self, int dim);
 TORCH_API std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim);
 
+
+// Special C++ only overloads for convnd functions (See gh-45667)
+// These are needed because {1, 2} is ambiguous between string and IntArrayRef overloads
+TORCH_API at::Tensor conv1d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
+    std::initializer_list<int64_t> padding, IntArrayRef dilation = 1, int64_t groups = 1);
+TORCH_API at::Tensor conv2d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
+    std::initializer_list<int64_t> padding, IntArrayRef dilation = 1, int64_t groups = 1);
+TORCH_API at::Tensor conv3d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias, IntArrayRef stride,
+    std::initializer_list<int64_t> padding, IntArrayRef dilation = 1, int64_t groups = 1);
+
 namespace {
   inline std::vector<int64_t> zero_sizes(const TensorOptions& options) {
     if (options.has_memory_format()) {
@@ -147,7 +160,11 @@ inline bool is_complex(const Tensor& tensor) {
 }
 
 inline bool is_floating_point(const Tensor& tensor) {
-    return tensor.is_floating_point();
+  return tensor.is_floating_point();
+}
+
+inline bool is_signed(const Tensor& tensor) {
+  return tensor.is_signed();
 }
 
 }

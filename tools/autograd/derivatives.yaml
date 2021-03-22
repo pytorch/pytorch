@@ -357,7 +357,7 @@
   self: logcumsumexp_backward(grad, self, result, dim)
 
 - name: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-  self: cumprod_backward(grad.to(self.scalar_type()), self, dim)
+  self: cumprod_backward(grad.to(self.scalar_type()), self, dim, result)
 
 - name: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   self: cumsum_backward(grad.to(self.scalar_type()), dim)
@@ -484,6 +484,9 @@
 - name: frac(Tensor self) -> Tensor
   self: grad
 
+- name: frexp.Tensor(Tensor self) -> (Tensor mantissa, Tensor exponent)
+  self: grad / exponent.exp2()
+
 - name: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
   self: gather_backward(grad, self, dim, index, sparse_grad)
   index: non_differentiable
@@ -557,7 +560,10 @@
 
 - name: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   self: grad
-  source: grad.index_select(dim, index).expand_as(source)
+  # The case source.dim() == 0  is necessary to support scalar tensors of the form
+  # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
+  # This is because source is not broadcastable to index, as source.dim() < index.dim()
+  source: "source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0))"
   index: non_differentiable
 
 - name: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
@@ -606,13 +612,13 @@
   other: zeros_like(other)
 
 - name: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor
-  self: grad * (1 - weight.toDouble())
-  end: grad * weight
+  self: "weight.isComplex() ? grad * (1 - weight.conj().toComplexDouble()) : grad * (1 - weight.toDouble())"
+  end: grad * weight.conj()
 
 - name: lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor
-  self: grad * (1 - weight)
-  end: grad * weight
-  weight: grad * (end - self)
+  self: grad * (1 - weight).conj()
+  end: grad * weight.conj()
+  weight: grad * (end - self).conj()
 
 - name: lgamma(Tensor self) -> Tensor
   self: grad * digamma(self)
@@ -665,6 +671,11 @@
 - name: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   self: not_implemented("lstsq")
   A: not_implemented("lstsq")
+
+- name: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+  self: not_implemented("linalg_lstsq")
+  b: not_implemented("linalg_lstsq")
+  output_differentiability: [True, True]
 
 - name: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
@@ -830,6 +841,9 @@
 - name: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim)
 
+- name: linalg_vector_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  self: linalg_vector_norm_backward(grad, self, ord, result, dim, keepdim)
+
 - name: _pdist_forward(Tensor self, float p=2) -> Tensor
   self: _pdist_backward(grad, self, p, result)
 
@@ -864,9 +878,8 @@
   mean: at::zeros(mean.sizes(), grad.options())
   std: at::zeros(std.sizes(), grad.options())
 
-- name: orgqr(Tensor self, Tensor input2) -> Tensor
-  self: not_implemented("orgqr")
-  input2: not_implemented("orgqr")
+- name: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
+  input, tau: householder_product_backward(grad, input, tau)
 
 - name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   self: not_implemented("ormqr")
@@ -1904,6 +1917,9 @@
 
 - name: mkldnn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: mkldnn_adaptive_avg_pool2d_backward(grad, self)
+
+- name: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
+  self: grad.reshape(self.sizes())
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor

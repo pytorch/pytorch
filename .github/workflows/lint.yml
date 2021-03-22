@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
@@ -68,6 +68,9 @@ jobs:
         uses: actions/checkout@v2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+      - name: Get HEAD commit SHA
+        run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
+        id: get-commit-sha
       - name: Run flake8
         run: |
           set -eux
@@ -79,7 +82,7 @@ jobs:
         with:
           check_name: 'flake8-py3'
           linter_output_path: 'flake8-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
+          commit_sha: ${{ steps.get-commit-sha.outputs.commit-sha }}
           regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w+\d+) (?<errorDesc>.*)'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -92,7 +95,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
@@ -101,6 +104,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # deep clone, to allow us to use git merge-base
+      - name: Get HEAD commit SHA
+        run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
+        id: get-commit-sha
       - name: Install dependencies
         run: |
           set -eux
@@ -178,11 +184,11 @@ jobs:
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
       - name: Add annotations
-        uses: suo/add-annotations-github-action@master
+        uses: pytorch/add-annotations-github-action@master
         with:
           check_name: 'clang-tidy'
           linter_output_path: 'clang-tidy-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
+          commit_sha: ${{ steps.get-commit-sha.outputs.commit-sha }}
           regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -191,7 +197,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.x
           architecture: x64
@@ -207,3 +213,31 @@ jobs:
           git ls-files -z -- bootstrap '*.cmake' '*.cmake.in' '*CMakeLists.txt' | \
           grep -E -z -v '^(cmake/Modules/|cmake/Modules_CUDA_fix/)' | \
           xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
+
+  mypy:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Install dependencies
+        run: |
+          set -eux
+          pip install -r requirements.txt
+          pip install mypy==0.770
+      - name: Run autogen
+        run: |
+          set -eux
+          time python -mtools.generate_torch_version --is_debug=false
+          time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
+          time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
+      - name: Run mypy
+        run: |
+          set -eux
+          for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done

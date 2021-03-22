@@ -45,8 +45,16 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or
       a one-element tuple `(sW,)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a one-element tuple `(padW,)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
     dilation: the spacing between kernel elements. Can be a single number or
       a one-element tuple `(dW,)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
@@ -78,14 +86,24 @@ Note:
         **reproducibility_notes, **tf32_notes
     )
     + r"""
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
     weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padH, padW)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
+
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
@@ -125,8 +143,17 @@ Args:
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padT, padH, padW)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
+
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dT, dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
@@ -1927,9 +1954,9 @@ def embedding(
         input (LongTensor): Tensor containing indices into the embedding matrix
         weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
             and number of columns equal to the embedding size
-        padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
-                                    whenever it encounters the index.
-                                    Note: Vector at :attr:`padding_idx` will not receive gradient update.
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
+                                     therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
+                                     i.e. it remains as a fixed "pad".
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
                                     Note: this will modify :attr:`weight` in-place.
