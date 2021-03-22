@@ -1281,8 +1281,8 @@ Example::
     True
     >>> a = torch.randn(3, 4, 5)
     >>> q, r = torch.linalg.qr(a, mode='complete')
-    >>> torch.allclose(torch.matmul(q, r), a)
+    >>> torch.allclose(torch.matmul(q, r), a, atol=1e-5)
     True
-    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(5))
+    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(4), atol=1e-5)
     True
 """)
