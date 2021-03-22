@@ -131,9 +131,6 @@ def _get_cache_or_reload(github, force_reload, verbose=True):
     # Parse github repo information
     repo_owner, repo_name, branch = _parse_repo_info(github)
 
-    # Validate the tag/branch is from the original repo instead of a forked repo
-    _validate_not_a_forked_repo(repo_owner, repo_name, branch)
-
     # Github allows branch name with slash '/',
     # this causes confusion with path on both Linux and Windows.
     # Backslash is not allowed in Github branch name so no need to
@@ -151,6 +148,9 @@ def _get_cache_or_reload(github, force_reload, verbose=True):
         if verbose:
             sys.stderr.write('Using cache found in {}\n'.format(repo_dir))
     else:
+        # Validate the tag/branch is from the original repo instead of a forked repo
+        _validate_not_a_forked_repo(repo_owner, repo_name, branch)
+
         cached_file = os.path.join(hub_dir, normalized_br + '.zip')
         _remove_if_exists(cached_file)
 
