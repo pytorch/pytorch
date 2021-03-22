@@ -1652,9 +1652,9 @@ def sample_inputs_masked_fill(op_info, device, dtype, requires_grad):
         SampleInput(_make_tensor_helper(()), args=(torch.randn((), device=device) > 0, _make_tensor_helper(()))),
         SampleInput(_make_tensor_helper((S, S)), args=(torch.randn((), device=device) > 0, 10)),
     )
-    
+
     return samples
-    
+
 def sample_inputs_masked_select(op_info, device, dtype, requires_grad):
     samples = (
         SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -2700,7 +2700,7 @@ op_db: List[OpInfo] = [
                         active_if=(CUDA11OrLater and IS_WINDOWS)),
                SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
            ),
-           supports_out=False),                   
+           supports_out=False),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
