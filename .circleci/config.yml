@@ -7592,7 +7592,7 @@ workflows:
           name: pytorch_windows_vs2019_py36_cuda10.1_build
           python_version: "3.6"
           use_cuda: "1"
-          vc_product: Community
+          vc_product: BuildTools
           vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
@@ -7605,7 +7605,7 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda10.1_build
           test_name: pytorch-windows-test1
           use_cuda: "1"
-          vc_product: Community
+          vc_product: BuildTools
           vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
@@ -7618,7 +7618,7 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda10.1_build
           test_name: pytorch-windows-test2
           use_cuda: "1"
-          vc_product: Community
+          vc_product: BuildTools
           vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_build:
@@ -7627,7 +7627,7 @@ workflows:
           name: pytorch_windows_vs2019_py36_cuda11.1_build
           python_version: "3.6"
           use_cuda: "1"
-          vc_product: Community
+          vc_product: BuildTools
           vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
@@ -7646,7 +7646,7 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda11.1_build
           test_name: pytorch-windows-test1
           use_cuda: "1"
-          vc_product: Community
+          vc_product: BuildTools
           vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
@@ -7665,7 +7665,7 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda11.1_build
           test_name: pytorch-windows-test2
           use_cuda: "1"
-          vc_product: Community
+          vc_product: BuildTools
           vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_build:
@@ -7674,7 +7674,7 @@ workflows:
           name: pytorch_windows_vs2019_py36_cpu_build
           python_version: "3.6"
           use_cuda: "0"
-          vc_product: Community
+          vc_product: BuildTools
           vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
@@ -7692,7 +7692,7 @@ workflows:
             - pytorch_windows_vs2019_py36_cpu_build
           test_name: pytorch-windows-test1
           use_cuda: "0"
-          vc_product: Community
+          vc_product: BuildTools
           vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
@@ -7710,7 +7710,7 @@ workflows:
             - pytorch_windows_vs2019_py36_cpu_build
           test_name: pytorch-windows-test2
           use_cuda: "0"
-          vc_product: Community
+          vc_product: BuildTools
           vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
@@ -7728,7 +7728,7 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda10.1_build
           test_name: pytorch-windows-test1
           use_cuda: "0"
-          vc_product: Community
+          vc_product: BuildTools
           vc_version: "14.28.29333"
           vc_year: "2019"
       - update_s3_htmls:
