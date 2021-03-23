@@ -2001,6 +2001,9 @@ def embedding(
                  [ 0.6262,  0.2438,  0.7471]]])
     """
 
+    if has_torch_function_variadic(input, weight):
+        return handle_torch_function(embedding, (input, weight),
+            input, weight, padding_idx, max_norm, norm_type, scale_grad_by_freq, sparse)
     if padding_idx is not None:
         if padding_idx > 0:
             assert padding_idx < weight.size(0), "Padding_idx must be within num_embeddings"
