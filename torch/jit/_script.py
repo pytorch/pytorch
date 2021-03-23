@@ -962,6 +962,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional
         with monkeytype_trace(monkeytype_config):
             for example_input in example_inputs:
                 obj(*example_input)
+        print(type_trace_db.trace_records)
+        print(type_trace_db.consolidate_types(obj.__module__ + '.' + obj.__name__))
 
     if inspect.isclass(obj):
         # If this type is a `nn.Module` subclass, they probably meant to pass
