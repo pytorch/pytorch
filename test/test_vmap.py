@@ -6,7 +6,7 @@ import functools
 import itertools
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-                                                       skipCUDAIfNoMagma
+skipCUDAIfNoMagma
 import types
 
 
