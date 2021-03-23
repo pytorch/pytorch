@@ -99,7 +99,7 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<Sc
 // This thread considers itself the "island leader". The island leader then reads more indices to
 // the right to figure out how big the island is. Most likely, the island will be very small,
 // just a few values. The island leader then rolls that many RNG, uses them to additionally
-// shuffle values within the island, and writes them out.
+// shuffle values within the island using serial Fisher-Yates, and writes them out.
 //
 // Reference
 // [1] https://osf.io/af2hy/
