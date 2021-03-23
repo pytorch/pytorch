@@ -468,10 +468,20 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     auto fut = createInstance(std::move(type));
     addCallback(
         [fut, cb = std::move(callback)]() {
+          // Get the true stacktrace if call to markCompleted() fails. We cannot
+          // simply call fut->markCompleted(cb()) since if markCompleted fails
+          // after setting completed_ flag, setError will report error that
+          // completed_ is set, instead of the true error.
+          at::IValue cbValue;
+          bool hasException = false;
           try {
-            fut->markCompleted(cb());
+            cbValue= cb();
           } catch (std::exception&) {
+            hasException = true;
             fut->setError(std::current_exception());
+          }
+          if (!hasException) {
+            fut->markCompleted(std::move(cbValue));
           }
         });
     return fut;
