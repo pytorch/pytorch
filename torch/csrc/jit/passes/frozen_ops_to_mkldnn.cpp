@@ -24,6 +24,8 @@
 // clang-format off
 // moving ConvUtils include induces import cycle
 #include <ATen/native/ConvUtils.h>
+#include <algorithm>
+#include <memory>
 // clang-format on
 
 namespace torch {
@@ -37,6 +39,170 @@ namespace {
 
 c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return AliasAnalysisKind::FROM_SCHEMA;
+}
+
+using ValueSet = std::unordered_set<Value*>;
+using ValueSetPtr = std::shared_ptr<std::unordered_set<Value*>>;
+
+Node* getLastUse(Value* v) {
+  auto last_use_node = v->node();
+  for (const auto& use : v->uses()) {
+    if (use.user->isAfter(last_use_node)) {
+      last_use_node = use.user;
+    }
+  }
+  return last_use_node;
+}
+
+void merge_sets(
+    std::unordered_map<Value*, ValueSetPtr>& alias_mapping,
+    Value* existing,
+    Value* new_v) {
+  if (alias_mapping[existing] == alias_mapping[new_v]) {
+    return;
+  }
+  auto existing_set = alias_mapping[existing];
+  auto set_to_remove = alias_mapping[new_v];
+  for (auto it = set_to_remove->begin(); it != set_to_remove->end(); it++) {
+    existing_set->insert(*it);
+    alias_mapping[*it] = existing_set;
+  }
+}
+
+// no uses of tensors in container types
+void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
+  if (type->cast<TensorType>()) {
+    return;
+  }
+  for (auto t : type->containedTypes()) {
+    TORCH_INTERNAL_ASSERT(!t->cast<TensorType>());
+  }
+}
+
+void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
+  // This function first calculates aliasing sets,
+  // then calculates the last node each aliasing set is alive for.
+  // Then we go through each node, if it's a node which has an equivalent
+  // inplace node and the aliasing set for its input is dead afer this node, we
+  // inplace it. Then we merge the aliasing sets for the input and output of the
+  // node and extend the liveness of the set. To inplace a node you need to
+  // prove device and dtype of the input and output are the same, which we've
+  // already done, and prove that the output size is the same as the input size,
+  // which is achieved by explicit Broadcast nodes (which we inserted for other
+  // reasons).
+  // The graphs here are simple subgraphs without uses of Tensors in
+  // containers (Lists, GetAttrs, etc)
+
+  // CALCULATE ALIASING SETS
+
+  auto aliasDb = torch::make_unique<AliasDb>(graph);
+
+  // map from Value to its Aliasing Set
+  std::unordered_map<Value*, ValueSetPtr> alias_mapping;
+  ValueSet set;
+  ValueSetPtr input_set = std::make_shared<ValueSet>(set);
+  for (Value* v : graph->inputs()) {
+    if (v->type()->cast<TensorType>()) {
+      input_set->insert(v);
+      alias_mapping[v] = input_set;
+    } else {
+      assertNonTensorTypeDoesNotContainTensors(v->type());
+    }
+  }
+
+  for (Node* n : graph->nodes()) {
+    for (Value* output : n->outputs()) {
+      if (!output->type()->cast<TensorType>()) {
+        assertNonTensorTypeDoesNotContainTensors(output->type());
+        continue;
+      }
+
+      std::unordered_set<Value*> new_set = {output};
+      alias_mapping[output] = std::make_shared<ValueSet>(new_set);
+      for (Value* input : n->inputs()) {
+        if (aliasDb->mayAlias(input, output)) {
+          merge_sets(alias_mapping, input, output);
+        }
+      }
+    }
+  }
+
+  // CALCULATE ALIASING SET LIVENESS
+
+  // map from aliased set -> last use of set
+  std::unordered_map<ValueSetPtr, Node*> set_liveness;
+  for (auto& set : alias_mapping) {
+    if (set_liveness.count(set.second)) {
+      continue;
+    }
+    Node* last = nullptr;
+    for (auto it = set.second->begin(); it != set.second->end(); it++) {
+      Value* v = *it;
+      auto k = v->node()->kind();
+      if (k == prim::Constant || k == prim::ConstantMKLDNNTensor ||
+          k == prim::Param) {
+        last = graph->return_node();
+        continue;
+      }
+
+      auto last_use = getLastUse(v);
+      if (!last || last_use->isAfter(last)) {
+        last = last_use;
+      }
+    }
+    set_liveness[set.second] = last;
+  }
+
+  // REUSING MEMORY BY REINPLACING NODES
+  std::vector<Node*> nodes_to_inplace;
+
+  auto add_to_inplace_set = [&](Node* node) {
+    // defer making the inplacing change because that would invalidate the old
+    // Node output Value*
+    nodes_to_inplace.push_back(node);
+    TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+    auto output_liveness_end =
+        set_liveness[alias_mapping[node->outputs().at(0)]];
+    merge_sets(alias_mapping, node->inputs().at(0), node->output());
+    set_liveness[alias_mapping[node->output()]] = output_liveness_end;
+  };
+
+  for (Node* node : graph->nodes()) {
+    auto k = node->kind();
+    if (k == aten::relu || k == aten::sigmoid || k == aten::dropout) {
+      if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
+        continue;
+      }
+      add_to_inplace_set(node);
+    } else if (k == aten::mul || k == aten::add) {
+      // the binary operators (add/mul) are commutative and only take tensor
+      // inputs, so we can inplace either the first or second input
+      int64_t reusable_value_index = -1;
+      for (size_t i = 0; i < 2; i++) {
+        TORCH_INTERNAL_ASSERT(node->inputs().at(i)->type()->cast<TensorType>());
+        if (!set_liveness[alias_mapping[node->inputs().at(i)]]->isAfter(node)) {
+          reusable_value_index = i;
+          break;
+        }
+      }
+
+      if (reusable_value_index == -1) {
+        continue;
+      }
+
+      if (reusable_value_index == 1) {
+        node->insertInput(0, node->inputs().at(1));
+        node->removeInput(2);
+      }
+      add_to_inplace_set(node);
+    }
+  }
+
+  for (Node* node : nodes_to_inplace) {
+    node->replaceWithNewSymbol(
+        Symbol::fromQualString(node->schema().name() + "_"));
+    node->destroy();
+  }
 }
 
 Operation BroadOp(const Node* node) {
@@ -239,7 +405,7 @@ void moveWeightsToMKLDNN(Node* n) {
   }
 }
 
-void computeSubgraphInMKLDNN(Node* subgraph_node) {
+void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
   auto graph = subgraph_node->owningGraph();
   Value* none_value = nullptr;
   {
@@ -467,7 +633,7 @@ class MKLDNNSubgraphSlicer {
         return true;
     }
 
-    if (n->kind() == aten::add) {
+    if (n->kind() == aten::add || n->kind() == aten::mul) {
       // mkldnn doesn't currently support Tensor-Scalar add
       for (size_t i = 0; i < 2; i++) {
         if (!n->inputs().at(i)->type()->cast<TensorType>()) {
@@ -489,7 +655,8 @@ class MKLDNNSubgraphSlicer {
     while (curNode != *block_->nodes().end()) {
       auto nextNode = curNode->next();
       if (curNode->kind() == prim::MKLDNNGroup) {
-        computeSubgraphInMKLDNN(curNode);
+        ComputeSubgraphInMKLDNN(curNode);
+        InplaceMKLDNNSubgraph(SubgraphUtils::getSubgraph(curNode));
         SubgraphUtils::unmergeSubgraph(curNode);
       }
       curNode = nextNode;
