@@ -2987,6 +2987,9 @@ Computes the error function of each element. The error function is defined as fo
 .. math::
     \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erf`.
+
 Args:
     {input}
 
@@ -3009,6 +3012,9 @@ The complementary error function is defined as follows:
 .. math::
     \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erfc`.
+
 Args:
     {input}
 
@@ -3031,6 +3037,8 @@ The inverse error function is defined in the range :math:`(-1, 1)` as:
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erfinv`.
 
 Args:
     {input}
@@ -6427,7 +6435,7 @@ Keyword args:
 Example::
 
     >>> eps = torch.finfo(torch.float32).eps
-    >>> torch.nextafter(torch.Tensor([1, 2]), torch.Tensor([2, 1])) == torch.Tensor([eps + 1, 2 - eps])
+    >>> torch.nextafter(torch.tensor([1.0, 2.0]), torch.tensor([2.0, 1.0])) == torch.tensor([eps + 1, 2 - eps])
     tensor([True, True])
 
 """.format(**common_args))
@@ -6680,21 +6688,9 @@ Example::
 
 add_docstr(torch.orgqr,
            r"""
-orgqr(input, input2) -> Tensor
+orgqr(input, tau) -> Tensor
 
-Computes the orthogonal matrix `Q` of a QR factorization, from the `(input, input2)`
-tuple returned by :func:`torch.geqrf`.
-
-This directly calls the underlying LAPACK function `?orgqr`.
-See `LAPACK documentation for orgqr`_ for further details.
-
-Args:
-    input (Tensor): the `a` from :func:`torch.geqrf`.
-    input2 (Tensor): the `tau` from :func:`torch.geqrf`.
-
-.. _LAPACK documentation for orgqr:
-    https://software.intel.com/en-us/mkl-developer-reference-c-orgqr
-
+Alias for :func:`torch.linalg.householder_product`.
 """)
 
 add_docstr(torch.ormqr,
@@ -7810,12 +7806,17 @@ add_docstr(torch.sgn,
            r"""
 sgn(input, *, out=None) -> Tensor
 
-For complex tensors, this function returns a new tensor whose elemants have the same angle as that of the
-elements of :attr:`input` and absolute value 1. For a non-complex tensor, this function
-returns the signs of the elements of :attr:`input` (see :func:`torch.sign`).
+This function is an extension of torch.sign() to complex tensors.
+It computes a new tensor whose elements have
+the same angles as the corresponding elements of :attr:`input` and
+absolute values (i.e. magnitudes) of one for complex tensors and
+is equivalent to torch.sign() for non-complex tensors.
 
-:math:`\text{out}_{i} = 0`, if :math:`|{\text{{input}}_i}| == 0`
-:math:`\text{out}_{i} = \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|}`, otherwise
+.. math::
+    \text{out}_{i} = \begin{cases}
+                    0 & |\text{{input}}_i| == 0 \\
+                    \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|} & \text{otherwise}
+                    \end{cases}
 
 """ + r"""
 Args:
@@ -7826,8 +7827,8 @@ Keyword args:
 
 Example::
 
-    >>> x=torch.tensor([3+4j, 7-24j, 0, 1+2j])
-    >>> x.sgn()
+    >>> t = torch.tensor([3+4j, 7-24j, 0, 1+2j])
+    >>> t.sgn()
     tensor([0.6000+0.8000j, 0.2800-0.9600j, 0.0000+0.0000j, 0.4472+0.8944j])
 """.format(**common_args))
 
