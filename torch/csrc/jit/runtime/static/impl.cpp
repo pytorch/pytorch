@@ -1130,7 +1130,7 @@ ProcessedNode::ProcessedNode(
   } else if (
       node->kind() != prim::ListConstruct &&
       node->kind() != prim::TupleConstruct &&
-      node->kind() != prim::ListUnpack) {
+      node->kind() != prim::DictConstruct && node->kind() != prim::ListUnpack) {
     const Operator& op = node->getOperator();
     TORCH_CHECK(op.hasOperation());
     op_ = op.getOperation(node);
