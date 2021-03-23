@@ -107,7 +107,7 @@ def _issubtype_with_constraints(variant, constraints):
         return all(_issubtype_with_constraints(v, constraints) for v in vs)
 
     # Variant is not TypeVar or Union
-    if hasattr(variant, '__origin__'):
+    if hasattr(variant, '__origin__') and variant.__origin__ is not None:
         v_origin = variant.__origin__
         v_args = variant.__args__
     else:
