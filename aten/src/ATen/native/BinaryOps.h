@@ -7,7 +7,7 @@ namespace at { struct TensorIterator; }
 
 namespace at { namespace native {
 
-inline void alpha_check(const ScalarType dtype, Scalar alpha) {
+inline void alpha_check(const ScalarType dtype, const Scalar& alpha) {
   TORCH_CHECK(! alpha.isBoolean() || dtype == ScalarType::Bool,
               "Boolean alpha only supported for Boolean results.");
   TORCH_CHECK(isFloatingType(dtype) || isComplexType(dtype)
@@ -34,21 +34,22 @@ inline void sub_check(const Tensor& self, const Scalar& scalar) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
-using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, Scalar alpha);
+using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
+using structured_binary_fn = void(*)(TensorIteratorBase&);
 
-using binary_fn_alpha = void(*)(TensorIterator&, Scalar alpha);
+using binary_fn_alpha = void(*)(TensorIterator&, const Scalar& alpha);
 using binary_fn_double = void(*)(TensorIterator&, double);
 using binary_fn = void(*)(TensorIterator&);
 using binary_clamp_fn_alpha =
-    void(*)(TensorIterator&, Scalar alpha, Scalar min_val, Scalar max_val);
+    void(*)(TensorIterator&, const Scalar& alpha, const Scalar& min_val, const Scalar& max_val);
 
 DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub);
 DECLARE_DISPATCH(binary_clamp_fn_alpha, add_clamp_stub);
-DECLARE_DISPATCH(binary_fn_alpha, sub_stub);
-DECLARE_DISPATCH(binary_fn, mul_stub);
-DECLARE_DISPATCH(binary_fn, div_true_stub);
-DECLARE_DISPATCH(binary_fn, div_floor_stub);
-DECLARE_DISPATCH(binary_fn, div_trunc_stub);
+DECLARE_DISPATCH(structured_binary_fn_alpha, sub_stub);
+DECLARE_DISPATCH(structured_binary_fn, mul_stub);
+DECLARE_DISPATCH(structured_binary_fn, div_true_stub);
+DECLARE_DISPATCH(structured_binary_fn, div_floor_stub);
+DECLARE_DISPATCH(structured_binary_fn, div_trunc_stub);
 DECLARE_DISPATCH(binary_fn, remainder_stub);
 DECLARE_DISPATCH(binary_fn, atan2_stub);
 DECLARE_DISPATCH(binary_fn, bitwise_and_stub);
