@@ -100,7 +100,7 @@ void ListenThread::run() {
   }
 }
 
-void ListenThread::addCallback(std::string key, CallbackFunction cb) {
+void ListenThread::addCallback(std::string key, std::function<void(std::string, std::string)> cb) {
   keyToCallbacks_[key] = cb;
 }
 
@@ -532,12 +532,12 @@ TCPStore::TCPStore(
           tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
       if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
         waitForWorkers();
-      }
+      } 
 
       // socket to handle requests from server
       listenSocket_ = tcputil::connect(
           tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-      tcpStoreListener_ = std::make_unique<ListenThread>(listenSocket_);
+      watchListener_ = std::make_unique<ListenThread>(listenSocket_);
 
   } catch (const std::exception&) {
     if (isServer_) {
@@ -552,7 +552,7 @@ TCPStore::TCPStore(
 TCPStore::~TCPStore() {
   tcputil::closeSocket(storeSocket_);
   tcputil::closeSocket(listenSocket_);
-  tcpStoreListener_ = nullptr;
+  watchListener_ = nullptr;
   if (isServer_) {
     // Store daemon should end because of closed connection.
     // daemon destructor should join the thread
@@ -630,10 +630,10 @@ bool TCPStore::deleteKey(const std::string& key) {
   return (numDeleted == 1);
 }
 
-void TCPStore::watchKey(const std::string& key, CallbackFunction callback) {
+void TCPStore::watchKey(const std::string& key, std::function<void(std::string, std::string)> callback) {
   std::string regKey = regularPrefix_ + key;
 
-  tcpStoreListener_->addCallback(regKey, callback);
+  watchListener_->addCallback(regKey, callback);
 
   tcputil::sendValue<QueryType>(listenSocket_, QueryType::WATCH_KEY);
   tcputil::sendString(listenSocket_, regKey, true);
