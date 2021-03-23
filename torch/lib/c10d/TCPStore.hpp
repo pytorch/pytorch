@@ -14,6 +14,7 @@
 
 namespace c10d {
 
+// Background thread that runs exclusively on the master process
 class TCPStoreDaemon {
  public:
   explicit TCPStoreDaemon(int storeListenSocket);
@@ -63,24 +64,27 @@ class TCPStoreDaemon {
 #endif
 };
 
+// Listener thread runs on all processes
+// Right now only handles callbacks registered from watchKey()
 class ListenThread {
   public:
-    typedef void (*CallbackFunction)(const std::string&, const std::string&);
     explicit ListenThread(int listenSocket);
     ~ListenThread();
-    void addCallback(std::string key, CallbackFunction cb);
+    // Adds a callback to run key change
+    void addCallback(std::string key, std::function<void(std::string, std::string)> cb);
 
   protected:
     void run();
     std::thread listenerThread_;
+    // Socket from which to receive data from TCPStoreDaemon
     int storeListenSocket_;
-    std::unordered_map<std::string, CallbackFunction> keyToCallbacks_;
+    // List of callbacks map each watched key
+    std::unordered_map<std::string, std::function<void(std::string, std::string)>> keyToCallbacks_;
     std::vector<int> controlPipeFd_{-1, -1};
 };
 
 class TCPStore : public Store {
  public:
-  typedef void (*CallbackFunction)(const std::string&, const std::string&);
   explicit TCPStore(
       const std::string& masterAddr,
       PortType masterPort,
@@ -104,7 +108,7 @@ class TCPStore : public Store {
 
   bool deleteKey(const std::string& key) override;
 
-  void watchKey(const std::string& key, CallbackFunction callback);
+  void watchKey(const std::string& key, std::function<void(std::string, std::string)> callback);
 
   bool check(const std::vector<std::string>& keys) override;
 
@@ -149,7 +153,8 @@ class TCPStore : public Store {
   std::unique_ptr<TCPStoreDaemon> tcpStoreDaemon_ = nullptr;
 
   // Launched from all clients
-  std::unique_ptr<ListenThread> tcpStoreListener_ = nullptr;
+  std::unique_ptr<ListenThread> watchListener_ = nullptr;
 };
 
 } // namespace c10d
+
