@@ -319,63 +319,6 @@ class ComputeTensorMethod:
 def compute_aten_op(f: NativeFunction) -> str:
     return f'{{"aten::{f.func.name.name}", "{f.func.name.overload_name}"}},'
 
-# Generates NativeFunctions.h, a list of forward declarations of all
-# actual kernel definitions we keep in aten/src/ATen/native/
-@with_native_function
-def compute_native_function_declaration(g: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
-    if isinstance(g, StructuredNativeFunctions):
-        # only out has dispatch
-        meta_name = meta.name(g)
-        rs = []
-        seen: Set[Any] = set()
-        out_args = structured.impl_arguments(g)
-        for k, n in g.out.dispatch.items():
-            if n in seen:
-                continue
-            if not is_structured_dispatch_key(k):
-                continue
-            seen.add(n)
-            rs.append(f"""\
-struct TORCH_API structured_{n} : public at::meta::{meta_name} {{
-    void impl({', '.join(a.decl() for a in out_args)});
-}};
-""")
-
-        seen = set()
-        for f in g.functions():
-            returns_type = native.returns_type(f.func.returns)
-            args = native.arguments(f.func)
-            for k, n in f.dispatch.items():
-                if n in seen:
-                    continue
-                if is_structured_dispatch_key(k):
-                    continue
-                seen.add(n)
-                args_str = ', '.join(a.decl() for a in args)
-                rs.append(f"TORCH_API {returns_type} {n}({args_str});")
-
-        return rs
-
-    else:
-        f = g
-        ns = list(f.dispatch.values())
-
-        rs = []
-        # Sometimes a function name shows up multiple times; only generate
-        # it once!
-        seen = set()
-        for n in ns:
-            if n in seen:
-                continue
-            if "legacy::" in n:
-                continue
-            seen.add(n)
-            returns_type = native.returns_type(f.func.returns)
-            args = native.arguments(f.func)
-            rs.append(f"TORCH_API {returns_type} {n}({', '.join(a.decl() for a in args)});")
-
-        return rs
-
 # Generates MetaFunctions.h
 def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
     with native_function_manager(g.out):
@@ -1027,7 +970,7 @@ def main() -> None:
         'aten_ops': list(mapMaybe(compute_aten_op, native_functions)),
     })
     cpu_fm.write('NativeFunctions.h', lambda: {
-        'native_function_declarations': list(concatMap(compute_native_function_declaration, grouped_native_functions)),
+        'native_function_declarations': list(concatMap(dest.compute_native_function_declaration, grouped_native_functions)),
     })
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
