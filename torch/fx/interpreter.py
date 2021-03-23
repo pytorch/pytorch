@@ -292,6 +292,14 @@ class Interpreter:
             return self.env[n_arg]
         return map_arg(args, load_arg)
 
+class TransformerTracer(Tracer):
+    def __init__(self, graph: Graph):
+        super().__init__()
+        self.graph = graph
+
+    def is_leaf_module(self, _, __) -> bool:
+        return True
+
 class Transformer(Interpreter):
     """
     ``Transformer`` is a special type of interpreter that produces a
@@ -334,13 +342,6 @@ class Transformer(Interpreter):
         super().__init__(module)
         self.new_graph = Graph()
 
-        class TransformerTracer(Tracer):
-            def __init__(self, graph: Graph):
-                super().__init__()
-                self.graph = graph
-
-            def is_leaf_module(self, _, __) -> bool:
-                return True
         self.tracer = TransformerTracer(self.new_graph)
         self.tracer.root = module
 
@@ -362,19 +363,12 @@ class Transformer(Interpreter):
 
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:
         """
-        Execute a ``get_attr`` node. In ``Transformer``, this is
-        overridden to insert a new ``get_attr`` node into the output
-        graph.
-
-        Args:
-            target (Target): The call target for this node. See
-                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
-                details on semantics
-            args (Tuple): Tuple of positional args for this invocation
-            kwargs (Dict): Dict of keyword arguments for this invocation
+        NOTE: emission of nodes for attributes (e.g. parameters, buffers) is done lazily
+        via Tracer.create_arg. Do not override this method to return a Proxy. Instead,
+        intercept creation of these nodes by sublcassing `TransformerTracer` and overriding
+        `create_arg` there.
         """
-        assert isinstance(target, str)
-        return Proxy(self.new_graph.get_attr(target), self.tracer)
+        return super().get_attr(target, args, kwargs)
 
     def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
         # Override so that the leaf module policy from `self.tracer` is respected.

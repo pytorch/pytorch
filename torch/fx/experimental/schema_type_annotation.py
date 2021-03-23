@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Tuple
 from torch.fx.node import Argument, Target
 from torch._jit_internal import boolean_dispatched
 from torch.fx.operator_schemas import _torchscript_type_to_python_type
+from torch.fx.interpreter import TransformerTracer
 
 from torch.fx import Transformer
 
@@ -32,6 +33,36 @@ class AnnotateTypesWithSchema(Transformer):
         self.annotate_functionals = annotate_functionals
         self.annotate_modules = annotate_modules
         self.annotate_get_attrs = annotate_get_attrs
+
+        class AnnotateTypesTracer(TransformerTracer):
+            """
+            Special transformer to annotate types on `get_attr` nodes. Since `get_attr`
+            nodes are emitted lazily during argument processing, we must override the
+            behavior here instead of in, for example, an AnnotateTypesWithSchema.get_attr
+            method
+            """
+            def create_arg(self, a: Any) -> 'Argument':
+                arg = super().create_arg(a)
+
+                def annotate_get_attr_types(a : Argument):
+                    if isinstance(a, torch.fx.Node) and a.op == 'get_attr' and a.type is None:
+                        try:
+                            a.type = type(self.root.get_parameter(a.target))
+                            return a
+                        except AttributeError:
+                            pass
+                        try:
+                            a.type = type(self.root.get_buffer(a.target))
+                            return a
+                        except AttributeError:
+                            pass
+                    return a
+
+                torch.fx.node.map_aggregate(arg, annotate_get_attr_types)
+                return arg
+
+        self.tracer = AnnotateTypesTracer(self.new_graph)
+        self.tracer.root = module
 
     def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
         python_ret_type = None
@@ -68,25 +99,6 @@ class AnnotateTypesWithSchema(Transformer):
         return_proxy = super().call_module(target, args, kwargs)
         return_proxy.node.type = return_proxy.node.type if return_proxy.node.type else python_ret_type
         return return_proxy
-
-    def get_attr(self, target : torch.fx.node.Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
-        attr_proxy = super().get_attr(target, args, kwargs)
-
-        if self.annotate_get_attrs:
-            module_itr = self.module
-            assert isinstance(target, str)
-            atoms = target.split('.')
-            for i, atom in enumerate(atoms):
-                if not hasattr(module_itr, atom):
-                    raise RuntimeError(f'Node referenced nonextent target {".".join(atoms[:i])}!')
-                module_itr = getattr(module_itr, atom)
-
-            maybe_inferred_ts_type = torch._C._jit_try_infer_type(module_itr)
-            if maybe_inferred_ts_type.success():
-                python_type = _torchscript_type_to_python_type(maybe_inferred_ts_type.type())
-                attr_proxy.node.type = python_type if not attr_proxy.node.type else attr_proxy.node.type
-
-        return attr_proxy
 
     def _extract_python_return_type(self, target : Target) -> Optional[Any]:
         """
