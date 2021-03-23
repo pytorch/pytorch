@@ -1634,7 +1634,7 @@ class TestFrozenOptimizations(JitTestCase):
 
                 scripted_mod = torch.jit.freeze(scripted_mod)
                 self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
-                FileCheck().check("to_mkldnn").check("aten::conv").check("to_dense").run(scripted_mod.graph)
+                FileCheck().check("to_mkldnn").check("prim::mkldnn_convolution").check("to_dense").run(scripted_mod.graph)
 
                 self.assertEqual(mod(inp), scripted_mod(inp))
                 self.assertEqual(mod(inp), scripted_mod(inp))
