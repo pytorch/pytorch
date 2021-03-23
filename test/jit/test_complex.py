@@ -148,3 +148,15 @@ class TestComplex(JitTestCase):
             checkCmathConst(x)
         for x in complex_consts:
             checkCmathConst(x, "complex")
+
+    def test_tensor_attributes(self):
+        @torch.jit.script
+        def tensor_real(x):
+            return x.T
+
+        def tensor_imag(x):
+            return x.imag
+
+        t = torch.randn(2, 3, dtype=torch.cdouble)
+        # self.checkScript(tensor_real, (t))
+        # self.checkScript(tensor_imag, (t))
