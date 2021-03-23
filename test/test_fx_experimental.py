@@ -898,6 +898,22 @@ class {test_classname}(torch.nn.Module):
         # Smoke test torchscript compilation since now we're emitting type annotations
         torch.jit.script(traced_functionals_annotated)
 
+    def test_annotate_buffer_type(self):
+        class TestMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer('foo', torch.rand(3, 4))
+
+            def forward(self, x):
+                return torch.nn.functional.relu(self.foo) + x
+
+        traced = torch.fx.symbolic_trace(TestMod())
+        annotated = AnnotateTypesWithSchema(traced).transform()
+
+        for node in annotated.graph.nodes:
+            if node.op == 'get_attr':
+                assert node.type is torch.Tensor
+
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
             def __init__(self):

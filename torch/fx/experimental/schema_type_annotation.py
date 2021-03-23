@@ -6,6 +6,7 @@ from torch.fx.node import Argument, Target
 from torch._jit_internal import boolean_dispatched
 from torch.fx.operator_schemas import _torchscript_type_to_python_type
 from torch.fx.interpreter import TransformerTracer
+import warnings
 
 from torch.fx import Transformer
 
@@ -46,16 +47,17 @@ class AnnotateTypesWithSchema(Transformer):
 
                 def annotate_get_attr_types(a : Argument):
                     if isinstance(a, torch.fx.Node) and a.op == 'get_attr' and a.type is None:
-                        try:
-                            a.type = type(self.root.get_parameter(a.target))
-                            return a
-                        except AttributeError:
-                            pass
-                        try:
-                            a.type = type(self.root.get_buffer(a.target))
-                            return a
-                        except AttributeError:
-                            pass
+                        assert isinstance(a.target, str)
+                        obj_itr = self.root
+                        for atom in a.target.split('.'):
+                            obj_itr = getattr(obj_itr, atom, None)
+                            if obj_itr is None:
+                                warnings.warn(f'Tried to annotate type of get_attr node referring to target '
+                                              f'{a.target}, but the Module did not have that target!')
+                                return a
+                        inferred_type = torch._C._jit_try_infer_type(obj_itr)
+                        if inferred_type.success():
+                            a.type = _torchscript_type_to_python_type(inferred_type.type())
                     return a
 
                 torch.fx.node.map_aggregate(arg, annotate_get_attr_types)
