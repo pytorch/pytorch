@@ -179,6 +179,31 @@ class TestOptimizer(TestCase):
         preserveThis = getattr(opt_m, "preserveThis", None)
         self.assertNotEqual(preserveThis, None)
 
+        class OptimizeNoForwardTest(torch.nn.Module):
+            def __init__(self):
+                super(OptimizeNoForwardTest, self).__init__()
+                self.l = nn.Linear(10, 100)
+                self.l2 = nn.Linear(100, 1)
+                self.d = nn.Dropout(p=0.2)
+
+            @torch.jit.export
+            def foo(self, x):
+                x = self.d(F.relu(self.l(x)))
+                return self.l2(x)
+        input_data = torch.ones(1, 10)
+        m = torch.jit.script(OptimizeNoForwardTest())
+        m.eval()
+        initial_result = m.foo(input_data)
+
+        optimized_scripted_model = optimize_for_mobile(m, methods_to_optimize=['foo'])
+        optimized_result = optimized_scripted_model.foo(input_data)
+
+
+        FileCheck().check_not("dropout.__") \
+                   .run(optimized_scripted_model.foo.graph)
+        torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
+
+
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."
                          " Please build with USE_XNNPACK=1.")
