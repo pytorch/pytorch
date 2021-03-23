@@ -766,7 +766,7 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad):
     samples = [SampleInput(tensor, args=(1, idx, source))
                for tensor, idx, source in product([t, t_nonctg], [idx, idx_nonctg], [s, s_nonctg])]
     samples.extend(SampleInput(tensor, args=(1, idx, source), kwargs=dict(alpha=a))
-               for tensor, idx, source, a in product([t, t_nonctg], [idx, idx_nonctg], [s, s_nonctg], [-1, 0, 2]))
+                   for tensor, idx, source, a in product([t, t_nonctg], [idx, idx_nonctg], [s, s_nonctg], [-1, 0, 2]))
 
     # Add scalar cases
     scalar_sizes = [(), (1,)]
