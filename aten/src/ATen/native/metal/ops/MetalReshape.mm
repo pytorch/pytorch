@@ -18,6 +18,9 @@ namespace metal {
 API_AVAILABLE(ios(10.0), macos(10.13))
 Tensor view(const Tensor& input, IntArrayRef size) {
   TORCH_CHECK(input.is_metal());
+  if(input.sizes() == size) {
+    return input;
+  }
   auto inferred_size = at::infer_size(size, input.numel());
   auto stride =
       at::detail::computeStride(input.sizes(), input.strides(), inferred_size);

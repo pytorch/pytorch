@@ -4,7 +4,6 @@
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 #import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
 #import <ATen/native/metal/ops/MetalConvolution.h>
-#import <ATen/native/metal/ops/MetalTranspose.h>
 
 #import <Foundation/Foundation.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
@@ -490,7 +489,7 @@ bool test_t() {
       auto X1 = at::rand({H, W}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
       auto Y1 = at::t(X1).contiguous();
       auto X2 = X1.metal();
-      auto Y2 = at::native::metal::t(X2).cpu();
+      auto Y2 = at::t(X2).cpu();
       return almostEqual(Y1, Y2);
     });
     if (!b) {
@@ -498,6 +497,39 @@ bool test_t() {
     }
   }
   return result;
+}
+
+bool test_transpose() {
+    __block std::vector<int64_t> size {1, 2, 2, 5};
+    return TEST(size, __PRETTY_FUNCTION__, ^bool{
+        auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+        auto Y1 = at::transpose(X1, 1, 3).contiguous();
+        auto X2 = X1.metal();
+        auto Y2 = at::transpose(X2, 1, 3).cpu();
+        return almostEqual(Y1, Y2);
+    });
+}
+
+bool test_transpose2() {
+    __block std::vector<int64_t> size {1, 2, 58, 28, 28};
+    return TEST(size, __PRETTY_FUNCTION__, ^bool{
+        auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+        auto Y1 = at::transpose(X1, 1, 2).contiguous();
+        auto X2 = X1.metal();
+        auto Y2 = at::transpose(X2, 1, 2).cpu();
+        return almostEqual(Y1, Y2);
+    });
+}
+
+bool test_transpose3() {
+    __block std::vector<int64_t> size {4, 5, 6};
+    return TEST(size, __PRETTY_FUNCTION__, ^bool{
+        auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+        auto Y1 = at::transpose(X1, 2, 0).contiguous();
+        auto X2 = X1.metal();
+        auto Y2 = at::transpose(X2, 2, 0).cpu();
+        return almostEqual(Y1, Y2);
+    });
 }
 
 bool test_view() {

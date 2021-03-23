@@ -579,7 +579,7 @@ kernel void reshape(texture2d_array<half, access::read> in_arr[[texture(0), func
     const ushort W1 = ushort_arg_5;
     const ushort C1 = ushort_arg_6;
     const ushort N1 = ushort_arg_7;
-        
+
     const int numel1 = H1 * W1 * C1 * N1;
     const ushort slices2 = divRoundUp(C2, 4);
     const ushort slices1 = divRoundUp(C1, 4);
@@ -590,7 +590,7 @@ kernel void reshape(texture2d_array<half, access::read> in_arr[[texture(0), func
         // we compute the "linear index" of the output element,
         // and convert it to the equivalent "linear index" of the input element.
         ushort offset = 4 * s2 + idx;
-        ushort linear_idx = n2 * C2 * H2 * W2 + offset * H2 * W2 + gid.y * W2 + gid.x;
+        int64_t linear_idx = n2 * C2 * H2 * W2 + offset * H2 * W2 + gid.y * W2 + gid.x;
         if(linear_idx >= numel1){
             value[idx] = 0;
             continue;
@@ -606,9 +606,101 @@ kernel void reshape(texture2d_array<half, access::read> in_arr[[texture(0), func
         } else {
             value[idx] = in_tex.read(ushort2(x1, y1))[pos];
         }
-            
+
     }
     if(reshape_out_is_arr) {
+        out_arr.write(value, gid.xy, gid.z);
+    } else {
+        out_tex.write(value, gid.xy);
+    }
+}
+
+constant bool transpose_in_is_arr = (ushort_arg_3 > 1 || ushort_arg_4 > 4);
+constant bool transpose_in_is_tex = !transpose_in_is_arr;
+constant bool transpose_out_is_arr = (ushort_arg_5 > 1 || ushort_arg_6 > 4);
+constant bool transpose_out_is_tex = !transpose_out_is_arr;
+kernel void transpose(texture2d_array<half, access::read>in_arr[[texture(0),function_constant(transpose_in_is_arr)]],
+                      texture2d<half, access::read> in_tex[[texture(0), function_constant(transpose_in_is_tex)]],
+                      texture2d_array<half, access::write>out_arr[[texture(1),function_constant(transpose_out_is_arr)]],
+                      texture2d<half, access::write> out_tex[[texture(1), function_constant(transpose_out_is_tex)]],
+                      constant ushort* inSizeBuffer [[buffer(0)]],
+                      constant ushort* outSizeBuffer [[buffer(1)]],
+                      device ushort* indexBuffer [[buffer(2)]],
+                      ushort3 gid[[thread_position_in_grid]]) {
+
+    const ushort dim0 = ushort_arg_0;
+    const ushort dim1 = ushort_arg_1;
+    const ushort dim = ushort_arg_2;
+    const ushort N1 = ushort_arg_3;
+    const ushort C1 = ushort_arg_4;
+    const ushort N2 = ushort_arg_5;
+    const ushort C2 = ushort_arg_6;
+    ushort W1,W2,H1,H2;
+    if(transpose_in_is_arr) {
+        W1 = in_arr.get_width();
+        H1 = in_arr.get_height();
+    } else {
+        W1 = in_tex.get_width();
+        H1 = in_tex.get_height();
+    }
+    if(transpose_out_is_arr) {
+        W2 = out_arr.get_width();
+        H2 = out_arr.get_height();
+    } else {
+        W2 = out_tex.get_width();
+        H2 = out_tex.get_height();
+    }
+    if (gid.x >= W2 || gid.y >= H2) {
+        return;
+    }
+    const int numel = H2 * W2 * C2 * N2;
+    const ushort slices2 = divRoundUp(C2, 4);
+    const ushort slices1 = divRoundUp(C1, 4);
+    const ushort n2 = gid.z / slices2;
+    const ushort s2 = gid.z - n2 * slices2;
+    half4 value;
+    for (int idx = 0; idx < 4; ++idx){
+        ushort offset = 4 * s2 + idx;
+        int64_t linear_idx2 = n2 * C2 * H2 * W2 + offset * H2 * W2 + gid.y * W2 + gid.x;
+        if(linear_idx2 >= numel) {
+            value[idx] = 0;
+            continue;
+        }
+
+        ushort d2 = 0;
+        for(int j = dim-1; j>=0; --j){
+            d2  = outSizeBuffer[j];
+            indexBuffer[j] = linear_idx2 % d2;
+            linear_idx2 /= d2;
+        }
+
+        // swap dims
+        ushort tmp = indexBuffer[dim0];
+        indexBuffer[dim0] = indexBuffer[dim1];
+        indexBuffer[dim1] = tmp;
+
+        int64_t linear_idx1 = 0;
+        ushort m = 1;
+        ushort d1 = 0;
+        for(int k = dim-1; k>=0; --k) {
+            d1 = indexBuffer[k];
+            linear_idx1 += d1 * m;
+            m *= inSizeBuffer[k];
+        }
+
+        auto x1 = linear_idx1 % W1;
+        auto y1 = ((int)(linear_idx1/W1)) % H1;
+        auto c1 = ((int)(linear_idx1/W1/H1) % C1);
+        auto n1 = ((int)(linear_idx1/W1/H1/C1) % N1);
+        auto z1 = (int)c1 / 4 + n1 * slices1;
+        auto pos = c1 % 4;
+        if(transpose_in_is_arr) {
+            value[idx] = in_arr.read(ushort2(x1, y1), z1)[pos];
+        } else {
+            value[idx] = in_tex.read(ushort2(x1, y1))[pos];
+        }
+    }
+    if(transpose_out_is_arr) {
         out_arr.write(value, gid.xy, gid.z);
     } else {
         out_tex.write(value, gid.xy);
