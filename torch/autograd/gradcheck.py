@@ -143,7 +143,7 @@ def compute_gradient(fn, entry, v, norm_v):
     returns the gradient of each of the outputs wrt to x at idx.
     """
     # we currently assume that the norm of delta equals eps
-    if isinstance(v, torch.Tensor):
+    if isinstance(v, torch.Tensor) and v.layout != torch.sparse_coo:
         v = v.reshape(entry.shape)
 
     orig = entry.clone()
@@ -227,27 +227,36 @@ def get_numerical_jacobian_for_input(fn, input, inputs, outputs, delta, eps, gra
         get_numerical_jvp(jacobian_cols[d_idx], delta, jvp_fn, x.is_complex(), grad_out)
     return combine_jacobian_cols(jacobian_cols, outputs, input, dim=input.numel())
 
+def sparse_clone(input):
+    # returns a new sparse tensor that shares storage with `input`
+    # this is used to avoid invoking coalesce on the original input tensor
+    # assumes that input is coalesced
+    if input.layout == torch.sparse_coo:
+        return torch.sparse_coo_tensor(input.indices(), input.values(), input.size())
+    return input
 
 def get_fast_numerical_jacobian_for_input(fn, input_idx, input, inputs, outputs, delta, eps, grad_out):
     jacobian_cols: List[Optional[torch.Tensor]] = []
-    if input.layout == torch.sparse_coo:
-        dense_input = input.to_dense()
+
+    if input.layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
+         # TODO do we really need this anymore for the fast case?
+        entry = input.to_dense()
+    elif input.layout == torch.sparse_coo:
+        entry = torch.sparse_coo_tensor(input.indices(), input.values(), input.size())
     else:
-        dense_input = input
+        entry = input.data
 
     def wrapped_fn():
         if input.layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
-            # convert the dense tensor back to have mkldnn layout
-            inp = [input.to_mkldnn()]
+            inp = [entry.to_mkldnn()]
         elif input.layout == torch.sparse_coo:
-            inp = [a.clone() if i != input_idx else dense_input.to_sparse() for i, a in enumerate(_as_tuple(inputs))]
+            inp = [sparse_clone(a) if i != input_idx else entry for i, a in enumerate(_as_tuple(inputs))]
         else:
-            # x is a view into input and so this works
             inp = _as_tuple(inputs)
         return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
     def jvp_fn(delta):
-        return compute_gradient(wrapped_fn, dense_input.data, delta, eps)
+        return compute_gradient(wrapped_fn, entry, delta, eps)
 
     get_numerical_jvp(jacobian_cols, delta, jvp_fn, input.is_complex(), grad_out)
     jacobians = make_jacobians_with_outputs(outputs, dtype=input.dtype, device=input.device)
@@ -389,7 +398,7 @@ def check_inputs(fail_test, tupled_inputs, check_sparse_nnz) -> bool:
 
 
 def check_outputs(outputs) -> None:
-    if any(t.is_sparse for t in outputs if isinstance(t, torch.Tensor)):
+    if any(t.layout == torch.sparse_coo for t in outputs if isinstance(t, torch.Tensor)):
         # it is easier to call to_dense() on the sparse output than
         # to modify analytical jacobian
         raise ValueError('Sparse output is not supported at gradcheck yet. '
@@ -411,14 +420,17 @@ def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> b
 
 
 def check_no_differentiable_outputs_fast(fail_test, func, func_out, inputs, all_u, eps):
-    for i, (inp, u) in enumerate(zip(inputs, all_u)):
+    diff_idx = 0
+    for i, inp in enumerate(inputs):
         if not is_tensor_like(inp) or not inp.requires_grad:
             continue
+        u = all_u[diff_idx]
         numerical = get_fast_numerical_jacobian_for_input(func, i, inp, inputs, _as_tuple(func_out), eps * u, eps, 1.0)
         for n in numerical:
             # TODO: Why do get small non-zero values here
             if not torch.allclose(n, torch.zeros_like(n), atol=1e-12):
                 return fail_test('Numerical gradient for function expected to be zero')
+        diff_idx += 1
     return True
 
 
@@ -668,16 +680,25 @@ def dot(u, v):
 def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
                    atol, raise_exception, check_grad_dtypes, nondet_tol):
     # See https://github.com/pytorch/pytorch/issues/53876
-
-    def normalize(x):
-        return x / x.norm()
+    def vec_from_tensor(x):
+        # If x is complex, we create a complex tensor with only real component
+        if x.layout == torch.sparse_coo:
+            # For sparse, create a random sparse vec with random values in the same
+            # indices. Make sure size is set so that it isn't inferred to be smaller.
+            x_values = x.values()
+            values = torch.rand(x_values.nelement()).to(dtype=x.dtype, device=x.device).reshape(x_values.shape)
+            values /= values.norm()
+            vec = torch.sparse_coo_tensor(x.indices(), values, x.size())
+        else:
+            vec = torch.rand(x.nelement()).to(dtype=x.dtype, device=x.device)
+            vec /= vec.norm()
+        return vec
 
     inp_tensors = [t for t in tupled_inputs if is_tensor_like(t) and t.requires_grad]
 
-    all_u = [normalize(torch.rand(input.nelement())).to(dtype=input.dtype, device=input.device)
-             for input in inp_tensors]
-    all_v = [normalize(torch.rand(output.nelement())).to(dtype=output.dtype, device=output.device)
-             for output in outputs if is_tensor_like(output)]
+    all_u = [vec_from_tensor(inp) for inp in inp_tensors]
+    all_u_dense = [u.to_dense().reshape(-1) if u.layout == torch.sparse_coo else u for u in all_u]
+    all_v = [vec_from_tensor(out) for out in outputs if is_tensor_like(out)]
 
     if not outputs:
         if not check_no_differentiable_outputs_fast(fail_test, func, func_out, tupled_inputs, all_u, eps):
@@ -721,7 +742,7 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
         if failed:
             return False
 
-        for a, u in zip(analytical, all_u):
+        for a, u in zip(analytical, all_u_dense):
             all_analytical[i].append(a.T.squeeze(0).dot(u))
 
         if out.is_complex():
@@ -730,7 +751,7 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
             if failed:
                 return False
 
-            for j, (a, u) in enumerate(zip(analytical_from_imag_grad_out, all_u)):
+            for j, (a, u) in enumerate(zip(analytical_from_imag_grad_out, all_u_dense)):
                 all_analytical_from_imag_grad_out[i].append(a.T.squeeze(0).dot(u))
 
 
@@ -741,13 +762,13 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
             # TODO: clean up cases
             a = all_analytical_from_imag_grad_out[j][i]
             if a.is_complex() and not n.is_complex():
-                if not torch.allclose(a, n.to(a.dtype), atol, rtol):
+                if not torch.allclose(a, n.to(a.dtype), rtol, atol):
                     return fail_test(get_notallclose_msg(a, n, i, j, prefix))
             elif n.is_complex() and not a.is_complex():
-                if not torch.allclose(a.to(n.dtype), n, atol, rtol):
+                if not torch.allclose(a.to(n.dtype), n, rtol, atol):
                     return fail_test(get_notallclose_msg(a, n, i, j, prefix))
             else:
-                if not torch.allclose(a, n, atol, rtol):
+                if not torch.allclose(a, n, rtol, atol):
                     return fail_test(get_notallclose_msg(a, n, i, j, prefix))
 
     # Make sure analytical and numerical is the same
@@ -757,13 +778,13 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
         for j, n in enumerate(all_numerical_for_input_i):
             a = all_analytical[j][i]
             if a.is_complex() and not n.is_complex():
-                if not torch.allclose(a, n.to(a.dtype), atol, rtol):
+                if not torch.allclose(a, n.to(a.dtype), rtol, atol):
                     return fail_test(get_notallclose_msg(a, n, i, j, prefix))
             elif n.is_complex() and not a.is_complex():
-                if not torch.allclose(a.to(n.dtype), n, atol, rtol):
+                if not torch.allclose(a.to(n.dtype), n, rtol, atol):
                     return fail_test(get_notallclose_msg(a, n, i, j, prefix))
             else:
-                if not torch.allclose(a, n, atol, rtol):
+                if not torch.allclose(a, n, rtol, atol):
                     return fail_test(get_notallclose_msg(a, n, i, j, prefix))
 
     return True
@@ -785,7 +806,7 @@ def gradcheck(
     rtol: float = 1e-3,
     raise_exception: bool = True,
     check_sparse_nnz: bool = False,
-    nondet_tol: float = 0.0,
+    nondet_tol: float = 1e-12, # TODO WHY
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
     check_batched_grad: bool = False,
@@ -844,7 +865,14 @@ def gradcheck(
             raise RuntimeError(msg)
         return False
 
-    tupled_inputs = _as_tuple(inputs)
+    # Coalesce if sparse, so we can get .values() later. We do this before we call func
+    # so that input is part of the graph
+    def coalesce(input):
+        if is_tensor_like(input) and input.layout == torch.sparse_coo:
+            return input.coalesce()
+        return input
+
+    tupled_inputs = tuple(coalesce(input) for input in _as_tuple(inputs))
 
     if not check_inputs(fail_test, tupled_inputs, check_sparse_nnz):
         return False
