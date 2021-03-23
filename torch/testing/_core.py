@@ -7,7 +7,6 @@ import random
 import math
 import cmath
 from typing import cast, List, Optional, Tuple, Union
-from .check_kernel_launches import check_cuda_kernel_launches, check_code_for_cuda_kernel_launches
 import operator
 
 FileCheck = torch._C.FileCheck
