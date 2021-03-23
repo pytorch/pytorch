@@ -45,7 +45,7 @@ std::unique_ptr<RRefBackwardReq> RRefBackwardReq::fromMessage(
       payload,
       payload_size,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &message.tensors());
+      message.tensors());
   std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
 
   // Build RRefBackwardReq.
