@@ -1469,7 +1469,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ArithmeticModule(), (x, y, z, t))
 
         class ArithmeticModule(torch.nn.Module):
-            def forward(self, x: float, y: float):
+            def forward(self, x: int, y: int):
                 return x == y
 
         x = 3
