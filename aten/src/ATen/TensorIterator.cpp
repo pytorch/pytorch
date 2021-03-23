@@ -8,6 +8,8 @@
 #include <ATen/native/Resize.h>
 #include <ATen/TensorOperators.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 
 using DimMask = TensorIteratorBase::DimMask;
@@ -1392,7 +1394,7 @@ DimCounter::DimCounter(IntArrayRef shape, Range range)
   , offset(range.begin) {
   int64_t linear_offset = range.begin;
   int64_t ndim = values.size();
-  for (int dim = 0; dim < ndim; dim++) {
+  for (const auto dim : c10::irange(ndim)) {
     int64_t size = shape[dim];
     if (size > 0) {
       values[dim] = linear_offset % size;
