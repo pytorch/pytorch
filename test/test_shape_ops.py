@@ -620,9 +620,8 @@ class TestShapeFuncs(TestCase):
     def test_repeat_tile_vs_numpy(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
-            (t, dims) = sample.input
-            expected = op.ref(t.cpu().numpy(), dims, **sample.kwargs)
-            result = op(t, dims, **sample.kwargs).cpu().numpy()
+            expected = op.ref(sample.input.cpu().numpy(), *sample.args, **sample.kwargs)
+            result = op(sample.input, *sample.args, **sample.kwargs).cpu().numpy()
             self.assertEqual(expected, result)
 
 instantiate_device_type_tests(TestShapeOps, globals())
