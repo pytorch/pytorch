@@ -161,7 +161,7 @@ class OpInfo(object):
                  sample_inputs_func=None,  # function to generate sample inputs
                  sparse_sample_inputs_func=None,  # function to generate sparse sample inputs, if provided then the op
                                                   # is supporting sparse inputs and op.supports_sparse == True
-                                                  # Generated sparse sample inputs are used in addition to the 
+                                                  # Generated sparse sample inputs are used in addition to the
                                                   # regular sample inputs from op.sample_inputs_func
                  supports_inplace_on_uncoalesced=False,  # whether op supports inplace on uncoalesced sparse input
                  aten_name=None,  # name of the corresponding aten:: operator
@@ -325,7 +325,7 @@ def sample_inputs_unary(op_info, device, dtype, requires_grad):
 
 
 def sparse_sample_inputs_unary(op_info, device, dtype, requires_grad):
-    """This function generates 2D sparse COO matrices with 20% density. 
+    """This function generates 2D sparse COO matrices with 20% density.
     Generated values are bound to domain if op_info.domain is provided.
     Generated COO matrices are coalesced and uncoalesced of random shape.
     """
@@ -334,8 +334,8 @@ def sparse_sample_inputs_unary(op_info, device, dtype, requires_grad):
 
     # generate 2D random coalesced/uncoalesced sparse matrix with density of 20%
     rh, rw = 23, 34
-    # TODO: In the future should we consider updating the sparse matrix ctor to be 
-    # make_sparse_tensor() for consistency with make_tensor(), and look at giving 
+    # TODO: In the future should we consider updating the sparse matrix ctor to be
+    # make_sparse_tensor() for consistency with make_tensor(), and look at giving
     # them similar interfaces and logic
     low, high = op_info.domain
     domain = None if (low is None and high is None) else (low + op_info._domain_eps, high - op_info._domain_eps)

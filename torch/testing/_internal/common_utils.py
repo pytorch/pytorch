@@ -1814,7 +1814,7 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     is specified but higher than min(rows, columns)/(rows * columns)
     for non-singular matrices.
     """
-    # TODO: we should also add tests to test_testing to ensure that random_sparse_matrix() 
+    # TODO: we should also add tests to test_testing to ensure that random_sparse_matrix()
     # (and make_tensor()) work as expected
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')

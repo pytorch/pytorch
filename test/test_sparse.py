@@ -3055,7 +3055,7 @@ class TestSparseUnaryUfuncs(TestCase):
         return samples
 
     def _test_forward(self, sample, op, inplace_op=None):
-        # In this method we assume that input args and kwargs should not 
+        # In this method we assume that input args and kwargs should not
         # need to be modified between dense and sparse
         # This assumption holds for unary ops for which args/kwargs wont be tensors.
         dense_sample_input = tuple(
@@ -3180,7 +3180,7 @@ class TestSparseUnaryUfuncs(TestCase):
             self.skipTest("Skipped! No inplace variant op")
 
         # Below we test unary inplace op on a single input
-        for sample in samples:            
+        for sample in samples:
             self._test_forward(sample, op, inplace)
             # We can not check grads for sparse yet
 
