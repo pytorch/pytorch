@@ -1085,7 +1085,6 @@ Arguments:
                  const std::chrono::milliseconds& timeout) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                LOG(INFO) << "Got timeout of: " << opts.timeout.count();
                 return self->monitoredBarrier(opts);
               },
               py::call_guard<py::gil_scoped_release>());
