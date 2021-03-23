@@ -2721,6 +2721,9 @@ op_db: List[OpInfo] = [
                SkipInfo('TestGradients', 'test_inplace_gradgrad',
                         device_type='cuda', dtypes=[torch.complex128]),
                SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
+               # RuntimeError: CUDA error: misaligned address
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        device_type='cuda', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
            ),
            supports_out=False),
     OpInfo('masked_select',
