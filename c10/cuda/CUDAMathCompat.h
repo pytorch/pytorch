@@ -76,11 +76,6 @@ __MATH_FUNCTIONS_DECL__ uint16_t fp16_to_bits(scalar_t f) {
   return fp16.as_bits;
 }
 
-template <typename scalar_t>
-__MATH_FUNCTIONS_DECL__ scalar_t copysignfp16(scalar_t x, scalar_t y) {
-  return fp16_from_bits<scalar_t>(
-      (fp16_to_bits(x) & 0x7fffu) | (fp16_to_bits(y) & 0x8000u));
-}
 
 template <typename scalar_t>
 __MATH_FUNCTIONS_DECL__ scalar_t copysignfp32(scalar_t x, scalar_t y) {
@@ -94,6 +89,16 @@ __MATH_FUNCTIONS_DECL__ float copysign(float x, float y) {
 #else
   return copysignfp32(x, y);
 #endif
+}
+
+template <typename scalar_t>
+__MATH_FUNCTIONS_DECL__ scalar_t copysignfp16(scalar_t x, scalar_t y) {
+  #if defined(__CUDA_ARCH__)
+    return copysign(x,y);
+  #else
+    return fp16_from_bits<scalar_t>(
+      (fp16_to_bits(x) & 0x7fffu) | (fp16_to_bits(y) & 0x8000u));
+  #endif
 }
 
 __MATH_FUNCTIONS_DECL__ double copysign(double x, double y) {
