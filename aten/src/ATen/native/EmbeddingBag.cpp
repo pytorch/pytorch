@@ -6,6 +6,8 @@
 
 #include <ATen/native/CPUBlas.h>
 
+#include <c10/util/irange.h>
+
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #else
@@ -574,15 +576,16 @@ void embedding_bag_cpu_max_out(
     int64_t numBags = bag_size.size(0);
     std::vector<bool> bag_empty(numBags, true);
 
-    for (int i = 0; i < numIndices; ++i) {
+    for (const auto i : c10::irange(numIndices)) {
       auto bag = offset2bag_data[i];
       auto word_idx = indices_data[i];
 
       if (word_idx != static_cast<index_t>(padding_idx)) {
         bool is_first_for_bag = bag_empty[bag];
-        for (int dim = 0; dim < featureSize; dim++) {
+        for (const auto dim : c10::irange(featureSize)) {
           auto& current_item = output_data[output_stride * bag + dim];
-          auto weight_item = weight_data[weight_stride0 * word_idx + dim * weight_stride1];
+          auto weight_item =
+              weight_data[weight_stride0 * word_idx + dim * weight_stride1];
 
           if (is_first_for_bag || (weight_item > current_item)) {
             current_item = weight_item;
@@ -671,9 +674,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 embedding_bag(const Tensor &weight, const Tensor &indices,
               const Tensor &offsets, const bool scale_grad_by_freq,
-              const int64_t mode, bool sparse,
-              const Tensor &per_sample_weights,
+              const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
               bool include_last_offset, c10::optional<int64_t> padding_idx_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
   int64_t padding_idx = -1;
 
   if (padding_idx_opt.has_value()) {
@@ -703,9 +707,10 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_forward_only_cpu(const Tensor &weight, const Tensor &indices,
                   const Tensor &offsets, const bool scale_grad_by_freq,
-                  const int64_t mode, bool sparse,
-                  const Tensor &per_sample_weights, bool include_last_offset,
+                  const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt, bool include_last_offset,
                   int64_t padding_idx) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
   std::ignore = scale_grad_by_freq;
   std::ignore = sparse;
   return _embedding_bag_cpu_impl(
@@ -724,9 +729,11 @@ _embedding_bag_forward_only_cpu(const Tensor &weight, const Tensor &indices,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
                   const Tensor &offsets, const bool scale_grad_by_freq,
-                  const int64_t mode, bool sparse,
-                  const Tensor &per_sample_weights, bool include_last_offset,
+                  const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt, bool include_last_offset,
                   int64_t padding_idx) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+
   std::ignore = scale_grad_by_freq;
   std::ignore = sparse;
   return _embedding_bag_cpu_impl(
@@ -749,9 +756,11 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
                               const Tensor &max_indices_,
                               int64_t num_weights,
                               bool scale_grad_by_freq, int64_t mode,
-                              bool sparse,
-                              const Tensor& per_sample_weights,
+                              bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                               int64_t padding_idx) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag", indices_arg, {kLong, kInt});
   checkContiguous("embedding_bag", indices_arg);
@@ -809,7 +818,7 @@ static std::vector<index_t> compute_counts(
     index_t* indices_data,
     int64_t indices_length) {
   std::vector<index_t> counts(num_weights, 0);
-  for (int i = 0; i < indices_length; i++) {
+  for (const auto i : c10::irange(indices_length)) {
     counts[indices_data[i]]++;
   }
   return counts;
@@ -936,10 +945,12 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
                                   const Tensor &offset2bag__,
                                   const Tensor &bag_size_,
                                   const Tensor& max_indices_, int64_t num_weights,
-                                  bool scale_grad_by_freq, int64_t mode,
-                                  const Tensor& per_sample_weights_,
+                                  bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights__opt,
                                   int64_t padding_idx) {
-  // indices_ and offset2bag__ are assumed having correct dtypes and
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights_ = c10::value_or_else(per_sample_weights__opt, [] {return Tensor();});
+
+  // indices_, offsets_ and offset2bag__ are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward above.
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
   // for more details.
@@ -1067,8 +1078,11 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu(
 Tensor _embedding_bag_sparse_backward(
     const Tensor &grad_, const Tensor &indices, const Tensor &offsets,
     const Tensor &offset2bag, const Tensor &bag_size_, int64_t num_weights,
-    bool scale_grad_by_freq, int64_t mode, const Tensor& per_sample_weights,
+    bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt,
     int64_t padding_idx) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+
   // indices, offsets and offset2bag are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward above.
   // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml

@@ -134,7 +134,7 @@ class Embedding(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+            self.weight = Parameter(torch.empty(num_embeddings, embedding_dim))
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
@@ -350,7 +350,7 @@ class EmbeddingBag(Module):
                 padding_idx = self.num_embeddings + padding_idx
         self.padding_idx = padding_idx
         if _weight is None:
-            self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+            self.weight = Parameter(torch.empty(num_embeddings, embedding_dim))
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \

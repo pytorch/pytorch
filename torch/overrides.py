@@ -126,6 +126,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.cudnn_batch_norm,
         torch.cudnn_convolution,
         torch.cudnn_convolution_transpose,
+        torch.cudnn_convolution_relu,
+        torch.cudnn_convolution_add_relu,
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
         torch.empty,
@@ -829,6 +831,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.symeig: lambda input, eigenvectors=False, upper=True, out=None: -1,
         torch.swapaxes: lambda input, dim0, dim1: -1,
         torch.swapdims: lambda input, axis0, axis1: -1,
+        torch.special.erf: lambda input: -1,
+        torch.special.erfc: lambda input: -1,
+        torch.special.erfinv: lambda input: -1,
+        torch.special.gammaln: lambda input: -1,
         torch.t: lambda input: -1,
         torch.take: lambda input, index: -1,
         torch.tan: lambda input, out=None: -1,
@@ -1282,6 +1288,7 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
         (torch.Tensor, dir(torch.Tensor)),
         (torch.linalg, dir(torch.linalg)),
         (torch.fft, dir(torch.fft)),
+        (torch.special, dir(torch.special)),
     ]
     for namespace, ns_funcs in tested_namespaces:
         for func_name in ns_funcs:
