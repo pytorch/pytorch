@@ -185,22 +185,7 @@ void TCPStoreDaemon::wakeupWaitingClients(const std::string& key) {
 
 void TCPStoreDaemon::setHandler(int socket) {
   std::string key = tcputil::recvString(socket);
-  std::vector<uint8_t> newData = tcputil::recvVector<uint8_t>(socket);
-  std::vector<uint8_t> oldData;
-  if (tcpStore_.find(key) != tcpStore_.end()) {
-    oldData = tcpStore_.at(key);
-  }
-  tcpStore_[key] = newData;
-
-  // Tell nodes watching key to perform callbacks
-  for (int listenSocket : watchedSockets_[key]) {
-    tcputil::sendValue<WatchResponseType>(
-        listenSocket, WatchResponseType::KEY_UPDATED);
-    tcputil::sendString(listenSocket, key);
-    tcputil::sendVector<uint8_t>(listenSocket, oldData);
-    tcputil::sendVector<uint8_t>(listenSocket, newData);
-  }
-
+  tcpStore_[key] = tcputil::recvVector<uint8_t>(socket);
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
 }
@@ -218,15 +203,6 @@ void TCPStoreDaemon::compareSetHandler(int socket) {
   } else {
     if (pos->second == currentValue) {
       pos->second = std::move(newValue);
-
-      // Tell nodes watching key to perform callbacks
-      for (int listenSocket : watchedSockets_[key]) {
-        tcputil::sendValue<WatchResponseType>(
-            listenSocket, WatchResponseType::KEY_UPDATED);
-        tcputil::sendString(listenSocket, key);
-        tcputil::sendVector<uint8_t>(listenSocket, currentValue);
-        tcputil::sendVector<uint8_t>(listenSocket, newValue);
-      }
     }
     tcputil::sendVector<uint8_t>(socket, pos->second);
   }
