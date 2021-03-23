@@ -2,14 +2,13 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <array>
 #include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <vector>
-
-#include <iostream>
 
 namespace c10 {
 namespace cuda {
@@ -205,7 +204,7 @@ static void initGlobalStreamState() {
       "). Increase that and recompile.");
 
   // Initializes default streams
-  for (auto i = decltype(num_gpus){0}; i < num_gpus; ++i) {
+  for (const auto i: c10::irange(num_gpus)) {
     default_streams[i].device_index = i;
     low_priority_counters[i] = 0;
     high_priority_counters[i] = 0;
@@ -219,7 +218,7 @@ static void initDeviceStreamState(DeviceIndex device_index) {
   // with it.
   CUDAGuard device_guard{device_index};
 
-  for (auto i = decltype(kStreamsPerPool){0}; i < kStreamsPerPool; ++i) {
+  for (const auto i: c10::irange(kStreamsPerPool)) {
     auto& lowpri_stream = low_priority_streams[device_index][i];
     auto& hipri_stream = high_priority_streams[device_index][i];
 
@@ -245,7 +244,7 @@ static void initCUDAStreamsOnce() {
   // Inits current streams (thread local) to default streams
   current_streams =
       (LeakyStreamInternals**)malloc(num_gpus * sizeof(LeakyStreamInternals*));
-  for (auto i = decltype(num_gpus){0}; i < num_gpus; ++i) {
+  for (const auto i: c10::irange(num_gpus)) {
     current_streams[i] = &default_streams[i];
   }
 }

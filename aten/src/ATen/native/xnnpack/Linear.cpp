@@ -24,12 +24,12 @@ bool available(
   return xnnpack::internal::available() &&
           // Weight
           (2 == weight.ndimension()) &&
-          (c10::DeviceType::CPU == weight.device().type()) &&
+          (weight.device().is_cpu()) &&
           (kFloat == weight.scalar_type()) &&
           !weight.requires_grad() &&
           // Bias
           ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
-                                       (c10::DeviceType::CPU == bias->device().type()) &&
+                                       (bias->device().is_cpu()) &&
                                        (kFloat == bias->scalar_type()) &&
                                        (weight.size(Layout::Filter::output)) == bias->size(0) &&
                                        !bias->requires_grad())
@@ -43,7 +43,7 @@ bool available(
 bool usable(const Tensor& input) {
          // Input
   return (2 <= input.ndimension()) &&
-         (c10::DeviceType::CPU == input.device().type()) &&
+         (input.device().is_cpu()) &&
          (kFloat == input.scalar_type()) &&
          !input.requires_grad() &&
          true;
@@ -157,8 +157,8 @@ Tensor run(
 c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
     Tensor weight,
     c10::optional<Tensor> bias,
-    c10::optional<Scalar> output_min,
-    c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   return xnnpack::XNNPackLinearOpContext::create_context(
       std::move(weight), std::move(bias), output_min, output_max);
 }

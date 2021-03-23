@@ -34,6 +34,7 @@
 #include <torch/csrc/autograd/python_nn_functions.h>
 #include <torch/csrc/autograd/python_fft_functions.h>
 #include <torch/csrc/autograd/python_linalg_functions.h>
+#include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/multiprocessing/init.h>
@@ -70,9 +71,6 @@
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
 #endif
-
-#define WITH_NUMPY_IMPORT_ARRAY
-#include <torch/csrc/utils/numpy_stub.h>
 
 namespace py = pybind11;
 
@@ -451,10 +449,12 @@ PyObject *THPModule_userEnabledMkldnn(PyObject *_unused, PyObject *noargs)
 
 PyObject *THPModule_setDeterministicCuDNN(PyObject *_unused, PyObject *arg)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assert(PyBool_Check(arg), "set_deterministic_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
   at::globalContext().setDeterministicCuDNN(arg == Py_True);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
@@ -465,10 +465,12 @@ PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
 
 PyObject *THPModule_setDeterministicAlgorithms(PyObject *_unused, PyObject *arg)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assert(PyBool_Check(arg), "use_deterministic_algorithms expects a "
           "bool, but got %s", THPUtils_typename(arg));
   at::globalContext().setDeterministicAlgorithms(arg == Py_True);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_deterministicAlgorithms(PyObject *_unused, PyObject *noargs)
@@ -491,7 +493,7 @@ PyObject *THPModule_warnAlways(PyObject *_unused, PyObject *noargs)
 {
   if (c10::Warning::get_warnAlways()) {
     Py_RETURN_TRUE;
-  } 
+  }
   Py_RETURN_FALSE;
 }
 
@@ -554,7 +556,7 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(
-          c10::DeviceTypeName(computeDeviceType(torch::tensors::get_default_dispatch_key()),
+          c10::DeviceTypeName(dispatchKeyToDeviceType(torch::tensors::get_default_dispatch_key()),
                               /*lower_case=*/true));
   END_HANDLE_TH_ERRORS
 }
@@ -834,6 +836,7 @@ PyObject* initModule() {
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
   torch::autograd::initLinalgFunctions(module);
+  torch::autograd::initSpecialFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);
 #ifdef USE_CUDA
@@ -1004,9 +1007,6 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("DisableTorchFunction", (PyObject*)THPModule_DisableTorchFunctionType(), /* incref= */ false));
   torch::set_disabled_torch_function_impl(PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);
-#ifdef USE_NUMPY
-  if (_import_array() < 0) return nullptr;
-#endif
   return module;
   END_HANDLE_TH_ERRORS
 }

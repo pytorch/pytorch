@@ -107,6 +107,14 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::layout(Tensor a) -> int",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.layout());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          prim::tolist,
          // This operator has to be unschematized because the return type
          // depends on the type hint and input. The implementation of this
@@ -634,6 +642,14 @@ RegisterOperators reg(
            auto a = pop(stack).toDevice();
            auto b = pop(stack).toDevice();
            push(stack, a == b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::ne.device(Device a, Device b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack).toDevice();
+           auto b = pop(stack).toDevice();
+           push(stack, a != b);
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(

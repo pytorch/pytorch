@@ -117,6 +117,12 @@ class Reducer {
   // Saves thread local state to be used by autograd engine callbacks.
   void save_thread_local_state();
 
+  // An function for users to set sample_rate of collecting
+  // runtime stats. The time stats will be recorded for the
+  // first 10 iterations, after 10 iteratons time stats will be
+  // recorded once every "sample_rate" training iterations.
+  void set_ddp_runtime_logging_sample_rate(int sample_rate);
+
  protected:
   // Forward declaration.
   struct Bucket;
@@ -142,8 +148,8 @@ class Reducer {
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Node*, std::vector<VariableIndex>>
-      gradAccToVariablesMap_;
+  std::unordered_map<torch::autograd::Node*, VariableIndex>
+      gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
@@ -172,10 +178,6 @@ class Reducer {
 
   // Work handle for allreduce on local_used_maps_
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
-
-  void verify_replicas_within_process();
-
-  void verify_replica0_across_processes();
 
   void mark_variable_ready_dense(VariableIndex index);
 
@@ -379,6 +381,9 @@ class Reducer {
   void record_backward_comm_start_time();
   void record_backward_comm_end_time();
 
+  int get_ddp_runtime_logging_sample_rate();
+  int ddp_runtime_logging_sample_rate_ = kDDPRuntimeLoggingSampleRate;
+
   bool is_multi_device_module_ = false;
 
   // Following variables are to help build dynamic bucket order
@@ -434,4 +439,15 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const std::vector<bool>& expect_sparse_gradient = {},
     const std::vector<int64_t>& tensor_indices = {});
 
+// Verify model replicas in this process are the same with respect to no. of
+// params, requires grad, and matching dtype/size/layout.
+void verify_replicas_within_process(
+    std::vector<std::vector<torch::autograd::Variable>> model_replicas,
+    std::vector<std::vector<bool>> expect_sparse_gradients);
+
+// Verify models across all processes are the same as model on rank 0 with
+// respect to no. of params and matching dtype/size/layout.
+void verify_replica0_across_processes(
+    c10::intrusive_ptr<c10d::ProcessGroup> process_group,
+    std::vector<std::vector<torch::autograd::Variable>> model_replicas);
 } // namespace c10d

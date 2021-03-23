@@ -152,7 +152,7 @@ IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
         auto cls = source_importer_.loadType(qn)->expect<ClassType>();
         return c10::StrongTypePtr(compilation_unit_, std::move(cls));
       },
-      &tensor_table_);
+      tensor_table_);
   return ivalue;
 }
 
@@ -195,10 +195,10 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
         std::move(storage_ptr),
         /*allocator=*/nullptr,
         /*resizable=*/false); // NB: we didn't set any allocator for the tensor
-    if (device.type() == DeviceType::CPU) {
+    if (device.is_cpu()) {
       storage_it =
           storageMap.insert(std::make_pair(record_key, cpu_storage)).first;
-    } else if (device.type() == DeviceType::CUDA) {
+    } else if (device.is_cuda()) {
       at::Tensor cpu_tensor =
           at::empty({0}, at::CPU(type).options()).set_(cpu_storage);
       at::Storage cuda_storage =
@@ -223,7 +223,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
 
   at::Tensor result;
 
-  if (device.type() == DeviceType::CPU) {
+  if (device.is_cpu()) {
     if (tensor_proto.is_quantized()) {
       result =
           at::_empty_affine_quantized(
@@ -234,7 +234,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
           at::empty({0}, at::CPU(type).options())
               .set_(storage_it->second, tensor_proto.offset(), dims, strides);
     }
-  } else if (device.type() == DeviceType::CUDA) {
+  } else if (device.is_cuda()) {
     result =
         at::empty(
             {0}, c10::TensorOptions(type).device(storage_it->second.device()))

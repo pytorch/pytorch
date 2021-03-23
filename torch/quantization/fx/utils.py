@@ -9,7 +9,7 @@ from torch.fx.graph import (
     Node,
 )
 
-from typing import Callable, Optional, List, Dict, Any, Set, Tuple
+from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union
 from .quantization_types import QuantizerCls
 
 # turn foo.bar -> ['foo', 'bar']
@@ -94,23 +94,30 @@ def get_per_tensor_qparams(activation_post_process):
     dtype = activation_post_process.dtype
     return scale, zero_point, dtype
 
-def get_quantize_op_and_qparams(activation_post_process):
+def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Optional[Union[Callable, str]], Dict[str, Any]]:
     ''' Given an activation_post_process module,
-    return quantize op(e.g. quantize_per_tensor) and a dictionary
+    return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
     of extracted qparams from the module
     '''
-    scale, zero_point = activation_post_process.calculate_qparams()
-    dtype = activation_post_process.dtype
-    if is_per_channel(activation_post_process.qscheme):
-        ch_axis = int(activation_post_process.ch_axis)
-        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_axis_': ch_axis, '_dtype_': dtype}
-        quantize_op = torch.quantize_per_channel
-    else:
-        scale = float(scale)
-        zero_point = int(zero_point)
-        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_dtype_': dtype}
-        quantize_op = torch.quantize_per_tensor  # type: ignore
-    return quantize_op, qparams
+    dtype = activation_post_process.dtype  # type: ignore
+    quantize_op : Optional[Union[Callable, str]] = None
+    if dtype in [torch.quint8, torch.qint8]:
+        node_type = "call_function"
+        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore
+        if is_per_channel(activation_post_process.qscheme):  # type: ignore
+            ch_axis = int(activation_post_process.ch_axis)  # type: ignore
+            qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
+            quantize_op = torch.quantize_per_channel
+        else:
+            scale = float(scale)
+            zero_point = int(zero_point)
+            qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
+            quantize_op = torch.quantize_per_tensor  # type: ignore
+    elif dtype == torch.float16:
+        node_type = "call_method"
+        quantize_op = "to"
+        qparams = {"_dtype_": dtype}
+    return node_type, quantize_op, qparams
 
 def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
     ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
@@ -125,17 +132,24 @@ def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
     if is_input:
         # if the quantize function is at the input of op, then we find the first user of the observer_node
         # to get the path
-        first_use = list(obs_node.users)[0]
+        users = list(obs_node.users)
+        first_use = users[0] if users else None
         prefix = "_input"
     else:
         # if the quantize function is at the output of the op, we use the observer input node to get the path
         first_use = in_node
         prefix = "_output"
 
-    module_path, _ = quantizer.node_name_to_scope[first_use.name]
+    if first_use:
+        module_path, _ = quantizer.node_name_to_scope[first_use.name]
+    else:
+        # TODO: it's not used, so actually we can skip quantization
+        # but this requires changing return type of quantize_node
+        # we can fix it later if needed
+        module_path = ""
     root_module = quantizer.modules['']
     graph = quantizer.quantized_graph
-    quantize_op, qparams = get_quantize_op_and_qparams(obs_module)
+    node_type, quantize_op, qparams = get_quantize_node_info(obs_module)
     inputs = [in_node]
 
     for key, value in qparams.items():
@@ -148,7 +162,7 @@ def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
             qparam_full_path = get_new_attr_name(root_module)
             setattr(root_module, qparam_full_path, value)
             inputs.append(graph.create_node('get_attr', qparam_full_path))
-    return graph.create_node('call_function', quantize_op, tuple(inputs), {})
+    return graph.create_node(node_type, quantize_op, tuple(inputs), {})
 
 def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key) -> List[Any]:
     r""" Get all the unique custom module keys in the custom config dict
@@ -323,3 +337,56 @@ def create_qparam_nodes(quantizer: QuantizerCls, node_name: str, scale: Any, zer
     scale_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_scale_"), scale)
     zero_point_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_zero_point_"), zero_point)
     return (scale_node, zero_point_node)
+
+
+def all_node_args_have_no_tensors(node: Node) -> bool:
+    """
+    If we know for sure that all of this node's args have no
+    tensors (are primitives), return True.  If we either
+    find a tensor or are not sure, return False. Note: this
+    function is not exact.
+    """
+    if not isinstance(node, Node):
+        return True
+    elif node.op == 'placeholder':
+        return False
+    elif node.op == 'call_module':
+        return False
+    elif node.op == 'get_attr':
+        return False
+    elif node.target is getattr and node.args[1] == 'ndim':
+        # x1 = x0.ndim
+        return True
+    elif node.op == 'call_method' and node.target == 'size':
+        # x1 = x0.size(0)
+        return True
+
+    found_one_tensor = False
+    for arg in node.args:
+        if isinstance(arg, list):
+            for list_el in arg:
+                if isinstance(list_el, Node):
+                    this_list_el_args_have_no_tensors = \
+                        all_node_args_have_no_tensors(list_el)
+                    found_one_tensor = found_one_tensor or \
+                        (not this_list_el_args_have_no_tensors)
+        elif isinstance(arg, int):
+            pass
+        else:
+            if isinstance(arg, Node):
+                this_arg_args_have_no_tensors = all_node_args_have_no_tensors(arg)
+                found_one_tensor = found_one_tensor or \
+                    (not this_arg_args_have_no_tensors)
+            else:
+                found_one_tensor = True
+    return not found_one_tensor
+
+
+def node_return_type_is_int(node: Node) -> bool:
+    """
+    Returns true if this node results in an integer, even if some of the args
+    are Tensors.
+    """
+    if node.op == 'call_method' and node.target == 'size':
+        return True
+    return False

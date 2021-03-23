@@ -83,6 +83,9 @@ class Placeholder {
   const Buf* data() const {
     return data_;
   }
+  BufHandle handle() const {
+    return BufHandle(data());
+  }
   Dtype dtype() const {
     return data_->dtype();
   }
@@ -101,6 +104,8 @@ class Placeholder {
 
   template <typename T>
   inline ExprHandle load(const std::vector<T>& args) const;
+
+  inline ExprHandle load(const std::vector<ExprHandle>& args) const;
 
   inline ExprHandle loadWithMask(
       const std::vector<ExprHandle>& args,
@@ -170,11 +175,12 @@ inline void unpack_dim_args(
 }
 
 // Handle reductions over a Reducer and a body_func which produces values.
-template <typename BodyFunc>
+template <typename InitFunc, typename BodyFunc>
 Tensor* Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
+    const InitFunc& init_func,
     const BodyFunc& body_func,
     const std::vector<DimArg>& reduce_args) {
   std::vector<const Expr*> dims;
@@ -192,13 +198,30 @@ Tensor* Reduce(
   ExprHandle body =
       Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(all_vars));
   std::vector<const Expr*> output_args(vars.begin(), vars.end());
-  const Expr* init_expr = new Cast(body.dtype(), reducer.initializer());
+  const Expr* init_expr = new Cast(
+      body.dtype(), init_func(VarVectorToVarHandleVector(vars)).node());
   Buf* func_result = new Buf(func_name, dims, body.dtype(), init_expr);
   const ReduceOp* reduce_op =
       reducer(func_result, body, output_args, reduce_vars);
   Tensor* t =
       new Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
   return t;
+}
+
+template <typename BodyFunc>
+Tensor* Reduce(
+    const std::string& func_name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    const BodyFunc& body_func,
+    const std::vector<DimArg>& reduce_args) {
+  return Reduce(
+      func_name,
+      dim_args,
+      reducer,
+      [&](ParameterList p) { return ExprHandle(reducer.initializer()); },
+      body_func,
+      reduce_args);
 }
 
 // Overload which allows inline lambda functions for the body_func.
@@ -218,6 +241,13 @@ TORCH_API Tensor* Reduce(
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
     const Placeholder& buffer,
+    const std::vector<DimArg>& reduce_args);
+
+TORCH_API Tensor* Reduce(
+    const std::string& name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    const BufHandle& buffer,
     const std::vector<DimArg>& reduce_args);
 
 // Overload for the common case of all dimensions of a prevously Computed
@@ -295,6 +325,22 @@ inline ExprHandle Placeholder::load(const std::vector<T>& args) const {
   std::vector<ExprHandle> params(args.begin(), args.end());
   return ExprHandle(
       new Load(data(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+}
+
+inline ExprHandle Placeholder::load(const std::vector<ExprHandle>& args) const {
+  return this->template load<ExprHandle>(args);
+}
+
+template <typename... Ts>
+inline ExprHandle BufHandle::load(const Ts&... ts) const {
+  std::vector<ExprHandle> params({ExprHandle(ts)...});
+  return Load::make(*this, params);
+}
+
+template <typename T>
+inline ExprHandle BufHandle::load(const std::vector<T>& args) const {
+  std::vector<ExprHandle> params(args.begin(), args.end());
+  return Load::make(*this, params);
 }
 
 } // namespace tensorexpr

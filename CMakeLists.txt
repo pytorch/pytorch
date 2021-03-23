@@ -264,10 +264,9 @@ if(NOT DEFINED USE_VULKAN)
       "ANDROID" OFF)
 endif()
 
-option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" OFF)
+option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
-option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
-option(USE_VULKAN_WRAPPER "Vulkan - Dynamically load Vulkan functions" ON)
+option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -296,6 +295,19 @@ option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 cmake_dependent_option(
     USE_DEPLOY "Build embedded torch::deploy interpreter" OFF
     "BUILD_PYTHON" OFF)
+cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
+
+if(USE_CCACHE)
+  find_program(CCACHE_PROGRAM ccache)
+  if(CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CUDA_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+  else()
+    message(STATUS "Could not find ccache. Consider installing ccache to speed up compilation.")
+  endif()
+endif()
+
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
@@ -632,10 +644,6 @@ if(USE_VULKAN)
 
   if(USE_VULKAN_SHADERC_RUNTIME)
     string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
-  endif()
-
-  if(USE_VULKAN_WRAPPER)
-    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_WRAPPER")
   endif()
 endif()
 

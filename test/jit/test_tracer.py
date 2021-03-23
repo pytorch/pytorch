@@ -515,6 +515,8 @@ class TestTracer(JitTestCase):
 
         with warnings.catch_warnings(record=True) as warns:
             traced_fn = torch.jit.trace(fn, torch.tensor([1]))
+        for warn in warns:
+            self.assertIs(warn.category, torch.jit.TracerWarning)
         warns = [str(w.message) for w in warns]
         self.assertIn('a Python integer', warns[0])
         self.assertIn('a Python boolean', warns[1])
@@ -2436,3 +2438,59 @@ class TestMixTracingScripting(JitTestCase):
 
         scripted_test_module = torch.jit.script(TestModule())
         self.checkScript(fn_takes_interface, (scripted_test_module,))
+
+    def test_traced_module_contains_scripted_interface_types(self):
+
+        class LeafModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.rand(19))
+
+            def forward(self, input: torch.Tensor):
+                return input + self.weight
+
+        class LowerModuleImpl(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.leaf = LeafModule()
+
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                return self.leaf(input)
+
+        @torch.jit.interface
+        class LowerModuleInterface(torch.nn.Module):
+            def forward(self, input: torch.Tensor) -> torch.Tensor:
+                pass
+
+        class MiddleModule(torch.nn.Module):
+            lower: LowerModuleInterface
+
+            def __init__(self, feature_processor_modules=None):
+                super().__init__()
+                self.lower = LowerModuleImpl()
+
+            def forward(self, input):
+                return self.lower(input)
+
+        class WrapperModule(torch.nn.Module):
+            def __init__(self, m):
+                super().__init__()
+                self.middle = m
+
+            def forward(self, input):
+                return self.middle(input)
+
+        class TopModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                m = MiddleModule()
+                m = torch.jit.script(m)
+                self.sub1 = m
+                self.sub2 = WrapperModule(m)
+
+            def forward(self, input: torch.Tensor):
+                return self.sub1(input) + self.sub2(input)
+
+        top = TopModule()
+        top_example_input = torch.ones(1)
+        torch.jit.trace(top, top_example_input)
