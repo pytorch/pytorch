@@ -220,7 +220,7 @@ class class_ {
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualMethodName,
+        std::move(qualMethodName),
         std::move(schema),
         std::move(wrapped_func),
         std::move(doc_string));
@@ -299,9 +299,8 @@ class class_ {
   /// This is an unsafe method registration API added for adding custom JIT backend support via custom
   /// C++ classes. It is not for general purpose use.
   class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
-    auto qualMethodName = qualClassName + "." + name;
     auto method = std::make_unique<jit::BuiltinOpFunction>(
-        qualMethodName, std::move(schema), std::move(func), std::move(doc_string));
+        qualClassName + "." + name, std::move(schema), std::move(func), std::move(doc_string));
     classTypePtr->addMethod(method.get());
     registerCustomClassMethod(std::move(method));
     return *this;
