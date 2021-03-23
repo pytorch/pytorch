@@ -2644,6 +2644,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # This used to segfault
             self.assertRaises(RuntimeError, lambda: x.detach().storage())
 
+        @noarchTest
+        def test_add_meta_scalar(self):
+            # From https://github.com/pytorch/pytorch/issues/53815
+            x = torch.empty(2, device='meta')
+            y = x + 2
+            self.assertEqual(y.size(), x.size())
+
         def test_normal_shape(self):
             warned = False
             for device in torch.testing.get_all_device_types():
@@ -4554,38 +4561,50 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(0, x.index_fill(0, index, -1).dim())
         self.assertEqual(0, x.index_fill_(0, index, -1).dim())
 
-    def test_index_select(self, device):
-        for dtype in [torch.int, torch.long]:
-            src = torch.randn(3, 4, 5, device=device)
-            # Index can be duplicated.
-            idx = torch.tensor([2, 1, 0, 1, 2], dtype=dtype, device=device)
-            dest = torch.index_select(src, 0, idx)
-            self.assertEqual(dest.shape, (5, 4, 5))
-            for i in range(idx.size(0)):
-                self.assertEqual(dest[i], src[idx[i]])
+    # The test fails for zero-dimensional tensors on XLA
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_index_select(self, device, dtype):
+        num_src, num_out = 3, 5
 
-            # Check that 'out' is used correctly.
-            out = torch.randn(5 * 4 * 5, device=device)
-            dest = torch.index_select(src, 0, idx, out=out.view(5, 4, 5))
-            self.assertEqual(dest.shape, (5, 4, 5))
-            for i in range(idx.size(0)):
-                self.assertEqual(dest[i], src[idx[i]])
-            out.fill_(0.123)
-            self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
+        def make_arg(batch_sizes, n, dim, contig):
+            size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
+            return make_tensor(size_arg, device, dtype, low=None, high=None, discontiguous=not contig)
 
-            # Bool tensor
-            src = torch.tensor([False, True, False, False], device=device, dtype=torch.bool)
-            idx = torch.tensor([1], dtype=dtype, device=device)
-            dest = torch.index_select(src, 0, idx)
-            self.assertEqual(torch.tensor([True]), dest)
+        def ref_index_select(src, dim, idx):
+            # bfloat16 is just used on GPU, so it's not supported on numpy
+            if dtype == torch.bfloat16:
+                src = src.float()
+            out = torch.from_numpy(np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim))
+            if dtype == torch.bfloat16:
+                out = out.to(device=device, dtype=dtype)
+            return out
 
-            # Complex Tensor
-            src = torch.randn(3, 4, 5, dtype=torch.complex64, device=device)
-            idx = torch.tensor([2, 1, 0, 1, 2], dtype=dtype, device=device)
-            dest = torch.index_select(src, 0, idx)
-            self.assertEqual(dest.shape, (5, 4, 5))
-            for i in range(idx.size(0)):
-                self.assertEqual(dest[i], src[idx[i]])
+        for src_contig, idx_contig in product([True, False], repeat=2):
+            for other_sizes in ((), (4, 5)):
+                for dim in range(len(other_sizes)):
+                    src = make_arg(other_sizes, num_src, dim, src_contig)
+                    idx = make_tensor((num_out,), device, dtype=torch.int64, low=0, high=num_src, discontiguous=not idx_contig)
+                    out = torch.index_select(src, dim, idx)
+                    out2 = ref_index_select(src, dim, idx)
+                    self.assertEqual(out, out2)
+
+        for idx_type in (torch.int32, torch.int64):
+            other_sizes = (3, 2)
+            dim = 1
+            src = make_arg(other_sizes, num_src, dim, True)
+            idx = make_tensor((num_out,), device, dtype=idx_type, low=0, high=num_src, discontiguous=False)
+            out = torch.index_select(src, dim, idx)
+            out2 = ref_index_select(src, dim, idx)
+            self.assertEqual(out, out2)
+
+        # Create the 4 possible combinations of scalar sizes for index / source
+        scalars = ((make_tensor(size_s, device, dtype),
+                    torch.zeros(size_i, dtype=torch.int64, device=device))
+                   for size_s, size_i in product([(), (1,)], repeat=2))
+        for source, idx in scalars:
+            out = source.index_select(0, idx)
+            self.assertEqual(out.item(), source.item())
 
     def test_take_empty(self, device):
         for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
@@ -7128,7 +7147,6 @@ tensor_op_tests = [
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
-    ('sign', '', _small_3d, lambda t, d: []),
 ]
 
 # Creates and decorates a generic test and adds it to the class.

@@ -240,32 +240,6 @@ class TestUnaryUfuncs(TestCase):
                                                                             high,
                                                                             result.item()))
 
-    # Tests that fn == method == inplace == jit on a simple single tensor input
-    # TODO: should this jitting the method and inplace variants, too?
-    @ops(unary_ufuncs)
-    def test_variant_consistency(self, device, dtype, op):
-        def _fn(t):
-            return op(t)
-
-        t = make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
-        expected = op(t)
-
-        for alt, inplace in ((op.get_method(), False), (op.get_inplace(), True),
-                             (torch.jit.script(_fn), False)):
-            if alt is None:
-                continue
-
-            if inplace and not torch.can_cast(expected.dtype, dtype):
-                # Assert that RuntimeError is raised
-                # for inplace variant of Operators that
-                # promote integer input to floating dtype.
-                with self.assertRaises(RuntimeError):
-                    alt(t.clone())
-                continue
-
-            actual = alt(t.clone())
-            self.assertEqual(actual, expected, rtol=0, atol=0)
-
     # Helper for comparing torch tensors and numpy arrays
     # TODO: should this or assertEqual also validate that strides are equal?
     def assertEqualHelper(self, actual, expected, msg, *, dtype, exact_dtype=True, **kwargs):
@@ -766,19 +740,6 @@ class TestUnaryUfuncs(TestCase):
                 if fn_name == 'angle':
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
-
-    # TODO: update sign to use opinfo-based testing
-    # XLA tests fail for self.assertRaises for complex dtypes
-    @onlyOnCPUAndCUDA
-    def test_sign_complex_assert_raises(self, device):
-        for dtype in [torch.complex64, torch.complex128]:
-            size = [5, 5]
-            tensor = torch.rand(size, dtype=dtype, device=device)
-
-            with self.assertRaisesRegex(RuntimeError,
-                                        (r'Unlike NumPy, torch.sign is not intended to support complex numbers\. '
-                                         r'Please use torch.sgn instead\.')):
-                torch.sign(torch.tensor([4j], device=device, dtype=dtype))
 
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
@@ -1527,63 +1488,6 @@ class TestUnaryUfuncs(TestCase):
                 self.assertTrue(math.isnan(nan_real_inf_imag_out.imag))
                 # Ensure we are notified when NumPy changes its behavior
                 self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
-
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False))
-    def test_sign(self, device, dtype):
-        if dtype == torch.bool:
-            a_bool = torch.tensor([True, True, False, float('nan')], device=device).bool()
-            a_bool_target = torch.tensor([True, True, False, True], device=device).bool()
-            self.assertEqual(a_bool.sign(), a_bool_target, msg='sign device={} dtype=bool'.format(device))
-            self.assertEqual(torch.sign(a_bool), a_bool_target, msg='sign device={} dtype=bool'.format(device))
-
-            a_out = torch.empty_like(a_bool)
-            torch.sign(a_bool, out=a_out)
-            self.assertEqual(a_out, a_bool_target, msg='sign_out device={} dtype=bool'.format(device))
-
-            a_bool.sign_()
-            self.assertEqual(a_bool, a_bool_target, msg='sign_ device={} dtype=bool'.format(device))
-            return
-
-        # Include NaN for floating point numbers
-        if dtype.is_floating_point:
-            dt_info = torch.finfo(dtype)
-
-            # Create tensor (with NaN checking)
-            a = torch.tensor([float('nan'), -12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
-            a_target = torch.tensor([0, -1, 0, 1, -1, 1], device=device, dtype=dtype)
-        else:
-            dt_info = torch.iinfo(dtype)
-
-            # If unsigned type, everything should be >= 0
-            if dt_info.min == 0:
-                a = torch.tensor([12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
-                a_target = torch.tensor([1, 0, 1, 0, 1], device=device, dtype=dtype)
-            else:
-                a = torch.tensor([-12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
-                a_target = torch.tensor([-1, 0, 1, -1, 1], device=device, dtype=dtype)
-
-        self.assertEqual(a.sign(), a_target, msg='sign device={} dtype={}'.format(device, dtype))
-        self.assertEqual(torch.sign(a), a_target, msg='sign device={} dtype={}'.format(device, dtype))
-
-        out = torch.empty_like(a)
-        torch.sign(a, out=out)
-        self.assertEqual(out, a_target, msg='sign_out device={} dtype={}'.format(device, dtype))
-
-        a.sign_()
-        self.assertEqual(a, a_target, msg='sign_ device={} dtype={}'.format(device, dtype))
-
-    @dtypes(torch.cfloat, torch.cdouble)
-    def test_sgn(self, device, dtype):
-        x = torch.randn(100, dtype=dtype)
-        angle = x.angle()
-        out = x.sgn()
-        self.assertEqual(out.angle(), angle)
-        self.assertEqual(out.abs(), torch.ones_like(x).real)
-
-        x_out = torch.empty_like(x)
-        torch.sgn(x, out=x_out)
-        self.assertEqual(x_out.angle(), angle)
-        self.assertEqual(x_out.abs(), torch.ones_like(x).real)
 
     # This function tests that a nan value is returned for input values not in domain
     @dtypes(torch.float32, torch.float64)
