@@ -417,11 +417,11 @@ SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
 #
-# NB: we create StructuredNativeFunctions *even if* the function is not
+# NB: we create NativeFunctionsGroup *even if* the function is not
 # actually annotated structured.  Test the structured boolean to see if it
 # actually is structured or not.
 @dataclass(frozen=True)
-class StructuredNativeFunctions:
+class NativeFunctionsGroup:
     functional: NativeFunction
     inplace: Optional[NativeFunction]
     out: NativeFunction
@@ -435,7 +435,7 @@ class StructuredNativeFunctions:
         for f in self.functions():
             if test_sig != f.func.signature():
                 raise AssertionError(
-                    "StructuredNativeFunctions constructed from two NativeFunctions "
+                    "NativeFunctionsGroup constructed from two NativeFunctions "
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
                 )
         assert self.functional.func.kind() == SchemaKind.functional
@@ -464,7 +464,7 @@ class StructuredNativeFunctions:
             yield self.inplace
 
     @staticmethod
-    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['StructuredNativeFunctions']:
+    def from_dict(d: Dict[SchemaKind, NativeFunction]) -> Optional['NativeFunctionsGroup']:
         assert d
         if len(d) == 1:
             return None
@@ -478,7 +478,7 @@ class StructuredNativeFunctions:
         # these don't count as structured for our purposes here
         if out is None:
             return None
-        return StructuredNativeFunctions(
+        return NativeFunctionsGroup(
             functional=functional,
             inplace=inplace,
             out=out,

@@ -29,7 +29,7 @@ def gen_unstructured(f: NativeFunction) -> List[str]:
     return rs
 
 @with_native_function
-def gen_structured(g: StructuredNativeFunctions) -> List[str]:
+def gen_structured(g: NativeFunctionsGroup) -> List[str]:
     # only out has dispatch
     meta_name = meta.name(g)
     rs = []
@@ -65,8 +65,8 @@ void impl({', '.join(a.decl() for a in out_args)});
 # Generates NativeFunctions.h, a list of forward declarations of all
 # actual kernel definitions we keep in aten/src/ATen/native/
 @with_native_function
-def compute_native_function_declaration(g: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
-    if isinstance(g, StructuredNativeFunctions):
+def compute_native_function_declaration(g: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
+    if isinstance(g, NativeFunctionsGroup):
         if g.structured:
             return gen_structured(g)
         else:
