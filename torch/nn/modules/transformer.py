@@ -31,6 +31,7 @@ class Transformer(Module):
         activation: the activation function of encoder/decoder intermediate layer, relu or gelu (default=relu).
         custom_encoder: custom encoder (default=None).
         custom_decoder: custom decoder (default=None).
+        layer_norm_eps: the eps value in layer normalization components (default=1e-5).
 
     Examples::
         >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
@@ -44,21 +45,22 @@ class Transformer(Module):
 
     def __init__(self, d_model: int = 512, nhead: int = 8, num_encoder_layers: int = 6,
                  num_decoder_layers: int = 6, dim_feedforward: int = 2048, dropout: float = 0.1,
-                 activation: str = "relu", custom_encoder: Optional[Any] = None, custom_decoder: Optional[Any] = None) -> None:
+                 activation: str = "relu", custom_encoder: Optional[Any] = None, custom_decoder: Optional[Any] = None,
+                 layer_norm_eps: float = 1e-5) -> None:
         super(Transformer, self).__init__()
 
         if custom_encoder is not None:
             self.encoder = custom_encoder
         else:
-            encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
-            encoder_norm = LayerNorm(d_model)
+            encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation, layer_norm_eps)
+            encoder_norm = LayerNorm(d_model, eps=layer_norm_eps)
             self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         if custom_decoder is not None:
             self.decoder = custom_decoder
         else:
-            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
-            decoder_norm = LayerNorm(d_model)
+            decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation, layer_norm_eps)
+            decoder_norm = LayerNorm(d_model, eps=layer_norm_eps)
             self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
         self._reset_parameters()
