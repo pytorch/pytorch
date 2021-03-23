@@ -581,7 +581,7 @@ void Reducer::mark_variable_ready(VariableIndex index) {
           // Defensively ensures local_used_maps_tmp is distinct from local_used_maps_[i]
           auto local_used_maps_tmp = at::native::empty_like(local_used_maps_[i],
                                                             local_used_maps_[i].options().pinned_memory(true));
-          local_used_maps_tmp.copy_(local_used_maps[i]);
+          local_used_maps_tmp.copy_(local_used_maps_[i]);
           local_used_maps_dev_[i].copy_(local_used_maps_tmp, true);
         } else {
           local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
