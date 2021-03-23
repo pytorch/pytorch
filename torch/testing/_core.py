@@ -16,7 +16,17 @@ __all__ = [
     'make_non_contiguous',
     'rand_like',
     'randn_like',
-    'get_all_dtypes'
+    'get_all_dtypes',
+    'make_non_contiguous',
+    'floating_types',
+    'floating_types_and',
+    'floating_and_complex_types',
+    'floating_and_complex_types_and',
+    'all_types_and_complex_and',
+    'all_types_and',
+    'all_types_and_complex',
+    'integral_types_and',
+    'FileCheck',
 ]
 
 rand_like = torch.rand_like
