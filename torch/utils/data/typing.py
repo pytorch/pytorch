@@ -4,7 +4,8 @@
 import collections
 import copy
 import numbers
-from typing import Any, Dict, Generic, List, Set, Sequence, Tuple, TypeVar, Union, get_type_hints
+from typing import (Any, Dict, Iterator, Generic, List, Set, Sequence, Tuple,
+                    TypeVar, Union, get_type_hints)
 from typing import _tp_cache, _type_check, _type_repr  # type: ignore
 try:
     from typing import GenericMeta  # Python 3.6
@@ -309,7 +310,9 @@ def _validate_iter(sub_cls):
             raise TypeError('No return annotation found for `__iter__` of {}'.format(sub_cls.__name__))
         if 'return' in hints:
             return_hint = hints['return']
-            if not hasattr(return_hint, '__origin__') or return_hint.__origin__ is not collections.abc.Iterator:
+            if not hasattr(return_hint, '__origin__') or \
+                    (return_hint.__origin__ is not Iterator and
+                     return_hint.__origin__ is not collections.abc.Iterator):
                 raise TypeError('Expected Iterator as the return annotation for `__iter__` of {}'
                                 ', but found {}'.format(sub_cls.__name__, hints['return']))
             data_type = return_hint.__args__[0]
