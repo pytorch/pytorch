@@ -11,7 +11,6 @@ import os
 import platform
 import re
 import gc
-from tools.stats_utils.s3_stat_parser import Version2Report
 import types
 import math
 from datetime import datetime, timedelta
@@ -60,7 +59,7 @@ from enum import Enum
 
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.."))
-    from tools.stats_utils.s3_stat_parser import (get_S3_bucket_readonly, HAVE_BOTO3, Report)
+    from tools.stats_utils.s3_stat_parser import (get_S3_bucket_readonly, HAVE_BOTO3, Report, Version2Report)
 except ImportError:
     print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
     HAVE_BOTO3 = False
