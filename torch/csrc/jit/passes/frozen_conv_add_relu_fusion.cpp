@@ -16,7 +16,7 @@ namespace torch {
 namespace jit {
 
 namespace {
-void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
+void fuseFrozenConvAddRelu(std::shared_ptr<Graph>& graph) {
 #ifdef USE_CUDA
 #if AT_CUDNN_ENABLED()
   SubgraphRewriter rewriter;
@@ -108,7 +108,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 } // namespace
 
 void FuseFrozenConvAddRelu(std::shared_ptr<Graph>& graph) {
-  fuseFrozenConvAddReluImpl(graph);
+  fuseFrozenConvAddRelu(graph);
 }
 
 } // namespace jit
