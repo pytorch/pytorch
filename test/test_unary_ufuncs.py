@@ -25,6 +25,9 @@ from torch.testing import (
 if TEST_SCIPY:
     import scipy
 
+# Refer [scipy reference filter]
+# Filter operators for which the reference function
+# is available in the current environment (for reference_numerics tests).
 reference_filtered_ops = list(filter(lambda op: op.ref is not _NOTHING, unary_ufuncs))
 
 # Tests for unary "universal functions (ufuncs)" that accept a single

@@ -1849,15 +1849,15 @@ def reference_sgn(x):
 def scipy_reference_wrapper(ref):
     # Note [scipy reference filter]
     # SciPy is not available in all build environments.
-    # If an operator uses a scipy function for reference and Scipy
-    # is not available, we return `_NOTHING`.
+    # If you're using a SciPy op as a reference,
+    # then pass it wrapped in a lambda to this function,
+    # which will either return the lambda or,
+    # if SciPy is unavailable, _NOTHING.
     #
-    # This way we can skip reference tests where Scipy is required
-    # but not available while allowing other tests which don't depend
-    # on reference function.
-
-    # Note: reference wrapped with this function may unconditionally call scipy,
-    #       as they would only be executed if SciPy is available.
+    # Wrapping the operation in a lambda will prevent
+    # the Python interpreter from attempting to discover
+    # the operation, which will fail if SciPy is unavailable.
+    # See the OpInfo for digamma for an example.
     if TEST_SCIPY:
         return ref
 
