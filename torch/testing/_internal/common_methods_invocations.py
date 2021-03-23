@@ -380,6 +380,50 @@ class UnaryUfuncInfo(OpInfo):
         self._domain_eps = 1e-5
 
 
+def sample_inputs_binary(op_info, device, dtype, requires_grad):
+    low, high = op_info.domain
+    low = low if low is None else low + op_info._domain_eps
+    high = high if high is None else high - op_info._domain_eps
+
+    return (
+        # empty tensors
+        SampleInput((make_tensor((), device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad),
+                     make_tensor((), device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad))),
+        # 1d - 1d
+        SampleInput((make_tensor((L), device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad),
+                     make_tensor((L), device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad))),
+        # 1d - 2d
+        SampleInput((make_tensor((L), device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad),
+                     make_tensor((L, L + 5), device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad))),
+        # 2d - 1d
+        SampleInput((make_tensor((L, L + 5), device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad),
+                     make_tensor((L), device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad))),
+        # 2d - 2d
+        SampleInput((make_tensor((L, L + 5), device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad),
+                     make_tensor((L, L + 5), device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad))),
+    )
+
+
 # Metadata class for binary "universal functions (ufuncs)" that accept two
 # tensor and have common properties
 class _BinaryUfuncInfo(OpInfo):
@@ -404,11 +448,7 @@ class _BinaryUfuncInfo(OpInfo):
                  dtypesIfCUDA=floating_and_complex_types_and(torch.half),
                  dtypesIfROCM=floating_types_and(torch.half),
                  domain=(None, None),  # the [low, high) domain of the function
-                 handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
-                 handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
-                 handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
-                 supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
-                 sample_inputs_func=sample_inputs_unary,
+                 sample_inputs_func=sample_inputs_binary,
                  supports_sparse=False,
                  **kwargs):
         super(_BinaryUfuncInfo, self).__init__(name,
@@ -421,10 +461,6 @@ class _BinaryUfuncInfo(OpInfo):
                                                **kwargs)
         self.ref = ref
         self.domain = domain
-        self.handles_large_floats = handles_large_floats
-        self.handles_extremals = handles_extremals
-        self.handles_complex_extremals = handles_complex_extremals
-        self.supports_complex_to_float = supports_complex_to_float
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -4495,30 +4531,54 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
 ]
 
-for op in (('add', 'add'), ('mul', 'multiply'), ('div', 'divide')):
-    op_db.append(
-        _BinaryUfuncInfo(op[0],
-                         aliases=(op[1],),
-                         ref=getattr(np, op[1]),
-                         dtypes=all_types_and_complex(),
-                         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-                         test_inplace_grad=True,
-                         supports_out=True,
-                         decorators=(precisionOverride({torch.bfloat16: 5e-1,
-                                                        torch.float16: 5e-1}),),
-                         ))
-
-op_db.append(_BinaryUfuncInfo('sub',
-                              aliases=('subtract',),
-                              ref=np.subtract,
-                              # skip subtraction of bool types
-                              dtypes=all_types_and_complex(),
-                              dtypesIfCUDA=all_types_and_complex_and(torch.half),
-                              test_inplace_grad=True,
-                              supports_out=True,
-                              decorators=(precisionOverride({torch.bfloat16: 5e-1,
-                                                             torch.float16: 5e-1}),),
-                              ))
+op_db += [
+    _BinaryUfuncInfo('add',
+                     aliases=('add',),
+                     ref=np.add,
+                     dtypes=all_types_and_complex(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                     test_inplace_grad=True,
+                     supports_out=True,
+                     sample_inputs_func=sample_inputs_binary,
+                     decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                                                    torch.float16: 5e-1}),),
+                     ),
+    _BinaryUfuncInfo('mul',
+                     aliases=('multiply',),
+                     ref=np.multiply,
+                     dtypes=all_types_and_complex(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+                     test_inplace_grad=True,
+                     supports_out=True,
+                     sample_inputs_func=sample_inputs_binary,
+                     decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                                                    torch.float16: 5e-1}),),
+                     ),
+    _BinaryUfuncInfo('sub',
+                     aliases=('subtract',),
+                     ref=np.subtract,
+                     # skip subtraction of bool types
+                     dtypes=all_types_and_complex(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.half),
+                     test_inplace_grad=True,
+                     supports_out=True,
+                     sample_inputs_func=sample_inputs_binary,
+                     decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                                                    torch.float16: 5e-1}),),
+                     ),
+    _BinaryUfuncInfo('div',
+                     aliases=('divide',),
+                     ref=np.divide,
+                     # skip subtraction of bool types
+                     dtypes=all_types_and_complex(),
+                     dtypesIfCUDA=all_types_and_complex_and(torch.half),
+                     test_inplace_grad=True,
+                     supports_out=True,
+                     sample_inputs_func=sample_inputs_binary,
+                     decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                                                    torch.float16: 5e-1}),),
+                     ),
+]
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]

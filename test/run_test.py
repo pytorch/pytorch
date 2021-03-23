@@ -33,6 +33,7 @@ TESTS = [
     'test_type_hints',
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
+    'test_binary_ufuncs',
     'test_bundled_inputs',
     'test_complex',
     'test_cpp_api_parity',

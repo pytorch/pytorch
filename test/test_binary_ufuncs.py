@@ -13,12 +13,14 @@ from functools import partial
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, iter_indices, TEST_WITH_ASAN, run_tests,
-    torch_to_numpy_dtype_dict, make_tensor, TEST_SCIPY, set_default_dtype)
+    torch_to_numpy_dtype_dict, make_tensor,
+    TEST_SCIPY, set_default_dtype)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
-    skipCUDAIfRocm, skipIf)
-from torch.testing import all_types_and_complex_and
+    skipCUDAIfRocm, skipIf, ops)
+from torch.testing import all_types_and_complex_and, assert_allclose
+from torch.testing._internal.common_methods_invocations import binary_ufuncs
 
 if TEST_SCIPY:
     import scipy.special
@@ -1136,11 +1138,10 @@ class TestBinaryUfuncs(TestCase):
     # Also tests that reverse operations are equivalent to forward ops
     # NOTE: division ops are tested separately above
     def test_binary_ops_with_scalars(self, device):
-        for ops in ((operator.add, torch.add),
-                    (operator.sub, torch.sub),
-                    (operator.mul, torch.mul),
-                    (operator.truediv, torch.div)):
-            python_op, torch_op = ops
+        for python_op, torch_op in ((operator.add, torch.add),
+                                    (operator.sub, torch.sub),
+                                    (operator.mul, torch.mul),
+                                    (operator.truediv, torch.div)):
 
             for a, b in product(range(-10, 10), range(-10, 10)):
                 for op in (lambda x: x * .5, lambda x: math.floor(x)):
@@ -1166,6 +1167,26 @@ class TestBinaryUfuncs(TestCase):
 
                         self.assertEqual(expected, python_op(first, second))
                         self.assertEqual(expected, torch_op(first, second))
+
+    # Tests that the function and its (array-accepting) reference produce the same
+    #   values on a range of tensors, including empty tensors, scalar tensors,
+    #   1D tensors and a large 2D tensor
+    @ops(binary_ufuncs)
+    def test_reference_numerics(self, device, dtype, op):
+        precision = self.precision
+        if dtype == torch.bfloat16:
+            precision *= 10
+            np_dtype = np.float16
+        else:
+            np_dtype = torch_to_numpy_dtype_dict[dtype]
+        # TODO: I am missing how op.sample_inputs() is meant to be called
+        for tensors in op.sample_inputs(device, dtype):
+            torch_res = getattr(torch, op.name)(*tensors)
+            numpy_res = op.ref([np.array(t, dtype=np_dtype) for t in tensors])
+            assert_allclose(torch_res, numpy_res, rtol=precision, atol=precision)
+
+
+
 
     @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False), torch.testing.get_all_dtypes(include_complex=False)))
     def test_maximum_minimum_type_promotion(self, device, dtypes):
