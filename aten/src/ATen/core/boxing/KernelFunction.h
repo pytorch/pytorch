@@ -34,7 +34,7 @@ TORCH_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Dispat
 //          This is good, because the CPU specific backend
 //          implementation is more specialized and typically better;
 //          if we used the composite, we would bypass it.
-//          (NB: the Autograd key is guaranteed to exists because
+//          (NB: the Autograd key is guaranteed to exist because
 //          the autograd codegen requires it!)
 //
 //    n     CompositeImplicitAutograd takes precedence.
@@ -46,7 +46,7 @@ TORCH_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, Dispat
 //
 // As you can see, when we have a specific Autograd key (AutogradCPU), we can
 // decide whether or not to use the CompositeImplicitAutograd kernel or the
-// Autograd kernel based on whether or not the backend exists.
+// Autograd kernel based on whether or not the backend kernel exists.
 //
 // However, for AutogradOther (which is the catchall autograd kernel for
 // everything that doesn't have a specific Autograd key), we can't do this
