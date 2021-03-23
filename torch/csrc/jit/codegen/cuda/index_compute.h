@@ -173,24 +173,24 @@ class IndexSwizzle : public IndexCompute {
 class Index {
  private:
   // Producer indexing if it's in shared or local memory
-  static kir::TensorIndex* getProducerIndex_impl(
+  static std::vector<kir::Val*> getNonGlobalProducerStridedIndices(
       TensorView* producer,
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
   // Consumer indexing if it's in shared or local memory
-  static kir::TensorIndex* getConsumerIndex_impl(
+  static std::vector<kir::Val*> getNonGlobalConsumerStridedIndices(
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
   // Producer if it's in global memory
-  static kir::TensorIndex* getGlobalProducerIndex(
+  static std::vector<kir::Val*> getGlobalProducerStridedIndices(
       TensorView* producer,
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
   // Consumer indexing if it's in global memory
-  static kir::TensorIndex* getGlobalConsumerIndex(
+  static std::vector<kir::Val*> getGlobalConsumerStridedIndices(
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
@@ -206,6 +206,23 @@ class Index {
 
   // Consumer index dispatch
   static kir::TensorIndex* getConsumerIndex(
+      const TensorView* consumer,
+      const std::vector<kir::ForLoop*>& loops);
+
+  //! Returns a vector of strided indices mapped onto the (rfactor)
+  //! root domain of a producer tensor. The size of the returned
+  //! vector is guaranteed to be equal to the number of axes of the
+  //! indexing root domain.
+  static std::vector<kir::Val*> getProducerStridedIndices(
+      TensorView* producer,
+      const TensorView* consumer,
+      const std::vector<kir::ForLoop*>& loops);
+
+  //! Returns a vector of strided indices mapped onto the (rfactor)
+  //! root domain of a consumer tensor. The size of the returned
+  //! vector is guaranteed to be equal to the number of axes of the
+  //! indexing root domain.
+  static std::vector<kir::Val*> getConsumerStridedIndices(
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 

@@ -74,6 +74,20 @@ Val* IrBuilder::modExpr(Val* lhs, Val* rhs) {
   return newArithmeticExpr(BinaryOpType::Mod, lhs, rhs);
 }
 
+Int* IrBuilder::zero() {
+  if (zero_ == nullptr) {
+    zero_ = create<kir::Int>(0);
+  }
+  return zero_;
+}
+
+Int* IrBuilder::one() {
+  if (one_ == nullptr) {
+    one_ = create<kir::Int>(1);
+  }
+  return one_;
+}
+
 } // namespace kir
 } // namespace cuda
 } // namespace fuser

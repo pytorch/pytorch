@@ -361,6 +361,16 @@ TensorIndex::TensorIndex(
           indices.end(),
           [](Val* v) { return v->dtype() == DataType::Int; }),
       "Cannot index with a value other than an int.");
+  indices_.erase(
+      std::remove_if(
+          indices_.begin(),
+          indices_.end(),
+          [](Val* index) { return index->isZeroInt(); }),
+      indices_.end());
+  // If indices becomes empty, just put one ZeroInt
+  if (indices_.empty()) {
+    indices_.push_back(kir::IrBuilder(GpuLower::current()->kernel()).zero());
+  }
 }
 
 Sync::Sync(Passkey passkey, bool war_sync)

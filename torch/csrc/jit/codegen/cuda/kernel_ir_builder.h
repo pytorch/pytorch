@@ -63,6 +63,10 @@ class TORCH_CUDA_CU_API IrBuilder {
   Val* ceilDivExpr(Val* lhs, Val* rhs);
   Val* modExpr(Val* lhs, Val* rhs);
 
+  // Shortcuts for frequently used vals
+  Int* zero();
+  Int* one();
+
  private:
   Val* newResult(DataType dtype);
   Val* newArithmeticExpr(BinaryOpType op_type, Val* lhs, Val* rhs);
@@ -71,6 +75,9 @@ class TORCH_CUDA_CU_API IrBuilder {
  private:
   // Non-owning pointer to the kernel to be modified
   Kernel* kernel_ = nullptr;
+  // Frequently used constant vals
+  Int* zero_ = nullptr;
+  Int* one_ = nullptr;
 };
 
 } // namespace kir
