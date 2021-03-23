@@ -1198,12 +1198,18 @@ class TestUnaryUfuncs(TestCase):
         t = torch.tensor([], device=device, dtype=dtype)
         check_equal(t)
 
-        t = torch.linspace(-65000, 65000, int(1e4), device=device, dtype=dtype)
+        range = (-1e7, 1e7)
+        if dtype == torch.half:
+            range = (-65000, 65000)
+
+        t = torch.linspace(*range, int(1e4), device=device, dtype=dtype)
         check_equal(t)
 
-        if dtype != torch.half:
-            t = torch.linspace(-1e6, 1e6, int(1e4), device=device, dtype=dtype)
-            check_equal(t)
+        # NaN, inf, -inf are tested in reference_numerics tests.
+        info = torch.finfo(dtype)
+        min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
+        t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
+        check_equal(t)
 
     # TODO: allow large opinfo values to be opted-into via metadata
     @dtypes(torch.long)
