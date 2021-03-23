@@ -25,7 +25,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // Do them here instead of in the init list in case data is undefined.
     data_ = variable.tensor_data();
     // TODO(albanD) This needs to be updated when moving to multiple levels
-    const auto& fw_grad = variable.fw_grad(/* level */ 0);
+    const auto& fw_grad = variable._fw_grad(/* level */ 0);
     if (fw_grad.defined()) {
       fw_grad_ = std::make_shared<ForwardGrad>();
       fw_grad_->set_value(fw_grad, /* level */ 0);
@@ -113,7 +113,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   if (fw_grad_ && !fw_grad_->empty()) {
     // TODO(albanD) This needs to be updated when moving to multiple levels
     auto new_fw_grad = fw_grad_->value(/* level */ 0);
-    var.set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
+    var._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
   }
 
   return var;

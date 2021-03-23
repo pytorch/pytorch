@@ -2,7 +2,9 @@
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 
+#include <aten/src/ATen/Parallel.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
 #include <memory>
@@ -56,6 +58,7 @@ DEFINE_TRIGGER(llvm_codegen_executed);
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+DEFINE_TRIGGER(llvm_codegen_parallel_dispatched);
 namespace {
 
 llvm::CmpInst::Predicate llvm_comparison_predicate(
@@ -121,6 +124,34 @@ llvm::ElementCount ElementCount(int lanes) {
 }
 #endif
 
+#if LLVM_VERSION_MAJOR >= 9
+
+using FunctionCallee = llvm::FunctionCallee;
+
+#elif LLVM_VERSION_MAJOR == 8 && LLVM_VERSION_PATCH == 20181009
+
+struct FunctionCallee {
+  FunctionCallee() {}
+
+  FunctionCallee(llvm::Constant* fn)
+      : v_(fn), ft_(cast<llvm::Function>(v_)->getFunctionType()) {}
+
+  llvm::FunctionType* getFunctionType() {
+    return ft_;
+  }
+
+  llvm::Value* getCallee() {
+    return v_;
+  }
+
+ private:
+  llvm::Value* v_{nullptr};
+  llvm::FunctionType* ft_{nullptr};
+};
+
+#else
+#error Only LLVM versions 8 and above are supported.
+#endif
 } // namespace
 
 class LLVMCodeGenImpl : public IRVisitor {
@@ -133,12 +164,12 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::BasicBlock* bb_;
   llvm::Value* value_{nullptr};
   llvm::JITTargetAddress kernelAddress_;
-  std::unique_ptr<void* []> argv_ { nullptr };
 
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
 #undef LLVM_TYPE_DECLARE
   llvm::Type* Int8PtrTy_;
+  llvm::Type* VoidTy_;
 
   std::unordered_map<const Var*, int> varToArg_;
   std::unordered_map<const Var*, llvm::Value*> varToVal_;
@@ -168,6 +199,14 @@ class LLVMCodeGenImpl : public IRVisitor {
       Arity arity,
       int lanes);
 
+  llvm::Value* varToValue(const Var* var);
+  void replaceVarMapping(
+      const std::vector<const Var*>& vars,
+      const std::vector<llvm::Value*>& vals);
+  llvm::Value* packFuncArgs(const std::vector<llvm::Value*>& func_args);
+  std::vector<llvm::Value*> unpackFuncArgs(llvm::Value* packed, int arg_count);
+  void processParallelFor(const For* v);
+
  public:
   LLVMCodeGenImpl(
       Stmt* stmt,
@@ -177,7 +216,6 @@ class LLVMCodeGenImpl : public IRVisitor {
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
-  void** getArgvAddress() const;
 
   void visit(const Add* v) override;
   void visit(const Sub* v) override;
@@ -238,6 +276,19 @@ class LLVMCodeGenImpl : public IRVisitor {
     return asmCode;
   }
 };
+
+typedef void (*ParallelCallee)(int index, int8_t* packed_data);
+void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
+  // TODO: preserve the func type.
+  ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
+  at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
+    for (int index = f_begin; index < f_end; index++) {
+      callee(index, packed_data);
+    }
+  });
+  USE_TRIGGER(llvm_codegen_parallel_dispatched);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
@@ -284,13 +335,15 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
     throw malformed_input("wrong number of args in call");
   }
 
-  void** argv = impl_->getArgvAddress();
+  constexpr unsigned nargs = 8;
+  c10::SmallVector<void*, nargs> argv;
+  argv.resize(buf_args.size());
   for (size_t i = 0, e = buf_args.size(); i < e; i++) {
     auto const& bufferArg = buf_args[i];
     auto const& callArg = args[i];
     argv[i] = argToPtr(bufferArg, callArg);
   }
-  value<float>(argv);
+  value<float>(argv.data());
   USE_TRIGGER(llvm_codegen_executed);
 }
 
@@ -321,10 +374,6 @@ llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
 }
 
-void** LLVMCodeGenImpl::getArgvAddress() const {
-  return argv_.get();
-}
-
 LLVMCodeGenImpl::LLVMCodeGenImpl(
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& args,
@@ -341,6 +390,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   FloatTy_ = llvm::Type::getFloatTy(getContext());
   DoubleTy_ = llvm::Type::getDoubleTy(getContext());
   Int8PtrTy_ = llvm::Type::getInt8PtrTy(getContext());
+  VoidTy_ = llvm::Type::getVoidTy(getContext());
   BoolTy_ = ByteTy_;
 
   llvm::InitializeNativeTarget();
@@ -386,7 +436,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   jit_->addModule(std::move(module_), std::move(context_));
   auto sym = jit_->findSymbol("wrapper");
   kernelAddress_ = assertSuccess(sym.getAddress());
-  argv_ = std::make_unique<void*[]>(params.size());
 
   USE_TRIGGER(llvm_codegen_created);
 }
@@ -955,12 +1004,35 @@ void LLVMCodeGenImpl::visit(const BitCast* v) {
 }
 
 void LLVMCodeGenImpl::visit(const Var* v) {
-  if (varToArg_.count(v)) {
+  value_ = varToValue(v);
+}
+
+llvm::Value* LLVMCodeGenImpl::varToValue(const Var* v) {
+  // It is possible for v to be in both varToVal_ and varToArgs.
+  // In that case, varToVal_ takes precedence.
+  if (varToVal_.count(v)) {
+    return varToVal_.at(v);
+  } else if (varToArg_.count(v)) {
     auto idx = varToArg_.at(v);
     auto arg = fn_->arg_begin() + idx;
-    value_ = arg;
-  } else if (varToVal_.count(v)) {
-    value_ = varToVal_.at(v);
+    return arg;
+  }
+  return nullptr;
+}
+
+void LLVMCodeGenImpl::replaceVarMapping(
+    const std::vector<const Var*>& vars,
+    const std::vector<llvm::Value*>& vals) {
+  TORCH_CHECK(vars.size() == vals.size());
+  int i = 0;
+  for (int i = 0; i < vars.size(); i++) {
+    const Var* var = vars[i];
+    llvm::Value* val = vals[i];
+    if (val) {
+      varToVal_[var] = val;
+    } else {
+      varToVal_.erase(var);
+    }
   }
 }
 
@@ -1128,7 +1200,132 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   value_ = load;
 }
 
+// Pack the arguments into an aggregate struct for forwarding.
+llvm::Value* LLVMCodeGenImpl::packFuncArgs(
+    const std::vector<llvm::Value*>& func_args) {
+  if (func_args.empty()) {
+    llvm::PointerType* VoidPtrType = llvm::Type::getInt8PtrTy(getContext());
+    llvm::Constant* NullPtr = llvm::ConstantPointerNull::get(VoidPtrType);
+    return NullPtr;
+  }
+  std::vector<llvm::Type*> arg_types(func_args.size());
+  for (int i = 0; i < func_args.size(); i++) {
+    arg_types[i] = func_args[i]->getType();
+  }
+  llvm::StructType* packed_type = llvm::StructType::create(arg_types);
+  llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
+  llvm::Value* one = llvm::ConstantInt::get(IntTy_, 1);
+  llvm::Value* packed = irb_.CreateAlloca(packed_type, one);
+  for (int i = 0; i < func_args.size(); i++) {
+    llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
+        packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
+    irb_.CreateStore(func_args[i], dst_ptr);
+  }
+  return packed;
+}
+
+// Unpack the aggregate struct into individual arguments.
+std::vector<llvm::Value*> LLVMCodeGenImpl::unpackFuncArgs(
+    llvm::Value* packed,
+    int arg_count) {
+  // TODO: extract arg_count from packed.
+  std::vector<llvm::Value*> func_args(arg_count);
+  llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
+  for (int i = 0; i < arg_count; i++) {
+    llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
+        packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
+    func_args[i] = irb_.CreateLoad(dst_ptr);
+  }
+  return func_args;
+}
+
+// Lower the parallel for-loop.
+// * Move the body into its own closure.
+// * Identify var across the boundary into arguments and forward them.
+// * Send the closure and range to the dispatcher for execution.
+void LLVMCodeGenImpl::processParallelFor(const For* v) {
+  // Create "start" and "stop" values.
+  v->start()->accept(this);
+  auto start = this->value_;
+  v->stop()->accept(this);
+  auto stop = this->value_;
+
+  // The Vars that need to be forward in the body closure.
+  std::vector<const Var*> body_arg_vars;
+  // Corresponding Value* that was used in the old body for the caller.
+  std::vector<llvm::Value*> body_caller_vals;
+  // Corresponding Value* that will be used in the new body closure.
+  std::vector<llvm::Value*> body_closure_args;
+
+  // Identify the Var* used in the body, and generated outside.
+  VarFinder var_finder;
+  v->body()->accept(&var_finder);
+  const auto& vars = var_finder.vars();
+  for (auto& var : vars) {
+    if (llvm::Value* value = varToValue(var)) {
+      body_arg_vars.push_back(var);
+      body_caller_vals.push_back(value);
+    }
+  }
+
+  // Pack the arguments in an automatic variable for forwarding.
+  llvm::Value* packed_caller_args = packFuncArgs(body_caller_vals);
+
+  // Remember where we are before moving to the new function.
+  llvm::BasicBlock* old_insert_block = irb_.GetInsertBlock();
+
+  // Create the new body closure code.
+  auto func_type =
+      llvm::FunctionType::get(VoidTy_, {IntTy_, Int8PtrTy_}, false);
+  llvm::Function* func = llvm::Function::Create(
+      func_type, llvm::Function::PrivateLinkage, "func", module_.get());
+  auto func_body = llvm::BasicBlock::Create(getContext(), "func_body", func);
+  irb_.SetInsertPoint(func_body);
+  auto args = func->arg_begin();
+  llvm::Value* index = args++;
+  llvm::Value* packed_func_args_raw = args++;
+  llvm::Value* packed_func_args = irb_.CreatePointerCast(
+      packed_func_args_raw, packed_caller_args->getType());
+
+  // Unpack the arguments from the opaque buffer.
+  body_closure_args = unpackFuncArgs(packed_func_args, body_arg_vars.size());
+  // Set the codegen to the new func.
+  // TODO: this should be replaced by RAII wrappers.
+  varToVal_[v->var()] = index;
+  replaceVarMapping(body_arg_vars, body_closure_args);
+  llvm::Function* old_fn = fn_;
+  fn_ = func;
+  if (v->body()) {
+    v->body()->accept(this);
+  }
+  // Restore back to the previous fn_
+  fn_ = old_fn;
+  irb_.CreateRet(nullptr);
+  replaceVarMapping(body_arg_vars, body_caller_vals);
+  varToVal_.erase(v->var());
+
+  // Points back to the original block and generate the callee code.
+  irb_.SetInsertPoint(old_insert_block);
+  llvm::Value* packed_caller_args_ptr =
+      irb_.CreatePointerCast(packed_caller_args, Int8PtrTy_);
+  llvm::Value* func_value = irb_.CreatePointerCast(func, Int8PtrTy_);
+  llvm::FunctionType* dispatcher_fntype = llvm::FunctionType::get(
+      VoidTy_, {Int8PtrTy_, IntTy_, IntTy_, Int8PtrTy_}, false);
+  FunctionCallee dispatcher_callee =
+      module_->getOrInsertFunction("DispatchParallel", dispatcher_fntype);
+  llvm::Function* dispatcher =
+      llvm::cast<llvm::Function>(dispatcher_callee.getCallee());
+  irb_.CreateCall(
+      dispatcher, {func_value, start, stop, packed_caller_args_ptr});
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
+}
+
 void LLVMCodeGenImpl::visit(const For* v) {
+  if (v->is_parallel()) {
+    processParallelFor(v);
+    return;
+  }
+
   // Create "start" and "stop" values.
   v->start()->accept(this);
   auto start = this->value_;
@@ -1360,38 +1557,6 @@ static void applyMathFunctionAttributes(llvm::Function* f) {
   f->addFnAttr(llvm::Attribute::WillReturn);
 #endif
 }
-
-namespace {
-#if LLVM_VERSION_MAJOR >= 9
-
-using FunctionCallee = llvm::FunctionCallee;
-
-#elif LLVM_VERSION_MAJOR == 8 && LLVM_VERSION_PATCH == 20181009
-
-struct FunctionCallee {
-  FunctionCallee() {}
-
-  FunctionCallee(llvm::Constant* fn)
-      : v_(fn), ft_(cast<llvm::Function>(v_)->getFunctionType()) {}
-
-  llvm::FunctionType* getFunctionType() {
-    return ft_;
-  }
-
-  llvm::Value* getCallee() {
-    return v_;
-  }
-
- private:
-  llvm::Value* v_{nullptr};
-  llvm::FunctionType* ft_{nullptr};
-};
-
-#else
-#error Only LLVM versions 8 and above are supported.
-#endif
-
-} // namespace
 
 llvm::Value* LLVMCodeGenImpl::toVec(llvm::Value* v, int lanes) {
   if (lanes > 1) {
