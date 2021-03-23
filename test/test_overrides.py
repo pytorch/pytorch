@@ -557,7 +557,6 @@ def generate_tensor_like_override_tests(cls):
 
         func_args = []
         is_method = is_tensor_method_or_property(func)
-        first_arg = False
         if func in annotated_args:
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
@@ -565,10 +564,9 @@ def generate_tensor_like_override_tests(cls):
                 if t.endswith('?'):
                     t = t[:-1]
                 if t == 'Tensor':
-                    if is_method and first_arg:
+                    if is_method and arg['name'] == 'self':
                         # See "Note: properties and __get__"
                         func = func.__get__(instance_gen())
-                        first_arg = False
                         continue
                     func_args.append(instance_gen())
                 elif t == 'TensorList':
