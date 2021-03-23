@@ -11,13 +11,13 @@ $VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStud
                                                      "--add Microsoft.VisualStudio.Component.VC.Redist.14.Latest",
                                                      "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64")
 
-#curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
-#if ($LASTEXITCODE -ne 0) {
-#    echo "Download of the VS 2019 Version 16.7 installer failed"
-#    exit 1
-#}
+curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
+if ($LASTEXITCODE -ne 0) {
+    echo "Download of the VS 2019 Version 16.7 installer failed"
+    exit 1
+}
 
-$VS_UNINSTALL_ARGS = @("uninstall", "--installPath", "`"C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools`"", "--wait")
+$VS_UNINSTALL_ARGS = @("uninstall", "--installPath", "`"C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools`"", "--quiet","--wait")
 
 if (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools") {
     echo "start uninstalling"
