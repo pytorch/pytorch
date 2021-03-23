@@ -1,8 +1,10 @@
 #include <ATen/Utils.h>
 
 #include <ATen/Config.h>
+#include <ATen/core/interned_strings.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -12,23 +14,22 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
+#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
-
-#include <ATen/core/interned_strings.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
-#include <torch/csrc/jit/ir/constants.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
-#include <torch/csrc/jit/passes/peephole.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
+// clang-format off
+// moving ConvUtils include induces import cycle
+#include <ATen/native/ConvUtils.h>
+// clang-format on
 
 namespace torch {
 namespace jit {
+
+#if AT_MKLDNN_ENABLED()
 
 using Tensor = at::Tensor;
 
@@ -76,6 +77,63 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
     return 0;
   };
 }
+
+// aten::convolution does a lot of precomputation and dispatching before
+// mkldnn_convolution is called. registering here we can directly invoke the op
+// and avoid overhead. avoiding dispatch overhead for other operators - relu,
+// add, etc - did not benchmark as speeding up models noticeably. the additional
+// overhead of `convolution` warrants the custom operator.
+jit::RegisterOperators reg_fut_ops({
+    jit::Operator(
+        // XXX: this follows the schema convention of conv2d/conv3d, not
+        // aten::mkldnn_convolution, which is different for some reason!
+        "prim::mkldnn_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
+        [](jit::Stack* stack) {
+          int64_t groups = pop(stack).toInt();
+          auto dilation = pop(stack).toIntVector();
+          auto padding = pop(stack).toIntVector();
+          auto stride = pop(stack).toIntVector();
+
+          Tensor bias;
+          IValue bias_ival = pop(stack);
+          if (!bias_ival.isNone()) {
+            bias = bias_ival.toTensor();
+          }
+          Tensor weight = pop(stack).toTensor();
+          Tensor input = pop(stack).toTensor();
+
+          at::AutoNonVariableTypeMode non_var_type_mode(true);
+          // aten::convolution takes care of 0 dim case before calls into
+          // backends
+          if (input.size(0) == 0) {
+            std::vector<int64_t> o = at::native::conv_output_size(
+                input.sizes(), weight.sizes(), padding, stride, dilation);
+            push(
+                stack,
+                at::native::empty_mkldnn(
+                    o,
+                    optTypeMetaToScalarType(input.options().dtype_opt()),
+                    input.options().layout_opt(),
+                    input.options().device_opt(),
+                    input.options().pinned_memory_opt()));
+            return;
+          }
+          // aten::convolution also checks dtype mismatches
+          TORCH_CHECK(
+              input.options().type_equal(weight.options()),
+              "Input type (",
+              input.toString(),
+              ") and weight type (",
+              weight.toString(),
+              ") should be the same");
+
+          push(
+              stack,
+              at::native::mkldnn_convolution(
+                  input, weight, bias, padding, stride, dilation, groups));
+        },
+        aliasAnalysisFromSchema()),
+});
 
 // This is registered as its own op instead of as prim::Constant bc it does not
 // serialize which is an invariant of prim::Constant
@@ -221,6 +279,15 @@ void computeSubgraphInMKLDNN(Node* subgraph_node) {
       node->insertBefore(body_node);
       body_node->replaceInput(0, node->outputs().at(0));
       body_node->replaceInput(1, node->outputs().at(1));
+    }
+
+    if (body_node->kind() == aten::conv2d ||
+        body_node->kind() == aten::conv3d) {
+      // this node doesnt handle string padding yet...
+      if (!body_node->namedInput("padding")->type()->cast<StringType>()) {
+        body_node->replaceWithNewSymbol(Symbol::prim("mkldnn_convolution"));
+        body_node->destroy();
+      }
     }
   }
 }
@@ -501,7 +568,6 @@ bool containsMKLDNNGroup(Block* b) {
 } // namespace
 
 void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
-#if AT_MKLDNN_ENABLED()
   GRAPH_DUMP("Before convert frozen ops to mkldnn", graph);
   // TODO: replace conv1d with conv2d ?
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
@@ -527,10 +593,15 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
   } else {
     GRAPH_DUMP("No mkldnn compatible frozen nodes", graph);
   }
-#else
-  GRAPH_DUMP("MKLDNN Not enabled", graph);
-#endif
 }
+
+#else
+
+void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("MKLDNN Not enabled", graph);
+}
+
+#endif
 
 } // namespace jit
 } // namespace torch
