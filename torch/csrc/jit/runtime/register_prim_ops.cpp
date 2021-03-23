@@ -777,8 +777,8 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      DEFINE_UNARY_OP_WITH_COMPLEX(aten::log, std::log(a), float, float),
      DEFINE_STRING_OP(aten::add, a + b, str),
-     DEFINE_COMPARISON_OP(aten::eq, a == b),
-     DEFINE_COMPARISON_OP(aten::ne, a != b),
+     DEFINE_COMPARISON_OP_WITH_COMPLEX(aten::eq, a == b),
+     DEFINE_COMPARISON_OP_WITH_COMPLEX(aten::ne, a != b),
      DEFINE_COMPARISON_OP(aten::lt, a < b),
      DEFINE_COMPARISON_OP(aten::gt, a > b),
      DEFINE_COMPARISON_OP(aten::le, a <= b),
@@ -811,17 +811,20 @@ RegisterOperators reg(
          fmod((b + fmod(a, b)), b),
          Scalar),
      // NB: This is the python truediv operation
-     DEFINE_GENERIC_OP(
+     DEFINE_GENERIC_OP_WITH_COMPLEX(
          aten::div,
          static_cast<double>(a) / static_cast<double>(b),
+         a / b,
          a / b,
          float,
-         float),
-     DEFINE_SCALAR_BINARY_OP(
+         float,
+         complex),
+     DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX(
          aten::div,
          static_cast<double>(a) / static_cast<double>(b),
          a / b,
-         float),
+         a / b,
+         Scalar),
      DEFINE_GENERIC_OP(
          aten::floordiv,
          floordiv(a, b),
@@ -836,18 +839,22 @@ RegisterOperators reg(
          Scalar),
      // int ** int produces a float, because negative exponents produce float
      // results
-     DEFINE_GENERIC_OP(
+     DEFINE_GENERIC_OP_WITH_COMPLEX(
          aten::pow,
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
+         static_cast<c10::complex<double>>(pow(a, b)),
          float,
-         float),
+         float,
+         complex),
      DEFINE_INT_FLOAT_OP(aten::pow, pow(a, b), float),
-     DEFINE_SCALAR_SCALAR_BINARY_OP(
+     DEFINE_FLOAT_COMPLEX_OP(aten::pow, pow(a, b), complex),
+     DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX(
          aten::pow,
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
-         float),
+         static_cast<c10::complex<double>>(pow(static_cast<c10::complex<double>>(a), static_cast<c10::complex<double>>(b))),
+         Scalar),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::pow.int_to_int(int a, int b) -> int"),
          [](Stack* stack) {

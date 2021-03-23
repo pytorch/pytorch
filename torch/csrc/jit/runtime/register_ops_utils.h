@@ -430,7 +430,7 @@ void listCopyAndSort<at::Tensor>(Stack* stack);
 
 void listSetItem(Stack* stack);
 
-#define DEFINE_GENERIC_BINARY_OP(aten_op, op, result)                        \
+#define DEFINE_GENERIC_BINARY_OP(aten_op, op, result, complex_result)        \
   OperatorGenerator(                                                         \
       TORCH_SELECTIVE_SCHEMA(#aten_op ".int_int(int a, int b) -> " #result), \
       [](Stack* stack) {                                                     \
@@ -447,7 +447,16 @@ void listSetItem(Stack* stack);
             pop(stack, a, b);                                                \
             push(stack, op);                                                 \
           },                                                                 \
-          aliasAnalysisFromSchema())
+          aliasAnalysisFromSchema()),                                          \
+          OperatorGenerator(                                                     \
+            TORCH_SELECTIVE_SCHEMA(                                            \
+                #aten_op ".complex_complex(complex a, complex b) -> " #complex_result),        \
+            [](Stack* stack) {                                                 \
+              c10::complex<double> a, b;                                                     \
+              pop(stack, a, b);                                                \
+              push(stack, op);                                                 \
+            },                                                                 \
+            aliasAnalysisFromSchema())
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
@@ -831,6 +840,14 @@ void listSetItem(Stack* stack);
       DEFINE_FLOAT_COMPLEX_OP(aten_op, op, complex),                        \
       DEFINE_INT_FLOAT_OP(aten_op, op, float),                              \
       DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX(aten_op, op, op, op, Scalar)
+
+#define DEFINE_COMPARISON_OP_WITH_COMPLEX(aten_op, op)             \
+  DEFINE_GENERIC_OP_WITH_COMPLEX(aten_op, op, op, op, bool, bool, bool),     \
+      DEFINE_INT_FLOAT_OP(aten_op, op, bool),         \
+      DEFINE_FLOAT_COMPLEX_OP(aten_op, op, complex),                      \
+      DEFINE_SCALAR_BINARY_OP(aten_op, op, op, Scalar),\
+      DEFINE_STR_CMP_OP(aten_op, op)
+      // TODO(alter DEFINE_SCALAR_BINARY_OP to also include complex)
 
 } // namespace jit
 } // namespace torch
