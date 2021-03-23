@@ -1,6 +1,8 @@
 #pragma once
 #include <ATen/ATen.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 namespace {
@@ -29,7 +31,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
 
   auto expected_dtype = tensors1[0].dtype();
 
-  for (int i = 0; i < tensors1.size(); i++) {
+  for (const auto i : c10::irange(tensors1.size())) {
     TORCH_CHECK(tensors1[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(tensors2[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
@@ -45,7 +47,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
 
   auto expected_dtype = tensors1[0].dtype();
 
-  for (int i = 0; i < tensors1.size(); i++) {
+  for (const auto i : c10::irange(tensors1.size())) {
     TORCH_CHECK(tensors1[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(tensors2[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
