@@ -698,10 +698,9 @@ jobs:
     steps:
       - checkout
       - run:
-          name: _HACK_ Install CUDA compatible cmath
-          no_output_timeout: 1m
+          name: Install VS2019
           command: |
-              powershell .circleci/scripts/vs_install_cmath.ps1
+              powershell .circleci/scripts/vs_install.ps1
       - run:
           name: Install Cuda
           no_output_timeout: 30m
