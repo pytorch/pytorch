@@ -586,8 +586,16 @@ void upsample_generic_Nd_kernel_impl(
 
   std::vector<std::vector<Tensor>> indices_weights;
 
+  constexpr int interp_size = F<float>::interp_size;
+  auto input_scalar_type = input.scalar_type();
+  if (interp_size == 1 && input_scalar_type == at::ScalarType::Byte) {
+    // nearest also supports uint8 tensor, but we have to use float
+    // with compute_indices_weights
+    input_scalar_type = at::ScalarType::Float;
+  }
+
   AT_DISPATCH_FLOATING_TYPES(
-    input.scalar_type(), "compute_indices_weights_generic", [&] {
+    input_scalar_type, "compute_indices_weights_generic", [&] {
       for (int i=0; i<out_ndims; i++) {
         indices_weights.emplace_back(
           F<scalar_t>::compute_indices_weights(
@@ -614,11 +622,18 @@ void upsample_generic_Nd_kernel_impl(
 
   auto iter = config.build();
 
-  AT_DISPATCH_FLOATING_TYPES(
-      iter.dtype(), "upsample_generic_Nd", [&] {
-      constexpr int interp_size = F<scalar_t>::interp_size;
-      cpu_upsample_generic<scalar_t, out_ndims, interp_size>(iter);
-  });
+  if (interp_size > 1) {
+    // Nearest also supports uint8 tensor, so need to handle it separately
+    AT_DISPATCH_FLOATING_TYPES(
+        iter.dtype(), "upsample_generic_Nd", [&] {
+        cpu_upsample_generic<scalar_t, out_ndims, interp_size>(iter);
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte,
+        iter.dtype(), "upsample_generic_Nd", [&] {
+        cpu_upsample_generic<scalar_t, out_ndims, interp_size>(iter);
+    });
+  }
 }
 
 void upsample_nearest1d_kernel_impl(
