@@ -309,6 +309,12 @@ namespace c10 {
   _(aten, moveaxis)                  \
   _(aten, lgamma)                    \
   _(aten, special_gammaln)           \
+  _(aten, erf)                       \
+  _(aten, special_erf)               \
+  _(aten, erfc)                      \
+  _(aten, special_erfc)              \
+  _(aten, erfinv)                    \
+  _(aten, special_erfinv)            \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \

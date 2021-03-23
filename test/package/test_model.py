@@ -1,4 +1,4 @@
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from textwrap import dedent
@@ -6,7 +6,7 @@ from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter, sys_importer
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
 
 try:
     from torchvision.models import resnet18
@@ -27,6 +27,7 @@ except ImportError:
 class ModelTest(PackageTestCase):
     """End-to-end tests packaging an entire model."""
 
+    @skipIf(IS_FBCODE or IS_SANDCASTLE, "Tests that use temporary files are disabled in fbcode")
     def test_resnet(self):
         resnet = resnet18()
 
@@ -56,7 +57,7 @@ class ModelTest(PackageTestCase):
         # functions exist also to get at the private modules in each package
         torchvision = i.import_module("torchvision")
 
-        f2 = self.temp()
+        f2 = BytesIO()
         # if we are doing transfer learning we might want to re-save
         # things that were loaded from a package.
         # We need to tell the exporter about any modules that
@@ -77,6 +78,8 @@ class ModelTest(PackageTestCase):
             # using functions like save_state_dict and load_state_dict to transfer state
             # to the correct code objects.
             e.save_pickle("model", "model.pkl", r2)
+
+        f2.seek(0)
 
         i2 = PackageImporter(f2)
         r3 = i2.load_pickle("model", "model.pkl")
@@ -111,7 +114,7 @@ class ModelTest(PackageTestCase):
         # get our normal torchvision resnet
         resnet = resnet18()
 
-        f1 = self.temp()
+        f1 = BytesIO()
         # Option 1: save by pickling the whole model
         # + single-line, similar to torch.jit.save
         # - more difficult to edit the code after the model is created
@@ -133,7 +136,7 @@ class ModelTest(PackageTestCase):
             )
             e.save_source_string("model", src, is_package=True)
 
-        f2 = self.temp()
+        f2 = BytesIO()
         # Option 2: save with state dict
         # - more code to write to save/load the model
         # + but this code can be edited later to adjust adapt the model later
@@ -161,6 +164,7 @@ class ModelTest(PackageTestCase):
         input = torch.rand(1, 3, 224, 224)
         results = []
         for m in [f1, f2]:
+            m.seek(0)
             importer = PackageImporter(m)
             the_model = importer.import_module("model").load()
             r = the_model(input)
@@ -172,12 +176,14 @@ class ModelTest(PackageTestCase):
     def test_script_resnet(self):
         resnet = resnet18()
 
-        f1 = self.temp()
+        f1 = BytesIO()
         # Option 1: save by pickling the whole model
         # + single-line, similar to torch.jit.save
         # - more difficult to edit the code after the model is created
         with PackageExporter(f1, verbose=False) as e:
             e.save_pickle("model", "pickled", resnet)
+
+        f1.seek(0)
 
         i = PackageImporter(f1)
         loaded = i.load_pickle("model", "pickled")

@@ -74,6 +74,11 @@ int64_t get_device(Tensor self) {
   return self.get_device();
 }
 
+bool Tensor::is_cpu() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_cpu();
+}
+
 bool Tensor::is_cuda() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_cuda();
