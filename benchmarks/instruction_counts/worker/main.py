@@ -22,7 +22,7 @@ import os
 import pickle
 import timeit
 import traceback
-from typing import Any, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Any, Tuple, Union, TYPE_CHECKING
 import sys
 
 
