@@ -103,11 +103,11 @@ Computes the exponentially scaled zeroth order modified Bessel function of the f
 for each element of :attr:`input`.
 
 .. math::
-    \text{out}_{i} = I_0(\text{input}_{i}) = \exp(-|x|) * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+    \text{out}_{i} = \exp(-|x|) * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
 
 """ + r"""
 Args:
-    input (Tensor): the input tensor
+    {input}
 
 Keyword args:
     {out}

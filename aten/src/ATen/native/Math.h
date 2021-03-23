@@ -1258,7 +1258,7 @@ inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float
  * This function is derived from the implementation of the i0e function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  *
- * Computes an approximation of the zeroth order modified Bessel function of the first kind.
+ * Computes an approximation of the exponentially scaled zeroth order modified Bessel function of the first kind.
  * The approximation is actually two (sub)approximations, both using a Chebyshev polynomial expansion.
  * One approximates the function over [0, 8], and the other over (8, infinity). This function takes the absolute value
  * of all inputs to convert them into the domain of the approximation.
