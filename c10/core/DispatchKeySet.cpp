@@ -9,7 +9,6 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
         DispatchKey::CPU,
         DispatchKey::CUDA,
         DispatchKey::XLA,
-        DispatchKey::NestedTensor,
         DispatchKey::XPU,
         DispatchKey::PrivateUse1,
         DispatchKey::PrivateUse2,
