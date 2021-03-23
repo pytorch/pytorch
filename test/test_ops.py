@@ -180,7 +180,7 @@ class TestGradients(TestCase):
     @_gradcheck_ops(op_db)
     def test_inplace_gradgrad(self, device, dtype, op):
         self._skip_helper(op, dtype)
-        if not op.supports_inplace_autograd:
+        if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
