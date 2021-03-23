@@ -13,6 +13,8 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/core/grad_mode.h>
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <functional>
 #include <limits>
@@ -371,7 +373,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     const Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
     Tensor prods_from_k_plus_1;
     Tensor omitted_products;
-    for (int k = 0; k < dim_size; ++k) {
+    for (const auto k : c10::irange(dim_size)) {
       if (k == 0) {
         prods_from_k_plus_1 = at::cumprod(input_conj.slice(dim, k + 1), dim);
         omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);

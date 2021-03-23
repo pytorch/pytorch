@@ -1,6 +1,7 @@
 #include <climits>
 
 #include <c10/mobile/CPUProfilingAllocator.h>
+#include <c10/util/irange.h>
 
 namespace c10 {
 
@@ -304,7 +305,7 @@ void AllocationPlanner::formulate_plan() {
     formulate_greedy_allocation_plan(
         allocation_plan_->allocation_sizes, allocation_plan_->allocation_lifetimes);
   allocation_plan_->total_size = 0;
-  for (auto i = 0; i < allocation_plan_->allocation_sizes.size(); ++i) {
+  for (const auto i : c10::irange(allocation_plan_->allocation_sizes.size())) {
     if (allocation_plan_->allocation_lifetimes[i] ==
         std::numeric_limits<uint64_t>::max()) {
       continue;

@@ -11,7 +11,7 @@
 namespace {
   // Provides additional detail into NCCL error codes based on when these are
   // thrown in the NCCL codebase.
-const char* getNcclErrorDetailStr(ncclResult_t error) {
+const inline char* getNcclErrorDetailStr(ncclResult_t error) {
   switch (error) {
     case ncclUnhandledCudaError:
       return "ncclUnhandledCudaError: Call to CUDA function failed.";
