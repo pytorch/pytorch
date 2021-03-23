@@ -7,6 +7,7 @@ import warnings
 import time
 from torch._six import string_classes
 from datetime import timedelta
+from os import getenv
 from typing import Dict, Optional, Tuple, Union
 
 # This module is wildcard imported from torch.distributed.
@@ -397,7 +398,8 @@ def init_process_group(backend,
                        world_size=-1,
                        rank=-1,
                        store=None,
-                       group_name=''):
+                       group_name='',
+                       pg_options=None):
     """
     Initializes the default distributed process group, and this will also
     initialize the distributed package.
@@ -451,9 +453,17 @@ def init_process_group(backend,
             might result in subsequent CUDA operations running on corrupted
             data. Only one of these two environment variables should be set.
         group_name (str, optional, deprecated): Group name.
+        pg_options (ProcessGroupOptions, optional): process group options
+            specifying what additional options need to be passed in during
+            the construction of specific process groups. i.e. for the ``nccl``
+            backend, ``is_high_priority_stream`` can be specified so that
+            process group can pick up high priority cuda streams.
 
-    To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
-    on a system that supports MPI.
+    .. note:: Note that if passing in pg_options and set the ``pg_options.timeout``,
+        it will override the default timeout of the ``timeout`` argument.
+
+    .. note:: To enable ``backend == Backend.MPI``, PyTorch needs to be built from source
+        on a system that supports MPI.
 
     """
     global _pg_group_ranks
@@ -509,6 +519,7 @@ def init_process_group(backend,
             [],
             backend,
             store,
+            pg_options=pg_options,
             group_name=group_name,
             timeout=timeout))
 
@@ -532,6 +543,7 @@ def _new_process_group_helper(world_size,
                               group_ranks,
                               backend,
                               store,
+                              pg_options=None,
                               group_name=None,
                               timeout=default_pg_timeout):
     """
@@ -558,6 +570,11 @@ def _new_process_group_helper(world_size,
     if not isinstance(timeout, timedelta):
         raise RuntimeError("Expected timeout argument to be of type"
                            "datetime.timedelta")
+
+    if pg_options is not None and timeout != default_pg_timeout and pg_options.timeout != timeout:
+        raise RuntimeError("The timeout argument and timeout value defined in pg_options"
+                           " are conflicting, they have to be the same when manually"
+                           " passing in both arguments.")
 
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = (len(group_ranks) == 0)
@@ -588,22 +605,52 @@ def _new_process_group_helper(world_size,
         prefix_store = PrefixStore(group_name, store)
 
         if backend == Backend.GLOO:
+            if pg_options is not None:
+                assert isinstance(pg_options, ProcessGroupGloo.Options), \
+                    "Expected pg_options argument to be of type ProcessGroupGloo.Options"
+            else:
+                pg_options = ProcessGroupGloo.Options()
+                pg_options.timeout = timeout
+
+            # If user forget to set devices, we should do it by default
+            if not pg_options._devices:
+                ifname_env = getenv("GLOO_SOCKET_IFNAME")
+                if ifname_env is not None:
+                    pg_options._devices = [ProcessGroupGloo.create_device(interface=iface) for iface in ifname_env.split(",")]
+                else:
+                    pg_options._devices = [ProcessGroupGloo.create_default_device()]
+
+                # user pass in threads but not devices, error that both are required
+                if pg_options._threads != 2:
+                    raise RuntimeError("ProcessGroupGloo.Options threads and devices must be passed in together")
+                else:
+                    pg_options._threads = len(pg_options._devices) * 2
+
             pg = ProcessGroupGloo(
                 prefix_store,
                 rank,
                 world_size,
-                timeout=timeout)
+                pg_options)
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif backend == Backend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL "
                                    "built in")
+            if pg_options is not None:
+                assert isinstance(pg_options, ProcessGroupNCCL.Options), \
+                    "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
+            else:
+                # default pg_options for NCCL
+                pg_options = ProcessGroupNCCL.Options()
+                pg_options.is_high_priority_stream = False
+                pg_options.timeout = timeout
+
             pg = ProcessGroupNCCL(
                 prefix_store,
                 rank,
                 world_size,
-                timeout)
+                pg_options)
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
@@ -2467,11 +2514,10 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None):
         timeout = default_pg_timeout
 
     group_to_use = _get_default_group() if group is None else group
-    assert isinstance(group_to_use, ProcessGroupGloo)
     return group_to_use.monitored_barrier(timeout)
 
 
-def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
+def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
     """
     Creates a new distributed group.
 
@@ -2503,6 +2549,11 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
             should be given as a lowercase string (e.g., ``"gloo"``), which can
             also be accessed via :class:`Backend` attributes (e.g.,
             ``Backend.GLOO``).
+        pg_options (ProcessGroupOptions, optional): process group options
+            specifying what additional options need to be passed in during
+            the construction of specific process groups. i.e. for the ``nccl``
+            backend, is_high_priority_stream can be specified so that process
+            group can pick up high priority cuda streams.
 
     Returns:
         A handle of distributed group that can be given to collective calls.
@@ -2549,6 +2600,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
                                    ranks,
                                    backend,
                                    default_store,
+                                   pg_options=pg_options,
                                    timeout=timeout)
 
     # Create the global rank to group rank mapping
