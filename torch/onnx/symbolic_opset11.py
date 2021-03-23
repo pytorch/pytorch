@@ -136,20 +136,20 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     sub_data_shape = sym_help._slice_helper(
         g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[maxsize])
     values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
-    # Check if values is a singular value and expand accordingly
-    rank = sym_help._get_tensor_rank(values)
-    if rank is not None and rank == 0:
-        values = expand(g, values, values_shape, None)
     values = g.op("Reshape", values, values_shape)
 
     if accumulate:
         dtype = self.type().scalarType()
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
         dtype = sym_help.scalar_type_to_pytorch_type[dtype]
+        if values.type().scalarType() is not None:
+            dtype = values.type().scalarType()
         zeros = g.op("ConstantOfShape", g.op("Shape", self), value_t=torch.tensor([0], dtype=dtype))
         result = g.op("ScatterND", zeros, index, values)
         result = add(g, self, result)
     else:
+        if (self.type().scalarType() != values.type().scalarType() and values.type().scalarType() is not None):
+            self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[values.type().scalarType()])
         result = g.op("ScatterND", self, index, values)
 
     return result
