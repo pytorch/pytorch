@@ -342,6 +342,27 @@ void ONNXFixupUninitializedOutput(Node* node) {
           graph, else_block, else_block_output, then_block_output);
       if_node->outputs()[i]->setType(else_block->outputs()[i]->type());
     }
+    auto then_tensor_type =
+        then_block->outputs().at(i)->type()->castRaw<TensorType>();
+    auto else_tensor_type =
+        else_block->outputs().at(i)->type()->castRaw<TensorType>();
+    if (then_tensor_type && else_tensor_type) {
+      const auto& then_shape = then_tensor_type->symbolic_sizes();
+      const auto& else_shape = else_tensor_type->symbolic_sizes();
+      std::vector<::c10::ShapeSymbol> dims;
+      if (then_shape.rank() && else_shape.rank() &&
+          then_shape.rank() == else_shape.rank()) {
+        for (size_t j = 0; j < then_shape.rank().value(); ++j) {
+          if (then_shape[j] == else_shape[j]) {
+            dims.emplace_back(then_shape[j]);
+          } else {
+            dims.emplace_back(::c10::ShapeSymbol::newSymbol());
+          }
+        }
+        if_node->output(i)->setType(
+            then_tensor_type->withSymbolicShapes(::c10::SymbolicShape(dims)));
+      }
+    }
   }
 }
 
@@ -352,7 +373,7 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   auto* if_node = node;
   auto* graph = if_node->owningGraph();
-  FixupONNXSubblockOutputs(if_node);
+  FixupONNXSubblockOutputs(node);
   ONNXFixupUninitializedOutput(if_node);
   GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());
   return if_node->outputs().vec();
