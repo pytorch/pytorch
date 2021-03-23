@@ -61,15 +61,13 @@ class TestComplex(JitTestCase):
         self.checkScript(fn, (t1, t2, 2))
 
     def test_complex_math_ops(self):
-        inf = float("inf")
-        nan = float("nan")
-        vals = ([inf, nan, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
+        vals = ([0.0, 1.0, 2.2, -1.0, -0.0, -2.2, 1, 0, 2]
                 + [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
         complex_vals = tuple(complex(x, y) for x, y in product(vals, vals))
 
-        def checkMath(func_name, vals=None):
+        def checkMath(func_name):
             funcs_template = dedent('''
-            def func(a):
+            def func(a: complex):
                 return cmath.{func}(a)
             ''')
 
@@ -94,9 +92,6 @@ class TestComplex(JitTestCase):
 
                 if res_python != res_script:
                     if isinstance(res_python, Exception):
-                        continue
-
-                    if (a == complex(inf, nan) and IS_WINDOWS) or (a == complex(-inf, inf) and IS_MACOS):
                         continue
 
                     msg = ("Failed on {func_name} with input {a}. Python: {res_python}, Script: {res_script}"
