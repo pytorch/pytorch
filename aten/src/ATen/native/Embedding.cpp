@@ -3,6 +3,8 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 
+#include <c10/util/irange.h>
+
 #include <cstring>
 #include <memory>
 #include <sstream>
@@ -97,10 +99,10 @@ Tensor embedding_dense_backward_cpu(
     std::unique_ptr<index_t[]> counts;
     if (scale_grad_by_freq) {
       counts.reset(new index_t[num_weights]);
-      for (int i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
         counts[indices_data[i]] = 0;
       }
-      for (int i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
         counts[indices_data[i]]++;
       }
     }

@@ -1218,7 +1218,7 @@ class DistributedTest:
             store = dist.PrefixStore(new_port, store)
 
             opts = dist.ProcessGroupNCCL.Options()
-            opts.is_high_priority = False
+            opts.is_high_priority_stream = False
             group_id = dist.ProcessGroupNCCL(store, rank, size, opts)
 
             self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU, True)
@@ -5129,8 +5129,8 @@ class DistributedTest:
             for _ in range(10):
                 dist.all_reduce(torch.cat(tensors))
             # Run monitored barrier
-            timeout = 5
-            dist.monitored_barrier(None, timeout)
+            timeout = timedelta(seconds=2)
+            process_group.monitored_barrier(timeout)
             # All ranks besides 1 call into barrier, rank 0 should report failure
             # while others report gloo error.
             failed_rank = 1
@@ -5138,20 +5138,53 @@ class DistributedTest:
                 return
             if self.rank == 0:
                 with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
-                    dist.monitored_barrier(None, timeout)
+                    dist.monitored_barrier(timeout)
             else:
                 # Other ranks will report standard gloo error, only rank 0 knows
                 # ranks that failed to respond to barrier.
-                try:
-                    dist.monitored_barrier(None, timeout)
-                except RuntimeError as e:
-                    pass
+                with self.assertRaises(RuntimeError):
+                    dist.monitored_barrier(timeout)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        def test_monitored_barrier_allreduce_hang(self):
+            # tests expected behavior when nonzero rank hangs.
+            if "NCCL_ASYNC_ERROR_HANDLING" in os.environ:
+                del os.environ["NCCL_ASYNC_ERROR_HANDLING"]
+            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            nccl_pg = dist.new_group(
+                ranks=list(i for i in range(int(self.world_size))),
+                timeout=timedelta(seconds=10),
+                backend=dist.Backend.NCCL,
+            )
+            gloo_pg = dist.new_group(
+                ranks=list(i for i in range(int(self.world_size))),
+                backend=dist.Backend.GLOO,
+            )
+            tensors = [
+                torch.ones(10, device=self.rank) * self.rank
+            ]
+            # Let all ranks call allreduce first to set up communicators etc.
+            # Directly simulating error here will run into store issue described
+            # in https://github.com/pytorch/pytorch/issues/54524.
+            nccl_pg.allreduce(tensors).wait()
+            failed_rank = 1
+            # All ranks besides 0 call into allreduce.
+            if self.rank != 0:
+                with self.assertRaisesRegex(RuntimeError, "Caught collective operation timeout"):
+                    nccl_pg.allreduce(tensors).wait()
+                return
+
+            # Rank 0 should report that rank 1 timed out.
+            monitored_barrier_timeout_seconds = timedelta(seconds=2)
+            with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
+                gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds)
 
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
         def test_monitored_barrier_gloo_subgroup(self):
             failed_rank = 1
-            timeout = 5
+            timeout = 1
             subgroup = dist.new_group(ranks=[0, 1])
             if self.rank == failed_rank:
                 return
