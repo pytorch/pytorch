@@ -5312,8 +5312,6 @@ Returns the indices of the maximum value of all elements in the :attr:`input` te
 This is the second value returned by :meth:`torch.max`. See its
 documentation for the exact semantics of this method.
 
-See also :func:`torch.take_along_dim`.
-
 .. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
 
 Args:
@@ -5788,8 +5786,6 @@ Returns the indices of the minimum value(s) of the flattened tensor or along a d
 
 This is the second value returned by :meth:`torch.min`. See its
 documentation for the exact semantics of this method.
-
-See also :func:`torch.take_along_dim`.
 
 .. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
 
@@ -7993,8 +7989,6 @@ order by value.
 This is the second value returned by :meth:`torch.sort`.  See its documentation
 for the exact semantics of this method.
 
-See also :func:`torch.take_along_dim`.
-
 Args:
     {input}
     dim (int, optional): the dimension to sort along
@@ -8876,8 +8870,8 @@ take_along_dim(input, indices, dim, *, out=None) -> Tensor
 
 Selects values from :attr:`input` at the 1-dimensional indices from :attr:`indices` along the given :attr:`dim`.
 
-Functions returning index along dimension like torch.argmax and torch.argsort can be passed
-as :attr:`indices` to take_along_dim.
+Functions that return indices along a dimension, like :func:`torch.argmax` and :func:`torch.argsort`,
+are designed to work with this function. See the examples below.
 
 .. note::
     This function is similar to NumPy's `take_along_axis`.
