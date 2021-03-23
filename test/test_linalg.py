@@ -3556,16 +3556,16 @@ class TestLinalg(TestCase):
     def test_matrix_rank_tol(self, device, dtype):
 
         def run_test_tol(shape0, shape1, batch):
-            a = torch.randn(*batch, shape0, shape1, dtype=dtype, device=device)
+            a = make_tensor((*batch, shape0, shape1), dtype=dtype, device=device)
             # Check against NumPy output
             # Test float tol, and specific value for each matrix
             tolerances = [float(torch.rand(1)), ]
             # Test different types of tol tensor
             for tol_type in all_types():
-                tolerances.append(torch.rand(a.shape[:-2], dtype=torch.double, device=device).to(tol_type))
+                tolerances.append(make_tensor(a.shape[:-2], dtype=tol_type, device=device, low=0))
             # Test broadcasting of tol
             if a.ndim > 2:
-                tolerances.append(torch.rand(a.shape[-3], device=device))
+                tolerances.append(make_tensor(a.shape[-3], dtype=torch.float32, device=device, low=0))
             for tol in tolerances:
                 actual = torch.linalg.matrix_rank(a, tol=tol)
                 numpy_tol = tol if isinstance(tol, float) else tol.cpu().numpy()
