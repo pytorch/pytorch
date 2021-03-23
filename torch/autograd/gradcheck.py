@@ -693,9 +693,9 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
     all_numerical_from_imag_grad_out: List[List[torch.Tensor]] = [[] for t in inp_tensors]
 
     # Numerically approximate v^T (J u)
-    # diff_idx represents only counts tensors that require grad, but input_idx counts 
+    # diff_idx represents only counts tensors that require grad, but input_idx counts
     # all tensors
-    diff_idx = 0  
+    diff_idx = 0
     for input_idx, inp in enumerate(tupled_inputs):
         if not is_tensor_like(inp) or not inp.requires_grad:  # type: ignore
             continue
