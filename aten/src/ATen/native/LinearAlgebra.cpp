@@ -293,6 +293,10 @@ Tensor linalg_matrix_power(const Tensor& self, int64_t n) {
   return linalg_matrix_power_impl(self, n, c10::nullopt);
 }
 
+Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
+  return at::native::linalg_matrix_power_out(self, n, result);
+}
+
 Tensor matrix_power(const Tensor& self, int64_t n) {
   return at::native::linalg_matrix_power(self, n);
 }

@@ -2315,8 +2315,12 @@
 
 - func: matrix_rank(Tensor self, bool symmetric=False) -> Tensor
 
+# Alias to linalg.matrix_power
 - func: matrix_power(Tensor self, int n) -> Tensor
   variants: function, method
+
+# Alias to linalg.matrix_power
+- func: matrix_power.out(Tensor self, int n, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: matrix_exp(Tensor self) -> Tensor
   variants: function, method
