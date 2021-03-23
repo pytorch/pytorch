@@ -1,4 +1,5 @@
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 
 #include <benchmark/benchmark.h>
 #include <memory>
@@ -45,10 +46,10 @@ static void BM_IntrusivePtrArray(benchmark::State& state) {
   const size_t kLength = state.range(0);
   std::vector<intrusive_ptr<Foo> > vararray(kLength);
   while (state.KeepRunning()) {
-    for (int i = 0; i < kLength; ++i) {
+    for (const auto i : c10::irange(kLength)) {
       vararray[i] = var;
     }
-    for (int i = 0; i < kLength; ++i) {
+    for (const auto i : c10::irange(kLength)) {
       vararray[i].reset();
     }
   }
@@ -60,10 +61,10 @@ static void BM_SharedPtrArray(benchmark::State& state) {
   const size_t kLength = state.range(0);
   std::vector<std::shared_ptr<Bar> > vararray(kLength);
   while (state.KeepRunning()) {
-    for (int i = 0; i < kLength; ++i) {
+    for (const auto i : c10::irange(kLength)) {
       vararray[i] = var;
     }
-    for (int i = 0; i < kLength; ++i) {
+    for (const auto i : c10::irange(kLength)) {
       vararray[i].reset();
     }
   }

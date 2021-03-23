@@ -199,6 +199,7 @@ namespace c10 {
   _(aten, matrix_power)              \
   _(aten, linalg_matrix_power)       \
   _(aten, linalg_norm)               \
+  _(aten, linalg_vector_norm)        \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -250,6 +251,8 @@ namespace c10 {
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
+  _(aten, orgqr)                     \
+  _(aten, linalg_householder_product)\
   _(aten, transpose)                 \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
@@ -308,6 +311,12 @@ namespace c10 {
   _(aten, moveaxis)                  \
   _(aten, lgamma)                    \
   _(aten, special_gammaln)           \
+  _(aten, erf)                       \
+  _(aten, special_erf)               \
+  _(aten, erfc)                      \
+  _(aten, special_erfc)              \
+  _(aten, erfinv)                    \
+  _(aten, special_erfinv)            \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
