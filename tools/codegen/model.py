@@ -486,8 +486,6 @@ class NativeFunctionsGroup:
         # these don't count as structured for our purposes here
         if out is None:
             return None
-        if DispatchKey.CompositeExplicitAutograd in out.dispatch:
-            print(out.func.name)
         return NativeFunctionsGroup(
             functional=functional,
             inplace=inplace,

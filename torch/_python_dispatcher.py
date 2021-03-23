@@ -29,9 +29,11 @@ keys for a single example of each use case. These use cases are listed below:
 - CompositeImplicitAutograd: alias key CompositeImplicitAutograd = CompositeExplicitAutograd + Autograd
     Kernels registered to this key MUST work for both inference + autograd for all backends.
 
-Note we only allow registrations to alias keys inside pytorch core library. E.g you shouldn't register
-a CompositeImplicitAutograd or CompositeExplicitAutograd kernel from torch-xla extension, instead you should upstream the kernel into
-pytorch/pytorch repo so that it's available for all backends and continuously tested even without the extension.
+Note we only allow registrations to alias keys inside pytorch core library. E.g
+you shouldn't register a CompositeImplicitAutograd or CompositeExplicitAutograd
+kernel from torch-xla extension, instead you should upstream the kernel into
+pytorch/pytorch repo so that it's available for all backends and continuously
+tested even without the extension.
 
 Usage:
   dispatcher = PythonDispatcher()

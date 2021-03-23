@@ -268,12 +268,13 @@ belong to.  If the dispatch table is omitted, we assume a default dispatch
 table:
 
 ```
-func: func(...) -> ...
+# overload is ignored
+func: func.overload(...) -> ...
 dispatch:
     CompositeImplicitAutograd: func
 
-# out functions get suffixed with _out in their name
-func: func.out(...) -> ...
+# overload is ignored, but out functions get suffixed with _out in their name
+func: func.out_overload(...) -> ...
 dispatch:
     CompositeImplicitAutograd: func_out
 ```
@@ -287,7 +288,7 @@ There are also two special "generic" backends:
 
   - `CompositeExplicitAutograd` (previously known as `DefaultBackend`):
     implementations of kernels that work for all backends, but require an
-    explicit definition of autograd in `derivatives.yaml` to support autograd.
+    explicit definition of backward function in `derivatives.yaml` to support autograd.
     The most typical use of this key are for delegating functions; i.e.,
     functions that do a very small amount of work and then delegate to another
     operator to do the actual heavy lifting.  Under the hood, registering a
@@ -305,6 +306,9 @@ There are also two special "generic" backends:
     CPU and CUDA implementations, but you might want to provide a fallback
     lowering for external backends that may not have a specialized
     implementation.
+
+Functions registered to composite backends should work for any backend, if the
+nested functions they call work for those backends.
 
 For example, suppose `my_op` can be implemented in the following way:
 
@@ -325,7 +329,7 @@ backward of `my_op` can no longer be derived automatically.
 Whether to use implicit or explicit autograd for your kernel can be decided by the following steps:
 1. If you can, always start with a `CompositeImplicitAutograd` kernel that's composable from existing operators.
 2. If you don't want to use the derived gradient formula from `CompositeImplicitAutograd` kernel for autograd, either to
-   get better performance or better numerical stability, you should put the kernel in `CompositeExplicitAutograd`
+   get better performance or better numerical stability, you should register the kernel with `CompositeExplicitAutograd`
    so that it's only used in inference.
    Later for autograd, depending on whether your autograd kernel works for all backends or not,
    you can put them in alias `Autograd` or specific keys like `AutogradCPU`.
