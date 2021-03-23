@@ -7,9 +7,12 @@ $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
 $VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStudio.Workload.VCTools",
                                                      "--add Microsoft.Component.MSBuild",
                                                      "--add Microsoft.VisualStudio.Component.Roslyn.Compiler",
-                                                     "--add Microsoft.VisualStudio.Component.VC.CoreBuildTools",
+                                                     "--add Microsoft.VisualStudio.Component.TextTemplating",
+                                                     "--add Microsoft.VisualStudio.Component.VC.CoreIde",
                                                      "--add Microsoft.VisualStudio.Component.VC.Redist.14.Latest",
-                                                     "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64")
+                                                     "--add Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Core",
+                                                     "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                                                     "--add Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Win81")
 
 curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
 if ($LASTEXITCODE -ne 0) {
@@ -27,12 +30,11 @@ if (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC
     Start-Process "${PWD}\vs_installer.exe"   -ArgumentList $VS_UNINSTALL_ARGS -NoNewWindow -Wait -PassThru
 }
 else {
-    echo "BuildTools uninstalled"
+    echo "Original BuildTools uninstalled"
 }
 $process = Start-Process "${PWD}\vs_installer.exe" -ArgumentList $VS_INSTALL_ARGS -NoNewWindow -Wait -PassThru
 Remove-Item -Path vs_installer.exe -Force
 $exitCode = $process.ExitCode
-echo $exitCode
 if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
     echo "VS 2019 installer exited with code $exitCode, which should be one of [0, 3010]."
     curl.exe --retry 3 -kL $COLLECT_DOWNLOAD_LINK --output Collect.exe
@@ -45,4 +47,13 @@ if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
     Copy-Item -Path "C:\Users\circleci\AppData\Local\Temp\vslogs.zip" -Destination "C:\w\build-results\"
     exit 1
 }
+
+if (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC\14.28.29333") {
+    echo "Install Successfully"
+}
+else {
+    echo "Installation Failed"
+    exit 1
+}
+
 
