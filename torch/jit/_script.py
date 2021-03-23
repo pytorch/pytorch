@@ -13,7 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple, Optional
 
 
 import torch
@@ -35,6 +35,10 @@ from torch.jit._state import (
 )
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic)
+
+import monkeytype
+from monkeytype import trace as monkeytype_trace
+from torch.jit._monkey_config_jit import JitTypeTraceStore, JitTypeTraceConfig, type_trace_db
 
 torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
@@ -787,7 +791,7 @@ def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
-def script(obj, optimize=None, _frames_up=0, _rcb=None):
+def script(obj, optimize=None, _frames_up=0, _rcb=None, example_inputs: Optional[List[Tuple]]=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
@@ -949,6 +953,16 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         )
 
     qualified_name = _qualified_name(obj)
+
+    # Check if example_inputs are defined and generate call traces
+    # for the method by running eager mode version of the method with
+    # the provide example inputs. This logs all the traces in type_trace_db
+    if example_inputs:
+        monkeytype_config = JitTypeTraceConfig(type_trace_db)
+        with monkeytype_trace(monkeytype_config):
+            for example_input in example_inputs:
+                obj(*example_input)
+
     if inspect.isclass(obj):
         # If this type is a `nn.Module` subclass, they probably meant to pass
         # an instance instead of a Module
