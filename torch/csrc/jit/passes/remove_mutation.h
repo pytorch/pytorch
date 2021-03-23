@@ -74,7 +74,7 @@ struct MutationRemover {
  private:
   bool newMemoryLocation(Value* v);
   Node* createSpecialMappedOp(Node* n);
-  bool listAppendFollowingListConstruct(Node* n);
+  bool listMutationFollowingListConstruct(Node* n);
   bool tryMakeCreationAndMutationAtomic(
       Value* mutated_value,
       Node* mutating_op);
