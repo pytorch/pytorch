@@ -28,17 +28,14 @@ at::Tensor& reshape_copy_out(
                           : proposed_shape;
   at::native::resize_(out, shape, c10::nullopt);
 
-  if (!self.is_contiguous()) {
-    at::native::copy_(out, self, false /* non_blocking */);
-    return out;
-  }
+  auto self_contig = self.expect_contiguous();
 
   size_t nbytes = self.nbytes();
   if (nbytes == 0) {
     return out;
   }
 
-  const void* self_data = self.data_ptr();
+  const void* self_data = self_contig->data_ptr();
   void* out_data = out.data_ptr();
   memcpy(out_data, self_data, nbytes);
 

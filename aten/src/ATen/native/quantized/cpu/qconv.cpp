@@ -12,6 +12,8 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
+#include <c10/util/irange.h>
+
 namespace {
 // To have a sanity check for maximum matrix size.
 constexpr int64_t kReasonableMaxDim = 1000000;
@@ -453,7 +455,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
   const int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     fbgemm::DoNothing<> kNoOpObj{};
-    for (int task_id = begin; task_id < end; ++task_id) {
+    for (const auto task_id : c10::irange(begin, end)) {
       if (q_scheme == c10::kPerTensorAffine) {
         fbgemm::ReQuantizeOutput<
             kReluFused,

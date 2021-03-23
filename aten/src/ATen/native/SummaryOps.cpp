@@ -60,7 +60,10 @@ Tensor _bincount_cpu_template(
 } // namespace
 
 Tensor
-_bincount_cpu(const Tensor& self, const Tensor& weights, int64_t minlength) {
+_bincount_cpu(const Tensor& self, const c10::optional<Tensor>& weights_opt, int64_t minlength) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weights = c10::value_or_else(weights_opt, [] {return Tensor();});
+
   return AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "bincount_cpu", [&] {
     const auto scalar = weights.scalar_type();
     if (scalar == ScalarType::Undefined || scalar == ScalarType::Float)
