@@ -1081,14 +1081,14 @@ Arguments:
               py::call_guard<py::gil_scoped_release>())
           .def(
               "monitored_barrier",
-              []( const c10::intrusive_ptr<::c10d::ProcessGroup>& self, double timeoutSeconds) {
-                  ::c10d::BarrierOptions opts;
-                  long timeoutMillis = static_cast<long>(timeoutSeconds * kSecondsToMilliConversion);
-                  opts.timeout = std::chrono::milliseconds(timeoutMillis);
-                  return self->monitoredBarrier(opts);
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::chrono::milliseconds& timeout) {
+                ::c10d::BarrierOptions opts;
+                opts.timeout = timeout;
+                LOG(INFO) << "Got timeout of: " << opts.timeout.count();
+                return self->monitoredBarrier(opts);
               },
-              py::call_guard<py::gil_scoped_release>()
-          );
+              py::call_guard<py::gil_scoped_release>());
 
   // base ProcessGroup::Options binding
   auto processGroupOptions =
@@ -1884,16 +1884,7 @@ static const auto ProcessGroupTorchBind =
             [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self) {
               ::c10d::BarrierOptions opts;
               return self->barrier(opts);
-            })
-        .def(
-            "monitored_barrier",
-            [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self, double timeoutSeconds) {
-                ::c10d::BarrierOptions opts;
-                long timeoutMillis = static_cast<long>(timeoutSeconds * kSecondsToMilliConversion);
-                opts.timeout = std::chrono::milliseconds(timeoutMillis);
-                return self->monitoredBarrier(opts);
-            }
-        );
+            });
 
 #ifdef USE_C10D_NCCL
 // XXX: Ideally the Options of ProcessGroupNCCL should be

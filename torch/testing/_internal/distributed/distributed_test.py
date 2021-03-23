@@ -5129,7 +5129,7 @@ class DistributedTest:
             for _ in range(10):
                 process_group.allreduce(tensors).wait()
             # Run monitored barrier
-            timeout = 2
+            timeout = timedelta(seconds=2)
             process_group.monitored_barrier(timeout)
             # All ranks besides 1 call into barrier, rank 0 should report failure
             # while others report gloo error.
@@ -5176,6 +5176,6 @@ class DistributedTest:
                 return
 
             # Rank 0 should report that rank 1 timed out.
-            monitored_barrier_timeout_seconds = 2
+            monitored_barrier_timeout_seconds = timedelta(seconds=2)
             with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
                 gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds)
