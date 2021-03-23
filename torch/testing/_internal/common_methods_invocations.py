@@ -3379,7 +3379,7 @@ if TEST_SCIPY:
                            SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     dtypes=[torch.bfloat16, torch.float16]),
                        ),
-                       test_inplace_grad=False,
+                       supports_inplace_autograd=False,
                        safe_casts_outputs=True,
                        sample_inputs_func=sample_inputs_entr),
         UnaryUfuncInfo('erf',
