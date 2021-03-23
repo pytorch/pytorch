@@ -1116,10 +1116,6 @@ jobs:
     - run:
         <<: *binary_populate_env
     - run:
-        name: Install VS2019
-        command: |
-          powershell /c/w/p/.circleci/scripts/vs_install.ps1
-    - run:
         name: Build
         no_output_timeout: "1h"
         command: |
@@ -1151,10 +1147,6 @@ jobs:
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
-    - run:
-        name: Install VS2019
-        command: |
-          powershell /c/w/p/.circleci/scripts/vs_install.ps1
     - run:
         name: Test
         no_output_timeout: "1h"
