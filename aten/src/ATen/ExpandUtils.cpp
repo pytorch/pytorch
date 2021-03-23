@@ -153,8 +153,8 @@ std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef t
   //     is (4, 3, 2, 1, 0) and the sorted `perm` will be (4, 3, 0, 1, 2)
   for (const auto i : c10::irange(1, ndim)) {
     auto dim1 = i;
-    for (const auto j : c10::irange(i)) {
-      auto dim0 = i - 1 - j;
+    for (const auto j : c10::irange(i + 1)) {
+      auto dim0 = i - j;
       int comparison = should_swap(perm[dim0], perm[dim1]);
       if (comparison > 0) {
         std::swap(perm[dim0], perm[dim1]);
