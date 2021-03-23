@@ -17,6 +17,7 @@ from functools import wraps
 import torch
 import torch.distributed as c10d
 
+import faulthandler
 from functools import partial, reduce
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA
 
@@ -351,6 +352,7 @@ class MultiProcessTestCase(TestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
+        faulthandler.enable(all_threads=True)
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
