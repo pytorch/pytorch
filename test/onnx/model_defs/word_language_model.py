@@ -93,7 +93,7 @@ class RNNModelWithTupleHidden(RNNModel):
     @staticmethod
     def repackage_hidden(h: Tuple[Tensor, Tensor]):
         """Detach hidden states from their history."""
-        return tuple((h[0].detach(), h[1].detach()))
+        return tuple(h[0].detach(), h[1].detach())
 
     def forward(self, input: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None):
         emb = self.drop(self.encoder(input))
