@@ -328,6 +328,9 @@ jobs:
       - attach_workspace:
           at: c:/users/circleci/workspace
       - run:
+          name: Install VS2019
+          command: |
+              powershell .circleci/scripts/vs_install.ps1
           name: Install Cuda
           no_output_timeout: 30m
           command: |
