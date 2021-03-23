@@ -255,7 +255,7 @@ void TCPStoreDaemon::setHandler(int socket) {
     tcputil::sendVector<uint8_t>(listenSocket, oldData);
     tcputil::sendVector<uint8_t>(listenSocket, newData);
   }
-
+  
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
 }
