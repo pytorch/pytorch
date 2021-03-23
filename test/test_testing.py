@@ -11,7 +11,6 @@ from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal import mypy_wrapper
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
