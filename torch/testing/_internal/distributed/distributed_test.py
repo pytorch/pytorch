@@ -3672,8 +3672,6 @@ class DistributedTest:
                 ddp_logging_data.avg_backward_compute_comm_overlap_time)
             # test larger net with mixed data types, verify multiple bucket sizes
             model = LargeNet()
-            model.float()
-            model.fc1.double()
             model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1.5)
             ddp_logging_data = model_DDP.get_ddp_logging_data()
             params = list(model_DDP.parameters())
@@ -3681,7 +3679,6 @@ class DistributedTest:
             self.assertEqual(
                 ddp_logging_data.bucket_sizes,
                 [params[1].numel() * params[1].element_size(), params[0].numel() * params[0].element_size()])
-            self.assertEqual(','.join(ddp_logging_data.dtypes), 'double,float')
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
