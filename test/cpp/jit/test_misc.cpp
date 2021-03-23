@@ -1,4 +1,3 @@
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -2202,17 +2201,6 @@ TEST(FuturesTest, CollectAny) {
   ASSERT_EQ(c4->value().toInt(), 7);
   s2->markCompleted(1);
   ASSERT_EQ(c4->value().toInt(), 7);
-}
-
-TEST(FuturesTest, SetError) {
-  auto f1 = c10::make_intrusive<Future>(IntType::get());
-  f1->setError(std::make_exception_ptr(std::runtime_error("foo")));
-  try {
-    f1->setError(std::make_exception_ptr(std::runtime_error("bar")));
-    FAIL() << "Expected to throw";
-  } catch (std::exception& e) {
-    EXPECT_THAT(e.what(), ::testing::HasSubstr("Error already set"));
-  }
 }
 
 TEST(TLSFutureCallbacksTest, Basic) {
