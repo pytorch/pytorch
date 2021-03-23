@@ -511,6 +511,20 @@ class TestBenchmarkUtils(TestCase):
         self.assertIsInstance(counts, int)
         self.assertGreater(counts, 0)
 
+        # There is some jitter with the allocator, so we use a simpler task to
+        # test reproducibility.
+        timer = benchmark_utils.Timer(
+            "x += 1",
+            setup="x = torch.ones((1,))",
+        )
+
+        stats = timer.collect_callgrind(number=1000, repeats=20)
+        assert isinstance(stats, tuple)
+
+        # Check that the repeats are at least somewhat repeatable. (within 10 instructions per iter)
+        counts = collections.Counter([s.counts(denoise=True) // 10_000 * 10_000 for s in stats])
+        self.assertGreater(max(counts.values()), 1, f"Every instruction count total was unique: {counts}")
+
         from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import wrapper_singleton
         self.assertIsNone(
             wrapper_singleton()._bindings_module,
@@ -548,7 +562,7 @@ class TestBenchmarkUtils(TestCase):
 
         # NB: Unlike the example above, there is no expectation that all
         #     repeats will be identical.
-        counts = collections.Counter([s.counts(denoise=True) for s in stats])
+        counts = collections.Counter([s.counts(denoise=True) // 10_000 * 10_000 for s in stats])
         self.assertGreater(max(counts.values()), 1, repr(counts))
 
     def test_manipulate_callgrind_stats(self):
