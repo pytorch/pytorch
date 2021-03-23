@@ -247,7 +247,7 @@ class class_ {
 
     auto wrapped_setter =
         detail::wrap_func<CurClass, SetterFunc>(std::move(setter_func));
-    setter = defineMethod(name + "_setter", setter_name, wrapped_setter, doc_string);
+    setter = defineMethod(name + "_setter", wrapped_setter, doc_string);
 
     classTypePtr->addProperty(name, getter, setter);
     return *this;
