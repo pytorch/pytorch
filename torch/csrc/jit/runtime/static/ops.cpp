@@ -712,13 +712,23 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
         } else {
           dtype = at::native::result_type(in0_t, p_node->Input(1).toScalar());
           p_node->Output(0) = at::native::empty_like(
-              in0_t, in0_t.options().dtype(dtype), at::MemoryFormat::Preserve);
+              in0_t,
+              dtype,
+              in0_t.options().layout_opt(),
+              in0_t.options().device_opt(),
+              in0_t.options().pinned_memory_opt(),
+              at::MemoryFormat::Preserve);
         }
       } else {
         const auto& in1_t = p_node->Input(1).toTensor();
         dtype = at::native::result_type(p_node->Input(0).toScalar(), in1_t);
         p_node->Output(0) = at::native::empty_like(
-            in1_t, in1_t.options().dtype(dtype), at::MemoryFormat::Preserve);
+            in1_t,
+            dtype,
+            in1_t.options().layout_opt(),
+            in1_t.options().device_opt(),
+            in1_t.options().pinned_memory_opt(),
+            at::MemoryFormat::Preserve);
       }
     }
     auto& out_t = p_node->Output(0).toTensor();

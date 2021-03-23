@@ -672,14 +672,30 @@ static inline void mvlgamma_check(const Tensor& self, int64_t p) {
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
-  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
+  Tensor args = native::arange(
+      -p / 2. + 0.5,
+      0.5,
+      0.5,
+      optTypeMetaToScalarType(self.options().dtype_opt()),
+      self.options().layout_opt(),
+      self.options().device_opt(),
+      self.options().pinned_memory_opt());
   args = args.add(self.unsqueeze(-1));
   return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(c10::pi<double>) / 4.);
 }
 
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
-  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
+  auto dtype_opt = self.options().dtype_opt();
+  Tensor args = native::arange(
+      -p / 2. + 0.5,
+      0.5,
+      0.5,
+      optTypeMetaToScalarType(self.options().dtype_opt()),
+      self.options().layout_opt(),
+      self.options().device_opt(),
+      self.options().pinned_memory_opt());
+  args = args.add(self.unsqueeze(-1));
   args = args.add(self.unsqueeze(-1));
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(c10::pi<double>) / 4.));
 }

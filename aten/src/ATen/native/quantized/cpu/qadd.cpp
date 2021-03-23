@@ -139,10 +139,13 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 
   Tensor qy = at::native::empty_affine_quantized(
       qa_contig.sizes(),
-      at::device(kCPU).dtype(kQUInt8).memory_format(qa.suggest_memory_format()),
+      kQUInt8,
+      c10::nullopt /* layout */,
+      kCPU,
+      c10::nullopt /* pin_memory */,
       scale,
       zero_point,
-      c10::nullopt);
+      qa.suggest_memory_format());
 
   if (qa_contig.size(0) == 0) {
     return qy;

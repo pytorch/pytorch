@@ -698,12 +698,13 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   // Allocate output Tensor and a buffer for QNNPACK to use
   at::Tensor output = at::native::empty_affine_quantized(
       output_shape,
-      at::device(c10::kCPU)
-          .dtype(c10::kQUInt8)
-          .memory_format(c10::MemoryFormat::ChannelsLast),
+      c10::kQUInt8,
+      c10::nullopt /* layout */,
+      c10::kCPU,
+      c10::nullopt /* pin_memory */,
       output_scale,
       output_zero_point,
-      c10::nullopt);
+      c10::MemoryFormat::ChannelsLast);
 
   pytorch_qnnp_status run_status;
   if (transpose()) {

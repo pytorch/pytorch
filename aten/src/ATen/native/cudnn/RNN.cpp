@@ -52,7 +52,18 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
   AT_ERROR("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
 }
 
-Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
+Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]      
+  TensorOptions options = TensorOptions()
+      .dtype(dtype)
+      .layout(layout)
+      .device(device)
+      .pinned_memory(pin_memory);
+
   AT_ERROR("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
 
@@ -1313,7 +1324,18 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 // as input.  The codegen currently assumes that ALL factory functions
 // take TensorOptions, so it's just a lot easier for this function to
 // be bound if it also does it.
-Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
+Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]      
+  TensorOptions options = TensorOptions()
+      .dtype(dtype)
+      .layout(layout)
+      .device(device)
+      .pinned_memory(pin_memory);
+
   auto handle = getCudnnHandle();
   DropoutDescriptor dropout_desc;
   auto dropout_p = train ? dropout : 0;

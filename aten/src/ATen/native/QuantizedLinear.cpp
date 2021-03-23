@@ -242,7 +242,12 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   q_params.precision = kPrecision;
 
   Tensor quantized = at::native::empty_like(
-      weight_contig, weight_contig.options().dtype(at::kChar), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      weight_contig,
+      at::kChar,
+      weight_contig.options().layout_opt(),
+      weight_contig.options().device_opt(),
+      weight_contig.options().pinned_memory_opt(),
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   // Tensor quantized = at::native::empty_cpu(
   //     weight_contig.sizes(), weight_contig.options().dtype(at::kChar));
   fbgemm::Quantize<int8_t, false /*LEGACY*/>(
@@ -254,7 +259,12 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   // Calculate column offsets of the weight and store them away in a tensor.
   // Similarly to quantization, this can be done once and cached.
   Tensor col_offsets = at::empty(
-      {weight_contig.size(0)}, weight_contig.options().dtype(at::kInt), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      {weight_contig.size(0)},
+      at::kChar,
+      weight_contig.options().layout_opt(),
+      weight_contig.options().device_opt(),
+      weight_contig.options().pinned_memory_opt(),
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   CalcColOffsetsTranspose(
       /*K=*/quantized.size(1),
       /*N=*/quantized.size(0),

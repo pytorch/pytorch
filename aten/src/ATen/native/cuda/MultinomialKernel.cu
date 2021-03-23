@@ -359,12 +359,30 @@ void multinomial_with_replacement_kernel_impl(
 
       // For sampling without replacement, we modify the distribution
       // for subsequent samples in this space
-      Tensor origDist = native::empty_like(self_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      Tensor origDist = native::empty_like(
+          self_v,
+          nullopt /* dtype */,
+          nullopt /* layout */,
+          nullopt /* device */,
+          nullopt /* pin_memory */,
+          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       origDist.copy_(self_v);
 
-      Tensor normDist = native::empty_like(self_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      Tensor normDist = native::empty_like(
+          self_v,
+          nullopt /* dtype */,
+          nullopt /* layout */,
+          nullopt /* device */,
+          nullopt /* pin_memory */,
+          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-      Tensor prefixSum = native::empty_like(self_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      Tensor prefixSum = native::empty_like(
+          self_v,
+          nullopt /* dtype */,
+          nullopt /* layout */,
+          nullopt /* device */,
+          nullopt /* pin_memory */,
+          LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
       // Renorm along rows
       normDist.copy_(origDist);

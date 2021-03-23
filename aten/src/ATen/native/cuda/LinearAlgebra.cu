@@ -137,7 +137,15 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     }
     // TODO: We could squeeze some perf by calling at::cuda::mul_out here instead, to bypass the dispatcher.
     // That requires some fixing some internal build dependencies though.
-    return at::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
+    return at::mul_out(
+        result,
+        self,
+        at::native::scalar_tensor(
+            beta,
+            self.scalar_type(),
+            nullopt /* layout */,
+            at::kCPU,
+            nullopt /* pin_memory */));
   }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {

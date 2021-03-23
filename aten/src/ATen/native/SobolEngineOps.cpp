@@ -163,7 +163,16 @@ Tensor& _sobol_engine_initialize_state_(Tensor& sobolstate, int64_t dimension) {
 
   /// Multiply each column of sobolstate by power of 2:
   /// sobolstate * [2^(maxbit-1), 2^(maxbit-2),..., 2, 1]
-  Tensor pow2s = at::pow(2, at::native::arange((MAXBIT - 1), -1, -1, sobolstate.options()));
+  Tensor pow2s = at::pow(
+      2,
+      at::native::arange(
+          (MAXBIT - 1),
+          -1,
+          -1,
+          optTypeMetaToScalarType(sobolstate.options().dtype_opt()),
+          sobolstate.options().layout_opt(),
+          sobolstate.options().device_opt(),
+          sobolstate.options().pinned_memory_opt()));
   sobolstate.mul_(pow2s);
   return sobolstate;
 }

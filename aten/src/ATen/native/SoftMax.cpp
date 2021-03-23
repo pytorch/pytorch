@@ -120,7 +120,13 @@ void host_softmax_backward(
 Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
   TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on CPU");
   auto input = input_.contiguous();
-  Tensor output = at::native::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor output = at::native::empty_like(
+      input,
+      nullopt /* dtype */,
+      nullopt /* layout */,
+      nullopt /* device */,
+      nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
 
   if (input.numel() == 0) {
@@ -144,7 +150,13 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
 Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
   TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on CPU");
   auto input = input_.contiguous();
-  Tensor output = at::native::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor output = at::native::empty_like(
+      input,
+      nullopt /* dtype */,
+      nullopt /* layout */,
+      nullopt /* device */,
+      nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
 
   if (input.numel() == 0) {
@@ -175,7 +187,13 @@ Tensor softmax_backward_cpu(
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
   auto grad = grad_.contiguous();
   auto output = output_.contiguous();
-  Tensor grad_input = at::native::empty_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor grad_input = at::native::empty_like(
+      grad,
+      nullopt /* dtype */,
+      nullopt /* layout */,
+      nullopt /* device */,
+      nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   if (output.numel() == 0) {
     return grad_input;
@@ -207,7 +225,13 @@ Tensor log_softmax_backward_cpu(
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
   auto grad = grad_.contiguous();
   auto output = output_.contiguous();
-  Tensor grad_input = at::native::empty_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor grad_input = at::native::empty_like(
+      grad,
+      nullopt /* dtype */,
+      nullopt /* layout */,
+      nullopt /* device */,
+      nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   if (output.numel() == 0) {
     return grad_input;
