@@ -196,6 +196,8 @@ namespace c10 {
   _(aten, clip_)                     \
   _(aten, det)                       \
   _(aten, linalg_det)                \
+  _(aten, matrix_power)              \
+  _(aten, linalg_matrix_power)       \
   _(aten, linalg_norm)               \
   _(aten, linalg_vector_norm)        \
   _(aten, append)                    \
