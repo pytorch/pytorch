@@ -15,6 +15,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Deprecated.h>
+#include <c10/util/MaybeOwned.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
@@ -125,8 +126,34 @@ class TORCH_API Tensor {
     }
   }
 
+  /// Should be used if *this can reasonably be expected to be contiguous and
+  /// performance is important.
+  /// Compared to contiguous, it saves a reference count
+  /// increment/decrement if *this is already contiguous, at the cost
+  /// in all cases of an extra pointer of stack usage, an extra branch
+  /// to access, and an extra branch at destruction time.
+  c10::MaybeOwned<Tensor> expect_contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const & {
+    if (is_contiguous(memory_format)) {
+      return c10::MaybeOwned<Tensor>::borrowed(*this);
+    } else {
+      return c10::MaybeOwned<Tensor>::owned(__dispatch_contiguous(memory_format));
+    }
+  }
+
+  // Use .contiguous() instead. Trying to borrow from a prvalue Tensor
+  // will only lead to trouble and dangling references.
+  c10::MaybeOwned<Tensor> expect_contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) && = delete;
+
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
+  }
+
+  bool is_floating_point() const {
+    return at::isFloatingType(this->scalar_type());
+  }
+
+  bool is_signed() const {
+    return at::isSignedType(this->scalar_type());
   }
 
   int64_t size(int64_t dim) const {
@@ -346,6 +373,9 @@ class TORCH_API Tensor {
   /// Returns a `Tensor`'s device index.
   int64_t get_device() const;
 
+  /// Returns if a `Tensor` has CPU backend.
+  bool is_cpu() const;
+
   /// Returns if a `Tensor` has CUDA backend.
   bool is_cuda() const;
 
@@ -483,9 +513,9 @@ class TORCH_API Tensor {
   Tensor index(std::initializer_list<at::indexing::TensorIndex> indices) const;
 
   Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor const & rhs);
-  Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar v);
+  Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, const Scalar& v);
   Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs);
-  Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Scalar v);
+  Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, const Scalar& v);
 
   Tensor cpu() const;
   Tensor cuda() const;
@@ -619,16 +649,16 @@ class TORCH_API Tensor {
   // users who should use the API provided in torch/csrc/autograd.h
 
   /// This function returns the forward gradient for this Tensor at the given level.
-  const Tensor& fw_grad(uint64_t level) const {
-    return impl_->fw_grad(level, *this);
+  const Tensor& _fw_grad(uint64_t level) const {
+    return impl_->_fw_grad(level, *this);
   }
 
   /// This function can be used to set the value of the forward grad.
   /// Note that the given new_grad might not be used directly if it has different
   /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
   /// new_grad content will be copied into a new Tensor
-  void set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) {
-    impl_->set_fw_grad(new_grad, *this, level, is_inplace_op);
+  void _set_fw_grad(const Tensor& new_grad, uint64_t level, bool is_inplace_op) {
+    impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
   }
 
 

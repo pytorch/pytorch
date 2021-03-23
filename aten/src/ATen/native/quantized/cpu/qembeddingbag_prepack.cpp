@@ -4,6 +4,8 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <torch/library.h>
 
+#include <c10/util/irange.h>
+
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
 /*
@@ -271,7 +273,7 @@ Tensor _qembeddingbag_nbit_prepack_helper(
       output_row_scale_zp[1] = Xmin;
 
       // Pack the weight values.
-      for (int col = 0; col < embedding_cols; ++col) {
+      for (const auto col : c10::irange(embedding_cols)) {
         float X = input_row[col];
         std::uint8_t quantized = std::max(
             0,

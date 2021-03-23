@@ -76,63 +76,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 
 #if !defined(TH_REAL_IS_HALF) /* non half part */
 
-#if !defined(TH_REAL_IS_BOOL)
-void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value)
-{
-  THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int tContig = THTensor_(isContiguous)(t);
-  if (r_Contig && tContig) {
-    TH_TENSOR_APPLY2_CONTIG(scalar_t, r_, scalar_t, t, THVector_(muls)(r__data, t_data, value, r__len););
-  } else {
-    TH_TENSOR_APPLY2_PARALLEL(r_Size, r_Contig, tContig, scalar_t, r_, scalar_t, t, *r__data = *t_data * value;, ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-  }
-}
-
-#endif
-
 #if !defined(TH_REAL_IS_BFLOAT16) /* non bfloat16 part*/
-
-void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
-{
-  ptrdiff_t i, numel;
-  THTensor *tSlice, *sSlice;
-  int64_t *index_data;
-
-  dim = at::maybe_wrap_dim(dim, tensor);
-  // Error checking for this function has moved to ATen!!
-  numel = THLongTensor_nElement(index);
-
-  index = THLongTensor_newContiguous(index);
-  index_data = THLongTensor_data(index);
-
-  if (tensor->dim() > 1 )
-  {
-    tSlice = THTensor_(new)();
-    sSlice = THTensor_(new)();
-
-    for (i=0; i<numel; i++)
-    {
-      THTensor_(select)(tSlice, tensor, dim, index_data[i]);
-      THTensor_(select)(sSlice, src, dim, i);
-      at::Tensor tSlice_wrap = THTensor_wrap(tSlice);
-      at::Tensor sSlice_wrap = THTensor_wrap(sSlice);
-      at::native::copy_(tSlice_wrap, sSlice_wrap);
-    }
-
-    c10::raw::intrusive_ptr::decref(tSlice);
-    c10::raw::intrusive_ptr::decref(sSlice);
-  }
-  else
-  {
-    for (i=0; i<numel; i++)
-    {
-      THTensor_(set1d)(tensor, index_data[i], THTensor_(get1d)(src,i));
-    }
-  }
-  THLongTensor_free(index);
-}
 
 static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) {
   auto size = THTensor_sizesLegacyNoScalars(tensor);

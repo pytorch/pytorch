@@ -56,13 +56,12 @@ c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
 }
 template <typename T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::toIntrusivePtr() const {
-  auto r = c10::intrusive_ptr<T, NullType>::reclaim(
-      payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()
-      ? NullType::singleton()
-      : static_cast<T*>(payload.u.as_intrusive_ptr));
-  auto p = r;
-  r.release();
-  return p;
+  if (payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()) {
+    return c10::intrusive_ptr<T, NullType>();
+  }
+  c10::raw::intrusive_ptr::incref(payload.u.as_intrusive_ptr);
+  return c10::intrusive_ptr<T, NullType>::reclaim(
+      static_cast<T*>(payload.u.as_intrusive_ptr));
 }
 
 template <class T, class U>
@@ -139,7 +138,9 @@ inline c10::complex<double> IValue::toComplexDouble() const {
   return (*ptr).val;
 }
 inline at::Tensor IValue::toTensor() && {
-  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
   auto result = std::move(payload.as_tensor);
   // As far as I can tell, omitting the usual explicit destructor call
   // is not UB in and of itself, and it's a slight perf win. The
@@ -154,11 +155,15 @@ inline at::Tensor IValue::toTensor() && {
   return result;
 }
 inline at::Tensor& IValue::toTensor() & {
-  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
   return payload.as_tensor;
 }
 inline const at::Tensor& IValue::toTensor() const& {
-  AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
+  if (C10_UNLIKELY(!isTensor())) {
+    reportToTensorTypeError();
+  }
   return payload.as_tensor;
 }
 inline c10::Storage IValue::toStorage() && {
@@ -908,7 +913,7 @@ static std::vector<T> createVectorFromList(const c10::detail::ListImpl* impl) {
 }
 
 template <typename T>
-static std::vector<T> createVectorFromList(const c10::List<T>& impl) {
+std::vector<T> createVectorFromList(const c10::List<T>& impl) {
   std::vector<T> result;
   result.reserve(impl.size());
   for (size_t i = 0, N = impl.size(); i < N; ++i) {

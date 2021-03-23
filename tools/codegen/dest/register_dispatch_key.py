@@ -50,16 +50,19 @@ class RegisterDispatchKey:
     rocm: bool
 
     @method_with_native_function
-    def __call__(self, f: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
-        if isinstance(f, StructuredNativeFunctions):
-            return self.gen_structured(f)
+    def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
+        if isinstance(f, NativeFunctionsGroup):
+            if f.structured:
+                return self.gen_structured(f)
+            else:
+                return list(mapMaybe(self.gen_unstructured, f.functions()))
         elif isinstance(f, NativeFunction):
             r = self.gen_unstructured(f)
             return [] if r is None else [r]
         else:
             assert_never(f)
 
-    def gen_structured(self, g: StructuredNativeFunctions) -> List[str]:
+    def gen_structured(self, g: NativeFunctionsGroup) -> List[str]:
         if self.dispatch_key == DispatchKey.Meta:
             assert self.dispatch_key not in g.out.dispatch, \
                 "Do not explicitly specify Meta dispatch key on structured " \
@@ -211,7 +214,7 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
 
 @dataclass(frozen=True)
 class StructuredRegisterDispatchKey(RegisterDispatchKey):
-    g: StructuredNativeFunctions
+    g: NativeFunctionsGroup
 
     def gen_class_set_output(self, k: SchemaKind, parent_class: str, generate_super: bool) -> str:
         if generate_super:
@@ -271,20 +274,33 @@ if (strides.empty()) {
 if (strides.empty()) {{
     outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
 }} else {{
+    // TODO: assert options.memory_format_opt() is nullopt (debug only?)
     outputs_[output_idx] = {empty_strided_impl}(sizes, strides, {expanded_topts});
 }}
 """
         elif k is SchemaKind.inplace:
             return maybe_set_guard
         elif k is SchemaKind.out:
+            if self.dispatch_key == DispatchKey.CPU:
+                resize_impl = "resize_output_cpu"
+            else:
+                # Only bothering to include a resize_output fastpath for CPU for now.
+                # We can add one in if for the perf if we need to. But it'll be easier when external backends
+                # have access to meta functions, and we can write one for resize_.
+                resize_impl = "resize_output"
             return f"""
 {maybe_set_guard}
-at::native::resize_output(outputs_[output_idx], sizes);
-if (!strides.empty()) {{
-    TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
-    at::native::as_strided_(outputs_[output_idx], sizes, strides);
-}} else if (options.memory_format_opt().has_value()) {{
-    outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+bool resized = at::native::{resize_impl}(outputs_[output_idx], sizes);
+// Only restride if a resize occurred; otherwise we ignore the (advisory)
+// strides from the meta function and directly use the output tensor's
+// preexisting strides
+if (resized) {{
+    if (!strides.empty()) {{
+        TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+        at::native::as_strided_(outputs_[output_idx], sizes, strides);
+    }} else if (options.memory_format_opt().has_value()) {{
+        outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+    }}
 }}
 """
         else:

@@ -788,6 +788,17 @@ class RpcTest(RpcAgentTestFixture):
             )
 
     @dist_init(setup_rpc=False)
+    def test_duplicate_name_2(self):
+        with self.assertRaisesRegex(RuntimeError, "is not unique"):
+            rpc.init_rpc(
+                name=worker_name(self.rank % (self.world_size - 1)),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+    @dist_init(setup_rpc=False)
     def test_reinit(self):
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -4686,6 +4697,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
+    @unittest.skip("Disallow new devices in user-function output tensors. See https://github.com/pytorch/pytorch/issues/54017")
     @skip_if_lt_x_gpu(2)
     def test_device_maps_gpu(self):
         options = self.rpc_backend_options
@@ -4720,6 +4732,53 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             return x.to(z_to) + y.to(z_to)
         else:
             raise ValueError("Wrong device affinity")
+
+    def _test_device_maps_new_gpu(self, x_from, y_from, z_to, device_map, dst=None):
+        x_to = device_map[x_from]
+        y_to = device_map[y_from]
+
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size) if dst is None else dst
+        options.set_device_map(dst, device_map)
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        x = torch.zeros(2).to(x_from)
+        y = torch.ones(2).to(y_from)
+
+        errMsg = "RPC detected that a user-function output tensor on device"
+        with self.assertRaisesRegex(RuntimeError, errMsg):
+            ret = rpc.rpc_sync(
+                dst,
+                TensorPipeAgentRpcTest._gpu_add_given_gpus,
+                args=(x, y, x_to, y_to, z_to)
+            )
+
+        rpc.shutdown()
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_error_on_new_gpu_0(self):
+        self._test_device_maps_new_gpu(
+            x_from=1,
+            y_from=1,
+            z_to=0,
+            device_map={0 : 0, 1 : 1}
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_error_on_new_gpu_1(self):
+        self._test_device_maps_new_gpu(
+            x_from=0,
+            y_from=0,
+            z_to=1,
+            device_map={0 : 0, 1 : 1}
+        )
 
     def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map, dst=None):
         x_to = device_map[x_from]

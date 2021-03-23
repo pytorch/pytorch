@@ -449,10 +449,12 @@ PyObject *THPModule_userEnabledMkldnn(PyObject *_unused, PyObject *noargs)
 
 PyObject *THPModule_setDeterministicCuDNN(PyObject *_unused, PyObject *arg)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assert(PyBool_Check(arg), "set_deterministic_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
   at::globalContext().setDeterministicCuDNN(arg == Py_True);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
@@ -463,10 +465,12 @@ PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
 
 PyObject *THPModule_setDeterministicAlgorithms(PyObject *_unused, PyObject *arg)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assert(PyBool_Check(arg), "use_deterministic_algorithms expects a "
           "bool, but got %s", THPUtils_typename(arg));
   at::globalContext().setDeterministicAlgorithms(arg == Py_True);
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_deterministicAlgorithms(PyObject *_unused, PyObject *noargs)
@@ -489,7 +493,7 @@ PyObject *THPModule_warnAlways(PyObject *_unused, PyObject *noargs)
 {
   if (c10::Warning::get_warnAlways()) {
     Py_RETURN_TRUE;
-  } 
+  }
   Py_RETURN_FALSE;
 }
 
@@ -552,7 +556,7 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(
-          c10::DeviceTypeName(computeDeviceType(torch::tensors::get_default_dispatch_key()),
+          c10::DeviceTypeName(dispatchKeyToDeviceType(torch::tensors::get_default_dispatch_key()),
                               /*lower_case=*/true));
   END_HANDLE_TH_ERRORS
 }
