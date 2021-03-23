@@ -62,7 +62,8 @@ class TestComplex(JitTestCase):
 
     def test_complex_math_ops(self):
         inf = float("inf")
-        vals = ([inf, float("nan"), 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
+        nan = float("nan")
+        vals = ([inf, nan, 0.0, 1.0, 2.2, -1.0, -0.0, -2.2, -inf, 1, 0, 2]
                 + [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
         complex_vals = tuple(complex(x, y) for x, y in product(vals, vals))
 
