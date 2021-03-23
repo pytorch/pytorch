@@ -78,7 +78,7 @@ void Module::to(at::Device device, bool non_blocking) {
 }
 
 void module_state_to(
-    const autograd::Variable& variable,
+    autograd::Variable& variable,
     const c10::optional<at::Device>& device,
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {

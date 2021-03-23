@@ -13,23 +13,23 @@ void _backward(const Tensor& self, TensorList inputs, const Tensor& gradient, c1
 }
 
 void set_data(Tensor& self, const Tensor& new_data) {
-  AT_ERROR("set_data is not implemented for Tensor");
+  return self.set_data(new_data);
 }
 
 Tensor data(const Tensor& self) {
-  AT_ERROR("data is not implemented for Tensor");
+  return self.data();
 }
 
 bool is_leaf(const Tensor& self) {
-  AT_ERROR("is_leaf is not implemented for Tensor");
+  return self.is_leaf();
 }
 
 int64_t output_nr(const Tensor& self) {
-  AT_ERROR("output_nr is not implemented for Tensor");
+  return self.output_nr();
 }
 
 int64_t _version(const Tensor& self) {
-  AT_ERROR("version is not implemented for Tensor");
+  return self._version();
 }
 
 Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
@@ -37,7 +37,7 @@ Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
 }
 
 void retain_grad(Tensor& self) {
-  AT_ERROR("retain_grad is not implemented for Tensor");
+  return self.retain_grad();
 }
 
 Tensor _fw_primal(const Tensor& self, int64_t level) {
