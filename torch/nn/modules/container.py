@@ -27,41 +27,33 @@ class Container(Module):
 
 
 class Sequential(Module):
-    r"""A list of ``Module``s that acts as a ``Module`` itself.
-    A ``Sequential`` is fundamentally a list of ``Module``s, each with a 
-    ``forward()`` method. ``Sequential`` provides a ``forward()`` method
-    of its own, which accepts any input and forwards it to the first 
-    module it stores. It then "chains" outputs to inputs sequentially 
-    for each subsequent module, finally returning the output of the last
-    module. Modules will be added to it in the order they are passed in 
-    the constructor. Alternatively, an ``OrderedDict`` of modules can 
-    be passed in.
+    r"""A sequential container.
+    Modules will be added to it in the order they are passed in the 
+    constructor. Alternatively, an ``OrderedDict`` of modules can be
+    passed in. The ``forward()`` method of ``Sequential`` accepts any 
+    input and forwards it to the first module it contains. It then 
+    "chains" outputs to inputs sequentially for each subsequent module, 
+    finally returning the output of the last module.
 
-    Why should you use a ``Sequential`` instead of a ``ModuleList``? 
     The value a ``Sequential`` provides over manually calling a sequence
     of modules is that it allows treating the whole container as a 
     single module, such that performing a transformation on the 
     ``Sequential`` applies to each of the modules it stores (which are 
-    each a registered submodule of the ``Sequential``). Also, unlike
-    ``Sequential``,  a ``ModuleList`` does not have a ``forward()`` 
-    method, because it does not define a neural network; in fact, there 
-    is no connection between each of the Modules that it stores. A
-    ``ModuleList`` is exactly what it sounds like--a list for storing
-    ``Module``s! On the other hand, the layers in a ``Sequential`` are 
-    connected in a cascading way.
+    each a registered submodule of the ``Sequential``).
 
-    If you're using ``Sequential`` with TorchScript, the inputs of some
-    of the ``Sequential`` submodules may be falsely inferred to be
-    ``Tensor``, even if they're annotated otherwise. This is a known
-    issue in the TorchScript type inference algorithm. The canonical
-    solution is to subclass ``nn.Sequential`` and redeclare ``forward`` 
-    with the input typed correctly.
+    What's the difference between a ``Sequential`` and a 
+    :class:`torch.nn.ModuleList`? A ``ModuleList`` is exactly what it 
+    sounds like--a list for storing ``Module`` s! On the other hand, 
+    the layers in a ``Sequential`` are connected in a cascading way.
 
     Example::
 
         # Using Sequential to create a small model. When `model` is run,
-        # input will first be passed to `Conv2d(1,20,5)`, then to 
-        # `ReLU`, then to `Conv2d(20,64,5)`, then to `ReLU` again
+        # input will first be passed to `Conv2d(1,20,5)`. The output of
+        # `Conv2d(1,20,5)` will be used as the input to the first
+        # `ReLU`; the output of the first `ReLU` will become the input
+        # for `Conv2d(20,64,5)`. Finally, the output of
+        # `Conv2d(20,64,5)` will be used as input to the second `ReLU`
         model = nn.Sequential(
                   nn.Conv2d(1,20,5),
                   nn.ReLU(),
