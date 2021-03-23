@@ -4,6 +4,13 @@
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/Dict.h>
 
+// Snippets for checking assembly.
+c10::IValue inspectTupleConstruction() {
+  std::tuple<std::string, std::string> s = std::make_tuple(
+      "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+  return c10::IValue(s);
+}
+
 namespace c10 {
 
 TEST(IValueTest, Basic) {

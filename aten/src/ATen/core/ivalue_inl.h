@@ -255,9 +255,9 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
   }
 
   template <typename... Args>
-  static c10::intrusive_ptr<Tuple> create(Args... elements_) {
+  static c10::intrusive_ptr<Tuple> create(Args&&... elements_) {
     return c10::make_intrusive<Tuple>(
-        std::vector<IValue>{IValue(elements_)...});
+        std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
   }
 
   const std::vector<IValue>& elements() const& {
@@ -1141,7 +1141,19 @@ template <
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(
-          std::move(c10::guts::apply(c10::ivalue::Tuple::create<Args...>, t))) {
+          std::move(c10::guts::apply(c10::ivalue::Tuple::create<const Args&...>, t))) {
+}
+
+template <
+    typename... Args,
+    std::enable_if_t<
+        !guts::disjunction<
+            std::is_lvalue_reference<Args>...,
+            guts::negation<std::is_constructible<IValue, Args>>...>::value,
+        std::nullptr_t>>
+inline IValue::IValue(std::tuple<Args...>&& t)
+    : IValue(
+          std::move(c10::guts::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t)))) {
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
