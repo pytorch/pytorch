@@ -114,41 +114,43 @@ c10::IValue preprocess(
     const Module& mod,
     const c10::Dict<IValue, IValue>& method_compile_spec) {
   // The output of this process would produce a dictionary
-  // Key: method name.
+  // Key: method name, which matches one of the keys in method_compile_spec
   // Val: compiled blob (represented by a string).
   c10::Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
   for (const auto& method : mod.get_methods()) {
     const auto graph = method.function().graph()->copy();
     auto key = method.name();
-    std::stringstream ss;
-    for (const auto& node : graph->nodes()) {
-      switch (node->kind()) {
-        case prim::Constant:
-          ss << node->kind().toDisplayString() << "#"
-             << toIValue(node->output()).value();
-          break;
-        case aten::add:
-          ss << node->kind().toQualString();
-          break;
-        case aten::sub:
-          ss << node->kind().toQualString();
-          break;
-        default:
-          TORCH_CHECK(
-              false,
-              "The node of ",
-              node->kind().toQualString(),
-              " is not supported in this compiler. Source code: ",
-              node->sourceRange().str());
-          break;
+    if (method_compile_spec.find(key) != method_compile_spec.end()) {
+      std::stringstream ss;
+      for (const auto &node : graph->nodes()) {
+        switch (node->kind()) {
+          case prim::Constant:
+            ss << node->kind().toDisplayString() << "#"
+               << toIValue(node->output()).value();
+            break;
+          case aten::add:
+            ss << node->kind().toQualString();
+            break;
+          case aten::sub:
+            ss << node->kind().toQualString();
+            break;
+          default:
+            TORCH_CHECK(
+                false,
+                "The node of ",
+                node->kind().toQualString(),
+                " is not supported in this compiler. Source code: ",
+                node->sourceRange().str());
+            break;
+        }
+        ss << ",";
       }
-      ss << ",";
+      std::string blob = ss.str();
+      if (!blob.empty()) {
+        blob.pop_back();
+      }
+      compiled.insert(method.name(), blob);
     }
-    std::string blob = ss.str();
-    if (!blob.empty()) {
-      blob.pop_back();
-    }
-    compiled.insert(method.name(), blob);
   }
   return compiled;
 }
