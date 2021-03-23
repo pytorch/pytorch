@@ -320,7 +320,7 @@ def compute_aten_op(f: NativeFunction) -> str:
     return f'{{"aten::{f.func.name.name}", "{f.func.name.overload_name}"}},'
 
 # Generates MetaFunctions.h
-def compute_meta_function_declaration(g: StructuredNativeFunctions) -> Optional[str]:
+def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
     if not g.structured:
         return None
     with native_function_manager(g.out):
@@ -809,8 +809,8 @@ def main() -> None:
         assert f.func.kind() not in d
         d[f.func.kind()] = f
 
-    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, StructuredNativeFunctions]]:
-        r = StructuredNativeFunctions.from_dict(d)
+    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
+        r = NativeFunctionsGroup.from_dict(d)
         if r is None:
             return list(d.values())
         else:
@@ -818,7 +818,7 @@ def main() -> None:
 
     # TODO: how come ValuesView isn't a Sequence lol
     grouped_native_functions = list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
-    structured_native_functions = [g for g in grouped_native_functions if isinstance(g, StructuredNativeFunctions)]
+    structured_native_functions = [g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)]
 
     template_dir = os.path.join(options.source_path, "templates")
 
