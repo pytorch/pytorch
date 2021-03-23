@@ -2570,7 +2570,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     # fmod was added in version 10
     @skipIfUnsupportedMinOpsetVersion(10)
-    def test_Gemm_with_low_precision(self):
+    def test_mod_with_low_precision(self):
         class ModModule(torch.nn.Module):
             def forward(self, x, y):
                 return torch.fmod(x, y).to(dtype=torch.long)
