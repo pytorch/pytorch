@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import os
 import enum
 from typing import Tuple
 
@@ -13,10 +14,9 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
-
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 _PARAM_VAL = torch.nn.Parameter(torch.ones(1))
-
 
 # RPC handler for querying the device on the destination worker.
 def remote_device(module_rref):
@@ -268,8 +268,12 @@ class RemoteModuleTest(RpcAgentTestFixture):
                 )
             )
 
+        error_string = "CUDA error: invalid device ordinal"
+        if TEST_WITH_ROCM:
+            error_string = "HIP error: hipErrorInvalidDevice"
+
         with self.assertRaisesRegex(
-            RuntimeError, r"CUDA error: invalid device ordinal"
+            RuntimeError, r"{}".format(error_string)
         ):
             list(
                 self._create_remote_module_iter(

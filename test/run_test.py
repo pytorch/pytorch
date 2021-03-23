@@ -211,9 +211,6 @@ WINDOWS_BLOCKLIST = [
 
 ROCM_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
-    'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/test_tensorpipe_agent',
     'test_determination',
     'test_multiprocessing',
     'test_jit_legacy',
