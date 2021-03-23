@@ -679,6 +679,33 @@ def sample_inputs_amax_amin(op_info, device, dtype, requires_grad):
                              args=args)
                  for size, args in test_cases)
 
+def sample_inputs_argmax_argmin(op_info, device, dtype, requires_grad):
+    test_cases = (
+        ((2, 2, 2), ()),
+        ((2, 2, 2), (0,)),
+        ((2, 2, 2), (1,)),
+        ((2, 2, 2), (2,)),
+        ((2, 2, 2), (2, True,)),
+        ((2, 2, 2), (None,)),
+        ((), (0,)),
+        ((), ()),
+        ((), (None, True,)),
+        ((1,), ()),
+        ((1,), (0,)),
+        ((1,), (0, True)),
+        ((2,), ()),
+        ((2,), (0,)),
+        ((2,), (0, True)),
+        ((2, 2, 3), ()),
+        ((2, 2, 3), (0,)),
+        ((2, 2, 3), (1,)),
+        ((2, 2, 3), (None, True)),
+    )
+    return tuple(SampleInput((make_tensor(size, device, dtype,
+                                          requires_grad=requires_grad)),
+                             args=args)
+                 for size, args in test_cases)
+
 def sample_inputs_diff(op_info, device, dtype, requires_grad):
     test_cases = (
         ((1,), 0, None, None),
@@ -855,6 +882,39 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           low=None, high=None,
                                           requires_grad=requires_grad),))
     return inputs
+
+# Missing to test the nondeterminism of the operation
+# https://github.com/pytorch/pytorch/issues/53352
+def sample_inputs_index_copy(op_info, device, dtype, requires_grad):
+    def make_arg(shape, low=None, high=None, dtype=dtype):
+        return make_tensor(shape, device=device, dtype=dtype,
+                           low=low, high=high,
+                           requires_grad=requires_grad)
+
+    t = make_arg((S, S))
+    s = make_arg((S, S))
+    # non-contiguous input
+    t01 = t.transpose(0, 1)
+    # non-contiguous input
+    s01 = s.transpose(0, 1)
+
+    # idx is a permutation of 0...S-1 for this function to be deterministic
+    idx = torch.randperm(S, device=device, dtype=torch.int64)
+    # non-contiguous index
+    idx_nonctg = torch.repeat_interleave(idx, 2, dim=-1)[::2]
+    # index_copy_ does not support negative indices
+    # idx_neg = -idx - 1
+    samples = [SampleInput(tensor, args=(1, idx, source))
+               for tensor, idx, source in product([t, t01], [idx, idx_nonctg], [s, s01])]
+
+    # Add scalar cases
+    scalar_sizes = [(), (1,)]
+    ts = (make_arg(size) for size in scalar_sizes)
+    idxs = (make_arg(size, dtype=torch.int64, low=0, high=1) for size in scalar_sizes)
+    ss = (make_arg(size) for size in scalar_sizes)
+
+    samples.extend(SampleInput(t, args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
+    return samples
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
     return (
@@ -1666,6 +1726,86 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
     return samples
 
 
+def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
+    def _make_tensor_helper(shape, low=None, high=None):
+        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
+
+    def _samples_with_alpha_helper(args, alphas, filter_fn=lambda arg_alpha: True):
+        filtered_product = filter(filter_fn, product(args, alphas))  # type: ignore
+        return (SampleInput(input, args=(arg,), kwargs=dict(alpha=alpha))
+                for (input, arg), alpha in filtered_product)  # type: ignore
+
+    int_alpha, float_alpha, complex_alpha = 2, 0.1, 1 + 0.6j
+
+    if variant == 'tensor':
+        samples = (  # type: ignore
+            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)),)),
+            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)),)),
+            SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper((S, S)),)),
+            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper(()),)),
+            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper((S,)),)),
+            SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper(()),)),
+        )
+
+        if dtype.is_complex:
+            alphas = [int_alpha, float_alpha, complex_alpha]
+        elif dtype.is_floating_point:
+            alphas = [int_alpha, float_alpha]
+        else:
+            alphas = [int_alpha]
+
+        args = ((_make_tensor_helper((S, S)), _make_tensor_helper((S, S))),
+                (_make_tensor_helper((S, S)), _make_tensor_helper((S,))),
+                (_make_tensor_helper(()), _make_tensor_helper(())))
+        samples += tuple(_samples_with_alpha_helper(args, alphas))  # type: ignore
+    elif variant == 'scalar':
+        # Scalar Other
+        samples = (SampleInput(_make_tensor_helper((S, S)), args=(0.5,)),
+                   SampleInput(_make_tensor_helper(()), args=(0.5,)),
+                   SampleInput(_make_tensor_helper((S, S)), args=(1.5j,)),
+                   SampleInput(_make_tensor_helper(()), args=(1.5j,)),
+                   SampleInput(_make_tensor_helper((S, S)), args=(0.4 + 1.2j,)),
+                   SampleInput(_make_tensor_helper(()), args=(1.2 + 1.76j,)))  # type: ignore
+
+        scalar_args = [(_make_tensor_helper((S, S)), 0.5), (_make_tensor_helper(()), 0.5),
+                       (_make_tensor_helper((S, S)), 2.7j), (_make_tensor_helper(()), 2.7j),
+                       (_make_tensor_helper((S, S)), 1 - 2.7j), (_make_tensor_helper(()), 1 + 2.7j)]  # type: ignore
+
+        alphas = [int_alpha, float_alpha, complex_alpha]
+
+        def filter_fn(arg_alpha):
+            arg, alpha = arg_alpha
+            if isinstance(alpha, complex):
+                if dtype.is_complex or isinstance(arg[1], complex):
+                    return True
+                else:
+                    # complex alpha is valid only if either `self` or `other` is complex
+                    return False
+
+            # Non-Complex Alpha
+            return True
+
+        # Samples with alpha (scalar version) covers the following cases
+        # self    | other   | alpha
+        # -----------------------------------------
+        # real    | real    | real (int and float)
+        # real    | complex | real and complex
+        # complex | real    | real and complex
+        # complex | complex | real and complex
+        #
+        # It does not cover
+        # real    | real    | complex
+        # x = torch.randn(2, requires_grad=True, dtype=torch.float64)
+        # torch.rsub(x, 1, alpha=1. + 1.6j)
+        # RuntimeError: value cannot be converted to type double without overflow: (-1,-1.6)
+
+        samples += tuple(_samples_with_alpha_helper(scalar_args, alphas, filter_fn=filter_fn))  # type: ignore
+    else:
+        raise Exception("Invalid variant!")
+
+    return samples
+
+
 def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -1961,8 +2101,6 @@ op_db: List[OpInfo] = [
     OpInfo('amax',
            op=torch.amax,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_amax_amin,
            skips=(
@@ -1971,12 +2109,24 @@ op_db: List[OpInfo] = [
     OpInfo('amin',
            op=torch.amin,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_amax_amin,
            skips=(
                # amin does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),)),
+    OpInfo('argmax',
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_argmax_argmin,
+           skips=(
+               # argmax does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),)),
+    OpInfo('argmin',
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_argmax_argmin,
+           skips=(
+               # argmin does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),)),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
@@ -2847,6 +2997,30 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.complex64])
                    )),
+    OpInfo('rsub',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+           variant_test_name='rsub_tensor',
+           supports_out=False,
+           supports_inplace_autograd=False,
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.cfloat, torch.cdouble]),
+           ),
+           sample_inputs_func=partial(sample_inputs_rsub, variant='tensor'),),
+    OpInfo('rsub',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+           variant_test_name='rsub_scalar',
+           supports_out=False,
+           supports_inplace_autograd=False,
+           sample_inputs_func=partial(sample_inputs_rsub, variant='scalar'),
+           skips=(
+               # Reference: https://github.com/pytorch/pytorch/issues/53797
+               # JIT doesn't understand complex literals
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
+           assert_autodiffed=True,),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
                    dtypes=all_types_and(torch.bfloat16, torch.half),
@@ -3186,6 +3360,11 @@ op_db: List[OpInfo] = [
            skips=(SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
            supports_out=False,
            sample_inputs_func=sample_inputs_index_fill),
+    OpInfo('index_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_inplace_autograd=False,
+           supports_out=False,
+           sample_inputs_func=sample_inputs_index_copy),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_inplace_autograd=False,
@@ -4032,11 +4211,6 @@ def method_tests():
         ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
-        ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', (), [0]),
-        ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim_alert_nondeterministic', (), [0],
-            [skipMeta, expectedAlertNondeterministic('index_copy')]),
-        ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', (), [0]),
-        ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', (), [0]),
         ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', (), [0]),
         ('index_fill', (S, S), (0, index_variable(2, S), ()), 'variable_dim', (), [0]),
         ('index_fill', (S, S), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_index_dim', (), [0]),

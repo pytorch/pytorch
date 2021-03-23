@@ -56,13 +56,12 @@ c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
 }
 template <typename T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::toIntrusivePtr() const {
-  auto r = c10::intrusive_ptr<T, NullType>::reclaim(
-      payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()
-      ? NullType::singleton()
-      : static_cast<T*>(payload.u.as_intrusive_ptr));
-  auto p = r;
-  r.release();
-  return p;
+  if (payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()) {
+    return c10::intrusive_ptr<T, NullType>();
+  }
+  c10::raw::intrusive_ptr::incref(payload.u.as_intrusive_ptr);
+  return c10::intrusive_ptr<T, NullType>::reclaim(
+      static_cast<T*>(payload.u.as_intrusive_ptr));
 }
 
 template <class T, class U>
