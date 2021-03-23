@@ -366,12 +366,12 @@ void PrepareCopyForONNX(Node* node) {
         graph->insert(aten::expand_as, {node->input(1), node->input(0)});
     expanded_value->node()->setSourceRange(node->sourceRange());
     expanded_value->copyMetadata(node->input(1));
+
     auto index_put = graph->insert(
         aten::index_put_,
         {node->input(0), dummy_list, expanded_value, node->input(2)});
     index_put->node()->setSourceRange(node->sourceRange());
-    index_put->copyMetadata(node->input(1));
-
+    index_put->copyMetadata(node->output());
     node->output()->replaceAllUsesWith(index_put);
 
     PrepareIndexPutForONNX(index_put->node());
