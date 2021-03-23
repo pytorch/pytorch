@@ -186,131 +186,88 @@ using EnforceNotMet = ::c10::Error;
 
 namespace enforce_detail {
 
-struct C10_API EnforceOK {};
+template <typename T1, typename T2>
+std::string enforceFailMsgImpl(const T1& x, const T2& y) {
+  return c10::str(x, " vs ", y);
+}
 
-class C10_API EnforceFailMessage {
- public:
-#ifdef _MSC_VER
-  // MSVC + NVCC ignores constexpr and will issue a warning if included.
-  /* implicit */ EnforceFailMessage(EnforceOK) : msg_(nullptr) {}
-#else
-  constexpr /* implicit */ EnforceFailMessage(EnforceOK) : msg_(nullptr) {}
-#endif
-  EnforceFailMessage(EnforceFailMessage&&) = default;
-  EnforceFailMessage(const EnforceFailMessage&) = delete;
-  EnforceFailMessage& operator=(EnforceFailMessage&&) = delete;
-  EnforceFailMessage& operator=(const EnforceFailMessage&) = delete;
+template <typename T1, typename T2, typename... Args>
+std::string enforceFailMsgImpl(const T1& x, const T2& y, const Args&... args) {
+  return c10::str(x, " vs ", y, ". ", args...);
+}
 
-  // Catch all wrong usages like CAFFE_ENFORCE_THAT(x < y)
-  template <class... Args>
-  /* implicit */ EnforceFailMessage(Args...) {
-    static_assert(
-        // This stands for an "impossible" condition. Plain `false` doesn't
-        // trick compiler enough.
-        sizeof...(Args) == std::numeric_limits<std::size_t>::max(),
-        "CAFFE_ENFORCE_THAT has to be used with one of special check functions "
-        "like `Equals`. Use CAFFE_ENFORCE for simple boolean checks.");
+template <typename Pred, typename T1, typename T2, typename... Args>
+void enforceThatImpl(Pred p, const T1& lhs, const T2& rhs, const char* file,
+                     int line, const char* expr, const void* caller,
+                     const Args&... args) {
+  if (C10_UNLIKELY(!(p(lhs, rhs)))) {
+    ::c10::ThrowEnforceNotMet(
+        file,
+        line,
+        expr,
+        ::c10::enforce_detail::enforceFailMsgImpl(
+            lhs,
+            rhs,
+            args...),
+        caller);
   }
+}
+#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...)        \
+  ::c10::enforce_detail::enforceThatImpl(                       \
+      op,                                                       \
+      lhs,                                                      \
+      rhs,                                                      \
+      __FILE__,                                                 \
+      __LINE__,                                                 \
+      expr,                                                     \
+      nullptr,                                                  \
+      ##__VA_ARGS__)
 
-  /* implicit */ EnforceFailMessage(std::string&& msg);
+#define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...)    \
+  ::c10::enforce_detail::enforceThatImpl(                               \
+      op,                                                               \
+      (lhs),                                                            \
+      (rhs),                                                            \
+      __FILE__,                                                         \
+      __LINE__,                                                         \
+      expr,                                                             \
+      this,                                                             \
+      ##__VA_ARGS__)
 
-  inline bool bad() const {
-    return msg_ != nullptr;
-  }
-  std::string get_message_and_free(const std::string& extra) const {
-    std::string r;
-    if (extra.empty()) {
-      r = std::move(*msg_);
-    } else {
-      r = ::c10::str(std::move(*msg_), ". ", extra);
-    }
-    delete msg_;
-    return r;
-  }
-
- private:
-  std::string* msg_{};
-};
-
-#define BINARY_COMP_HELPER(name, op)                         \
-  template <typename T1, typename T2>                        \
-  inline EnforceFailMessage name(const T1& x, const T2& y) { \
-    if (x op y) {                                            \
-      return EnforceOK();                                    \
-    }                                                        \
-    return c10::str(x, " vs ", y);                           \
-  }
-BINARY_COMP_HELPER(Equals, ==)
-BINARY_COMP_HELPER(NotEquals, !=)
-BINARY_COMP_HELPER(Greater, >)
-BINARY_COMP_HELPER(GreaterEquals, >=)
-BINARY_COMP_HELPER(Less, <)
-BINARY_COMP_HELPER(LessEquals, <=)
-#undef BINARY_COMP_HELPER
-
-#define CAFFE_ENFORCE_THAT_IMPL(condition, expr, ...)                   \
-  do {                                                                  \
-    using namespace ::c10::enforce_detail;                              \
-    const EnforceFailMessage& CAFFE_ENFORCE_THAT_IMPL_r_ = (condition); \
-    if (C10_UNLIKELY(CAFFE_ENFORCE_THAT_IMPL_r_.bad())) {               \
-      ::c10::ThrowEnforceNotMet(                                        \
-          __FILE__,                                                     \
-          __LINE__,                                                     \
-          expr,                                                         \
-          CAFFE_ENFORCE_THAT_IMPL_r_.get_message_and_free(              \
-              ::c10::str(__VA_ARGS__)));                                \
-    }                                                                   \
-  } while (false)
-
-#define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(condition, expr, ...)      \
-  do {                                                                 \
-    using namespace ::c10::enforce_detail;                             \
-    const EnforceFailMessage& CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_ = \
-        (condition);                                                   \
-    if (C10_UNLIKELY(CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_.bad())) {  \
-      ::c10::ThrowEnforceNotMet(                                       \
-          __FILE__,                                                    \
-          __LINE__,                                                    \
-          expr,                                                        \
-          CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_.get_message_and_free( \
-              ::c10::str(__VA_ARGS__)),                                \
-          this);                                                       \
-    }                                                                  \
-  } while (false)
 } // namespace enforce_detail
 
-#define CAFFE_ENFORCE_THAT(condition, ...) \
-  CAFFE_ENFORCE_THAT_IMPL((condition), #condition, __VA_ARGS__)
+#define CAFFE_ENFORCE_THAT(cmp, op, lhs, rhs,...)                        \
+  CAFFE_ENFORCE_THAT_IMPL(cmp, lhs, rhs,  #lhs " " #op " " #rhs, ##__VA_ARGS__)
 
-#define CAFFE_ENFORCE_EQ(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(Equals((x), (y)), #x " == " #y, __VA_ARGS__)
-#define CAFFE_ENFORCE_NE(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(NotEquals((x), (y)), #x " != " #y, __VA_ARGS__)
-#define CAFFE_ENFORCE_LE(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(LessEquals((x), (y)), #x " <= " #y, __VA_ARGS__)
-#define CAFFE_ENFORCE_LT(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(Less((x), (y)), #x " < " #y, __VA_ARGS__)
-#define CAFFE_ENFORCE_GE(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(GreaterEquals((x), (y)), #x " >= " #y, __VA_ARGS__)
-#define CAFFE_ENFORCE_GT(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(Greater((x), (y)), #x " > " #y, __VA_ARGS__)
-#define CAFFE_ENFORCE_EQ_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
-      Equals((x), (y)), #x " == " #y, __VA_ARGS__)
-#define CAFFE_ENFORCE_NE_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
-      NotEquals((x), (y)), #x " != " #y, __VA_ARGS__)
-#define CAFFE_ENFORCE_LE_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
-      LessEquals((x), (y)), #x " <= " #y, __VA_ARGS__)
-#define CAFFE_ENFORCE_LT_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(Less((x), (y)), #x " < " #y, __VA_ARGS__)
-#define CAFFE_ENFORCE_GE_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
-      GreaterEquals((x), (y)), #x " >= " #y, __VA_ARGS__)
-#define CAFFE_ENFORCE_GT_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
-      Greater((x), (y)), #x " > " #y, __VA_ARGS__)
+#define CAFFE_ENFORCE_BINARY_OP(cmp, op, x, y, ...)                      \
+  CAFFE_ENFORCE_THAT_IMPL(cmp, x, y, #x " " #op " " #y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_EQ(x, y, ...)                     \
+  CAFFE_ENFORCE_BINARY_OP(std::equal_to<void>(), ==, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_NE(x, y, ...)                     \
+  CAFFE_ENFORCE_BINARY_OP(std::not_equal_to<void>(), !=, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_LE(x, y, ...)                     \
+  CAFFE_ENFORCE_BINARY_OP(std::less_equal<void>(), <=, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_LT(x, y, ...)                     \
+  CAFFE_ENFORCE_BINARY_OP(std::less<void>(), <, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_GE(x, y, ...)                     \
+  CAFFE_ENFORCE_BINARY_OP(std::greater_equal<void>(), >=, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_GT(x, y, ...)                     \
+  CAFFE_ENFORCE_BINARY_OP(std::greater<void>(), >, x, y, ##__VA_ARGS__)
+
+#define CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(cmp, op, x, y, ...)          \
+  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(cmp, x, y, #x " " #op " " #y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_EQ_WITH_CALLER(x, y, ...)                 \
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::equal_to<void>(), ==, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_NE_WITH_CALLER(x, y, ...)                 \
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::not_equal_to<void>(), !=, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_LE_WITH_CALLER(x, y, ...)                 \
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::less_equal<void>(), <=, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_LT_WITH_CALLER(x, y, ...)                 \
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::less<void>(), <, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_GE_WITH_CALLER(x, y, ...)                 \
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::greater_equal<void>(), >=, x, y, ##__VA_ARGS__)
+#define CAFFE_ENFORCE_GT_WITH_CALLER(x, y, ...)                 \
+  CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(std::greater<void>(), >, x, y, ##__VA_ARGS__)
 
 /**
  * Very lightweight logging for the first time API usage. It's beneficial for

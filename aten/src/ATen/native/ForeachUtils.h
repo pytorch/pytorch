@@ -1,6 +1,8 @@
 #pragma once
 #include <ATen/ATen.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 namespace {
@@ -29,7 +31,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
 
   auto expected_dtype = tensors1[0].dtype();
 
-  for (int i = 0; i < tensors1.size(); i++) {
+  for (const auto i : c10::irange(tensors1.size())) {
     TORCH_CHECK(tensors1[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(tensors2[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
@@ -45,7 +47,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
 
   auto expected_dtype = tensors1[0].dtype();
 
-  for (int i = 0; i < tensors1.size(); i++) {
+  for (const auto i : c10::irange(tensors1.size())) {
     TORCH_CHECK(tensors1[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(tensors2[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
@@ -64,7 +66,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
 // - All tensors must be non-overlapping and dense
 // - Resulting tensor must have the same dtype as the input one
 
-bool will_promote_tensor(const Tensor& tensor, Scalar scalar, bool does_op_promote_integer_inputs_to_float = false) {
+bool will_promote_tensor(const Tensor& tensor, const Scalar& scalar, bool does_op_promote_integer_inputs_to_float = false) {
   // In case of division, integer inputs will result in float
   if (does_op_promote_integer_inputs_to_float) {
     if (at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
