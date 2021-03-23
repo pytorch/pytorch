@@ -1275,6 +1275,27 @@ void Node::replaceAllUsesWith(Node* n) {
   }
 }
 
+Node* Node::replaceWithNewSymbol(Symbol new_symbol) {
+  WithInsertPoint insert_guard{this};
+  bool had_operator = maybeOperator() != nullptr;
+  auto graph = owningGraph();
+  auto replace_node = graph->insertNode(graph->create(new_symbol, 0));
+  for (Value* v : inputs()) {
+    replace_node->addInput(v);
+  }
+  for (Value* v : outputs()) {
+    auto new_out = replace_node->addOutput()->copyMetadata(v);
+    v->replaceAllUsesWith(new_out);
+  }
+  replace_node->copyMetadata(this);
+  TORCH_INTERNAL_ASSERT(
+      (replace_node->maybeOperator() != nullptr) == had_operator,
+      "invalid symbol replacement:",
+      new_symbol,
+      kind());
+  return replace_node;
+}
+
 Value* Node::insertInput(size_t i, Value* value) {
   AT_ASSERT(graph_ == value->owningGraph());
   op_ = nullptr;

@@ -80,7 +80,6 @@ _(aten, _fft_with_size) \
 _(aten, _fill) \
 _(aten, _floor) \
 _(aten, _fused_dropout) \
-_(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _ldexp) \
 _(aten, _linspace) \
