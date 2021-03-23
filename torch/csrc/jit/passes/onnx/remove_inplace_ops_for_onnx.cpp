@@ -352,7 +352,7 @@ void PrepareCopyForONNX(Node* node) {
     // tensor indices input is empty.
     // Remove aten::copy_, and replace it with index_put.
     // 1. create an empty listConstruct node as indices input for index_put.
-    // 2. cast expanded_value, so it has the same type as node->input[0].
+    // 2. create index_put node.
 
     // Tracing aten::copy_ broadcasts the rhs values.
     // 3. Apply broadcasting for scripting.
