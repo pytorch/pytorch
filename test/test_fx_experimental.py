@@ -107,7 +107,7 @@ class TestFXExperimental(JitTestCase):
         assert serialized_graph1["nodes"][0]["target"] == "a"
         assert serialized_graph1["nodes"][0]["op_code"] == "placeholder"
         assert serialized_graph1["nodes"][0]["name"] == "a"
-        assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_2"
+        assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_1"
         assert serialized_graph1["nodes"][6]["args"][0]["is_node"] is True
 
         # Test quantization info serialization.
@@ -215,10 +215,10 @@ class TestFXExperimental(JitTestCase):
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         partition = partitioner.partitions[0]
         assert partition.used_mem_bytes == 112
-        # Select add_3 node to remove
+        # Select add_2 node to remove
         selected_node = None
         for node in partition.nodes:
-            if node.name == 'add_3':
+            if node.name == 'add_2':
                 selected_node = node
         partition.remove_node(selected_node)
         assert(partition.used_mem_bytes == 80)
@@ -594,7 +594,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
@@ -622,7 +622,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
@@ -650,7 +650,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
@@ -682,7 +682,7 @@ terrible spacing
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(

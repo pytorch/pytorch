@@ -145,6 +145,9 @@ class LLVMCodeGenImpl : public IRVisitor {
   std::unordered_map<const Block*, std::vector<const Var*>> scopeToVar_;
   const Block* scope_;
 
+  std::string llvmCode;
+  std::string asmCode;
+
  private:
   llvm::LLVMContext& getContext();
   llvm::Type* dtypeToLLVM(Dtype dtype);
@@ -228,6 +231,12 @@ class LLVMCodeGenImpl : public IRVisitor {
       llvm::Value* val);
 
   void optimize(llvm::Module& M);
+  std::string getLLVMCodeText() {
+    return llvmCode;
+  }
+  std::string getASMCodeText() {
+    return asmCode;
+  }
 };
 } // namespace tensorexpr
 } // namespace jit
@@ -298,6 +307,14 @@ at::Tensor LLVMCodeGen::empty_strided(
 
 void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
   return (void*)impl->getKernelAddress();
+}
+
+std::string LLVMCodeGen::getCodeText(const std::string& attr /*=""*/) {
+  if (attr == "asm") {
+    return impl_->getASMCodeText();
+  } else {
+    return impl_->getLLVMCodeText();
+  }
 }
 
 llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
@@ -488,22 +505,24 @@ void LLVMCodeGenImpl::emitKernel(
 
   // print graph debug info after optimization
   asmBuffer.set_size(0);
-  if (GRAPH_DEBUG_ENABLED) {
-    module_->print(asmStream, nullptr);
-    llvm::legacy::PassManager PM;
-    jit_->getTargetMachine().addPassesToEmitFile(
-        PM,
-        asmStream,
-        nullptr,
+  module_->print(asmStream, nullptr);
+  llvmCode = asmStream.str().str();
+  asmBuffer.set_size(0);
+  llvm::legacy::PassManager PM;
+  jit_->getTargetMachine().addPassesToEmitFile(
+      PM,
+      asmStream,
+      nullptr,
 #if LLVM_VERSION_MAJOR >= 10
-        llvm::CodeGenFileType::CGFT_AssemblyFile);
+      llvm::CodeGenFileType::CGFT_AssemblyFile);
 #else
-        llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
+      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
 #endif
-    PM.run(*module_);
-  }
+  PM.run(*module_);
+  asmCode = asmStream.str().str();
+
   GRAPH_DEBUG(
-      "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
+      "\nLLVM module after optimizations\n\n", llvmCode, "\n", asmCode, "\n");
 }
 
 // TODO: The binary ops are copypasta.
@@ -1076,7 +1095,11 @@ void LLVMCodeGenImpl::visit(const Load* v) {
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(loadType, 0));
+#if LLVM_VERSION_MAJOR >= 13
+      value_ = irb_.CreateAlignedLoad(vaddr, llvm::MaybeAlign(4));
+#else
       value_ = irb_.CreateAlignedLoad(vaddr, 4);
+#endif
       return;
     }
   }
@@ -1255,8 +1278,12 @@ void LLVMCodeGenImpl::visit(const Store* v) {
       auto addr = irb_.CreateGEP(base, first_idx);
       auto vaddr = irb_.CreateBitOrPointerCast(
           addr, llvm::PointerType::get(val->getType(), 0));
-      irb_.CreateAlignedStore(val, vaddr, 4);
 
+#if LLVM_VERSION_MAJOR >= 13
+      irb_.CreateAlignedStore(val, vaddr, llvm::MaybeAlign(4));
+#else
+      irb_.CreateAlignedStore(val, vaddr, 4);
+#endif
       value_ = llvm::ConstantInt::get(IntTy_, 0);
       return;
     }

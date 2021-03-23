@@ -325,8 +325,7 @@
   imag: at::imag(grad)
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
-  abs: not_implemented("polar abs")
-  angle: not_implemented("polar angle")
+  abs, angle: polar_backward(grad, result)
 
 - name: _conj(Tensor self) -> Tensor
   self: grad.conj()
@@ -409,12 +408,12 @@
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type(), rounding_mode)
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
-  self: handle_r_to_c(self.scalar_type(), grad * tensor.conj())
-  tensor: handle_r_to_c(tensor.scalar_type(), grad * self.conj())
+  self: grad * tensor.conj()
+  tensor: grad * self.conj()
 
 - name: vdot(Tensor self, Tensor other) -> Tensor
-  self: handle_r_to_c(self.scalar_type(), grad.conj() * other)
-  other: handle_r_to_c(other.scalar_type(), grad * self)
+  self: grad.conj() * other
+  other: grad * self
 
 - name: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
   self: _fused_dropout_backward(grad, result1, p)
@@ -666,6 +665,11 @@
 - name: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   self: not_implemented("lstsq")
   A: not_implemented("lstsq")
+
+- name: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+  self: not_implemented("linalg_lstsq")
+  b: not_implemented("linalg_lstsq")
+  output_differentiability: [True, True]
 
 - name: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
@@ -1308,6 +1312,10 @@
   self: smooth_l1_loss_backward(grad, self, target, reduction, beta)
   target: smooth_l1_loss_backward(grad, target, self, reduction, beta)
 
+- name: huber_loss(Tensor self, Tensor target, int reduction=Mean, float delta=1.0) -> Tensor
+  self: huber_loss_backward(grad, self, target, reduction, delta)
+  target: huber_loss_backward(grad, target, self, reduction, delta)
+
 - name: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: soft_margin_loss_backward(grad, self, target, reduction)
 
@@ -1693,6 +1701,11 @@
   self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)
   target: -smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)
 
+- name: huber_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta) -> Tensor
+  grad_output: huber_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, delta)
+  self: huber_loss_double_backward(grad * grad_output, self, target, reduction, delta)
+  target: -huber_loss_double_backward(grad * grad_output, self, target, reduction, delta)
+
 - name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
   grad_output: softplus_backward(grad, self, beta, threshold, output)
   self: softplus_double_backward(grad * grad_output, self, beta, threshold)
@@ -1887,6 +1900,15 @@
 
 - name: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   self, weight, bias: mkldnn_linear_backward(self, grad, weight, grad_input_mask)
+
+- name: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  self: mkldnn_max_pool2d_backward(grad, result, self, kernel_size, stride, padding, dilation, ceil_mode)
+
+- name: mkldnn_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
+  self: mkldnn_max_pool3d_backward(grad, result, self, kernel_size, stride, padding, dilation, ceil_mode)
+
+- name: mkldnn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
+  self: mkldnn_adaptive_avg_pool2d_backward(grad, self)
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor

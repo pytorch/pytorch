@@ -476,16 +476,12 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     if scale_grad_by_freq and sym_help._training_mode:
         raise RuntimeError('Unsupported: ONNX export of embedding with scale_grad_by_freq=True '
                            'for training mode. ONNX does not support scaling the gradients.')
-    # To match the torch operator behavior for padding_idx: 
-    # if (padding_idx >= 0) {
-    #   embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
-    # }
-    weight = g.op("Gather", weight, indices)
-    if (padding_idx >= 0):
-        mask = eq(g, indices, g.op("Constant", value_t=torch.tensor(padding_idx)))
-        mask = reshape(g, mask, g.op("Constant", value_t=torch.tensor([-1, 1], dtype=torch.int64)))
-        weight = masked_fill(g, weight, mask, torch.tensor(0.))
-    return weight
+    if padding_idx >= 0 and sym_help._training_mode:
+        warnings.warn('Warning: ONNX export of embedding with padding_idx >= 0 '
+                      'for training mode. '
+                      'ONNX does not support not updating the embedding vector at padding_idx during training.')
+
+    return g.op("Gather", weight, indices)
 
 
 @parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')

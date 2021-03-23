@@ -32,26 +32,37 @@ bool IsInplaceNode(const Node* n) {
   return false;
 }
 
-Node* addDummyCloneToBlock(Block* b, Value* orig_data) {
-  auto graph = b->owningGraph();
-
+Node* addDummyClone(
+    Graph* graph,
+    Value* orig_data,
+    bool insertBefore,
+    Node* referenceNode) {
   Node* newNode = nullptr;
   if (orig_data->type()->kind() == TypeKind::ListType) {
     newNode = graph->create(aten::list, /*num_outputs =*/1);
     newNode->addInput(orig_data);
     newNode->output()->setType(orig_data->type());
-    b->prependNode(newNode);
-  } else if (orig_data->type()->kind() == TypeKind::TensorType) {
-    newNode = graph->create(aten::clone, /*num_outputs =*/1);
-    newNode->addInput(orig_data);
+    if (insertBefore)
+      newNode->insertBefore(referenceNode);
+    else
+      referenceNode->owningBlock()->prependNode(newNode);
+  } else if (
+      orig_data->type()->kind() == TypeKind::TensorType ||
+      orig_data->type()->kind() == TypeKind::IntType ||
+      orig_data->type()->kind() == TypeKind::FloatType ||
+      orig_data->type()->kind() == TypeKind::BoolType) {
     auto* noneNode = graph->create(prim::Constant);
     noneNode->output()->setType(NoneType::get());
+    newNode = graph->create(aten::clone, /*num_outputs =*/1);
+    newNode->addInput(orig_data);
     newNode->addInput(noneNode->output());
     newNode->output()->setType(orig_data->type());
-    b->prependNode(newNode);
+    if (insertBefore)
+      newNode->insertBefore(referenceNode);
+    else
+      referenceNode->owningBlock()->prependNode(newNode);
     noneNode->insertBefore(newNode);
-  } // TODO: Handle float/int attributes
-
+  }
   return newNode;
 }
 
@@ -82,7 +93,8 @@ Value* MatchIfBlocksOutputForValue(
 
   for (Block* b : outer_block->owningNode()->blocks()) {
     if (b->outputs().size() < output_size) {
-      auto clone_node = addDummyCloneToBlock(b, orig_data);
+      auto clone_node =
+          addDummyClone(b->owningGraph(), orig_data, false, b->return_node());
       b->registerOutput(clone_node->output());
       b->outputs()
           .at(b->outputs().size() - 1)
@@ -494,7 +506,8 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
                   << (*it)->debugName() << "'. This changes graph semantics."
                   << std::endl;
 
-        Node* newNode = addDummyCloneToBlock(b, input);
+        Node* newNode =
+            addDummyClone(b->owningGraph(), input, false, b->return_node());
         TORCH_INTERNAL_ASSERT(nullptr != newNode);
         node->replaceInput(index, newNode->output());
         input->replaceAllUsesAfterNodeWith(node, newNode->output());
@@ -533,7 +546,7 @@ std::deque<std::string> findSubModuleAttr(
       moduleNames.push_front(node->s(attr::name));
       node = node->inputs()[0]->node();
     } else {
-      return moduleNames;
+      break;
     }
   }
   // Assign the inner module to attrModule.
@@ -554,31 +567,6 @@ Value* findArgumentAsInputParam(
   throw std::runtime_error(
       "Attribute is not part of model parameters. Cannot handle SetAttr and GetAttr nodes for : " +
       name);
-}
-
-Node* insertCloneBeforeNode(
-    const std::shared_ptr<Graph>& graph,
-    Value* orig_data,
-    Node* node) {
-  Node* newNode = nullptr;
-  if (orig_data->type()->kind() == TypeKind::ListType) {
-    // Create an aten::list to clone the list in graph inputs
-    newNode = graph->create(aten::list, /*num_outputs =*/1);
-    newNode->addInput(orig_data);
-    newNode->output()->setType(orig_data->type());
-    newNode->insertBefore(node);
-  } else if (orig_data->type()->kind() == TypeKind::TensorType) {
-    auto* noneNode = graph->create(prim::Constant);
-    noneNode->output()->setType(NoneType::get());
-    newNode = graph->create(aten::clone, /*num_outputs =*/1);
-    newNode->addInput(orig_data);
-
-    newNode->addInput(noneNode->output());
-    newNode->output()->setType(orig_data->type());
-    newNode->insertBefore(node);
-    noneNode->insertBefore(newNode);
-  } // TODO: Handle float/int attributes
-  return newNode;
 }
 
 Value* registerSetAttrInBlocks(
@@ -696,7 +684,8 @@ void trackAndRegisterAttributesInBlocks(
       // If inside a block, keep the output value to register in block
       // output.
       auto block_ = n->owningBlock();
-      Node* cloneNode = insertCloneBeforeNode(graph, n->inputs().at(1), n);
+      Node* cloneNode =
+          addDummyClone(block_->owningGraph(), n->inputs().at(1), true, n);
       if (block_->owningNode() &&
           (block_->owningNode()->kind() == prim::If ||
            block_->owningNode()->kind() == prim::Loop)) {

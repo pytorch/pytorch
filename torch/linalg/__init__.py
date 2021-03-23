@@ -86,7 +86,7 @@ Examples::
 inv = _add_docstr(_linalg.linalg_inv, r"""
 linalg.inv(input, *, out=None) -> Tensor
 
-Computes the multiplicative inverse matrix of a square matrix :attr:`input`, or of each square matrix in a 
+Computes the multiplicative inverse matrix of a square matrix :attr:`input`, or of each square matrix in a
 batched :attr:`input`. The result satisfies the relation:
 
 ``matmul(inv(input),input)`` = ``matmul(input,inv(input))`` = ``eye(input.shape[0]).expand_as(input)``.
@@ -253,7 +253,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
-.. note:: The eigenvalues/eigenvectors are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs, 
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs,
           and MAGMA's `syevd` and `heevd` routines for CUDA inputs.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
@@ -319,7 +319,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
-.. note:: The eigenvalues are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs, 
+.. note:: The eigenvalues are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs,
           and MAGMA's `syevd` and `heevd` routines for CUDA inputs.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
@@ -365,6 +365,99 @@ Examples::
     tensor([[ 2.5797,  3.4629],
             [-4.1605,  1.3780],
             [-3.1113,  2.7381]], dtype=torch.float64)
+""")
+
+lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
+torch.linalg.lstsq(input, b, cond=None, *, driver=None)
+    -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+
+Computes the least squares solution to the system with a batch of matrices :math:`a` (represented by :attr:`input`)
+and a batch of vectors or matrices :math:`b` such that
+
+.. math::
+    x = \text{argmin}_x \|ax - b\|_F,
+
+where :math:`a` is of size :math:`(..., m, n)` and :math:`b` is of size :math:`(..., m, k)` or
+:math:`(..., m)`. The batch dimensions of :math:`a` and :math:`b` have to be broadcastable.
+
+The returned solution :math:`solution` is of shape :math:`(..., n, k)` if :math:`b` is of shape :math:`(..., m, k)`,
+and is of shape :math:`(..., n, 1)` if :math:`b` is of shape :math:`(..., m)`.
+The batch sizes of :math:`x` is the broadcasted shape of the batch dimensions of :math:`a` and :math:`b`.
+
+.. note::
+    The case when :math:`m < n` is not supported on CUDA.
+
+Args:
+    input (Tensor): the batch of left-hand side matrices :math:`a`
+        of shape :math:`(..., m, n)` with :math:`m > 0, n > 0`
+    b (Tensor): the batch of righ-hand side vectors or matrices :math:`b`
+        of shape :math:`(..., m)` or :math:`(..., m, k)` with :math:`m > 0, k > 0`
+    cond (float, optional): used to determine the effective rank of :math:`a`
+        for the rank-revealing drivers (see :attr:`driver`).
+        Singular values :math:`s[i] \le cond * s[0]` are treated as zero.
+        If :attr:`cond` is ``None`` or is smaller than zero,
+        the machine precision based on :attr:`input`'s dtype is used.
+        Default: ``None``
+    driver (str, optional): the name of the LAPACK/MAGMA driver that is used
+        to compute the solution.
+        For CPU inputs the valid values are
+        (``'gels'``, ``'gelsy'``, ``'gelsd``, ``'gelss'``, ``None``).
+        For CUDA inputs the valid values are (``'gels'``, ``None``).
+        If ``driver == None``, ``'gelsy'`` is used for CPU inputs and ``'gels'`` for GPU inputs.
+        Default: ``None``
+
+.. note::
+    Driver ``'gels'`` assumes only full-rank inputs, i.e. ``torch.matrix_rank(a) == min(m, n)``.
+    Drivers ``'gelsy'``, ``'gelsd'``, ``'gelss'`` are rank-revealing and hence handle rank-deficient inputs.
+    ``'gelsy'`` uses QR factorization with column pivoting, ``'gelsd'`` and ``'gelss'`` use SVD.
+    ``'gelsy'`` is the fastest among the rank-revealing algorithms that also handles rank-deficient inputs.
+
+.. warning::
+    The default value for :attr:`cond` is subject to a potential change.
+    It is therefore recommended to use some fixed value to avoid potential
+    issues upon the library update.
+
+
+Returns:
+    (Tensor, Tensor, Tensor, Tensor): a namedtuple (solution, residuals, rank, singular_values) containing:
+        - **solution** (*Tensor*): the least squares solution
+        - **residuals** (*Tensor*):  if :math:`m > n` then for full rank matrices in :attr:`input` the tensor encodes
+            the squared residuals of the solutions, that is :math:`||\text{input} @ x - b||_F^2`.
+            If :math:`m \le n`, an empty tensor is returned instead.
+        - **rank** (*Tensor*): the tensor of ranks of the matrix :attr:`input` with shape ``input.shape[:-2]``.
+            Only computed if :attr:`driver` is one of (``'gelsy'``, ``'gelsd'``, ``'gelss'``),
+            an empty tensor is returned otherwise.
+        - **singular_values** (*Tensor*): the tensor of singular values
+            of the matrix :attr:`input` with shape ``input.shape[:-2] + (min(m, n),)``.
+            Only computed if :attr:`driver` is one of (``'gelsd'``, ``'gelss'``),
+            an empty tensor is returend otherwise.
+
+Example::
+
+    >>> a = torch.tensor([[10, 2, 3], [3, 10, 5], [5, 6, 12]], dtype=torch.float)
+    >>> b = torch.tensor([[[2, 5, 1], [3, 2, 1], [5, 1, 9]],
+                          [[4, 2, 9], [2, 0, 3], [2, 5, 3]]], dtype=torch.float)
+    >>> x = torch.linalg.lstsq(a.view(1, 3, 3), b).solution
+    >>> x
+    tensor([[[ 0.0793,  0.5345, -0.1228],
+             [ 0.1125,  0.1458, -0.3517],
+             [ 0.3274, -0.2123,  0.9770]],
+
+            [[ 0.3939,  0.1023,  0.9361],
+             [ 0.1074, -0.2903,  0.1189],
+             [-0.0512,  0.5192, -0.1995]]])
+
+    >>> (x - a.pinverse() @ b).abs().max()
+    tensor(2.0862e-07)
+
+    >>> aa = a.clone().select(1, -1).zero_()
+    >>> xx, rank, _ = torch.linalg.lstsq(aa.view(1, 3, 3), b)
+    >>> rank
+    tensor([2])
+
+    >>> sv = torch.linalg.lstsq(a.view(1, 3, 3), b, driver='gelsd').singular_values
+    >>> (sv - a.svd()[1]).max().abs()
+    tensor(5.7220e-06)
 """)
 
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
@@ -705,7 +798,7 @@ Keyword args:
     out (Tensor, optional): tensor to write the output to. Default is ``None``.
 
 Returns:
-    The condition number of :attr:`input`. The output dtype is always real valued 
+    The condition number of :attr:`input`. The output dtype is always real valued
     even for complex inputs (e.g. float if :attr:`input` is cfloat).
 
 Examples::

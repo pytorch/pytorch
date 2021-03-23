@@ -192,8 +192,8 @@ def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     if leftover:
         splits.append(leftover)
 
-    # TODO: So far we don't have a module using this method. We'll keep 
-    # this as a constant unless we see a request of dynamics in any 
+    # TODO: So far we don't have a module using this method. We'll keep
+    # this as a constant unless we see a request of dynamics in any
     # user's modules.
     splits = g.op("Constant", value_t=torch.tensor(splits, dtype=torch.long))
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
