@@ -461,13 +461,9 @@ Here're steps to follow to decide the right dispatch keyword:
 
 2. Think about training: does your kernel support autograd? [check autograd support](#will-your-function-be-automatically-differentiable)
     - Yes: in other words, you're providing a `Math` kernel which supports both inference and autograd.
-      To use autograd support for training, simply skip adding a dispatch section or write
-      ```
-      dispatch:
-        Math: kernel
-      ```
-
-      You're done. This will allow this op to be correctly registered for both inference and training.
+      To use autograd support for training, simply skip adding a dispatch
+      section and you're done. This will allow this op to be correctly
+      registered for both inference and training.
 
     - Yes, but you still want to provide a numerically stable gradient formula instead of using autograd, write
       ```
