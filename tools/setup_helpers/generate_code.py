@@ -5,9 +5,9 @@ import yaml
 
 try:
     # use faster C loader if available
-    from yaml import CLoader as YamlLoader
+    from yaml import CSafeLoader as YamlLoader
 except ImportError:
-    from yaml import Loader as YamlLoader
+    from yaml import SafeLoader as YamlLoader
 
 source_files = {'.py', '.cpp', '.h'}
 
