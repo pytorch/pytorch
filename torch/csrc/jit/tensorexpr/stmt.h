@@ -173,13 +173,16 @@ class TORCH_API Block : public StmtNode<Block> {
 
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
-      if (s->get_parent()) {
-        throw malformed_input(
-            "Block creation has Stmt with existing parent", s);
+      if (!s) {
+        continue;
+      }
+      if (!s->get_parent()) {
+        // If we get here, it's a bug, but we cannot throw an error from a
+        // constructor. But IR verifier would catch this.
+        set_parent(s, this);
       }
 
       stmts_.push_back(s);
-      set_parent(s, this);
     }
   }
 
@@ -535,17 +538,28 @@ class TORCH_API LoopOptions {
     gpu_thread_index_ = index;
   }
 
+  void set_parallel() {
+    is_parallel_ = true;
+  }
+
+  bool is_parallel() const {
+    return is_parallel_;
+  }
+
   std::string ToString() const {
     if (is_gpu_block_index()) {
       return gpu_block_index_str();
     } else if (is_gpu_thread_index()) {
       return gpu_thread_index_str();
+    } else if (is_parallel()) {
+      return "parallel";
     }
     return "";
   }
 
   bool isDefault() const {
-    return gpu_block_index_ == IDX_UNSET && gpu_thread_index_ == IDX_UNSET;
+    return gpu_block_index_ == IDX_UNSET && gpu_thread_index_ == IDX_UNSET &&
+        !is_parallel_;
   }
 
   void set_buffer_mapping(
@@ -560,6 +574,7 @@ class TORCH_API LoopOptions {
  private:
   int gpu_block_index_{IDX_UNSET};
   int gpu_thread_index_{IDX_UNSET};
+  bool is_parallel_{false};
   std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
 
@@ -604,16 +619,6 @@ class TORCH_API For : public StmtNode<For> {
 
   For(const Var* var, const Expr* start, const Expr* stop, Stmt* body)
       : var_(var), start_(start), stop_(stop) {
-    if (!var) {
-      throw malformed_input("invalid Var in For loop", var);
-    } else if (!start) {
-      throw malformed_input("invalid Start in For loop", start);
-    } else if (!stop) {
-      throw malformed_input("invalid Stop in For loop", stop);
-    } else if (!body || body->get_parent()) {
-      throw malformed_input("invalid Body in For loop", body);
-    }
-
     Block* b = dynamic_cast<Block*>(body);
     if (!b) {
       b = new Block({body});
@@ -652,6 +657,14 @@ class TORCH_API For : public StmtNode<For> {
 
   void set_gpu_thread_index(int thread_index) {
     loop_options_.set_gpu_thread_index(thread_index);
+  }
+
+  void set_parallel() {
+    loop_options_.set_parallel();
+  }
+
+  bool is_parallel() const {
+    return loop_options_.is_parallel();
   }
 
   void set_buffer_map(const std::unordered_map<std::string, const Buf*>& map) {

@@ -359,7 +359,8 @@ class Tanh(Module):
         return torch.tanh(input)
 
 class SiLU(Module):
-    r"""Applies the silu function, element-wise.
+    r"""Applies the Sigmoid Linear Unit (SiLU) function, element-wise.
+    The SiLU function is also known as the swish function.
 
     .. math::
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
@@ -874,9 +875,9 @@ class MultiheadAttention(Module):
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
         if self._qkv_same_embed_dim is False:
-            self.q_proj_weight = Parameter(torch.Tensor(embed_dim, embed_dim))
-            self.k_proj_weight = Parameter(torch.Tensor(embed_dim, self.kdim))
-            self.v_proj_weight = Parameter(torch.Tensor(embed_dim, self.vdim))
+            self.q_proj_weight = Parameter(torch.empty(embed_dim, embed_dim))
+            self.k_proj_weight = Parameter(torch.empty(embed_dim, self.kdim))
+            self.v_proj_weight = Parameter(torch.empty(embed_dim, self.vdim))
             self.register_parameter('in_proj_weight', None)
         else:
             self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
@@ -1042,7 +1043,7 @@ class PReLU(Module):
     def __init__(self, num_parameters: int = 1, init: float = 0.25) -> None:
         self.num_parameters = num_parameters
         super(PReLU, self).__init__()
-        self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
+        self.weight = Parameter(torch.empty(num_parameters).fill_(init))
 
     def forward(self, input: Tensor) -> Tensor:
         return F.prelu(input, self.weight)

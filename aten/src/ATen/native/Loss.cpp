@@ -24,10 +24,16 @@ namespace at { namespace native {
 
 DEFINE_DISPATCH(smooth_l1_stub);
 DEFINE_DISPATCH(smooth_l1_backward_stub);
+DEFINE_DISPATCH(huber_stub);
+DEFINE_DISPATCH(huber_backward_stub);
 DEFINE_DISPATCH(mse_stub);
 DEFINE_DISPATCH(mse_backward_stub);
 
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
+  TORCH_CHECK(
+      target.dim() == 1,
+      "1D target tensor expected, multi-target not supported");
+
   auto prod_sum = (input1 * input2).sum(1);
   auto mag_square1 = (input1 * input1).sum(1) + EPSILON;
   auto mag_square2 = (input2 * input2).sum(1) + EPSILON;
@@ -111,7 +117,10 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   return grad_input;
 }
 
-Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     Tensor loss = at::empty_like(input);
     return at::native::binary_cross_entropy_out_cpu(loss, input, target, weight, reduction);
 }
@@ -152,7 +161,10 @@ Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Te
     return loss;
 }
 
-Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     Tensor grad_input = at::empty_like(input);
     return at::native::binary_cross_entropy_backward_out_cpu(grad_input, grad, input, target, weight, reduction);
 }
@@ -191,7 +203,11 @@ Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& 
     return grad_input;
 }
 
-Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
+Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+
     Tensor loss;
     auto max_val = (-input).clamp_min_(0);
     if (pos_weight.defined()) {
@@ -209,7 +225,11 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
     return apply_loss_reduction(loss, reduction);
 }
 
-Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
+Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+
     Tensor grad_input;
     if (pos_weight.defined()) {
         // pos_weight need to be broadcasted, thus mul(target) is not inplace.
@@ -338,6 +358,43 @@ Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, c
       return at::native::l1_loss_backward(grad_output, input, target, reduction);
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction, beta);
+}
+
+Tensor huber_loss(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
+  TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
+  Tensor loss = at::empty_like(input);
+  auto iter = TensorIterator::binary_op(loss, input, target);
+  huber_stub(iter.device_type(), iter, delta);
+  return apply_loss_reduction(loss, reduction);
+}
+
+Tensor& huber_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& result) {
+  TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
+  auto iter = TensorIterator::binary_op(result, input, target);
+  huber_stub(iter.device_type(), iter, delta);
+  if (reduction != Reduction::None) {
+    auto reduced = apply_loss_reduction(result, reduction);
+    result.resize_({});
+    result.copy_(reduced);
+  }
+  return result;
+}
+
+Tensor huber_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
+  auto grad_input = at::zeros_like(input, MemoryFormat::Contiguous);
+  return at::huber_loss_backward_out(grad_input, grad_output, input, target, reduction, delta);
+}
+
+Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& grad_input) {
+  auto norm = (reduction == Reduction::Mean) ? (1. / input.numel()) : 1.;
+  auto iter = at::TensorIteratorConfig()
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(target)
+    .add_input(grad_output)
+    .build();
+  huber_backward_stub(iter.device_type(), iter, norm, delta);
+  return grad_input;
 }
 
 Tensor mse_loss(const Tensor& input, const Tensor& target, int64_t reduction) {

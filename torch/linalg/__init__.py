@@ -86,7 +86,7 @@ Examples::
 inv = _add_docstr(_linalg.linalg_inv, r"""
 linalg.inv(input, *, out=None) -> Tensor
 
-Computes the multiplicative inverse matrix of a square matrix :attr:`input`, or of each square matrix in a 
+Computes the multiplicative inverse matrix of a square matrix :attr:`input`, or of each square matrix in a
 batched :attr:`input`. The result satisfies the relation:
 
 ``matmul(inv(input),input)`` = ``matmul(input,inv(input))`` = ``eye(input.shape[0]).expand_as(input)``.
@@ -253,7 +253,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
-.. note:: The eigenvalues/eigenvectors are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs, 
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs,
           and MAGMA's `syevd` and `heevd` routines for CUDA inputs.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
@@ -319,7 +319,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
-.. note:: The eigenvalues are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs, 
+.. note:: The eigenvalues are computed using LAPACK's `syevd` and `heevd` routines for CPU inputs,
           and MAGMA's `syevd` and `heevd` routines for CUDA inputs.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
@@ -365,6 +365,158 @@ Examples::
     tensor([[ 2.5797,  3.4629],
             [-4.1605,  1.3780],
             [-3.1113,  2.7381]], dtype=torch.float64)
+""")
+
+householder_product = _add_docstr(_linalg.linalg_householder_product, r"""
+householder_product(input, tau, *, out=None) -> Tensor
+
+Computes the product of Householder matrices.
+
+Householder matrices are stored in compressed vector form as columns of a `(m × n)` matrix :attr:`input`,
+or columns of each matrix in a batched :attr:`input`.
+:attr:`tau` is a tensor of scalar scale factors for each Householder vector.
+For the single matrix :attr:`input` taking its `i`-th column as `vᵢ` and `τ = tau[i]`
+gives the `i`-th Householder matrix as `Hᵢ = I − τ vᵢ vᵢᴴ`.
+
+The result of this function is `H₁ H₂ ... Hᵣ`, where `r` is equal to `tau.shape[-1]`.
+This function is commonly used together with :func:`torch.geqrf`
+to explitly form the `Q` matrix of the QR decomposition.
+See `Representation of Orthogonal or Unitary Matrices`_ for further details.
+
+.. note:: LAPACK's `orgqr` is used for the computations.
+          For CUDA inputs, cuSOLVER's `orgqr` routine is used if CUDA version >= 10.1.243.
+
+.. note:: Only values below the main diagonal of :attr:`input` are used in the computations
+          and other values are ignored.
+
+.. note:: If :attr:`input` doesn't satisfy the requirement `m >= n`,
+          or :attr:`tau` doesn't satisfy the requirement `n >= r`, then a RuntimeError will be thrown.
+
+Args:
+    input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
+                    batch dimensions consisting of `(m × n)` matrices.
+    tau (Tensor): the input tensor of size `(*, r)` where `*` is zero or more
+                    batch dimensions consisting of `r`-dimensional vectors.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if `None`. Default: `None`
+
+Examples::
+
+    >>> a = torch.randn(2, 2)
+    >>> h, tau = torch.geqrf(a)
+    >>> q = torch.linalg.householder_product(h, tau)
+    >>> torch.allclose(q, torch.linalg.qr(a)[0])
+    True
+
+    >>> h = torch.randn(3, 2, 2, dtype=torch.complex128)
+    >>> tau = torch.randn(3, 1, dtype=torch.complex128)
+    >>> q = torch.linalg.householder_product(h, tau)
+    >>> q
+    tensor([[[ 1.8034+0.4184j,  0.2588-1.0174j],
+            [-0.6853+0.7953j,  2.0790+0.5620j]],
+
+            [[ 1.4581+1.6989j, -1.5360+0.1193j],
+            [ 1.3877-0.6691j,  1.3512+1.3024j]],
+
+            [[ 1.4766+0.5783j,  0.0361+0.6587j],
+            [ 0.6396+0.1612j,  1.3693+0.4481j]]], dtype=torch.complex128)
+
+.. _Representation of Orthogonal or Unitary Matrices:
+    https://www.netlib.org/lapack/lug/node128.html
+""")
+
+lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
+torch.linalg.lstsq(input, b, cond=None, *, driver=None)
+    -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+
+Computes the least squares solution to the system with a batch of matrices :math:`a` (represented by :attr:`input`)
+and a batch of vectors or matrices :math:`b` such that
+
+.. math::
+    x = \text{argmin}_x \|ax - b\|_F,
+
+where :math:`a` is of size :math:`(..., m, n)` and :math:`b` is of size :math:`(..., m, k)` or
+:math:`(..., m)`. The batch dimensions of :math:`a` and :math:`b` have to be broadcastable.
+
+The returned solution :math:`solution` is of shape :math:`(..., n, k)` if :math:`b` is of shape :math:`(..., m, k)`,
+and is of shape :math:`(..., n, 1)` if :math:`b` is of shape :math:`(..., m)`.
+The batch sizes of :math:`x` is the broadcasted shape of the batch dimensions of :math:`a` and :math:`b`.
+
+.. note::
+    The case when :math:`m < n` is not supported on CUDA.
+
+Args:
+    input (Tensor): the batch of left-hand side matrices :math:`a`
+        of shape :math:`(..., m, n)` with :math:`m > 0, n > 0`
+    b (Tensor): the batch of righ-hand side vectors or matrices :math:`b`
+        of shape :math:`(..., m)` or :math:`(..., m, k)` with :math:`m > 0, k > 0`
+    cond (float, optional): used to determine the effective rank of :math:`a`
+        for the rank-revealing drivers (see :attr:`driver`).
+        Singular values :math:`s[i] \le cond * s[0]` are treated as zero.
+        If :attr:`cond` is ``None`` or is smaller than zero,
+        the machine precision based on :attr:`input`'s dtype is used.
+        Default: ``None``
+    driver (str, optional): the name of the LAPACK/MAGMA driver that is used
+        to compute the solution.
+        For CPU inputs the valid values are
+        (``'gels'``, ``'gelsy'``, ``'gelsd``, ``'gelss'``, ``None``).
+        For CUDA inputs the valid values are (``'gels'``, ``None``).
+        If ``driver == None``, ``'gelsy'`` is used for CPU inputs and ``'gels'`` for GPU inputs.
+        Default: ``None``
+
+.. note::
+    Driver ``'gels'`` assumes only full-rank inputs, i.e. ``torch.matrix_rank(a) == min(m, n)``.
+    Drivers ``'gelsy'``, ``'gelsd'``, ``'gelss'`` are rank-revealing and hence handle rank-deficient inputs.
+    ``'gelsy'`` uses QR factorization with column pivoting, ``'gelsd'`` and ``'gelss'`` use SVD.
+    ``'gelsy'`` is the fastest among the rank-revealing algorithms that also handles rank-deficient inputs.
+
+.. warning::
+    The default value for :attr:`cond` is subject to a potential change.
+    It is therefore recommended to use some fixed value to avoid potential
+    issues upon the library update.
+
+
+Returns:
+    (Tensor, Tensor, Tensor, Tensor): a namedtuple (solution, residuals, rank, singular_values) containing:
+        - **solution** (*Tensor*): the least squares solution
+        - **residuals** (*Tensor*):  if :math:`m > n` then for full rank matrices in :attr:`input` the tensor encodes
+            the squared residuals of the solutions, that is :math:`||\text{input} @ x - b||_F^2`.
+            If :math:`m \le n`, an empty tensor is returned instead.
+        - **rank** (*Tensor*): the tensor of ranks of the matrix :attr:`input` with shape ``input.shape[:-2]``.
+            Only computed if :attr:`driver` is one of (``'gelsy'``, ``'gelsd'``, ``'gelss'``),
+            an empty tensor is returned otherwise.
+        - **singular_values** (*Tensor*): the tensor of singular values
+            of the matrix :attr:`input` with shape ``input.shape[:-2] + (min(m, n),)``.
+            Only computed if :attr:`driver` is one of (``'gelsd'``, ``'gelss'``),
+            an empty tensor is returend otherwise.
+
+Example::
+
+    >>> a = torch.tensor([[10, 2, 3], [3, 10, 5], [5, 6, 12]], dtype=torch.float)
+    >>> b = torch.tensor([[[2, 5, 1], [3, 2, 1], [5, 1, 9]],
+                          [[4, 2, 9], [2, 0, 3], [2, 5, 3]]], dtype=torch.float)
+    >>> x = torch.linalg.lstsq(a.view(1, 3, 3), b).solution
+    >>> x
+    tensor([[[ 0.0793,  0.5345, -0.1228],
+             [ 0.1125,  0.1458, -0.3517],
+             [ 0.3274, -0.2123,  0.9770]],
+
+            [[ 0.3939,  0.1023,  0.9361],
+             [ 0.1074, -0.2903,  0.1189],
+             [-0.0512,  0.5192, -0.1995]]])
+
+    >>> (x - a.pinverse() @ b).abs().max()
+    tensor(2.0862e-07)
+
+    >>> aa = a.clone().select(1, -1).zero_()
+    >>> xx, rank, _ = torch.linalg.lstsq(aa.view(1, 3, 3), b)
+    >>> rank
+    tensor([2])
+
+    >>> sv = torch.linalg.lstsq(a.view(1, 3, 3), b, driver='gelsd').singular_values
+    >>> (sv - a.svd()[1]).max().abs()
+    tensor(5.7220e-06)
 """)
 
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
@@ -429,6 +581,76 @@ Examples::
     >>> torch.linalg.matrix_rank(a, tol=1.0, hermitian=True)
     tensor([[2, 2, 2, 1],
             [1, 2, 2, 2]])
+""")
+
+vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
+linalg.vector_norm(input, ord=None, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+
+Computes a vector norm over :attr:`input`.
+
+See :func:`torch.linalg.norm` for computing matrix norms.
+
+Supports floating and complex inputs.
+
+Args:
+    input (Tensor): The input tensor. For complex inputs, the norm is
+        calculated using the absolute value of each element. If the input is
+        complex and neither :attr:`dtype` nor :attr:`out` is specified, the
+        result's data type will be the corresponding floating point type (e.g.
+        float if :attr:`input` is complex float).
+
+    ord (int, float, inf, -inf, optional): The order of the norm.
+        The following norms can be calculated:
+
+        =====  ==========================
+        ord    norm
+        =====  ==========================
+        None   2-norm
+        inf    max(abs(x))
+        -inf   min(abs(x))
+        0      sum(x != 0)
+        other  sum(abs(x)**ord)**(1./ord)
+        =====  ==========================
+
+        Default: ``None``
+
+    dim (int, tuple of ints, list of ints, optional): If :attr:`dim` is an int,
+        the vector norm is calculated over the specified dimension. If
+        :attr:`dim` is a tuple of ints, the vector norm is calculated over the
+        elements in the specified dimensions. If :attr:`dim` is ``None``, the
+        vector norm is calculated across all dimensions. Default: ``None``
+
+    keepdim (bool, optional): If set to True, the reduced dimensions are retained
+        in the result as dimensions with size one. Default: ``False``
+
+Keyword args:
+
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+    dtype (:class:`torch.dtype`, optional): If specified, the :attr:`input` is
+        cast to :attr:`dtype` before performing the operation, and the returned
+        tensor's type will be :attr:`dtype`. If this argument is used in
+        conjunction with the :attr:`out` argument, the output tensor's type
+        must match this argument or a RuntimeError will be raised. Default:
+        ``None``
+
+Examples::
+
+    >>> import torch
+    >>> from torch import linalg as LA
+    >>> a = torch.arange(9, dtype=torch.float) - 4
+    >>> a
+    tensor([-4., -3., -2., -1.,  0.,  1.,  2.,  3.,  4.])
+    >>> b = a.reshape((3, 3))
+    >>> b
+    tensor([[-4., -3., -2.],
+            [-1.,  0.,  1.],
+            [ 2.,  3.,  4.]])
+
+    >>> LA.vector_norm(a, ord=3.5)
+    tensor(5.4345)
+    >>> LA.vector_norm(b, ord=3.5)
+    tensor(5.4345)
 """)
 
 norm = _add_docstr(_linalg.linalg_norm, r"""
@@ -618,7 +840,7 @@ Args:
     compute_uv (bool, optional): whether to compute `U` and `V` or not. Defaults to True.
     out (tuple, optional): a tuple of three tensors to use for the outputs. If compute_uv=False,
                            the 1st and 3rd arguments must be tensors, but they are ignored. E.g. you can
-                           pass `(torch.Tensor(), out_S, torch.Tensor())`
+                           pass `(torch.tensor([]), out_S, torch.tensor([]))`
 
 Example::
 
@@ -705,7 +927,7 @@ Keyword args:
     out (Tensor, optional): tensor to write the output to. Default is ``None``.
 
 Returns:
-    The condition number of :attr:`input`. The output dtype is always real valued 
+    The condition number of :attr:`input`. The output dtype is always real valued
     even for complex inputs (e.g. float if :attr:`input` is cfloat).
 
 Examples::
@@ -956,7 +1178,7 @@ Args:
                     ``prod(input.shape[other.ndim:]) == prod(input.shape[:other.ndim])``.
     other (Tensor): "right-hand-side" tensor of shape ``input.shape[other.ndim]``.
     dims (Tuple[int]): dimensions of :attr:`input` to be moved before the computation.
-                       Equivalent to calling ``input = movedim(input, dims, range(len(dims) - input.ndim, 0))``.
+                       Equivalent to calling ``input = movedim(input, dims, range(len(dims) - input.ndim + 1, 0))``.
                        If None (default), no dimensions are moved.
 
 Keyword args:
@@ -1059,8 +1281,8 @@ Example::
     True
     >>> a = torch.randn(3, 4, 5)
     >>> q, r = torch.linalg.qr(a, mode='complete')
-    >>> torch.allclose(torch.matmul(q, r), a)
+    >>> torch.allclose(torch.matmul(q, r), a, atol=1e-5)
     True
-    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(5))
+    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(4), atol=1e-5)
     True
 """)

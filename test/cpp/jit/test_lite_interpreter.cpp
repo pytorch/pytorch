@@ -1,3 +1,5 @@
+#include <test/cpp/jit/test_utils.h>
+
 #include <gtest/gtest.h>
 
 #include <c10/core/TensorOptions.h>
@@ -12,14 +14,6 @@
 #include <torch/torch.h>
 
 #include <unordered_set>
-
-#define ASSERT_THROWS_WITH(statement, substring)                         \
-  try {                                                                  \
-    (void)statement;                                                     \
-    ASSERT_TRUE(false);                                                  \
-  } catch (const std::exception& e) {                                    \
-    ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
-  }
 
 // Tests go in torch::jit
 namespace torch {
@@ -281,7 +275,7 @@ TEST(LiteInterpreterTest, LoadOrigJit) {
   )");
   std::stringstream ss;
   m.save(ss);
-  ASSERT_THROWS_WITH(_load_for_mobile(ss), "file not found");
+  ASSERT_THROWS_WITH_MESSAGE(_load_for_mobile(ss), "file not found");
 }
 
 TEST(LiteInterpreterTest, WrongMethodName) {
@@ -298,7 +292,8 @@ TEST(LiteInterpreterTest, WrongMethodName) {
   std::vector<IValue> inputs;
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
-  ASSERT_THROWS_WITH(bc.get_method("forward")(inputs), "is not defined");
+  ASSERT_THROWS_WITH_MESSAGE(
+      bc.get_method("forward")(inputs), "is not defined");
 }
 
 TEST(LiteInterpreterTest, SetState) {
@@ -849,6 +844,35 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
   AT_ASSERT(resd == refd);
+}
+
+TEST(LiteInterpreterTest, DuplicateSetState) {
+  Module m("M");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def __getstate__(self):
+      return self.foo + self.foo
+    def __setstate__(self, a):
+      self.foo = a
+    def forward(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+
+  Module b("B");
+  b.register_module("M0", m);
+  b.register_module("M1", m);
+  b.define(R"(
+    def forward(self, x):
+      return self.M0.forward(x) + self.M1.forward(x)
+  )");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  const auto methods = bc.get_methods();
+  const size_t expected_n = 3;
+  ASSERT_EQ(methods.size(), expected_n);
 }
 
 TEST(LiteInterpreterTest, ExtraFiles) {

@@ -128,6 +128,8 @@ namespace detail {
 
 GraphExecutor* getGradExecutor(Operation& op);
 
+GraphExecutor* getDifferentiableGraphOpExecutor(Operation& op);
+
 // for debugging information we expose a way to get the last actually
 // run graph. Previous approaches allowed querying the GraphExecutor
 // for what graph it would run in certain circumstances (graphFor), but

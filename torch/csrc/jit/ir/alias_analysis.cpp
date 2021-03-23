@@ -435,7 +435,7 @@ std::string AliasDb::toGraphviz() const {
   dot << toString();
   dot << "*/\n";
 
-  dot << "digraph fusion_ir {\n"
+  dot << "digraph alias_db {\n"
       << "  rankdir=LR\n"
       << "  node [shape=rect, color=gray];\n"
       << "  edge [color=black];\n";
@@ -555,8 +555,15 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
+    case prim::BroadcastMKLDNNTensors: {
+      makePointerTo(node->outputs().at(0), node->inputs().at(0));
+      makePointerTo(node->outputs().at(1), node->inputs().at(1));
+      return;
+    }
     // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:
+    case prim::MKLDNNGroup:
+    case prim::ConstantMKLDNNTensor:
     case prim::StaticSubgraph:
     case prim::Constant:
     case prim::AutogradZero:
@@ -1320,6 +1327,7 @@ class AliasDb::WorkingSet {
   // Add `n` to the working set
   void add(Node* n) {
     nodes_.push_back(n);
+    node_to_index_[n] = nodes_.size() - 1;
     for (const auto user : getUsersSameBlock(n)) {
       users_.insert(user);
     }
@@ -1399,8 +1407,8 @@ class AliasDb::WorkingSet {
     if (mover_ && users.count(mover_)) {
       return true;
     }
-    return std::any_of(nodes_.begin(), nodes_.end(), [&](Node* node) {
-      return users.count(node) != 0;
+    return std::any_of(users.begin(), users.end(), [&](Node* user) {
+      return node_to_index_.find(user) != node_to_index_.end();
     });
   }
 
@@ -1445,6 +1453,10 @@ class AliasDb::WorkingSet {
 
   const AliasDb& aliasDb_;
   std::vector<Node*> nodes_;
+  // Extra data structure for nodes for faster look up
+  // Since the tryMove method is used a lot, we want to
+  // make it as fast as possible.
+  std::unordered_map<Node*, int64_t> node_to_index_;
 
   // Mover dependencies. We track these separately since we may erase the mover
   // from the working set.

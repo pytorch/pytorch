@@ -126,6 +126,7 @@ def split(tensor, split_size_or_sections, dim=0):
         dim (int): dimension along which to split the tensor.
 
     Example::
+
         >>> a = torch.arange(10).reshape(5,2)
         >>> a
         tensor([[0, 1],
@@ -151,7 +152,7 @@ def split(tensor, split_size_or_sections, dim=0):
             split, (tensor,), tensor, split_size_or_sections, dim=dim)
     # Overwriting reason:
     # This dispatches to two ATen functions depending on the type of
-    # split_size_or_sections. The branching code is in tensor.py, which we
+    # split_size_or_sections. The branching code is in _tensor.py, which we
     # call here.
     return tensor.split(split_size_or_sections, dim)
 
@@ -935,8 +936,28 @@ unique_consecutive = boolean_dispatch(
     func_name='unique_consecutive')
 unique_consecutive.__doc__ = _unique_consecutive_impl.__doc__
 
+if TYPE_CHECKING:
+    pass
+    # There's no good way to use this type annotation without breaking JIT
+    # overloads. So leave untyped for mypy for now.
+else:
+    @overload  # noqa: 749
+    def tensordot(a, b, dims: int = 2, out: Optional[torch.Tensor] = None):  # noqa: 749
+        pass
 
-def tensordot(a, b, dims=2, out=None):
+    @overload  # noqa: 749
+    def tensordot(a, b, dims: Tuple[List[int], List[int]], out: Optional[torch.Tensor] = None):  # noqa: 749
+        pass
+
+    @overload  # noqa: 749
+    def tensordot(a, b, dims: List[List[int]], out: Optional[torch.Tensor] = None):  # noqa: 749
+        pass
+
+    @overload  # noqa: 749
+    def tensordot(a, b, dims: torch.Tensor, out: Optional[torch.Tensor] = None):  # noqa: 749
+        pass
+
+def tensordot(a, b, dims= 2, out: Optional[torch.Tensor] = None):  # noqa: 749
     r"""Returns a contraction of a and b over multiple dimensions.
 
     :attr:`tensordot` implements a generalized matrix product.
@@ -944,7 +965,7 @@ def tensordot(a, b, dims=2, out=None):
     Args:
       a (Tensor): Left tensor to contract
       b (Tensor): Right tensor to contract
-      dims (int or Tuple[List[int]] containing two lists): number of dimensions to
+      dims (int or Tuple[List[int], List[int]] or List[List[int]] containing two lists or Tensor): number of dimensions to
          contract or explicit lists of dimensions for :attr:`a` and
          :attr:`b` respectively
 
@@ -988,16 +1009,35 @@ def tensordot(a, b, dims=2, out=None):
     """
     if has_torch_function_variadic(a, b):
         return handle_torch_function(tensordot, (a, b), a, b, dims=dims)
-    if isinstance(dims, (list, tuple)) or \
-       (isinstance(dims, torch.Tensor) and dims.numel() > 1):
+
+    dims_a: List[int] = []
+    dims_b: List[int] = []
+
+    if isinstance(dims, (tuple, list)):
         dims_a, dims_b = dims
-    else:
-        if isinstance(dims, torch.Tensor):
-            dims = dims.item()
+
+    if isinstance(dims, torch.Tensor):
+        num_elements = dims.numel()
+        if num_elements > 1:
+            assert dims.size()[0] == 2
+            dims_a = torch.jit.annotate(List[int], dims[0].tolist())
+            dims_b = torch.jit.annotate(List[int], dims[1].tolist())
+        else:
+            dims_val = int(dims.item())
+            if dims_val < 0:
+                raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
+            dims_a = list(range(-dims_val, 0))
+            dims_b = list(range(dims_val))
+
+    if isinstance(dims, int):
         if dims < 0:
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
+
+    if len(dims_a) == 0 or len(dims_b) == 0:
+        raise RuntimeError(f"unsupported input to tensordot, got dims={dims}")
+
     if out is None:
         return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore
     else:
@@ -1012,8 +1052,8 @@ def cartesian_prod(*tensors):
 
     Returns:
         Tensor: A tensor equivalent to converting all the input tensors into lists,
-            do `itertools.product` on these lists, and finally convert the resulting list
-            into tensor.
+        do `itertools.product` on these lists, and finally convert the resulting list
+        into tensor.
 
     Example::
 
@@ -1043,8 +1083,8 @@ def block_diag(*tensors):
 
     Returns:
         Tensor: A 2 dimensional tensor with all the input tensors arranged in
-            order such that their upper left and lower right corners are
-            diagonally adjacent. All other elements are set to 0.
+        order such that their upper left and lower right corners are
+        diagonally adjacent. All other elements are set to 0.
 
     Example::
 
@@ -1136,6 +1176,7 @@ def atleast_1d(*tensors):
         output (Tensor or tuple of Tensors)
 
     Example::
+
         >>> x = torch.randn(2)
         >>> x
         tensor([1.4584, 0.7583])
@@ -1161,6 +1202,7 @@ def atleast_2d(*tensors):
     r"""
     Returns a 2-dimensional view of each input tensor with zero dimensions.
     Input tensors with two or more dimensions are returned as-is.
+
     Args:
         input (Tensor or list of Tensors)
 
@@ -1168,6 +1210,7 @@ def atleast_2d(*tensors):
         output (Tensor or tuple of Tensors)
 
     Example::
+
         >>> x = torch.tensor(1.)
         >>> x
         tensor(1.)
@@ -1195,6 +1238,7 @@ def atleast_3d(*tensors):
     r"""
     Returns a 3-dimensional view of each input tensor with zero dimensions.
     Input tensors with three or more dimensions are returned as-is.
+
     Args:
         input (Tensor or list of Tensors)
 
