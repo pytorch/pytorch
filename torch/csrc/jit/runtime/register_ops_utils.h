@@ -664,9 +664,9 @@ void listSetItem(Stack* stack);
 
 // Some complex unary ops (like abs, angle) return real valued output, but most
 // other unary ops return complex valued output. So, this macro is used in the
-// former case where we can explicitly pass complex_result_cast argument, which is
-// set to c10::complex<float> in the macro `DEFINE_UNARY_OP_WITH_COMPLEX` defined
-// below.
+// former case where we can explicitly pass complex_result_cast argument, which
+// is set to c10::complex<float> in the macro `DEFINE_UNARY_OP_WITH_COMPLEX`
+// defined below.
 #define DEFINE_UNARY_OP_WITH_COMPLEX_CAST(                                \
     aten_op,                                                              \
     op,                                                                   \
