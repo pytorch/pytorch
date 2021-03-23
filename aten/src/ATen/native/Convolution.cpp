@@ -1,11 +1,13 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/Pool.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 #include <ATen/Config.h>
 #include <c10/macros/Macros.h>
@@ -246,7 +248,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
       || input.size(0)*input.size(1)*input.size(2)*input.size(3) > 20480) // for some case, native is faster
       // OneDNN < 1.8.1 produce incorrect results in this case (see #50042)
       // TODO(VitalyFedyunin): Remove this patch after OneDNN 1.8.1 merged in
-      && !(groups == 24 && weight.size(0) == 24 && weight.size(1) == 1)
+      && !(groups > 0 && groups % 24 == 0 && weight.size(0) == groups && weight.size(1) == 1)
       );
 
 #endif
@@ -488,7 +490,7 @@ static void check_shape_forward(const at::Tensor& input,
              ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
              ", but got bias of size ", bias.sizes(), " instead");
 
-    for (int i = 2; i < k; ++i) {
+    for (const auto i : c10::irange(2, k)) {
       input_shape.push_back(input.size(i) + 2 * padding[i-2]);
       // log new kernel size considering dilation
       kernel_shape.push_back(dilation[i-2] * (weight_sizes[i]-1) + 1);
@@ -552,51 +554,176 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
 
 
 at::Tensor conv1d(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {0}, groups);
 }
 
 at::Tensor conv2d(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0}}, groups);
 }
 
 at::Tensor conv3d(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          false, {{0, 0, 0}}, groups);
 }
 
-at::Tensor conv_transpose1d(
+
+static Tensor convolution_same(
+    const Tensor &input, const Tensor &weight, const Tensor &bias,
+    IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
+
+  auto k = weight.dim();
+  auto dim = k - 2;
+  TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
+  auto weight_sizes = weight.sizes();
+  auto input_sizes = input.sizes();
+  TORCH_CHECK(k == input.dim(),
+              "Expected ", k, "-dimensional input for ",
+              k, "-dimensional weight", weight_sizes, ", but got ",
+              input.dim(), "-dimensional input of size ",
+              input.sizes(), " instead");
+  TORCH_CHECK(stride.size() == dim || stride.size() == 1,
+              "stride cannot broadcast to ", dim, " dimensions");
+  TORCH_CHECK(dilation.size() == dim || dilation.size() == 1,
+              "dilation cannot broadcast to ", dim, " dimensions");
+  for (int64_t i = 0; i < stride.size(); ++i) {
+    TORCH_CHECK(stride[i] == 1, "padding='same' is not supported for strided convolutions");
+  }
+
+  // Calculate the correct padding
+  DimVector padding_l, padding_r;
+  bool symmetric_padding = true;
+  for (int64_t i = 0; i < dim; ++i) {
+    auto s = stride.size() == 1 ? stride[0] : stride[i];
+    auto d = dilation.size() == 1 ? dilation[0] : dilation[i];
+    auto pad = pooling_same_mode_padding_lr(
+        input_sizes[i + 2], weight_sizes[i + 2], s, d);
+    padding_l.push_back(pad.first);
+    padding_r.push_back(pad.second);
+    if (pad.first != pad.second) {
+      symmetric_padding = false;
+    }
+  }
+
+  if (symmetric_padding) {
+    // All backends handle symmetric padding natively
+    DimVector output_padding(static_cast<size_t>(dim));
+    return native::convolution(input, weight, bias, stride, padding_l, dilation,
+                               false, output_padding, groups);
+  }
+
+  TORCH_WARN_ONCE("Using padding='same' with even kernel lengths and odd dilation may"
+                  " require a zero-padded copy of the input be created");
+  SmallVector<int64_t, kDimVectorStaticSize * 2> pad_nd(static_cast<size_t>(2 * dim));
+  for (int i = 0; i < dim; ++i) {
+    // Apply padding by the difference, leaving only a symmetric padding
+    auto delta_pad = padding_r[i] - padding_l[i];
+    auto pad_idx = 2 * (dim - 1 - i);  // F.pad goes from last dim to first
+    if (delta_pad > 0) {
+      pad_nd[pad_idx + 1] = delta_pad;
+    } else {
+      pad_nd[pad_idx] = delta_pad;
+      padding_l[i] = padding_r[i];
+    }
+  }
+  auto padded_input = at::constant_pad_nd(input, pad_nd, 0);
+  DimVector output_padding(static_cast<size_t>(dim));
+  return at::convolution(padded_input, weight, bias, stride, padding_l,
+                         dilation, false, output_padding, groups);
+}
+
+Tensor _convolution_mode(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    int64_t groups) {
+  if (padding == "same") {
+    return at::native::convolution_same(
+        input, weight, bias, stride, dilation, groups);
+  } else if (padding == "valid") {
+    const int64_t padding_[] = {0};
+    return at::native::convolution(
+        input, weight, bias, stride, padding_, dilation, false, padding_, groups);
+  }
+  TORCH_CHECK(false, "Invalid padding string: '", padding, "'");
+}
+
+at::Tensor conv1d(
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
+    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    int64_t groups) {
+  return at::_convolution_mode(
+      input, weight, bias, stride, std::move(padding), dilation, groups);
+}
+
+at::Tensor conv2d(
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
+    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    int64_t groups) {
+  return at::_convolution_mode(
+      input, weight, bias, stride, std::move(padding), dilation, groups);
+}
+
+at::Tensor conv3d(
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias,
+    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    int64_t groups) {
+  return at::_convolution_mode(
+      input, weight, bias, stride, std::move(padding), dilation, groups);
+}
+
+at::Tensor conv_transpose1d(
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
 }
 
 at::Tensor conv_transpose2d(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
 }
 
 at::Tensor conv_transpose3d(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef output_padding, int64_t groups, IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   return at::convolution(input, weight, bias, stride, padding, dilation,
                          true, output_padding, groups);
 }
 
 at::Tensor convolution(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   auto& ctx = at::globalContext();
   // See Note [Enabling Deterministic Operations]
   bool deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
@@ -606,17 +733,23 @@ at::Tensor convolution(
 }
 
 at::Tensor convolution_overrideable(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
 }
 
 at::Tensor _convolution(
-    const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
+    const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_r_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias_r = c10::value_or_else(bias_r_opt, [] {return Tensor();});
+
 
   const bool input_is_mkldnn = input_r.is_mkldnn();
   auto input = input_r;
@@ -832,20 +965,26 @@ at::Tensor _convolution(
 }
 
 at::Tensor _convolution(
-    const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
+    const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_r_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled)
 {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias_r = c10::value_or_else(bias_r_opt, [] {return Tensor();});
+
   return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN());
 }
 
 // A generic function for convolution implementations which don't
 // natively implement groups (e.g., not CuDNN).
 at::Tensor _convolution_nogroup(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
 
   ConvParams params;
   params.stride = stride.vec();
@@ -928,13 +1067,17 @@ static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {
   return result;
 }
 
-std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
-    const Tensor& ggI, const Tensor& ggW_r, const Tensor& ggb,
+std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::optional<Tensor>& ggI_opt, const c10::optional<Tensor>& ggW_r_opt, const c10::optional<Tensor>& ggb_opt,
     const Tensor& gO_r, const Tensor& weight_r, const Tensor& input,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32,
     std::array<bool, 3> output_mask) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& ggI = c10::value_or_else(ggI_opt, [] {return Tensor();});
+  const Tensor& ggW_r = c10::value_or_else(ggW_r_opt, [] {return Tensor();});
+  const Tensor& ggb = c10::value_or_else(ggb_opt, [] {return Tensor();});
+
 
   auto ggW = ggW_r;
   auto gO = gO_r;

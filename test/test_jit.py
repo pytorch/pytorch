@@ -19,7 +19,7 @@ from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
-from jit.test_freezing import TestFreezing, TestFrozenOptimizations  # noqa: F401
+from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_module_containers import TestModuleContainers  # noqa: F401
@@ -7374,7 +7374,7 @@ a")
 
         for op, tensor, const, swap_args in product(ops, tensors, consts, [True, False]):
             # FIXME: things like 2 / long_tensor are not implemented correctly
-            # Look in torch/tensor.py to see how pytorch implements it.
+            # Look in torch/_tensor.py to see how pytorch implements it.
             if op == '/' and tensor.data_ptr() == long_tensor.data_ptr():
                 continue
 
@@ -9283,6 +9283,47 @@ dedent """
         self.checkScript(torch_unique_consecutive, (None,))
         self.checkScript(torch_unique_consecutive, (0,))
 
+    def test_torch_functional_tensordot_int(self):
+        def tensordot_dims_int(a: torch.Tensor, b: torch.Tensor, dims: int):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(120.).reshape(2, 3, 4, 5)
+        b = torch.arange(840.).reshape(4, 5, 6, 7)
+        dims = 2
+        self.checkScript(tensordot_dims_int, (a, b, dims))
+
+    def test_torch_functional_tensordot_tensor(self):
+        def tensordot_dims_tensor(a: torch.Tensor, b: torch.Tensor, dims: torch.Tensor):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(120.).reshape(2, 3, 4, 5)
+        b = torch.arange(840.).reshape(4, 5, 6, 7)
+        dims = torch.Tensor([2])
+        self.checkScript(tensordot_dims_tensor, (a, b, dims))
+
+        a = torch.arange(60.).reshape(3, 4, 5)
+        b = torch.arange(24.).reshape(4, 3, 2)
+        dims = torch.tensor([[1, 0], [0, 1]], dtype=torch.long)
+        self.checkScript(tensordot_dims_tensor, (a, b, dims))
+
+    def test_torch_functional_tensordot_list(self):
+        def tensordot_dims_list(a: torch.Tensor, b: torch.Tensor, dims: List[List[int]]):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(60.).reshape(3, 4, 5)
+        b = torch.arange(24.).reshape(4, 3, 2)
+        dims = [[1, 0], [0, 1]]
+        self.checkScript(tensordot_dims_list, (a, b, dims))
+
+    def test_torch_functional_tensordot_tuple(self):
+        def tensordot_dims_tuple(a: torch.Tensor, b: torch.Tensor, dims: Tuple[List[int], List[int]]):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(60.).reshape(3, 4, 5)
+        b = torch.arange(24.).reshape(4, 3, 2)
+        dims = ([1, 0], [0, 1])
+        self.checkScript(tensordot_dims_tuple, (a, b, dims))
+
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -10755,6 +10796,36 @@ dedent """
                 return self.foo(x)
 
         self.checkModule(C(), (torch.tensor(1),))
+
+    def test_ellipsis_const_mid(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, Ellipsis, 0:4, 4:8].size()  # noqa T484
+
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_const_mid_select(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, Ellipsis, 4, 4, 4:8, 2].size()  # noqa T484
+
+        dummy = torch.zeros(8, 8, 8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_const_start(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[Ellipsis, 0:4, 4:8].size()  # noqa T484
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_const_end(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[0:4, 2, Ellipsis].size()  # noqa T484
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
 
     def test_ellipsis_mid(self):
         def ellipsize(x):
@@ -12320,7 +12391,7 @@ dedent """
                 cu = torch.jit.CompilationUnit(funcs_str)
                 f_script = cu.fn
                 f = scope['fn']
-                with self.maybeWarnsRegex(UserWarning, "floor_divide"):
+                with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
                     self.assertEqual(f_script(), f())
 
     def test_call_python_fn_from_script_fn(self):
@@ -16512,7 +16583,7 @@ for test in autograd_method_tests():
 # NB: There isn't much utility in running these tests for CUDA, as the kernels
 # are exercised in test_autograd.py, and the JIT tests intention is to test the
 # JIT infrastructure around it, not the kernels themselves
-instantiate_device_type_tests(TestJitGeneratedAutograd, globals(), except_for='cuda')
+instantiate_device_type_tests(TestJitGeneratedAutograd, globals(), only_for='cpu')
 
 for test in nn_functional_tests:
     add_nn_functional_test(*test)

@@ -143,7 +143,12 @@ def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
             setattr(to_module, item, t)
         to_module = t
 
-    setattr(to_module, field, from_obj)
+    # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
+    # So, we register it as a named buffer in the target module.
+    if isinstance(from_obj, torch.Tensor) and not isinstance(from_obj, torch.nn.Parameter):
+        to_module.register_buffer(field, from_obj)
+    else:
+        setattr(to_module, field, from_obj)
 
 class GraphModule(torch.nn.Module):
     """
@@ -240,12 +245,13 @@ class GraphModule(torch.nn.Module):
         return self._graph
 
     @graph.setter
-    def graph(self, g) -> None:
+    def graph(self, g : Graph) -> None:
         """
         Set the underlying ``Graph`` for this ``GraphModule``. This will internally
         recompile the ``GraphModule`` so that the generated ``forward()`` function
         corresponds to ``g``
         """
+        assert isinstance(g, Graph), f'Expected a Graph instance, but got {type(g)}'
         self._graph = g
         g.owning_module = self
         self.recompile()
@@ -314,7 +320,7 @@ class {module_name}(torch.nn.Module):
         """
         Adds the given submodule to ``self``.
 
-        This installs empty Modules where none exist yet if they are 
+        This installs empty Modules where none exist yet if they are
         subpaths of ``target``.
 
         Args:
@@ -401,7 +407,7 @@ class {module_name}(torch.nn.Module):
         true:
         1. It has children that are used
         2. Its forward is called directly via a ``call_module`` node
-        3. It has a non-Module attribute that is used from a 
+        3. It has a non-Module attribute that is used from a
         ``get_attr`` node
 
         This method can be called to clean up an ``nn.Module`` without
@@ -425,9 +431,9 @@ class {module_name}(torch.nn.Module):
                     return '.'.join([x, y] if y else [x])
 
                 # Progressively collect all the names of intermediate
-                # modules. For example, if we have the target 
-                # `foo.bar.baz`, we'll add `foo`, `foo.bar`, and 
-                # `foo.bar.baz` to the list. 
+                # modules. For example, if we have the target
+                # `foo.bar.baz`, we'll add `foo`, `foo.bar`, and
+                # `foo.bar.baz` to the list.
                 for path in itertools.accumulate(fullpath, join_fn):
                     used.append(path)
 

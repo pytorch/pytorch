@@ -361,9 +361,11 @@ Tensor _histc_cuda_template(
 
 namespace native {
 Tensor _bincount_cuda(
-    const Tensor& self,
-    const Tensor& weights,
+    const Tensor& self, const c10::optional<Tensor>& weights_opt,
     int64_t minlength) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weights = c10::value_or_else(weights_opt, [] {return Tensor();});
+
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_bincount_cuda");
@@ -379,8 +381,8 @@ Tensor _bincount_cuda(
 Tensor _histc_cuda(
     const Tensor& self,
     int64_t nbins,
-    Scalar min,
-    Scalar max) {
+    const Scalar& min,
+    const Scalar& max) {
   if (self.scalar_type() == ScalarType::Half) {
     AT_ERROR("HalfTensor is not supported");
   }
@@ -392,7 +394,7 @@ Tensor _histc_cuda(
   });
 }
 
-Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, Scalar min, Scalar max) {
+Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max) {
   auto ret = _histc_cuda(self, bins, min, max);
   result.resize_as_(ret);
   result.copy_(ret);

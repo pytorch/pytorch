@@ -165,72 +165,6 @@ Tensor _th_nonzero(const Tensor & self) {
     }
     return result;
 }
-Tensor & _th_index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Bool: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_copy_", false, DeviceType::CPU, ScalarType::Long);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 4, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            THBoolTensor_indexCopy(self_, dim, index_, source_);
-            break;
-        }
-        case ScalarType::Byte: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_copy_", false, DeviceType::CPU, ScalarType::Long);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 4, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            THByteTensor_indexCopy(self_, dim, index_, source_);
-            break;
-        }
-        case ScalarType::Char: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_copy_", false, DeviceType::CPU, ScalarType::Long);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 4, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            THCharTensor_indexCopy(self_, dim, index_, source_);
-            break;
-        }
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_copy_", false, DeviceType::CPU, ScalarType::Long);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 4, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            THDoubleTensor_indexCopy(self_, dim, index_, source_);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_copy_", false, DeviceType::CPU, ScalarType::Long);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 4, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            THFloatTensor_indexCopy(self_, dim, index_, source_);
-            break;
-        }
-        case ScalarType::Int: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_copy_", false, DeviceType::CPU, ScalarType::Long);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 4, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            THIntTensor_indexCopy(self_, dim, index_, source_);
-            break;
-        }
-        case ScalarType::Long: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_copy_", false, DeviceType::CPU, ScalarType::Long);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 4, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            THLongTensor_indexCopy(self_, dim, index_, source_);
-            break;
-        }
-        case ScalarType::Short: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_copy_", false, DeviceType::CPU, ScalarType::Long);
-            auto source_ = checked_dense_tensor_unwrap(source, "source", 4, "_th_index_copy_", false, DeviceType::CPU, dispatch_scalar_type);
-            THShortTensor_indexCopy(self_, dim, index_, source_);
-            break;
-        }
-        default:
-            AT_ERROR("_th_index_copy_ not supported on CPUType for ", dispatch_scalar_type);
-    }
-    return self;
-}
 Tensor & _th_put_(Tensor & self, const Tensor & index, const Tensor & source, bool accumulate) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -442,7 +376,7 @@ Tensor _th_std(const Tensor & self, bool unbiased) {
             AT_ERROR("_th_std not supported on CPUType for ", dispatch_scalar_type);
     }
 }
-Tensor & _th_renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+Tensor & _th_renorm_out(Tensor & result, const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -468,7 +402,7 @@ Tensor & _th_renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t 
     }
     return result;
 }
-Tensor _th_renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+Tensor _th_renorm(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto result_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CPU, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
@@ -493,7 +427,7 @@ Tensor _th_renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
     }
     return result;
 }
-Tensor & _th_renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+Tensor & _th_renorm_(Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -517,7 +451,7 @@ Tensor & _th_renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
     }
     return self;
 }
-Tensor & _th_histc_out(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor & _th_histc_out(Tensor & result, const Tensor & self, int64_t bins, const Scalar& min, const Scalar& max) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -543,7 +477,7 @@ Tensor & _th_histc_out(Tensor & result, const Tensor & self, int64_t bins, Scala
     }
     return result;
 }
-Tensor _th_histc(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+Tensor _th_histc(const Tensor & self, int64_t bins, const Scalar& min, const Scalar& max) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto result_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CPU, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
