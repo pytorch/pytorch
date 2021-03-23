@@ -623,8 +623,7 @@ class TestTyping(TestCase):
                 def __iter__(self) -> Iterator[Tuple]:
                     yield 0
 
-
-        class ValidDP1(IterDataPipe[Tuple[int, str]]):
+        class DP1(IterDataPipe[Tuple[int, str]]):
             r""" DataPipe with fixed type"""
             def __init__(self, length):
                 self.length = length
@@ -633,31 +632,29 @@ class TestTyping(TestCase):
                 for d in range(self.length):
                     yield d, str(d)
 
-        dp1 = ValidDP1(10)
-        self.assertEqual(ValidDP1.type, dp1.type)
+        dp1 = DP1(10)
+        self.assertEqual(DP1.type, dp1.type)
         # Fixed type share one type instance
-        self.assertEqual(id(ValidDP1.type), id(dp1.type))
-        dp2 = ValidDP1(5)
+        self.assertEqual(id(DP1.type), id(dp1.type))
+        dp2 = DP1(5)
         self.assertEqual(dp1.type, dp2.type)
         self.assertEqual(id(dp1.type), id(dp2.type))
 
-
-        class ValidDP2(IterDataPipe[T_co]):
+        class DP2(IterDataPipe[T_co]):
             r""" DataPipe without fixed type"""
             def __iter__(self) -> Iterator[T_co]:
                 for d in range(10):
                     yield d
 
-        dp1 = ValidDP2()
-        self.assertEqual(ValidDP2.type, dp1.type)
+        dp1 = DP2()
+        self.assertEqual(DP2.type, dp1.type)
         # DataPipe instance with non-fixed type has own type instance
-        self.assertNotEqual(id(ValidDP2.type), id(dp1.type))
-        dp2 = ValidDP2()
+        self.assertNotEqual(id(DP2.type), id(dp1.type))
+        dp2 = DP2()
         self.assertEqual(dp1.type, dp2.type)
         self.assertNotEqual(id(dp1.type), id(dp2.type))
 
-
-        class ValidDP3(IterDataPipe[Tuple[T_co, str]]):
+        class DP3(IterDataPipe[Tuple[T_co, str]]):
             r""" DataPipe without fixed type with __init__ function"""
             def __init__(self, datasource):
                 self.datasource = datasource
@@ -666,23 +663,39 @@ class TestTyping(TestCase):
                 for d in self.datasource:
                     yield d, str(d)
 
-        dp1 = ValidDP3(range(10))
-        self.assertEqual(ValidDP3.type, dp1.type)
+        dp1 = DP3(range(10))
+        self.assertEqual(DP3.type, dp1.type)
         # DataPipe instance with non-fixed type has own type instance
-        self.assertNotEqual(id(ValidDP3.type), id(dp1.type))
-        dp2 = ValidDP3(5)
+        self.assertNotEqual(id(DP3.type), id(dp1.type))
+        dp2 = DP3(5)
         self.assertEqual(dp1.type, dp2.type)
         self.assertNotEqual(id(dp1.type), id(dp2.type))
 
-
-        class ValidDP4(IterDataPipe):
+        class DP4(IterDataPipe):
             r""" DataPipe without annotation"""
             def __iter__(self):
                 raise NotImplementedError
 
-        dp = ValidDP4()
+        dp = DP4()
         self.assertTrue(dp.type.param == Any)
-        self.assertNotEqual(id(ValidDP4.type), id(dp.type))
+        self.assertNotEqual(id(DP4.type), id(dp.type))
+
+        class DP5(IterDataPipe):
+            r""" DataPipe with plain Iterator"""
+            def __iter__(self) -> Iterator:
+                raise NotImplementedError
+
+        class DP6(IterDataPipe[int]):
+            r""" DataPipe with plain Iterator"""
+            def __iter__(self) -> Iterator:
+                raise NotImplementedError
+
+        dp = DP5()
+        self.assertTrue(dp.type.param == Any)
+        self.assertNotEqual(id(DP5.type), id(dp.type))
+        dp = DP6()
+        self.assertTrue(dp.type.param == int)
+        self.assertNotEqual(id(DP6.type), id(dp.type))
 
 
 if __name__ == '__main__':

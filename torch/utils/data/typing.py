@@ -119,7 +119,7 @@ def _issubtype_with_constraints(variant, constraints):
         return all(_issubtype_with_constraints(v, constraints) for v in vs)
 
     # Variant is not TypeVar or Union
-    if hasattr(variant, '__origin__'):
+    if hasattr(variant, '__origin__') and variant.__origin__ is not None:
         v_origin = variant.__origin__
         v_args = variant.__args__
     else:
@@ -310,9 +310,12 @@ def _validate_iter(sub_cls):
             raise TypeError('No return annotation found for `__iter__` of {}'.format(sub_cls.__name__))
         if 'return' in hints:
             return_hint = hints['return']
-            if not hasattr(return_hint, '__origin__') or \
-                    (return_hint.__origin__ is not Iterator and
-                     return_hint.__origin__ is not collections.abc.Iterator):
+            # Plain Return Hint for Python 3.6
+            if return_hint is Iterator:
+                return
+            if not (hasattr(return_hint, '__origin__') and
+                    (return_hint.__origin__ is Iterator or
+                     return_hint.__origin__ is collections.abc.Iterator)):
                 raise TypeError('Expected Iterator as the return annotation for `__iter__` of {}'
                                 ', but found {}'.format(sub_cls.__name__, hints['return']))
             data_type = return_hint.__args__[0]
