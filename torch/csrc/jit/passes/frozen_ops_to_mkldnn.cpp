@@ -1,8 +1,10 @@
 #include <ATen/Utils.h>
 
 #include <ATen/Config.h>
+#include <ATen/core/interned_strings.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -12,23 +14,24 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
+#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
-
-#include <ATen/core/interned_strings.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
-#include <torch/csrc/jit/ir/constants.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
-#include <torch/csrc/jit/passes/peephole.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
+// clang-format off
+// moving ConvUtils include induces import cycle
+#include <ATen/native/ConvUtils.h>
+#include <algorithm>
+#include <memory>
+// clang-format on
 
 namespace torch {
 namespace jit {
+
+#if AT_MKLDNN_ENABLED()
 
 using Tensor = at::Tensor;
 
@@ -36,6 +39,170 @@ namespace {
 
 c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return AliasAnalysisKind::FROM_SCHEMA;
+}
+
+using ValueSet = std::unordered_set<Value*>;
+using ValueSetPtr = std::shared_ptr<std::unordered_set<Value*>>;
+
+Node* getLastUse(Value* v) {
+  auto last_use_node = v->node();
+  for (const auto& use : v->uses()) {
+    if (use.user->isAfter(last_use_node)) {
+      last_use_node = use.user;
+    }
+  }
+  return last_use_node;
+}
+
+void merge_sets(
+    std::unordered_map<Value*, ValueSetPtr>& alias_mapping,
+    Value* existing,
+    Value* new_v) {
+  if (alias_mapping[existing] == alias_mapping[new_v]) {
+    return;
+  }
+  auto existing_set = alias_mapping[existing];
+  auto set_to_remove = alias_mapping[new_v];
+  for (auto it = set_to_remove->begin(); it != set_to_remove->end(); it++) {
+    existing_set->insert(*it);
+    alias_mapping[*it] = existing_set;
+  }
+}
+
+// no uses of tensors in container types
+void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
+  if (type->cast<TensorType>()) {
+    return;
+  }
+  for (auto t : type->containedTypes()) {
+    TORCH_INTERNAL_ASSERT(!t->cast<TensorType>());
+  }
+}
+
+void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
+  // This function first calculates aliasing sets,
+  // then calculates the last node each aliasing set is alive for.
+  // Then we go through each node, if it's a node which has an equivalent
+  // inplace node and the aliasing set for its input is dead afer this node, we
+  // inplace it. Then we merge the aliasing sets for the input and output of the
+  // node and extend the liveness of the set. To inplace a node you need to
+  // prove device and dtype of the input and output are the same, which we've
+  // already done, and prove that the output size is the same as the input size,
+  // which is achieved by explicit Broadcast nodes (which we inserted for other
+  // reasons).
+  // The graphs here are simple subgraphs without uses of Tensors in
+  // containers (Lists, GetAttrs, etc)
+
+  // CALCULATE ALIASING SETS
+
+  auto aliasDb = torch::make_unique<AliasDb>(graph);
+
+  // map from Value to its Aliasing Set
+  std::unordered_map<Value*, ValueSetPtr> alias_mapping;
+  ValueSet set;
+  ValueSetPtr input_set = std::make_shared<ValueSet>(set);
+  for (Value* v : graph->inputs()) {
+    if (v->type()->cast<TensorType>()) {
+      input_set->insert(v);
+      alias_mapping[v] = input_set;
+    } else {
+      assertNonTensorTypeDoesNotContainTensors(v->type());
+    }
+  }
+
+  for (Node* n : graph->nodes()) {
+    for (Value* output : n->outputs()) {
+      if (!output->type()->cast<TensorType>()) {
+        assertNonTensorTypeDoesNotContainTensors(output->type());
+        continue;
+      }
+
+      std::unordered_set<Value*> new_set = {output};
+      alias_mapping[output] = std::make_shared<ValueSet>(new_set);
+      for (Value* input : n->inputs()) {
+        if (aliasDb->mayAlias(input, output)) {
+          merge_sets(alias_mapping, input, output);
+        }
+      }
+    }
+  }
+
+  // CALCULATE ALIASING SET LIVENESS
+
+  // map from aliased set -> last use of set
+  std::unordered_map<ValueSetPtr, Node*> set_liveness;
+  for (auto& set : alias_mapping) {
+    if (set_liveness.count(set.second)) {
+      continue;
+    }
+    Node* last = nullptr;
+    for (auto it = set.second->begin(); it != set.second->end(); it++) {
+      Value* v = *it;
+      auto k = v->node()->kind();
+      if (k == prim::Constant || k == prim::ConstantMKLDNNTensor ||
+          k == prim::Param) {
+        last = graph->return_node();
+        continue;
+      }
+
+      auto last_use = getLastUse(v);
+      if (!last || last_use->isAfter(last)) {
+        last = last_use;
+      }
+    }
+    set_liveness[set.second] = last;
+  }
+
+  // REUSING MEMORY BY REINPLACING NODES
+  std::vector<Node*> nodes_to_inplace;
+
+  auto add_to_inplace_set = [&](Node* node) {
+    // defer making the inplacing change because that would invalidate the old
+    // Node output Value*
+    nodes_to_inplace.push_back(node);
+    TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+    auto output_liveness_end =
+        set_liveness[alias_mapping[node->outputs().at(0)]];
+    merge_sets(alias_mapping, node->inputs().at(0), node->output());
+    set_liveness[alias_mapping[node->output()]] = output_liveness_end;
+  };
+
+  for (Node* node : graph->nodes()) {
+    auto k = node->kind();
+    if (k == aten::relu || k == aten::sigmoid || k == aten::dropout) {
+      if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
+        continue;
+      }
+      add_to_inplace_set(node);
+    } else if (k == aten::mul || k == aten::add) {
+      // the binary operators (add/mul) are commutative and only take tensor
+      // inputs, so we can inplace either the first or second input
+      int64_t reusable_value_index = -1;
+      for (size_t i = 0; i < 2; i++) {
+        TORCH_INTERNAL_ASSERT(node->inputs().at(i)->type()->cast<TensorType>());
+        if (!set_liveness[alias_mapping[node->inputs().at(i)]]->isAfter(node)) {
+          reusable_value_index = i;
+          break;
+        }
+      }
+
+      if (reusable_value_index == -1) {
+        continue;
+      }
+
+      if (reusable_value_index == 1) {
+        node->insertInput(0, node->inputs().at(1));
+        node->removeInput(2);
+      }
+      add_to_inplace_set(node);
+    }
+  }
+
+  for (Node* node : nodes_to_inplace) {
+    node->replaceWithNewSymbol(
+        Symbol::fromQualString(node->schema().name() + "_"));
+    node->destroy();
+  }
 }
 
 Operation BroadOp(const Node* node) {
@@ -48,13 +215,22 @@ Operation BroadOp(const Node* node) {
       push(stack, a, b);
     } else {
       auto out_size = at::infer_size(a_size, b_size);
+      size_t out_numel = out_size[0];
+      for (size_t i = 1, end = out_size.size(); i < end; ++i) {
+        out_numel = out_numel * out_size[i];
+      }
+      // mkldnn tensors only support reshape, not expand or view operators
       if (a_size.equals(out_size)) {
         push(stack, a);
+      } else if (out_numel == a.numel()) {
+        push(stack, a.reshape(out_size));
       } else {
         push(stack, a.to_dense().expand(out_size).to_mkldnn());
       }
       if (b_size.equals(out_size)) {
         push(stack, b);
+      } else if (out_numel == b.numel()) {
+        push(stack, b.reshape(out_size).to_mkldnn());
       } else {
         push(stack, b.to_dense().expand(out_size).to_mkldnn());
       }
@@ -76,6 +252,63 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
     return 0;
   };
 }
+
+// aten::convolution does a lot of precomputation and dispatching before
+// mkldnn_convolution is called. registering here we can directly invoke the op
+// and avoid overhead. avoiding dispatch overhead for other operators - relu,
+// add, etc - did not benchmark as speeding up models noticeably. the additional
+// overhead of `convolution` warrants the custom operator.
+jit::RegisterOperators reg_fut_ops({
+    jit::Operator(
+        // XXX: this follows the schema convention of conv2d/conv3d, not
+        // aten::mkldnn_convolution, which is different for some reason!
+        "prim::mkldnn_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
+        [](jit::Stack* stack) {
+          int64_t groups = pop(stack).toInt();
+          auto dilation = pop(stack).toIntVector();
+          auto padding = pop(stack).toIntVector();
+          auto stride = pop(stack).toIntVector();
+
+          Tensor bias;
+          IValue bias_ival = pop(stack);
+          if (!bias_ival.isNone()) {
+            bias = bias_ival.toTensor();
+          }
+          Tensor weight = pop(stack).toTensor();
+          Tensor input = pop(stack).toTensor();
+
+          at::AutoNonVariableTypeMode non_var_type_mode(true);
+          // aten::convolution takes care of 0 dim case before calls into
+          // backends
+          if (input.size(0) == 0) {
+            std::vector<int64_t> o = at::native::conv_output_size(
+                input.sizes(), weight.sizes(), padding, stride, dilation);
+            push(
+                stack,
+                at::native::empty_mkldnn(
+                    o,
+                    optTypeMetaToScalarType(input.options().dtype_opt()),
+                    input.options().layout_opt(),
+                    input.options().device_opt(),
+                    input.options().pinned_memory_opt()));
+            return;
+          }
+          // aten::convolution also checks dtype mismatches
+          TORCH_CHECK(
+              input.options().type_equal(weight.options()),
+              "Input type (",
+              input.toString(),
+              ") and weight type (",
+              weight.toString(),
+              ") should be the same");
+
+          push(
+              stack,
+              at::native::mkldnn_convolution(
+                  input, weight, bias, padding, stride, dilation, groups));
+        },
+        aliasAnalysisFromSchema()),
+});
 
 // This is registered as its own op instead of as prim::Constant bc it does not
 // serialize which is an invariant of prim::Constant
@@ -172,7 +405,7 @@ void moveWeightsToMKLDNN(Node* n) {
   }
 }
 
-void computeSubgraphInMKLDNN(Node* subgraph_node) {
+void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
   auto graph = subgraph_node->owningGraph();
   Value* none_value = nullptr;
   {
@@ -221,6 +454,15 @@ void computeSubgraphInMKLDNN(Node* subgraph_node) {
       node->insertBefore(body_node);
       body_node->replaceInput(0, node->outputs().at(0));
       body_node->replaceInput(1, node->outputs().at(1));
+    }
+
+    if (body_node->kind() == aten::conv2d ||
+        body_node->kind() == aten::conv3d) {
+      // this node doesnt handle string padding yet...
+      if (!body_node->namedInput("padding")->type()->cast<StringType>()) {
+        body_node->replaceWithNewSymbol(Symbol::prim("mkldnn_convolution"));
+        body_node->destroy();
+      }
     }
   }
 }
@@ -391,7 +633,7 @@ class MKLDNNSubgraphSlicer {
         return true;
     }
 
-    if (n->kind() == aten::add) {
+    if (n->kind() == aten::add || n->kind() == aten::mul) {
       // mkldnn doesn't currently support Tensor-Scalar add
       for (size_t i = 0; i < 2; i++) {
         if (!n->inputs().at(i)->type()->cast<TensorType>()) {
@@ -413,7 +655,8 @@ class MKLDNNSubgraphSlicer {
     while (curNode != *block_->nodes().end()) {
       auto nextNode = curNode->next();
       if (curNode->kind() == prim::MKLDNNGroup) {
-        computeSubgraphInMKLDNN(curNode);
+        ComputeSubgraphInMKLDNN(curNode);
+        InplaceMKLDNNSubgraph(SubgraphUtils::getSubgraph(curNode));
         SubgraphUtils::unmergeSubgraph(curNode);
       }
       curNode = nextNode;
@@ -501,7 +744,6 @@ bool containsMKLDNNGroup(Block* b) {
 } // namespace
 
 void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
-#if AT_MKLDNN_ENABLED()
   GRAPH_DUMP("Before convert frozen ops to mkldnn", graph);
   // TODO: replace conv1d with conv2d ?
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
@@ -527,10 +769,15 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
   } else {
     GRAPH_DUMP("No mkldnn compatible frozen nodes", graph);
   }
-#else
-  GRAPH_DUMP("MKLDNN Not enabled", graph);
-#endif
 }
+
+#else
+
+void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("MKLDNN Not enabled", graph);
+}
+
+#endif
 
 } // namespace jit
 } // namespace torch
