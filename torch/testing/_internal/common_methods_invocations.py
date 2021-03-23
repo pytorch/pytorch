@@ -1672,19 +1672,19 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
 
     def _samples_with_alpha_helper(args, alphas, filter_fn=lambda arg_alpha: True):
         filtered_product = filter(filter_fn, product(args, alphas))  # type: ignore
-        return (SampleInput(arg, kwargs=dict(alpha=alpha))
-                for arg, alpha in filtered_product)  # type: ignore
+        return (SampleInput(input, args=(arg,), kwargs=dict(alpha=alpha))
+                for (input, arg), alpha in filtered_product)  # type: ignore
 
     int_alpha, float_alpha, complex_alpha = 2, 0.1, 1 + 0.6j
 
     if variant == 'tensor':
         samples = (  # type: ignore
-            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S, S)))),
-            SampleInput((_make_tensor_helper((S, S)), _make_tensor_helper((S,)))),
-            SampleInput((_make_tensor_helper((S,)), _make_tensor_helper((S, S)))),
-            SampleInput((_make_tensor_helper(()), _make_tensor_helper(()))),
-            SampleInput((_make_tensor_helper(()), _make_tensor_helper((S,)))),
-            SampleInput((_make_tensor_helper((S,)), _make_tensor_helper(()))),
+            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)),)),
+            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)),)),
+            SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper((S, S)),)),
+            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper(()),)),
+            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper((S,)),)),
+            SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper(()),)),
         )
 
         if dtype.is_complex:
@@ -1700,12 +1700,12 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
         samples += tuple(_samples_with_alpha_helper(args, alphas))  # type: ignore
     elif variant == 'scalar':
         # Scalar Other
-        samples = (SampleInput((_make_tensor_helper((S, S)), 0.5)),
-                   SampleInput((_make_tensor_helper(()), 0.5)),
-                   SampleInput((_make_tensor_helper((S, S)), 1.5j)),
-                   SampleInput((_make_tensor_helper(()), 1.5j)),
-                   SampleInput((_make_tensor_helper((S, S)), 0.4 + 1.2j)),
-                   SampleInput((_make_tensor_helper(()), 1.2 + 1.76j)))  # type: ignore
+        samples = (SampleInput(_make_tensor_helper((S, S)), args=(0.5,)),
+                   SampleInput(_make_tensor_helper(()), args=(0.5,)),
+                   SampleInput(_make_tensor_helper((S, S)), args=(1.5j,)),
+                   SampleInput(_make_tensor_helper(()), args=(1.5j,)),
+                   SampleInput(_make_tensor_helper((S, S)), args=(0.4 + 1.2j,)),
+                   SampleInput(_make_tensor_helper(()), args=(1.2 + 1.76j,)))  # type: ignore
 
         scalar_args = [(_make_tensor_helper((S, S)), 0.5), (_make_tensor_helper(()), 0.5),
                        (_make_tensor_helper((S, S)), 2.7j), (_make_tensor_helper(()), 2.7j),
@@ -2931,7 +2931,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
            variant_test_name='rsub_tensor',
            supports_out=False,
-           test_inplace_grad=False,
+           supports_inplace_autograd=False,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
                # JIT doesn't understand complex literals
@@ -2943,7 +2943,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
            variant_test_name='rsub_scalar',
            supports_out=False,
-           test_inplace_grad=False,
+           supports_inplace_autograd=False,
            sample_inputs_func=partial(sample_inputs_rsub, variant='scalar'),
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
