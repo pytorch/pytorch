@@ -7062,10 +7062,7 @@ class TestONNXRuntime(unittest.TestCase):
                 super().__init__()
                 self.weights = InnerModule2.get_embedding(embedding_dim)
                 self.register_buffer("_float_tensor", torch.FloatTensor(1))
-<<<<<<< HEAD
-=======
                 self.const = 2
->>>>>>> 15a3f9acafdf4593f43a5e6929993835967ad36e
 
             @staticmethod
             def get_embedding(embedding_dim: int):

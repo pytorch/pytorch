@@ -353,27 +353,25 @@ void PrepareCopyForONNX(Node* node) {
     // Remove aten::copy_, and replace it with index_put.
     // 1. create an empty listConstruct node as indices input for index_put.
     // 2. cast expanded_value, so it has the same type as node->input[0].
-    // 3. create index_put node.
 
     // Tracing aten::copy_ broadcasts the rhs values.
-    // 4. Apply broadcasting for scripting.
+    // 3. Apply broadcasting for scripting.
     WithInsertPoint guard(node);
     auto graph = node->owningGraph();
     auto dummy_list =
         graph->insertNode(graph->createList(OptionalType::ofTensor(), {}))
             ->output();
 
-    auto input1 =
-        graph->insert(aten::type_as, {node->input(1), node->input(0)});
     auto expanded_value =
-        graph->insert(aten::expand_as, {input1, node->input(0)});
+        graph->insert(aten::expand_as, {node->input(1), node->input(0)});
     expanded_value->node()->setSourceRange(node->sourceRange());
-    expanded_value->copyMetadata(input1);
+    expanded_value->copyMetadata(node->input(1));
     auto index_put = graph->insert(
         aten::index_put_,
         {node->input(0), dummy_list, expanded_value, node->input(2)});
     index_put->node()->setSourceRange(node->sourceRange());
-    index_put->copyMetadata(node->output());
+    index_put->copyMetadata(node->input(1));
+
     node->output()->replaceAllUsesWith(index_put);
 
     PrepareIndexPutForONNX(index_put->node());
