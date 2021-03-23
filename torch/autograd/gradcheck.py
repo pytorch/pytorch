@@ -23,34 +23,33 @@ def is_float_or_complex_tensor(obj):
     return is_tensor_like(obj) and (obj.is_floating_point() or obj.is_complex())
 
 
-def make_jacobians(tensors, tensors_is_inputs, dim=None, dtype=None, device=None):
-    """make_jacobians makes zero-filled tensors from inputs/outputs to be filled row-by-row
-     or col-by-col. If tensors is inputs, for each tensor, returns a new zero-filled tensor
-    with height of `t.numel` and width of `dim`. Otherwise, the new tensor will have height
-     of `dim` and width of `t.numel`.
+def make_jacobians_with_inputs(input_tensors: Tuple, dim=None):
+    """makes zero-filled tensors from inputs. If `dim` is not None, for each tensor in
+    `input_tensors`, returns a new zero-filled tensor with height of `t.numel` and width
+    of `dim`. Otherwise, for each tensor, returns a 1-d tensor with size `(t.numel,)`.
+    Each new tensor will be strided and have the same dtype and device as those of the
+    corresponding input"""
+    out: List[torch.Tensor] = []
+    for t in input_tensors:
+        if is_float_or_complex_tensor(t) and t.requires_grad:
+            if dim is None:
+                out.append(t.new_zeros((t.nelement(),), layout=torch.strided))
+            else:
+                out.append(t.new_zeros((t.nelement(), dim), layout=torch.strided))
+    return tuple(out)
 
-    NOTE: this is actually the *tranpose* of the jacobian. There is no particular reason we
-    favor the transpose. A possible todo is to "untranspose" what this fn generates.
 
-    If dim is None, the returned zero-filled tensor will be 1-d and have size (t.numel,).
-    You can think of this as representing a single row or column of the entire jacobian.
-    This is to be used by the fast version of gradcheck.
+def make_jacobians_with_outputs(output_tensors: Tuple, dtype=None, device=None, dim=None):
+    """makes zero-filled tensors from outputs. If `dim` is not None, for each tensor in
+    `output_tensors`, returns a new zero-filled tensor with height of `dim` and width of
+    `t.numel`. Otherwise, for each tensor, returns a 1-d tensor with size (t.numel,).
     """
     out: List[torch.Tensor] = []
-    assert isinstance(tensors, tuple)
-
-    assert not tensors_is_inputs or (dtype is None and device is None), \
-        "as tensors already has dtype/device information, we should not pass it in"
-    assert tensors_is_inputs or (dtype is not None and device is not None), \
-        "dtype and device of jacobian should be the same as that of the input"
-
     options = {"dtype": dtype, "device": device, "layout": torch.strided}
-    for t in tensors:
-        if is_float_or_complex_tensor(t) and (t.requires_grad or not tensors_is_inputs):
+    for t in output_tensors:
+        if is_float_or_complex_tensor(t):
             if dim is None:
                 out.append(t.new_zeros((t.nelement(),), **options))
-            elif tensors_is_inputs:
-                out.append(t.new_zeros((t.nelement(), dim), **options))
             else:
                 out.append(t.new_zeros((dim, t.nelement()), **options))
     return tuple(out)
@@ -176,7 +175,7 @@ def get_numerical_jacobian_helper(fn, input, inputs, outputs, eps, grad_out):
     tensors, where N is the number of outputs. Input must require grad.
     """
     assert input.requires_grad
-    jacobians = make_jacobians(outputs, False, input.numel(), input.dtype, input.device)
+    jacobians = make_jacobians_with_outputs(outputs, input.dtype, input.device, input.numel())
 
     for x, idx, d_idx in iter_tensor(input):
         # compute gradient only works for pure real or pure imaginary delta
@@ -219,7 +218,7 @@ def check_jacobians_equal(j1, j2, atol):
 
 
 def combine_jacobian_rows(jacobians_rows, inputs, output):
-    out_jacobians = make_jacobians(inputs, True, output.numel())
+    out_jacobians = make_jacobians_with_inputs(inputs, output.numel())
     diff_input_list = list(iter_tensors(inputs, True))
     correct_grad_sizes = True
     correct_grad_types = True
