@@ -41,18 +41,18 @@ bool isDefined(const c10::optional<Tensor>& t) {
 }
 
 bool isFwGradDefined(const c10::optional<Tensor>& t) {
-  return t.has_value() && t->defined() && t->fw_grad(/*level */ 0).defined();
+  return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
 }
 
-Tensor toLegacyTensor(const c10::optional<Tensor>& t) {
+Tensor toNonOptTensor(const c10::optional<Tensor>& t) {
   return t.has_value() ? *t : Tensor();
 }
 
-Tensor toLegacyFwGrad(const c10::optional<Tensor>& t) {
-  return (t.has_value() && t->defined()) ? t->fw_grad(/*level */ 0) : Tensor();
+Tensor toNonOptFwGrad(const c10::optional<Tensor>& t) {
+  return (t.has_value() && t->defined()) ? t->_fw_grad(/*level */ 0) : Tensor();
 }
 
-Tensor toLegacyPrimal(const c10::optional<Tensor>& t) {
+Tensor toNonOptPrimal(const c10::optional<Tensor>& t) {
   return (t.has_value() && t->defined()) ? t->_fw_primal(/*level */ 0) : Tensor();
 }
 
@@ -212,6 +212,53 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   } else {
     self_scaled = self * self.abs().pow(p - 2);
     scale_v = grad / norm.pow(p - 1);
+  }
+  // handle case at 0 where we return a subgradient containing 0
+  scale_v.masked_fill_(norm == 0, 0);
+  return self_scaled * scale_v;
+}
+
+Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const optional<Scalar>& opt_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
+  size_t ndim = self.sizes().size();
+  auto ord = opt_ord.value_or(2.0).toDouble();
+  auto dim = opt_dim.value_or(IntArrayRef({}));
+  Tensor self_scaled;
+  Tensor scale_v;
+
+  if (!keepdim && self.dim() != 0) {
+    grad = unsqueeze_multiple(grad, dim, ndim);
+    norm = unsqueeze_multiple(norm, dim, ndim);
+  }
+
+  if (ord == 0.0) {
+    return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  } else if (ord == 1.0) {
+    return self.sgn() * grad;
+  } else if (ord == 2.0) {
+    self_scaled = self;
+    scale_v = grad / norm;
+  } else if (std::isinf(ord)) {
+    // Find the elements from `self` that equal the norm result
+    Tensor is_equal_to_norm;
+
+    is_equal_to_norm = (self.abs() == norm);
+
+    // Need to explicitly check for nan in the input and output since `nan ==
+    // nan` is false
+    is_equal_to_norm = is_equal_to_norm.logical_or_(self.isnan().logical_and_(norm.isnan())).type_as(self);
+
+    self_scaled = self.sgn() * is_equal_to_norm;
+    Tensor nb_max = is_equal_to_norm.count_nonzero(dim);
+    if (self.dim() != 0) {
+      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
+    }
+    scale_v = grad / nb_max;
+  } else if (ord < 2.0) {
+    self_scaled = self.sgn() * self.abs().pow(ord - 1);
+    scale_v = grad / norm.pow(ord - 1);
+  } else {
+    self_scaled = self * self.abs().pow(ord - 2);
+    scale_v = grad / norm.pow(ord - 1);
   }
   // handle case at 0 where we return a subgradient containing 0
   scale_v.masked_fill_(norm == 0, 0);
@@ -419,7 +466,7 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
   Tensor exclusive_reverse_nocp = at::cat({ones, narrow_reverse}, dim);
   Tensor exclusive_reverse = reverse_dim(exclusive_reverse_nocp.cumprod(dim), dim);
 
-  return grad * (exclusive_normal * exclusive_reverse);
+  return grad * (exclusive_normal * exclusive_reverse).conj();
 }
 
 // note that the gradient for prod is equivalent to:
@@ -435,7 +482,7 @@ Tensor prod_backward(const Tensor& grad, const Tensor& input, const Tensor& resu
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
-    return (grad * result) / input;
+    return grad * (result / input).conj();
   } else if (zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
@@ -457,7 +504,7 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
   Tensor slice_zero_count = zero_mask.sum(dim, true);
   int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
   if (total_zeros == 0) {
-    return (grad * result) / input;
+    return grad * (result / input).conj();
   } else {
     return prod_safe_zeros_backward(grad, input, dim);
   }
@@ -2739,11 +2786,11 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
   // for half inputs, save_mean, save_invstd are float (ideally, we would cast
   // everything else, but not now)
-  auto mu = unsqueeze_dim1(training ? toLegacyTensor(save_mean).to(input.scalar_type()) : toLegacyTensor(running_mean), input);
+  auto mu = unsqueeze_dim1(training ? toNonOptTensor(save_mean).to(input.scalar_type()) : toNonOptTensor(running_mean), input);
   auto input_sub_mu = input - mu;
   auto sigma2_eps_neg_1_2 = unsqueeze_dim1(
-      training ? toLegacyTensor(save_invstd).to(input.scalar_type())
-               : toLegacyTensor(running_var).add(Scalar(eps)).pow(-0.5),
+      training ? toNonOptTensor(save_invstd).to(input.scalar_type())
+               : toNonOptTensor(running_var).add(Scalar(eps)).pow(-0.5),
       input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
@@ -2922,10 +2969,10 @@ infinitely_differentiable_native_layer_norm_backward(
   if (grad_input_mask[1] && dY.defined()) {
     dgamma = (dY_tensor * (X_tensor - mean_tensor) * rstd_tensor)
                  .sum(0)
-                 .reshape_as(toLegacyTensor(gamma));
+                 .reshape_as(toNonOptTensor(gamma));
   }
   if (grad_input_mask[2] && dY.defined()) {
-    dbeta = dY_tensor.sum(0).reshape_as(toLegacyTensor(gamma));
+    dbeta = dY_tensor.sum(0).reshape_as(toNonOptTensor(gamma));
   }
 
   return std::make_tuple(dX, dgamma, dbeta);
@@ -3011,10 +3058,10 @@ infinitely_differentiable_native_group_norm_backward(
     }
   }
   if (grad_input_mask[1] && dY.defined()) {
-    dgamma = ((ds - db * mean_tensor) * rstd_tensor).sum(0).reshape_as(toLegacyTensor(gamma));
+    dgamma = ((ds - db * mean_tensor) * rstd_tensor).sum(0).reshape_as(toNonOptTensor(gamma));
   }
   if (grad_input_mask[2] && dY.defined()) {
-    dbeta = db.sum(0).reshape_as(toLegacyTensor(gamma));
+    dbeta = db.sum(0).reshape_as(toNonOptTensor(gamma));
   }
 
   return std::make_tuple(dX, dgamma, dbeta);
@@ -3094,6 +3141,105 @@ bool any_variable_defined(variable_list& variables) {
     }
   }
   return false;
+}
+
+std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& input, const Tensor& tau) {
+  if (!grad.defined()) {
+    return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
+  }
+
+  // LAPACK's orgqr operation computes a product of Householder matrices.
+  // Each Householder matrix is stored using Householder vectors (columns of 'input') and its scaling factors (scalars of 'tau')
+  // An explicit Householder matrix in code is like this: H_i = eye(input.shape[-1]) - tau[i] * outer(input[:, i], input[:, i])
+  // See "Representation of Orthogonal or Unitary Matrices": https://www.netlib.org/lapack/lug/node128.html
+
+  // In Python code the orgqr operation can be implemented as following:
+  // result = torch.eye(input.shape[-2])
+  // for j in range(tau.shape[-1]):
+  //     v = A[:, j]
+  //     tauj = tau[j]
+  //     v1, v2 = v, v
+  //     result1, result2 = result, result
+  //     v3 = torch.outer(v1, v2)
+  //     v4 = tau[j] * v3
+  //     v5 = result1 @ v4
+  //     result = result2 - v5
+
+  // Differentiating the Python implementation line-by-line gives (sequence of assignments on the right inside the for loop should be applied in reverse order):
+  // result = torch.eye(input.shape[-2])       |  d_input = torch.zeros_like(input)
+  // for j in range(tau.shape[-1]):            |  for j in reversed(range(tau.shape[-1])):
+  //     v = input[:, j]                       |      d_input[:, j] += d_v
+  //     tauj = tau[j]                         |      d_tau[j] += d_tauj.sum(-1).sum(-1)
+  //     v1, v2 = v, v                         |      d_v = d_v1 + d_v2
+  //     result1, result2 = result, result     |      d_result = d_result1 + d_result2
+  //     v3 = torch.outer(v1, v2)              |      d_v1, d_v2 = d_v3 @ v2, v1 @ d_v3
+  //     v4 = tauj * v3                        |      d_tauj, d_v3 = d_v4 * v3, dv4 * tauj
+  //     v5 = result1 @ v4                     |      d_result1, d_v4 = d_v5 @ v4.T, result1.T @ d_v5
+  //     result = result2 - v5                 |      d_result2, d_v5 = d_result, -d_result
+
+  // in order to support rectangular input we need to expand 'input' and 'd_result' to square matrices
+  auto square_shape = input.sizes().vec();
+  square_shape.back() = input.size(-2);
+
+  auto input_ = at::zeros(square_shape, input.options());
+
+  using at::indexing::Slice;
+  using at::indexing::None;
+  input_.index_put_({"...", Slice(), Slice(None, input.size(-1))}, input); // input_[..., :, :input.shape[-1]] = input
+
+  // make sure that all elements of Householder vectors including 0's and 1's are stored explicitly
+  // LAPACK assumes implicitly that the diagonal is filled with ones and the upper triangle is zero
+  input_.tril_(-1);
+  input_.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+
+  auto d_input = at::zeros_like(input);
+  auto d_tau = at::zeros_like(tau);
+
+  auto d_result = at::zeros(square_shape, grad.options());
+  d_result.index_put_({"...", Slice(), Slice(None, input.size(-1))}, grad); // d_result[..., :, :input.shape[-1]] = grad
+
+  auto start_j = tau.size(-1) - 1;
+  for (int64_t j = start_j; j >= 0; j--) {
+    auto v = input_.index({"...", Slice(), j});
+    auto v1 = v, v2 = v;
+
+    // we need to recompute input[j] * at::outer(v, v)
+    auto tau_unsqueezed = tau.index({"...", j}).unsqueeze(-1);  // tau[..., j][:, None]
+    auto tau_unsqueezed2 = tau_unsqueezed.unsqueeze(-1);  // tau[..., j][:, None, None]
+    auto v3 = v1.unsqueeze(-1) * v2.conj().unsqueeze(-2);  // batch outer product, at::outer doesn't work for batched input
+    auto v4 = tau_unsqueezed2 * v3;
+
+    // we don't have an access to the intermediate results of the product of Householder matrices
+    // so we need to recompute orgqr(input, tau[..., :j])
+    auto result_prev = at::orgqr(input_, tau.index({"...", Slice(None, j)}));
+
+    // now the actual derivative computation
+    auto d_result2 = d_result, d_v5 = -d_result;
+
+    auto d_result1 = at::matmul(d_v5, v4.conj().transpose(-2, -1));
+    // TODO: at::ormqr could be used here for matrix multiplication of Householder matrices with a matrix
+    // d_v4 = ormqr(input, tau[..., :j], d_v5, left=True, transpose=True)
+    // it would be more efficient, but then gradgradcheck wouldn't pass because derivative computation for ormqr is not implemented yet
+    auto d_v4 = at::matmul(result_prev.conj().transpose(-2, -1), d_v5);
+
+    auto d_tauj = d_v4 * v3.conj();
+    auto d_v3 = d_v4 * tau_unsqueezed2.conj();
+
+    auto d_v1 = at::matmul(d_v3, v2.unsqueeze(-1));
+    auto d_v2 = at::matmul(v1.conj().unsqueeze(-2), d_v3);
+
+    d_result = d_result1 + d_result2;
+    auto d_v = d_v1.squeeze(-1) + d_v2.conj().squeeze(-2);
+
+    d_input.index({"...", Slice(), j}).add_(d_v);
+    d_tau.index({"...", j}).add_(d_tauj.sum(-1).sum(-1));
+  }
+
+  // orgqr assumes implicitly that the diagonal is filled with ones and the upper triangle is zero
+  // but we didn't take this into account in the above code
+  d_input = d_input.tril(-1);
+
+  return std::tuple<Tensor, Tensor>(d_input, d_tau);
 }
 
 std::tuple<Tensor, Tensor> polar_backward(
