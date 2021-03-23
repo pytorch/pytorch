@@ -558,7 +558,11 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   void setErrorInternal(
       std::exception_ptr eptr,
       std::unique_lock<std::mutex>& lock) {
-    AT_ASSERT(!completed());
+    TORCH_CHECK(
+        !eptr_,
+        "Error already set on the Future: ",
+        tryRetrieveErrorMessageInternal(eptr_));
+    TORCH_INTERNAL_ASSERT(!completed(), "Future is already marked completed");
     completed_ = true;
     eptr_ = std::move(eptr);
 
