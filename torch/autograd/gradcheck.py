@@ -659,11 +659,11 @@ def slow_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
                                                              numerical_from_imag_grad_out[i][j], i, j,
                                                              "Gradients failed to compare equal for grad output = 1j. "))
                 if inp.is_complex():  # C -> R, C -> C
-                    if not torch.allclose(a, n, atol, rtol):
+                    if not torch.allclose(a, n, rtol, atol):
                         return fail_test(get_notallclose_msg(a, n, i, j,
                                                              "Gradients failed to compare equal for grad output = 1. "))
                 else:                 # R -> R, R -> C
-                    if not torch.allclose(a, n, atol, rtol):
+                    if not torch.allclose(a, n, rtol, atol):
                         return fail_test(get_notallclose_msg(a, n, i, j))
     return True
 
