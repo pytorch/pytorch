@@ -269,8 +269,12 @@ class ProcessGroup : public torch::CustomClassHolder {
 
   virtual void monitoredBarrier(
       const BarrierOptions& opts = BarrierOptions()) {
+    auto backendName = getBackendName();
     throw std::runtime_error(
-        "ProcessGroup does not support monitoredBarrier, only Gloo process group supports monitored barrier.");
+        c10::str("ProcessGroup ",
+        backendName,
+        " does not support monitoredBarrier, only GLOO supports monitored barrier.")
+    );
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> send(

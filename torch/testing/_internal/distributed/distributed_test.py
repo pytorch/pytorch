@@ -5176,5 +5176,6 @@ class DistributedTest:
                 return
 
             # Rank 0 should report that rank 1 timed out.
+            monitored_barrier_timeout_seconds = 2
             with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
-                gloo_pg.monitored_barrier(2)
+                gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds)

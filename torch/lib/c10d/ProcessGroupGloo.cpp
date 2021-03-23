@@ -120,8 +120,11 @@ std::chrono::milliseconds getRemainingTime(
   auto elapsedTime = std::chrono::steady_clock::now() - startTime;
   auto remainingMillis = timeout -
       std::chrono::duration_cast<std::chrono::milliseconds>(elapsedTime);
-  auto remaining = std::max(static_cast<long>(remainingMillis.count()), static_cast<long>(1));
-  return std::chrono::milliseconds(remaining);
+  const int kMinTimeThresh = 1;
+  std::chrono::milliseconds remaining = remainingMillis.count() < kMinTimeThresh
+      ? std::chrono::milliseconds(kMinTimeThresh)
+      : remainingMillis;
+  return remaining;
 }
 
 // Wrap c10d store as Gloo store
@@ -2708,11 +2711,11 @@ void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
           c10::intrusive_ptr<ProcessGroup::Work>>>
       works;
   // Kick off all work
-  for (int rank = 1; rank < worldSize; ++rank) {
-    auto recvWork = recv(commTensor, rank, t1);
-    auto sendWork = send(commTensor, rank, t2);
+  for (int dstRank = 1; dstRank < worldSize; ++dstRank) {
+    auto recvWork = recv(commTensor, dstRank, t1);
+    auto sendWork = send(commTensor, dstRank, t2);
     works.insert(
-        {rank, std::make_tuple(std::move(recvWork), std::move(sendWork))});
+        {dstRank, std::make_tuple(std::move(recvWork), std::move(sendWork))});
   }
 
   // Wait for send/recv from all ranks
