@@ -96,34 +96,6 @@ void div_trunc_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-namespace{
-
-template<typename scalar_t>
-scalar_t fp16_from_bits(uint16_t w) {
-    union {
-      uint32_t as_bits;
-      scalar_t as_value;
-    } fp16 = {w};
-    return fp16.as_value;
-}
-
-template<typename scalar_t>
-uint32_t fp16_to_bits(scalar_t f) {
-    union {
-      scalar_t as_value;
-      uint16_t as_bits;
-    } fp16 = {f};
-    return fp16.as_bits;
-}
-
-template<typename scalar_t>
-scalar_t copysignfp16(scalar_t x, scalar_t y){
-  return fp16_from_bits<scalar_t>(
-    (fp16_to_bits(x) & 0x7fffu) | (fp16_to_bits(y) & 0x8000u));
-}
-
-}// namespace
-
 void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   // See NOTE: [Floor Division in Python]
   const auto dtype = iter.common_dtype();
