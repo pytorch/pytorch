@@ -1513,7 +1513,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case DICT_CONSTRUCT: {
-            auto type = frame.function->type_table_[inst.X]->expect<DictType>();
+            const auto& type =
+                frame.function->type_table_[inst.X]->expectRef<DictType>();
             dictConstruct(stack, type, inst.N);
             ++frame.pc;
           } break;
@@ -1561,7 +1562,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto range = node->sourceRange().source();
             if (range->filename()) {
               drop(stack, 1);
-              const auto msg = pop(stack).toStringRef();
+              const auto& msg = stack.back().toStringRef();
               if (need_warn) {
                 auto line = range->starting_line_no() +
                     range->lineno_for_offset(node->sourceRange().start());
@@ -1572,11 +1573,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 // will print the exception as configured.
                 c10::Warning::warn(location, msg, /*verbatim=*/true);
               }
+              stack.pop_back();
             } else {
-              const auto msg = pop(stack).toStringRef();
+              const auto& msg = stack.back().toStringRef();
               if (need_warn) {
                 TORCH_WARN(msg);
               }
+              stack.pop_back();
             }
             ++frame.pc;
           } break;
