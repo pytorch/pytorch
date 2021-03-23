@@ -793,6 +793,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.scatter: lambda input, dim, index, src: -1,
         torch.scatter_add: lambda input, dim, index, src: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
+        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.selu: lambda input, inplace=False: -1,
         torch.sigmoid: lambda input, out=None: -1,
