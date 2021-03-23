@@ -331,6 +331,7 @@ jobs:
           name: Install VS2019
           command: |
               powershell .circleci/scripts/vs_install.ps1
+      - run:
           name: Install Cuda
           no_output_timeout: 30m
           command: |
