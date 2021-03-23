@@ -484,7 +484,8 @@ AutogradCUDA: impl_t_t [autograd kernel]
 AutogradXLA: impl_t_t [autograd kernel]
 ''')
 
-    # Now that catchAll maps to CompositeImplicitAutograd, registering to both catchAll and CompositeImplicitAutograd breaks commutativity.
+    # Now that catchAll maps to CompositeImplicitAutograd, registering to both
+    # catchAll and CompositeImplicitAutograd breaks commutativity.
     def test_computed_table_with_cpu_autograd_math(self):
         result = self.commute("foo", [
             # m.def("foo(Tensor x) -> Tensor")
