@@ -40,7 +40,7 @@ TYPE2ABC = {
 
 
 # Check if the left-side type is a subtype for the right-side type
-def issubtype(left, right):
+def issubtype(left, right, recursive=True):
     left = TYPE2ABC.get(left, left)
     right = TYPE2ABC.get(right, right)
 
@@ -83,11 +83,11 @@ def issubtype(left, right):
     if len(variants) == 0:
         return False
 
-    return all(_issubtype_with_constraints(variant, constraints) for variant in variants)
+    return all(_issubtype_with_constraints(variant, constraints, recursive) for variant in variants)
 
 
 # Check if the variant is a subtype for any of constraints
-def _issubtype_with_constraints(variant, constraints):
+def _issubtype_with_constraints(variant, constraints, recursive=True):
     if variant in constraints:
         return True
 
@@ -116,7 +116,7 @@ def _issubtype_with_constraints(variant, constraints):
     # Variant is TypeVar or Union
     if vs is not None:
         vs = [TYPE2ABC.get(v, v) for v in vs]
-        return all(_issubtype_with_constraints(v, constraints) for v in vs)
+        return all(_issubtype_with_constraints(v, constraints, recursive) for v in vs)
 
     # Variant is not TypeVar or Union
     if hasattr(variant, '__origin__') and variant.__origin__ is not None:
@@ -140,7 +140,7 @@ def _issubtype_with_constraints(variant, constraints):
         # Constraint is TypeVar or Union
         if cs is not None:
             cs = [TYPE2ABC.get(c, c) for c in cs]
-            if _issubtype_with_constraints(variant, cs):
+            if _issubtype_with_constraints(variant, cs, recursive):
                 return True
         # Constraint is not TypeVar or Union
         else:
@@ -148,6 +148,8 @@ def _issubtype_with_constraints(variant, constraints):
             if hasattr(constraint, '__origin__') and constraint.__origin__ is not None:
                 c_origin = constraint.__origin__
                 if v_origin == c_origin:
+                    if not recursive:
+                        return True
                     c_args = constraint.__args__
                     if v_args is None or len(c_args) == 0:
                         return True
@@ -156,9 +158,33 @@ def _issubtype_with_constraints(variant, constraints):
                         return True
             else:
                 if v_origin == constraint:
-                    return v_args is None or len(v_args) == 0
+                    return not recursive or v_args is None or len(v_args) == 0
 
     return False
+
+
+def issubinstance(data, data_type):
+    if not issubtype(type(data), data_type, recursive=False):
+        return False
+
+    if isinstance(data, Tuple):
+        if data_type.__args__ is None or len(data_type.__args__) == 0:
+            return True
+        if len(data_type.__args__) != len(data):
+            return False
+        return all(issubinstance(d, t) for d, t in zip(data, data_type.__args__))
+    elif isinstance(data, (List, Set)):
+        if data_type.__args__ is None or len(data_type.__args__) == 0:
+            return True
+        t = data_type.__args__[0]
+        return all(issubinstance(d, t) for d in data)
+    elif isinstance(data, Dict):
+        if data_type.__args__ is None or len(data_type.__args__) == 0:
+            return True
+        kt, vt = data_type.__args__
+        return all(issubinstance(k, kt) and issubinstance(v, vt) for k, v in data.items())
+
+    return True
 
 
 # In order to keep compatibility for Python 3.6, use Meta for the typing.
@@ -241,6 +267,9 @@ class _DataPipeType:
         if isinstance(other, type):
             return issubtype(self.param, other)
         raise TypeError("Expected '_DataPipeType' or 'type', but found {}".format(type(other)))
+
+    def issubtype_of_instance(self, other):
+        return issubinstance(other, self.param)
 
 
 _DEFAULT_TYPE = _DataPipeType(Any)

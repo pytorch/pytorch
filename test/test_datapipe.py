@@ -605,6 +605,46 @@ class TestTyping(TestCase):
                 par = subscript_type[pars]
                 self.assertTrue(issubtype(sub, par))
                 self.assertFalse(issubtype(par, sub))
+                # Non-recursive check
+                self.assertTrue(issubtype(par, sub, recursive=False))
+
+    def test_issubinstance(self):
+        from torch.utils.data.typing import issubinstance
+
+        basic_data = (1, '1', True, 1., complex(1., 0.))
+        basic_type = (int, str, bool, float, complex)
+        S = TypeVar('S', bool, Union[str, int])
+        for d in basic_data:
+            self.assertTrue(issubinstance(d, Any))
+            self.assertTrue(issubinstance(d, T_co))
+            if type(d) in (bool, int, str):
+                self.assertTrue(issubinstance(d, S))
+            else:
+                self.assertFalse(issubinstance(d, S))
+            for t in basic_type:
+                if type(d) == t:
+                    self.assertTrue(issubinstance(d, t))
+                else:
+                    self.assertFalse(issubinstance(d, t))
+        # list/set
+        dt = (([1, '1', 2], List), (set({1, '1', 2}), Set))
+        for d, t in dt:
+            self.assertTrue(issubinstance(d, t))
+            self.assertTrue(issubinstance(d, t[T_co]))
+            self.assertFalse(issubinstance(d, t[int]))
+
+        # dict
+        d = dict({'1': 1, '2': 2.})
+        self.assertTrue(issubinstance(d, Dict))
+        self.assertTrue(issubinstance(d, Dict[str, T_co]))
+        self.assertFalse(issubinstance(d, Dict[str, int]))
+
+        # tuple
+        d = (1, '1', 2)
+        self.assertTrue(issubinstance(d, Tuple))
+        self.assertTrue(issubinstance(d, Tuple[int, str, T_co]))
+        self.assertFalse(issubinstance(d, Tuple[int, Any]))
+        self.assertFalse(issubinstance(d, Tuple[int, int, int]))
 
     # Static checking annotation
     def test_compile_time(self):
@@ -732,6 +772,34 @@ class TestTyping(TestCase):
                 @construct_time_validation
                 def __iter__(self):
                     yield 0
+
+    def test_runtime(self):
+        from torch.utils.data import runtime_validation
+
+        class DP(IterDataPipe[Tuple[int, T_co]]):
+            def __init__(self, datasource):
+                self.ds = datasource
+
+            @runtime_validation
+            def __iter__(self) -> Iterator[Tuple[int, T_co]]:
+                for d in self.ds:
+                    yield d
+
+        dss = ([(1, '1'), (2, '2')],
+               [(1, 1), (2, '2')])
+        for ds in dss:
+            dp = DP(ds)
+            self.assertEqual(list(d for d in dp), ds)
+            # Reset __iter__
+            self.assertEqual(list(d for d in dp), ds)
+
+        dss = ([(1, 1), ('2', 2)],
+               [[1, '1'], [2, '2']],
+               [1, '1', 2, '2'])
+        for ds in dss:
+            dp = DP(ds)
+            with self.assertRaisesRegex(TypeError, r"Expected an instance of subtype"):
+                list(d for d in dp)
 
 
 if __name__ == '__main__':
