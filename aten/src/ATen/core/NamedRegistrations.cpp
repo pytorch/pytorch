@@ -502,7 +502,5 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   // supported because they were manually registered.  I'm not sure
   // if these registrations are right or not, but they preserve old behavior
   // (and some of them are exercised by the test suite).
-  m.impl("_backward", CppFunction::makeFallthrough());
-  m.impl("requires_grad_", CppFunction::makeFallthrough());
   m.impl("_fw_primal", CppFunction::makeFallthrough());
 }

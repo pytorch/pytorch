@@ -3,7 +3,6 @@
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/FunctionsManual.h>
 #include <torch/csrc/utils/memory.h>
-#include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <ATen/TracerMode.h>
 #include <ATen/RedispatchFunctions.h>
@@ -80,28 +79,6 @@ std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
 }
 
 namespace {
-
-void _backward(
-    const Tensor& self,
-    TensorList inputs,
-    const c10::optional<Tensor>& gradient,
-    c10::optional<bool> keep_graph,
-    bool create_graph) {
-  // TODO torch::autograd::backward should take the c10::optional<Tensor> gradient directly
-  // instead of us having to unwrap it to Tensor _gradient here.
-  Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
-  std::vector<torch::autograd::Variable> input_vars(inputs.begin(), inputs.end());
-  torch::autograd::backward({self}, {_gradient}, keep_graph, create_graph, input_vars);
-}
-
-Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
-  if (!self.is_leaf() && !_requires_grad) {
-    throw std::runtime_error(
-      autograd::utils::requires_grad_leaf_error(_requires_grad)
-    );
-  }
-  return self.set_requires_grad(_requires_grad);
-}
 
 // Taken from codegened version
 Tensor _fw_primal(const Tensor & self, int64_t level) {
@@ -302,11 +279,6 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   m.impl("detach_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach_)));
   m.impl("copy_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
   m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
-}
-
-TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {
-  m.impl("_backward", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::_backward)));
-  m.impl("requires_grad_", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::requires_grad_)));
 }
 
 }  // namespace

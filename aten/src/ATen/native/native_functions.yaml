@@ -40,7 +40,7 @@
 # Computes the gradient of current tensor w.r.t. graph leaves.
 - func: _backward(Tensor self, Tensor[] inputs, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  manual_kernel_registration: True
+  manual_cpp_binding: True
   variants: method
 
 # DEPRECATED. Sets the tensor data held by this `Variable` to be the same as
@@ -82,7 +82,7 @@
   variants: method
 
 - func: requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)
-  manual_kernel_registration: True
+  manual_cpp_binding: True
   variants: method
 
 # Enables .grad attribute for non-leaf Tensors.

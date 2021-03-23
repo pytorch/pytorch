@@ -54,6 +54,8 @@ struct TORCH_API VariableHooksInterface {
   virtual Tensor data(const Tensor&) const = 0;
   virtual int64_t _version(const Tensor&) const = 0;
   virtual void retain_grad(Tensor&) const = 0;
+  virtual void _backward(const Tensor&, TensorList, const c10::optional<Tensor>&, c10::optional<bool>, bool) const = 0;
+  virtual Tensor& requires_grad_(Tensor&, bool) const = 0;
 };
 
 TORCH_API void SetVariableHooks(VariableHooksInterface* hooks);

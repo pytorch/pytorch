@@ -10,6 +10,7 @@ namespace native {
 
 void _backward(const Tensor& self, TensorList inputs, const Tensor& gradient, c10::optional<bool> keep_graph, bool create_graph) {
   AT_ERROR("backward is not implemented for Tensor");
+  return self._backward(inputs, gradient, keep_graph, create_graph);
 }
 
 void set_data(Tensor& self, const Tensor& new_data) {
@@ -33,7 +34,7 @@ int64_t _version(const Tensor& self) {
 }
 
 Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
-  AT_ERROR("requires_grad_ is not implemented for Tensor");
+  return self.requires_grad_(_requires_grad);
 }
 
 void retain_grad(Tensor& self) {

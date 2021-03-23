@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
+#include <torch/csrc/autograd/utils/error_messages.h>
 
 #include <ATen/core/VariableHooksInterface.h>
 
@@ -348,6 +349,10 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   Tensor data(const Tensor & self) const override;
   int64_t _version(const Tensor & self) const override;
   void retain_grad(Tensor & self) const override;
+  void _backward(const Tensor& self, at::TensorList inputs,
+    const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph,
+    bool create_graph) const override;
+  Tensor& requires_grad_(Tensor& self, bool _requires_grad) const override;
 };
 
 VariableHooks variableHooks;
@@ -458,6 +463,29 @@ void VariableHooks::retain_grad(Tensor & self) const {
   self.register_hook(retain_grad_hook);
   impl::get_autograd_meta(self)->retains_grad_ = true;
 }
+
+void VariableHooks::_backward(
+    const Tensor& self,
+    at::TensorList inputs,
+    const c10::optional<Tensor>& gradient,
+    c10::optional<bool> keep_graph,
+    bool create_graph) const {
+  // TODO torch::autograd::backward should take the c10::optional<Tensor> gradient directly
+  // instead of us having to unwrap it to Tensor _gradient here.
+  Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
+  std::vector<torch::autograd::Variable> input_vars(inputs.begin(), inputs.end());
+  torch::autograd::backward({self}, {_gradient}, keep_graph, create_graph, input_vars);
+}
+
+Tensor& VariableHooks::requires_grad_(Tensor& self, bool _requires_grad) const {
+  if (!self.is_leaf() && !_requires_grad) {
+    throw std::runtime_error(
+      autograd::utils::requires_grad_leaf_error(_requires_grad)
+    );
+  }
+  return self.set_requires_grad(_requires_grad);
+}
+
 // Backward View Variables
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

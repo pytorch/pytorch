@@ -1046,7 +1046,7 @@ TEST(TensorTest, RequiresGradInplace) {
   x.requires_grad_(false);
   ASSERT_FALSE(x.requires_grad());
 
-  const auto int_tensor = torch::tensor({5}, at::TensorOptions().dtype(torch::kInt));
+  auto int_tensor = torch::tensor({5}, at::TensorOptions().dtype(torch::kInt));
   ASSERT_THROWS_WITH(int_tensor.requires_grad_(true),
     "Only Tensors of floating point and complex dtype can require gradients");
 }
