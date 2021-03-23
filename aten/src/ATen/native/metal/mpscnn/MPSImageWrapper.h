@@ -12,6 +12,7 @@ namespace metal {
 class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
  public:
   MPSImageWrapper(IntArrayRef sizes);
+  ~MPSImageWrapper();
   operator bool() const {
     return _image;
   }
@@ -28,11 +29,13 @@ class API_AVAILABLE(ios(10.0), macos(10.13)) MPSImageWrapper {
   MPSImage* image() const;
   void recycleImage();
   void synchronize();
+  void prepareForSynchronization();
 
  private:
   std::vector<int64_t> _textureSizes;
   MPSImage* _image = nullptr;
   MetalCommandBuffer* _commandBuffer;
+  id<PTMetalCommandBufferDelegate> _delegate;
 };
 
 } // namespace metal
