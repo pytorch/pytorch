@@ -132,11 +132,17 @@ class ProcessGroupGloo : public ProcessGroup {
     int srcRank_;
   };
 
-  struct Options {
-    explicit Options();
+  struct Options : public ProcessGroup::Options {
+    explicit Options(
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout);
+
+    // return intrusive_ptr of the object
+    static c10::intrusive_ptr<Options> create(
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout) {
+      return c10::make_intrusive<Options>(timeout);
+    }
 
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
-    std::chrono::milliseconds timeout;
     int threads;
   };
 
@@ -166,9 +172,13 @@ class ProcessGroupGloo : public ProcessGroup {
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
-      Options options = Options());
+      c10::intrusive_ptr<Options> options = Options::create());
 
   virtual ~ProcessGroupGloo();
+
+  c10::intrusive_ptr<Options> getOptions() {
+    return options_;
+  }
 
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
@@ -246,6 +256,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
+  const c10::intrusive_ptr<Options> options_;
 
   // Every Gloo context represents a set of connections to its peers.
   // In order to use more than one device (or allow for parallelism on
