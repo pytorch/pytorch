@@ -850,6 +850,8 @@ class TensorExprFuser {
       return canFuseOnCPU();
     } else if (device->is_cuda()) {
       return canFuseOnGPU();
+    } else if (device->is_xpu()) {
+      return false;
     }
     throw std::runtime_error("Unknown device");
   }

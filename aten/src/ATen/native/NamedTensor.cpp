@@ -3,6 +3,8 @@
 
 #include <ATen/NamedTensorUtils.h>
 
+#include <c10/util/irange.h>
+
 #include <bitset>
 
 namespace at { namespace native {
@@ -143,7 +145,7 @@ static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_tw
 
 static int64_t countUnset(std::bitset<kMaxNamedTensorDim> set, int64_t up_to_idx) {
   int64_t result = 0;
-  for (auto i = 0; i < up_to_idx; ++i) {
+  for (const auto i : c10::irange(up_to_idx)) {
     if (!set.test(i)) result++;
   }
   return result;
@@ -188,7 +190,7 @@ Tensor align_to(const Tensor& tensor, DimnameList order, int64_t ellipsis_idx) {
   // appears in the jth element of tensor.
   std::vector<int64_t> tensor_idx_for(order.size(), not_found);
 
-  for (auto order_idx = 0U; order_idx < order.size(); ++order_idx) {
+  for (const auto order_idx : c10::irange(order.size())) {
     const auto name = order[order_idx];
     TORCH_CHECK(name.isBasic(),
         "align_to: the desired order of dimensions cannot contain a None name, got ",
@@ -233,7 +235,7 @@ Tensor align_to(const Tensor& tensor, DimnameList order, int64_t ellipsis_idx) {
   }
 
   // Fill in the ellipsis dimensions
-  for (auto tensor_idx = 0U; tensor_idx < tensor_dim; ++tensor_idx) {
+  for (const auto tensor_idx : c10::irange(tensor_dim)) {
     if (order_has_tensor_name.test(tensor_idx)) {
       continue;
     }
@@ -259,7 +261,7 @@ Tensor align_to(const Tensor& tensor, DimnameList names) {
   std::vector<int64_t> new_sizes(names.size(), 1);
   std::vector<int64_t> new_strides(names.size(), 0);
 
-  for (auto idx = 0U; idx < tensor_names.size(); ++idx) {
+  for (const auto idx : c10::irange(tensor_names.size())) {
     const auto& dim = tensor_names[idx];
     TORCH_CHECK(dim.isBasic(),
         "align_to: All input dims must be named. Found unnamed dim at index ",
