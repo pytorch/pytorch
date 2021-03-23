@@ -70,6 +70,11 @@ class Gamma(ExponentialFamily):
                 (self.concentration - 1) * torch.log(value) -
                 self.rate * value - torch.lgamma(self.concentration))
 
+    def cdf(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
+        return torch.igamma(self.concentration, self.rate * value) / torch.gamma(self.concentration)
+
     def entropy(self):
         return (self.concentration - torch.log(self.rate) + torch.lgamma(self.concentration) +
                 (1.0 - self.concentration) * torch.digamma(self.concentration))
