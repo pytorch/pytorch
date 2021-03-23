@@ -3,6 +3,7 @@ import gc
 import sys
 import io
 import math
+import random
 import tempfile
 import time
 import threading
@@ -291,6 +292,95 @@ class TestAutograd(TestCase):
         t3 = TestAutograd.SimulateBackwardError.apply(tmp)
         with self.assertRaisesRegex(Exception, "Simulate error on backward pass"):
             t3.sum().backward()
+
+    def test_custom_function_non_tensor_inputs_outputs(self):
+        class MyFunction(Function):
+
+            @staticmethod
+            def forward(ctx, t1, t2, scale, t3):
+                t4 = t1 + t2 * t3
+                t5 = t1 * t2 + t3
+                t4 *= scale
+                t5 *= scale
+
+                # Save scale
+                ctx.scale = scale
+                ctx.save_for_backward(t1, t2, t3)
+                return scale, t4, None, True, t5, "bar", t1
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, *grads):
+                # Verify grads
+                self.assertEqual(7, len(grads))
+                self.assertIsNone(grads[0])
+                self.assertIsNone(grads[2])
+                self.assertIsNone(grads[3])
+                self.assertIsNone(grads[5])
+
+                scale = ctx.scale
+                var1, var2, var3 = ctx.saved_tensors
+                return (
+                    grads[1] * scale + grads[4] * var2 * scale + grads[6],
+                    grads[1] * var3 * scale + grads[4] * var1 * scale,
+                    None,
+                    grads[1] * var2 * scale + grads[4] * scale,
+                )
+
+        t1 = torch.rand(10, requires_grad=True)
+        t2 = torch.rand(10, requires_grad=True)
+        t3 = torch.rand(10)
+        scale = random.randint(0, 10)
+        res = MyFunction.apply(t1, t2, scale, t3)
+        self.assertEqual(scale, res[0])
+        self.assertEqual((t1 + t2 * t3) * scale, res[1])
+        self.assertEqual(None, res[2])
+        self.assertEqual(True, res[3])
+        self.assertEqual((t1 * t2 + t3) * scale, res[4])
+        self.assertEqual("bar", res[5])
+        self.assertEqual(t1, res[6])
+
+        # Validate running backward.
+        torch.autograd.backward([res[1].sum(), res[4].sum(), res[6].sum()])
+        self.assertIsNotNone(t1.grad)
+        self.assertIsNotNone(t2.grad)
+        self.assertIsNone(t3.grad)
+
+        # Test gradcheck
+        def foo(t1, t2, t3):
+            res = MyFunction.apply(t1, t2, scale, t3)
+            return res[1], res[4], res[6]
+
+        gradcheck(foo, (t1, t2, t3))
+
+    def test_custom_function_no_tensors(self):
+        class MyFunction(Function):
+
+            @staticmethod
+            def forward(ctx, t1, t2, scale, t3):
+                t4 = t1 + t2 * t3
+                t5 = t1 * t2 + t3
+                t4 *= scale
+                t5 *= scale
+                return scale, t4, None, True, t5, "bar", t1
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, *args):
+                return (args[0], args[1], None, args[2])
+
+        t1 = random.random()
+        t2 = random.random()
+        t3 = random.random()
+        scale = random.randint(0, 10)
+        res = MyFunction.apply(t1, t2, scale, t3)
+        self.assertEqual(scale, res[0])
+        self.assertEqual((t1 + t2 * t3) * scale, res[1])
+        self.assertEqual(None, res[2])
+        self.assertEqual(True, res[3])
+        self.assertEqual((t1 * t2 + t3) * scale, res[4])
+        self.assertEqual("bar", res[5])
+        self.assertEqual(t1, res[6])
 
     def test_invalid_gradients(self):
         class MyFunction(Function):
@@ -941,6 +1031,11 @@ class TestAutograd(TestCase):
 
         reset_grad()
         torch.autograd.backward(fn(), gradient, inputs=[y])
+        self.assertEqual(y.grad, y_grad_expected)
+        self.assertEqual(x.grad, torch.zeros(2, 2))
+
+        reset_grad()
+        torch.autograd.backward(fn(), gradient, inputs=y)
         self.assertEqual(y.grad, y_grad_expected)
         self.assertEqual(x.grad, torch.zeros(2, 2))
 
@@ -6759,6 +6854,17 @@ class TestAutogradForwardMode(TestCase):
             # version of the tangent alive
             del dual
             self.assertIsNone(tangent_ref())
+
+    def test_size_check(self):
+        foo = torch.rand(2)
+        tangent = torch.rand(3)
+
+        with fwAD.dual_level():
+            with self.assertRaisesRegex(RuntimeError, "Trying to set a forward gradient that has a different size"):
+                dual = fwAD.make_dual(foo, tangent)
+
+            dual = fwAD.make_dual(foo, tangent[1:])
+
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
