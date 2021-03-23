@@ -519,7 +519,6 @@ void GraphTask::exec_post_processing() {
     final_callbacks_[i]();
     cb_lock.lock();
   }
-  // std::cout << "exec_post_processing" << std::endl;
 }
 
 void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
@@ -867,8 +866,6 @@ auto Engine::execute(const edge_list& roots,
                      bool create_graph,
                      bool accumulate_grad,
                      const edge_list& outputs) -> variable_list {
-  // const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-  // std::cout << "current stream " << guard.getStream(*at::device_of(inputs[0])) << std::endl;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
@@ -931,8 +928,6 @@ auto Engine::execute(const edge_list& roots,
     const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
     for (const auto& leaf_stream : graph_task->leaf_streams) {
       const auto current_stream = guard.getStream(leaf_stream.device());
-      // std::cout << "current stream " << guard.getStream(leaf_stream.device())
-      //           << ", leaf stream " << leaf_stream << std::endl;
       if (leaf_stream != current_stream) {
         auto event = c10::Event{c10::DeviceType::CUDA};
         event.record(leaf_stream);
