@@ -636,7 +636,7 @@ If you're using ``Sequential`` with TorchScript, the inputs of some
 of the ``Sequential`` submodules may be falsely inferred to be
 ``Tensor``, even if they're annotated otherwise. This is a known
 issue in the TorchScript type inference algorithm. The canonical
-solution is to subclass ``nn.Sequential`` and redeclare ``forward`` 
+solution is to subclass ``nn.Sequential`` and redeclare ``forward``
 with the input typed correctly.
 
 Appendix
