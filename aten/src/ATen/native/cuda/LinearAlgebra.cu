@@ -135,7 +135,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     if (beta.toComplexDouble() == 0.) {
       return result.zero_();
     }
-    return at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
+    // TODO: We could squeeze some perf by calling at::cuda::mul_out here instead, to bypass the dispatcher.
+    // That requires some fixing some internal build dependencies though.
+    return at::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
   }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {

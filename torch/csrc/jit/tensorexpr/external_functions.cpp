@@ -70,7 +70,7 @@ void nnc_aten_conv2d(
     int64_t groups = extra_args[6];
 
     try {
-      r = at::native::conv2d(
+      r = at::conv2d(
           x,
           w,
           b,
@@ -82,7 +82,7 @@ void nnc_aten_conv2d(
     }
   } else {
     try {
-      r = at::native::conv2d(x, w);
+      r = at::conv2d(x, w);
     } catch (...) {
     }
   }

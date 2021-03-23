@@ -34,8 +34,8 @@ void compareTensorLists(
   for (int i = 0; i < l.size(); ++i) {
     ASSERT_TRUE(l[i].isTensor());
     ASSERT_TRUE(r[i].isTensor());
-    LOG(INFO) << "expect " << i << ": \n" << l[i] << std::endl;
-    LOG(INFO) << "output " << i << ": \n" << r[i] << std::endl;
+    VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
+    VLOG(2) << "output " << i << ": \n" << r[i] << std::endl;
     if (! l[i].toTensor().defined()) {
       EXPECT_TRUE(! r[i].toTensor().defined());
     } else {
@@ -49,8 +49,8 @@ void compareTensorLists(
     const std::vector<at::Tensor>& r /* values */) {
   EXPECT_TRUE(l.size() == r.size());
   for (int i = 0; i < l.size(); ++i) {
-    LOG(INFO) << "expect " << i << ": \n" << l[i] << std::endl;
-    LOG(INFO) << "output " << i << ": \n" << r[i] << std::endl;
+    VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
+    VLOG(2) << "output " << i << ": \n" << r[i] << std::endl;
     if (! l[i].defined()) {
       EXPECT_TRUE(! r[i].defined());
     } else {
@@ -148,6 +148,7 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
   testStaticRuntime(reshape_script_3, args);
   testStaticRuntime(reshape_script_4, args);
   testStaticRuntime(reshape_script_5, args);
+  testStaticRuntime(reshape_inplace_script, args);
 }
 
 TEST(StaticRuntime, IndividualOps_flatten) {

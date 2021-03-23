@@ -60,6 +60,8 @@
 #include <ATen/native/Copy.h>
 #include <ATen/Parallel.h>
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <functional>
 #include <numeric>
@@ -473,7 +475,8 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
 
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "index_add_", [&self, &source, &dim, &index_contig, &numel] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+      self.scalar_type(), "index_add_", [&self, &source, &dim, &index_contig, &numel] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
       // TODO: Maybe TensorAccessor can beused here?
@@ -505,7 +508,7 @@ static void check_indexarray_range(
     const IndexType* indices,
     int64_t n,
     IndexType indexing_axis_dim) {
-  for (auto i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     auto idx = indices[i];
     TORCH_CHECK(
         0 <= idx && idx < indexing_axis_dim,
@@ -684,8 +687,8 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
     TORCH_CHECK(result.dim() <= 1, "result.dim() (", result.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, self.scalar_type(), "index_select",
-      [&index_contig, &self, &result, &dim, &numel] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+      self.scalar_type(), "index_select", [&index_contig, &self, &result, &dim, &numel] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
 

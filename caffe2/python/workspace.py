@@ -45,6 +45,7 @@ CreateOfflineTensor = C.create_offline_tensor
 operator_tracebacks = defaultdict(dict)
 
 is_asan = C.is_asan
+has_fbgemm = C.has_fbgemm
 has_cuda_support = C.has_cuda_support
 has_hip_support = C.has_hip_support
 has_gpu_support = C.has_gpu_support

@@ -45,8 +45,16 @@ Args:
     bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or
       a one-element tuple `(sW,)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a one-element tuple `(padW,)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
     dilation: the spacing between kernel elements. Can be a single number or
       a one-element tuple `(dW,)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
@@ -78,14 +86,24 @@ Note:
         **reproducibility_notes, **tf32_notes
     )
     + r"""
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
     weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padH, padW)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
+
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
@@ -125,8 +143,17 @@ Args:
     bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a
+    padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padT, padH, padW)`. Default: 0
+      ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
+      the input so the output has the shape as the input. However, this mode
+      doesn't support any stride values other than 1.
+
+      .. warning::
+          For ``padding='same'``, if the ``weight`` is even-length and
+          ``dilation`` is odd in any dimension, a full :func:`pad` operation
+          may be needed internally. Lowering performance.
+
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dT, dH, dW)`. Default: 1
     groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
