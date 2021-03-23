@@ -252,6 +252,7 @@ class TransformerEncoderLayer(Module):
         dim_feedforward: the dimension of the feedforward network model (default=2048).
         dropout: the dropout value (default=0.1).
         activation: the activation function of intermediate layer, relu or gelu (default=relu).
+        layer_norm_eps: the eps value in layer normalization components (default=1e-5).
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -259,7 +260,7 @@ class TransformerEncoderLayer(Module):
         >>> out = encoder_layer(src)
     """
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu"):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu", layer_norm_eps=1e-5):
         super(TransformerEncoderLayer, self).__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
         # Implementation of Feedforward model
@@ -267,8 +268,8 @@ class TransformerEncoderLayer(Module):
         self.dropout = Dropout(dropout)
         self.linear2 = Linear(dim_feedforward, d_model)
 
-        self.norm1 = LayerNorm(d_model)
-        self.norm2 = LayerNorm(d_model)
+        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps)
+        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
 
@@ -314,6 +315,7 @@ class TransformerDecoderLayer(Module):
         dim_feedforward: the dimension of the feedforward network model (default=2048).
         dropout: the dropout value (default=0.1).
         activation: the activation function of intermediate layer, relu or gelu (default=relu).
+        layer_norm_eps: the eps value in layer normalization components (default=1e-5).
 
     Examples::
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
@@ -322,7 +324,7 @@ class TransformerDecoderLayer(Module):
         >>> out = decoder_layer(tgt, memory)
     """
 
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu"):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu", layer_norm_eps=1e-5):
         super(TransformerDecoderLayer, self).__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
         self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout)
@@ -331,9 +333,9 @@ class TransformerDecoderLayer(Module):
         self.dropout = Dropout(dropout)
         self.linear2 = Linear(dim_feedforward, d_model)
 
-        self.norm1 = LayerNorm(d_model)
-        self.norm2 = LayerNorm(d_model)
-        self.norm3 = LayerNorm(d_model)
+        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps)
+        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps)
+        self.norm3 = LayerNorm(d_model, eps=layer_norm_eps)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
