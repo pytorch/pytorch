@@ -37,6 +37,7 @@ void OptimizeGraph(
 #ifdef FBCODE_CAFFE2
   if (opts.enable_out_variant) {
     ReplaceWithCopy(graph);
+    FuseSigridTransformsListUnpack(graph);
   }
 #endif
   ConstantPropagation(graph);
@@ -1115,13 +1116,7 @@ ProcessedNode::ProcessedNode(
     : node_(node), inputs_(std::move(inputs)) {
   // TODO leverage type information
   outputs_.resize(node->outputs().size());
-  if (node->kind() != prim::ListConstruct &&
-      node->kind() != prim::TupleConstruct &&
-      node->kind() != prim::ListUnpack) {
-    const Operator& op = node->getOperator();
-    TORCH_CHECK(op.hasOperation());
-    op_ = op.getOperation(node);
-  }
+
   if (enable_out_variants && canRunOutOfPlace(node)) {
     fn_ = getOutOfPlaceOperation(node);
     std::ostringstream ss;
@@ -1132,7 +1127,14 @@ ProcessedNode::ProcessedNode(
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Switch to native impl for node: " << ss.str();
-  } else {
+  } else if (
+      node->kind() != prim::ListConstruct &&
+      node->kind() != prim::TupleConstruct &&
+      node->kind() != prim::ListUnpack) {
+    const Operator& op = node->getOperator();
+    TORCH_CHECK(op.hasOperation());
+    op_ = op.getOperation(node);
+
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Fallback interpreter for node: " << ss.str();

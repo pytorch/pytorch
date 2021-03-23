@@ -4,6 +4,8 @@
 #include <chrono>
 #include <exception>
 #include <ratio>
+#include <tuple>
+#include <fmt/format.h>
 
 #ifdef _WIN32
 #include <gloo/common/win.h>
@@ -116,10 +118,13 @@ std::chrono::milliseconds getRemainingTime(
     steady_clock_time_point startTime,
     const std::chrono::milliseconds& timeout) {
   auto elapsedTime = std::chrono::steady_clock::now() - startTime;
-  auto elapsedMillis = timeout -
+  auto remainingMillis = timeout -
       std::chrono::duration_cast<std::chrono::milliseconds>(elapsedTime);
-  auto remaining = std::max(elapsedMillis.count(), static_cast<long>(1));
-  return std::chrono::milliseconds(remaining);
+  const int kMinTimeThresh = 1;
+  std::chrono::milliseconds remaining = remainingMillis.count() < kMinTimeThresh
+      ? std::chrono::milliseconds(kMinTimeThresh)
+      : remainingMillis;
+  return remaining;
 }
 
 // Wrap c10d store as Gloo store
@@ -473,8 +478,8 @@ void ProcessGroupGloo::RecvWork::abort() {
   buffer_->abortWaitRecv();
 }
 
-ProcessGroupGloo::Options::Options()
-    : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
+ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
+    : ProcessGroup::Options(timeout, GLOO_BACKEND_NAME), threads(2) {}
 
 namespace {
 
@@ -596,12 +601,13 @@ ProcessGroupGloo::ProcessGroupGloo(
     const c10::intrusive_ptr<Store>& store,
     int rank,
     int size,
-    Options options)
+    c10::intrusive_ptr<Options> options)
     : ProcessGroup(rank, size),
       store_(new GlooStore(store)),
+      options_(options),
       stop_(false),
       collectiveCounter_(0) {
-  auto& devices = options.devices;
+  auto& devices = options->devices;
   if (devices.empty()) {
     throw std::runtime_error("No device(s) specified");
   }
@@ -618,12 +624,12 @@ ProcessGroupGloo::ProcessGroupGloo(
   // option is needed if you have a fast NIC that cannot be saturated
   // by a single I/O thread.
   //
-  contexts_.reserve(options.devices.size());
-  for (size_t i = 0; i < options.devices.size(); i++) {
+  contexts_.reserve(options->devices.size());
+  for (size_t i = 0; i < options->devices.size(); i++) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
     auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
-    context->setTimeout(options.timeout);
-    context->connectFullMesh(store, options.devices[i]);
+    context->setTimeout(options->timeout);
+    context->connectFullMesh(store, options->devices[i]);
     contexts_.push_back(std::move(context));
   }
 
@@ -631,9 +637,9 @@ ProcessGroupGloo::ProcessGroupGloo(
   // working on in the workInProgress_ vector. It must have size equal
   // to the number of workers such that they can simply index into it
   // using the worker index they are started with.
-  workInProgress_.resize(options.threads);
+  workInProgress_.resize(options->threads);
 
-  threads_.resize(options.threads);
+  threads_.resize(options->threads);
   for (size_t i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
@@ -2678,72 +2684,61 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier(
 }
 
 void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
-  auto monitoredBarrierTimeout = opts.timeout;
+  // Use default timeout if no timeout was specified.
+  auto monitoredBarrierTimeout =
+      (opts.timeout == kUnsetTimeout) ? this->options_->timeout : opts.timeout;
   auto rank = this->getRank();
   auto t1 = nextTag();
   auto t2 = nextTag();
-  std::vector<at::Tensor> t = {at::tensor({rank})};
+  std::vector<at::Tensor> commTensor = {at::tensor({rank})};
+  auto errStr = "Rank {} failed to pass monitoredBarrier in {} ms";
   // only enforce timeout on rank 0. This is so that other ranks aren't timed
   // out first, bringing down the job without reporting which rank timed out.
   if (rank != 0) {
-    auto sendWork = send(t, 0, t1);
+    auto sendWork = send(commTensor, 0, t1);
     sendWork->wait();
-    auto recvWork = recv(t, 0, t2);
+    auto recvWork = recv(commTensor, 0, t2);
     recvWork->wait();
     return;
   }
   auto startTime = std::chrono::steady_clock::now();
   auto worldSize = this->getSize();
-  for (int rank = 0; rank < worldSize; ++rank) {
-    // Rank 0 recv
-    if (rank != 0) {
-      auto recvWork = recv(t, rank, t1);
-      auto remainingTime = monitoredBarrierTimeout == kUnsetTimeout
-          ? monitoredBarrierTimeout
-          : getRemainingTime(startTime, monitoredBarrierTimeout);
-      try {
-        recvWork->wait(remainingTime);
-      } catch (const std::exception& e) {
-        LOG(ERROR) << "Rank " << rank << " failed to pass monitoredBarrier in "
-                   << monitoredBarrierTimeout.count() << " ms.";
-        throw std::runtime_error(
-            c10::str(
-                "Rank ",
-                rank,
-                " failed to pass monitoredBarrier. Original exception: \n") +
-            e.what());
-      }
-    }
+  // Holds mapping of rank to pair of recv/send work.
+  std::unordered_map<
+      int,
+      std::tuple<
+          c10::intrusive_ptr<ProcessGroup::Work>,
+          c10::intrusive_ptr<ProcessGroup::Work>>>
+      works;
+  // Kick off all work
+  for (int dstRank = 1; dstRank < worldSize; ++dstRank) {
+    auto recvWork = recv(commTensor, dstRank, t1);
+    auto sendWork = send(commTensor, dstRank, t2);
+    works.insert(
+        {dstRank, std::make_tuple(std::move(recvWork), std::move(sendWork))});
   }
-  // Rank 0 send
-  for (int rank = 0; rank < worldSize; ++rank) {
-    if (rank != 0) {
-      auto sendWork = send(t, rank, t2);
-      auto remainingTime = monitoredBarrierTimeout == kUnsetTimeout
-          ? monitoredBarrierTimeout
-          : getRemainingTime(startTime, monitoredBarrierTimeout);
-      try {
-        sendWork->wait(remainingTime);
-      } catch (const std::exception& e) {
-        LOG(ERROR) << "Rank " << rank << " failed to pass monitoredBarrier in "
-                   << monitoredBarrierTimeout.count() << " ms.";
-        throw std::runtime_error(
-            c10::str(
-                "Rank ",
-                rank,
-                " failed to pass monitoredBarrier. Original exception: \n") +
-            e.what());
-      }
-      LOG(INFO) << "Rank " << rank << " successfully passed monitored barrier.";
-    }
-  }
-  if (monitoredBarrierTimeout != kUnsetTimeout) {
+
+  // Wait for send/recv from all ranks
+  for (auto& work : works) {
+    // Compute the remaining time for every call to wait() instead of using the
+    // whole timeout every call.
     auto remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
-    LOG(INFO) << "All ranks passed monitoredBarrier in "
-              << (monitoredBarrierTimeout - remainingTime).count() << " ms.";
-  } else {
-    LOG(INFO) << "All ranks passed monitoredBarrier.";
+    try {
+      std::get<0>(work.second)->wait(remainingTime);
+      remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
+      std::get<1>(work.second)->wait(remainingTime);
+    } catch (const std::exception& e) {
+      const std::string error =
+          fmt::format(errStr, work.first, monitoredBarrierTimeout.count());
+      LOG(ERROR) << error;
+      throw std::runtime_error(
+          c10::str(error, "\n Original exception: \n") + e.what());
+    }
   }
+
+  auto remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
+  LOG(INFO) << "All ranks passed monitoredBarrier in "
+            << (monitoredBarrierTimeout - remainingTime).count() << " ms.";
 }
 
 } // namespace c10d
