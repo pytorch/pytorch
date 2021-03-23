@@ -294,13 +294,13 @@
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
     - run:
-        name: Install VS2019
-        command: |
-          powershell .circleci/scripts/vs_install.ps1
-    - run:
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
+    - run:
+        name: Install VS2019
+        command: |
+          powershell /c/w/p/.circleci/scripts/vs_install.ps1
     - run:
         name: Build
         no_output_timeout: "1h"
@@ -330,13 +330,13 @@
     - attach_workspace:
         at: c:/users/circleci/project
     - run:
-        name: Install VS2019
-        command: |
-          powershell .circleci/scripts/vs_install.ps1
-    - run:
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
+    - run:
+        name: Install VS2019
+        command: |
+          powershell /c/w/p/.circleci/scripts/vs_install.ps1
     - run:
         name: Test
         no_output_timeout: "1h"
