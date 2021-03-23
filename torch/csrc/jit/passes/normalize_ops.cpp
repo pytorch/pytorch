@@ -7,7 +7,6 @@ namespace jit {
 
 namespace {
 
-
 // having multiple ops in our IR that do the same thing makes the IR more
 // difficult to consumer for downstream user of the IR, such as our own
 // optimization passes here, we convert op aliases into a standard form
