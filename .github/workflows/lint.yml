@@ -240,8 +240,4 @@ jobs:
       - name: Run mypy
         run: |
           set -eux
-          mypy --config=mypy.ini
-      - name: Run mypy strict
-        run: |
-          set -eux
-          mypy --config=mypy-strict.ini
+          for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
