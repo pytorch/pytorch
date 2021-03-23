@@ -145,7 +145,7 @@ struct cpu_scatter_gather_base_kernel {
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
-      "method_name", [&] {
+      "scatter_gather_scalar", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
 
@@ -240,7 +240,7 @@ struct cpu_scatter_gather_base_kernel {
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Bool, ScalarType::Half, iter.dtype(),
-      "method_name", [&] {
+      "scatter_gather_tensor", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 2;
         constexpr auto SRC_ITER_STRIDE_IDX = 1;
