@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 
 """
-This module serves two purposes:
-
-- it holds the config_files function, which defines the set of subtests
-  for the test_run_mypy test in test/test_type_hints.py
-- it can be run as a script (see the docstring of main below) and passed
-  the filename of any Python file in this repo, to typecheck that file
-  using only the subset of our mypy configs that apply to it
+This module is meant to be run as a script (see the docstring of main
+below) and passed the filename of any Python file in this repo, to
+typecheck that file using only the subset of our mypy configs that apply
+to it.
 
 Since editors (e.g. VS Code) can be configured to use this wrapper
 script in lieu of mypy itself, the idea is that this can be used to get
 inline mypy results while developing, and have at least some degree of
 assurance that those inline results match up with what you would get
-from running the TestTypeHints test suite in CI.
+from running the mypy lint from the .github/workflows/lint.yml file.
 
 See also these wiki pages:
 
@@ -29,24 +26,14 @@ from itertools import chain
 from pathlib import Path, PurePath, PurePosixPath
 from typing import List, Set
 
-# don't import any files that live in the PyTorch repo, since this is
-# meant to work as a standalone script
-
-try:
-    import mypy.api
-except ImportError:
-    # let test/test_type_hints.py import this even if mypy is absent
-    pass
+import mypy.api
 
 
 def config_files() -> Set[str]:
     """
     Return a set of the names of all the PyTorch mypy config files.
     """
-    return {
-        'mypy.ini',
-        'mypy-strict.ini',
-    }
+    return {str(p) for p in Path().glob('mypy*.ini')}
 
 
 def glob(*, pattern: str, filename: PurePosixPath) -> bool:
@@ -86,13 +73,17 @@ def main(args: List[str]) -> None:
 
     These assumptions hold, for instance, when mypy is run automatically
     by VS Code's Python extension, so in your clone of this repository,
-    you could modify your .vscode/settings.json to look like this:
+    you could modify your .vscode/settings.json to look something like
+    this (assuming you use a conda environment named "pytorch"):
 
         {
           "python.linting.enabled": true,
           "python.linting.mypyEnabled": true,
           "python.linting.mypyPath":
-            "${workspaceFolder}/torch/testing/_internal/mypy_wrapper.py"
+            "${env:HOME}/miniconda3/envs/pytorch/bin/python",
+          "python.linting.mypyArgs": [
+            "${workspaceFolder}/tools/mypy_wrapper.py"
+          ]
         }
 
     More generally, this should work for any editor sets the cwd to the
