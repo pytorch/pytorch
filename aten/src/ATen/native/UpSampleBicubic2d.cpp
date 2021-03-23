@@ -172,7 +172,7 @@ TORCH_IMPL_FUNC(upsample_bicubic2d_out_cpu) (
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
     const Tensor& output
-) {  
+) {
   upsample_bicubic2d_kernel(kCPU, output, input, align_corners, scales_h, scales_w);
 }
 
