@@ -27,6 +27,8 @@ __all__ = [
     'all_types_and_complex',
     'integral_types_and',
     'FileCheck',
+    'integral_types',
+    'complex_types',
 ]
 
 rand_like = torch.rand_like
