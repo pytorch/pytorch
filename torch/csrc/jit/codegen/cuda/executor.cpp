@@ -570,6 +570,8 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     cudaEventSynchronize(start_event);
     cudaEventSynchronize(finish_event);
     cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event);
+    cudaEventDestroy(start_event);
+    cudaEventDestroy(finish_event);
   }
 
   return allocated_outputs;
