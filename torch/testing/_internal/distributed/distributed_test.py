@@ -5129,7 +5129,7 @@ class DistributedTest:
             for _ in range(10):
                 process_group.allreduce(tensors).wait()
             # Run monitored barrier
-            timeout = 5
+            timeout = 2
             process_group.monitored_barrier(timeout)
             # All ranks besides 1 call into barrier, rank 0 should report failure
             # while others report gloo error.
