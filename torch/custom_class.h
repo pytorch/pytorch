@@ -241,15 +241,13 @@ class class_ {
     torch::jit::Function* getter;
     torch::jit::Function* setter;
 
-    auto getter_name = name + "_getter";
     auto wrapped_getter =
         detail::wrap_func<CurClass, GetterFunc>(std::move(getter_func));
-    getter = defineMethod(getter_name, wrapped_getter, doc_string);
+    getter = defineMethod(name + "_getter", wrapped_getter, doc_string);
 
-    auto setter_name = name + "_setter";
     auto wrapped_setter =
         detail::wrap_func<CurClass, SetterFunc>(std::move(setter_func));
-    setter = defineMethod(setter_name, wrapped_setter, doc_string);
+    setter = defineMethod(name + "_setter", setter_name, wrapped_setter, doc_string);
 
     classTypePtr->addProperty(name, getter, setter);
     return *this;
@@ -263,10 +261,9 @@ class class_ {
       std::string doc_string = "") {
     torch::jit::Function* getter;
 
-    auto getter_name = name + "_getter";
     auto wrapped_getter =
         detail::wrap_func<CurClass, GetterFunc>(std::move(getter_func));
-    getter = defineMethod(getter_name, wrapped_getter, doc_string);
+    getter = defineMethod(name + "_getter", wrapped_getter, doc_string);
 
     classTypePtr->addProperty(name, getter, nullptr);
     return *this;
