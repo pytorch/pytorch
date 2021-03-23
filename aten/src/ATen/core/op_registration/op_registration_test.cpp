@@ -1502,10 +1502,10 @@ TEST(NewOperatorRegistrationTest, BackendOverridesCompositeImplicitAutogradKerne
   }
 }
 
-TEST(NewOperatorRegistrationTest, dispatchWithDefaultBackendKernel) {
+TEST(NewOperatorRegistrationTest, dispatchWithCompositeExplicitAutogradKernel) {
   bool called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("fn", torch::dispatch(c10::DispatchKey::DefaultBackend, [&](const Tensor& x) { called = true; return x; }));
+  m.def("fn", torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, [&](const Tensor& x) { called = true; return x; }));
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
   ASSERT_TRUE(op.has_value());
@@ -1550,11 +1550,11 @@ TEST(NewOperatorRegistrationTest, dispatchWithDefaultBackendKernel) {
   }
 }
 
-TEST(NewOperatorRegistrationTest, dispatchWithDefaultBackendAndCompositeImplicitAutogradKernel) {
+TEST(NewOperatorRegistrationTest, dispatchWithCompositeExplicitAutogradAndCompositeImplicitAutogradKernel) {
   bool backend_called = false;
   bool math_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("fn", torch::dispatch(c10::DispatchKey::DefaultBackend, [&](const Tensor& x) { backend_called = true; return x; }));
+  m.def("fn", torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, [&](const Tensor& x) { backend_called = true; return x; }));
   m.impl("fn", c10::DispatchKey::CompositeImplicitAutograd, [&](const Tensor& x) { math_called = true; return x; });
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
@@ -1606,11 +1606,11 @@ TEST(NewOperatorRegistrationTest, dispatchWithDefaultBackendAndCompositeImplicit
   }
 }
 
-TEST(NewOperatorRegistrationTest, BackendOverridesDefaultBackendKernel) {
+TEST(NewOperatorRegistrationTest, BackendOverridesCompositeExplicitAutogradKernel) {
   bool default_called = false;
   bool backend_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("fn", torch::dispatch(c10::DispatchKey::DefaultBackend, [&](const Tensor& x) { default_called = true; return x; }));
+  m.def("fn", torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, [&](const Tensor& x) { default_called = true; return x; }));
   m.impl("fn", c10::DispatchKey::CPU, [&](const Tensor& x) { backend_called = true; return x; });
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});

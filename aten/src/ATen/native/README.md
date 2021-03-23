@@ -481,7 +481,7 @@ Here're steps to follow to decide the right dispatch keyword:
     - Yes, but you still want to provide a numerically stable gradient formula instead of using autograd, write
       ```
       dispatch:
-        DefaultBackend: kernel
+        CompositeExplicitAutograd: kernel
       ```
 
       You're done. This op will be called in inference for all backends.
@@ -501,7 +501,7 @@ Here're steps to follow to decide the right dispatch keyword:
       For `sign` and `sign_`, write
       ```
       dispatch:
-        DefaultBackend: kernel
+        CompositeExplicitAutograd: kernel
       ```
 
       You're done. This op will be called in inference for all backends.
@@ -525,8 +525,8 @@ It shows for a certain operator, what the computed dispatch table looks like aft
 
 Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
   - direct registration to backend always has higher precendence than alias
-  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `DefaultBackend > CompositeImplicitAutograd`,
-    e.g. adding both `CompositeImplicitAutograd` and `DefaultBackend` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
+  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `CompositeExplicitAutograd > CompositeImplicitAutograd`,
+    e.g. adding both `CompositeImplicitAutograd` and `CompositeExplicitAutograd` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
     both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
 
 

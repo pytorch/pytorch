@@ -373,14 +373,14 @@ Tensor & detach_(Tensor & self) {
 // Ops in the following registration list are registered as
 //   (1) CompositeImplicitAutograd kernels
 //   (2) Autograd kernels
-//   (3) DefaultBackend kernels and additionally Autograd kernels
+//   (3) CompositeExplicitAutograd kernels and additionally Autograd kernels
 // The reason for (3) is that ops that also use dispatch (e.g. register CPU/CUDA/QuantizedCPU
 // kernels) will skip picking up CompositeImplicitAutograd kernels for Autograd, so we register them to both
-// DefaultBackend and Autograd instead. See
+// CompositeExplicitAutograd and Autograd instead. See
 // https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword
 // for more details.
 // Invariant:
-// - Ops registered to CompositeImplicitAutograd or DefaultBackend below must match `MANUAL_BACKEND` set in tools/autograd/gen_variable_type.py.
+// - Ops registered to CompositeImplicitAutograd or CompositeExplicitAutograd below must match `MANUAL_BACKEND` set in tools/autograd/gen_variable_type.py.
 //   and they have manual_kernel_registration=True in native_functions.yaml.
 // - Ops registered to DispatchKey::Autograd below must be included in `MANUAL_AUTOGRAD` in tools/autograd/gen_variable_type.py
 
@@ -393,9 +393,9 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
 }
 
-TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {
-  m.impl("_backward", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::_backward)));
-  m.impl("requires_grad_", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::requires_grad_)));
+TORCH_LIBRARY_IMPL(aten, CompositeExplicitAutograd, m) {
+  m.impl("_backward", torch::dispatch(DispatchKey::CompositeExplicitAutograd, TORCH_FN(VariableType::_backward)));
+  m.impl("requires_grad_", torch::dispatch(DispatchKey::CompositeExplicitAutograd, TORCH_FN(VariableType::requires_grad_)));
 }
 
 TORCH_LIBRARY_IMPL(aten, CompositeImplicitAutograd, m) {
