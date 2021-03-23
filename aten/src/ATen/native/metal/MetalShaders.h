@@ -559,20 +559,27 @@ kernel void resize_nearest_nonarray(texture2d<half, access::sample> in[[texture(
     out.write(in.sample(s, float2(in_x, in_y)), gid.xy);
 }
 
-// array -> array
-kernel void reshape1(texture2d_array<half, access::read> in[[texture(0)]],
-                     texture2d_array<half, access::write> out[[texture(1)]],
-                     ushort3 gid[[thread_position_in_grid]]) {
+constant bool reshape_out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);
+constant bool reshape_out_is_tex = !reshape_out_is_arr;
+constant bool reshape_in_is_arr = (ushort_arg_7 > 1 || ushort_arg_6 > 4);
+constant bool reshape_in_is_tex = !reshape_in_is_arr;
+kernel void reshape(texture2d_array<half, access::read> in_arr[[texture(0), function_constant(reshape_in_is_arr)]],
+                    texture2d<half, access::read> in_tex[[texture(0),function_constant(reshape_in_is_tex)]],
+                    texture2d_array<half, access::write> out_arr[[texture(1), function_constant(reshape_out_is_arr)]],
+                    texture2d<half, access::write> out_tex[[texture(1),
+                        function_constant(reshape_out_is_tex)]],
+                    ushort3 gid[[thread_position_in_grid]]) {
     const ushort H2 = ushort_arg_0;
     const ushort W2 = ushort_arg_1;
     const ushort C2 = ushort_arg_2;
     if (gid.x >= W2 || gid.y >= H2) {
         return;
     }
-    const ushort H1 = ushort_arg_3;
-    const ushort W1 = ushort_arg_4;
-    const ushort C1 = ushort_arg_5;
-    const ushort N1 = ushort_arg_6;
+    const ushort H1 = ushort_arg_4;
+    const ushort W1 = ushort_arg_5;
+    const ushort C1 = ushort_arg_6;
+    const ushort N1 = ushort_arg_7;
+        
     const int numel1 = H1 * W1 * C1 * N1;
     const ushort slices2 = divRoundUp(C2, 4);
     const ushort slices1 = divRoundUp(C1, 4);
@@ -594,116 +601,18 @@ kernel void reshape1(texture2d_array<half, access::read> in[[texture(0)]],
         auto n1 = ((int)(linear_idx/W1/H1/C1) % N1);
         auto z1 = (int)s1 / 4 + n1 * slices1;
         auto pos = s1 % 4;
-        value[idx] = in.read(ushort2(x1, y1), z1)[pos];
-    }
-    out.write(value, gid.xy, gid.z);
-}
-
-
-// array -> nonarray
-kernel void reshape2(texture2d_array<half, access::read> in[[texture(0)]],
-                     texture2d<half, access::write> out[[texture(1)]],
-                     ushort2 gid[[thread_position_in_grid]]) {
-    const ushort H2 = ushort_arg_0;
-    const ushort W2 = ushort_arg_1;
-    if (gid.x >= W2 || gid.y >= H2) {
-        return;
-    }
-    const ushort H1 = ushort_arg_3;
-    const ushort W1 = ushort_arg_4;
-    const ushort C1 = ushort_arg_5;
-    const ushort N1 = ushort_arg_6;
-    const int numel1 = H1 * W1 * C1 * N1;
-    const ushort slices1 = divRoundUp(C1, 4);
-    half4 value;
-    for (int idx = 0; idx < 4; ++idx){
-        // we compute the "linear index" of the output element,
-        // and convert it to the equivalent "linear index" of the input element.
-        ushort offset = idx;
-        ushort linear_idx = offset * H2 * W2 + gid.y * W2 + gid.x;
-        if(linear_idx >= numel1){
-            value[idx] = 0;
-            continue;
+        if(reshape_in_is_arr) {
+            value[idx] = in_arr.read(ushort2(x1, y1), z1)[pos];
+        } else {
+            value[idx] = in_tex.read(ushort2(x1, y1))[pos];
         }
-        auto x1 = linear_idx % W1;
-        auto y1 = ((int)(linear_idx/W1)) % H1;
-        auto s1 = ((int)(linear_idx/W1/H1) % C1);
-        auto n1 = ((int)(linear_idx/W1/H1/C1) % N1);
-        auto z1 = (int)s1 / 4 + n1 * slices1;
-        auto pos = s1 % 4;
-        value[idx] = in.read(ushort2(x1, y1), z1)[pos];
+            
     }
-    out.write(value, gid);
-}
-
-// nonarray -> array
-kernel void reshape3(texture2d_array<half, access::write> out[[texture(1)]],
-                     texture2d<half, access::read> in[[texture(0)]],
-                     ushort3 gid[[thread_position_in_grid]]) {
-    const ushort H2 = ushort_arg_0;
-    const ushort W2 = ushort_arg_1;
-    const ushort C2 = ushort_arg_2;
-    if (gid.x >= W2 || gid.y >= H2) {
-        return;
+    if(reshape_out_is_arr) {
+        out_arr.write(value, gid.xy, gid.z);
+    } else {
+        out_tex.write(value, gid.xy);
     }
-    const ushort H1 = ushort_arg_3;
-    const ushort W1 = ushort_arg_4;
-    const ushort C1 = ushort_arg_5;
-    const ushort N1 = ushort_arg_6;
-    const int numel1 = H1 * W1 * C1 * N1;
-    const ushort slices2 = divRoundUp(C2, 4);
-    const ushort n2 = gid.z / slices2; //image index
-    const ushort s2 = gid.z - n2 * slices2; // slice offest
-    half4 value;
-    for (int idx = 0; idx < 4; ++idx){
-        // we compute the "linear index" of the output element,
-        // and convert it to the equivalent "linear index" of the input element.
-        ushort offset = 4 * s2 + idx;
-        ushort linear_idx = n2 * C2 * H2 * W2 + offset * H2 * W2 + gid.y * W2 + gid.x;
-        if(linear_idx >= numel1){
-            value[idx] = 0;
-            continue;
-        }
-        auto x1 = linear_idx % W1;
-        auto y1 = ((int)(linear_idx/W1)) % H1;
-        auto s1 = ((int)(linear_idx/W1/H1) % C1);
-        auto pos = s1 % 4;
-        value[idx] = in.read(ushort2(x1, y1))[pos];
-    }
-    out.write(value, gid.xy, gid.z);
-}
-
-// nonarray -> nonarray
-kernel void reshape4(texture2d<half, access::write> out[[texture(1)]],
-                     texture2d<half, access::read> in[[texture(0)]],
-                     ushort2 gid[[thread_position_in_grid]]) {
-    const ushort H2 = ushort_arg_0;
-    const ushort W2 = ushort_arg_1;
-    if (gid.x >= W2 || gid.y >= H2) {
-        return;
-    }
-    const ushort H1 = ushort_arg_3;
-    const ushort W1 = ushort_arg_4;
-    const ushort C1 = ushort_arg_5;
-    const ushort N1 = ushort_arg_6;
-    const int numel1 = H1 * W1 * C1 * N1;
-    half4 value;
-    for (int idx = 0; idx < 4; ++idx){
-        // we compute the "linear index" of the output element,
-        // and convert it to the equivalent "linear index" of the input element.
-        ushort offset = idx;
-        ushort linear_idx = offset * H2 * W2 + gid.y * W2 + gid.x;
-        if(linear_idx >= numel1){
-            value[idx] = 0;
-            continue;
-        }
-        auto x1 = linear_idx % W1;
-        auto y1 = ((int)(linear_idx/W1)) % H1;
-        auto s1 = ((int)(linear_idx/W1/H1) % C1);
-        auto pos = s1 % 4;
-        value[idx] = in.read(ushort2(x1, y1))[pos];
-    }
-    out.write(value, gid);
 }
 
 )PT_METAL_SHADERS";
