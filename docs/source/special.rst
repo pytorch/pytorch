@@ -22,3 +22,4 @@ Functions
 .. autofunction:: erfc
 .. autofunction:: erfinv
 .. autofunction:: gammaln
+.. autofunction:: i0e
