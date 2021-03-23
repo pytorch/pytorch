@@ -867,7 +867,7 @@ auto Engine::execute(const edge_list& roots,
                      bool create_graph,
                      bool accumulate_grad,
                      const edge_list& outputs) -> variable_list {
-  const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
+  // const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
   // std::cout << "current stream " << guard.getStream(*at::device_of(inputs[0])) << std::endl;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
@@ -926,15 +926,18 @@ auto Engine::execute(const edge_list& roots,
   // Syncs leaf streams with ambient (current) streams of the thread that called execute().
   // See Note [Streaming backwards]. leaf_streams is an unordered_set so it should only
   // hold a small number of streams to sync with.
-  for (const auto& leaf_stream : graph_task->leaf_streams) {
+
+  if (graph_task->leaf_streams.size() > 0) {
     const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
-    const auto current_stream = guard.getStream(leaf_stream.device());
-    // std::cout << "current stream " << guard.getStream(leaf_stream.device())
-    //           << ", leaf stream " << leaf_stream << std::endl;
-    if (leaf_stream != current_stream) {
-      auto event = c10::Event{c10::DeviceType::CUDA};
-      event.record(leaf_stream);
-      current_stream.wait(event);
+    for (const auto& leaf_stream : graph_task->leaf_streams) {
+      const auto current_stream = guard.getStream(leaf_stream.device());
+      // std::cout << "current stream " << guard.getStream(leaf_stream.device())
+      //           << ", leaf stream " << leaf_stream << std::endl;
+      if (leaf_stream != current_stream) {
+        auto event = c10::Event{c10::DeviceType::CUDA};
+        event.record(leaf_stream);
+        current_stream.wait(event);
+      }
     }
   }
 

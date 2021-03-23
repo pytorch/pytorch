@@ -1689,6 +1689,8 @@ class TestCuda(TestCase):
             stream.wait_stream(default_stream)
             output = MultiplyInStream.apply(x)
             output.sum().backward()
+        # See "Stream semantics of backward passes" on https://pytorch.org/docs/stable/notes/cuda.html
+        default_stream.wait_stream(stream)
 
         self.assertEqual(x.grad, torch.ones_like(x) * 2)
         self.assertEqual(torch.cuda.current_stream(), default_stream)
@@ -1697,6 +1699,20 @@ class TestCuda(TestCase):
     @skipIfRocm
     def test_streaming_backwards_multiple_streams(self):
 
+        class MultiplyInStream(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, val):
+                ctx.val = val
+                ctx.stream = torch.cuda.current_stream()
+                return x * val
+
+            @staticmethod
+            def backward(ctx, grad):
+                self.assertEqual(torch.cuda.current_stream(), ctx.stream)
+                # delays the operation in the the background stream
+                torch.cuda._sleep(1000 * 5000)
+                return grad * ctx.val, None
+
         class StreamModel(torch.nn.Module):
             def __init__(self):
                 super(StreamModel, self).__init__()
@@ -1704,30 +1720,36 @@ class TestCuda(TestCase):
                 self.stream0 = torch.cuda.Stream()
                 self.stream1 = torch.cuda.Stream()
 
-            def forward(self, x):
-                x0 = x.clone()
-                torch._C._cuda_setStream(self.stream0._cdata)
-                y0 = x0 * 2
-                self.event.record(stream=torch.cuda.current_stream())
+            def forward(self, x, x_first_use_on_ambient):
+                if x_first_use_on_ambient:
+                    x0 = x.clone()
+                self.stream0.wait_stream(torch.cuda.current_stream())
+                self.stream1.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(self.stream0):
+                    if not x_first_use_on_ambient:
+                        x0 = x.clone()
+                    y0 = MultiplyInStream.apply(x0, 2)
+                    self.event.record(stream=torch.cuda.current_stream())
 
-                torch._C._cuda_setStream(self.stream1._cdata)
-                y1 = x * 3
-                self.stream1.wait_event(self.event)
-                return y0 + y1
+                with torch.cuda.stream(self.stream1):
+                    y1 = MultiplyInStream.apply(x, 3)
+                    self.stream1.wait_event(self.event)
+                    return y0 + y1
 
         stream = torch.cuda.Stream()
 
-        def accum_hook(grad):
-            self.assertEqual(torch.cuda.current_stream(), stream)
-
-        with torch.cuda.stream(stream):
-            x = torch.randn(5, 5, device='cuda', requires_grad=True)
-            x.register_hook(accum_hook)
+        for x_first_use_on_ambient in (True, False):
+            with torch.cuda.stream(stream):
+                x = torch.randn(5, 5, device='cuda', requires_grad=True)
+                model = StreamModel().cuda()
+                x.register_hook(lambda grad: self.assertEqual(torch.cuda.current_stream(),
+                                                              stream if x_first_use_on_ambient else model.stream0))
+                for i in range(5):
+                    model(x, x_first_use_on_ambient).sum().backward()
+            # See "Stream semantics of backward passes" on https://pytorch.org/docs/stable/notes/cuda.html
             torch.cuda.current_stream().wait_stream(stream)
-            model = StreamModel().cuda()
-            model(x).sum().backward()
 
-        self.assertEqual(x.grad, torch.ones_like(x) * 5)
+            self.assertEqual(x.grad, torch.ones_like(x) * 5 * 5)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
@@ -1773,7 +1795,7 @@ class TestCuda(TestCase):
         self.assertTrue(a.grad.sum().item() == 4 * size)
         self.assertTrue(b.grad.sum().item() == 4 * size)
 
-    def test_streaming_backward_sync_graph_root(self):
+    def test_streaming_backwards_sync_graph_root(self):
         # This function tests if bwd ops running on a side stream properly sync with the GraphRoot.
         # The potential bug it targets is a race condition. The test uses multiple trials and
         # torch.cuda._sleep such that if the race condition exists, the test will almost certainly fail,
