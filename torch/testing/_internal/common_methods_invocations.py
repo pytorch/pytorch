@@ -3096,13 +3096,9 @@ op_db: List[OpInfo] = [
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
-           test_inplace_grad=False,
+           supports_inplace_autograd=False,
            supports_out=True,
-           sample_inputs_func=sample_inputs_mode,
-           skips=(
-               # ScatterGather not implemented for BF16
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        device_type='cpu', dtypes=[torch.bfloat16]),)),
+           sample_inputs_func=sample_inputs_mode,),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
