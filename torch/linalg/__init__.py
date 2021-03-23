@@ -367,6 +367,65 @@ Examples::
             [-3.1113,  2.7381]], dtype=torch.float64)
 """)
 
+householder_product = _add_docstr(_linalg.linalg_householder_product, r"""
+householder_product(input, tau, *, out=None) -> Tensor
+
+Computes the product of Householder matrices.
+
+Householder matrices are stored in compressed vector form as columns of a `(m × n)` matrix :attr:`input`,
+or columns of each matrix in a batched :attr:`input`.
+:attr:`tau` is a tensor of scalar scale factors for each Householder vector.
+For the single matrix :attr:`input` taking its `i`-th column as `vᵢ` and `τ = tau[i]`
+gives the `i`-th Householder matrix as `Hᵢ = I − τ vᵢ vᵢᴴ`.
+
+The result of this function is `H₁ H₂ ... Hᵣ`, where `r` is equal to `tau.shape[-1]`.
+This function is commonly used together with :func:`torch.geqrf`
+to explitly form the `Q` matrix of the QR decomposition.
+See `Representation of Orthogonal or Unitary Matrices`_ for further details.
+
+.. note:: LAPACK's `orgqr` is used for the computations.
+          For CUDA inputs, cuSOLVER's `orgqr` routine is used if CUDA version >= 10.1.243.
+
+.. note:: Only values below the main diagonal of :attr:`input` are used in the computations
+          and other values are ignored.
+
+.. note:: If :attr:`input` doesn't satisfy the requirement `m >= n`,
+          or :attr:`tau` doesn't satisfy the requirement `n >= r`, then a RuntimeError will be thrown.
+
+Args:
+    input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
+                    batch dimensions consisting of `(m × n)` matrices.
+    tau (Tensor): the input tensor of size `(*, r)` where `*` is zero or more
+                    batch dimensions consisting of `r`-dimensional vectors.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if `None`. Default: `None`
+
+Examples::
+
+    >>> a = torch.randn(2, 2)
+    >>> h, tau = torch.geqrf(a)
+    >>> q = torch.linalg.householder_product(h, tau)
+    >>> torch.allclose(q, torch.linalg.qr(a)[0])
+    True
+
+    >>> h = torch.randn(3, 2, 2, dtype=torch.complex128)
+    >>> tau = torch.randn(3, 1, dtype=torch.complex128)
+    >>> q = torch.linalg.householder_product(h, tau)
+    >>> q
+    tensor([[[ 1.8034+0.4184j,  0.2588-1.0174j],
+            [-0.6853+0.7953j,  2.0790+0.5620j]],
+
+            [[ 1.4581+1.6989j, -1.5360+0.1193j],
+            [ 1.3877-0.6691j,  1.3512+1.3024j]],
+
+            [[ 1.4766+0.5783j,  0.0361+0.6587j],
+            [ 0.6396+0.1612j,  1.3693+0.4481j]]], dtype=torch.complex128)
+
+.. _Representation of Orthogonal or Unitary Matrices:
+    https://www.netlib.org/lapack/lug/node128.html
+""")
+
 lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
 torch.linalg.lstsq(input, b, cond=None, *, driver=None)
     -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
@@ -567,6 +626,76 @@ Examples::
             [1, 2, 2, 2]])
 """)
 
+vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
+linalg.vector_norm(input, ord=None, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+
+Computes a vector norm over :attr:`input`.
+
+See :func:`torch.linalg.norm` for computing matrix norms.
+
+Supports floating and complex inputs.
+
+Args:
+    input (Tensor): The input tensor. For complex inputs, the norm is
+        calculated using the absolute value of each element. If the input is
+        complex and neither :attr:`dtype` nor :attr:`out` is specified, the
+        result's data type will be the corresponding floating point type (e.g.
+        float if :attr:`input` is complex float).
+
+    ord (int, float, inf, -inf, optional): The order of the norm.
+        The following norms can be calculated:
+
+        =====  ==========================
+        ord    norm
+        =====  ==========================
+        None   2-norm
+        inf    max(abs(x))
+        -inf   min(abs(x))
+        0      sum(x != 0)
+        other  sum(abs(x)**ord)**(1./ord)
+        =====  ==========================
+
+        Default: ``None``
+
+    dim (int, tuple of ints, list of ints, optional): If :attr:`dim` is an int,
+        the vector norm is calculated over the specified dimension. If
+        :attr:`dim` is a tuple of ints, the vector norm is calculated over the
+        elements in the specified dimensions. If :attr:`dim` is ``None``, the
+        vector norm is calculated across all dimensions. Default: ``None``
+
+    keepdim (bool, optional): If set to True, the reduced dimensions are retained
+        in the result as dimensions with size one. Default: ``False``
+
+Keyword args:
+
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+    dtype (:class:`torch.dtype`, optional): If specified, the :attr:`input` is
+        cast to :attr:`dtype` before performing the operation, and the returned
+        tensor's type will be :attr:`dtype`. If this argument is used in
+        conjunction with the :attr:`out` argument, the output tensor's type
+        must match this argument or a RuntimeError will be raised. Default:
+        ``None``
+
+Examples::
+
+    >>> import torch
+    >>> from torch import linalg as LA
+    >>> a = torch.arange(9, dtype=torch.float) - 4
+    >>> a
+    tensor([-4., -3., -2., -1.,  0.,  1.,  2.,  3.,  4.])
+    >>> b = a.reshape((3, 3))
+    >>> b
+    tensor([[-4., -3., -2.],
+            [-1.,  0.,  1.],
+            [ 2.,  3.,  4.]])
+
+    >>> LA.vector_norm(a, ord=3.5)
+    tensor(5.4345)
+    >>> LA.vector_norm(b, ord=3.5)
+    tensor(5.4345)
+""")
+
 norm = _add_docstr(_linalg.linalg_norm, r"""
 linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
 
@@ -754,7 +883,7 @@ Args:
     compute_uv (bool, optional): whether to compute `U` and `V` or not. Defaults to True.
     out (tuple, optional): a tuple of three tensors to use for the outputs. If compute_uv=False,
                            the 1st and 3rd arguments must be tensors, but they are ignored. E.g. you can
-                           pass `(torch.Tensor(), out_S, torch.Tensor())`
+                           pass `(torch.tensor([]), out_S, torch.tensor([]))`
 
 Example::
 
@@ -1195,8 +1324,8 @@ Example::
     True
     >>> a = torch.randn(3, 4, 5)
     >>> q, r = torch.linalg.qr(a, mode='complete')
-    >>> torch.allclose(torch.matmul(q, r), a)
+    >>> torch.allclose(torch.matmul(q, r), a, atol=1e-5)
     True
-    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(5))
+    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(4), atol=1e-5)
     True
 """)
