@@ -1,4 +1,16 @@
-"""Default set of benchmarks."""
+"""Default set of benchmarks.
+
+Parser notes:
+    `parse_stmts`:
+        - Width for the left (Python) column MUST be 40 characters.
+        - The column separator is " | ", not "|". Whitespace matters.
+
+    `GroupedVariants`:
+        - `Setup` and `Global_Setup` (case insensitive) are reserved keywords
+          to populate `setup` and `global_setup` for every generated benchmark.
+        - To set a label for the succeeding block, add `# @YOUR_LABEL` (Python)
+          or `// @YOUR_LABEL` (C++).
+"""
 
 from core.api import GroupedModules, GroupedStmts, GroupedVariants
 from core.types import FlatIntermediateDefinition
@@ -20,17 +32,17 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
 
         "overloads": GroupedVariants(
             cpp_block=r"""
-                // <-- Setup -->
+                // @Setup
                 auto options_empty = c10::TensorOptions();
                 auto options_full = c10::TensorOptions().dtype(at::kFloat).device(at::kCPU);
                 auto optional_float = c10::make_optional(at::kFloat);
 
-                // <-- TensorOptions overload -->
+                // @TensorOptions overload
                 at::empty({0}, options_empty);
                 at::empty({0}, options_full);
                 at::empty({0}, at::kFloat); // implicit conversion
 
-                // <-- Faithful overload -->
+                // @Faithful overload
                 at::empty({0}, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
                 at::empty({0}, at::kFloat, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
                 at::empty({0}, optional_float, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
@@ -53,31 +65,31 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
     "Indexing": GroupedVariants(*parse_stmts(r"""
         Python                                   | C++
         ---------------------------------------- | ----------------------------------------
-        # <-- Setup -->                          | // <-- Setup -->
+        # @setup                                 | // @setup
                                                  | using namespace torch::indexing;
         torch.manual_seed(6626_10_34)            | torch::manual_seed(66261034);
                                                  |
         x = torch.randn(1, 1, 1)                 | auto x = torch::randn({1, 1, 1});
         y = torch.randn(1, 1, 1)                 | auto y = torch::randn({1, 1, 1});
                                                  |
-        # <-- Tensor-Scalar -->                  | // <-- Tensor-Scalar -->
+        # @Tensor-Scalar                         | // @Tensor-Scalar
         x[0] = 1                                 | x.index_put_({0}, 1);
         x[0, 0] = 1                              | x.index_put_({0, 0}, 1);
         x[0, 0, 0] = 1                           | x.index_put_({0, 0, 0}, 1);
                                                  |
-        # <-- Tensor-Scalar (Advanced) -->       | // <-- Tensor-Scalar (Advanced) -->
+        # @Tensor-Scalar (Advanced)              | // @Tensor-Scalar (Advanced)
         x[...] = 1                               | x.index_put_({"..."}, 1);
         x[:] = 1                                 | x.index_put_({Slice(None, None, None)}, 1);
         x[None] = 1                              | x.index_put_({None}, 1);
         x[False] = 1                             | x.index_put_({false}, 1);
         x[True] = 1                              | x.index_put_({true}, 1);
                                                  |
-        # <-- Tensor-Tensor -->                  | // <-- Tensor-Tensor -->
+        # @Tensor-Tensor                         | // @Tensor-Tensor
         x[0] = y[0]                              | x.index_put_({0}, y.index({0}));
         x[0, 0] = y[0, 0]                        | x.index_put_({0, 0}, y.index({0, 0}));
         x[0, 0, 0] = y[0, 0, 0]                  | x.index_put_({0, 0, 0}, y.index({0, 0, 0}));
                                                  |
-        # <-- Tensor-Tensor (Advanced) -->       | // <-- Tensor-Tensor (Advanced) -->
+        # @Tensor-Tensor (Advanced)              | // @Tensor-Tensor (Advanced)
         x[...] = y[...]                          | x.index_put_({"..."}, y.index({"..."}));
         x[:] = y[:]                              | x.index_put_({Slice(None, None, None)}, y.index({Slice(None, None, None)}));
         x[None] = y[None]                        | x.index_put_({None}, y.index({None}));

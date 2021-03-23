@@ -1,7 +1,7 @@
 # Instruction count microbenchmarks
 ## Quick start
 
-To run the benchmark:
+### To run the benchmark:
 
 ```
 # From pytorch root
@@ -12,6 +12,15 @@ python main.py
 Currently `main.py` contains a very simple threadpool (so that run time isn't
 unbearably onerous) and simply prints the results. These components will be
 upgraded in subsequent PRs.
+
+### To define a new benchmark:
+* `TimerArgs`: Low level definition which maps directly to
+`torch.utils.benchmark.Timer`
+* `GroupedStmts`: Benchmark a snippet. (Python, C++, or both) Can automatically
+generate TorchScript and autograd variants.
+* `GroupedModules`: Like `GroupedStmts`, but takes `nn.Module`s
+* `GroupedVariants`: Benchmark-per-line to define many related benchmarks in a
+single code block.
 
 ## Architecture
 ### Benchmark definition.

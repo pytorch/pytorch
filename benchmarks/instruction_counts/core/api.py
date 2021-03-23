@@ -63,6 +63,7 @@ class GroupedBenchmark:
     Concrete interfaces:
      - `core.api.GroupedStmts`     (init_from_stmts)
      - `core.api.GroupedModules`   (init_from_model)
+     - `core.api.GroupedVariants`  (init_from_variants)
 
     There are a variety of dimensions along which one might wish to measure
     PyTorch performance:
@@ -77,7 +78,7 @@ class GroupedBenchmark:
     There are also two programming idioms in PyTorch. One is to write free form
     code (so-called "NumPy with gradients"), and the other is to organize code
     using `torch.nn.Module`s. (This is how common neural network layers are
-    exposed through the PyTorch API.) To support easy definition two
+    exposed through the PyTorch API.) To support easy definition two simple
     initialization methods are provided:
      - `init_from_stmts`
      - `init_from_model`
@@ -120,6 +121,9 @@ class GroupedBenchmark:
         num_threads:
             Maps to the Timer arg. If a tuple of ints is provided, benchmarks
             will be generated for each value.
+
+    A third method, `init_from_variants`, is provided to define several related
+    benchmarks at once.
     """
 
     # These are the stmts which are actually executed by Timer. In the case of
@@ -369,7 +373,7 @@ class GroupedBenchmark:
     def _parse_variants(block: str, language: Language) -> Tuple[Dict[str, List[str]], str, str]:
         block = textwrap.dedent(block).strip()
         comment = "#" if language == Language.PYTHON else "//"
-        label_pattern = f"{comment} <-- (.+) -->$"
+        label_pattern = f"{comment} @(.+)$"
         label = ""
 
         lines_by_label: Dict[str, List[str]] = {"SETUP": [], "GLOBAL_SETUP": []}
