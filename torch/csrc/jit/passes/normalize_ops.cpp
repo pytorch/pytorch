@@ -7,24 +7,6 @@ namespace jit {
 
 namespace {
 
-void replaceNodeWithNewSymbol(Node* node, Symbol new_symbol) {
-  WithInsertPoint insert_guard{node};
-  auto graph = node->owningGraph();
-  auto replace_node = graph->insertNode(graph->create(new_symbol, 0));
-  for (Value* v : node->inputs()) {
-    replace_node->addInput(v);
-  }
-  for (Value* v : node->outputs()) {
-    auto new_out = replace_node->addOutput()->copyMetadata(v);
-    v->replaceAllUsesWith(new_out);
-  }
-  replace_node->copyMetadata(node);
-  TORCH_INTERNAL_ASSERT(
-      replace_node->maybeOperator(),
-      "invalid symbol replacement:",
-      new_symbol,
-      node->kind());
-}
 
 // having multiple ops in our IR that do the same thing makes the IR more
 // difficult to consumer for downstream user of the IR, such as our own
@@ -32,7 +14,7 @@ void replaceNodeWithNewSymbol(Node* node, Symbol new_symbol) {
 bool normalizeOpAliases(graph_node_list_iterator& iter) {
   auto alias = getOperatorAliasMap().find(iter->kind());
   if (alias != getOperatorAliasMap().end()) {
-    replaceNodeWithNewSymbol(*iter, alias->second);
+    iter->replaceWithNewSymbol(alias->second);
     iter.destroyCurrent();
     return true;
   }
@@ -105,6 +87,9 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::swapaxes, aten::transpose},
       {aten::swapaxes_, aten::transpose_},
       {aten::moveaxis, aten::movedim},
+      {aten::special_erf, aten::erf},
+      {aten::special_erfc, aten::erfc},
+      {aten::special_erfinv, aten::erfinv},
       {aten::orgqr, aten::linalg_householder_product},
       {aten::special_gammaln, aten::lgamma}};
   return alias_map;
