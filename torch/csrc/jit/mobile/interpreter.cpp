@@ -44,7 +44,7 @@ void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
 
 using namespace at;
 
-int64_t getInterpretersCurrentPC() {
+int64_t getInterpretersExceptionPC() {
   return exception_pc_;
 }
 
@@ -143,7 +143,8 @@ bool InterpreterState::run(Stack& stack) {
           // numAttributes before setSlot.
           // clang-tidy complains about size_t compare with int32_t (inst.X)
           // hence the cast
-          while (static_cast<int32_t>(userObj->type()->numAttributes()) <= inst.X) {
+          while (static_cast<int32_t>(userObj->type()->numAttributes()) <=
+                 inst.X) {
             std::stringstream ss;
             ss << userObj->type()->numAttributes();
             userObj->type()->addAttribute(ss.str(), c10::NoneType::create());
@@ -196,7 +197,7 @@ bool InterpreterState::run(Stack& stack) {
           ++pc;
         } break;
         case DICT_CONSTRUCT: {
-          auto type = code_->types_[inst.X]->expect<at::DictType>();
+          const auto& type = code_->types_[inst.X]->expectRef<at::DictType>();
           dictConstruct(stack, type, inst.N);
           ++pc;
         } break;
@@ -232,6 +233,8 @@ bool InterpreterState::run(Stack& stack) {
           AT_ERROR(toString(inst.op), " is invalid.");
       }
     } catch (c10::Error& error) {
+      // Reason for catching and rethrowing the error is so that we can
+      // set the exception pc that is queried later
       exception_pc_ = pc;
       TORCH_RETHROW(error);
     } catch (...) {

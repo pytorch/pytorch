@@ -37,7 +37,10 @@ class Function {
   void setSchema(c10::FunctionSchema schema);
   const at::optional<c10::FunctionSchema>& getSchema() const;
 
-  int64_t getCurrentDebugHandle() const;
+  // Returns the debug handle corresponding to where the execution
+  // is halted due to exception.
+  // If no corresponding debug handle is found then -1 is returned.
+  int64_t getExceptionDebugHandle() const;
 
  private:
   c10::QualifiedName name_;

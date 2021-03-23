@@ -28,13 +28,14 @@ MobileDebugTable::MobileDebugTable(
           std::make_unique<SourceRangeDeserializer>();
       for (auto& val : ivalues) {
         auto tup_elems = val.toTuple()->elements();
-        TORCH_CHECK(
-            tup_elems.size() == 3,
-            "Source debug tuple must have three elements:"
-            "byte_offset, source_tag, source_range");
-        int64_t debug_handle = tup_elems[1].toInt();
-        auto source_range = deserializer->deserialize(tup_elems[2]);
-        source_range_map_.emplace(debug_handle, std::move(source_range));
+        // For BC we decode only tuples with 3 elements
+        // assuming it contains
+        // byte_offset, debug_handle (=source range tag), source range
+        if (tup_elems.size() == 3) {
+          int64_t debug_handle = tup_elems[1].toInt();
+          auto source_range = deserializer->deserialize(tup_elems[2]);
+          source_range_map_.emplace(debug_handle, std::move(source_range));
+        }
       }
     }
   }

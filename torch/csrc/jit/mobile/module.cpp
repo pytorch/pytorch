@@ -158,7 +158,7 @@ void Method::run(Stack& stack) const {
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     auto debug_string = owner_->getDebugTable()->getSourceDebugString(
-        function_->getCurrentDebugHandle());
+        function_->getExceptionDebugHandle());
     error.add_context(debug_string);
 #endif
     if (observer) {
@@ -180,7 +180,7 @@ void Method::run(Stack& stack) const {
     } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
       auto debug_string = owner_->getDebugTable()->getSourceDebugString(
-          function_->getCurrentDebugHandle());
+          function_->getExceptionDebugHandle());
       error.add_context(debug_string);
 #endif
       if (observer) {

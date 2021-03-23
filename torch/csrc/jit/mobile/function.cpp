@@ -131,8 +131,8 @@ const std::shared_ptr<Code> Function::get_code() const {
   return code_;
 }
 
-int64_t Function::getCurrentDebugHandle() const {
-  size_t pc = getInterpretersCurrentPC();
+int64_t Function::getExceptionDebugHandle() const {
+  size_t pc = getInterpretersExceptionPC();
   return (pc < code_->debug_handles_.size()) ? code_->debug_handles_[pc] : -1;
 }
 

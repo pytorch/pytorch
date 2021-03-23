@@ -24,7 +24,6 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
-#include <stack>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -635,11 +634,10 @@ class ScriptModuleSerializer {
   // full JIT with capabilities of reading code and constructing
   // graphs.
   // Instead we serialize the Code generated from graph of the methods.
-  // Code is serialized in bytecode format that contains ops corresponding
-  // to the nodes of the graph.
-  // Since original graph is gone, the question is how do we identify
-  // where the ops, in serialized bytecode, come from in original model code.
-  // We do this in two parts.
+  // Code is serialized in bytecode format that contains instructions
+  // corresponding to the nodes of the graph. Since original graph is gone, the
+  // question is how do we identify where the ops, in serialized bytecode, come
+  // from in original model code. We do this in two parts.
   // 1. Associate a unique tag to SourceRange.
   // 2. Serialize this unique_tag.
   //  2.1 Meaning save <byte_offset, source_range_tag, source range> instead of
