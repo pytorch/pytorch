@@ -18,48 +18,34 @@
 
 namespace at {
 namespace native {
-// The out variants of view ops can't be moved to aten because they don't
-// exactly follow the semantics of the aten ops. aten::reshape/flatten create
-// views, t, that are tracked by autograd and t.is_view() returns true. Here
-// t.is_view() would return false instead.
-at::Tensor& reshape_out(
+// copy version of view ops
+at::Tensor& reshape_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
     const std::vector<int64_t>& proposed_shape,
     bool infer_size = true) {
   auto shape = infer_size ? at::infer_size(proposed_shape, self.numel())
                           : proposed_shape;
-  auto stride = at::detail::computeStride(self.sizes(), self.strides(), shape);
+  at::native::resize_(out, shape, c10::nullopt);
 
-  if (stride.has_value()) {
-    // create view
-    if (!out.defined() || !out.storage().is_alias_of(self.storage())) {
-      auto impl = c10::make_intrusive<c10::TensorImpl>(
-          c10::Storage(self.storage()), self.key_set(), self.dtype());
-      out = at::Tensor(std::move(impl));
-    }
-
-    c10::TensorImpl* impl = out.unsafeGetTensorImpl();
-    impl->set_storage_offset(self.storage_offset());
-    impl->set_sizes_and_strides(shape, *stride);
-  } else {
-    // copy over tensor
-    if (!out.defined()) {
-      out = at::native::empty_like(
-          self, self.options(), at::MemoryFormat::Contiguous);
-    }
-    // copy first and set shape/strides later. It doesn't work the other way
-    // around.
-    at::native::copy_(out, self);
-    stride = at::detail::computeStride(out.sizes(), out.strides(), shape);
-    c10::TensorImpl* impl = out.unsafeGetTensorImpl();
-    impl->set_sizes_and_strides(shape, *stride);
+  if (!self.is_contiguous()) {
+    at::native::copy_(out, self, false /* non_blocking */);
+    return out;
   }
-  // namedinference::propagate_names(output, self);
+
+  size_t nbytes = self.nbytes();
+  if (nbytes == 0) {
+    return out;
+  }
+
+  const void* self_data = self.data_ptr();
+  void* out_data = out.data_ptr();
+  memcpy(out_data, self_data, nbytes);
+
   return out;
 }
 
-at::Tensor& flatten_out(
+at::Tensor& flatten_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
     int64_t start_dim,
@@ -72,12 +58,12 @@ at::Tensor& flatten_out(
       "flatten() has invalid args: start_dim cannot come after end_dim");
 
   if (self.dim() == 0) {
-    return reshape_out(out, self, {1}, false);
+    return reshape_copy_out(out, self, {1}, false);
   }
 
   if (start_dim == end_dim) {
-    out = self;
-    return out;
+    auto shape = self.sizes().vec();
+    return reshape_copy_out(out, self, shape, false);
   }
 
   // We don't want to infer_size on the entire shape, because that can give us
@@ -101,7 +87,7 @@ at::Tensor& flatten_out(
   for (int64_t i = end_dim + 1; i < self.dim(); i++) {
     shape.push_back(self.sizes()[i]);
   }
-  return reshape_out(out, self, shape, false);
+  return reshape_copy_out(out, self, shape, false);
 }
 
 at::Tensor& to_copy_out(Tensor& out, const Tensor& self, bool non_blocking) {
@@ -231,20 +217,6 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
-  return [](ProcessedNode* p_node) {
-    const auto& in0_t = p_node->Input(0).toTensor();
-    const auto& in1_t = p_node->Input(1).toTensor();
-    const auto in2_s = p_node->Input(2).toScalar();
-    if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = create_empty_from(in0_t);
-    }
-    auto& out_t = p_node->Output(0).toTensor();
-    fastResizeToZero(out_t);
-    at::cpu::add_out(out_t, in0_t, in1_t, in2_s);
-  };
-});
-
 REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
@@ -254,7 +226,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::mul_out(out_t, in0_t, in1_t);
+    at::cpu::mul_out(out_t, in0_t, in1_t);
   };
 });
 
@@ -284,7 +256,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::clamp_out(out_t, in0_t, in1_s, in2_s);
+    at::native::clamp_out(in0_t, in1_s, in2_s, out_t);
   };
 });
 
@@ -297,7 +269,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::bmm_out_cpu(out_t, in0_t, in1_t);
+    at::native::bmm_out_cpu(in0_t, in1_t, out_t);
   };
 });
 
@@ -320,7 +292,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
-        at::native::nan_to_num_out(out_t, in0_t, in1_d, in2_d, in3_d);
+        at::native::nan_to_num_out(in0_t, in1_d, in2_d, in3_d, out_t);
       };
     });
 REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
@@ -753,14 +725,14 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     if (p_node->Input(0).isTensor()) {
       if (p_node->Input(1).isTensor()) {
-        at::native::pow_out(
+        at::cpu::pow_out(
             out_t, p_node->Input(0).toTensor(), p_node->Input(1).toTensor());
       } else {
-        at::native::pow_out(
+        at::cpu::pow_out(
             out_t, p_node->Input(0).toTensor(), p_node->Input(1).toScalar());
       }
     } else {
-      at::native::pow_out(
+      at::cpu::pow_out(
           out_t, p_node->Input(0).toScalar(), p_node->Input(1).toTensor());
     }
   };
@@ -803,7 +775,7 @@ REGISTER_OPERATOR_FUNCTOR(
 // Out variants for view ops are registered to a separate registry because
 // their outputs (views) can't participate in memory reuse.
 REGISTER_OPERATOR_FUNCTOR(
-    aten::reshape,
+    static_runtime::reshape_copy,
     aten_reshape,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
@@ -811,15 +783,15 @@ REGISTER_OPERATOR_FUNCTOR(
         const auto proposed_shape = p_node->Input(1).toIntVector(); // shape
 
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::Tensor();
+          p_node->Output(0) = create_empty_from(self);
         }
         auto& out = p_node->Output(0).toTensor();
-        at::native::reshape_out(out, self, proposed_shape, true);
+        at::native::reshape_copy_out(out, self, proposed_shape, true);
       };
     });
 
 REGISTER_OPERATOR_FUNCTOR(
-    aten::flatten,
+    static_runtime::flatten_copy,
     aten_flatten,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
@@ -829,10 +801,10 @@ REGISTER_OPERATOR_FUNCTOR(
         const auto end_dim = p_node->Input(2).toInt();
 
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::Tensor();
+          p_node->Output(0) = create_empty_from(self);
         }
         auto& out = p_node->Output(0).toTensor();
-        at::native::flatten_out(out, self, start_dim, end_dim);
+        at::native::flatten_copy_out(out, self, start_dim, end_dim);
       };
     });
 
