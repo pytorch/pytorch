@@ -695,6 +695,13 @@ class TestHub(TestCase):
             self.assertEqual(sum_of_state_dict(loaded_state),
                              SUM_OF_HUB_EXAMPLE)
 
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_commit_from_forked_repo(self):
+        with self.assertRaisesRegex(
+                ValueError,
+                'If it\'s a commit from a forked repo'):
+            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
+
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python # noqa
