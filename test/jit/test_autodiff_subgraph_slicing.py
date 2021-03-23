@@ -3,6 +3,7 @@ import sys
 import unittest
 from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, enable_profiling_mode_for_profiling_tests
 import torch
+from typing import Optional
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -62,6 +63,18 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         scripted = self.checkScript(method1, (x, weight, b1, b2))
         # check_types requires last_graph on scripted to be set, so we just skip it
         check_against_reference(self, scripted, method1, lambda x: x, (x, weight, b1, b2), check_types=False)
+
+    def test_bias_none(self):
+
+        def method1(x, weight, bias: Optional[torch.Tensor]):
+            return torch.nn.functional.linear(x, weight, bias).relu() + 2
+        N = 10
+        x = torch.rand(N, N, requires_grad=True)
+        weight = torch.rand(N, N, requires_grad=True)
+        bias = None
+        scripted = self.checkScript(method1, (x, weight, bias))
+        # check_types requires last_graph on scripted to be set, so we just skip it
+        check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
 
     def test_simple_merge(self):
         # o --> o

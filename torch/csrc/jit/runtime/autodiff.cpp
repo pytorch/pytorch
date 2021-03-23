@@ -348,16 +348,16 @@ struct ReverseDetails {
   Block* reverse_block;
 };
 
-static Value* unwrapOptionalGradient(Value* dx) {
+static void unwrapOptionalGradient(Value* dx) {
   const static auto optional_tensor_type =
       OptionalType::create(TensorType::get());
-  if (*dx->type() != *optional_tensor_type) {
-    return dx;
+
+  if (auto opt_type = dx->type()->cast<OptionalType>()) {
+    if (auto tensor_type = opt_type->getElementType()->cast<TensorType>()) {
+      GRAPH_DEBUG("Unwrapping the optional part of ", dx->debugName());
+      dx->setType(tensor_type);
+    }
   }
-  WithInsertPoint wip{dx->node()->next()};
-  GRAPH_DEBUG("Unwrapping optional tensor value ", dx->debugName());
-  return dx->node()->owningGraph()->insert(
-      prim::unchecked_unwrap_optional, {dx});
 }
 
 // AutogradAdd is a special addition function that handles Undef
@@ -446,7 +446,11 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
       if (!grad_inputs[i])
         continue;
 
-      grad_inputs[i] = unwrapOptionalGradient(grad_inputs[i]);
+      // if a backward function returns `None` or `Tensor` (i.e.
+      // Optional[Tensor]) as a gradient for one of the forward's inputs, we
+      // need to strip off the optional part, otherwise any following
+      // computations that use the gradient may fail schema matching
+      unwrapOptionalGradient(grad_inputs[i]);
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
