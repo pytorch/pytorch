@@ -239,7 +239,7 @@ def get_fast_numerical_jacobian_for_input(fn, input_idx, input, inputs, outputs,
     jacobian_cols: List[Optional[torch.Tensor]] = []
 
     if input.layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
-         # TODO do we really need this anymore for the fast case?
+        # TODO do we really need this anymore for the fast case?
         entry = input.to_dense()
     elif input.layout == torch.sparse_coo:
         entry = torch.sparse_coo_tensor(input.indices(), input.values(), input.size())
@@ -806,7 +806,7 @@ def gradcheck(
     rtol: float = 1e-3,
     raise_exception: bool = True,
     check_sparse_nnz: bool = False,
-    nondet_tol: float = 1e-12, # TODO WHY
+    nondet_tol: float = 1e-12,  # TODO WHY
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
     check_batched_grad: bool = False,
