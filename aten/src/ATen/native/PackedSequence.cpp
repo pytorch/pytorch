@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
+#include <c10/util/irange.h>
+
 namespace at { namespace native {
 
 void checkLongTensor(const Tensor& tensor) {
@@ -28,7 +30,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
   TORCH_CHECK(lengths[batch_size - 1] > 0,
            "Length of all samples has to be greater than 0, but found an element "
            "in 'lengths' that is <= 0");
-  for(auto i = 0; i < batch_size - 1; i++) {
+  for (const auto i : c10::irange(batch_size - 1)) {
     if (lengths[batch_size - 1 - i] > lengths[batch_size - 2 - i]) {
       // NB: enforce_sorted is implemented at a Python level, but the sortedness
       // check lives here. If enforce_sorted=False then this error should never
