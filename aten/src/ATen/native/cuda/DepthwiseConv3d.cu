@@ -381,11 +381,13 @@ void conv_depthwise_shape_check(
 Tensor conv_depthwise3d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   TORCH_CHECK(input.device() == weight.device(), "expects input and weight tensors to be on the same device.");
   if (bias.defined()) {
     TORCH_CHECK(input.device() == bias.device(), "expects input and bias tensors to be on the same device.");
