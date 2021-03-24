@@ -9176,7 +9176,7 @@ workflows:
           python_version: "3.6"
           use_cuda: "1"
           vc_product: Community
-          vc_version: ""
+          vc_version: "14.27"
           vc_year: "2019"
           filters:
             branches:
