@@ -417,16 +417,16 @@ class TestONNXRuntime(unittest.TestCase):
         batchsize = 5
         if model_name == "GRU":
             model = word_language_model.RNNModelWithTensorHidden(model_name, ntokens, emsize,
-                                                nhid, nlayers, dropout, tied,
-                                                batchsize)
+                                                                 nhid, nlayers, dropout, tied,
+                                                                 batchsize)
         elif model_name == "LSTM":
             model = word_language_model.RNNModelWithTupleHidden(model_name, ntokens, emsize,
-                                                nhid, nlayers, dropout, tied,
-                                                batchsize)
+                                                                nhid, nlayers, dropout, tied,
+                                                                batchsize)
         else:
             model = word_language_model.RNNModel(model_name, ntokens, emsize,
-                                                nhid, nlayers, dropout, tied,
-                                                batchsize)
+                                                 nhid, nlayers, dropout, tied,
+                                                 batchsize)
         x = torch.arange(0, ntokens).long().view(-1, batchsize)
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_test(model, (x, model.hidden))
