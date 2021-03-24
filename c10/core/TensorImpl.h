@@ -736,7 +736,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T * data_ptr_impl() const {
-    TORCH_CHECK(has_storage(),
+    TORCH_CHECK_NOT_IMPLEMENTED(has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
     TORCH_CHECK(
         storage_initialized(),
@@ -758,7 +758,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * can be validly read from this tensor.
    */
   inline void* data() const {
-    TORCH_CHECK(has_storage(),
+    TORCH_CHECK_NOT_IMPLEMENTED(has_storage(),
         "Cannot access data pointer of Tensor that doesn't have storage");
     TORCH_CHECK(dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "

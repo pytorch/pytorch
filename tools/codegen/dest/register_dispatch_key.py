@@ -248,11 +248,12 @@ if (C10_UNLIKELY(current_device.has_value())) {
 
         if k is SchemaKind.functional:
             if self.dispatch_key == DispatchKey.Meta:
+                # TODO: dedupe this with below
                 return """
 if (strides.empty()) {
     outputs_[output_idx] = at::empty(sizes, options.device(at::kMeta));
 } else {
-    TORCH_INTERNAL_ASSERT(0, "not implemented yet");
+    outputs_[output_idx] = at::empty_strided(sizes, strides, options.device(at::kMeta));
 }
 """
             else:
