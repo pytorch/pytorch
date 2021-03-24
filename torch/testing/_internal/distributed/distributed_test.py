@@ -5140,10 +5140,14 @@ class DistributedTest:
                 with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
                     process_group.monitored_barrier(timeout)
             else:
-                # Other ranks will report standard gloo error, only rank 0 knows
-                # ranks that failed to respond to barrier.
-                with self.assertRaises(RuntimeError):
+                # It is permissible for other ranks that did not fail to
+                # successfully exit or crash in the monitored barrier, the main
+                # purpose of monitored barrier is to report the rank that hung
+                # on rank 0.
+                try:
                     process_group.monitored_barrier(timeout)
+                except RuntimeError:
+                    pass
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -5168,14 +5172,19 @@ class DistributedTest:
             # Directly simulating error here will run into store issue described
             # in https://github.com/pytorch/pytorch/issues/54524.
             nccl_pg.allreduce(tensors).wait()
-            failed_rank = 1
             # All ranks besides 0 call into allreduce.
             if self.rank != 0:
                 with self.assertRaisesRegex(RuntimeError, "Caught collective operation timeout"):
                     nccl_pg.allreduce(tensors).wait()
                 return
 
-            # Rank 0 should report that rank 1 timed out.
+            # Rank 0 should report timed out rank.
             monitored_barrier_timeout_seconds = timedelta(seconds=2)
-            with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
+            world_size = int(self.world_size)
+            if world_size == 2:
+                err_regex = "Rank 1"
+            else:
+                err_regex = f"Rank [1-{world_size - 1}]"
+
+            with self.assertRaisesRegex(RuntimeError, err_regex):
                 gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds)
