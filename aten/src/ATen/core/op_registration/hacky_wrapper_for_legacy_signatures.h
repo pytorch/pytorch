@@ -29,6 +29,22 @@
  * the creation of a default constructed tensor.
  */
 
+/*
+ * [Note: hacky wrapper removal for TensorOptions]
+ *
+ * The kernel implementation takes a TensorOptions argument but the dispatcher
+ * expects separate arguments for dtype, layout, device, pin_memory.
+ *
+ * To remove the hacky wrapper, the kernel implementation is changed to take
+ * the 4 arguments (dtype, layout, device, pin_memory), and assemble the
+ * TensorOptions value at the beginning of the function, e.g.:
+ *   > TensorOptions options = TensorOptions().dtype(dtype).layout(layout)
+ *   >    .device(device).pinned_memory(pin_memory);
+ *
+ * We may want make the kernel handle these parameters directly without going
+ * through the creation of a TensorOptions value.
+ */
+
 namespace c10 {
 namespace impl {
 
