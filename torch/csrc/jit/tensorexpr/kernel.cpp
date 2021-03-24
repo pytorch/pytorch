@@ -262,6 +262,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::batch_norm:
     case aten::isnan:
     case aten::log:
     case aten::log10:
@@ -1060,6 +1061,74 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
         auto zero = Cast::make(a.dtype(), 0);
         return CompareSelect::make(a, zero, zero, a, kLT);
       });
+    } break;
+
+    case aten::batch_norm: {
+      bool hasWeight = true;
+      bool hasBias = true;
+
+      if (v->node()->input(1)->node()->kind() == prim::Constant) {
+        const auto val = toIValue(v->node()->input(1)).value();
+        if (val.isNone()) {
+          hasWeight = false;
+        }
+      }
+
+      if (v->node()->input(2)->node()->kind() == prim::Constant) {
+        const auto val = toIValue(v->node()->input(2)).value();
+        if (val.isNone()) {
+          hasBias = false;
+        }
+      }
+
+      auto const& shape = valueShape(v->node()->inputs()[0]);
+      return Compute(
+          "aten_batch_norm",
+          c10::fmap<DimArg>(shape),
+          [this, v, hasWeight, hasBias](const std::vector<VarHandle>& axes) {
+            TORCH_INTERNAL_ASSERT(axes.size() >= 2);
+            auto const& n = v->node();
+            // axes: N, C, H, W
+            std::vector<ExprHandle> indices(axes.begin(), axes.end());
+            ExprHandle c = indices[1];
+
+            // Parameter list:
+            // input, weight, bias, mean, var, training, momentum, eps,
+            // cudnn_enabled
+            std::vector<ExprHandle> inputs = {
+                tensorOrConstant(n->input(0), indices), // input
+                tensorOrConstant(n->input(3), {c}), // mean
+                tensorOrConstant(n->input(4), {c}), // var
+                constant(n->input(7)) // eps
+            };
+            if (hasWeight) {
+              inputs.push_back(tensorOrConstant(n->input(1), {c}));
+            }
+            if (hasBias) {
+              inputs.push_back(tensorOrConstant(n->input(2), {c}));
+            }
+            promoteInputs(inputs);
+
+            ExprHandle input = inputs[0];
+            ExprHandle mean = inputs[1];
+            ExprHandle var = inputs[2];
+            ExprHandle eps = inputs[3];
+            ExprHandle weight = FloatImm::make(1);
+            ExprHandle bias = FloatImm::make(0);
+
+            if (hasWeight) {
+              weight = inputs[4];
+            }
+            if (hasBias) {
+              bias = inputs[5];
+            }
+
+            auto inv_var = rsqrt(var + eps);
+            auto alpha = inv_var * weight;
+            auto beta = bias - mean * alpha;
+            auto output = input * alpha + beta;
+            return demoteOutput(output, n->output());
+          });
     } break;
 
     case aten::log: {
