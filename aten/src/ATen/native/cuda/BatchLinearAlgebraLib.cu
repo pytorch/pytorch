@@ -570,7 +570,7 @@ Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A,
 
   // cusolverDn<t>potrsBatched only supports nrhs == 1
   if (batch_size > 1 && nrhs == 1) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrs", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrs_batched", [&] {
       apply_cholesky_cusolver_potrsBatched<scalar_t>(self_working_copy, A_column_major_copy, upper, infos);
     });
   } else {
