@@ -262,7 +262,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   // Similarly to quantization, this can be done once and cached.
   Tensor col_offsets = at::empty(
       {weight_contig.size(0)},
-      at::kChar,
+      at::kInt,
       weight_contig.options().layout_opt(),
       weight_contig.options().device_opt(),
       weight_contig.options().pinned_memory_opt(),
