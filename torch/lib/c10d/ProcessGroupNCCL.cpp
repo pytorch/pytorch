@@ -167,6 +167,18 @@ std::string getNcclAbortedCommStoreKey(const std::string ncclIdStr) {
   return std::string(kNCCLAbortedCommStoreKey) + ":" + ncclIdStr;
 }
 
+// Returns exception's what() given an exception_ptr instance.
+std::string getExceptionMsgFromExceptionPtr(const std::exception_ptr exceptionPtr) {
+  TORCH_CHECK(exceptionPtr != nullptr);
+  std::string msg;
+  try {
+    std::rethrow_exception(exceptionPtr);
+  } catch (const std::exception &e) {
+    msg = e.what();
+  }
+  return msg;
+}
+
 } // namespace
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
@@ -240,7 +252,12 @@ bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
 }
 
 void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
-  if (exception()) {
+  auto existingException = exception();
+  if (existingException) {
+    auto existingExceptionMsg = getExceptionMsgFromExceptionPtr(existingException);
+    LOG(INFO) << "[Rank " << rank_ << "]"
+              << " already had existing exception: " << existingExceptionMsg
+              << " when checking for NCCL communicator errors.";
     // We already have an exception.
     return;
   }
@@ -248,6 +265,13 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
   auto exception_ptr = checkForNCCLErrors(ncclComms_);
   std::unique_lock<std::mutex> lock(mutex_);
   exception_ = exception_ptr;
+  if (exception_) {
+    auto msg = getExceptionMsgFromExceptionPtr(exception_);
+    LOG(INFO) << "[Rank " << rank_ << "]"
+              << " found async exception when checking for NCCL errors: "
+              << msg;
+  }
+  return;
 }
 
 void ProcessGroupNCCL::WorkNCCL::setException(
@@ -534,12 +558,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         }
         std::exception_ptr ncclErrorException = checkForNCCLErrors(ncclComms);
         if (ncclErrorException) {
-          std::string exceptionMsg = "";
-          try {
-            std::rethrow_exception(ncclErrorException);
-          } catch (const std::exception& e) {
-            exceptionMsg = e.what();
-          }
+          std::string exceptionMsg = getExceptionMsgFromExceptionPtr(ncclErrorException);
 
           LOG(INFO) << "[Rank " << rank_
                     << "] Received NCCL errors for communicators in the cache: \n"
