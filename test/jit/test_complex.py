@@ -6,7 +6,6 @@ from typing import List, Dict
 from itertools import product
 from textwrap import dedent
 import cmath  # noqa
-from torch.testing._internal.common_utils import (IS_WINDOWS, IS_MACOS)
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -115,14 +114,13 @@ class TestComplex(JitTestCase):
             self.checkScript(fn, (val, ))
 
     def test_cmath_constants(self):
-        def checkCmathConst(const_name, ret_type="float"):
+        def checkCmathConst(const_name):
             funcs_template = dedent('''
                 def func():
-                    # type: () -> {ret_type}
                     return cmath.{const}
                 ''')
 
-            funcs_str = funcs_template.format(const=const_name, ret_type=ret_type)
+            funcs_str = funcs_template.format(const=const_name)
             scope = {}
             execWrapper(funcs_str, globals(), scope)
             cu = torch.jit.CompilationUnit(funcs_str)
@@ -134,12 +132,10 @@ class TestComplex(JitTestCase):
 
             if res_python != res_script:
                 msg = ("Failed on {const_name}. Python: {res_python}, Script: {res_script}"
-                    .format(const_name=const_name, res_python=res_python, res_script=res_script))
+                       .format(const_name=const_name, res_python=res_python, res_script=res_script))
                 self.assertEqual(res_python, res_script, msg=msg)
 
         float_consts = ['pi', 'e', 'tau', 'inf', 'nan']
         complex_consts = ['infj', 'nanj']
-        for x in float_consts:
+        for x in (float_consts + complex_consts):
             checkCmathConst(x)
-        for x in complex_consts:
-            checkCmathConst(x, "complex")
