@@ -31,6 +31,8 @@ namespace meta {
     build_unary_float_op(maybe_get_output(), self);   \
   }
 
+// Use this macro iff you need to dispatch and don't need
+// extra error checking/have a different signature, etc.
 CREATE_UNARY_META_FUNC(sin)
 CREATE_UNARY_META_FUNC(sinc)
 
