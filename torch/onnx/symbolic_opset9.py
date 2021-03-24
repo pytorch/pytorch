@@ -1858,7 +1858,7 @@ def hardtanh(g, self, min_val, max_val):
 
 @parse_args('v')
 def hardsigmoid(g, self):
-    return g.op('HardSigmoid', self, alpha_f=1/6)
+    return g.op('HardSigmoid', self, alpha_f=1 / 6)
 
 @parse_args('v')
 def hardswish(g, self):
