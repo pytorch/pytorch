@@ -297,6 +297,9 @@ _floating_types = _dispatch_dtypes((torch.float32, torch.float64))
 def floating_types():
     return _floating_types
 
+def floating64_type_and(*dtypes):
+    return (torch.float64, *dtypes) #TODO: add torch.cfloat64
+
 _floating_types_and_half = _floating_types + (torch.half,)
 def floating_types_and_half():
     return _floating_types_and_half
