@@ -331,8 +331,10 @@ def _check_dill_version(pickle_module) -> None:
             ))
 
 def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
-         pickle_module='pickle', pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
-    """Saves an object to a disk file.
+         pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
+    """save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True)
+
+    Saves an object to a disk file.
 
     See also: :ref:`saving-loading-tensors`
 
@@ -364,7 +366,6 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO, IO[bytes]],
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
     """
-    pickle_module = pickle if pickle_module == 'pickle' else pickle_module
     _check_dill_version(pickle_module)
 
     with _open_file_like(f, 'wb') as opened_file:
@@ -493,7 +494,9 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
 
 def load(f, map_location=None, pickle_module='pickle', **pickle_load_args):
-    """Loads an object saved with :func:`torch.save` from a file.
+    """load(f, map_location=None, pickle_module=pickle, **pickle_load_args)
+
+    Loads an object saved with :func:`torch.save` from a file.
 
     :func:`torch.load` uses Python's unpickling facilities but treats storages,
     which underlie tensors, specially. They are first deserialized on the
@@ -572,7 +575,6 @@ def load(f, map_location=None, pickle_module='pickle', **pickle_load_args):
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
     """
-    pickle_module = pickle if pickle_module == 'pickle' else pickle_module
     _check_dill_version(pickle_module)
 
     if 'encoding' not in pickle_load_args.keys():

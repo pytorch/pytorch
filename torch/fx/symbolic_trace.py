@@ -88,7 +88,8 @@ class _CPatchManager(object):
         sys.setprofile(None)
 
 class Tracer(TracerBase):
-    """
+    """Tracer(self, autowrap_modules = (math, ), enable_cpatching = False)
+
     ``Tracer`` is the class that implements the symbolic tracing functionality
     of ``torch.fx.symbolic_trace``. A call to ``symbolic_trace(m)`` is equivalent
     to ``Tracer().trace(m)``.
@@ -117,8 +118,6 @@ class Tracer(TracerBase):
                 Turning this on is likely to slow down tracing by 1.5-3x.
 
         """
-        modules_dict: Dict[str, ModuleType] = {'math': math}
-        autowrap_modules = tuple(modules_dict[m] if isinstance(m, str) else m for m in autowrap_modules)
 
         super().__init__()
 
