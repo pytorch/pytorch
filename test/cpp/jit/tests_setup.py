@@ -76,7 +76,7 @@ class TorchSaveJitStream_CUDA(FileSetup):
                 a = torch.rand(3, 4, device="cuda")
                 b = torch.rand(3, 4, device="cuda")
 
-                with torch.jit.stream(s):
+                with torch.cuda.stream(s):
                     is_stream_s = torch.cuda.current_stream(s.device_index()).id() == s.id()
                     c = torch.cat((a, b), 0).to("cuda")
                 s.synchronize()
