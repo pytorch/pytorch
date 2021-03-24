@@ -1726,86 +1726,6 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
     return samples
 
 
-def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
-    def _make_tensor_helper(shape, low=None, high=None):
-        return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
-
-    def _samples_with_alpha_helper(args, alphas, filter_fn=lambda arg_alpha: True):
-        filtered_product = filter(filter_fn, product(args, alphas))  # type: ignore
-        return (SampleInput(input, args=(arg,), kwargs=dict(alpha=alpha))
-                for (input, arg), alpha in filtered_product)  # type: ignore
-
-    int_alpha, float_alpha, complex_alpha = 2, 0.1, 1 + 0.6j
-
-    if variant == 'tensor':
-        samples = (  # type: ignore
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S, S)),)),
-            SampleInput(_make_tensor_helper((S, S)), args=(_make_tensor_helper((S,)),)),
-            SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper((S, S)),)),
-            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper(()),)),
-            SampleInput(_make_tensor_helper(()), args=(_make_tensor_helper((S,)),)),
-            SampleInput(_make_tensor_helper((S,)), args=(_make_tensor_helper(()),)),
-        )
-
-        if dtype.is_complex:
-            alphas = [int_alpha, float_alpha, complex_alpha]
-        elif dtype.is_floating_point:
-            alphas = [int_alpha, float_alpha]
-        else:
-            alphas = [int_alpha]
-
-        args = ((_make_tensor_helper((S, S)), _make_tensor_helper((S, S))),
-                (_make_tensor_helper((S, S)), _make_tensor_helper((S,))),
-                (_make_tensor_helper(()), _make_tensor_helper(())))
-        samples += tuple(_samples_with_alpha_helper(args, alphas))  # type: ignore
-    elif variant == 'scalar':
-        # Scalar Other
-        samples = (SampleInput(_make_tensor_helper((S, S)), args=(0.5,)),
-                   SampleInput(_make_tensor_helper(()), args=(0.5,)),
-                   SampleInput(_make_tensor_helper((S, S)), args=(1.5j,)),
-                   SampleInput(_make_tensor_helper(()), args=(1.5j,)),
-                   SampleInput(_make_tensor_helper((S, S)), args=(0.4 + 1.2j,)),
-                   SampleInput(_make_tensor_helper(()), args=(1.2 + 1.76j,)))  # type: ignore
-
-        scalar_args = [(_make_tensor_helper((S, S)), 0.5), (_make_tensor_helper(()), 0.5),
-                       (_make_tensor_helper((S, S)), 2.7j), (_make_tensor_helper(()), 2.7j),
-                       (_make_tensor_helper((S, S)), 1 - 2.7j), (_make_tensor_helper(()), 1 + 2.7j)]  # type: ignore
-
-        alphas = [int_alpha, float_alpha, complex_alpha]
-
-        def filter_fn(arg_alpha):
-            arg, alpha = arg_alpha
-            if isinstance(alpha, complex):
-                if dtype.is_complex or isinstance(arg[1], complex):
-                    return True
-                else:
-                    # complex alpha is valid only if either `self` or `other` is complex
-                    return False
-
-            # Non-Complex Alpha
-            return True
-
-        # Samples with alpha (scalar version) covers the following cases
-        # self    | other   | alpha
-        # -----------------------------------------
-        # real    | real    | real (int and float)
-        # real    | complex | real and complex
-        # complex | real    | real and complex
-        # complex | complex | real and complex
-        #
-        # It does not cover
-        # real    | real    | complex
-        # x = torch.randn(2, requires_grad=True, dtype=torch.float64)
-        # torch.rsub(x, 1, alpha=1. + 1.6j)
-        # RuntimeError: value cannot be converted to type double without overflow: (-1,-1.6)
-
-        samples += tuple(_samples_with_alpha_helper(scalar_args, alphas, filter_fn=filter_fn))  # type: ignore
-    else:
-        raise Exception("Invalid variant!")
-
-    return samples
-
-
 def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -2997,30 +2917,6 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cpu', dtypes=[torch.complex64])
                    )),
-    OpInfo('rsub',
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
-           variant_test_name='rsub_tensor',
-           supports_out=False,
-           supports_inplace_autograd=False,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/53797
-               # JIT doesn't understand complex literals
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=[torch.cfloat, torch.cdouble]),
-           ),
-           sample_inputs_func=partial(sample_inputs_rsub, variant='tensor'),),
-    OpInfo('rsub',
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
-           variant_test_name='rsub_scalar',
-           supports_out=False,
-           supports_inplace_autograd=False,
-           sample_inputs_func=partial(sample_inputs_rsub, variant='scalar'),
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/53797
-               # JIT doesn't understand complex literals
-               SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
-           assert_autodiffed=True,),
     UnaryUfuncInfo('signbit',
                    ref=np.signbit,
                    dtypes=all_types_and(torch.bfloat16, torch.half),

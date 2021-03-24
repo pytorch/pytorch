@@ -22,14 +22,6 @@ FP16_ENGINES = ["SIMD_Q_FP16", "SIMD_Q_STOC_FP16", "SIMD_Q_STOC_MKL_FP16"]
 
 logger = logging.getLogger(__name__)
 
-def reset_optimizer_instance_count():
-    """
-    This function clears the _optimizer_instance_count. And keeps it
-    empty. This functionality is needed in some situations where
-    optimizer instance count might not reset even though the workplace is reset.
-    """
-    _optimizer_instance_count.clear()
-
 
 class Optimizer(object):
     def __init__(self):
