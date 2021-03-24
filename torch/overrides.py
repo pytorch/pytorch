@@ -531,6 +531,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.masked_select: lambda input, mask, out=None: -1,
         torch.matmul: lambda input, other, out=None: -1,
         torch.matrix_power: lambda input, n: -1,
+        torch.linalg.matrix_power: lambda input, n, out=None: -1,
         torch.matrix_rank: lambda input, tol=None, symmetric=False: -1,
         torch.linalg.matrix_rank: lambda input, tol=None, hermitian=False: -1,
         torch.matrix_exp: lambda input: -1,
@@ -793,6 +794,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.scatter: lambda input, dim, index, src: -1,
         torch.scatter_add: lambda input, dim, index, src: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
+        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.selu: lambda input, inplace=False: -1,
         torch.sigmoid: lambda input, out=None: -1,
@@ -831,6 +833,10 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.symeig: lambda input, eigenvectors=False, upper=True, out=None: -1,
         torch.swapaxes: lambda input, dim0, dim1: -1,
         torch.swapdims: lambda input, axis0, axis1: -1,
+        torch.special.erf: lambda input: -1,
+        torch.special.erfc: lambda input: -1,
+        torch.special.erfinv: lambda input: -1,
+        torch.special.gammaln: lambda input: -1,
         torch.t: lambda input: -1,
         torch.take: lambda input, index: -1,
         torch.tan: lambda input, out=None: -1,
@@ -1284,6 +1290,7 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
         (torch.Tensor, dir(torch.Tensor)),
         (torch.linalg, dir(torch.linalg)),
         (torch.fft, dir(torch.fft)),
+        (torch.special, dir(torch.special)),
     ]
     for namespace, ns_funcs in tested_namespaces:
         for func_name in ns_funcs:

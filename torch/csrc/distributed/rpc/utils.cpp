@@ -38,17 +38,14 @@ void processRemoteProfiledEvents(
       "Profiler was expected to be enabled. This can happen in callback "
       " continutations that run in different threads, and the TLS of the "
       " profiler was not propagated.");
-  std::vector<LegacyEvent> events =
-      rpcWithProfilingResp.getProfiledEvents();
+  std::vector<LegacyEvent> events = rpcWithProfilingResp.getProfiledEvents();
   const auto& profilingId = rpcWithProfilingResp.getProfilingId();
   auto& remoteProfilerManager = RemoteProfilerManager::getInstance();
   auto key = remoteProfilerManager.retrieveRPCProfilingKey(profilingId);
   remoteProfilerManager.eraseKey(profilingId);
   auto keyPrefixStr = key + rpc::REMOTE_PROFILING_KEY_PREFIX;
   std::for_each(
-      events.begin(),
-      events.end(),
-      [&keyPrefixStr](LegacyEvent& event) {
+      events.begin(), events.end(), [&keyPrefixStr](LegacyEvent& event) {
         std::string name = keyPrefixStr + std::string(event.name());
         event.setName(at::StringView(name));
       });
@@ -515,7 +512,7 @@ std::vector<at::IValue> readWrappedPayload(
       wrappedPayloadBegin,
       additionalPayloadSize,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &tensorTable);
+      tensorTable);
   std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
   payload.resize(payload.size() - additionalPayloadSize);
   return tupleElements;
@@ -546,12 +543,13 @@ void populateRemoteProfiledEvents(
       profilerStart != nullptr, "Expected to find __start_profile event.");
 
   if (cudaProfilingEnabled) {
-    // Deserialized events don't have the corresponding CUDA events, making it impossible
-    // to use cudaEventElapsedTime the receiving end. To avoid this, find all push/pop pairs
-    // of CUDA events and set the corresponding CUDA time to zero for the push event and
-    // to the elapsed time for the pop event, to be used later for the elapsed CUDA time
-    // computation.
-    std::unordered_map<at::RecordFunctionHandle, const LegacyEvent*> startEvents;
+    // Deserialized events don't have the corresponding CUDA events, making it
+    // impossible to use cudaEventElapsedTime the receiving end. To avoid this,
+    // find all push/pop pairs of CUDA events and set the corresponding CUDA
+    // time to zero for the push event and to the elapsed time for the pop
+    // event, to be used later for the elapsed CUDA time computation.
+    std::unordered_map<at::RecordFunctionHandle, const LegacyEvent*>
+        startEvents;
     for (auto& e : profiledEvents) {
       if (e.hasCuda()) {
         if (e.kind() == EventKind::PushRange) {
