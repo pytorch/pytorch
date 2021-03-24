@@ -853,7 +853,9 @@ RegisterOperators reg(
          aten::pow,
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
-         static_cast<c10::complex<double>>(pow(static_cast<c10::complex<double>>(a), static_cast<c10::complex<double>>(b))),
+         static_cast<c10::complex<double>>(
+             pow(static_cast<c10::complex<double>>(a),
+                 static_cast<c10::complex<double>>(b))),
          Scalar),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::pow.int_to_int(int a, int b) -> int"),
