@@ -3189,6 +3189,29 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.bfloat16])),
                    safe_casts_outputs=True,
                    handles_complex_extremals=False),
+    UnaryUfuncInfo('square',
+                   ref=np.square,
+                   dtypes=all_types_and_complex_and(torch.bool),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.complex64: 3e-4, torch.bfloat16: 3e-1}),),
+                   skips=(
+                       # Reference: https://github.com/pytorch/pytorch/issues/52549
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       # >>> t = torch.tensor(complex(-0.01, float("inf")))
+                       # >>> np.square(t.numpy())
+                       # (-inf-infj)
+                       # >>> t.square()
+                       # tensor(-inf-infj)
+                       # >>> t.cuda().square()
+                       # tensor(inf+nanj, device='cuda:0')
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
+                       # Reference: https://github.com/pytorch/pytorch/pull/52551#issuecomment-782596181
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                device_type='cuda', dtypes=[torch.bfloat16]),
+                   ),),
     OpInfo('lerp',
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),

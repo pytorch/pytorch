@@ -3548,6 +3548,10 @@
 - func: square_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
 
+- func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: square_out
+
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   variants: function, method
   dispatch:
