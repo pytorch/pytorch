@@ -537,10 +537,10 @@ class SELU(Module):
     :math:`\text{scale} = 1.0507009873554804934193349852946`.
 
     .. warning::
-        When using `kaiming_normal` or `kaiming_normal_` for initialisation,
+        When using ``kaiming_normal`` or ``kaiming_normal_`` for initialisation,
         ``nonlinearity='linear'`` should be used instead of ``nonlinearity='selu'``
         in order to get `Self-Normalizing Neural Networks`_.
-        See the docs for ``torch.nn.init.calculate_gain`` for more information.
+        See :func:`torch.nn.init.calculate_gain` for more information.
 
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
