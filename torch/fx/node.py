@@ -94,8 +94,8 @@ class NormalizedArguments(object):
     def __iter__(self):
         return iter(self.args_dict)
 
-    def __getitem__(self, idx):
-        return self.args_dict[self.keys[i]]
+    def __getitem__(self, key):
+        return self.args_dict[key]
 
 class Node:
     """
