@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/script.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
@@ -18,6 +19,8 @@ void NeZha_TryUpdateModule(
 
 Module NeZha_UpdateOps(
     Module& dst_module);
+
+Module NeZha_ConvertModule(Module& module, torch::Tensor input) ;
 
 void NeZha_TrySplitModule(
     Module& moudle_1st,

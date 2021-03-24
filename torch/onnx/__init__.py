@@ -40,9 +40,10 @@ class DummyModule(torch.nn.Module):
     def forward(self, x):
         return x
 
-def export_c_module(m, inputs, outputs, file_name):
+def export_c_module(m, file_name, inputs):
     local_module = torch.jit.trace(DummyModule(), torch.ones(1))
     local_module._c = m
+    outputs = local_module(inputs)
     torch.onnx.export(local_module, inputs, file_name, example_outputs=outputs)
 
 def try_ort_inference(file_name, inputs):
