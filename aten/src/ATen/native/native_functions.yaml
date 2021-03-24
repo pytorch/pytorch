@@ -860,8 +860,6 @@
 
 - func: broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
   variants: function, method
-  dispatch:
-    Math: broadcast_to
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
@@ -1310,13 +1308,9 @@
 
 - func: diff(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None) -> Tensor
   variants: function, method
-  dispatch:
-    Math: diff
 
 - func: diff.out(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
-  dispatch:
-    Math: diff_out
 
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -1475,12 +1469,8 @@
 
 # row_stack is the alias of vstack
 - func: row_stack(Tensor[] tensors) -> Tensor
-  dispatch:
-    Math: row_stack
 
 - func: row_stack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    Math: row_stack_out
 
 - func: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)
 
@@ -2027,12 +2017,8 @@
 
 - func: kron(Tensor self, Tensor other) -> Tensor
   variants: function, method
-  dispatch:
-    Math: kron
 
 - func: kron.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    Math: kron_out
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -2329,8 +2315,12 @@
 
 - func: matrix_rank(Tensor self, bool symmetric=False) -> Tensor
 
+# Alias to linalg.matrix_power
 - func: matrix_power(Tensor self, int n) -> Tensor
   variants: function, method
+
+# Alias to linalg.matrix_power
+- func: matrix_power.out(Tensor self, int n, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: matrix_exp(Tensor self) -> Tensor
   variants: function, method
@@ -3558,6 +3548,10 @@
 - func: square_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
 
+- func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: square_out
+
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   variants: function, method
   dispatch:
@@ -4588,8 +4582,6 @@
 
 - func: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
   variants: function
-  dispatch:
-    Math: fake_quantize_per_tensor_affine
 
 - func: fake_quantize_per_tensor_affine_cachemask(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
   variants: function
@@ -4609,8 +4601,6 @@
 
 - func: fake_quantize_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
   variants: function
-  dispatch:
-    Math: fake_quantize_per_channel_affine
 
 - func: fake_quantize_per_channel_affine_cachemask(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
   variants: function
@@ -5750,13 +5740,9 @@
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  dispatch:
-    Math: svd_out
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   variants: method, function
-  dispatch:
-    Math: svd
 
 - func: _svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor U, Tensor S, Tensor V)
   variants: function
@@ -5841,13 +5827,9 @@
 
 - func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  dispatch:
-    Math: qr_out
 
 - func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
   variants: method, function
-  dispatch:
-    Math: qr
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -6281,13 +6263,9 @@
 
 - func: msort.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  dispatch:
-    Math: msort_out
 
 - func: msort(Tensor self) -> Tensor
   variants: method, function
-  dispatch:
-    Math: msort
 
 - func: argsort(Tensor self, int dim=-1, bool descending=False) -> Tensor
   variants: method, function
@@ -6390,42 +6368,26 @@
 
 - func: float_power.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  dispatch:
-    Math: float_power_out
 
 - func: float_power.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
   variants: function, method
-  dispatch:
-    Math: float_power
 
 - func: float_power.Scalar_out(Scalar self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  dispatch:
-    Math: float_power_out
 
 - func: float_power.Scalar(Scalar self, Tensor exponent) -> Tensor
-  dispatch:
-    Math: float_power
 
 - func: float_power.Tensor_Scalar_out(Tensor self, Scalar exponent, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  dispatch:
-    Math: float_power_out
 
 - func: float_power.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
   variants: function, method
-  dispatch:
-    Math: float_power
 
 - func: float_power_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   variants: method
-  dispatch:
-    Math: float_power_
 
 - func: float_power_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   variants: method
-  dispatch:
-    Math: float_power_
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
@@ -6472,8 +6434,8 @@
 
 - func: _index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_index_copy_
-    CUDA: legacy::cuda::_th_index_copy_
+    CPU: _index_copy_impl_
+    CUDA: _index_copy_impl_
 
 - func: _cumsum(Tensor self, int dim) -> Tensor
   dispatch:
@@ -8565,13 +8527,9 @@
     CUDA: col2im_backward_cuda
 
 - func: column_stack(Tensor[] tensors) -> Tensor
-  dispatch:
-    Math: column_stack
 
 - func: column_stack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  dispatch:
-    Math: column_stack_out
 
 - func: im2col.out(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -9031,54 +8989,38 @@
 - func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_cond
 
 - func: linalg_cond.out(Tensor self, Scalar? p=None, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_cond_out
 
 - func: linalg_cond.p_str(Tensor self, str p) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_cond
 
 - func: linalg_cond.p_str_out(Tensor self, str p, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_cond_out
 
 - func: linalg_pinv(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_pinv
 
 - func: linalg_pinv.rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_pinv
 
 - func: linalg_pinv.out(Tensor self, float rcond=1e-15, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
-  dispatch:
-    Math: linalg_pinv_out
 
 - func: linalg_pinv.out_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
-  dispatch:
-    Math: linalg_pinv_out
 
 - func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) other, Tensor(c!) infos) -> Tensor(a!)
   variants: function
@@ -9102,28 +9044,20 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_tensorinv
 
 - func: linalg_tensorinv.out(Tensor self, int ind=2, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_tensorinv_out
 
 - func: linalg_tensorsolve(Tensor self, Tensor other, int[]? dims=None) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_tensorsolve
 
 - func: linalg_tensorsolve.out(Tensor self, Tensor other, int[]? dims=None, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_tensorsolve_out
 
 - func: linalg_qr(Tensor self, str mode='reduced') -> (Tensor Q, Tensor R)
   python_module: linalg
@@ -9144,18 +9078,20 @@
     CPU: _linalg_qr_helper_cpu
     CUDA: _linalg_qr_helper_cuda
 
+- func: linalg_matrix_power(Tensor self, int n) -> Tensor
+  python_module: linalg
+
+- func: linalg_matrix_power.out(Tensor self, int n, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+
 - func: linalg_matrix_rank(Tensor self, float? tol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_matrix_rank
 
 - func: linalg_matrix_rank.out(Tensor self, float? tol=None, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
-  dispatch:
-    Math: linalg_matrix_rank_out
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
@@ -9191,3 +9127,8 @@
 - func: _test_ambiguous_defaults.b(Tensor dummy, int a=2, str b="2") -> Tensor
   cpp_no_default_args: ['a', 'b']
   python_module: nn
+
+- func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _segment_reduce_cpu

@@ -435,8 +435,9 @@ Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_floa
 Tensor sqrt(const Tensor& self) { return unary_op_impl_float(self, sqrt_stub); }
 Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
 
+Tensor& square_out(const Tensor& self, Tensor& result) { return at::pow_out(result, self, 2); }
 Tensor square(const Tensor& self) { return at::pow(self, 2); }
-Tensor& square_(Tensor& self) { return at::pow_out(self, self, 2); }
+Tensor& square_(Tensor& self) { return self.pow_(2); }
 
 Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, sigmoid_stub);  }
 Tensor sigmoid(const Tensor& self) { return unary_op_impl_float(self, sigmoid_stub);  }

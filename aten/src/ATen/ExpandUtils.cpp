@@ -1,5 +1,7 @@
 #include <ATen/ExpandUtils.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
@@ -149,9 +151,10 @@ std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef t
   // all dimensions with 0 stride won't move. This is the same behavior as TensorIterator.
   // eg. Given tensor with size/stride (6, 5, 4, 3, 2)/(6, 0, 120, 0, 1), the initial `perm`
   //     is (4, 3, 2, 1, 0) and the sorted `perm` will be (4, 3, 0, 1, 2)
-  for (int i = 1; i < ndim; ++i) {
-    int dim1 = i;
-    for (int dim0 = i - 1; dim0 >= 0; --dim0) {
+  for (const auto i : c10::irange(1, ndim)) {
+    auto dim1 = i;
+    for (const auto j : c10::irange(1, i + 1)) {
+      auto dim0 = i - j;
       int comparison = should_swap(perm[dim0], perm[dim1]);
       if (comparison > 0) {
         std::swap(perm[dim0], perm[dim1]);
