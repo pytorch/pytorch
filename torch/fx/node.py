@@ -483,10 +483,10 @@ class Node:
                     # values. If none matches, `new_kwargs` will be None
                     for candidate_signature in torch_op_schemas:
                         try:
-                            candidate_signature.bind(self.args, self.kwargs)
+                            candidate_signature.bind(*self.args, **self.kwargs)
                             new_kwargs = self._args_kwargs_to_normalized_kwargs(candidate_signature, self.args, self.kwargs)
                             break
-                        except TypeError:
+                        except TypeError as e:
                             continue
             if new_kwargs:
                 return NormalizedArguments(new_kwargs)

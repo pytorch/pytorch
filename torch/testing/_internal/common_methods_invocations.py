@@ -2582,7 +2582,8 @@ op_db: List[OpInfo] = [
            skips=(
                # `test_duplicate_method_tests` doesn't raise any warning, as it doesn't actually
                # call the operator.
-               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),),
+               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
+               SkipInfo('TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
            supports_autograd=False,
            ),
     UnaryUfuncInfo('frexp',

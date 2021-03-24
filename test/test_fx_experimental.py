@@ -2,6 +2,7 @@ import torch
 import operator
 import unittest
 import sys
+import math
 from typing import Callable, Dict, Union, List
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
@@ -12,6 +13,8 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 from torch.fx.passes.split_module import split_module
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
@@ -1124,6 +1127,81 @@ class {test_classname}(torch.nn.Module):
         # Basic graph structure check; the number of matrix multiplcations should not have changed.
         self.assertEqual(_count_matmuls(module), 2)
         self.assertEqual(_count_matmuls(opt_module), 2)
+
+class TestNormalizeOperators(JitTestCase):
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_normalize_operator_exhaustive(self, device, dtype, op):
+        known_no_good = {'stack', 'hstack', 'vstack', 'dstack', 'repeat'}
+
+        try:
+            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+            for sample_input in sample_inputs_itr:
+                param_names = ['input']
+                param_values = [sample_input.input]
+                args = ['input']
+
+                unsupported_arg_type = False
+
+                for i, v in enumerate(sample_input.args):
+                    if isinstance(v, torch.Tensor):
+                        name = f'arg_{i}'
+                        param_names.append(name)
+                        param_values.append(v)
+                        args.append(name)
+                    else:
+                        if isinstance(v, complex):
+                            # Complex type not supported in FX
+                            unsupported_arg_type = True
+                        args.append(repr(v))
+
+                for k, v in sample_input.kwargs.items():
+                    if isinstance(v, torch.Tensor):
+                        param_names.append(k)
+                        param_values.append(v)
+                        args.append(f'{k} = {k}')
+                    else:
+                        if isinstance(v, complex):
+                            # Complex type not supported in FX
+                            unsupported_arg_type = True
+                        args.append(f'{k} = {repr(v)}')
+
+                if unsupported_arg_type:
+                    continue
+
+                code = f"""
+class TestModule(torch.nn.Module):
+    def forward(self, {', '.join(param_names)}):
+        return torch.{op.name}({', '.join(args)})
+                """
+
+                print(code)
+
+                g = {'torch': torch, 'inf' : math.inf}
+                exec(code, g)
+                TestModule = g['TestModule']
+
+                m = TestModule()
+                traced = torch.fx.symbolic_trace(m)
+
+                ref_out = traced(*param_values)
+
+                for node in traced.graph.nodes:
+                    if node.op == 'call_function':
+                        normalized_args = node.normalized_arguments(traced)
+                        assert normalized_args
+                        node.args = ()
+                        node.kwargs = normalized_args.args_dict
+
+                traced.recompile()
+
+                test_out = traced(*param_values)
+                self.assertEqual(test_out, ref_out)
+
+        except Exception as e:
+            assert op.name in known_no_good
+
+instantiate_device_type_tests(TestNormalizeOperators, globals())
 
 if __name__ == "__main__":
     run_tests()
