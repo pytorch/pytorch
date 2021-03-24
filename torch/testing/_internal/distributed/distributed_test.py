@@ -5130,7 +5130,7 @@ class DistributedTest:
                 dist.all_reduce(torch.cat(tensors))
             # Run monitored barrier
             timeout = timedelta(seconds=2)
-            process_group.monitored_barrier(timeout)
+            dist.monitored_barrier(timeout=timeout)
             # All ranks besides 1 call into barrier, rank 0 should report failure
             # while others report gloo error.
             failed_rank = 1
@@ -5138,12 +5138,12 @@ class DistributedTest:
                 return
             if self.rank == 0:
                 with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
-                    dist.monitored_barrier(timeout)
+                    dist.monitored_barrier(timeout=timeout)
             else:
                 # Other ranks will report standard gloo error, only rank 0 knows
                 # ranks that failed to respond to barrier.
                 with self.assertRaises(RuntimeError):
-                    dist.monitored_barrier(timeout)
+                    dist.monitored_barrier(timeout=timeout)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
