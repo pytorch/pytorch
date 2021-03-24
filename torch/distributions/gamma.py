@@ -73,7 +73,7 @@ class Gamma(ExponentialFamily):
     def cdf(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        return torch.igamma(self.concentration, self.rate * value) / torch.gamma(self.concentration)
+        return torch.igamma(self.concentration, self.rate * value) # depsite its name, torch.igamma is the regularized gamma function
 
     def entropy(self):
         return (self.concentration - torch.log(self.rate) + torch.lgamma(self.concentration) +
