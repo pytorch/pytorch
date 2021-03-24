@@ -40,6 +40,7 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
 // See note [Algorithm of randperm]
 template<typename T, typename scalar_t>
 void randperm_handle_duplicate_keys(T *keys, scalar_t *data, int bits, int64_t n, c10::optional<at::Generator> gen_) {
+#ifndef _MSC_VER
   auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(gen_, at::cuda::detail::getDefaultCUDAGenerator());
   int64_t counter_offset = n;
   at::PhiloxCudaState rng_engine_inputs;
@@ -50,6 +51,7 @@ void randperm_handle_duplicate_keys(T *keys, scalar_t *data, int bits, int64_t n
   }
   T mask = static_cast<T>((1UL << bits) - 1);
   randperm_handle_duplicate_keys_kernel<<<(n + 511) / 512, 512>>>(keys, data, mask, n, rng_engine_inputs);
+#endif
 }
 
 }
