@@ -7728,6 +7728,34 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (x,), input_names=['input_ids'],
                       dynamic_axes={'input_ids': {0: 'batch', 1: 'sequence'}})
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_hann_window(self):
+        class HannWindowModule_Periodic(torch.nn.Module):
+            def __init__(self):
+                super(HannWindowModule_Periodic, self).__init__()
+                self.window_length = 0
+
+            def forward(self, x, window_length: int):
+                self.window_length = window_length
+                return torch.add(x, torch.hann_window(self.window_length, periodic=True, dtype=torch.float))
+
+        class HannWindowModule_NotPeriodic(torch.nn.Module):
+            def __init__(self):
+                super(HannWindowModule_NotPeriodic, self).__init__()
+                self.window_length = 0
+
+            def forward(self, x, window_length: int):
+                self.window_length = window_length
+                return torch.add(x, torch.hann_window(self.window_length, periodic=False, dtype=torch.float))
+
+        win_length = 100
+        x = torch.randn(win_length)
+        module_periodic = HannWindowModule_Periodic()
+        self.run_test(module_periodic, (x, win_length))
+
+        module_not_periodic = HannWindowModule_NotPeriodic()
+        self.run_test(module_not_periodic, (x, win_length))
+
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
               **extra_kwargs):
