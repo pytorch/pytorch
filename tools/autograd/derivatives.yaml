@@ -1065,11 +1065,11 @@
   self: handle_r_to_c(self.scalar_type(), grad)
 
 - name: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  self: handle_r_to_c(other.scalar_type(), -grad * alpha.conj())
-  other: handle_r_to_c(self.scalar_type(), grad)
+  self: -grad * alpha
+  other: grad
 
 - name: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
-  self: handle_r_to_c(self.scalar_type(), -grad * alpha.conj())
+  self: -grad * alpha
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: grad.expand(self.sizes())

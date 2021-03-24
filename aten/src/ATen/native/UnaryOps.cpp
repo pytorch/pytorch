@@ -696,7 +696,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
       self.options().device_opt(),
       self.options().pinned_memory_opt());
   args = args.add(self.unsqueeze(-1));
-  args = args.add(self.unsqueeze(-1));
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(c10::pi<double>) / 4.));
 }
 
