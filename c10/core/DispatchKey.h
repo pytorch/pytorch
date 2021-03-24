@@ -283,6 +283,7 @@ enum class DispatchKey : uint8_t {
   // be used
   CPUTensorId = CPU,
   CUDATensorId = CUDA,
+  DefaultBackend = CompositeExplicitAutograd,
   PrivateUse1_PreAutograd = AutogradPrivateUse1,
   PrivateUse2_PreAutograd = AutogradPrivateUse2,
   PrivateUse3_PreAutograd = AutogradPrivateUse3,

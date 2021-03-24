@@ -1372,6 +1372,107 @@ std::vector<For*> LoopNest::distributeLoopOverInnerLoops(For* loop) {
   return distributeLoop(loop, loopsSet);
 }
 
+For* LoopNest::fuseLoops(const std::vector<For*>& loops) {
+  if (loops.empty()) {
+    return nullptr;
+  }
+  if (loops.size() == 1) {
+    return loops.front();
+  }
+
+  // Check if all the loops have the same parent.
+  auto root = loops.front()->get_parent();
+  for (auto l : loops) {
+    auto par = l->get_parent();
+    if (par == nullptr) {
+      throw malformed_input("Loop without parent: ", l);
+    }
+    if (par != root) {
+      throw malformed_input("Can't fuse loops with different parents: ", l);
+    }
+  }
+  auto root_block = dynamic_cast<Block*>(root);
+  if (root_block == nullptr) {
+    throw malformed_input(
+        "Loops' parent must be a Block, instead found ", root);
+  }
+
+  // Currently, we only handle cases where there are no statements between
+  // the given loops in their parents body. We can possibly relax this
+  // constraint by allowing statements that do not affect the loops being
+  // fused by performing some dependency analysis. TODO.
+  auto it = root_block->begin();
+  for (; it != root_block->end(); ++it) {
+    if (*it == loops.front()) {
+      break;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(it != root_block->end());
+  for (auto l : loops) {
+    if (*it != l) {
+      throw malformed_input(
+          "Only contiguous loops can be fused, found another stmt before", l);
+    }
+    ++it;
+  }
+
+  auto first_loop = loops.front();
+
+  // Check if bounds are the same for all the loops.
+  // TODO: The following check does not consider different expressions that
+  // evaluate to the same value as the same. Improve this by performing
+  // expression equality.
+  auto are_bounds_equal = [](const Expr* bound1, const Expr* bound2) {
+    if (bound1->isConstant() && bound2->isConstant()) {
+      return immediateAs<int>(bound1) == immediateAs<int>(bound2);
+    }
+    return bound1 == bound2;
+  };
+  auto first_loop_start = IRSimplifier::simplify(first_loop->start());
+  auto first_loop_stop = IRSimplifier::simplify(first_loop->stop());
+  for (size_t i = 1; i < loops.size(); ++i) {
+    auto curr_loop = loops[i];
+    auto curr_loop_start = IRSimplifier::simplify(curr_loop->start());
+    auto curr_loop_stop = IRSimplifier::simplify(curr_loop->stop());
+    if (!are_bounds_equal(curr_loop_start, first_loop_start)) {
+      throw malformed_input(
+          "Loops with different start bounds cannot be fused");
+    }
+    if (!are_bounds_equal(curr_loop_stop, first_loop_stop)) {
+      throw malformed_input("Loops with different stop bounds cannot be fused");
+    }
+  }
+
+  // Now, we fuse the incoming loops. This is done by taking all the statements
+  // from the second loops onwards and moving them into the first loop's body.
+  // This way the final fused loop will be the same as the first loop.
+  for (size_t i = 1; i < loops.size(); ++i) {
+    auto body = dynamic_cast<Block*>(Substitute(
+        Stmt::clone(loops[i]->body()), {{loops[i]->var(), first_loop->var()}}));
+    first_loop->body()->splice(first_loop->body()->end(), body);
+    root_block->remove_stmt(loops[i]);
+  }
+
+  analysis::MemDependencyChecker analyzer;
+  first_loop->accept(&analyzer);
+  for (auto it1 = first_loop->body()->begin(); it1 != first_loop->body()->end();
+       ++it1) {
+    for (auto it2 = std::next(it1); it2 != first_loop->body()->end(); ++it2) {
+      if (hasPartialOverlap(analyzer, *it2, *it1)) {
+        // Whenever there is a partial overlap between accesses in 2 statements
+        // in a loop, it results in a loop-carried dependence. NOTE: In
+        // general, this may not be true. But the semantics of TE IR is that all
+        // iterations of the loop can run in parallel, so there should be no
+        // loop-carried dependence in either direction (forward or backward).
+        throw malformed_input(
+            "Fusing given loops is not valid since it results in a loop carried dependence");
+      }
+    }
+  }
+
+  return first_loop;
+}
+
 For* findOuterFor(For* a, For* b) {
   Stmt* s = b; // guess b is the latter.
   while (s != nullptr) {
