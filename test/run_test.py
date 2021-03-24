@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import argparse
-import bz2
 import copy
 from datetime import datetime, timedelta
 import json
@@ -23,7 +22,7 @@ from typing_extensions import TypedDict
 
 try:
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    from tools.stats_utils.s3_stat_parser import (get_S3_bucket_readonly, HAVE_BOTO3)
+    from tools.stats_utils.s3_stat_parser import (get_test_stats_summaries_for_job, HAVE_BOTO3)
 except ImportError:
     print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
     HAVE_BOTO3 = False
@@ -390,17 +389,16 @@ def get_test_time_reports_from_S3() -> List[Dict[str, Any]]:
         encoding="ascii").splitlines()
 
     stripped_job = get_stripped_CI_job()
-    bucket = get_S3_bucket_readonly('ossci-metrics')
     reports = []
     commit_index = 0
     while len(reports) == 0 and commit_index < len(nightly_commits):
         nightly_commit = nightly_commits[commit_index]
         print(f'Grabbing reports from nightly commit: {nightly_commit}')
-        summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{stripped_job}")
-        for summary in summaries:
-            binary = summary.get()["Body"].read()
-            string = bz2.decompress(binary).decode("utf-8")
-            reports.append(json.loads(string))
+        summaries = get_test_stats_summaries_for_job(sha=nightly_commit, job_prefix=stripped_job)
+        for _, summary in summaries.items():
+            reports.append(summary[0])
+            if len(summary) > 1:
+                print(f'Warning: multiple summary object found for {nightly_commit}/{stripped_job}')
         commit_index += 1
     return reports
 

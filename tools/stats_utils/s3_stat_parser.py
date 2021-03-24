@@ -1,3 +1,7 @@
+import bz2
+import json
+from collections import defaultdict
+
 from typing import Dict, List, Optional, Union, Any, cast
 from typing_extensions import Literal, TypedDict
 
@@ -8,6 +12,8 @@ try:
 except ImportError:
     HAVE_BOTO3 = False
 
+
+OSSCI_METRICS_BUCKET = 'ossci-metrics'
 
 Commit = str  # 40-digit SHA-1 hex string
 Status = Optional[Literal['errored', 'failed', 'skipped']]
@@ -127,3 +133,28 @@ def get_cases(
         else:
             raise RuntimeError(f'Unknown format version: {version}')
     return cases
+
+
+def _parse_s3_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[Any]]:
+    summary_dict = defaultdict(list)
+    for summary in summaries:
+        summary_job = summary.key.split('/')[2]
+        if summary_job in jobs or len(jobs) == 0:
+            binary = summary.get()["Body"].read()
+            string = bz2.decompress(binary).decode("utf-8")
+            summary_dict[summary_job].append(json.loads(string))
+    return summary_dict
+
+# Collect and decompress S3 test stats summaries into JSON.
+# data stored on S3 buckets are pathed by {sha}/{job} so we also allow
+# optional jobs filter
+def get_test_stats_summaries(*, sha: str, jobs: Optional[List[str]] = None) -> Dict[str, List[Any]]:
+    bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
+    summaries = list(bucket.objects.filter(Prefix=f"test_time/{sha}"))
+    return _parse_s3_summaries(summaries, jobs=list(jobs or []))
+
+
+def get_test_stats_summaries_for_job(*, sha: str, job_prefix: str) -> Dict[str, List[Any]]:
+    bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
+    summaries = list(bucket.objects.filter(Prefix=f"test_time/{sha}/{job_prefix}"))
+    return _parse_s3_summaries(summaries, jobs=list())

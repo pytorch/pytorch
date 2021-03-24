@@ -18,7 +18,7 @@ from xml.dom import minidom  # type: ignore[import]
 
 import requests
 from typing_extensions import TypedDict
-from tools.stats_utils.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_S3_bucket_readonly,
+from tools.stats_utils.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
                                               Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
                                               Version1Report, Version2Report, ReportMetaMeta)
 
@@ -805,20 +805,13 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
         commits = commits[:-1]
 
     job = os.environ.get("CIRCLE_JOB", "")
-    bucket = get_S3_bucket_readonly('ossci-metrics')
-    index = {}
-    for commit in commits:
-        summaries = bucket.objects.filter(Prefix=f"test_time/{commit}/{job}/")
-        index[commit] = list(summaries)
+    objects: Dict[Commit, List[Report]] = defaultdict(list)
 
-    objects: Dict[Commit, List[Report]] = {}
-    # should we do these in parallel?
-    for commit, summaries in index.items():
-        objects[commit] = []
-        for summary in summaries:
-            binary = summary.get()["Body"].read()
-            string = bz2.decompress(binary).decode("utf-8")
-            objects[commit].append(json.loads(string))
+    for commit in commits:
+        objects[commit]
+        summaries = get_test_stats_summaries_for_job(sha=commit, job_prefix=job)
+        for _, summary in summaries.items():
+            objects[commit].extend(summary)
 
     print()
     print(regression_info(
