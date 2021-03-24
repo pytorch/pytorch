@@ -770,7 +770,7 @@ terrible spacing
 
         modules = dict(traced.named_modules())
         for node in traced.graph.nodes:
-            if node.op == 'call_function' and node.target.__module__ == 'torch.nn.functional':
+            if node.op == 'call_function' and node.target.__module__ != '_operator':
                 normalized_args = node.normalized_arguments(traced)
                 assert normalized_args
                 node.args = ()

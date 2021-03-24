@@ -6,6 +6,7 @@ import builtins
 import inspect
 import types
 from torch._jit_internal import boolean_dispatched
+from torch.fx.operator_schemas import get_signature_for_torch_op
 
 if TYPE_CHECKING:
     from .graph import Graph
