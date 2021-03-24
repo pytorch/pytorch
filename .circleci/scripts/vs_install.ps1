@@ -1,15 +1,7 @@
-$VS_DOWNLOAD_LINK = "https://aka.ms/vs/15/release/vs_buildtools.exe"
+$VS_DOWNLOAD_LINK = "https://aka.ms/vs/16/release/vs_community.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
-$VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStudio.Workload.VCTools",
-                                                     "--add Microsoft.VisualStudio.Component.VC.Tools.14.13",
-                                                     "--add Microsoft.Component.MSBuild",
-                                                     "--add Microsoft.VisualStudio.Component.Roslyn.Compiler",
-                                                     "--add Microsoft.VisualStudio.Component.TextTemplating",
-                                                     "--add Microsoft.VisualStudio.Component.VC.CoreIde",
-                                                     "--add Microsoft.VisualStudio.Component.VC.Redist.14.Latest",
-                                                     "--add Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Core",
-                                                     "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                                                     "--add Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Win81")
+$VS_INSTALL_ARGS = @("modify","--nocache","--quiet","--wait", "--installPath C:\Program Files (x86)\Microsoft Visual Studio\2019\Community",
+                                                              "--add Microsoft.VisualStudio.Component.VC.14.27.x86.x64")
 
 curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
 if ($LASTEXITCODE -ne 0) {
