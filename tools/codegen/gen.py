@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import *
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
 import tools.codegen.api.meta as meta
@@ -25,9 +25,9 @@ import tools.codegen.dest as dest
 
 try:
     # use faster C loader if available
-    from yaml import CLoader as Loader
+    from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import Loader  # type: ignore
+    from yaml import SafeLoader as Loader  # type: ignore
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
@@ -231,7 +231,7 @@ class ComputeFunction:
             else:
                 return f"""
 // aten::{f.func}
-{sig.defn()} {{
+{sig.defn(is_redispatching_fn=self.is_redispatching_fn)} {{
     {static_dispatch_block}
 }}
 """
@@ -319,65 +319,10 @@ class ComputeTensorMethod:
 def compute_aten_op(f: NativeFunction) -> str:
     return f'{{"aten::{f.func.name.name}", "{f.func.name.overload_name}"}},'
 
-# Generates NativeFunctions.h, a list of forward declarations of all
-# actual kernel definitions we keep in aten/src/ATen/native/
-@with_native_function
-def compute_native_function_declaration(g: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
-    if isinstance(g, StructuredNativeFunctions):
-        # only out has dispatch
-        meta_name = meta.name(g)
-        rs = []
-        seen: Set[Any] = set()
-        out_args = structured.impl_arguments(g)
-        for k, n in g.out.dispatch.items():
-            if n in seen:
-                continue
-            if not is_structured_dispatch_key(k):
-                continue
-            seen.add(n)
-            rs.append(f"""\
-struct TORCH_API structured_{n} : public at::meta::{meta_name} {{
-    void impl({', '.join(a.decl() for a in out_args)});
-}};
-""")
-
-        seen = set()
-        for f in g.functions():
-            returns_type = native.returns_type(f.func.returns)
-            args = native.arguments(f.func)
-            for k, n in f.dispatch.items():
-                if n in seen:
-                    continue
-                if is_structured_dispatch_key(k):
-                    continue
-                seen.add(n)
-                args_str = ', '.join(a.decl() for a in args)
-                rs.append(f"TORCH_API {returns_type} {n}({args_str});")
-
-        return rs
-
-    else:
-        f = g
-        ns = list(f.dispatch.values())
-
-        rs = []
-        # Sometimes a function name shows up multiple times; only generate
-        # it once!
-        seen = set()
-        for n in ns:
-            if n in seen:
-                continue
-            if "legacy::" in n:
-                continue
-            seen.add(n)
-            returns_type = native.returns_type(f.func.returns)
-            args = native.arguments(f.func)
-            rs.append(f"TORCH_API {returns_type} {n}({', '.join(a.decl() for a in args)});")
-
-        return rs
-
 # Generates MetaFunctions.h
-def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
+def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
+    if not g.structured:
+        return None
     with native_function_manager(g.out):
         name = meta.name(g)
         args = structured.meta_arguments(g)
@@ -864,8 +809,8 @@ def main() -> None:
         assert f.func.kind() not in d
         d[f.func.kind()] = f
 
-    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, StructuredNativeFunctions]]:
-        r = StructuredNativeFunctions.from_dict(d)
+    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
+        r = NativeFunctionsGroup.from_dict(d)
         if r is None:
             return list(d.values())
         else:
@@ -873,7 +818,7 @@ def main() -> None:
 
     # TODO: how come ValuesView isn't a Sequence lol
     grouped_native_functions = list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
-    structured_native_functions = [g for g in grouped_native_functions if isinstance(g, StructuredNativeFunctions)]
+    structured_native_functions = [g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)]
 
     template_dir = os.path.join(options.source_path, "templates")
 
@@ -986,7 +931,7 @@ def main() -> None:
     })
 
     cpu_fm.write('MetaFunctions.h', lambda: {
-        'declarations': list(map(compute_meta_function_declaration, structured_native_functions)),
+        'declarations': list(mapMaybe(compute_meta_function_declaration, structured_native_functions)),
     })
 
     schema_selector = selector
@@ -1027,7 +972,7 @@ def main() -> None:
         'aten_ops': list(mapMaybe(compute_aten_op, native_functions)),
     })
     cpu_fm.write('NativeFunctions.h', lambda: {
-        'native_function_declarations': list(concatMap(compute_native_function_declaration, grouped_native_functions)),
+        'native_function_declarations': list(concatMap(dest.compute_native_function_declaration, grouped_native_functions)),
     })
 
     cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))

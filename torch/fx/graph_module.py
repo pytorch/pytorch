@@ -143,7 +143,12 @@ def _assign_attr(from_obj: Any, to_module: torch.nn.Module, target: str):
             setattr(to_module, item, t)
         to_module = t
 
-    setattr(to_module, field, from_obj)
+    # If it is a tensor and not a parameter attribute of a module, it should be a named buffer.
+    # So, we register it as a named buffer in the target module.
+    if isinstance(from_obj, torch.Tensor) and not isinstance(from_obj, torch.nn.Parameter):
+        to_module.register_buffer(field, from_obj)
+    else:
+        setattr(to_module, field, from_obj)
 
 class GraphModule(torch.nn.Module):
     """
@@ -240,12 +245,13 @@ class GraphModule(torch.nn.Module):
         return self._graph
 
     @graph.setter
-    def graph(self, g) -> None:
+    def graph(self, g : Graph) -> None:
         """
         Set the underlying ``Graph`` for this ``GraphModule``. This will internally
         recompile the ``GraphModule`` so that the generated ``forward()`` function
         corresponds to ``g``
         """
+        assert isinstance(g, Graph), f'Expected a Graph instance, but got {type(g)}'
         self._graph = g
         g.owning_module = self
         self.recompile()

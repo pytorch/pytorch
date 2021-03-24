@@ -262,6 +262,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::reciprocal:
     case aten::neg:
     case aten::relu:
+    case aten::batch_norm:
     case aten::isnan:
     case aten::log:
     case aten::log10:
@@ -1062,6 +1063,74 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       });
     } break;
 
+    case aten::batch_norm: {
+      bool hasWeight = true;
+      bool hasBias = true;
+
+      if (v->node()->input(1)->node()->kind() == prim::Constant) {
+        const auto val = toIValue(v->node()->input(1)).value();
+        if (val.isNone()) {
+          hasWeight = false;
+        }
+      }
+
+      if (v->node()->input(2)->node()->kind() == prim::Constant) {
+        const auto val = toIValue(v->node()->input(2)).value();
+        if (val.isNone()) {
+          hasBias = false;
+        }
+      }
+
+      auto const& shape = valueShape(v->node()->inputs()[0]);
+      return Compute(
+          "aten_batch_norm",
+          c10::fmap<DimArg>(shape),
+          [this, v, hasWeight, hasBias](const std::vector<VarHandle>& axes) {
+            TORCH_INTERNAL_ASSERT(axes.size() >= 2);
+            auto const& n = v->node();
+            // axes: N, C, H, W
+            std::vector<ExprHandle> indices(axes.begin(), axes.end());
+            ExprHandle c = indices[1];
+
+            // Parameter list:
+            // input, weight, bias, mean, var, training, momentum, eps,
+            // cudnn_enabled
+            std::vector<ExprHandle> inputs = {
+                tensorOrConstant(n->input(0), indices), // input
+                tensorOrConstant(n->input(3), {c}), // mean
+                tensorOrConstant(n->input(4), {c}), // var
+                constant(n->input(7)) // eps
+            };
+            if (hasWeight) {
+              inputs.push_back(tensorOrConstant(n->input(1), {c}));
+            }
+            if (hasBias) {
+              inputs.push_back(tensorOrConstant(n->input(2), {c}));
+            }
+            promoteInputs(inputs);
+
+            ExprHandle input = inputs[0];
+            ExprHandle mean = inputs[1];
+            ExprHandle var = inputs[2];
+            ExprHandle eps = inputs[3];
+            ExprHandle weight = FloatImm::make(1);
+            ExprHandle bias = FloatImm::make(0);
+
+            if (hasWeight) {
+              weight = inputs[4];
+            }
+            if (hasBias) {
+              bias = inputs[5];
+            }
+
+            auto inv_var = rsqrt(var + eps);
+            auto alpha = inv_var * weight;
+            auto beta = bias - mean * alpha;
+            auto output = input * alpha + beta;
+            return demoteOutput(output, n->output());
+          });
+    } break;
+
     case aten::log: {
       return computeOneOperand("aten_log", v, [](const ExprHandle& a) {
         return log(promoteIntegerToDefaultType(a));
@@ -1540,11 +1609,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 }
 
 Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
-  std::unordered_set<const Buf*> output_bufs;
-  for (auto t : tensorOutputs_) {
-    output_bufs.insert(t->buf());
-  }
-  torch::jit::tensorexpr::LoopNest l(st, output_bufs);
+  torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
@@ -1567,8 +1632,8 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   l.inlineIntermediateBufs(allow_duplicated_work);
 
   if (backendType == kCudaCodeGen) {
-    for (auto tensor : tensorOutputs_) {
-      std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+    for (auto buf : bufOutputs_) {
+      std::vector<For*> loops = l.getLoopStmtsFor(buf);
       TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
       For* flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
@@ -1612,15 +1677,15 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
   }
 
   if (backendType == kBlockCodeGen) {
-    for (auto tensor : tensorOutputs_) {
+    for (auto buf : bufOutputs_) {
       const int default_fp16_blocksize = 16;
       const int default_uint8_blocksize = 32;
       int blockSize = default_fp16_blocksize;
       // We only handle looplevels == 2 for now
-      if (tensor->buf()->dtype().scalar_type() == ScalarType::Byte) {
+      if (buf->dtype().scalar_type() == ScalarType::Byte) {
         blockSize = default_uint8_blocksize;
       }
-      std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+      std::vector<For*> loops = l.getLoopStmtsFor(buf);
       TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
       For* flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
@@ -2242,8 +2307,8 @@ void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
-  // Vector to collect the Stmts corresponding to all tensors.
-  std::vector<Stmt*> tensor_stmts;
+  // Block to collect the Stmts corresponding to all tensors.
+  auto block = new Block({});
 
   // Bind inputs to buffers.
   nInputs_ = graph_->inputs().size();
@@ -2252,7 +2317,7 @@ void TensorExprKernel::compile() {
     bindInput(input);
     inputTypes_.push_back(input->type());
     if (input->type()->kind() == TypeKind::TensorType) {
-      tensor_stmts.push_back(Stmt::clone(tensors_.at(input->unique())->stmt()));
+      block->append_stmt(tensors_.at(input->unique())->stmt());
     }
   }
 
@@ -2264,8 +2329,7 @@ void TensorExprKernel::compile() {
       for (auto const& output : n->outputs()) {
         if (output->hasUses()) {
           tensors_.emplace(output->unique(), computeValue(output));
-          tensor_stmts.push_back(
-              Stmt::clone(tensors_.at(output->unique())->stmt()));
+          block->append_stmt(tensors_.at(output->unique())->stmt());
         }
       }
     }
@@ -2277,7 +2341,7 @@ void TensorExprKernel::compile() {
 
   device_ = *pickDeviceType(graph_->inputs());
 
-  // Move output operands from `tensors_` to `tensorOutputs_`
+  // Move output operands from `tensors_` to `bufOutputs_`
   for (const auto& output : graph_->outputs()) {
     if (!tensors_.count(output->unique())) {
       throw malformed_input("cannot find output Tensor");
@@ -2287,7 +2351,7 @@ void TensorExprKernel::compile() {
     // strides at the end of the kernel (if already contiguous it's a no-op)
     Tensor* properly_strided_output = convertOutputToCorrectStrides(output);
     if (tensors_.at(output->unique()) != properly_strided_output) {
-      tensor_stmts.push_back(Stmt::clone(properly_strided_output->stmt()));
+      block->append_stmt(properly_strided_output->stmt());
     }
     tensors_[output->unique()] = properly_strided_output;
     const auto& tt = output->type()->expect<TensorType>();
@@ -2303,7 +2367,7 @@ void TensorExprKernel::compile() {
       tensorOutputStrides_.push_back(TensorType::contiguousStridesOf(sizes));
     }
 
-    tensorOutputs_.emplace_back(tensors_.at(output->unique()));
+    bufOutputs_.insert(tensors_.at(output->unique())->buf());
     bufferArgs_.emplace_back(tensors_.at(output->unique()));
     tensorOutputTensorOptions_.emplace_back(
         c10::TensorOptions(tensorType(tensors_[output->unique()]))
@@ -2312,7 +2376,7 @@ void TensorExprKernel::compile() {
   }
 
   BackendType backendType = inferBackendTypeFromDevice(device_);
-  Stmt* stmt = transformLoops(backendType, new Block(tensor_stmts));
+  Stmt* stmt = transformLoops(backendType, block);
 
   // Generate code.
   codegen_ = CreateCodeGen(
@@ -2361,7 +2425,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
     std::vector<at::Tensor>& outputs) {
   std::vector<CodeGen::CallArg> runArgs;
-  runArgs.reserve(inputs.size() + tensorOutputs_.size());
+  runArgs.reserve(inputs.size() + bufOutputs_.size());
 
   for (const auto& input : inputs) {
     if (input.isInt()) {
@@ -2373,7 +2437,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     }
   }
 
-  for (size_t i = 0, e = tensorOutputs_.size(); i < e; ++i) {
+  for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
     auto const& opts = tensorOutputTensorOptions_[i];
     outputs.emplace_back(codegen_->empty_strided(
         tensorOutputSizes_[i],

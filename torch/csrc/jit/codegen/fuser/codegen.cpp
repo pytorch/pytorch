@@ -471,8 +471,10 @@ std::string generateKernel(
         AT_ASSERT(use_cuda);
         env.s(
             "access",
-            format("__bfloat162float(t${formal}.data[t${formal}_offset])", env));
-        env.s("access_vec4", format("__bfloat162float(t${formal}_buf[i])", env));
+            format(
+                "__bfloat162float(t${formal}.data[t${formal}_offset])", env));
+        env.s(
+            "access_vec4", format("__bfloat162float(t${formal}_buf[i])", env));
         has_bfloat_tensor = true;
       } else if (use_cuda) {
         // No __ldg overload for bool
@@ -587,7 +589,8 @@ std::string generateKernel(
     // Acquires and converts (if needed) outputs
     // Note: conversion to half is only supported for CUDA kernels.
     const auto is_half = (output.second.scalar_type == at::ScalarType::Half);
-    const auto is_bfloat = (output.second.scalar_type == at::ScalarType::BFloat16);
+    const auto is_bfloat =
+        (output.second.scalar_type == at::ScalarType::BFloat16);
     if (is_half) {
       AT_ASSERT(use_cuda);
       body << format("${access} = __float2half(${node});\n", env);

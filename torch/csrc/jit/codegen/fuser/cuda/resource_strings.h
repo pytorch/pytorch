@@ -263,7 +263,7 @@ typedef __half half;
 #endif
 
 constexpr auto bfloat16_support_literal =
-  R"(
+    R"(
 #define __BFLOAT16_TO_US(var) *(reinterpret_cast<unsigned short*>(&(var)))
 #define __BFLOAT16_TO_CUS(var) \
   *(reinterpret_cast<const unsigned short*>(&(var)))
