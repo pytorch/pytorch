@@ -49,4 +49,3 @@ class TensorRepr(gdb.Command):
             gdb.parse_and_eval('(void)free(%s)' % int(res))
 
 TensorRepr()
-
