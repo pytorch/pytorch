@@ -1560,8 +1560,7 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
 #ifdef USE_CUSOLVER
   if (batchCount(self) == 1 || !use_magma_) {
     return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
-  }
-  else {
+  } else {
     return _cholesky_solve_helper_cuda_magma(self, A, upper);
   }
 #else

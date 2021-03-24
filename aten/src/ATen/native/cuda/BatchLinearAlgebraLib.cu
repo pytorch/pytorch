@@ -501,7 +501,7 @@ inline static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, cons
       lda, datatype,
       self_working_copy_ptr + i * self_matrix_stride,
       ldb,
-      infos_ptr + i
+      infos_ptr
     );
   }
 
@@ -519,7 +519,7 @@ inline static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, cons
       lda_32,
       self_working_copy_ptr + i * self_matrix_stride,
       ldb_32,
-      infos_ptr + i
+      infos_ptr
     );
   }
 #endif // USE_CUSOLVER_64_BIT
@@ -562,7 +562,7 @@ inline static void apply_cholesky_cusolver_potrsBatched(Tensor& self_working_cop
 
 Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A, bool upper) {
   const int64_t batch_size = batchCount(self);
-  at::Tensor infos = at::zeros({batch_size}, self.options().dtype(at::kInt));
+  at::Tensor infos = at::zeros({1}, self.options().dtype(at::kInt));
   at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
   at::Tensor A_column_major_copy = cloneBatchedColumnMajor(A);
 
@@ -579,7 +579,9 @@ Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A,
     });
   }
 
-  batchCheckErrors(infos, "cholesky_solve_cuda");
+  // info from potrs and potrsBatched only report if the i-th parameter is wrong, not about the matrix singularity, etc.
+  // So we don't need to check it all the time.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.item().toInt() == 0);
 
   return self_working_copy;
 }
