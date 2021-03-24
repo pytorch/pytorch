@@ -629,13 +629,12 @@ Q: I would like to trace module's method but I keep getting this error:
 
     To trace a specific method on a module, see :func:`torch.jit.trace_module <torch.jit.trace_module>`
 
-Gotchas
----------
+Known Issues
+---------------
 
 If you're using ``Sequential`` with TorchScript, the inputs of some
 of the ``Sequential`` submodules may be falsely inferred to be
-``Tensor``, even if they're annotated otherwise. This is a known
-issue in the TorchScript type inference algorithm. The canonical
+``Tensor``, even if they're annotated otherwise. The canonical
 solution is to subclass ``nn.Sequential`` and redeclare ``forward``
 with the input typed correctly.
 
