@@ -45,7 +45,7 @@ static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
 
   THArgCheck(dstSliceSize == srcSliceSize, 2,
              "Source/destination tensor have different slice sizes (%ld vs %ld)",
-             dstSliceSize, srcSliceSize);
+             srcSliceSize, dstSliceSize);
 
   if (mismatch) {
     static bool warningShown = false;
