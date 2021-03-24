@@ -53,11 +53,10 @@ static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
 static inline __m256i merge_compare_result(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
   __m256i hi = _mm256_castps_si256(b);
-  // // input = input >> 16;
   lo = _mm256_srli_epi32(lo, 16);
   hi = _mm256_srli_epi32(hi, 16);
-  auto out = _mm256_packus_epi32(lo, hi);      // t_hi[4-7] t_lo[4-7] t_hi[0-4] t_lo[0-4]
-  return _mm256_permute4x64_epi64(out, 0xd8); // 11        01        10        00
+  auto out = _mm256_packus_epi32(lo, hi);
+  return _mm256_permute4x64_epi64(out, 0xd8);
 }
 
 template <> class Vec256<BFloat16> {
