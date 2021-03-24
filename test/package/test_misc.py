@@ -18,7 +18,7 @@ class TestMisc(PackageTestCase):
     """Tests for one-off or random functionality. Try not to add to this!"""
 
     def test_file_structure(self):
-        filename = self.temp()
+        buffer = BytesIO()
 
         export_plain = dedent(
             """\
@@ -56,7 +56,7 @@ class TestMisc(PackageTestCase):
             """
         )
 
-        with PackageExporter(filename, verbose=False) as he:
+        with PackageExporter(buffer, verbose=False) as he:
             import module_a
             import package_a
             import package_a.subpackage
@@ -68,7 +68,7 @@ class TestMisc(PackageTestCase):
             he.save_text("main", "main", "my string")
 
             export_file_structure = he.file_structure()
-            # remove first line from testing because WINDOW/iOS/Unix treat the filename differently
+            # remove first line from testing because WINDOW/iOS/Unix treat the buffer differently
             self.assertEqual(
                 dedent("\n".join(str(export_file_structure).split("\n")[1:])),
                 export_plain,
@@ -81,7 +81,8 @@ class TestMisc(PackageTestCase):
                 export_include,
             )
 
-        hi = PackageImporter(filename)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
         import_file_structure = hi.file_structure(exclude="**/*.storage")
         self.assertEqual(
             dedent("\n".join(str(import_file_structure).split("\n")[1:])),
@@ -90,7 +91,7 @@ class TestMisc(PackageTestCase):
 
     @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
     def test_custom_requires(self):
-        filename = self.temp()
+        buffer = BytesIO()
 
         class Custom(PackageExporter):
             def require_module(self, name, dependencies):
@@ -103,10 +104,11 @@ class TestMisc(PackageTestCase):
                 else:
                     raise NotImplementedError("wat")
 
-        with Custom(filename, verbose=False) as he:
+        with Custom(buffer, verbose=False) as he:
             he.save_source_string("main", "import package_a\n")
 
-        hi = PackageImporter(filename)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
         hi.import_module("module_a").should_be_mocked
         bar = hi.import_module("package_a")
         self.assertEqual(bar.result, 5)
