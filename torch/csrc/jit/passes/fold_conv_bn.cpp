@@ -28,50 +28,59 @@ static bool hastensor(Module& m, const char* name) {
   return m.hasattr(name) && m.attr(name).isTensor();
 }
 
-void replaceConvBiasWithGetAttr(Module& module) {
-  auto graph = module.get_method("forward").graph();
-  // Only looks fors _convolution pattern.
-  // Thus assumes that tracing will have always gotten rid of aten::conv2d or
-  // aten::conv3d. If it did not, BN folding will fail.
-  const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
-      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
-          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
-          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
-        %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
-            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled, %allow_tf32)
-        return (%conv_out) )");
-  const PatternInfo& pattern_convolution_deprecated =
-      PatternInfo::parse_from_str(R"(
-      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
-          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
-          %deterministic:bool, %cudnn_enabled:bool):
-        %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
-            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
-        return (%conv_out) )");
-  auto replace_pattern = [&](const PatternInfo& pattern_convolution) {
-    const Graph& pattern_convolution_graph = *pattern_convolution.pattern_graph;
-    const auto& convolution_vmap = pattern_convolution.vmap;
+void replaceConvBiasWithGetAttr(
+    Module& module,
+    const std::unordered_set<std::string>& methods_to_optimize) {
+  for (const std::string& method_name : methods_to_optimize) {
+    auto graph = module.get_method(method_name).graph();
+    // Only looks for _convolution pattern.
+    // Thus assumes that tracing will have always gotten rid of aten::conv2d or
+    // aten::conv3d. If it did not, BN folding will fail.
+    const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
+        graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+            %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+            %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
+          %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
+              %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled, %allow_tf32)
+          return (%conv_out) )");
+    const PatternInfo& pattern_convolution_deprecated =
+        PatternInfo::parse_from_str(R"(
+        graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+            %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+            %deterministic:bool, %cudnn_enabled:bool):
+          %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
+              %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
+          return (%conv_out) )");
+    auto replace_pattern = [&](const PatternInfo& pattern_convolution) {
+      const Graph& pattern_convolution_graph =
+          *pattern_convolution.pattern_graph;
+      const auto& convolution_vmap = pattern_convolution.vmap;
 
-    const auto& matches = findPatternMatches(pattern_convolution_graph, *graph);
-    for (const auto& match : matches) {
-      // We come here only if the bias was not present in the module.
-      // In that case, the corresponding graph will not have getAttr("bias")
-      // Insert that in the graph.
-      // And change _convolution to take the new value.
-      auto conv_node =
-          match.values_map.at(convolution_vmap.at("conv_out"))->node();
-      WithInsertPoint ins(conv_node);
-      Value* bias_attr_val = graph->insertGetAttr(graph->inputs()[0], "bias")
-                                 ->setType(TensorType::get());
-      constexpr size_t conv_bias_index = 2;
-      conv_node->replaceInput(conv_bias_index, bias_attr_val);
-    }
-  };
-  replace_pattern(pattern_convolution);
-  replace_pattern(pattern_convolution_deprecated);
+      const auto& matches =
+          findPatternMatches(pattern_convolution_graph, *graph);
+      for (const auto& match : matches) {
+        // We come here only if the bias was not present in the module.
+        // In that case, the corresponding graph will not have getAttr("bias")
+        // Insert that in the graph.
+        // And change _convolution to take the new value.
+        auto conv_node =
+            match.values_map.at(convolution_vmap.at("conv_out"))->node();
+        WithInsertPoint ins(conv_node);
+        Value* bias_attr_val = graph->insertGetAttr(graph->inputs()[0], "bias")
+                                   ->setType(TensorType::get());
+        constexpr size_t conv_bias_index = 2;
+        conv_node->replaceInput(conv_bias_index, bias_attr_val);
+      }
+    };
+    replace_pattern(pattern_convolution);
+    replace_pattern(pattern_convolution_deprecated);
+  }
 }
 
-void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
+void addBiasForConvIfNone(
+    Module& module,
+    const std::string& pattern_name,
+    const std::unordered_set<std::string>& methods_to_optimize) {
   auto t = module.type()->expect<ClassType>();
 
   const std::string real_typename = t->name()->qualifiedName();
@@ -87,11 +96,11 @@ void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
       t->addAttribute("bias", optional_tensor_type, true);
       auto optional_tensor = c10::optional<at::Tensor>();
       module.setattr("bias", optional_tensor);
-      replaceConvBiasWithGetAttr(module);
+      replaceConvBiasWithGetAttr(module, methods_to_optimize);
     }
   }
   for (Module m : module.children()) {
-    addBiasForConvIfNone(m, pattern_name);
+    addBiasForConvIfNone(m, pattern_name, methods_to_optimize);
   }
 }
 
@@ -356,11 +365,18 @@ void FoldConvBatchNormHelper::transform() {
 
 } // namespace
 
-Module FoldConvBatchNorm(const Module& module) {
+Module FoldConvBatchNorm(
+    const Module& module,
+    const std::vector<std::string>& methods_to_optimize_arg) {
+  std::unordered_set<std::string> methods_to_optimize(
+      methods_to_optimize_arg.begin(), methods_to_optimize_arg.end());
+  if (module.find_method("forward")) {
+    methods_to_optimize.insert("forward");
+  }
   Module m = module.clone();
 
-  addBiasForConvIfNone(m, "Conv2d");
-  addBiasForConvIfNone(m, "Conv3d");
+  addBiasForConvIfNone(m, "Conv2d", methods_to_optimize);
+  addBiasForConvIfNone(m, "Conv3d", methods_to_optimize);
   // Conv2d + BatchNorm2d
   const PatternInfo pattern2d = PatternInfo::parse_from_str(
       R"(

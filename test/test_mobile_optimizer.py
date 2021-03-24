@@ -121,6 +121,7 @@ class TestOptimizer(TestCase):
         bn_test_module = BNTestModule()
         bn_scripted_module = torch.jit.script(bn_test_module)
         bn_scripted_module.eval()
+
         self.assertEqual(len(torch.jit.export_opnames(bn_scripted_module)), 14)
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                    .run(str(get_forward(bn_scripted_module._c).graph))
@@ -200,12 +201,40 @@ class TestOptimizer(TestCase):
         optimized_scripted_model = optimize_for_mobile(m, methods_to_optimize=['foo'])
         optimized_result = optimized_scripted_model.foo(input_data)
 
-
         FileCheck().check_not("dropout.__") \
             .check_count("aten::_add_relu(", 1, exactly=True) \
             .run(optimized_scripted_model.foo.graph)
         torch.testing.assert_allclose(initial_result, optimized_result, rtol=1e-2, atol=1e-3)
 
+        class BNTestNoForwardModule(torch.nn.Module):
+            def __init__(self):
+                super(BNTestNoForwardModule, self).__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+                self.bn.eps = 0.0023
+
+            @torch.jit.export
+            def foo(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        bn_test_no_forward_module = BNTestNoForwardModule()
+        bn_no_forward_scripted_module = torch.jit.script(bn_test_no_forward_module)
+        bn_no_forward_scripted_module.eval()
+
+        self.assertEqual(len(torch.jit.export_opnames(bn_no_forward_scripted_module)), 14)
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+                   .run(bn_no_forward_scripted_module.foo.graph)
+
+        bn_fold_no_foward_scripted_module = optimize_for_mobile(bn_no_forward_scripted_module, methods_to_optimize=['foo'])
+        self.assertEqual(len(torch.jit.export_opnames(bn_fold_no_foward_scripted_module)), 1)
+        bn_input = torch.rand(1, 1, 6, 6)
+        torch.testing.assert_allclose(
+            bn_no_forward_scripted_module.foo(bn_input),
+            bn_fold_no_foward_scripted_module.foo(bn_input),
+            rtol=1e-2,
+            atol=1e-3)
 
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."

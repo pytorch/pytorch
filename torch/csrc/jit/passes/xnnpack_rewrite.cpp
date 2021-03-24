@@ -392,9 +392,8 @@ script::Module optimizeForMobile(
   auto cloned_module = m.clone();
   cloned_module.eval();
 
-  if (!optimization_blocklist.count(MobileOptimizerType::CONV_BN_FUSION) &&
-      optimize_forward) {
-    cloned_module = FoldConvBatchNorm(cloned_module);
+  if (!optimization_blocklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
+    cloned_module = FoldConvBatchNorm(cloned_module, preserved_list);
   }
 
   // Many optimizations require a frozen module, but ConvBatchNorm requires
