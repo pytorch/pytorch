@@ -1,5 +1,6 @@
 import torch
 from torch.optim.optimizer import Optimizer
+from typing import List
 
 
 class MLCOptimizer(Optimizer):
@@ -73,7 +74,7 @@ class MLCOptimizer(Optimizer):
                         if self.defaults.get("max_gradient_clipping") and p.grad is not None:
                             max_clip = self.defaults.get("max_gradient_clipping", float("inf"))
                             min_clip = self.defaults.get("min_gradient_clipping", float("-inf"))
-                            torch.clamp_(p.grad, min_clip, max_clip)
+                            p.grad, = torch.clamp(p.grad, min_clip, max_clip)
 
         self.torchopt.param_groups = param_groups_copy
         self.torchopt.step()
@@ -138,3 +139,8 @@ class MLCOptimizer(Optimizer):
         self.torchopt.state = torchstate
         self.mlcopt.set_optimizer_data(mlcstate)
         self.state = None
+
+    def _same_parameters(self, group):
+        # Dummy same parameters
+        keys: List[str] = []
+        return all(self.defaults[k] == group[k] for k in keys)
