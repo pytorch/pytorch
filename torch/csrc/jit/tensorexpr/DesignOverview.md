@@ -1,4 +1,5 @@
 # IR Specification (Updated 2/26/21)
+```
 Stmt
 = Block(stmts_ = [Stmt])
 | Store(buf_ = Buf, indices = [Expr], value_ = Expr, mask_ = Expr)
@@ -29,6 +30,8 @@ Expr
 | CallNode(call_type_ = {kIntrinsics, kFunctionCall}, params_ = [Expr])
 | CompareSelect(lhs_ = Expr, rhs_ = Expr, ret_val1_ = Expr, ret_val2_ = Expr, compare_op_ = {kEQ, kGT, kGE, ...}, bias_ = {kUnbiased, kLikely, kUnlikely})
 | ReduceOp(body_ = Expr, reduce_args_ = [Var], reducer = Reducer)
+```
+
 # Current workflow
 
 ## Step 1: input from the user.
