@@ -1175,8 +1175,6 @@ class TestModule(torch.nn.Module):
         return torch.{op.name}({', '.join(args)})
                 """
 
-                print(code)
-
                 g = {'torch': torch, 'inf' : math.inf}
                 exec(code, g)
                 TestModule = g['TestModule']
