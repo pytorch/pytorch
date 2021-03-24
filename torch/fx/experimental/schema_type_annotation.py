@@ -47,6 +47,7 @@ class AnnotateTypesWithSchema(Transformer):
         Set types for placeholder nodes
         """
         ph_proxy = super().placeholder(target, args, kwargs)
+        assert self._cur_node is not None
         ph_proxy.node.type = self._cur_node.type
         return ph_proxy
 
