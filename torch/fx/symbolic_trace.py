@@ -194,8 +194,7 @@ class Tracer(TracerBase):
             assert isinstance(path, str)
             return path
         # O(N^2) fallback in the case that we didn't store the submodule
-        # paths. (This happens e.g. in using NormalizeArgs. See
-        #  `test/test_fx_experimental:test_normalize_args`)
+        # paths.
         else:
             for n, p in self.root.named_modules():
                 if mod is p:

@@ -23,7 +23,6 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.fuser import fuse
 from torch.fx.experimental import merge_matmul
-from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 
@@ -769,24 +768,27 @@ terrible spacing
         input = torch.randn(5, 3, 224, 224)
         ref_outs = traced(input)
 
-        traced = NormalizeArgs(traced).transform()
-
-        test_outs = traced(input)
-        self.assertEqual(test_outs, ref_outs)
-
         modules = dict(traced.named_modules())
         for node in traced.graph.nodes:
             if node.op == 'call_function' and node.target.__module__ == 'torch.nn.functional':
-                self.assertEqual(len(node.args), 0)
+                normalized_args = node.normalized_arguments(traced)
+                assert normalized_args
+                node.args = ()
+                node.kwargs = normalized_args.args_dict
             if node.op == 'call_module':
                 submod_class = modules[node.target].__class__
                 nn_class = getattr(torch.nn, submod_class.__name__)
                 if submod_class == nn_class:
-                    self.assertEqual(len(node.args), 0)
+                    normalized_args = node.normalized_arguments(traced)
+                    assert normalized_args
+                    node.args = ()
+                    node.kwargs = normalized_args.args_dict
+        traced.recompile()
+        self.assertEqual(traced(input), ref_outs)
 
     def test_normalize_modules_exhaustive(self):
         """
-        Exhaustively test `NormalizeArgs` on all standard
+        Exhaustively test `Node.normalized_arguments` on all standard
         torch.nn Module classes
         """
         for test_params in module_tests + new_module_tests:
@@ -835,8 +837,21 @@ class {test_classname}(torch.nn.Module):
             test_instance = gbls[test_classname](mod)
             traced = symbolic_trace(test_instance)
 
-            # Now actually test arg normalization!
-            traced = NormalizeArgs(traced).transform()
+            # Use `Node.normalized_arguments` to get a new set of arguments
+            # to feed to the Module. Then, rewrite the node to only take
+            # in those arguments as kwargs
+            modules = dict(traced.named_modules())
+            for node in traced.graph.nodes:
+                if node.op == 'call_module':
+                    submod_class = modules[node.target].__class__
+                    nn_class = getattr(torch.nn, submod_class.__name__)
+                    if submod_class == nn_class:
+                        normalized_args = node.normalized_arguments(traced)
+                        assert normalized_args
+                        node.args = ()
+                        node.kwargs = normalized_args.args_dict
+
+            traced.recompile()
 
             # These Modules have an RNG in their forward, so testing
             # correctness by comparing outputs is not correct. Skip that
@@ -846,15 +861,6 @@ class {test_classname}(torch.nn.Module):
 
             if mod.__class__.__name__ not in stochastic_modules:
                 self.assertEqual(traced(*inputs), mod(*inputs))
-
-            # Ensure all args/kwargs are normalized into kwargs
-            modules = dict(traced.named_modules())
-            for node in traced.graph.nodes:
-                if node.op == 'call_module':
-                    submod_class = modules[node.target].__class__
-                    nn_class = getattr(torch.nn, submod_class.__name__)
-                    if submod_class == nn_class:
-                        self.assertEqual(len(node.args), 0)
 
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
