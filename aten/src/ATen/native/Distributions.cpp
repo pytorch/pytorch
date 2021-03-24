@@ -225,12 +225,19 @@ struct UniformStub {
   }
 };
 
+template<typename RNG>
+struct UniformMeta {
+  // No-op!
+  void operator()(TensorIterator& iter, double from, double to, c10::optional<Generator> gen) {
+  }
+};
+
 Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> gen) {
   return at::native::templates::uniform_impl_<UniformStub, Generator>(self, from, to, gen);
 }
 
 Tensor& uniform_meta_(Tensor& self, double from, double to, c10::optional<Generator> gen) {
-  return self;
+  return at::native::templates::uniform_impl_<UniformMeta, Generator>(self, from, to, gen);
 }
 
 // ==================================================== Normal ========================================================
