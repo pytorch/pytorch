@@ -963,6 +963,18 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(-3).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    def test_hardsigmoid(self):
+        model = torch.nn.Hardsigmoid()
+
+        x = torch.rand(3, 3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+        # Testing edge cases
+        x = torch.tensor(3).to(dtype=torch.float32)
+        self.run_test(model, x)
+        x = torch.tensor(-3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
     def test_hardswish_script(self):
         class MyModel(torch.jit.ScriptModule):
             @torch.jit.script_method

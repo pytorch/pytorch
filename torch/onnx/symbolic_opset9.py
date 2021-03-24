@@ -1856,6 +1856,9 @@ def slice(g, self, *args):
 def hardtanh(g, self, min_val, max_val):
     return g.op("Clip", self, min_f=min_val, max_f=max_val)
 
+@parse_args('v')
+def hardsigmoid(g, self):
+    return g.op('HardSigmoid', self, alpha_f=1/6)
 
 @parse_args('v')
 def hardswish(g, self):
