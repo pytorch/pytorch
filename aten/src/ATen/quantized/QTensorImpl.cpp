@@ -10,4 +10,8 @@ QTensorImpl::QTensorImpl(
     : TensorImpl(std::move(storage), key_set, data_type),
       quantizer_(quantizer) {}
 
+const char* QTensorImpl::tensorimpl_type_name() const {
+  return "QTensorImpl";
+}
+
 } // namespace at

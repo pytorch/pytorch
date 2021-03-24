@@ -4,6 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/stack.h>
+#include <pybind11/complex.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
@@ -22,6 +23,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/six.h>
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/py_rref.h>
@@ -35,6 +37,7 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -53,12 +56,33 @@
 namespace torch {
 namespace jit {
 
+void clear_registered_instances(void* ptr);
+
 IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N = c10::nullopt);
 
 py::object toPyObject(IValue ivalue);
+
+// Wrap Python function to guard deref
+// NB: Need VISIBILITY_HIDDEN for silencing compiler error,
+// 'torch::jit::PythonFunctionGuard' declared with greater visibility than the
+// type of its field 'torch::jit::PythonFunctionGuard::func_'
+struct VISIBILITY_HIDDEN PythonFunctionGuard {
+  explicit PythonFunctionGuard(py::function func) : func_(std::move(func)) {}
+
+  ~PythonFunctionGuard() {
+    pybind11::gil_scoped_acquire ag;
+    func_.dec_ref();
+    // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
+    // decref on the PyObject again.
+    // See Note [Destructing py::object] in python_ivalue.h
+    func_.ptr() = nullptr;
+  }
+
+  py::function func_;
+};
 
 // The PythonFutureWrapper for ivalue::Future
 //
@@ -90,6 +114,9 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     // without grabbing the GIL.
     py::gil_scoped_acquire acquire;
     py::object py_obj = toPyObject(fut->value());
+    // unwrap_func is a general compositional function that takes in a
+    // py::object and executes some python function. It is currently mostly used
+    // to throw python exceptions.
     if (unwrap_func) {
       (*unwrap_func)(py_obj);
     }
@@ -122,7 +149,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         // Capture a copy of the ivalue::Future instead of the `this` pointer
         // because the PythonFutureWrapper object could have been deleted
         // when the callbacks are fired. For example, RPC only captures the
-        // ivalue::Future instead of PythonFutureWrapper in FutureMessage's
+        // ivalue::Future instead of PythonFutureWrapper in JitFuture's
         // callback functions. Hence, if user code does not hold a reference to
         // this PythonFutureWrapper object, there is no guarantee that the
         // PythonFutureWrapper is still valid when running the callback.
@@ -194,22 +221,6 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   c10::optional<UnwrapFunc> unwrap_func;
 
  private:
-  // Wrap Python function to guard deref
-  struct PythonFunctionGuard {
-    explicit PythonFunctionGuard(py::function func) : func_(std::move(func)) {}
-
-    ~PythonFunctionGuard() {
-      pybind11::gil_scoped_acquire ag;
-      func_.dec_ref();
-      // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
-      // decref on the PyObject again.
-      // See Note [Destructing py::object] in python_ivalue.h
-      func_.ptr() = nullptr;
-    }
-
-    py::function func_;
-  };
-
   std::shared_ptr<PythonFutureWrapper> getPtr() {
     return shared_from_this();
   }
@@ -292,6 +303,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (py::isinstance<py::float_>(input)) {
     return InferredType(FloatType::get());
+  } else if (PyComplex_CheckExact(input.ptr())) {
+    return InferredType(ComplexType::get());
   } else if (py::isinstance<py::str>(input)) {
     return InferredType(StringType::get());
   } else if (THPLayout_Check(input.ptr())) {
@@ -343,6 +356,16 @@ inline InferredType tryToInferType(py::handle input) {
     auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
     return InferredType(rref_ivalue.type());
 #endif
+  }
+
+  if (as_module(py::cast<py::object>(input))) {
+    return InferredType("Cannot infer type of ScriptModule");
+  }
+
+  auto module_type = py::module::import("torch.nn").attr("Module");
+  py::bool_ is_module = py::isinstance(input, module_type);
+  if (py::cast<bool>(is_module)) {
+    return InferredType("Cannot infer concrete type of torch.nn.Module");
   }
 
   // Try container types
@@ -636,6 +659,9 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
+  } else if (ivalue.isComplexDouble()) {
+    return py::cast(
+        static_cast<std::complex<double>>(std::move(ivalue).toComplexDouble()));
   } else if (ivalue.isInt()) {
     return py::cast(std::move(ivalue).toInt());
   } else if (ivalue.isBool()) {
@@ -924,10 +950,63 @@ inline py::object runAndInsertCall(
   return toPyObject(std::move(stack.back()));
 }
 
+inline c10::optional<py::object> maybeTorchFunctionDispatch(
+    const py::object& callee,
+    const tuple_slice& args_no_self,
+    const py::kwargs& kwargs,
+    const c10::QualifiedName qualname) {
+  std::vector<py::handle> args_vec = {callee};
+  for (const auto& arg : args_no_self) {
+    args_vec.push_back(arg);
+  }
+  py::tuple args = py::cast(args_vec);
+
+  // Handle __torch_function__ dispatch
+  std::vector<py::handle> overloaded_args;
+  size_t total_arg_num = args.size() + kwargs.size();
+  for (const auto& arg : args) {
+    is_tensor_and_append_overloaded(arg.ptr(), &overloaded_args);
+    is_tensor_list_and_append_overloaded(
+        arg.ptr(),
+        &overloaded_args,
+        static_cast<int>(total_arg_num),
+        false /* throw_error */);
+  }
+  // NB: for kwargs, we cannot guarantee the order of appending
+  // is the same as the argument order in operator's schema.
+  // This is suboptimal, but should be fine. Later when we have
+  // better schema matching and argument parsing, we could
+  // match the operator in `operations` first, then the order will
+  // be guaranteed.
+  for (auto item : kwargs) {
+    is_tensor_and_append_overloaded(item.second.ptr(), &overloaded_args);
+    is_tensor_list_and_append_overloaded(
+        item.second.ptr(),
+        &overloaded_args,
+        total_arg_num,
+        false /* throw_error */);
+  }
+  if (overloaded_args.size() > 0) {
+    return pybind11::reinterpret_steal<py::object>(
+        handle_torch_function_no_python_arg_parser(
+            overloaded_args,
+            args.ptr(),
+            kwargs.ptr(),
+            qualname.name().c_str(),
+            args[0].ptr(),
+            qualname.prefix().c_str()));
+  }
+
+  return c10::nullopt;
+}
+
 inline py::object invokeScriptFunctionFromPython(
     Function& callee,
     const tuple_slice& args,
     const py::kwargs& kwargs) {
+  // TODO: we could add __torch_function__ dispatch here but I don't know
+  // the implications of doing so
+
   return runAndInsertCall(
       callee,
       args,
@@ -943,6 +1022,12 @@ inline py::object invokeScriptMethodFromPython(
     const tuple_slice& args,
     const py::kwargs& kwargs) {
   auto self = callee.owner()._ivalue();
+
+  if (auto torch_fn_result = maybeTorchFunctionDispatch(
+          py::cast(callee), args, kwargs, callee.name())) {
+    return *torch_fn_result;
+  }
+
   return runAndInsertCall(
       callee.function(),
       args,

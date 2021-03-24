@@ -52,7 +52,7 @@ void THCTensor_(topk)(THCState* state,
       static_cast<INDEX_T>(topKInfo.strides[collapseTopKDim]),          \
       indicesInfo,                                                      \
       static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]));   \
-  C10_CUDA_KERNEL_LAUNCH_CHECK()
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define RUN_DIR(INDEX_T, DIM)                   \
   if (dir) {                                    \

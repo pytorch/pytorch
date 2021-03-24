@@ -965,15 +965,15 @@ struct SliceExpr : public Expr {
   Maybe<Expr> step() const {
     return Maybe<Expr>(subtree(2));
   }
-  Expr startOr(int alternative) const {
+  Expr startOr(int64_t alternative) const {
     const auto startOption = start();
     return startOption.present() ? startOption.get() : createInt(alternative);
   }
-  Expr endOr(int alternative) const {
+  Expr endOr(int64_t alternative) const {
     const auto endOption = end();
     return endOption.present() ? endOption.get() : createInt(alternative);
   }
-  Expr stepOr(int alternative) const {
+  Expr stepOr(int64_t alternative) const {
     const auto stepOption = step();
     return stepOption.present() ? stepOption.get() : createInt(alternative);
   }
@@ -987,7 +987,7 @@ struct SliceExpr : public Expr {
   }
 
  private:
-  Expr createInt(int value) const {
+  Expr createInt(int64_t value) const {
     return Expr(Const::create(range(), c10::to_string(value)));
   }
 };

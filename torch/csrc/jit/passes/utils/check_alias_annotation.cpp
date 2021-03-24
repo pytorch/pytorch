@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
+
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -41,6 +42,8 @@ IValue deepCopy(const IValue& self) {
     return IValue(self.toIntList().copy());
   } else if (self.isDoubleList()) {
     return IValue(self.toDoubleList().copy());
+  } else if (self.isComplexDoubleList()) {
+    return IValue(self.toComplexDoubleList().copy());
   } else if (self.isBoolList()) {
     return IValue(self.toBoolList().copy());
   } else if (self.isString()) {

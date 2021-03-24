@@ -160,6 +160,7 @@ class TORCH_API Pickler {
   void endTypeTag(const IValue& value);
   void pushBool(bool value);
   void pushDouble(double value);
+  void pushComplexDouble(const IValue& value);
   void pushGenericList(const IValue& ivalue);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
