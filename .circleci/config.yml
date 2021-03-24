@@ -1114,11 +1114,6 @@ jobs:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
     - run:
-        name: Install VS2019 toolchain
-        no_output_timeout: 10m
-        command: |
-            powershell .circleci/scripts/vs_install.ps1
-    - run:
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
@@ -1150,11 +1145,6 @@ jobs:
     - checkout
     - attach_workspace:
         at: c:/users/circleci/project
-    - run:
-        name: Install VS2019 toolchain
-        no_output_timeout: 10m
-        command: |
-            powershell .circleci/scripts/vs_install.ps1
     - run:
         <<: *binary_checkout
     - run:
