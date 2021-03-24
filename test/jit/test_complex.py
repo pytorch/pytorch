@@ -115,6 +115,13 @@ class TestComplex(JitTestCase):
         for val in complex_vals:
             self.checkScript(fn, (val, ))
 
+         # --- Binary op ---
+        def rect_fn(x: float, y: float):
+            return cmath.rect(x, y)
+
+        for x, y in product(vals, vals):
+            self.checkScript(rect_fn, (x, y, ))
+
     def test_cmath_constants(self):
         def checkCmathConst(const_name):
             funcs_template = dedent('''

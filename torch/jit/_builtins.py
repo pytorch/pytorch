@@ -67,6 +67,7 @@ _builtin_ops = [
     (cmath.isfinite, "aten::isfinite"),
     (cmath.isinf, "aten::isinf"),
     (cmath.phase, "aten::angle"),
+    (cmath.rect, "aten::polar"),
     (cmath.log, "aten::log"),
     (cmath.log10, "aten::log10"),
     (cmath.sqrt, "aten::sqrt"),
