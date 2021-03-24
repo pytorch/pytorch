@@ -46,6 +46,7 @@ def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_
             for result in iter_tensors(elem, only_requiring_grad):
                 yield result
 
+
 def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
     """
     input: input to `fn`
@@ -160,18 +161,35 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, grad_out=1.0):
     return jacobian
 
 
-def get_analytical_jacobian(input, output, nondet_tol=0.0, grad_out=1.0):
-    # it is easier to call to_dense() on the sparse output than
-    # to modify analytical jacobian
-    if output.is_sparse:
-        raise ValueError('Sparse output is not supported at gradcheck yet. '
-                         'Please call to_dense() on the output of fn for gradcheck.')
-    if output.layout == torch._mkldnn:  # type: ignore
-        raise ValueError('MKLDNN output is not supported at gradcheck yet. '
-                         'Please call to_dense() on the output of fn for gradcheck.')
-    diff_input_list = list(iter_tensors(input, True))
-    jacobian = make_jacobian(input, output.numel())
-    jacobian_reentrant = make_jacobian(input, output.numel())
+def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out, check_grad_dtypes,
+                                         raise_exception):
+    jacobian, reentrant, correct_grad_sizes, correct_grad_types = \
+        get_analytical_jacobian(inputs, output, nondet_tol, grad_out)
+
+    complex_str = '(calculated using complex valued grad output) ' \
+        if isinstance(grad_out, complex) else ''
+
+    def fail_test(msg):
+        if raise_exception:
+            raise RuntimeError(msg)
+
+    if not correct_grad_types and check_grad_dtypes:
+        fail_test(f'Gradient{complex_str} has dtype mismatch')
+    if not correct_grad_sizes:
+        fail_test(f'Analytical gradient{complex_str} has incorrect size')
+    if not reentrant:
+        fail_test(f'Backward{complex_str} is not reentrant, i.e., running backward with '
+                  'same input and grad_output multiple times gives different values, '
+                  'although analytical gradient matches numerical gradient. '
+                  f'The tolerance for nondeterminism was {nondet_tol}.')
+    failed = not (reentrant and correct_grad_sizes and correct_grad_types)
+    return jacobian, failed
+
+
+def get_analytical_jacobian(inputs, output, nondet_tol, grad_out):
+    diff_input_list = list(iter_tensors(inputs, True))
+    jacobian = make_jacobian(inputs, output.numel())
+    jacobian_reentrant = make_jacobian(inputs, output.numel())
     grad_output = torch.zeros_like(output, memory_format=torch.legacy_contiguous_format)
     flat_grad_output = grad_output.view(-1)
     reentrant = True
@@ -202,6 +220,63 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0, grad_out=1.0):
             reentrant = False
 
     return jacobian, reentrant, correct_grad_sizes, correct_grad_types
+
+
+def check_inputs(fail_test, tupled_inputs, check_sparse_nnz) -> bool:
+    if not check_sparse_nnz and any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)):
+        return fail_test('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
+    # Make sure that gradients are saved for at least one input
+    any_input_requiring_grad = False
+    for idx, inp in enumerate(tupled_inputs):
+        if is_tensor_like(inp) and inp.requires_grad:
+            if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
+                warnings.warn(
+                    f'Input #{idx} requires gradient and '
+                    'is not a double precision floating point or complex. '
+                    'This check will likely fail if all the inputs are '
+                    'not of double precision floating point or complex. ')
+            content = inp._values() if inp.is_sparse else inp
+            # TODO: To cover more problematic cases, replace stride = 0 check with
+            # "any overlap in memory" once we have a proper function to check it.
+            if content.layout is not torch._mkldnn:  # type: ignore
+                if not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
+                    raise RuntimeError(
+                        f'The {idx}th input has a dimension with stride 0. gradcheck only '
+                        'supports inputs that are non-overlapping to be able to '
+                        'compute the numerical gradients correctly. You should call '
+                        '.contiguous on the input before passing it to gradcheck.')
+            any_input_requiring_grad = True
+            inp.retain_grad()
+    if not any_input_requiring_grad:
+        raise ValueError(
+            'gradcheck expects at least one input tensor to require gradient, '
+            'but none of the them have requires_grad=True.')
+    return True
+
+
+def check_outputs(outputs) -> None:
+    if any(t.is_sparse for t in outputs if isinstance(t, torch.Tensor)):
+        # it is easier to call to_dense() on the sparse output than
+        # to modify analytical jacobian
+        raise ValueError('Sparse output is not supported at gradcheck yet. '
+                         'Please call to_dense() on the output of fn for gradcheck.')
+    if any(t.layout == torch._mkldnn for t in outputs if isinstance(t, torch.Tensor)):  # type: ignore
+        raise ValueError('MKLDNN output is not supported at gradcheck yet. '
+                         'Please call to_dense() on the output of fn for gradcheck.')
+
+
+def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> bool:
+    # When there are no differentiable outputs, numerical gradient for a function is
+    # expected to be zero.
+    for i, o in enumerate(func_out):
+        def fn(input):
+            return _as_tuple(func(*input))[i]
+        numerical = get_numerical_jacobian(fn, inputs, eps=eps)
+        for n in numerical:
+            if torch.ne(n, 0).sum() > 0:
+                return fail_test('Numerical gradient for function expected to be zero')
+    return True
+
 
 FAILED_BATCHED_GRAD_MSG = """
 gradcheck or gradgradcheck failed while testing batched gradient computation.
@@ -242,7 +317,13 @@ Expected:
 {exp}
 """.strip()
 
+
 def test_batched_grad(fail_test, input, output, output_idx):
+    # NB: test_batched_grad compares two autograd.grad invocations with a single
+    # vmap(autograd.grad) invocation. It's not exactly a "gradcheck" in the
+    # sense that we're not comparing an analytical jacobian with a numeric one,
+    # but it is morally similar (we could have computed a full analytic jac
+    # via vmap, but that is potentially slow)
     diff_input_list = list(iter_tensors(input, True))
     grad = functools.partial(torch.autograd.grad, output, diff_input_list, retain_graph=True, allow_unused=True)
 
@@ -279,6 +360,91 @@ def test_batched_grad(fail_test, input, output, output_idx):
         return fail_test(get_failed_batched_grad_test_msg(output_idx, input_idx, res, exp))
 
 
+def test_backward_mul_by_grad_output(fail_test, outputs, inputs, check_sparse_nnz) -> bool:
+    # Tests that backward is multiplied by grad_output
+    diff_input_list: List[torch.Tensor] = list(iter_tensors(inputs, True))
+    if not diff_input_list:
+        raise RuntimeError("no Tensors requiring grad found in input")
+    grads_input = torch.autograd.grad(outputs, diff_input_list,
+                                      [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in outputs],
+                                      allow_unused=True)
+    for gi, di in zip(grads_input, diff_input_list):
+        if gi is None:
+            continue
+        if isinstance(gi, torch.Tensor) and gi.layout != torch.strided:
+            if gi.layout != di.layout:
+                return fail_test('grad is incorrect layout (' + str(gi.layout) + ' is not ' + str(di.layout) + ')')
+            if gi.layout == torch.sparse_coo:
+                if gi.sparse_dim() != di.sparse_dim():
+                    return fail_test('grad is sparse tensor, but has incorrect sparse_dim')
+                if gi.dense_dim() != di.dense_dim():
+                    return fail_test('grad is sparse tensor, but has incorrect dense_dim')
+            gi = gi.to_dense()
+            di = di.to_dense()
+
+        if check_sparse_nnz:
+            if not torch.allclose(gi, torch.zeros_like(gi)):
+                return fail_test('backward not multiplied by grad_output')
+        elif not gi.eq(0).all():
+            return fail_test('backward not multiplied by grad_output')
+        if gi.dtype != di.dtype or gi.device != di.device or gi.is_sparse != di.is_sparse:
+            return fail_test("grad is incorrect type")
+        if gi.size() != di.size():
+            return fail_test('grad is incorrect size')
+    return True
+
+
+def test_undefined_grad(fail_test, func, outputs, inputs) -> bool:
+    diff_input_list: List[torch.Tensor] = list(iter_tensors(inputs, True))
+    if not diff_input_list:
+        raise RuntimeError("no Tensors requiring grad found in input")
+
+    def warn_bc_breaking():
+        warnings.warn((
+            'Backwards compatibility: New undefined gradient support checking '
+            'feature is enabled by default, but it may break existing callers '
+            'of this function. If this is true for you, you can call this '
+            'function with "check_undefined_grad=False" to disable the feature'))
+
+    def check_undefined_grad_support(output_to_check):
+        grads_output = [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output_to_check]
+        try:
+            grads_input = torch.autograd.grad(output_to_check, diff_input_list,
+                                              grads_output, allow_unused=True)
+        except RuntimeError:
+            warn_bc_breaking()
+            return fail_test((
+                'Expected backward function to handle undefined output grads. '
+                'Please look at "Notes about undefined output gradients" in '
+                '"tools/autograd/derivatives.yaml"'))
+
+        for gi, i in zip(grads_input, diff_input_list):
+            if (gi is not None) and (not gi.eq(0).all()):
+                warn_bc_breaking()
+                return fail_test((
+                    'Expected all input grads to be undefined or zero when all output grads are undefined '
+                    'or zero. Please look at "Notes about undefined output gradients" in '
+                    '"tools/autograd/derivatives.yaml"'))
+        return True
+
+    # All backward functions must work properly if all output grads are undefined
+    outputs_to_check = [[
+        torch._C._functions.UndefinedGrad()(o) for o in _differentiable_outputs(func(*inputs))
+        # This check filters out Tensor-likes that aren't instances of Tensor.
+        if isinstance(o, torch.Tensor)
+    ]]
+
+    # If there are multiple output grads, we should be able to undef one at a time without error
+    if len(outputs_to_check[0]) > 1:
+        for undef_grad_idx in range(len(outputs)):
+            output_to_check = _differentiable_outputs(func(*inputs))
+            outputs_to_check.append([
+                torch._C._functions.UndefinedGrad()(o) if idx == undef_grad_idx else o
+                for idx, o in enumerate(output_to_check)])
+
+    return all(check_undefined_grad_support(output) for output in outputs_to_check)
+
+
 def _as_tuple(x):
     if isinstance(x, tuple):
         return x
@@ -300,7 +466,6 @@ def _differentiable_outputs(x):
 # For now, we permit any input.
 # the '...' first argument of Callable can be replaced with VarArg(Tensor).
 # For now, we permit any input.
-
 def gradcheck(
     func: Callable[..., Union[_TensorOrTensors]],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,
@@ -368,81 +533,34 @@ def gradcheck(
         return False
 
     tupled_inputs = _as_tuple(inputs)
-    if not check_sparse_nnz and any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)):
-        return fail_test('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
 
-    # Make sure that gradients are saved for at least one input
-    any_input_requiring_grad = False
-    for idx, inp in enumerate(tupled_inputs):
-        if is_tensor_like(inp) and inp.requires_grad:
-            if not (inp.dtype == torch.float64 or inp.dtype == torch.complex128):
-                warnings.warn(
-                    f'Input #{idx} requires gradient and '
-                    'is not a double precision floating point or complex. '
-                    'This check will likely fail if all the inputs are '
-                    'not of double precision floating point or complex. ')
-            content = inp._values() if inp.is_sparse else inp
-            # TODO: To cover more problematic cases, replace stride = 0 check with
-            # "any overlap in memory" once we have a proper function to check it.
-            if content.layout is not torch._mkldnn:  # type: ignore
-                if not all(st > 0 or sz <= 1 for st, sz in zip(content.stride(), content.size())):
-                    raise RuntimeError(
-                        'The {}th input has a dimension with stride 0. gradcheck only '
-                        'supports inputs that are non-overlapping to be able to '
-                        'compute the numerical gradients correctly. You should call '
-                        '.contiguous on the input before passing it to gradcheck.')
-            any_input_requiring_grad = True
-            inp.retain_grad()
-    if not any_input_requiring_grad:
-        raise ValueError(
-            'gradcheck expects at least one input tensor to require gradient, '
-            'but none of the them have requires_grad=True.')
+    if not check_inputs(fail_test, tupled_inputs, check_sparse_nnz):
+        return False
 
     func_out = func(*tupled_inputs)
-    output = _differentiable_outputs(func_out)
+    outputs = _differentiable_outputs(func_out)
 
-    if not output:
-        for i, o in enumerate(func_out):
-            def fn(input):
-                return _as_tuple(func(*input))[i]
-            numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
-            for n in numerical:
-                if torch.ne(n, 0).sum() > 0:
-                    return fail_test('Numerical gradient for function expected to be zero')
-        return True
+    check_outputs(outputs)
 
-    for i, o in enumerate(output):
-        if not o.requires_grad:
-            continue
+    if not outputs:
+        return check_no_differentiable_outputs(fail_test, func, tupled_inputs, func_out, eps)
 
+    for i, o in enumerate(outputs):
         def fn(input):
             return _as_tuple(func(*input))[i]
 
-        analytical, reentrant, correct_grad_sizes, correct_grad_types = get_analytical_jacobian(tupled_inputs,
-                                                                                                o,
-                                                                                                nondet_tol=nondet_tol)
+        analytical, failed = check_analytical_jacobian_attributes(tupled_inputs, o, nondet_tol, 1.0,
+                                                                  check_grad_dtypes, raise_exception)
+        if failed:
+            return False
         numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
 
-        out_is_complex = o.is_complex()
-
-        if out_is_complex:
-            # analytical vjp with grad_out = 1.0j
-            analytical_with_imag_grad_out, reentrant_with_imag_grad_out, \
-                correct_grad_sizes_with_imag_grad_out, correct_grad_types_with_imag_grad_out \
-                = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol, grad_out=1j)
-            numerical_with_imag_grad_out = get_numerical_jacobian(fn, tupled_inputs, eps=eps, grad_out=1j)
-
-        if not correct_grad_types and check_grad_dtypes:
-            return fail_test('Gradient has dtype mismatch')
-
-        if out_is_complex and not correct_grad_types_with_imag_grad_out and check_grad_dtypes:
-            return fail_test('Gradient (calculated using complex valued grad output) has dtype mismatch')
-
-        if not correct_grad_sizes:
-            return fail_test('Analytical gradient has incorrect size')
-
-        if out_is_complex and not correct_grad_sizes_with_imag_grad_out:
-            return fail_test('Analytical gradient (calculated using complex valued grad output) has incorrect size')
+        if o.is_complex():
+            analytical_from_imag_grad_out, failed = check_analytical_jacobian_attributes(
+                tupled_inputs, o, nondet_tol, 1j, check_grad_dtypes, raise_exception)
+            if failed:
+                return False
+            numerical_from_imag_grad_out = get_numerical_jacobian(fn, tupled_inputs, eps=eps, grad_out=1j)
 
         def checkIfNumericalAnalyticAreClose(a, n, j, error_str=''):
             if not torch.allclose(a, n, rtol, atol):
@@ -455,9 +573,9 @@ def gradcheck(
             if a.numel() != 0 or n.numel() != 0:
                 if o.is_complex():
                     # C -> C, R -> C
-                    a_with_imag_grad_out = analytical_with_imag_grad_out[j]
-                    n_with_imag_grad_out = numerical_with_imag_grad_out[j]
-                    checkIfNumericalAnalyticAreClose(a_with_imag_grad_out, n_with_imag_grad_out, j,
+                    a_imag_grad_out = analytical_from_imag_grad_out[j]
+                    n_imag_grad_out = numerical_from_imag_grad_out[j]
+                    checkIfNumericalAnalyticAreClose(a_imag_grad_out, n_imag_grad_out, j,
                                                      "Gradients failed to compare equal for grad output = 1j. ")
                 if inp.is_complex():
                     # C -> R, C -> C
@@ -467,115 +585,15 @@ def gradcheck(
                     # R -> R, R -> C
                     checkIfNumericalAnalyticAreClose(a, n, j)
 
-
-        def not_reentrant_error(error_str=''):
-            error_msg = "Backward" + error_str + " is not reentrant, i.e., running backward with same \
-                        input and grad_output multiple times gives different values, \
-                        although analytical gradient matches numerical gradient. \
-                        The tolerance for nondeterminism was {}.".format(nondet_tol)
-            return fail_test(error_msg)
-
-        if not reentrant:
-            return not_reentrant_error()
-
-        if out_is_complex and not reentrant_with_imag_grad_out:
-            return not_reentrant_error(' (calculated using complex valued grad output)')
-
         if check_batched_grad:
-            assert reentrant, ('Batched gradient checking makes the assumption that '
-                               'backward is reentrant. This assertion should never '
-                               'be triggered: we expect gradcheck to have early '
-                               'exited before reaching this point if backward is '
-                               'not reentrant. Please file us a bug report.')
-            # NB: test_batched_grad compares two autograd.grad invocations with a single
-            # vmap(autograd.grad) invocation. It's not exactly a "gradcheck" in the
-            # sense that we're not comparing an analytical jacobian with a numeric one,
-            # but it is morally similar (we could have computed a full analytic jac
-            # via vmap, but that is potentially slow)
             test_batched_grad(fail_test, tupled_inputs, o, j)
 
-    # check if the backward multiplies by grad_output
-    output = _differentiable_outputs(func(*tupled_inputs))
-    if any([o.requires_grad for o in output]):
-        diff_input_list: List[torch.Tensor] = list(iter_tensors(tupled_inputs, True))
-        if not diff_input_list:
-            raise RuntimeError("no Tensors requiring grad found in input")
-        grads_input = torch.autograd.grad(output, diff_input_list,
-                                          [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output],
-                                          allow_unused=True)
-        for gi, di in zip(grads_input, diff_input_list):
-            if gi is None:
-                continue
-            if isinstance(gi, torch.Tensor) and gi.layout != torch.strided:
-                if gi.layout != di.layout:
-                    return fail_test('grad is incorrect layout (' + str(gi.layout) + ' is not ' + str(di.layout) + ')')
-                if gi.layout == torch.sparse_coo:
-                    if gi.sparse_dim() != di.sparse_dim():
-                        return fail_test('grad is sparse tensor, but has incorrect sparse_dim')
-                    if gi.dense_dim() != di.dense_dim():
-                        return fail_test('grad is sparse tensor, but has incorrect dense_dim')
-                gi = gi.to_dense()
-                di = di.to_dense()
+    if not test_backward_mul_by_grad_output(fail_test, outputs, tupled_inputs, check_sparse_nnz):
+        return False
 
-            if check_sparse_nnz:
-                if not torch.allclose(gi, torch.zeros_like(gi)):
-                    return fail_test('backward not multiplied by grad_output')
-            elif not gi.eq(0).all():
-                return fail_test('backward not multiplied by grad_output')
-            if gi.dtype != di.dtype or gi.device != di.device or gi.is_sparse != di.is_sparse:
-                return fail_test("grad is incorrect type")
-            if gi.size() != di.size():
-                return fail_test('grad is incorrect size')
-
-        if check_undefined_grad:
-            def warn_bc_breaking():
-                warnings.warn((
-                    'Backwards compatibility: New undefined gradient support checking '
-                    'feature is enabled by default, but it may break existing callers '
-                    'of this function. If this is true for you, you can call this '
-                    'function with "check_undefined_grad=False" to disable the feature'))
-
-            def check_undefined_grad_support(output_to_check):
-                grads_output = [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output_to_check]
-                try:
-                    grads_input = torch.autograd.grad(output_to_check,
-                                                      diff_input_list,
-                                                      grads_output,
-                                                      allow_unused=True)
-                except RuntimeError:
-                    warn_bc_breaking()
-                    return fail_test((
-                        'Expected backward function to handle undefined output grads. '
-                        'Please look at "Notes about undefined output gradients" in '
-                        '"tools/autograd/derivatives.yaml"'))
-
-                for gi, i in zip(grads_input, diff_input_list):
-                    if (gi is not None) and (not gi.eq(0).all()):
-                        warn_bc_breaking()
-                        return fail_test((
-                            'Expected all input grads to be undefined or zero when all output grads are undefined '
-                            'or zero. Please look at "Notes about undefined output gradients" in '
-                            '"tools/autograd/derivatives.yaml"'))
-                return True
-
-            # All backward functions must work properly if all output grads are undefined
-            outputs_to_check = [[
-                torch._C._functions.UndefinedGrad()(o) for o in _differentiable_outputs(func(*tupled_inputs))
-                # This check filters out Tensor-likes that aren't instances of Tensor.
-                if isinstance(o, torch.Tensor)
-            ]]
-
-            # If there are multiple output grads, we should be able to undef one at a time without error
-            if len(outputs_to_check[0]) > 1:
-                for undef_grad_idx in range(len(output)):
-                    output_to_check = _differentiable_outputs(func(*tupled_inputs))
-                    outputs_to_check.append([
-                        torch._C._functions.UndefinedGrad()(o) if idx == undef_grad_idx else o
-                        for idx, o in enumerate(output_to_check)])
-
-            for output_to_check in outputs_to_check:
-                if not check_undefined_grad_support(output_to_check):
-                    return False
+    if check_undefined_grad:
+        if not test_undefined_grad(fail_test, func, outputs, tupled_inputs):
+            return False
 
     return True
 
