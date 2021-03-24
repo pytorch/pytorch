@@ -373,6 +373,7 @@ class StreamContext(object):
 def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ignore
     r"""Wrapper around the Context-manager StreamContext that
         selects a given stream.
+
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
@@ -382,10 +383,10 @@ def stream(stream: Optional['torch.cuda.Stream']) -> StreamContext:  # type: ign
     return StreamContext(stream)
 
 def set_stream(stream: Stream):
-    r"""Sets the current stream.
-    This is a wrapper API to set the stream.
-    Usage of this function is discouraged in favor of
-    the ``stream`` context manager.
+    r"""Sets the current stream.This is a wrapper API to set the stream.
+        Usage of this function is discouraged in favor of the ``stream``
+        context manager.
+
     Args:
         stream (Stream): selected stream. This function is a no-op
             if this argument is ``None``.
