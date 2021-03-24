@@ -4873,6 +4873,162 @@ else:
             scalar = torch.tensor(2, device=device, dtype=dtype)
             torch.diff(scalar)
 
+    # if the given input arg is not a list, it returns a list of single element: [arg]
+    def _wrap_to_list(self, input_array):
+        return input_array if isinstance(input_array, list) else [input_array]
+
+    # To ensure inf, -inf, and nan values do not cause divergence between Numpy and PyTorch.
+    # There are two types of possible divergence:
+    # 1. When we compute a,b both real numbers and has very small absolute values (i.e. very near to 0.0)
+    # then, result of a/b be inf, -inf and nan, and this cause divergence.
+    # 2. When we are dividing complex numbers by zero. For example, when a = torch.tensor(3+5j) we have
+    # a/0 to be equal to nan + nan*j in PyTorch and inf + inf*j in Numpy.
+    def _inf_nan_preprocess(self, actual, expected):
+        for i in range(len(expected)):
+            expected[i] = np.nan_to_num(expected[i], nan=nan, posinf=nan, neginf=nan)
+            # nan_to_num is not defined for complex tensors in PyTorch.
+            if actual[i].dtype == torch.complex64 :
+                actual[i].real = torch.nan_to_num(actual[i].real, nan=nan, posinf=nan, neginf=nan)
+                actual[i].imag = torch.nan_to_num(actual[i].imag, nan=nan, posinf=nan, neginf=nan)
+            else:
+                actual[i] = torch.nan_to_num(actual[i], nan=nan, posinf=nan, neginf=nan)
+
+        return actual, expected
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.long, torch.float32, torch.complex64)
+    def test_gradient_all(self, device, dtype):
+        def create_scalar(shape):
+            return make_tensor((1,), device='cpu', dtype=dtype, low=0.1).item()
+
+        def create_list(shape):
+            return make_tensor((len(shape),), device='cpu', dtype=dtype, low=0.1).tolist()
+
+        def create_coordinate_tensors(shape):
+            tensor_list = []
+            for i in range(len(shape)):
+                tensor_list.append(make_tensor((shape[i],), device=device, dtype=dtype))
+            return tensor_list
+
+        def filter_shape(shape, dim):
+            filtered_shape = []
+            for i in range(len(dim)):
+                filtered_shape.append(shape[dim[i]])
+            return filtered_shape
+
+        # shape, dims format
+        test_cases = (
+            ((5,), (0,)),
+            ((4, 4), (0, 1)),
+            ((3, 3, 3), (-1, 0)),
+            ((4, 4, 4), (2,)),
+            ((4, 4, 4), (0, 1)),
+            ((4, 4, 4, 3), (0, 2, 3)),
+            ((4, 5, 2, 4, 3), (1, 2)),
+            ((4, 3, 6, 5, 3), (2, 4)),
+            ((4, 3, 2, 5, 3), (0, 1, 2, 3, 4)),
+        )
+
+        for case, space_fn, contig in product(test_cases, (create_scalar, create_list, create_coordinate_tensors), [True, False]):
+            shape, dims = case
+            # filter shape by dims before passing filtered shape to create_* functions
+            filtered_shape = filter_shape(shape, dims)
+
+            spacing = space_fn(filtered_shape)
+            t = make_tensor(shape, device=device, dtype=dtype, noncontiguous=not contig)
+            t_np = t.cpu().numpy()
+
+            actual = torch.gradient(t, spacing=spacing, dim=dims, edge_order=1)
+            if space_fn == create_coordinate_tensors and spacing[0].device != 'cpu':
+                spacing = [space.cpu().detach().numpy() for space in spacing]
+            expected = np.gradient(t_np, *self._wrap_to_list(spacing), axis=dims, edge_order=1)
+            actual, expected = self._inf_nan_preprocess(list(actual), self._wrap_to_list(expected))
+            self.assertEqual(actual, expected, equal_nan="relaxed")
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.long, torch.float32, torch.complex64)
+    def test_gradient_extreme_cases(self, device, dtype):
+        # Test behaviour for inf and nan values
+        actual = torch.gradient(torch.tensor([2, -2, inf, inf, -inf, -inf, inf, 3, -inf, 2, nan, nan, 3, inf, nan]))
+        expected = np.gradient(np.array([2, -2, inf, inf, -inf, -inf, inf, 3, -inf, 2, nan, nan, 3, inf, nan]))
+        self.assertEqual(actual, self._wrap_to_list(expected),)
+
+        # Test behaviour in very big tensors
+        large_size = 100000
+        t = make_tensor((large_size,), device, dtype)
+        t_np = t.cpu().numpy()
+        coordinates_np = list(np.random.randn(large_size))
+        coordinates = [torch.tensor(coordinates_np, device=device)]
+        actual = torch.gradient(t, spacing=coordinates, dim=0, edge_order=1)
+        expected = [np.gradient(t_np, coordinates_np, axis=0, edge_order=1)]
+        self.assertEqual(actual, expected)
+
+    @onlyOnCPUAndCUDA
+    def test_gradient_type_promotion(self, device):
+        inputs = (
+            make_tensor((4, 4), device=device, dtype=torch.float32),
+            make_tensor((4, 4), device=device, dtype=torch.complex64),
+            make_tensor((4, 4), device=device, dtype=torch.int64),
+        )
+
+        spacing = (
+            make_tensor((1,), device='cpu', dtype=torch.float32).item(),
+            make_tensor((1,), device='cpu', dtype=torch.int64).item(),
+            make_tensor((1,), device='cpu', dtype=torch.complex64).item(),
+            make_tensor((2,), device='cpu', dtype=torch.float32, low=0.1).tolist(),
+            make_tensor((2,), device='cpu', dtype=torch.int64, low=1).tolist(),
+            make_tensor((2,), device='cpu', dtype=torch.complex64).tolist(),
+            [make_tensor((4,), device=device, dtype=torch.float32),
+             make_tensor((4,), device=device, dtype=torch.float32)],
+            [make_tensor((4,), device=device, dtype=torch.int64),
+             make_tensor((4,), device=device, dtype=torch.int64)],
+            [make_tensor((4,), device=device, dtype=torch.complex64),
+             make_tensor((4,), device=device, dtype=torch.complex64)],
+        )
+
+        for input, spacing_or_coord in product(inputs, spacing):
+            input_np = input.cpu().numpy()
+            actual = torch.gradient(input, spacing=spacing_or_coord, dim=(0, 1), edge_order=1)
+            spacing_or_coord_np = self._wrap_to_list(spacing_or_coord)
+            if torch.is_tensor(spacing_or_coord_np[0]) and torch.device(spacing_or_coord_np[0].device).type != 'cpu':
+                for i in range(len(spacing_or_coord_np)):
+                    spacing_or_coord_np[i] = spacing_or_coord_np[i].cpu().numpy()
+            expected = np.gradient(input_np, *spacing_or_coord_np, axis=(0, 1), edge_order=1)
+            if actual[0].dtype == torch.complex64 and input.dtype != torch.complex64:
+                for i in range(len(actual)):
+                    self.assertEqual(actual[i].real, expected[i].real)
+                    # Type promotion fails on Numpy when spacing is given as complex number and input is given as real.
+                    # Result is given just as real number and all the imaginary parts to be equal to zero.
+                    self.assertEqual(expected[i].imag, torch.zeros(actual[i].shape))
+            else:
+                actual, expected = self._inf_nan_preprocess(list(actual), expected)
+                self.assertEqual(actual, expected, equal_nan="relaxed")
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.long, torch.float32, torch.complex64)
+    def test_error_gradient(self, device, dtype):
+        t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected spacing to be unspecified, a scalar '):
+            dim = (1, 0)
+            spacing = [0.1]
+            torch.gradient(t, spacing=spacing, dim=dim, edge_order=1)
+
+        with self.assertRaisesRegex(RuntimeError, 'torch.gradient only supports edge_order=1 currently.'):
+            torch.gradient(t, edge_order=3)
+
+        with self.assertRaisesRegex(RuntimeError, 'dim 1 appears multiple times in the list of dims'):
+            dim = (1, 1)
+            spacing = 0.1
+            torch.gradient(t, spacing=spacing, dim=dim, edge_order=1)
+
+        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected each tensor to be on the same device,'):
+            dim = (0, 1)
+            coordinates = [torch.tensor([1, 2, 4], device='cpu'), torch.tensor([1, 2, 4], device='meta')]
+            torch.gradient(t, spacing=coordinates, dim=dim, edge_order=1)
+
+        with self.assertRaises(IndexError):
+            torch.gradient(t, dim=3)
+
     def _test_large_cum_fn_helper(self, x, fn):
         x_cpu = x.cpu().float()
         expected = fn(x_cpu)

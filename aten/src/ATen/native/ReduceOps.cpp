@@ -614,6 +614,145 @@ Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional
   }
 }
 
+void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size, c10::optional<IntArrayRef> dim,  int64_t edge_order) {
+  // Helper for gradient function to make sure input data satisfies prerequisites
+  TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
+  if (spacing_size.has_value() && !dim.has_value()) {
+    TORCH_CHECK(spacing_size.value() == 1 || spacing_size.value() == self.dim(), "torch.gradient expected spacing to be unspecified, a scalar or a list of length ", self.dim(), "but got a list of length ", spacing_size.value());
+  }
+  if (spacing_size.has_value() && dim.has_value()) {
+    TORCH_CHECK(spacing_size.value() == dim.value().size(), "torch.gradient expected spacing to be unspecified, a scalar or it's spacing and dim arguments to have the same length, but got a spacing argument of length ", spacing_size.value(), " and a dim argument of length ", dim.value().size(), "." );
+  }
+  // See discussion : https://github.com/pytorch/pytorch/issues/56036
+  TORCH_CHECK(edge_order == 1, "torch.gradient only supports edge_order=1 currently. To request support for more edge_orders please file an issue here : https://github.com/pytorch/pytorch/issues/new?assignees=&labels=&template=feature-request.md");
+  if (dim.has_value()) {
+    // The following function get called to check whether dim argument satisfies prerequisites.
+    // The output of the function is not used for the computation of gradient.
+    dim_list_to_bitset(dim.value(), self.dim());
+  }
+}
+
+std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, IntArrayRef dim, int64_t edge_order) {
+  for (const auto i : c10::irange(coordinates.size())) {
+    TORCH_CHECK(self.device() == coordinates[i].device(), "torch.gradient expected each tensor to be on the same device, but got devices ", self.device(), " and ", coordinates[i].device(), "!");
+  }
+
+  std::vector<Tensor> result;
+  for (const auto i : c10::irange(dim.size())) {
+    TORCH_CHECK( coordinates[i].dim() == 1, "torch.gradient expected each element of spacing to have one dimension, but got an element with ", coordinates[i].dim(), " dimensions!");
+    int64_t direction = maybe_wrap_dim(dim[i], self.dim());
+    std::vector<int64_t> shape(self.dim(),1);
+    shape[ direction ] = -1;
+
+    auto ax_dx = coordinates[i].diff(1,0);
+    auto dx1 = at::slice(ax_dx, 0, 0, -1);
+    auto dx2 = at::slice(ax_dx, 0, 1);
+    auto a = (   -dx2    / (dx1*(dx1+dx2)) ).reshape(shape);
+    auto b = ( (dx2-dx1) / (dx1*dx2)       ).reshape(shape);
+    auto c = (    dx1    / (dx2*(dx1+dx2)) ).reshape(shape);
+
+    auto center  = a*at::slice(self, direction, 0, -2) + b*at::slice(self, direction , 1, -1) + c*at::slice(self, direction ,2);
+    auto prepend = (at::slice(self, direction, 1, 2  ) - at::slice(self, direction, 0, 1   )) / ax_dx[0]  ;
+    auto append  = (at::slice(self, direction, -1    ) - at::slice(self, direction, -2, -1 )) / ax_dx[-1] ;
+    result.emplace_back(prepend_append_on_dim(center, prepend, append, direction));
+  }
+  return result;
+}
+
+std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> spacing, IntArrayRef dim, int64_t edge_order) {
+  std::vector<Tensor> result;
+  for (const auto i : c10::irange(dim.size())) {
+      int64_t direction = maybe_wrap_dim(dim[i], self.dim());
+      auto ax_dx = spacing[i];
+      auto center  = (at::slice(self,direction, 2   ) - at::slice(self, direction, 0, -2 ) ) / ax_dx;
+      auto prepend = (at::slice(self,direction, 1, 2) - at::slice(self, direction, 0, 1  ) ) / ax_dx  ;
+      auto append  = (at::slice(self,direction, -1  ) - at::slice(self, direction, -2, -1) ) / ax_dx ;
+      result.emplace_back(prepend_append_on_dim(center/2, prepend, append, direction));
+  }
+  return result;
+}
+
+std::vector<int64_t> gradient_dim_preprocess(const Tensor& self, c10::optional<int64_t> dim) {
+  // if gradient dim is provided as an integer, then we need to compute gradient only on this direction.
+  // Moreover, if it's not provided at all, then we are interested in gradient for all directions.
+  // Finally, if dim is provided as vector of ints, then it is not expected to be called by this function.
+  if (dim.has_value()) {
+    return std::vector<int64_t>{dim.value()};
+  }
+
+  std::vector<int64_t> axis(self.dim());
+  std::iota(axis.begin(), axis.end(), 0);
+  return axis;
+}
+
+std::vector<Tensor> gradient(const Tensor& self, TensorList coordinates, IntArrayRef dim, int64_t edge_order) {
+    pre_check_gradient(self,
+                       c10::optional<int64_t>(coordinates.size()),
+                       c10::optional<IntArrayRef>(dim),
+                       edge_order);
+    return gradient_helper(self, coordinates, dim, edge_order);
+}
+
+std::vector<Tensor> gradient(const Tensor& self, TensorList coordinates, c10::optional<int64_t> dim, int64_t edge_order) {
+  const auto processed_dim = gradient_dim_preprocess(self, dim);
+  pre_check_gradient(self,
+                     c10::optional<int64_t>(coordinates.size()),
+                     dim.has_value() ? c10::optional<IntArrayRef>(processed_dim) : c10::nullopt,
+                     edge_order);
+  return gradient_helper(self, coordinates, processed_dim, edge_order);
+}
+
+std::vector<Tensor> gradient(const Tensor& self, c10::ArrayRef<Scalar> spacing, IntArrayRef dim, int64_t edge_order) {
+  pre_check_gradient(self,
+                     c10::optional<int64_t>(spacing.size()),
+                     c10::optional<IntArrayRef>(dim),
+                     edge_order);
+  return gradient_helper_float(self, spacing, dim, edge_order);
+}
+
+std::vector<Tensor> gradient(const Tensor& self, ArrayRef<Scalar> spacing, c10::optional<int64_t> dim, int64_t edge_order) {
+  const auto processed_dim = gradient_dim_preprocess(self, dim);
+  pre_check_gradient(self,
+                     c10::optional<int64_t>(spacing.size()),
+                     dim.has_value() ? c10::optional<IntArrayRef>(processed_dim) : c10::nullopt,
+                     edge_order);
+  return gradient_helper_float(self, spacing, processed_dim, edge_order);
+}
+
+std::vector<Tensor> gradient(const Tensor& self, const Scalar& unit_size, IntArrayRef dim, int64_t edge_order) {
+  // When spacing is given as scalar, while dim is given as IntArrayRef, scalar value need to
+  // be taken as unit size at every given dimension element of - dim.
+  std::vector<Scalar> spacing(dim.size(), unit_size);
+  pre_check_gradient(self,
+                     c10::optional<int64_t>(spacing.size()),
+                     c10::optional<IntArrayRef>(dim),
+                     edge_order);
+  return gradient_helper_float(self, spacing, dim, edge_order);
+}
+
+std::vector<Tensor> gradient(const Tensor& self, const c10::optional<Scalar>& unit_size, c10::optional<int64_t> dim, int64_t edge_order) {
+  const auto processed_dim = gradient_dim_preprocess(self, dim);
+  // When unit_size not provided, it is always assumed to be equal to 1.
+  // When dim has integer value it implies we are looking for gradient in the specific direction, however when
+  // it is not provided, it means we are interested to find gradient in all directions.
+  std::vector<Scalar> spacing(dim.has_value() ? 1 : self.dim(),
+                              unit_size.has_value() ? unit_size.value() : 1.0) ;
+  pre_check_gradient(self,
+                     unit_size.has_value() ?  c10::optional<int64_t>(spacing.size()) : c10::nullopt,
+                     dim.has_value() ? c10::optional<IntArrayRef>(processed_dim) : c10::nullopt,
+                     edge_order);
+  return gradient_helper_float(self, spacing, processed_dim, edge_order);
+}
+
+std::vector<Tensor> gradient(const Tensor& self, IntArrayRef dim, int64_t edge_order) {
+  std::vector<Scalar> spacing(dim.size(), 1.0) ;
+  pre_check_gradient(self,
+                     c10::optional<int64_t>(spacing.size()),
+                     c10::optional<IntArrayRef>(dim),
+                     edge_order);
+  return gradient_helper_float(self, spacing, dim, edge_order);
+}
+
 // ALL REDUCE #################################################################
 
 inline ScalarType get_dtype_from_result(Tensor& result, optional<ScalarType> dtype) {

@@ -763,7 +763,8 @@ def sort_overloads(
         # discussed why it is important to prioritize int/int? over int[]
         return (str(t1) == 'Scalar' and str(t2) == 'Tensor' or
                 'Dimname' in str(t1) and 'Dimname' not in str(t2) or
-                str(t1) == 'int[]' and (str(t2) == 'int' or str(t2) == 'int?'))
+                str(t1) == 'int[]' and (str(t2) == 'int' or str(t2) == 'int?') or
+                str(t1) == 'Tensor[]' and (str(t2) == 'Scalar[]'))
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:
         """Returns True if s1 < s2 in the partial order."""

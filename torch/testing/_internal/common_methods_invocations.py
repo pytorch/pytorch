@@ -1295,7 +1295,35 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
 
     return tuple(sample_inputs)
 
-def sample_inputs_index_select(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_gradient(op_info, device, dtype, requires_grad):
+    sample_inputs = []
+    test_cases_float = (
+        ((S,), None, None),
+        ((S,), 2., None),
+        ((S, S), None, None),
+        ((S, S), [2.0, 2.1], None),
+        ((S, S), [2.0, 2.1], (0, 1)),
+        ((4, 4, 4), [2., 1.], (0, 1)),
+    )
+    for size, spacing, dim in test_cases_float:
+        t = make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(t, kwargs=dict(dim=dim, spacing=spacing)))
+
+    test_cases_tensor = (
+        ((3, 3, 3), ((1.1, 2.0, 3.5), (4.0, 2, 6.0)), (0, -1)),
+        ((3, 3, 3), ((1.0, 3.0, 2.0), (8.0, 6.0, 1.0)), (0, 1)),
+    )
+    for size, coordinates, dim in test_cases_tensor:
+        t = make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad)
+        coordinates_tensor_list = []
+        for coords in coordinates:
+            a = torch.tensor(coords, dtype=dtype, device=device)
+            coordinates_tensor_list.append(a)
+        sample_inputs.append(SampleInput(t, kwargs=dict(dim=dim, spacing=coordinates_tensor_list)))
+
+    return tuple(sample_inputs)
+
+def sample_inputs_index_select(op_info, device, dtype, requires_grad):
     return (
         SampleInput(
             make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
@@ -4324,6 +4352,18 @@ op_db: List[OpInfo] = [
                        # Skip since real and imag don't have out variants.
                        SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                    )),
+    OpInfo('gradient',
+           dtypes=floating_and_complex_types_and(torch.int8, torch.int16,
+                                                 torch.int32, torch.int64,
+                                                 torch.bfloat16, torch.half),
+           supports_out=False,
+           skips=(
+               # following tests give a runtime error with undefined value tensor
+               # see discussion : https://github.com/pytorch/pytorch/issues/56660
+               SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64)),
+           ),
+           supports_inplace_autograd=False,
+           sample_inputs_func=sample_inputs_gradient),
     OpInfo('inverse',
            op=torch.inverse,
            dtypes=floating_and_complex_types(),

@@ -455,6 +455,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.inner: lambda input, other, out=None: -1,
         torch.outer: lambda input, vec2, out=None: -1,  # alias for torch.ger
         torch.ger: lambda input, vec2, out=None: -1,
+        torch.gradient: lambda input, spacing=None, dim=None, edge_order=1: -1,
         torch.grid_sampler: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.grid_sampler_2d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.grid_sampler_3d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
