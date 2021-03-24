@@ -9,8 +9,6 @@ General Maintainers
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
--  (sunsetting) Sam Gross
-   (`colesbury <https://github.com/colesbury>`__)
 
 Module-level maintainers
 ------------------------
@@ -28,7 +26,6 @@ torch.nn
 -  Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  Soumith Chintala (`soumith <https://github.com/soumith>`__)
--  Sam Gross (`colesbury <https://github.com/colesbury>`__)
 
 torch.optim
 ~~~~~~~~~~~
@@ -60,10 +57,8 @@ Distributions & RNG
 Distributed
 ~~~~~~~~~~~
 
--  Pieter Noordhuis (`pietern <https://github.com/pietern>`__)
 -  Shen Li (`mrshenli <https://github.com/mrshenli>`__)
--  (proposed) Pritam Damania
-   (`pritamdamania87 <https://github.com/pritamdamania87>`__)
+-  Pritam Damania (`pritamdamania87 <https://github.com/pritamdamania87>`__)
 
 Multiprocessing and DataLoaders
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -77,7 +72,6 @@ CPU Performance / SIMD
 
 -  Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 -  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
--  Sam Gross (`colesbury <https://github.com/colesbury>`__)
 -  (sunsetting) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  [threading] Ilia Cherniavskii (`ilia-cher <https://github.com/ilia-cher>`__)
 
@@ -103,10 +97,10 @@ AMD/ROCm/HIP
 Build + CI
 ~~~~~~~~~~
 
--  Will Feng (`yf225 <https://github.com/yf225>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Soumith Chintala (`soumith <https://github.com/soumith>`__)
--  Karl Ostmo (`kostmo <https://github.com/kostmo>`__)
+-  Nikita Shulga (`malfet <https://github.com/malfet>`__)
+-  Eli Uriegas (`seemethere <https://github.com/seemethere>`__)
 -  Hong Xu (`xuhdev <https://github.com/xuhdev>`__)
 
 Benchmarks
@@ -128,8 +122,6 @@ C10 utils and operator dispatch
 ONNX <-> PyTorch
 ~~~~~~~~~~~~~~~~
 
--  Lu Fang (`houseroad <https://github.com/houseroad>`__)
--  Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
 -  Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
 -  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
 
@@ -153,8 +145,7 @@ XLA
 
 -  Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
 -  Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
--  Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)
--  Alex Suhan (`asuhan <https://github.com/asuhan>`__)
+-  Jack Cao (`JackCaoG <https://github.com/JackCaoG>`__)
 
 TorchServe
 ~~~~~~~~~~
