@@ -206,7 +206,7 @@ else
     # ppc64le build fails when WERROR=1
     # set only when building other architectures
     # only use for "python setup.py install" line
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
       WERROR=1 python setup.py bdist_wheel
       python -mpip install dist/*.whl
     else
@@ -318,4 +318,10 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   python setup.py install
   popd
   assert_git_not_dirty
+fi
+
+if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
+  # export test times so that potential sharded tests that'll branch off this build will use consistent data
+  # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
+  python test/run_test.py --export-past-test-times
 fi
