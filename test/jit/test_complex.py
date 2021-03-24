@@ -103,14 +103,11 @@ class TestComplex(JitTestCase):
                     self.assertEqual(res_python, res_script, msg=msg)
 
         unary_ops = ['log', 'log10', 'sqrt', 'exp', 'sin', 'cos', 'asin', 'acos', 'atan', 'sinh', 'cosh',
-                     'tanh', 'asinh', 'acosh', 'atanh', 'isinf', 'isnan', 'isfinite']
+                     'tanh', 'asinh', 'acosh', 'atanh', 'phase', 'isinf', 'isnan', 'isfinite']
 
-        # --- Unary ops with complex valued output ---
+        # --- Unary ops ---
         for op in unary_ops:
             checkMath(op)
-
-        # --- Unary ops with floating point output --- (cmath.phase(), abs())
-        checkMath('phase')
 
         def fn(x: complex):
             return abs(x)
