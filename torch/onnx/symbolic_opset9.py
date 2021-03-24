@@ -3013,4 +3013,19 @@ def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device
         window_length = sub(g, window_length, g.op("Constant", value_t=torch.tensor(1, dtype=torch.int)))
     output = div(g, output, window_length)
     output = g.op("Cast", square(g, sin(g, output)), to_i=sym_help.scalar_type_to_onnx[dtype])
+    
+    return output
+
+def linear(g, input, weight, bias):
+    rank = sym_help._get_tensor_rank(input)
+    weight = t(g, weight)
+    if rank == 2 and not bias.node().mustBeNone():
+        alpha = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        beta = g.op('Constant', value_t=torch.tensor(1, dtype=torch.int64))
+        output = addmm(g, bias, input, weight, alpha, beta)
+    else:
+        output = matmul(g, input, weight)
+        if not bias.node().mustBeNone():
+            output = add(g, bias, output)
+
     return output
