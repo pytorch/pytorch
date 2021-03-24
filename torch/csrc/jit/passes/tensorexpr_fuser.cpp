@@ -154,6 +154,7 @@ static const OperatorSet& supported_eltwise_set() {
       "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor",
       "aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor",
       "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor",
+      "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
       // TODO: enable other min/max variants, operators that can be both
       // elementwise or reductions:
       "aten::min.other(Tensor self, Tensor other) -> Tensor",
@@ -850,6 +851,8 @@ class TensorExprFuser {
       return canFuseOnCPU();
     } else if (device->is_cuda()) {
       return canFuseOnGPU();
+    } else if (device->is_xpu()) {
+      return false;
     }
     throw std::runtime_error("Unknown device");
   }
@@ -979,6 +982,12 @@ class TensorExprFuser {
       REQ(tensorexpr::pickDeviceType(listconstruct->inputs()));
     } else {
       REQ(tensorexpr::pickDeviceType(node->inputs()));
+    }
+
+    // Only fuse aten::batch_norm when the parameter 'training' is false
+    if (node->kind() == aten::batch_norm) {
+      REQ(node->input(5)->node()->kind() == prim::Constant);
+      REQ(!toIValue(node->input(5)).value().toBool());
     }
 
     REQ(tensorexpr::isSupported(node));
