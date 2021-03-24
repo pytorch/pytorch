@@ -1535,6 +1535,8 @@ size_t ONNXAssignOutputShape(
     }
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
+  } else if (strcmp(THPUtils_typename(output_obj), "NoneType") == 0) {
+    // Ignore none types
   } else {
     std::string msg =
         "Only tuples, lists and Variables are supported as JIT inputs/outputs. "
