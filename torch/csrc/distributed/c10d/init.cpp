@@ -66,8 +66,6 @@ constexpr auto kDeprecationWarning =
     "https://github.com/pytorch/pytorch/issues/46291 "
     "if you see this warning";
 
-constexpr auto kSecondsToMilliConversion = 1000;
-
 template <typename T>
 using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
 
