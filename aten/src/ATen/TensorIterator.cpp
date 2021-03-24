@@ -8,6 +8,8 @@
 #include <ATen/native/Resize.h>
 #include <ATen/TensorOperators.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 
 using DimMask = TensorIteratorBase::DimMask;
@@ -235,7 +237,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     TORCH_INTERNAL_ASSERT(op.target_dtype == op.current_dtype)
 
     // Acquires the first non-CPU device (if any) as the common device
-    if (common_device == kCPU && !op.tensor.device().is_cpu()) {
+    if (common_device == kCPU && !op.tensor.is_cpu()) {
       common_device = op.tensor.device();
     }
 
@@ -326,7 +328,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
       // Handles CPU scalars on CUDA kernels that support them
       if (!common_device.is_cpu() &&
           config.allow_cpu_scalars_ && !op.is_output && op.tensor.dim() == 0 &&
-          op.tensor.device().is_cpu()) {
+          op.tensor.is_cpu()) {
         TORCH_CHECK(current_cpu_scalars_on_non_cpu < max_cpu_scalars_on_non_cpu,
                     "Trying to pass too many CPU scalars to non-CPU kernel!");
         ++current_cpu_scalars_on_non_cpu;
@@ -861,7 +863,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
 TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tensor& a) {
   TORCH_INTERNAL_ASSERT(out1.defined());
   TORCH_INTERNAL_ASSERT(out2.defined());
-  TORCH_CHECK((a.is_cpu() && out1.is_cpu() && out2.is_cpu()) || (a.device() == out1.device() && out1.device() == out2.device()),
+  TORCH_CHECK(a.device() == out1.device() && out1.device() == out2.device(),
       "reduce_op(): expected input and both outputs to be on same device, but input is on ", a.device(),
       ", output1 is on ", out1.device(), " and output2 is on", out2.device());
   TORCH_CHECK(out1.dim() == out2.dim(), "reduce_op(): expected both outputs to have same number of dims, but output1 has ", out1.dim(),
@@ -1293,7 +1295,7 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
       TORCH_INTERNAL_ASSERT(op.original_tensor.is_same(t));
       TORCH_INTERNAL_ASSERT(!op.tensor.is_same(t));
       // fastpath CPU to skip a dispatcher trip
-      if (op.tensor.device().is_cpu()) {
+      if (op.tensor.is_cpu()) {
         at::native::resize_output_cpu(op.tensor, sizes);
       } else {
         at::native::resize_output(op.tensor, sizes);
@@ -1324,7 +1326,7 @@ void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayR
       op.current_dtype = op.target_dtype;
   } else if (op.will_resize) {
       // fastpath CPU to skip a dispatcher trip
-      if (op.tensor.device().is_cpu()) {
+      if (op.tensor.is_cpu()) {
         at::native::resize_output_cpu(op.tensor, sizes);
       } else {
         at::native::resize_output(op.tensor, sizes);
@@ -1392,7 +1394,7 @@ DimCounter::DimCounter(IntArrayRef shape, Range range)
   , offset(range.begin) {
   int64_t linear_offset = range.begin;
   int64_t ndim = values.size();
-  for (int dim = 0; dim < ndim; dim++) {
+  for (const auto dim : c10::irange(ndim)) {
     int64_t size = shape[dim];
     if (size > 0) {
       values[dim] = linear_offset % size;
