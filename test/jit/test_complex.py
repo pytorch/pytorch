@@ -115,7 +115,7 @@ class TestComplex(JitTestCase):
         for val in complex_vals:
             self.checkScript(fn, (val, ))
 
-         # --- Binary op ---
+        # --- Binary op ---
         def rect_fn(x: float, y: float):
             return cmath.rect(x, y)
 

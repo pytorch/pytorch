@@ -779,15 +779,23 @@ RegisterOperators reg(
      DEFINE_STRING_OP(aten::add, a + b, str),
      DEFINE_COMPARISON_OP_WITH_COMPLEX(aten::eq, a == b),
      DEFINE_COMPARISON_OP_WITH_COMPLEX(aten::ne, a != b),
-     DEFINE_GENERIC_OP(aten::polar, c10::polar(static_cast<double>(a), static_cast<double>(b)), c10::polar(static_cast<double>(a), static_cast<double>(b)), complex, complex),
-     DEFINE_INT_FLOAT_OP(aten::polar, c10::polar(static_cast<double>(a), static_cast<double>(b)), complex),
+     DEFINE_GENERIC_OP(
+         aten::polar,
+         c10::polar(static_cast<double>(a), static_cast<double>(b)),
+         c10::polar(static_cast<double>(a), static_cast<double>(b)),
+         complex,
+         complex),
+     DEFINE_INT_FLOAT_OP(
+         aten::polar,
+         c10::polar(static_cast<double>(a), static_cast<double>(b)),
+         complex),
      DEFINE_COMPARISON_OP(aten::lt, a < b),
      DEFINE_COMPARISON_OP(aten::gt, a > b),
      DEFINE_COMPARISON_OP(aten::le, a <= b),
      DEFINE_COMPARISON_OP(aten::ge, a >= b),
      DEFINE_BINARY_OP_WITH_COMPLEX(aten::add, a + b),
      DEFINE_BINARY_OP_WITH_COMPLEX(aten::sub, a - b),
-     DEFINE_BINARY_OP_WITH_COMPLEX(aten::mul, a * b),
+     DEFINE_BINARY_OP_WITH_COMPLEX(aten::mul, a* b),
      DEFINE_BOOL_OP(aten::__and__, a&& b),
      DEFINE_BOOL_OP(aten::__or__, a || b),
      DEFINE_BOOL_OP(aten::__xor__, a != b),
@@ -855,7 +863,9 @@ RegisterOperators reg(
          aten::pow,
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
-         static_cast<c10::complex<double>>(pow(static_cast<c10::complex<double>>(a), static_cast<c10::complex<double>>(b))),
+         static_cast<c10::complex<double>>(
+             pow(static_cast<c10::complex<double>>(a),
+                 static_cast<c10::complex<double>>(b))),
          Scalar),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::pow.int_to_int(int a, int b) -> int"),
@@ -1085,13 +1095,13 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-        TORCH_SELECTIVE_SCHEMA("prim::imag(Tensor a) -> Tensor"),
-        [](Stack* stack) {
-          at::Tensor a;
-        pop(stack, a);
-          push(stack, at::imag(a));
-        },
-        aliasAnalysisFromSchema()),
+         TORCH_SELECTIVE_SCHEMA("prim::imag(Tensor a) -> Tensor"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, at::imag(a));
+         },
+         aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::is_xpu(Tensor a) -> bool"),
          [](Stack* stack) {
