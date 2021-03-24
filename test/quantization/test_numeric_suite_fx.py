@@ -4,7 +4,6 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
 from torch.quantization import get_default_qconfig, default_dynamic_qconfig
 import torch.nn.quantized as nnq
 toq = torch.ops.quantized
