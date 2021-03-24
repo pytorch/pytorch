@@ -78,7 +78,7 @@ class SampleInput(object):
     """Represents sample inputs to a function."""
 
     # output_process_fn_grad is a function that modifies the output of op compatible with input
-    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad', 'broadcasts_self']
+    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad']
 
     def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None):
         # input must be a single tensor, and will be the first argument to the op
