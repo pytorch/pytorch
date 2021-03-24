@@ -4,8 +4,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
-from torch.quantization import get_default_qconfig, default_dynamic_qconfig
+from torch.quantization import default_dynamic_qconfig
 import torch.nn.quantized as nnq
 toq = torch.ops.quantized
 from torch.quantization._numeric_suite_fx import (
@@ -27,7 +26,6 @@ from torch.testing._internal.common_quantization import (
     LSTMwithHiddenDynamicModel,
     SparseNNModel,
     skip_if_no_torchvision,
-    test_only_eval_fn,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import override_qengines
