@@ -1770,8 +1770,6 @@ static Tensor& _linalg_norm_matrix_out(Tensor& result, const Tensor &self, const
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   Tensor result_;
   auto ord = opt_ord.value_or(2.0).toDouble();
-  TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "matrix norm only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "matrix norm only supports strided layout, got: ", self.layout());
 
