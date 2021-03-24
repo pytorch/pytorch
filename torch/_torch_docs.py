@@ -2987,6 +2987,9 @@ Computes the error function of each element. The error function is defined as fo
 .. math::
     \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erf`.
+
 Args:
     {input}
 
@@ -3009,6 +3012,9 @@ The complementary error function is defined as follows:
 .. math::
     \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erfc`.
+
 Args:
     {input}
 
@@ -3031,6 +3037,8 @@ The inverse error function is defined in the range :math:`(-1, 1)` as:
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
 """ + r"""
+
+.. note:: Alias for :func:`torch.special.erfinv`.
 
 Args:
     {input}
@@ -5066,37 +5074,12 @@ Example::
     tensor(9)
 """.format(**common_args))
 
-add_docstr(torch.matrix_power,
-           r"""
-matrix_power(input, n) -> Tensor
+add_docstr(torch.matrix_power, r"""
+matrix_power(input, n, *, out=None) -> Tensor
 
-Returns the matrix raised to the power :attr:`n` for square matrices.
-For batch of matrices, each individual matrix is raised to the power :attr:`n`.
+.. note:: :func:`torch.matrix_power` is deprecated, use :func:`torch.linalg.matrix_power` instead.
 
-If :attr:`n` is negative, then the inverse of the matrix (if invertible) is
-raised to the power :attr:`n`.  For a batch of matrices, the batched inverse
-(if invertible) is raised to the power :attr:`n`. If :attr:`n` is 0, then an identity matrix
-is returned.
-
-Args:
-    {input}
-    n (int): the power to raise the matrix to
-
-Example::
-
-    >>> a = torch.randn(2, 2, 2)
-    >>> a
-    tensor([[[-1.9975, -1.9610],
-             [ 0.9592, -2.3364]],
-
-            [[-1.2534, -1.3429],
-             [ 0.4153, -1.4664]]])
-    >>> torch.matrix_power(a, 3)
-    tensor([[[  3.9392, -23.9916],
-             [ 11.7357,  -0.2070]],
-
-            [[  0.2468,  -6.7168],
-             [  2.0774,  -0.8187]]])
+Alias for :func:`torch.linalg.matrix_power`
 """.format(**common_args))
 
 add_docstr(torch.matrix_exp,
@@ -6427,7 +6410,7 @@ Keyword args:
 Example::
 
     >>> eps = torch.finfo(torch.float32).eps
-    >>> torch.nextafter(torch.Tensor([1, 2]), torch.Tensor([2, 1])) == torch.Tensor([eps + 1, 2 - eps])
+    >>> torch.nextafter(torch.tensor([1.0, 2.0]), torch.tensor([2.0, 1.0])) == torch.tensor([eps + 1, 2 - eps])
     tensor([True, True])
 
 """.format(**common_args))
@@ -7798,12 +7781,17 @@ add_docstr(torch.sgn,
            r"""
 sgn(input, *, out=None) -> Tensor
 
-For complex tensors, this function returns a new tensor whose elemants have the same angle as that of the
-elements of :attr:`input` and absolute value 1. For a non-complex tensor, this function
-returns the signs of the elements of :attr:`input` (see :func:`torch.sign`).
+This function is an extension of torch.sign() to complex tensors.
+It computes a new tensor whose elements have
+the same angles as the corresponding elements of :attr:`input` and
+absolute values (i.e. magnitudes) of one for complex tensors and
+is equivalent to torch.sign() for non-complex tensors.
 
-:math:`\text{out}_{i} = 0`, if :math:`|{\text{{input}}_i}| == 0`
-:math:`\text{out}_{i} = \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|}`, otherwise
+.. math::
+    \text{out}_{i} = \begin{cases}
+                    0 & |\text{{input}}_i| == 0 \\
+                    \frac{{\text{{input}}_i}}{|{\text{{input}}_i}|} & \text{otherwise}
+                    \end{cases}
 
 """ + r"""
 Args:
@@ -7814,8 +7802,8 @@ Keyword args:
 
 Example::
 
-    >>> x=torch.tensor([3+4j, 7-24j, 0, 1+2j])
-    >>> x.sgn()
+    >>> t = torch.tensor([3+4j, 7-24j, 0, 1+2j])
+    >>> t.sgn()
     tensor([0.6000+0.8000j, 0.2800-0.9600j, 0.0000+0.0000j, 0.4472+0.8944j])
 """.format(**common_args))
 
