@@ -121,6 +121,16 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(*inputs))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no bfloat support with profiling on")
+    def test_cuda_bfloat16(self):
+        def foo(x, y):
+            return (x + y).relu()
+        m = torch.jit.script(foo)
+        x = torch.randn(65536).cuda().bfloat16()
+        y = torch.randn_like(x)
+        self.assertAllFused(m.graph_for(x, y))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_HALF, "no half support")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
     def test_cuda_half(self):
