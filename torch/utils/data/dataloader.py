@@ -9,13 +9,14 @@ import os
 import threading
 import itertools
 import warnings
+import queue
 from typing import Any, Callable, TypeVar, Generic, Sequence, List, Optional
 
 import multiprocessing as python_multiprocessing
 import torch
 import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
-from torch._six import queue, string_classes
+from torch._six import string_classes
 
 from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
 from . import _utils
@@ -158,9 +159,9 @@ class DataLoader(Generic[T_co]):
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
                  shuffle: bool = False, sampler: Optional[Sampler[int]] = None,
                  batch_sampler: Optional[Sampler[Sequence[int]]] = None,
-                 num_workers: int = 0, collate_fn: _collate_fn_t = None,
+                 num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
-                 timeout: float = 0, worker_init_fn: _worker_init_fn_t = None,
+                 timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
                  multiprocessing_context=None, generator=None,
                  *, prefetch_factor: int = 2,
                  persistent_workers: bool = False):
@@ -962,8 +963,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 self._index_queues[idx].put(_utils.worker._ResumeIteration())
             resume_iteration_cnt = self._num_workers
             while resume_iteration_cnt > 0:
-                data = self._get_data()
-                if isinstance(data, _utils.worker._ResumeIteration):
+                return_idx, return_data = self._get_data()
+                if isinstance(return_idx, _utils.worker._ResumeIteration):
+                    assert return_data is None
                     resume_iteration_cnt -= 1
         # prime the prefetch loop
         for _ in range(self._prefetch_factor * self._num_workers):

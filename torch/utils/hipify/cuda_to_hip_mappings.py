@@ -6501,7 +6501,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ),
         (
             "cublasZtrsmBatched",
-            ("rocblas_dtrsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("rocblas_ztrsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasSmatinvBatched",
@@ -7773,7 +7773,7 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
         ),
         ("cusparseCreateCsrgemm2Info", ("hipsparseCreateCsrgemm2Info", CONV_MATH_FUNC, API_SPARSE)),
         (
-            "cusparseDestroyCsrgemm2Info", 
+            "cusparseDestroyCsrgemm2Info",
             ("hipsparseDestroyCsrgemm2Info", CONV_MATH_FUNC, API_SPARSE),
         ),
         ("cusparseXcsrgemm2Nnz", ("hipsparseXcsrgemm2Nnz", CONV_MATH_FUNC, API_SPARSE)),
@@ -7998,6 +7998,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("CUDNN_LSTM", ("miopenLSTM", API_PYTORCH)),
         ("CUDNN_GRU", ("miopenGRU", API_PYTORCH)),
         ("cudnnRNNMode_t", ("miopenRNNMode_t", API_PYTORCH)),
+        ("magma_queue_create_from_cuda", ("magma_queue_create_from_hip", API_PYTORCH)),
     ]
 )
 
@@ -8090,6 +8091,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
         ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
         ("c10/cuda/CUDAStream.h", ("c10/hip/HIPStream.h", API_C10)),
+        ("c10/cuda/CUDAGraphsC10Utils.h", ("c10/hip/HIPGraphsC10Utils.h", API_C10)),
         ("c10/cuda/CUDACachingAllocator.h", ("c10/hip/HIPCachingAllocator.h", API_C10)),
         ("c10/cuda/impl/CUDATest.h", ("c10/hip/impl/HIPTest.h", API_C10)),
         ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),

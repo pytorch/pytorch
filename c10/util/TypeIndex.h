@@ -97,10 +97,17 @@ inline constexpr string_view extract(
 template <typename T>
 inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() {
 #if defined(_MSC_VER) && !defined(__clang__)
+    #if defined(__NVCC__)
+  return extract(
+      "c10::basic_string_view<char> c10::util::detail::fully_qualified_type_name_impl<",
+      ">()",
+      __FUNCSIG__);
+    #else
   return extract(
       "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<",
       ">(void)",
       __FUNCSIG__);
+    #endif
 #elif defined(__clang__)
   return extract(
       "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [T = ",

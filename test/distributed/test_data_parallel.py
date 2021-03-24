@@ -4,6 +4,7 @@ import unittest
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
+import functools
 
 import torch
 from torch import nn
@@ -11,9 +12,8 @@ from torch.cuda.amp import autocast
 import torch.nn.parallel as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import run_tests, TestCase, repeat_test_for_types, ALL_TENSORTYPES
-from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
+from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
-from torch.testing._internal.common_utils import skipIfRocm
 import torch.nn.functional as F
 
 torch.set_default_dtype(torch.double)
@@ -22,6 +22,10 @@ torch.set_default_dtype(torch.double)
 torch._C._set_forward_AD_enabled(True)
 
 NO_NCCL = not hasattr(torch.distributed, "ProcessGroupNCCL")
+
+# batched grad doesn't support data parallel
+gradcheck = functools.partial(gradcheck, check_batched_grad=False, check_forward=True)
+_assertGradAndGradgradChecks = functools.partial(_assertGradAndGradgradChecks, check_batched_grad=False)
 
 class TestDataParallel(TestCase):
 
@@ -45,7 +49,7 @@ class TestDataParallel(TestCase):
         def fn(t):
             return dpm(inp)
 
-        torch.autograd.gradcheck(fn, (m.t_rg,), check_forward=True)
+        gradcheck(fn, (m.t_rg,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_rnn(self):
@@ -728,7 +732,6 @@ class TestDataParallel(TestCase):
         dpm(torch.rand(4, 3, 6, 5))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_autocast(self):
         class Model(torch.nn.Linear):
             def __init__(self):
@@ -743,7 +746,6 @@ class TestDataParallel(TestCase):
         self.assertTrue(model(input).dtype is torch.float16)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_save_replica_module(self):
         # DataParallel replicas can be saved (gh-37182)
         module = torch.nn.Linear(8, 8).cuda()
@@ -754,7 +756,6 @@ class TestDataParallel(TestCase):
         torch.save(dpm, data)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    @skipIfRocm
     def test_strided_grad_layout(self):
         class ConvNet(nn.Module):
             def __init__(self, layouts, dtypes):

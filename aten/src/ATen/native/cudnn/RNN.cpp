@@ -1,13 +1,14 @@
-#include <ATen/native/RNN.h>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/MatrixRef.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/Exceptions.h>
+#include <ATen/InitialTensorOptions.h>
+#include <ATen/MatrixRef.h>
+#include <ATen/native/RNN.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
 
 #if !AT_CUDNN_ENABLED()
@@ -423,7 +424,7 @@ namespace {
     TORCH_INTERNAL_ASSERT(offset_bytes % elem_size == 0, "offset_bytes = ", offset_bytes, "; elem_size = ", elem_size);
     size_t offset = offset_bytes / elem_size;
 
-    int mat_numel = prod_intlist(filter_dim_a, filter_dim_a + nb_dims);
+    int mat_numel = c10::multiply_integers(filter_dim_a, filter_dim_a + nb_dims);
     // Generate a new parameter tensor which is a view into the weight_buf.
     std::initializer_list<int64_t> size = {mat_numel, 1};
     Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
@@ -507,7 +508,7 @@ namespace {
           // (same for the hh weights, and the ih and hh biases).
           // Since we're storing all the weights in a single tensor anyway,
           // might as well merge the CUDNN ones into a single tensor as well
-          int mat_numel = prod_intlist(filter_dim_a, filter_dim_a + nb_dims);
+          int mat_numel = c10::multiply_integers(filter_dim_a, filter_dim_a + nb_dims);
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
             // We could also exclude bias params by restricting cudnn_methods to just { cudnnGetRNNLinLayerMatrixParams }
             // at the very top.  However, to do so would throw off the cur_offset account, which is currently a strict
@@ -722,6 +723,11 @@ namespace {
                 (tensors.seq_length >=10 && bsize <=32));
       }
     } else if (prop->major >= 8) {
+      if (prop->minor == 6) {
+        // Excludes sm_86 GPU devices from using persistent rnn.
+        // This is because there are some edge cases that will throw exceptions with cudnn 8.0.5 on Nvidia A40 GPU.
+        return false;
+      }
       // Based on tests by Vasily Volkov and xwang233.  Vasily only tried bsize <= 128,
       // so conservatively enable persistence for bsize <= 128 only.
       // TODO:  Run more tests for bsize > 128.
@@ -769,78 +775,93 @@ namespace {
 // Utilities exposed in RNNUtils.h
 namespace cudnn_rnn {
 
-  TORCH_CUDA_API std::tuple<Tensor, std::vector<Tensor>> copy_weights_to_flat_buf_views(
-      TensorList weight_arr,
-      int64_t weight_stride0,
-      int64_t input_size,
-      int64_t mode,
-      int64_t hidden_size,
-      int64_t proj_size,
-      int64_t num_layers,
-      bool batch_first,
-      bool bidirectional,
-      const cudnnDataType_t flat_buf_datatype,
-      const TensorOptions& flat_buf_options,
-      bool set_orig_weights_to_flat_buf,
-      bool allow_type_change/*=false*/,
-      bool include_bias/*=true*/) {
-    // flat_buf_datatype is accepted as a separate argument (rather than extracted from flat_buf_options)
-    // because to extract flat_buf_datatype from flat_buf_options, we'd need to say
-    // auto flat_buf_datatype = getCudnnDataTypeFromScalarType(typeMetaToScalarType(options.dtype()));
-    // typeMetaToScalarType is a surprisingly nontrivial function.  We should avoid it if we can.
-    TORCH_CHECK(weight_arr.size() > 0,
-                "copy_weights_to_flat_buf_views: cannot flatten empty weight list");
+TORCH_CUDA_CPP_API std::tuple<Tensor, std::vector<Tensor>>
+copy_weights_to_flat_buf_views(
+    TensorList weight_arr,
+    int64_t weight_stride0,
+    int64_t input_size,
+    int64_t mode,
+    int64_t hidden_size,
+    int64_t proj_size,
+    int64_t num_layers,
+    bool batch_first,
+    bool bidirectional,
+    const cudnnDataType_t flat_buf_datatype,
+    const TensorOptions& flat_buf_options,
+    bool set_orig_weights_to_flat_buf,
+    bool allow_type_change /*=false*/,
+    bool include_bias /*=true*/) {
+  // flat_buf_datatype is accepted as a separate argument (rather than extracted
+  // from flat_buf_options) because to extract flat_buf_datatype from
+  // flat_buf_options, we'd need to say auto flat_buf_datatype =
+  // getCudnnDataTypeFromScalarType(typeMetaToScalarType(options.dtype()));
+  // typeMetaToScalarType is a surprisingly nontrivial function.  We should
+  // avoid it if we can.
+  TORCH_CHECK(
+      weight_arr.size() > 0,
+      "copy_weights_to_flat_buf_views: cannot flatten empty weight list");
 
-    RNNDescriptorParams rnn;
-    rnn.set(mode, hidden_size, proj_size, num_layers, bidirectional, promote_rnn_math_type(flat_buf_datatype), flat_buf_datatype);
+  RNNDescriptorParams rnn;
+  rnn.set(
+      mode,
+      hidden_size,
+      proj_size,
+      num_layers,
+      bidirectional,
+      promote_rnn_math_type(flat_buf_datatype),
+      flat_buf_datatype);
 
-    auto handle = getCudnnHandle();
-    RNNDescriptor rnn_desc = rnn.descriptor(handle);
+  auto handle = getCudnnHandle();
+  RNNDescriptor rnn_desc = rnn.descriptor(handle);
 
-    TensorGeometry x_geom({1, input_size});
-    TensorDescriptor x_desc;
-    // Why do we pad to 5 dims here (and elsewhere)?
-    // https://docs.nvidia.com/deeplearning/sdk/cudnn-api/index.html#cudnnRNNForwardTraining
-    // expects descriptors padded to 3 dimensions.
-    x_desc.set(flat_buf_datatype, x_geom.sizes(), x_geom.strides(), 5);
+  TensorGeometry x_geom({1, input_size});
+  TensorDescriptor x_desc;
+  // Why do we pad to 5 dims here (and elsewhere)?
+  // https://docs.nvidia.com/deeplearning/sdk/cudnn-api/index.html#cudnnRNNForwardTraining
+  // expects descriptors padded to 3 dimensions.
+  x_desc.set(flat_buf_datatype, x_geom.sizes(), x_geom.strides(), 5);
 
-    auto num_weights = get_num_weights(handle, rnn_desc, x_desc, flat_buf_datatype);
-    auto weight_buf = at::zeros(num_weights, flat_buf_options);
+  auto num_weights =
+      get_num_weights(handle, rnn_desc, x_desc, flat_buf_datatype);
+  auto weight_buf = at::zeros(num_weights, flat_buf_options);
 
-    FilterDescriptor w_desc;
-    w_desc.set(weight_buf, 3);
+  FilterDescriptor w_desc;
+  w_desc.set(weight_buf, 3);
 
-    // Slice off views into weight_buf
-    std::vector<Tensor> params_arr;
-    size_t params_stride0;
-    std::tie(params_arr, params_stride0) = get_parameters(handle, rnn, rnn_desc, x_desc, w_desc, weight_buf, include_bias);
-    MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
-                      params{params_arr, params_stride0};
+  // Slice off views into weight_buf
+  std::vector<Tensor> params_arr;
+  size_t params_stride0;
+  std::tie(params_arr, params_stride0) = get_parameters(
+      handle, rnn, rnn_desc, x_desc, w_desc, weight_buf, include_bias);
+  MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
+      params{params_arr, params_stride0};
 
-    // Copy weights
-    _viewOrCopyParams(weight, params, /*copy=*/true, allow_type_change);
-    if (set_orig_weights_to_flat_buf) {
-      // Update the storage
-      for (size_t i = 0; i < weight.size(0); i++) {
-        // There is a special case for LSTM with projections and no bias,
-        // where weight copy is done in 0->0, 1->1, 2->4 layout
-        if (weight[i].size() == 3 && params[i].size() == 5) {
-          weight[i][0].set_(params[i][0].view_as(weight[i][0]));
-          weight[i][1].set_(params[i][1].view_as(weight[i][1]));
-          weight[i][2].set_(params[i][4].view_as(weight[i][2]));
-        } else {
-          for (auto orig_param_it = weight[i].begin(), new_param_it = params[i].begin();
-              orig_param_it != weight[i].end() && new_param_it != params[i].end();
-              orig_param_it++, new_param_it++) {
-            auto orig_param = *orig_param_it, new_param = *new_param_it;
-            orig_param.set_(new_param.view_as(orig_param));
-          }
+  // Copy weights
+  _viewOrCopyParams(weight, params, /*copy=*/true, allow_type_change);
+  if (set_orig_weights_to_flat_buf) {
+    // Update the storage
+    for (size_t i = 0; i < weight.size(0); i++) {
+      // There is a special case for LSTM with projections and no bias,
+      // where weight copy is done in 0->0, 1->1, 2->4 layout
+      if (weight[i].size() == 3 && params[i].size() == 5) {
+        weight[i][0].set_(params[i][0].view_as(weight[i][0]));
+        weight[i][1].set_(params[i][1].view_as(weight[i][1]));
+        weight[i][2].set_(params[i][4].view_as(weight[i][2]));
+      } else {
+        for (auto orig_param_it = weight[i].begin(),
+                  new_param_it = params[i].begin();
+             orig_param_it != weight[i].end() &&
+             new_param_it != params[i].end();
+             orig_param_it++, new_param_it++) {
+          auto orig_param = *orig_param_it, new_param = *new_param_it;
+          orig_param.set_(new_param.view_as(orig_param));
         }
       }
     }
-
-    return std::make_tuple(weight_buf, params_arr);
   }
+
+  return std::make_tuple(weight_buf, params_arr);
+}
 
 } // namespace cudnn_rnn
 

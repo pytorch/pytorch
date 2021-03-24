@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/DispatchKeySet.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Flags.h>
 
 // TLS management for DispatchKeySet (the "local" DispatchKeySet(s))
@@ -53,23 +54,18 @@ struct C10_API LocalDispatchKeySet {
 };
 
 // thread_local variables cannot be C10_API on Windows.
-#ifdef _MSC_VER
+// Inlining this seems to break AutoNonVariableTypeGuard on Android.
+#if defined(_MSC_VER) || defined(C10_ANDROID)
 C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
-#else // _MSC_VER
-/// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
-/// thread_local is not supported.
-#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
+#else // defined(_MSC_VER) || defined(C10_ANDROID)
   extern C10_API thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
-#else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-  extern C10_API PODLocalDispatchKeySet raw_local_dispatch_key_set;
-#endif
 
 inline C10_API LocalDispatchKeySet tls_local_dispatch_key_set() {
   // Don't let people fiddle with the thread_local directly just
   // because they include this header.
   return raw_local_dispatch_key_set;
 }
-#endif // _MSC_VER
+#endif // defined(_MSC_VER) || defined(C10_ANDROID)
 
 // Internal, use ThreadLocalStateGuard
 C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
