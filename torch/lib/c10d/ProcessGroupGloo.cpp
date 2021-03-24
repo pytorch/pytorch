@@ -5,7 +5,6 @@
 #include <exception>
 #include <ratio>
 #include <tuple>
-#include <fmt/format.h>
 
 #ifdef _WIN32
 #include <gloo/common/win.h>
@@ -2691,7 +2690,6 @@ void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
   auto t1 = nextTag();
   auto t2 = nextTag();
   std::vector<at::Tensor> commTensor = {at::tensor({rank})};
-  auto errStr = "Rank {} failed to pass monitoredBarrier in {} ms";
   // only enforce timeout on rank 0. This is so that other ranks aren't timed
   // out first, bringing down the job without reporting which rank timed out.
   if (rank != 0) {
@@ -2728,8 +2726,12 @@ void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
       remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
       std::get<1>(work.second)->wait(remainingTime);
     } catch (const std::exception& e) {
-      const std::string error =
-          fmt::format(errStr, work.first, monitoredBarrierTimeout.count());
+      const std::string error = c10::str(
+          "Rank ",
+          work.first,
+          " failed to pass monitoredBarrier in ",
+          monitoredBarrierTimeout.count(),
+          " ms");
       LOG(ERROR) << error;
       throw std::runtime_error(
           c10::str(error, "\n Original exception: \n") + e.what());
