@@ -23,6 +23,7 @@ from torch.testing._internal.distributed.nn.api.remote_module_test import (
 from torch.testing._internal.distributed.rpc.dist_autograd_test import (
     DistAutogradTest,
     FaultyAgentDistAutogradTest,
+    TensorPipeDistAutogradTest
 )
 from torch.testing._internal.distributed.rpc.dist_optimizer_test import (
     DistOptimizerTest,
@@ -44,6 +45,10 @@ from torch.testing._internal.distributed.rpc.rpc_test import (
     TensorPipeAgentRpcTest,
 )
 from torch.testing._internal.distributed.rpc.examples.parameter_server_test import ParameterServerTest
+from torch.testing._internal.distributed.rpc.examples.reinforcement_learning_rpc_test import (
+    ReinforcementLearningRpcTest,
+)
+
 
 def _check_and_set_tcp_init():
     # if we are running with TCP init, set main address and port
@@ -124,6 +129,7 @@ GENERIC_TESTS = [
     DdpUnderDistAutogradTest,
     DdpComparisonTest,
     PipeWithDDPTest,
+    ReinforcementLearningRpcTest,
 ]
 
 
@@ -139,7 +145,8 @@ PROCESS_GROUP_TESTS = [
 # These suites should be standalone, and separate from the ones in the generic
 # list (not subclasses of those!).
 TENSORPIPE_TESTS = [
-    TensorPipeAgentRpcTest
+    TensorPipeAgentRpcTest,
+    TensorPipeDistAutogradTest
 ]
 
 

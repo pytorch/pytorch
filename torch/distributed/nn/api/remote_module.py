@@ -230,6 +230,9 @@ class _RemoteModule(nn.Module):
     def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
         _raise_not_supported(self.cuda.__name__)
 
+    def xpu(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
+        _raise_not_supported(self.xpu.__name__)
+
     def cpu(self: T) -> T:  # type: ignore[return]
         _raise_not_supported(self.cpu.__name__)
 
@@ -279,7 +282,7 @@ class _RemoteModule(nn.Module):
 
     def named_parameters(  # type: ignore[return]
         self, prefix: str = "", recurse: bool = True
-    ) -> Iterator[Tuple[str, Tensor]]:
+    ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
     def buffers(self, recurse: bool = True) -> Iterator[Tensor]:  # type: ignore[return]
@@ -330,26 +333,32 @@ class RemoteModule(_RemoteModule):
         It takes care of autograd recording to ensure the backward pass propogates
         gradients back to the corresponding remote module.
 
-        The arguments of ``forward_async`` and ``forward`` are the same as
-        the ``forward`` method of the module returned by the ``module_cls``.
+        It generates two methods ``forward_async`` and ``forward`` based on the
+        signature of the ``forward`` method of ``module_cls``. ``forward_async``
+        runs asynchronously and returns a Future. The arguments of ``forward_async``
+        and ``forward`` are the same as the ``forward`` method of the module
+        returned by the ``module_cls``.
 
         For example, if ``module_cls`` returns an instance of ``nn.Linear``,
-        that has ``forward`` method signature, ``def forward(input: Tensor) -> Tensor:``,
-        the generated ``RemoteModule`` will have 2 methods in signature of
-        ``def forward(input: Tensor) -> Tensor:`` and
-        ``def forward_async(input: Tensor) -> Future[Tensor]:``.
+        that has ``forward`` method signature: ``def forward(input: Tensor) -> Tensor:``,
+        the generated ``RemoteModule`` will have 2 methods with the signatures:
+
+        | ``def forward(input: Tensor) -> Tensor:``
+        | ``def forward_async(input: Tensor) -> Future[Tensor]:``
 
     Args:
         remote_device (str): Device on the destination worker where we‘d like to place this module.
             The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
             E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".
             In addition, the device field can be optional and the default value is "cpu".
-        module_cls (nn.Module): For example,
+        module_cls (nn.Module): Class for the module to be created remotely. For example,
+
             >>> class MyModule(nn.Module):
             >>>     def forward(input):
             >>>         return input + 1
             >>>
             >>> module_cls = MyModule
+
         args (Sequence, optional): args to be passed to ``module_cls``.
         kwargs (Dict, optional): kwargs to be passed to ``module_cls``.
 

@@ -28,6 +28,8 @@ from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_m
 
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
 
+from jit.test_fuser_common import TestFuserCommon  # noqa: F401
+
 FUSION_GROUP = 'prim::TensorExprGroup'
 LLVM_ENABLED = torch._C._llvm_enabled()
 
@@ -35,8 +37,7 @@ def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
 
-def warmup_forward(f, *args):
-    profiling_count = 2
+def warmup_forward(f, *args, profiling_count=2):
     for i in range(profiling_count):
         results = f(*args)
 
@@ -70,6 +71,9 @@ class TestTEFuser(JitTestCase):
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
 
+        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
+        torch._C._jit_set_te_must_use_llvm_cpu(False)
+
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         self.int_dtypes = [
             torch.int8,
@@ -95,6 +99,7 @@ class TestTEFuser(JitTestCase):
         torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
 
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -116,6 +121,26 @@ class TestTEFuser(JitTestCase):
         a = torch.randn(5, device=device)
         scripted = self.checkScript(func, (a,))
         self.assertLastGraphAllFused()
+
+    def test_typecheck(self):
+        a = torch.ones(1)
+
+        def fused_kernel(a, b):
+            return (a + b) * 2.
+
+        scripted = self.checkScript(fused_kernel, (a, a))
+        graph = scripted.graph_for(a, a)
+        # double check we fused
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        # we use a bigger tensor now (size 2)
+        # if we won't trigger a recompilation
+        # we will still create a tensor up to (size 1)
+        # if the type check fails
+        a = torch.ones(2)
+        # shape changed if we don't trigger recompilation
+        # we would compute the wrong result silently
+        self.assertEqual(scripted(a, a), fused_kernel(a, a))
 
     def test_sum_simple(self):
         def func(x):
@@ -160,6 +185,21 @@ class TestTEFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_abs_cuda(self):
         self._test_fused_abs(device="cuda")
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_unsqueeze_size_calculation(self):
+
+        def foo(b, d):
+            x = d.unsqueeze(1)
+            y = x * 42.
+            z = b + y
+            r = z / 42.
+            return r
+
+        inputs = (torch.rand(20, 28, device='cuda', requires_grad=True), torch.rand(20, device='cuda'))
+
+        scripted = self.checkScript(foo, inputs)
+        self.assertAllFused(scripted.graph_for(*inputs))
 
     def _test_zero_element_tensors(self, device="cpu"):
         def decode(sin_t, cos_t):
@@ -418,6 +458,26 @@ class TestTEFuser(JitTestCase):
                 graph = backward_graph(s)
                 self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
 
+    def test_clamp_double(self):
+        for device in self.devices:
+            def clamp_double(x, eta: float):
+                return 1 - x.clamp(eta, 1 - eta)
+
+            x = torch.tensor([1.0, 1.0], dtype=torch.double, device=device)
+            eta = 1e-9
+            s = self.checkScript(clamp_double, (x, eta), profiling=ProfilingMode.PROFILING, atol=1e-10, rtol=1e-5)
+            self.assertAllFused(s.graph_for(x, eta))
+
+    def test_clamp_int(self):
+        for device in self.devices:
+            def clamp_int(x, eta: int):
+                return x.clamp(0, eta)
+
+            x = torch.tensor([1, 1], device=device)
+            eta = 1 << 32
+            s = self.checkScript(clamp_int, (x, eta), profiling=ProfilingMode.PROFILING)
+            self.assertAllFused(s.graph_for(x, eta))
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
     def test_dropout(self):
@@ -653,9 +713,9 @@ class TestTEFuser(JitTestCase):
         scripted_f = torch.jit.script(test_fuse)
         x = torch.ones(1, requires_grad=True, device='cuda')
         y = torch.ones(1, requires_grad=True, device='cuda')
-        warmup_forward(scripted_f, x, y)
-        g = torch.jit.last_executed_optimized_graph()
-        diff_nodes = [n for n in g.nodes() if n.kind() == 'prim::DifferentiableGraph']
+        warmup_forward(scripted_f, x, y, profiling_count=3)
+        g = scripted_f.graph_for(x, y)
+        diff_nodes = g.findAllNodes('prim::DifferentiableGraph')
         self.assertEqual(len(diff_nodes), 1)
         g = diff_nodes[0].g('Subgraph')
         if_nodes = [n for n in g.nodes() if n.kind() == 'prim::If']
@@ -761,8 +821,7 @@ class TestTEFuser(JitTestCase):
 
     def test_scalar_arg(self):
         for device in self.devices:
-            def fn_test_scalar_arg(x, p):
-                # type: (Tensor, float) -> Tensor
+            def fn_test_scalar_arg(x: torch.Tensor, p: float) -> torch.Tensor:
                 return p * (x * x + x)
 
             x = torch.randn(4, 4, dtype=torch.float, device=device)
@@ -774,11 +833,12 @@ class TestTEFuser(JitTestCase):
 
             # use another function otherwise we will bailout
             # and won't be able to do fused checks
-            def fn_test_scalar_arg_requires_grad(x, p):
-                # type: (Tensor, float) -> Tensor
+            def fn_test_scalar_arg_requires_grad(x: torch.Tensor, p: float) -> torch.Tensor:
                 return p * (x * x + x)
 
             scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
+            out = scripted(x, p)
+            out = scripted(x, p)
             out = scripted(x, p)
             self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
                                                                       "aten::_size_if_not_equal"))
@@ -912,7 +972,7 @@ class TestTEFuser(JitTestCase):
         for device in self.devices:
             inputs = get_lstm_inputs(device, training=True)
             module = self.checkScript(LSTMCellS, inputs)
-            self.assertLastGraphAllFused()
+            self.assertAllFused(module.graph_for(inputs))
 
     def test_lstm_concat(self):
         # single fusion node causes error
@@ -964,7 +1024,7 @@ class TestTEFuser(JitTestCase):
             forward_graph = module.graph_for(*inputs)
             self.assertGraphContainsExactly(
                 forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
-            FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
+            FileCheck().check("DifferentiableGraph").check("TupleConstruct") \
                 .check_next("return").check(FUSION_GROUP).run(str(forward_graph))
             hy, cy = module(*inputs)
             warmup_backward((hy + cy).sum())
@@ -1014,10 +1074,10 @@ class TestTEFuser(JitTestCase):
                 return F.relu(torch.erf(x) - torch.erfc(x))
 
             x = torch.randn(4, 4, dtype=torch.float, device=device)
-            ge = self.checkTrace(fn_test_erf, (x,))
+            ge = self.checkScript(fn_test_erf, (x,), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(ge.graph_for(x))
             x.requires_grad_(True)
-            ge = self.checkTrace(fn_test_erf, (x,))
+            ge = self.checkScript(fn_test_erf, (x,), profiling=ProfilingMode.PROFILING)
             self.assertAllFused(ge.graph_for(x), except_for=("aten::size", "prim::BroadcastSizes",
                                                              "aten::_size_if_not_equal"))
 
@@ -1373,6 +1433,7 @@ class TestTEFuser(JitTestCase):
             torch.sinh,
             torch.atan,
             torch.tanh,
+            F.hardtanh,
             torch.sqrt,
             torch.rsqrt,
             torch.abs,

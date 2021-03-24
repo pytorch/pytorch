@@ -362,19 +362,33 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   return str.str();
 }
 
+void OperatorEntry::reportSignatureError(std::string name) const {
+  TORCH_CHECK(false,
+        "\nTried to access or call an operator with a wrong signature.\n",
+        "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
+        "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
+        "  correct signature:  ", cpp_signature_->signature.name(), "\n",
+        "    ", cpp_signature_->debug, "\n",
+        "  accessed/called as: ", name, "\n",
+        "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
+        "Please make sure that the function signature matches the signature in the operator registration call."
+  );
+};
+
 void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   // If there is an invariant problem, report it now.
   checkInvariants();
 
   if (dispatchKey == DispatchKey::Undefined) {
-    TORCH_CHECK(false,
+    TORCH_CHECK_NOT_IMPLEMENTED(false,
           "There were no tensor arguments to this function (e.g., you passed an "
           "empty list of Tensors), but no fallback function is registered for schema ", name_,
-          ".  This usually means that this function requires a non-empty list of Tensors.  "
+          ".  This usually means that this function requires a non-empty list of Tensors, "
+          "or that you (the operator writer) forgot to register a fallback function.  "
           "Available functions are ", listAllDispatchKeys(), ".\n\n", dumpComputedTable())
   }
 
-  TORCH_CHECK(false, "Could not run '", name_, "' with arguments",
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "Could not run '", name_, "' with arguments",
           " from the '", toString(dispatchKey), "' backend. This could be because "
           "the operator doesn't exist for this backend, or was omitted during ",
           "the selective/custom build process (if using custom build). If you are a ",

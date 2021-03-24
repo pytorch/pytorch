@@ -1,5 +1,5 @@
-#include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
+#include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -11,6 +11,7 @@ std::string fromVec(const std::vector<char>& vec) {
 }
 
 FaultyProcessGroupAgent::FaultyProcessGroupAgent(
+    const c10::intrusive_ptr<::c10d::Store>& store,
     std::string workerName,
     c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
@@ -19,6 +20,7 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
     const std::unordered_map<std::string, float>& messageTypesToDelay,
     int failNumSends)
     : ProcessGroupAgent(
+          store,
           std::move(workerName),
           std::move(pg),
           numSendRecvThreads,
@@ -56,10 +58,11 @@ std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
   return delayMessages;
 }
 
-std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
+std::shared_ptr<JitFuture> FaultyProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
   if (!shouldFailMessage(message.type())) {
@@ -78,11 +81,11 @@ std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
   if (failMessageCountMap_[key] < failNumSends_) {
     failMessageCountMap_[key]++;
     lock.unlock();
-    auto fm = std::make_shared<FutureMessage>();
-    fm->setError(makeRPCError(
+    auto jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+    jitFuture->setError(std::make_exception_ptr(std::runtime_error(makeRPCError(
         c10::str("Send attempt failed intentionally for ", key),
-        RPCErrorType::INTENTIONAL_FAILURE));
-    return fm;
+        RPCErrorType::INTENTIONAL_FAILURE))));
+    return jitFuture;
   } else {
     lock.unlock();
     return ProcessGroupAgent::send(to, std::move(message), rpcTimeoutSeconds);

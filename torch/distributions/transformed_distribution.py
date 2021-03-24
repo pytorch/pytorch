@@ -1,7 +1,8 @@
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.transforms import Transform
+from torch.distributions.independent import Independent
+from torch.distributions.transforms import ComposeTransform, Transform
 from torch.distributions.utils import _sum_rightmost
 from typing import Dict
 
@@ -42,7 +43,6 @@ class TransformedDistribution(Distribution):
     arg_constraints: Dict[str, constraints.Constraint] = {}
 
     def __init__(self, base_distribution, transforms, validate_args=None):
-        self.base_dist = base_distribution
         if isinstance(transforms, Transform):
             self.transforms = [transforms, ]
         elif isinstance(transforms, list):
@@ -51,25 +51,54 @@ class TransformedDistribution(Distribution):
             self.transforms = transforms
         else:
             raise ValueError("transforms must be a Transform or list, but was {}".format(transforms))
-        shape = self.base_dist.batch_shape + self.base_dist.event_shape
-        event_dim = max([len(self.base_dist.event_shape)] + [t.event_dim for t in self.transforms])
-        batch_shape = shape[:len(shape) - event_dim]
-        event_shape = shape[len(shape) - event_dim:]
+
+        # Reshape base_distribution according to transforms.
+        base_shape = base_distribution.batch_shape + base_distribution.event_shape
+        base_event_dim = len(base_distribution.event_shape)
+        transform = ComposeTransform(self.transforms)
+        domain_event_dim = transform.domain.event_dim
+        if len(base_shape) < domain_event_dim:
+            raise ValueError("base_distribution needs to have shape with size at least {}, but got {}."
+                             .format(domain_event_dim, base_shape))
+        shape = transform.forward_shape(base_shape)
+        expanded_base_shape = transform.inverse_shape(shape)
+        if base_shape != expanded_base_shape:
+            base_batch_shape = expanded_base_shape[:len(expanded_base_shape) - base_event_dim]
+            base_distribution = base_distribution.expand(base_batch_shape)
+        reinterpreted_batch_ndims = domain_event_dim - base_event_dim
+        if reinterpreted_batch_ndims > 0:
+            base_distribution = Independent(base_distribution, reinterpreted_batch_ndims)
+        self.base_dist = base_distribution
+
+        # Compute shapes.
+        event_dim = transform.codomain.event_dim + max(base_event_dim - domain_event_dim, 0)
+        assert len(shape) >= event_dim
+        cut = len(shape) - event_dim
+        batch_shape = shape[:cut]
+        event_shape = shape[cut:]
         super(TransformedDistribution, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(TransformedDistribution, _instance)
         batch_shape = torch.Size(batch_shape)
-        base_dist_batch_shape = batch_shape + self.base_dist.batch_shape[len(self.batch_shape):]
-        new.base_dist = self.base_dist.expand(base_dist_batch_shape)
+        shape = batch_shape + self.event_shape
+        for t in reversed(self.transforms):
+            shape = t.inverse_shape(shape)
+        base_batch_shape = shape[:len(shape) - len(self.base_dist.event_shape)]
+        new.base_dist = self.base_dist.expand(base_batch_shape)
         new.transforms = self.transforms
         super(TransformedDistribution, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False)
     def support(self):
-        return self.transforms[-1].codomain if self.transforms else self.base_dist.support
+        if not self.transforms:
+            return self.base_dist.support
+        support = self.transforms[-1].codomain
+        if len(self.event_shape) > support.event_dim:
+            support = constraints.independent(support, len(self.event_shape) - support.event_dim)
+        return support
 
     @property
     def has_rsample(self):
@@ -105,13 +134,16 @@ class TransformedDistribution(Distribution):
         Scores the sample by inverting the transform(s) and computing the score
         using the score of the base distribution and the log abs det jacobian.
         """
+        if self._validate_args:
+            self._validate_sample(value)
         event_dim = len(self.event_shape)
         log_prob = 0.0
         y = value
         for transform in reversed(self.transforms):
             x = transform.inv(y)
+            event_dim += transform.domain.event_dim - transform.codomain.event_dim
             log_prob = log_prob - _sum_rightmost(transform.log_abs_det_jacobian(x, y),
-                                                 event_dim - transform.event_dim)
+                                                 event_dim - transform.domain.event_dim)
             y = x
 
         log_prob = log_prob + _sum_rightmost(self.base_dist.log_prob(y),

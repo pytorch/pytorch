@@ -1,11 +1,11 @@
 import torch
 import numpy as np
-import unittest
 import inspect
 import functools
 import pprint
+import pickle
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -315,9 +315,16 @@ def generate_tensor_like_torch_implementations():
     torch_vars = vars(torch)
     untested_funcs = []
     testing_overrides = get_testing_overrides()
+    # test/test_cpp_api_parity.py monkeypatches torch.nn to have a new
+    # function sample_functional.  Depending on what order you run pytest
+    # collection, this may trigger the error here.  This is a hack to fix
+    # the problem.  A more proper fix is to make the "not tested" check
+    # a test on its own, and to make sure the monkeypatch is only installed
+    # for the span of the relevant test (and deleted afterwards)
+    testing_ignore = {"sample_functional"}
     for namespace, funcs in get_overridable_functions().items():
         for func in funcs:
-            if func not in testing_overrides:
+            if func not in testing_overrides and func.__name__ not in testing_ignore:
                 untested_funcs.append("{}.{}".format(namespace, func.__name__))
     msg = (
         "The following functions are not tested for __torch_function__ "
@@ -777,7 +784,7 @@ class TestEinsumOverride(TestCase):
 class TestGradCheckOverride(TestCase):
     "Test that wrappers work with gradcheck."
     def test_gradcheck(self):
-        from torch.autograd import gradcheck, gradgradcheck
+        from torch.testing._internal.common_utils import gradcheck, gradgradcheck
 
         a = wrap(torch.tensor(5.0, dtype=torch.double))
         b = wrap(torch.tensor(6.0, dtype=torch.double))
@@ -786,11 +793,11 @@ class TestGradCheckOverride(TestCase):
         b.requires_grad = True
 
         # Run both here to make sure as much of the code path is used as possible
-        gradcheck(torch.add, (a, b), raise_exception=False, check_forward=True)
-        gradgradcheck(torch.add, (a, b), raise_exception=False, check_forward=True)
+        gradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False, check_forward=True)
+        gradgradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False, check_forward=True)
 
-        gradcheck(torch.add, (a, b), raise_exception=False)
-        gradgradcheck(torch.add, (a, b), raise_exception=False)
+        gradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False)
+        gradgradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False)
 
         total_used_attrs = a.used_attrs.union(b.used_attrs)
         total_used_calls = a.used_calls.union(b.used_calls)
@@ -844,6 +851,14 @@ class TestGradNewOnesOverride(TestCase):
         n = t.new_ones((1, 2))
         self.assertEqual(type(n), SubTensor2)
 
+class TestPickle(TestCase):
+    "Regression test for gh-47051"
+    def test_pickle(self):
+        t = torch.tensor([1]).as_subclass(SubTensor2)
+        t.abcd = "e"
+        t2 = pickle.loads(pickle.dumps(t))
+        self.assertIs(type(t2), SubTensor2)
+        self.assertEqual(t2.abcd, "e")
 
 class TestBroadcastAllOverride(TestCase):
     """ test for gh-37141 """
@@ -883,5 +898,72 @@ class TestWrapTorchFunction(TestCase):
 
         self.assertEqual(f(A()), -1)
 
+class TestIndexing(TestCase):
+    """ Regression tests for gh-46277 """
+    def test_getitem(self):
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                return -1
+
+        t = torch.tensor([5])
+        self.assertEqual(t[A()], -1)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_getitem_subclass(self):
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                return -1
+
+        t = torch.tensor([5])
+        self.assertEqual(t[A()], -1)
+        self.assertEqual(t[5, A()], -1)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem(self):
+        triggered = set()
+
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[A()] = 1
+        t[5, A()] = 1
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem_val(self):
+        triggered = set()
+
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[0] = A()
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem_subclass(self):
+        triggered = set()
+
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[A()] = 1
+        t[5, A()] = 1
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

@@ -1,6 +1,5 @@
 import warnings
-from collections import OrderedDict
-from torch._six import container_abcs
+from collections import OrderedDict, abc as container_abcs
 from itertools import islice
 import operator
 
@@ -8,10 +7,12 @@ import torch
 from .module import Module
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
+from typing import Any, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
 
+if TYPE_CHECKING:
+    from torch.nn import Parameter
 
-T = TypeVar('T')
+T = TypeVar('T', bound=Module)
 
 
 class Container(Module):
@@ -57,7 +58,7 @@ class Sequential(Module):
     def __init__(self, arg: 'OrderedDict[str, Module]') -> None:
         ...
 
-    def __init__(self, *args: Any):
+    def __init__(self, *args):
         super(Sequential, self).__init__()
         if len(args) == 1 and isinstance(args[0], OrderedDict):
             for key, module in args[0].items():
@@ -66,7 +67,7 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
-    def _get_item_by_idx(self, iterator, idx):
+    def _get_item_by_idx(self, iterator, idx) -> T:
         """Get the idx-th item of the iterator"""
         size = len(self)
         idx = operator.index(idx)
@@ -76,14 +77,14 @@ class Sequential(Module):
         return next(islice(iterator, idx, None))
 
     @_copy_to_script_wrapper
-    def __getitem__(self: T, idx) -> T:
+    def __getitem__(self, idx) -> Union['Sequential', T]:
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
             return self._get_item_by_idx(self._modules.values(), idx)
 
     def __setitem__(self, idx: int, module: Module) -> None:
-        key = self._get_item_by_idx(self._modules.keys(), idx)
+        key: str = self._get_item_by_idx(self._modules.keys(), idx)
         return setattr(self, key, module)
 
     def __delitem__(self, idx: Union[slice, int]) -> None:
@@ -185,7 +186,7 @@ class ModuleList(Module):
     def __iter__(self) -> Iterator[Module]:
         return iter(self._modules.values())
 
-    def __iadd__(self: T, modules: Iterable[Module]) -> T:
+    def __iadd__(self, modules: Iterable[Module]) -> 'ModuleList':
         return self.extend(modules)
 
     @_copy_to_script_wrapper
@@ -205,7 +206,7 @@ class ModuleList(Module):
             self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
 
-    def append(self: T, module: Module) -> T:
+    def append(self, module: Module) -> 'ModuleList':
         r"""Appends a given module to the end of the list.
 
         Args:
@@ -214,7 +215,7 @@ class ModuleList(Module):
         self.add_module(str(len(self)), module)
         return self
 
-    def extend(self: T, modules: Iterable[Module]) -> T:
+    def extend(self, modules: Iterable[Module]) -> 'ModuleList':
         r"""Appends modules from a Python iterable to the end of the list.
 
         Args:
@@ -243,9 +244,9 @@ class ModuleDict(Module):
 
     * the order of insertion, and
 
-    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged 
+    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged
       ``OrderedDict``, ``dict`` (started from Python 3.6) or another
-      :class:`~torch.nn.ModuleDict` (the argument to 
+      :class:`~torch.nn.ModuleDict` (the argument to
       :meth:`~torch.nn.ModuleDict.update`).
 
     Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
@@ -357,6 +358,7 @@ class ModuleDict(Module):
             for key, module in modules.items():
                 self[key] = module
         else:
+            # modules here can be a list with two items
             for j, m in enumerate(modules):
                 if not isinstance(m, container_abcs.Iterable):
                     raise TypeError("ModuleDict update sequence element "
@@ -366,7 +368,9 @@ class ModuleDict(Module):
                     raise ValueError("ModuleDict update sequence element "
                                      "#" + str(j) + " has length " + str(len(m)) +
                                      "; 2 is required")
-                self[m[0]] = m[1]
+                # modules can be Mapping (what it's typed at), or a list: [(name1, module1), (name2, module2)]
+                # that's too cumbersome to type correctly with overloads, so we add an ignore here
+                self[m[0]] = m[1]  # type: ignore[assignment]
 
     def forward(self):
         raise NotImplementedError()
@@ -447,7 +451,7 @@ class ParameterList(Module):
     def __iter__(self) -> Iterator['Parameter']:
         return iter(self._parameters.values())
 
-    def __iadd__(self: T, parameters: Iterable['Parameter']) -> T:
+    def __iadd__(self, parameters: Iterable['Parameter']) -> 'ParameterList':
         return self.extend(parameters)
 
     def __dir__(self):
@@ -455,7 +459,7 @@ class ParameterList(Module):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
-    def append(self: T, parameter: 'Parameter') -> T:
+    def append(self, parameter: 'Parameter') -> 'ParameterList':
         """Appends a given parameter at the end of the list.
 
         Args:
@@ -464,7 +468,7 @@ class ParameterList(Module):
         self.register_parameter(str(len(self)), parameter)
         return self
 
-    def extend(self: T, parameters: Iterable['Parameter']) -> T:
+    def extend(self, parameters: Iterable['Parameter']) -> 'ParameterList':
         """Appends parameters from a Python iterable to the end of the list.
 
         Args:
@@ -637,7 +641,8 @@ class ParameterDict(Module):
                     raise ValueError("ParameterDict update sequence element "
                                      "#" + str(j) + " has length " + str(len(p)) +
                                      "; 2 is required")
-                self[p[0]] = p[1]
+                # parameters as length-2 list too cumbersome to type, see ModuleDict.update comment
+                self[p[0]] = p[1]  # type: ignore[assignment]
 
     def extra_repr(self) -> str:
         child_lines = []

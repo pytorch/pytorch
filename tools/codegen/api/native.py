@@ -1,7 +1,7 @@
 from tools.codegen.model import *
 
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 from tools.codegen import local
 
 from typing import Union, Sequence, List, Optional
@@ -29,12 +29,19 @@ def name(func: FunctionSchema) -> str:
 
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
     if str(t) == 'Tensor?':
+        tensor_type: CType = BaseCType('Tensor', binds)
+        if local.use_c10_dispatcher() is not UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+            tensor_type = OptionalCType(tensor_type)
         if mutable:
-            return MutRefCType(BaseCType('Tensor', binds))
+            return MutRefCType(tensor_type)
         else:
-            return ConstRefCType(BaseCType('Tensor', binds))
+            return ConstRefCType(tensor_type)
     elif str(t) == 'Tensor?[]':
-        return BaseCType('const c10::List<c10::optional<Tensor>> &', binds)
+        return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
+    elif str(t) == 'Scalar':
+        return ConstRefCType(BaseCType('Scalar', binds))
+    elif str(t) == 'Scalar?':
+        return ConstRefCType(OptionalCType(BaseCType('Scalar', binds)))
     return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
 def returns_type(rs: Sequence[Return]) -> str:
