@@ -4094,6 +4094,8 @@ class TestAutograd(TestCase):
         # runtime error while compute batched grad (print big error)
         with self.assertRaisesRegex(RuntimeError, 'gradcheck or gradgradcheck failed while testing batched gradient'):
             gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=True, check_batched_grad=True)
+        self.assertFalse(gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=True, check_batched_grad=True,
+                                   raise_exception=False))
 
     def test_gradcheck_backward_mul_by_grad_output(self):
         # when grad_input is sparse and has incorrect sparse_dim/dense_dim
@@ -4160,6 +4162,38 @@ class TestAutograd(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Expected backward function to handle undefined output grads'):
                 gradcheck(fn, (x,))
             self.assertFalse(gradcheck(fn, (x,), raise_exception=False))
+
+    def test_gradcheck_jacobian_mismatch(self):
+        def fn(x):  # R -> R, C -> C
+            y = x.clone()
+            y.register_hook(lambda x: x + 1e-2)
+            return y
+        x = torch.ones(2, 2, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, 'Jacobian mismatch for output 0 with respect to input 0'):
+            gradcheck(fn, (x,))
+        self.assertFalse(gradcheck(fn, (x,), raise_exception=False))
+
+        x_c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
+        with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
+            gradcheck(fn, (x_c,))
+        self.assertFalse(gradcheck(fn, (x_c,), raise_exception=False))
+
+        def fn2(x):  # R -> C
+            y = torch.complex(x, x)
+            y.register_hook(lambda x: x + 1e-2)
+            return y
+        x = torch.ones(2, 2, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1j'):
+            gradcheck(fn2, (x,))
+        self.assertFalse(gradcheck(fn2, (x,), raise_exception=False))
+
+        def fn3(x):  # C -> R
+            y = torch.real(x)
+            y.register_hook(lambda x: x + 1e-2)
+            return y
+        with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1'):
+            gradcheck(fn3, (x_c,))
+        self.assertFalse(gradcheck(fn3, (x_c,), raise_exception=False))
 
     def test_version_counter(self):
         x = torch.randn(1, 2)
