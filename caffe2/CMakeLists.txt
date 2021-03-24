@@ -176,7 +176,7 @@ endif()
 if(BUILD_SPLIT_CUDA)
   # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
   foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*(CUDASolver|Register.*CUDA|Legacy|THC|CUDAHooks|detail/|TensorShapeCUDA).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
+    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|CUDAHooks|detail/|TensorShapeCUDA).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
       # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
       list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
     else()
@@ -352,20 +352,27 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     # setting the USE_TENSORPIPE compile definition, this target will just end
     # up being empty. Downstream targets should also add a #ifdef guard.
     if(NOT WIN32)
-      add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
+      add_library(process_group_agent
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.h"
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h"
+      )
       target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
       add_dependencies(process_group_agent torch c10d)
 
-      add_library(tensorpipe_agent
-        "${TORCH_SRC_DIR}/csrc/distributed/rpc/macros.h"
-        "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
-        "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
-        "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
-        "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.h"
-        )
-      target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
-      add_dependencies(tensorpipe_agent torch c10d)
       if(USE_TENSORPIPE)
+        add_library(tensorpipe_agent
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/agent_utils.h"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/macros.h"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.h"
+          )
+        target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
+        add_dependencies(tensorpipe_agent torch c10d)
         if(USE_CUDA)
           target_compile_definitions(tensorpipe_agent PUBLIC USE_CUDA)
         endif()
@@ -414,6 +421,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/InplaceOrViewType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/InplaceOrViewType_1.cpp"
     )
   endif()
 
@@ -435,6 +444,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_fft_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_linalg_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
     )
 
   set(GENERATED_H_PYTHON
@@ -469,6 +479,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
+    "${TOOLS_PATH}/autograd/templates/InplaceOrViewType.cpp"
     "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
@@ -479,6 +490,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_fft_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_linalg_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
@@ -488,6 +500,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/gen_python_functions.py"
     "${TOOLS_PATH}/autograd/gen_variable_factories.py"
     "${TOOLS_PATH}/autograd/gen_variable_type.py"
+    "${TOOLS_PATH}/autograd/gen_inplace_or_view_type.py"
     "${TOOLS_PATH}/autograd/load_derivatives.py"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
@@ -689,6 +702,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/serialize.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/lr_scheduler.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
     )
@@ -851,6 +866,8 @@ if(USE_CUDA OR USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/UnpackRaw.cuh
   )
 
   file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include/nvfuser_resources")
@@ -912,15 +929,16 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
   endif()
 
-
-  set(TH_CPU_INCLUDE
-    # dense
-    aten/src/TH
-    ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
-    ${TORCH_ROOT}/aten/src
-    ${CMAKE_CURRENT_BINARY_DIR}/aten/src
-    ${CMAKE_BINARY_DIR}/aten/src)
-  target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
+  if(NOT BUILD_LITE_INTERPRETER)
+    set(TH_CPU_INCLUDE
+      # dense
+      aten/src/TH
+      ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
+      ${TORCH_ROOT}/aten/src
+      ${CMAKE_CURRENT_BINARY_DIR}/aten/src
+      ${CMAKE_BINARY_DIR}/aten/src)
+    target_include_directories(torch_cpu PRIVATE ${TH_CPU_INCLUDE})
+  endif()
 
   set(ATen_CPU_INCLUDE
     ${TORCH_ROOT}/aten/src

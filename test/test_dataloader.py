@@ -339,7 +339,8 @@ class ErrorTrackingProcess(mp.Process):
         set_faulthander_if_available()
         if self.disable_stderr:
             # Disable polluting stderr with errors that are supposed to happen.
-            sys.stderr = open(os.devnull, "w")
+            with open(os.devnull, 'w') as devnull:
+                os.dup2(devnull.fileno(), sys.stderr.fileno())
         try:
             super(ErrorTrackingProcess, self).run()
             self._cconn.send(None)
@@ -525,8 +526,8 @@ def disable_stderr(worker_id):
     sys.stderr.flush()  # flush library buffers that dup2 knows nothing about
     # Can't use a with-block because otherwise the fd will be closed when this
     # function ends.
-    devnull = open(os.devnull, 'w')
-    os.dup2(devnull.fileno(), sys.stderr.fileno())
+    with open(os.devnull, 'w') as devnull:
+        os.dup2(devnull.fileno(), sys.stderr.fileno())
 
 
 def _test_segfault():
@@ -2049,7 +2050,6 @@ class TestNamedTupleDataLoader(TestCase):
             self.assertIsInstance(batch.data, NamedTupleDataset.Data)
             self.assertNotIsInstance(batch.data.positive, torch.Tensor)
 
-
 class SimpleCustomBatch(object):
     def __init__(self, data):
         transposed_data = list(zip(*data))
@@ -2064,9 +2064,13 @@ class SimpleCustomBatch(object):
     def is_pinned(self):
         return self.inp.is_pinned() and self.tgt.is_pinned()
 
+# Workaround for https://github.com/pytorch/pytorch/issues/50661
+# Classes from  `__main__` can not be correctly unpickled from spawned module
+# See https://docs.python.org/3/library/multiprocessing.html#multiprocessing-programming
+self_module = __import__(os.path.splitext(os.path.basename(__file__))[0])
 
 def collate_wrapper(batch):
-    return SimpleCustomBatch(batch)
+    return self_module.SimpleCustomBatch(batch)
 
 
 def collate_into_packed_sequence(batch):
@@ -2097,7 +2101,7 @@ class TestCustomPinFn(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_custom_batch_pin(self):
         test_cases = [
-            (collate_wrapper, SimpleCustomBatch),
+            (collate_wrapper, self_module.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
         ]
@@ -2111,7 +2115,7 @@ class TestCustomPinFn(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_custom_batch_pin_worker(self):
         test_cases = [
-            (collate_wrapper, SimpleCustomBatch),
+            (collate_wrapper, self_module.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
         ]
@@ -2166,7 +2170,7 @@ class TestIndividualWorkerQueue(TestCase):
                 self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
 
 
-class SetAffinityDataset(torch.utils.data.IterableDataset):
+class SetAffinityDataset(IterableDataset):
 
     def __iter__(self):
         torch.randperm(1)
@@ -2190,6 +2194,26 @@ class TestSetAffinity(TestCase):
         for sample in dataloader:
             self.assertEqual(sample, [2])
 
+class ConvDataset(Dataset):
+    def __init__(self):
+        self.x = torch.ones(1, 1, 24000)
+        # Call convolution on parent process
+        self[0]
+
+    def __len__(self):
+        return 1
+
+    def __getitem__(self, index):
+        return torch.nn.functional.conv1d(self.x, torch.ones(1, 1, 2))
+
+
+@unittest.skipIf(IS_WINDOWS, "Needs fork")
+class TestConvAfterFork(TestCase):
+    # Tests crash reported in https://github.com/pytorch/pytorch/issues/53565
+    def test_conv_after_fork(self):
+        loader = DataLoader(ConvDataset(), num_workers=1)
+        for x in loader:
+            self.assertEqual(x.shape, (1, 1, 1, 23999))
 
 
 if __name__ == '__main__':

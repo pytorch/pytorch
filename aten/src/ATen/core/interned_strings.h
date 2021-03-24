@@ -76,7 +76,7 @@ namespace c10 {
   _(prim, ListConstruct)             \
   _(prim, ListUnpack)                \
   _(prim, DictConstruct)             \
-  _(prim, ModuleDictIndex)           \
+  _(prim, ModuleContainerIndex)      \
   _(prim, EnumName)                  \
   _(prim, EnumValue)                 \
   _(prim, StringIndex)               \
@@ -92,6 +92,7 @@ namespace c10 {
   _(aten, ScalarImplicit)            \
   _(aten, Float)                     \
   _(aten, str)                       \
+  _(aten, is_pinned)                 \
   _(aten, Delete)                    \
   _(aten, relu_)                     \
   _(aten, dropout_)                  \
@@ -195,7 +196,10 @@ namespace c10 {
   _(aten, clip_)                     \
   _(aten, det)                       \
   _(aten, linalg_det)                \
+  _(aten, matrix_power)              \
+  _(aten, linalg_matrix_power)       \
   _(aten, linalg_norm)               \
+  _(aten, linalg_vector_norm)        \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -247,6 +251,8 @@ namespace c10 {
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
+  _(aten, orgqr)                     \
+  _(aten, linalg_householder_product)\
   _(aten, transpose)                 \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
@@ -303,6 +309,14 @@ namespace c10 {
   _(aten, swapdims_)                 \
   _(aten, movedim)                   \
   _(aten, moveaxis)                  \
+  _(aten, lgamma)                    \
+  _(aten, special_gammaln)           \
+  _(aten, erf)                       \
+  _(aten, special_erf)               \
+  _(aten, erfc)                      \
+  _(aten, special_erfc)              \
+  _(aten, erfinv)                    \
+  _(aten, special_erfinv)            \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
@@ -356,6 +370,11 @@ namespace c10 {
   _(onnx, Conv)                      \
   _(onnx, BatchNormalization)        \
   _(onnx, ReduceProd)                \
+  _(onnx, Neg)                       \
+  _(onnx, NonZero)                   \
+  _(onnx, Range)                     \
+  _(onnx, Tile)                      \
+  _(onnx, Where)                     \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \

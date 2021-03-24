@@ -19,8 +19,11 @@ class Embedding(Module):
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
-        padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
-                                         (initialized to zeros) whenever it encounters the index.
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
+                                     therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
+                                     i.e. it remains as a fixed "pad". For a newly constructed Embedding,
+                                     the embedding vector at :attr:`padding_idx` will default to all zeros,
+                                     but can be updated to another value to be used as the padding vector.
         max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
                                     is renormalized to have norm :attr:`max_norm`.
         norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
@@ -41,14 +44,6 @@ class Embedding(Module):
         Keep in mind that only a limited number of optimizers support
         sparse gradients: currently it's :class:`optim.SGD` (`CUDA` and `CPU`),
         :class:`optim.SparseAdam` (`CUDA` and `CPU`) and :class:`optim.Adagrad` (`CPU`)
-
-    .. note::
-        With :attr:`padding_idx` set, the embedding vector at
-        :attr:`padding_idx` is initialized to all zeros. However, note that this
-        vector can be modified afterwards, e.g., using a customized
-        initialization method, and thus changing the vector used to pad the
-        output. The gradient for this vector from :class:`~torch.nn.Embedding`
-        is always zero.
 
     .. note::
         When :attr:`max_norm` is not ``None``, :class:`Embedding`'s forward method will modify the
@@ -93,6 +88,22 @@ class Embedding(Module):
                  [ 0.1535, -2.0309,  0.9315],
                  [ 0.0000,  0.0000,  0.0000],
                  [-0.1655,  0.9897,  0.0635]]])
+
+        >>> # example of changing `pad` vector
+        >>> padding_idx = 0
+        >>> embedding = nn.Embedding(3, 3, padding_idx=padding_idx)
+        >>> embedding.weight
+        Parameter containing:
+        tensor([[ 0.0000,  0.0000,  0.0000],
+                [-0.7895, -0.7089, -0.0364],
+                [ 0.6778,  0.5803,  0.2678]], requires_grad=True)
+        >>> with torch.no_grad():
+        ...     embedding.weight[padding_idx] = torch.ones(3)
+        >>> embedding.weight
+        Parameter containing:
+        tensor([[ 1.0000,  1.0000,  1.0000],
+                [-0.7895, -0.7089, -0.0364],
+                [ 0.6778,  0.5803,  0.2678]], requires_grad=True)
     """
     __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
                      'norm_type', 'scale_grad_by_freq', 'sparse']
@@ -123,13 +134,13 @@ class Embedding(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+            self.weight = Parameter(torch.empty(num_embeddings, embedding_dim))
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
             self.weight = Parameter(_weight)
-            self._fill_padding_idx_with_zero()
+
         self.sparse = sparse
 
     def reset_parameters(self) -> None:
@@ -171,7 +182,9 @@ class Embedding(Module):
                 First dimension is being passed to Embedding as ``num_embeddings``, second as ``embedding_dim``.
             freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
                 Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
-            padding_idx (int, optional): See module initialization documentation.
+            padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
+                                         therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
+                                         i.e. it remains as a fixed "pad".
             max_norm (float, optional): See module initialization documentation.
             norm_type (float, optional): See module initialization documentation. Default ``2``.
             scale_grad_by_freq (boolean, optional): See module initialization documentation. Default ``False``.
@@ -309,7 +322,7 @@ class EmbeddingBag(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+            self.weight = Parameter(torch.empty(num_embeddings, embedding_dim))
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \

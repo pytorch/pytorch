@@ -80,7 +80,6 @@ _(aten, _fft_with_size) \
 _(aten, _fill) \
 _(aten, _floor) \
 _(aten, _fused_dropout) \
-_(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _ldexp) \
 _(aten, _linspace) \
@@ -276,6 +275,8 @@ _(aten, cudnn_convolution_transpose_backward) \
 _(aten, cudnn_convolution_transpose_backward_bias) \
 _(aten, cudnn_convolution_transpose_backward_input) \
 _(aten, cudnn_convolution_transpose_backward_weight) \
+_(aten, cudnn_convolution_relu) \
+_(aten, cudnn_convolution_add_relu) \
 _(aten, cudnn_grid_sampler) \
 _(aten, cudnn_grid_sampler_backward) \
 _(aten, cudnn_is_acceptable) \
@@ -292,6 +293,7 @@ _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, fill_diagonal_) \
 _(aten, diff) \
+_(aten, frexp) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
@@ -314,9 +316,6 @@ _(aten, empty_like) \
 _(aten, empty_strided) \
 _(aten, eq) \
 _(aten, equal) \
-_(aten, erf) \
-_(aten, erfc) \
-_(aten, erfinv) \
 _(aten, exp) \
 _(aten, expand) \
 _(aten, expand_as) \
@@ -423,7 +422,6 @@ _(aten, leaky_relu) \
 _(aten, leaky_relu_backward) \
 _(aten, leaky_relu_forward) \
 _(aten, lerp) \
-_(aten, lgamma) \
 _(aten, linear) \
 _(aten, linspace) \
 _(aten, log) \
@@ -452,7 +450,6 @@ _(aten, masked_fill) \
 _(aten, masked_scatter) \
 _(aten, masked_select) \
 _(aten, matmul) \
-_(aten, matrix_power) \
 _(aten, matrix_rank) \
 _(aten, matrix_exp) \
 _(aten, max) \
@@ -549,7 +546,6 @@ _(aten, nuclear_norm) \
 _(aten, numel) \
 _(aten, ones) \
 _(aten, ones_like) \
-_(aten, orgqr) \
 _(aten, ormqr) \
 _(aten, pairwise_distance) \
 _(aten, _euclidean_dist) \
@@ -622,6 +618,7 @@ _(aten, rrelu_with_noise_forward) \
 _(aten, rsqrt) \
 _(aten, scatter) \
 _(aten, scatter_add) \
+_(aten, segment_reduce) \
 _(aten, select) \
 _(aten, selu) \
 _(aten, set) \
