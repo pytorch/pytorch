@@ -364,7 +364,7 @@ class TestCommon(JitCommonTestCase):
         if len(sample.kwargs) > 0:
             sample_args_kwargs += (sample.kwargs, )
 
-        original_name = op.name
+        original_name = op.aten_name
         original_name_inplace = original_name + "_"
         expected_dtype = op(sample.input, *sample.args, **sample.kwargs).dtype
 
@@ -380,8 +380,8 @@ class TestCommon(JitCommonTestCase):
 
                 if variant in method_or_inplace:
                     fn_template = '''
-                    def _fn(t0{c}{args_annot_kw}):
-                        return t0.{alias_name}({args_kw})
+                        def _fn(t0{c}{args_annot_kw}):
+                            return t0.{alias_name}({args_kw})
                     '''
                     # remove the first input tensor
                     script = fn_template.format(
