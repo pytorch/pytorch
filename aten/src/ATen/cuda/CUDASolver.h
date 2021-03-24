@@ -135,6 +135,40 @@ template<>
 void potrfBatched<c10::complex<double>>(CUDASOLVER_POTRF_BATCHED_ARGTYPES(c10::complex<double>));
 
 
+#define CUDASOLVER_POTRS_ARGTYPES(Dtype)  \
+    cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, const Dtype *A, int lda, Dtype *B, int ldb, int *devInfo
+
+template<class Dtype>
+void potrs(CUDASOLVER_POTRS_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potrs: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void potrs<float>(CUDASOLVER_POTRS_ARGTYPES(float));
+template<>
+void potrs<double>(CUDASOLVER_POTRS_ARGTYPES(double));
+template<>
+void potrs<c10::complex<float>>(CUDASOLVER_POTRS_ARGTYPES(c10::complex<float>));
+template<>
+void potrs<c10::complex<double>>(CUDASOLVER_POTRS_ARGTYPES(c10::complex<double>));
+
+
+#define CUDASOLVER_POTRS_BATCHED_ARGTYPES(Dtype)  \
+    cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, int nrhs, Dtype *Aarray[], int lda, Dtype *Barray[], int ldb, int *info, int batchSize
+
+template<class Dtype>
+void potrsBatched(CUDASOLVER_POTRS_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potrsBatched: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void potrsBatched<float>(CUDASOLVER_POTRS_BATCHED_ARGTYPES(float));
+template<>
+void potrsBatched<double>(CUDASOLVER_POTRS_BATCHED_ARGTYPES(double));
+template<>
+void potrsBatched<c10::complex<float>>(CUDASOLVER_POTRS_BATCHED_ARGTYPES(c10::complex<float>));
+template<>
+void potrsBatched<c10::complex<double>>(CUDASOLVER_POTRS_BATCHED_ARGTYPES(c10::complex<double>));
+
+
 #define CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES(Dtype)                        \
   cusolverDnHandle_t handle, int m, int n, int k, const Dtype *A, int lda, \
       const Dtype *tau, int *lwork
@@ -195,6 +229,10 @@ void xpotrf(
     cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, cudaDataType dataTypeA, void *A,
     int64_t lda, cudaDataType computeType, void *bufferOnDevice, size_t workspaceInBytesOnDevice, void *bufferOnHost, size_t workspaceInBytesOnHost,
     int *info);
+
+void xpotrs(
+    cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, int64_t nrhs, cudaDataType dataTypeA, const void *A,
+    int64_t lda, cudaDataType dataTypeB, void *B, int64_t ldb, int *info);
 
 #endif // USE_CUSOLVER_64_BIT
 
