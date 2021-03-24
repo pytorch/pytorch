@@ -1879,7 +1879,7 @@ def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tens
     """
     if has_torch_function_variadic(input1, input2, weight):
         return handle_torch_function(
-            bilinear, 
+            bilinear,
             (input1, input2, weight),
             input1, input2, weight,
             bias=bias
