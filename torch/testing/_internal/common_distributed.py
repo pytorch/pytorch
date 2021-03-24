@@ -361,15 +361,18 @@ class MultiProcessTestCase(TestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe, faulthandler_file_name):
-        faulthandler_file = open(faulthandler_file_name, mode='w')
-        faulthandler.enable(file=faulthandler_file)
         self = cls(test_name)
+        self._register_fault_handler(faulthandler_file_name)
         self.rank = rank
         self.file_name = file_name
 
         self.run_test(test_name, pipe)
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
+
+    def _register_fault_handler(self, faulthandler_file_name):
+        faulthandler_file = open(faulthandler_file_name, mode='w')
+        faulthandler.enable(file=faulthandler_file)
 
     def run_test(self, test_name, pipe):
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
