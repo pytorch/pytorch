@@ -33,6 +33,23 @@ class AnnotateTypesWithSchema(Transformer):
         self.annotate_modules = annotate_modules
         self.annotate_get_attrs = annotate_get_attrs
 
+        self._cur_node = None
+
+    def run_node(self, n):
+        try:
+            self._cur_node = n
+            return super().run_node(n)
+        finally:
+            self._cur_node = None
+
+    def placeholder(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
+        """
+        Set types for placeholder nodes
+        """
+        ph_proxy = super().placeholder(target, args, kwargs)
+        ph_proxy.node.type = self._cur_node.type
+        return ph_proxy
+
     def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
         python_ret_type = None
         if self.annotate_functionals and target.__module__ == 'torch.nn.functional':

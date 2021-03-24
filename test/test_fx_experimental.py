@@ -755,27 +755,25 @@ terrible spacing
 
     def test_normalize_binary_operators(self):
         ops_to_test = {
-            operator.add,
-            operator.mul,
-            operator.sub,
-            operator.truediv,
-            operator.floordiv,
-            operator.mod,
-            operator.eq,
-            operator.ne,
-            operator.lt,
-            operator.le,
-            operator.gt,
-            operator.ge,
+            torch.add,
+            torch.mul,
+            torch.sub,
+            torch.div,
+            torch.floor_divide,
+            torch.remainder,
+            torch.eq,
+            torch.ne,
+            torch.lt,
+            torch.le,
+            torch.gt,
+            torch.ge,
         }
 
         # Test Tensor/Tensor callsite
         for op in ops_to_test:
-            relu_functional = torch.nn.functional.relu
-
             class WrapperMod(torch.nn.Module):
                 def forward(self, x, y):
-                    return op(relu_functional(x), relu_functional(y))
+                    return op(x, y)
 
             traced = symbolic_trace(WrapperMod())
             normalized = NormalizeOperators(traced).transform()
@@ -786,28 +784,9 @@ terrible spacing
 
         # Test Tensor/scalar callsite
         for op in ops_to_test:
-            relu_functional = torch.nn.functional.relu
-
             class WrapperMod(torch.nn.Module):
                 def forward(self, x):
-                    return op(relu_functional(x), 42)
-
-            traced = symbolic_trace(WrapperMod())
-            normalized = NormalizeOperators(traced).transform()
-            x = torch.randn(3, 4)
-            torch.testing.assert_allclose(traced(x), normalized(x))
-            self.assertFalse(any(n.target in ops_to_test for n in normalized.graph.nodes))
-
-        # Test scalar/Tensor callsite
-        for op in ops_to_test:
-            # Mod does not commute, skip it
-            if op is operator.mod:
-                continue
-            relu_functional = torch.nn.functional.relu
-
-            class WrapperMod(torch.nn.Module):
-                def forward(self, x):
-                    return op(42, relu_functional(x))
+                    return op(x, 42)
 
             traced = symbolic_trace(WrapperMod())
             normalized = NormalizeOperators(traced).transform()

@@ -302,6 +302,15 @@ Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_fl
 Tensor erfinv(const Tensor& self) { return unary_op_impl_float(self, erfinv_stub); }
 Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
 
+Tensor& special_erf_out(const Tensor& self, Tensor& result) { return at::erf_out(result, self); }
+Tensor special_erf(const Tensor& self) { return self.erf(); }
+
+Tensor& special_erfc_out(const Tensor& self, Tensor& result) { return at::erfc_out(result, self); }
+Tensor special_erfc(const Tensor& self) { return self.erfc(); }
+
+Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
+Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
+
 Tensor& frac_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, frac_stub); }
 Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
 Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
