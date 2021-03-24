@@ -99,8 +99,8 @@ class TestResources(PackageTestCase):
         )
 
     def test_importer_access(self):
-        filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
+        buffer = BytesIO()
+        with PackageExporter(buffer, verbose=False) as he:
             he.save_text("main", "main", "my string")
             he.save_binary("main", "main_binary", "my string".encode("utf-8"))
             src = dedent(
@@ -113,7 +113,8 @@ class TestResources(PackageTestCase):
                 """
             )
             he.save_source_string("main", src, is_package=True)
-        hi = PackageImporter(filename)
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
         m = hi.import_module("main")
         self.assertEqual(m.t, "my string")
         self.assertEqual(m.b, "my string".encode("utf-8"))
