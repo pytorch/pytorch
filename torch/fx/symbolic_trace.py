@@ -117,6 +117,8 @@ class Tracer(TracerBase):
                 Turning this on is likely to slow down tracing by 1.5-3x.
 
         """
+        modules_dict: Dict[str, ModuleType] = {'math': math}
+        autowrap_modules = tuple(modules_dict[m] if isinstance(m, str) else m for m in autowrap_modules)
 
         super().__init__()
 
