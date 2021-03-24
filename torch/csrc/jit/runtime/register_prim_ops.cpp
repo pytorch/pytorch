@@ -779,6 +779,16 @@ RegisterOperators reg(
      DEFINE_STRING_OP(aten::add, a + b, str),
      DEFINE_COMPARISON_OP_WITH_COMPLEX(aten::eq, a == b),
      DEFINE_COMPARISON_OP_WITH_COMPLEX(aten::ne, a != b),
+     DEFINE_GENERIC_OP(
+         aten::polar,
+         c10::polar(static_cast<double>(a), static_cast<double>(b)),
+         c10::polar(static_cast<double>(a), static_cast<double>(b)),
+         complex,
+         complex),
+     DEFINE_INT_FLOAT_OP(
+         aten::polar,
+         c10::polar(static_cast<double>(a), static_cast<double>(b)),
+         complex),
      DEFINE_COMPARISON_OP(aten::lt, a < b),
      DEFINE_COMPARISON_OP(aten::gt, a > b),
      DEFINE_COMPARISON_OP(aten::le, a <= b),
@@ -1074,6 +1084,22 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_cuda());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::real(Tensor a) -> Tensor"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, at::real(a));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::imag(Tensor a) -> Tensor"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, at::imag(a));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(

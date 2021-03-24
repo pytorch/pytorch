@@ -430,9 +430,9 @@ void listCopyAndSort<at::Tensor>(Stack* stack);
 
 void listSetItem(Stack* stack);
 
-#define DEFINE_GENERIC_BINARY_OP(aten_op, op, result, complex_result)        \
+#define DEFINE_GENERIC_BINARY_OP(aten_op, op, int_float_result, complex_result)        \
   OperatorGenerator(                                                         \
-      TORCH_SELECTIVE_SCHEMA(#aten_op ".int_int(int a, int b) -> " #result), \
+      TORCH_SELECTIVE_SCHEMA(#aten_op ".int_int(int a, int b) -> " #int_float_result), \
       [](Stack* stack) {                                                     \
         int64_t a, b;                                                        \
         pop(stack, a, b);                                                    \
@@ -441,7 +441,7 @@ void listSetItem(Stack* stack);
       aliasAnalysisFromSchema()),                                            \
       OperatorGenerator(                                                     \
           TORCH_SELECTIVE_SCHEMA(                                            \
-              #aten_op ".float_float(float a, float b) -> " #result),        \
+              #aten_op ".float_float(float a, float b) -> " #int_float_result),        \
           [](Stack* stack) {                                                 \
             double a, b;                                                     \
             pop(stack, a, b);                                                \
