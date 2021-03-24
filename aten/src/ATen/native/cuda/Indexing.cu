@@ -286,8 +286,8 @@ static ptrdiff_t getSliceSize(const Tensor & dst,
   }
 
   TORCH_CHECK(dstSliceSize == srcSliceSize,
-             "Source/destination tensor have different slice sizes (%ld vs %ld)",
-             dstSliceSize, srcSliceSize);
+              "Source/destination tensor have different slice sizes: ",
+              dstSliceSize, " vs. ", srcSliceSize);
 
   if (mismatch) {
     TORCH_WARN_ONCE(
