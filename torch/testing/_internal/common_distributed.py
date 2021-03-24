@@ -371,8 +371,12 @@ class MultiProcessTestCase(TestCase):
         sys.exit(0)
 
     def _register_fault_handler(self, faulthandler_file_name):
-        faulthandler_file = open(faulthandler_file_name, mode='w')
-        faulthandler.enable(file=faulthandler_file)
+        # On windows, you can't reopen the temporary file and we can't pass a
+        # file object to a subprocess since it can't be pickled. As a result,
+        # don't use faulthandler on windows.
+        if sys.platform != 'win32':
+            faulthandler_file = open(faulthandler_file_name, mode='w')
+            faulthandler.enable(file=faulthandler_file)
 
     def run_test(self, test_name, pipe):
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
