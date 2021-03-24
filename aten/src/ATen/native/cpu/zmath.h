@@ -3,6 +3,7 @@
 // Complex number math operations that act as no-ops for other dtypes.
 #include <c10/util/complex.h>
 #include <c10/util/math_compat.h>
+#include <c10/util/MathConstants.h>
 #include<ATen/NumericUtils.h>
 
 namespace at { namespace native {
@@ -44,7 +45,7 @@ inline VALUE_TYPE angle_impl (SCALAR_TYPE z) {
   if (at::_isnan(z)) {
     return z;
   }
-  return z < 0 ? M_PI : 0;
+  return z < 0 ? c10::pi<double> : 0;
 }
 
 template<>

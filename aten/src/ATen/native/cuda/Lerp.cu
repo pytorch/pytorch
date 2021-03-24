@@ -49,15 +49,13 @@ namespace native {
 Tensor& lerp_cuda_tensor_out(Tensor& result, const Tensor& self,
                             const Tensor& end, const Tensor& weight) {
   Tensor b_self, b_end, b_weight;
-  TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
-           "weight should be of dimension max(self.dim(), end.dim()) or lesser");
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_out_cuda");
   lerp_cuda(result, b_self, b_end, b_weight);
   return result;
 }
 
 Tensor& lerp_cuda_scalar_out(Tensor& result, const Tensor& self,
-                            const Tensor& end, Scalar weight) {
+                            const Tensor& end, const Scalar& weight) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_out_cuda");
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "lerp_out_cuda", [&]{
@@ -72,13 +70,11 @@ Tensor& lerp_cuda_tensor_(Tensor& self, const Tensor& end, const Tensor& weight)
   TORCH_CHECK(b_self.sizes() == self.sizes(),
            "output with shape ", self.sizes(),
            " doesn't match the broadcast shape ", b_self.sizes());
-  TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
-           "weight should be of dimension max(self.dim(), end.dim()) or lesser");
   lerp_cuda(self, b_self, b_end, b_weight);
   return self;
 }
 
-Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, Scalar weight) {
+Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, const Scalar& weight) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp__cuda");
   TORCH_CHECK(b_self.sizes() == self.sizes(),
@@ -92,15 +88,13 @@ Tensor& lerp_cuda_scalar_(Tensor& self, const Tensor& end, Scalar weight) {
 
 Tensor lerp_cuda_tensor(const Tensor& self, const Tensor& end, const Tensor& weight) {
   Tensor b_self, b_end, b_weight;
-  TORCH_CHECK(weight.dim() <= std::max(self.dim(), end.dim()),
-           "weight should be of dimension max(self.dim(), end.dim()) or lesser");
   std::tie(b_self, b_end, b_weight) = expand_outplace(self, end, weight, "lerp_cuda");
   Tensor result = at::empty_like(b_self, b_self.suggest_memory_format());
   lerp_cuda(result, b_self, b_end, b_weight);
   return result;
 }
 
-Tensor lerp_cuda_scalar(const Tensor& self, const Tensor& end, Scalar weight) {
+Tensor lerp_cuda_scalar(const Tensor& self, const Tensor& end, const Scalar& weight) {
   Tensor b_self, b_end;
   std::tie(b_self, b_end) = expand_outplace(self, end, "lerp_cuda");
   Tensor result = at::empty_like(b_self, b_self.suggest_memory_format());

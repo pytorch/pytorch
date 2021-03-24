@@ -1,6 +1,6 @@
 import unittest
 import tempfile
-from sys import platform
+import sys
 import torch
 import torch.distributed as c10d
 import time
@@ -8,7 +8,7 @@ from datetime import timedelta
 from typing import List
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_rocm_single_process
+from torch.testing._internal.common_distributed import requires_nccl
 from torch.testing._internal.common_utils import load_tests, TEST_WITH_TSAN, run_tests, IS_WINDOWS
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -20,7 +20,7 @@ if not c10d.is_available():
     print('c10d not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
-if platform == 'darwin':
+if sys.platform == 'darwin':
     LOOPBACK = 'lo0'
 else:
     LOOPBACK = 'lo'
@@ -71,12 +71,10 @@ class ProcessGroupNCCLJitTest(JitTestCase):
             self.world_size, self.rank, [], "nccl", tcp_store, name, 0)
 
     @requires_nccl()
-    @skip_if_rocm_single_process
     def test_init_process_group_nccl_torchbind(self):
         self._create_nccl_pg("raw_process_group_nccl_torchbind")
 
     @requires_nccl()
-    @skip_if_rocm_single_process
     def test_process_group_nccl_torchbind_alltoall(self):
         nccl_pg = self._create_nccl_pg("process_group_nccl_as_base_class")
 
@@ -98,13 +96,11 @@ class ProcessGroupNCCLJitTest(JitTestCase):
         run_pg_nccl_alltoall(nccl_pg, output, input)
 
     @requires_nccl()
-    @skip_if_rocm_single_process
     def test_init_process_group_nccl_as_base_process_group_torchbind(self):
         name = unique_process_group_name("creation_test_process_group")
         self._create_nccl_pg_as_base_process_group(name)
 
     @requires_nccl()
-    @skip_if_rocm_single_process
     def test_process_group_nccl_as_base_process_group_torchbind_alltoall(self):
         name = unique_process_group_name("alltoall_test_process_group")
         nccl_pg = self._create_nccl_pg_as_base_process_group(name)
@@ -127,7 +123,6 @@ class ProcessGroupNCCLJitTest(JitTestCase):
         run_pg_nccl_alltoall(nccl_pg, output, input)
 
     @requires_nccl()
-    @skip_if_rocm_single_process
     def test_process_group_nccl_serialization(self):
         class TestModule(torch.nn.Module):
             def __init__(self, pg_nccl):
@@ -144,6 +139,36 @@ class ProcessGroupNCCLJitTest(JitTestCase):
         self.checkModule(TestModule(pg_nccl), (torch.rand((2, 3)),))
 
 
+class StoreTest(JitTestCase):
+    def setUp(self):
+        super(StoreTest, self).setUp()
+        self.file = tempfile.NamedTemporaryFile(delete=False)
+        self.filestore = torch.classes.dist_c10d.FileStore(self.file.name, 1)
+        self.prefix = "test_prefix"
+
+    def test_create_file_store(self):
+        # test FileStore creation in JIT
+        @torch.jit.script
+        def create_file_store(
+            path: str,
+            num_workers: int
+        ) -> torch.classes.dist_c10d.FileStore:
+            return torch.classes.dist_c10d.FileStore(path, num_workers)
+
+        create_file_store(self.file.name, 1)
+
+    def test_create_prefix_store(self):
+        # test PrefixStore creation in JIT
+        @torch.jit.script
+        def create_prefix_file_store(
+            store: torch.classes.dist_c10d.Store,
+            prefix: str
+        ) -> torch.classes.dist_c10d.PrefixStore:
+            return torch.classes.dist_c10d.PrefixStore(prefix, store)
+
+        create_prefix_file_store(self.filestore, self.prefix)
+
+
 @unittest.skipIf(IS_WINDOWS, "TCPStore not available on Windows")
 class C10dFrontendJitTest(JitTestCase):
     def setUp(self):
@@ -155,7 +180,6 @@ class C10dFrontendJitTest(JitTestCase):
             raise unittest.SkipTest("NCCL test requires 2+ GPUs")
 
     @requires_nccl()
-    @skip_if_rocm_single_process
     def test_frontend_singleton(self):
         frontend1 = torch.classes.dist_c10d.frontend()
         frontend2 = torch.classes.dist_c10d.frontend()
@@ -178,7 +202,6 @@ class C10dProcessGroupSerialization(JitTestCase):
             raise unittest.SkipTest("NCCL test requires 2+ GPUs")
 
     @requires_nccl()
-    @skip_if_rocm_single_process
     def test_process_group_as_module_member(self):
         class TestModule(torch.nn.Module):
             def __init__(self):

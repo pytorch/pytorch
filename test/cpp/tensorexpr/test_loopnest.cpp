@@ -91,13 +91,13 @@ TEST(LoopNest, ExprSimple02) {
             x_inner,
             0,
             4,
-            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))));
+            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y)))));
     ExprHandle x_2 = x_tail + x_outer_end * 4;
     For* stmt2 = For::make(
         x_tail,
         0,
         (ExprHandle(26) - 0) % 4,
-        For::make(y, 0, 5, Store::make(f, {x_2, y}, func(x_2, y), 1)));
+        For::make(y, 0, 5, Store::make(f, {x_2, y}, func(x_2, y))));
     Stmt* stmt = Block::make({stmt1, stmt2});
 
     std::ostringstream oss_ref;
@@ -549,7 +549,7 @@ TEST(LoopNest, ExprSplitWithTailNone) {
             x_inner,
             0,
             4,
-            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y), 1))))});
+            For::make(y, 0, 5, Store::make(f, {x_1, y}, func(x_1, y)))))});
 
     std::ostringstream oss_ref;
     oss_ref << *stmt;
@@ -826,7 +826,7 @@ TEST(LoopNest, ScheduleInlineSimple) {
       });
 
   LoopNest l1({y});
-  LoopNest l2({y});
+  LoopNest l2(l1);
   l2.computeInline(x->buf());
 
   l1.prepareForCodegen();
@@ -1156,7 +1156,7 @@ TEST(LoopNest, ScheduleInlineIntrinsics) {
   }
 
   LoopNest l1({y});
-  LoopNest l2({y});
+  LoopNest l2(l1);
   l2.computeInline(x->buf());
 
   l1.prepareForCodegen();
@@ -1228,7 +1228,6 @@ TEST(LoopNest, ScheduleSplitAThenInline) {
     return a->call(j + ExprHandle(8));
   });
 
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1247,7 +1246,6 @@ TEST(LoopNest, ScheduleSplitBThenInline) {
     return a->call(j + ExprHandle(8));
   });
 
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1275,8 +1273,6 @@ TEST(LoopNest, ScheduleSplitTwiceThenInline) {
   Tensor* b = Compute("b", {{2, "j"}}, [&](const VarHandle& j) {
     return a->call(j + ExprHandle(8));
   });
-
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1296,7 +1292,6 @@ TEST(LoopNest, ScheduleInlineThenSplit) {
     return a->call(j + ExprHandle(8));
   });
 
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1325,7 +1320,6 @@ TEST(LoopNest, ScheduleSplitInlineThenSplit) {
     return a->call(j + ExprHandle(8));
   });
 
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1357,7 +1351,6 @@ TEST(LoopNest, ScheduleSplitInlineSimplify) {
     return a->call(j) - ExprHandle(1);
   });
 
-  LoopNest loop({b});
   For* i_outer;
   For* i_inner;
 
@@ -1657,7 +1650,7 @@ TEST(LoopNest, LoopNestComputeAt_1) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (int i_b = 0; i_b < N; i_b++)
-# CHECK:   Allocate(temp, int, {1})
+# CHECK:   Allocate(temp); // dtype=int, dims=[1]
 # CHECK:   temp[
 # CHECK-NOT: A[
 # CHECK:   B[i_b] = temp[0]
@@ -1714,10 +1707,11 @@ TEST(LoopNest, LoopNestComputeAt_2) {
       c_ref[y * kW + x] = y * x + (y + 1) * x + y * (x + 1) + (y + 1) * (x + 1);
     }
   }
+  LoopNest orig_loopnest({c});
 
   {
     // First let's try to compute P at axis cy (the outer loop)
-    LoopNest l({c});
+    LoopNest l(orig_loopnest);
     std::vector<For*> loops = l.getLoopStmtsFor(c);
     l.computeAt(l.getLoopBodyFor(p), loops[0]);
     l.prepareForCodegen();
@@ -1730,7 +1724,7 @@ TEST(LoopNest, LoopNestComputeAt_2) {
     const std::string& verification_pattern =
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
-# CHECK:   Allocate(temp, int, {2 * (W + 1)})
+# CHECK:   Allocate(temp); // dtype=int, dims=[2, W + 1]
 # CHECK:   for
 # CHECK:     for
 # CHECK:   for (int cx = 0; cx < W; cx++)
@@ -1748,7 +1742,7 @@ TEST(LoopNest, LoopNestComputeAt_2) {
   }
   {
     // Now let's try to compute P at axis cx (the inner loop)
-    LoopNest l({c});
+    LoopNest l(orig_loopnest);
     std::vector<For*> loops = l.getLoopStmtsFor(c);
     l.computeAt(l.getLoopBodyFor(p), loops[1]);
     l.prepareForCodegen();
@@ -1762,7 +1756,7 @@ TEST(LoopNest, LoopNestComputeAt_2) {
         R"IR(
 # CHECK: for (int cy = 0; cy < H; cy++)
 # CHECK:   for (int cx = 0; cx < W; cx++)
-# CHECK:     Allocate(temp, int, {4})
+# CHECK:     Allocate(temp); // dtype=int, dims=[2, 2]
 # CHECK:     for
 # CHECK:       for
 # CHECK-NOT: prod[
@@ -1823,9 +1817,10 @@ TEST(LoopNest, LoopNestComputeAt_3) {
     }
   }
 
+  LoopNest orig_loopnest({D});
   {
     // First let's try to compute A at axis dy (the outer loop)
-    LoopNest l({D});
+    LoopNest l(orig_loopnest);
     std::vector<For*> loops = l.getLoopStmtsFor(D);
     l.computeAt(l.getLoopBodyFor(A), loops[0]);
     l.prepareForCodegen();
@@ -1847,7 +1842,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 # CHECK:   for (int cx = 0; cx < W; cx++)
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
-# CHECK:   Allocate(temp, int, {W})
+# CHECK:   Allocate(temp); // dtype=int, dims=[1, W]
 # CHECK:   for (int dx = 0; dx < W; dx++)
 # CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -1861,7 +1856,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
   }
   {
     // Now let's try to compute A at axis dx (the inner loop)
-    LoopNest l({D});
+    LoopNest l(orig_loopnest);
     std::vector<For*> loops = l.getLoopStmtsFor(D);
     l.computeAt(l.getLoopBodyFor(A), loops[1]);
     l.prepareForCodegen();
@@ -1884,7 +1879,7 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 # CHECK:     C[
 # CHECK: for (int dy = 0; dy < H; dy++)
 # CHECK:   for (int dx = 0; dx < W; dx++)
-# CHECK:     Allocate(temp, int, {1})
+# CHECK:     Allocate(temp); // dtype=int, dims=[1, 1]
 # CHECK-NOT: A[)IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
@@ -1895,10 +1890,6 @@ TEST(LoopNest, LoopNestComputeAt_3) {
 
     assertAllEqual(c_data, c_ref);
   }
-}
-
-TEST(LoopNest, LoopNestComputeAt_4) {
-  // TODO: Verify that computeAt works with reduction axis
 }
 
 class LoopOrderHelper : public IRVisitor {
@@ -2134,13 +2125,10 @@ TEST(LoopNest, LoopNestReorderExtraStatements) {
 
   VarHandle i = VarHandle(loops[0]->var());
 
-  Stmt* store_1 =
-      Store::make(BufHandle(extra.data()), {i, 0}, ExprHandle(1.f), 1);
-  Stmt* store_2 =
-      Store::make(BufHandle(extra.data()), {i, 1}, ExprHandle(2.f), 1);
+  Stmt* store_1 = Store::make(BufHandle(extra.data()), {i, 0}, ExprHandle(1.f));
+  Stmt* store_2 = Store::make(BufHandle(extra.data()), {i, 1}, ExprHandle(2.f));
   // stmt 3 is the Function body.
-  Stmt* store_3 =
-      Store::make(BufHandle(extra.data()), {i, 2}, ExprHandle(4.f), 1);
+  Stmt* store_3 = Store::make(BufHandle(extra.data()), {i, 2}, ExprHandle(4.f));
 
   loops[0]->body()->prepend_stmt(store_1);
   loops[1]->body()->prepend_stmt(store_2);
@@ -2606,8 +2594,9 @@ TEST(LoopNest, UnrollMultipleStatements) {
       x,
       0,
       kTotalSize,
-      Block::make({Store::make(a_buf, {x}, x * 2),
-                   Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1))}));
+      Block::make(
+          {Store::make(a_buf, {x}, x * 2),
+           Store::make(b_buf, {x}, Load::make(a_buf, {x}))}));
   Block::make({f});
   Stmt* unrolled = nullptr;
   LoopNest::unroll(f, &unrolled);
@@ -2622,6 +2611,47 @@ TEST(LoopNest, UnrollMultipleStatements) {
 # CHECK: A[2] = 4
 # CHECK: B[2] = A[2];)IR";
 
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(LoopNest, UnrollNonLiteralConstantBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 2 - 1; i < 12 / 3; i++) {
+  //     for (int j = 0; j < 4; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  BufHandle a_buf("A", {3, 4}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto inner_for = For::make(j, 0, 4, for_body);
+  auto outer_for = For::make(
+      i,
+      IntImm::make(2) - IntImm::make(1),
+      IntImm::make(12) / IntImm::make(3),
+      inner_for);
+  auto b = Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(loops[0], &unrolled);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int j = 0; j < 4; j++) {
+# CHECK:   A[1, j] = j;
+# CHECK: }
+# CHECK: for (int j = 0; j < 4; j++) {
+# CHECK:   A[2, j] = 2 * j;
+# CHECK: }
+# CHECK: for (int j = 0; j < 4; j++) {
+# CHECK:   A[3, j] = 3 * j;
+# CHECK: })IR";
+
+  std::ostringstream oss;
+  oss << *unrolled;
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
@@ -2658,9 +2688,10 @@ TEST(LoopNest, UnrollWithLet) {
       x,
       0,
       kTotalSize,
-      Block::make({Let::make(e, 7),
-                   Store::make(a_buf, {x}, e),
-                   Store::make(b_buf, {x}, e + 1)}));
+      Block::make(
+          {Let::make(e, 7),
+           Store::make(a_buf, {x}, e),
+           Store::make(b_buf, {x}, e + 1)}));
   Block::make({f});
   Stmt* unrolled = nullptr;
   LoopNest::unroll(f, &unrolled);
@@ -2700,9 +2731,9 @@ TEST(LoopNest, NormalizeStartPositive) {
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x})),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, 50, 100, for_body);
   Block::make({for_stmt});
 
@@ -2734,7 +2765,7 @@ TEST(LoopNest, NormalizeStartNegative) {
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
   auto for_body = Block::make(
-      {Store::make(a_buf, {x + 50}, Load::make(kInt, b_buf, {x + 50}, 1), 1),
+      {Store::make(a_buf, {x + 50}, Load::make(kInt, b_buf, {x + 50})),
        Store::make(b_buf, {x + 50}, x * 2)});
   auto for_stmt = For::make(x, -50, 100, for_body);
   Block::make({for_stmt});
@@ -2768,9 +2799,9 @@ TEST(LoopNest, NormalizeStartZero) {
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x})),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, 0, 100, for_body);
   Block::make({for_stmt});
 
@@ -2803,9 +2834,9 @@ TEST(LoopNest, NormalizeStartVariable) {
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x})),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, y, 100, for_body);
   Block::make({for_stmt});
 
@@ -2839,10 +2870,7 @@ TEST(LoopNest, NormalizeOnNestedOuterLoop) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   auto inner_for_body = Store::make(
-      a_buf,
-      {x},
-      Load::make(a_buf, {x}, 1) + Load::make(b_buf, {y}, 1) + y * 2,
-      1);
+      a_buf, {x}, Load::make(a_buf, {x}) + Load::make(b_buf, {y}) + y * 2);
   auto inner_for = For::make(y, 10, 100, inner_for_body);
   auto for_stmt = For::make(x, 50, 100, inner_for);
   Block::make({for_stmt});
@@ -2877,10 +2905,7 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   auto inner_for_body = Store::make(
-      a_buf,
-      {x},
-      Load::make(a_buf, {x}, 1) + Load::make(b_buf, {y}, 1) + y * 2,
-      1);
+      a_buf, {x}, Load::make(a_buf, {x}) + Load::make(b_buf, {y}) + y * 2);
   auto inner_for = For::make(y, 10, 100, inner_for_body);
   auto for_stmt = For::make(x, 50, 100, inner_for);
   Block::make({for_stmt});
@@ -2961,7 +2986,7 @@ TEST(LoopNest, FlattenSimpleLoopNest2D) {
   BufHandle a_buf("A", {10, 5}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
   auto inner_for = For::make(j, 0, 5, for_body);
   auto outer_for = For::make(i, 0, 10, inner_for);
   Block::make({outer_for});
@@ -3007,7 +3032,7 @@ TEST(LoopNest, FlattenSimpleLoopNest3D) {
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
-  auto for_body = Block::make({Store::make(a_buf, {i, j, k}, i + j * k, 1)});
+  auto for_body = Block::make({Store::make(a_buf, {i, j, k}, i + j * k)});
   auto for1 = For::make(k, 0, 7, for_body);
   auto for2 = For::make(j, 0, 5, for1);
   auto for3 = For::make(i, 0, 10, for2);
@@ -3051,7 +3076,7 @@ TEST(LoopNest, FlattenLoopNestAfterNormalize) {
   BufHandle a_buf("A", {8, 12}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto for_body = Block::make({Store::make(a_buf, {i - 2, j - 3}, i * j, 1)});
+  auto for_body = Block::make({Store::make(a_buf, {i - 2, j - 3}, i * j)});
   auto inner_for = For::make(j, 3, 15, for_body);
   auto outer_for = For::make(i, 2, 10, inner_for);
   Block::make({outer_for});
@@ -3082,6 +3107,51 @@ TEST(LoopNest, FlattenLoopNestAfterNormalize) {
   }
 }
 
+TEST(LoopNest, FlattenLoopNestWithNonLiteralConstantBounds) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 15-5; i++) {
+  //     for (int j = 0; j < 20/4; j++) {
+  //       A[i,j] = i * j;
+  //     }
+  //   }
+  BufHandle a_buf("A", {10, 5}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
+  auto inner_for =
+      For::make(j, 0, IntImm::make(20) / IntImm::make(4), for_body);
+  auto outer_for =
+      For::make(i, 0, IntImm::make(15) - IntImm::make(5), inner_for);
+  auto b = Block::make({outer_for});
+
+  std::vector<For*> loops = {outer_for, inner_for};
+  For* flattened = nullptr;
+  bool success = LoopNest::flatten(loops, &flattened);
+  ASSERT_TRUE(success);
+
+  auto result = IRSimplifier::simplify(flattened);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int i_flat = 0; i_flat < 50; i_flat++) {
+        # CHECK:   A[i_flat / 5, i_flat % 5] =
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  {
+    SimpleIREvaluator eval1(loops[0], {a_buf});
+    PaddedBuffer<int> inp1(10, 5);
+    eval1(inp1);
+    SimpleIREvaluator eval2(flattened, {a_buf});
+    PaddedBuffer<int> inp2(10, 5);
+    eval2(inp2);
+    ExpectAllNear(inp1, inp2, 1e-5);
+  }
+}
+
 TEST(LoopNest, FlattenImperfectLoopNest) {
   KernelScope kernel_scope;
 
@@ -3097,10 +3167,10 @@ TEST(LoopNest, FlattenImperfectLoopNest) {
   BufHandle a_buf("A", {10, 15}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto for_body = Block::make({Store::make(a_buf, {i, j}, i * j)});
   auto inner_for = For::make(j, 0, 15, for_body);
   auto outer_for = For::make(
-      i, 0, 10, Block::make({Store::make(a_buf, {i, i}, 0, 1), inner_for}));
+      i, 0, 10, Block::make({Store::make(a_buf, {i, i}, 0), inner_for}));
   Block::make({outer_for});
 
   std::vector<For*> loops = {outer_for, inner_for};
@@ -3138,13 +3208,10 @@ TEST(LoopNest, FlattenReductionLoopNest) {
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   auto for_body = Block::make({Store::make(
-      s_buf,
-      {i},
-      Load::make(s_buf, {i}, 1) + Load::make(a_buf, {i, j}, 1),
-      1)});
+      s_buf, {i}, Load::make(s_buf, {i}) + Load::make(a_buf, {i, j}))});
   auto inner_for = For::make(j, 0, 15, for_body);
-  auto outer_for = For::make(
-      i, 0, 10, Block::make({Store::make(s_buf, {i}, 0, 1), inner_for}));
+  auto outer_for =
+      For::make(i, 0, 10, Block::make({Store::make(s_buf, {i}, 0), inner_for}));
   Block::make({outer_for});
 
   std::vector<For*> loops = {outer_for, inner_for};
@@ -3213,11 +3280,11 @@ TEST(LoopNest, FlattenIncorrectLoopsAsInput) {
   VarHandle j("j", kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j)});
   auto inner_for1 = For::make(j, 0, 5, for_body1);
   auto outer_for1 = For::make(i, 0, 10, inner_for1);
   auto for_body2 = Block::make(
-      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}) + x + y)});
   auto inner_for2 = For::make(y, 0, 5, for_body2);
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   Block::make({outer_for1, outer_for2});
@@ -3286,14 +3353,14 @@ TEST(LoopNest, CacheReadsSimple) {
   // just this once: verify the whole thing.
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A, int, {4096});
+#CHECK: Allocate(A); // dtype=int, dims=[64, 64]
 #CHECK: for (int i
 #CHECK:  for (int j
 #CHECK:   A[
 #CHECK:  }
 #CHECK: }
 #CHECK: for (int i_1
-#CHECK:  Allocate(A_local, int, {10});
+#CHECK:  Allocate(A_local); // dtype=int, dims=[1, 10]
 #CHECK:  for (int j_1
 #CHECK:   A_local[j_1] = A[
 #CHECK:  }
@@ -3357,7 +3424,7 @@ TEST(LoopNest, CacheReadsOuter) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {231});
+#CHECK: Allocate(A_local); // dtype=int, dims=[21, 11]
 #CHECK: A_local[j_1 + 11 * i_1] =
 #CHECK: B[10 * i_2 + j_2] = (A_local[(j_2 + 11 * i_2) + 12]) + (A_local[j_2 + 11 * i_2]);
       )IR";
@@ -3408,7 +3475,7 @@ TEST(LoopNest, CacheReadsInternal) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {22});
+#CHECK: Allocate(A_local); // dtype=int, dims=[2, 11]
 #CHECK: A_local[j_1 + 11 * i_2] =
 #CHECK: B[10 * i_1 + j_2] = (A_local[j_2]) + (A_local[j_2 + 12]);
       )IR";
@@ -3460,7 +3527,7 @@ TEST(LoopNest, CacheReadsInner) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {10});
+#CHECK: Allocate(A_local); // dtype=int, dims=[5, 2]
 #CHECK: A_local[2 * i_2 + j_2] =
 #CHECK: B[10 * i_1 + j_1] = (A_local[8]) + (A_local[1]);
       )IR";
@@ -3512,7 +3579,7 @@ TEST(LoopNest, CacheWritesSimple) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(A_local, int, {64});
+#CHECK: Allocate(A_local); // dtype=int, dims=[1, 64]
 #CHECK: for (int j = 0; j < 64
 #CHECK:   A_local[j] = i * j;
 #CHECK: for (int j_1 = 0; j_1 < 64
@@ -3545,8 +3612,8 @@ TEST(LoopNest, DeadStoreElimination) {
   KernelScope kernel_scope;
   VarHandle y("y", kInt);
   VarHandle x("x_tail", kInt);
-  BufHandle f("f", {26, 5}, kFloat);
-  BufHandle g("g", {26, 5}, kFloat);
+  BufHandle f("f", {26, 5}, kInt);
+  BufHandle g("g", {26, 5}, kInt);
   ExprHandle x_outer_end = 5;
   ExprHandle x_2 = x + x_outer_end * 4;
   For* stmt1 = For::make(
@@ -3558,13 +3625,13 @@ TEST(LoopNest, DeadStoreElimination) {
           0,
           5,
           Block::make({
-              Store::make(f, {x_2, y}, (x_2 + y), 1),
-              Store::make(g, {x_2, y}, (x_2 * y), 1),
+              Store::make(f, {x_2, y}, (x_2 + y)),
+              Store::make(g, {x_2, y}, (x_2 * y)),
           })));
   Stmt* stmt = Block::make({stmt1});
 
   // Will eliminate if not used by an output.
-  LoopNest loop(stmt, {f.node()}, {}, {});
+  LoopNest loop(stmt, {f.node()});
   loop.eliminateDeadStores();
 
   std::ostringstream oss;
@@ -3578,7 +3645,7 @@ TEST(LoopNest, DeadStoreElimination) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 
   // But won't eliminate if used by different outputs.
-  LoopNest loop2(stmt, {f.node(), g.node()}, {}, {});
+  LoopNest loop2(stmt, {f.node(), g.node()});
   loop2.eliminateDeadStores();
 
   oss.clear();
@@ -3597,9 +3664,9 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
   VarHandle z("z", kInt);
-  BufHandle f("f", {26 * 5}, kFloat);
-  BufHandle g("g", {26 * 5}, kFloat);
-  BufHandle h("h", {26, 5}, kFloat);
+  BufHandle f("f", {26 * 5}, kInt);
+  BufHandle g("g", {26 * 5}, kInt);
+  BufHandle h("h", {26, 5}, kInt);
   ExprHandle x_outer_end = 5;
   ExprHandle x_2 = x + x_outer_end * 4;
   For* stmt1 = For::make(x, 0, 26 * 5, Store::make(f, {x}, x));
@@ -3613,13 +3680,13 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
           0,
           5,
           Block::make({
-              Store::make(h, {x, y}, Load::make(f, {x * y}, 1), 1),
+              Store::make(h, {x, y}, Load::make(f, {x * y})),
           })));
   Stmt* stmt = Block::make({stmt1, stmt2, stmt3});
 
   // Will eliminate the write to g, but not f since it used by the producer of
   // h.
-  LoopNest loop(stmt, {h.node()}, {}, {});
+  LoopNest loop(stmt, {h.node()});
   loop.eliminateDeadStores();
 
   std::ostringstream oss;
@@ -3634,7 +3701,7 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 
   // Sanity check won't eliminate if g is an output.
-  LoopNest loop2(stmt, {h.node(), g.node()}, {}, {});
+  LoopNest loop2(stmt, {h.node(), g.node()});
   loop2.eliminateDeadStores();
 
   oss.clear();
@@ -3657,16 +3724,16 @@ TEST(LoopNest, CompoundTensorSimple) {
   VarHandle j("j", kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j)});
   auto inner_for1 = For::make(j, 0, 5, for_body1);
   auto outer_for1 = For::make(i, 0, 10, inner_for1);
   auto for_body2 = Block::make(
-      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}) + x + y)});
   auto inner_for2 = For::make(y, 0, 5, for_body2);
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   Block* body = Block::make({outer_for1, outer_for2});
 
-  Tensor* A = new CompoundTensor(a_buf.node(), {i.node(), j.node()}, body);
+  Tensor* A = new Tensor(a_buf.node(), body);
 
   LoopNest l({A});
   l.prepareForCodegen();
@@ -3688,6 +3755,28 @@ TEST(LoopNest, CompoundTensorSimple) {
   assertAllEqual(a_data, a_ref);
 }
 
+TEST(LoopNest, InlineConstantIndex) {
+  KernelScope kernel_scope;
+  const int N = 10;
+  Placeholder x_buf("a", kFloat, {1, N, 1});
+  Tensor* y = Compute(
+      "f",
+      {{1, "m"}, {N, "n"}, {1, "o"}},
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
+        return x_buf.load(m, n, o);
+      });
+  Tensor* z = Compute(
+      "f",
+      {{1, "m"}, {N, "n"}, {1, "o"}},
+      [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& o) {
+        return y->call(m, n, o);
+      });
+
+  LoopNest l({z});
+  l.simplify();
+  ASSERT_TRUE(l.computeInline(y->buf()));
+}
+
 TEST(LoopNest, CompoundTensorUsed) {
   KernelScope kernel_scope;
 
@@ -3696,16 +3785,16 @@ TEST(LoopNest, CompoundTensorUsed) {
   VarHandle j("j", kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j, 1)});
+  auto for_body1 = Block::make({Store::make(a_buf, {i, j}, i * j)});
   auto inner_for1 = For::make(j, 0, 5, for_body1);
   auto outer_for1 = For::make(i, 0, 10, inner_for1);
   auto for_body2 = Block::make(
-      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}, 1) + x + y, 1)});
+      {Store::make(a_buf, {x, y}, Load::make(a_buf, {x, y}) + x + y)});
   auto inner_for2 = For::make(y, 0, 5, for_body2);
   auto outer_for2 = For::make(x, 0, 10, inner_for2);
   Block* body = Block::make({outer_for1, outer_for2});
 
-  Tensor* A = new CompoundTensor(a_buf.node(), {i.node(), j.node()}, body);
+  Tensor* A = new Tensor(a_buf.node(), body);
   Tensor* B = Compute(
       "B", {{10, "i"}, {3, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
         return A->call(i, j + 1) + A->call(i, j + 2);
@@ -3732,6 +3821,482 @@ TEST(LoopNest, CompoundTensorUsed) {
   cg.call({b_data});
 
   assertAllEqual(b_data, b_ref);
+}
+
+TEST(LoopNest, InlineFromLoad) {
+  KernelScope kernel_scope;
+
+  constexpr int N = 1024;
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  auto store_a = For::make(i, 0, N, Store::make(a, {i}, i, mask));
+  auto store_b =
+      For::make(j, 0, N, Store::make(b, {j}, Load::make(a, {j}, mask), mask));
+  LoopNest l(Block::make({store_a, store_b}), {b.node()});
+
+  l.computeInline(a.node());
+
+  // Check that A[j] is replaced with j after inlining
+  std::ostringstream oss;
+  oss << *l.root_stmt();
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: for (int j
+# CHECK-NOT: B[j] = A[j]
+# CHECK-NEXT: B[j] = j
+)IR",
+      oss.str());
+}
+
+static std::pair<std::unique_ptr<Placeholder>, Tensor*> colReduce(
+    int M,
+    int N) {
+  auto a =
+      std::make_unique<Placeholder>("a", kFloat, std::vector<ExprHandle>{M, N});
+  Tensor* t = Reduce(
+      "b",
+      {{N, "n"}},
+      Sum(),
+      [&](const VarHandle& n, const VarHandle& m) { return a->load(m, n); },
+      {{M, "m"}});
+  return {std::move(a), t};
+}
+
+static Stmt* splitTailReorder(Tensor* b) {
+  constexpr int kVectorWidth = 8;
+  For *outer, *inner, *tail;
+  LoopNest nest({b});
+  auto loops = nest.getLoopStmtsFor(b);
+  nest.splitWithTail(loops[0], kVectorWidth, &outer, &inner, &tail);
+  // Now the loopnests will look like:
+  //
+  // for (int n_outer = 0; ...
+  //   for (int n_inner = 0; ...
+  //     b[n_outer * 8 + n_inner] = float(0);
+  //     for (int m = 0; ...
+  //       b[n_outer * 8 + n_inner] = ReduceOp(...);
+  //
+  // for (int n_tail = 0; ...
+  //   b[n_tail + ((100 - 0) / 8) * 8] = float(0);
+  //   for (int m = 0; ...
+  //     b[n_tail + ((100 - 0) / 8) * 8] = ReduceOp(...);
+  //
+  // Since there are 4 writes to b, we will get 4 loopnests from the
+  // call to `getAllLoopNestsWritingToBuf` below.
+  //
+  // Write #2: "b[n_outer * 8 + n_inner] = ReduceOp(...)"
+  // Loopnest #2: {n_outer, n_inner, m};
+  // We will have to reorder n_inner and m.
+  auto loopnests = nest.getAllLoopNestsWritingToBuf(b->buf());
+  nest.reorderAxis(loopnests[1][1], loopnests[1][2]);
+  nest.prepareForCodegen();
+  return nest.root_stmt();
+}
+
+static Stmt* splitMaskReorder(Tensor* b) {
+  constexpr int kVectorWidth = 8;
+  For *outer, *inner;
+  LoopNest nest({b});
+  auto loops = nest.getLoopStmtsFor(b);
+  nest.splitWithMask(loops[0], kVectorWidth, &outer, &inner);
+  loops = nest.getLoopStmtsFor(b);
+  nest.reorderAxis(loops[1], loops[2]);
+  std::clog << *nest.root_stmt() << "\n";
+  nest.prepareForCodegen();
+  return nest.root_stmt();
+}
+
+static void checkColReduce(Stmt* s, Placeholder& p, Tensor* t) {
+  int M = immediateAs<int>(p.dim(0));
+  int N = immediateAs<int>(p.dim(1));
+  PaddedBuffer<float> a(M, N);
+  PaddedBuffer<float> b(N);
+  PaddedBuffer<float> ref(N);
+  for (int i = 0; i < M; i++) {
+    for (int j = 0; j < N; j++) {
+      a(i, j) = 1.0f;
+    }
+  }
+  for (int i = 0; i < N; i++) {
+    b(i) = 0.0f;
+  }
+  for (int i = 0; i < N; i++) {
+    ref(i) = 76.0f;
+  }
+  SimpleIREvaluator(s, {p, t}).call({a, b});
+  ExpectAllNear(b, ref, 1e-5);
+}
+
+TEST(LoopNest, ColReduceSplitTailEvenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 128;
+  auto p = colReduce(M, N);
+  Stmt* s = splitTailReorder(p.second);
+
+  std::ostringstream oss;
+  oss << *s;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int n_outer
+# CHECK-NEXT: for (int n_inner
+# CHECK-NEXT: b[
+# CHECK: for (int m
+# CHECK-NEXT: for (int n_inner
+# CHECK-NEXT: b[
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, ColReduceSplitTailUnevenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 100;
+  auto p = colReduce(M, N);
+  Stmt* s = splitTailReorder(p.second);
+
+  std::ostringstream oss;
+  oss << *s;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int n_outer
+# CHECK-NEXT: for (int n_inner
+# CHECK-NEXT: b[
+# CHECK: for (int m
+# CHECK-NEXT: for (int n_inner
+# CHECK-NEXT: b[
+# CHECK: for (int n_tail
+# CHECK-NEXT: b[
+# CHECK-NEXT: for (int m
+# CHECK-NEXT: b[
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, ColReduceSplitMaskEvenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 128;
+  auto p = colReduce(M, N);
+  Stmt* s = splitMaskReorder(p.second);
+  checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, DISABLED_ColReduceSplitMaskUnevenReorder) {
+  KernelScope kernel_scope;
+  constexpr int M = 76, N = 100;
+  auto p = colReduce(M, N);
+  Stmt* s = splitMaskReorder(p.second);
+  checkColReduce(s, *p.first, p.second);
+}
+
+TEST(LoopNest, DISABLED_VectorizeUse) {
+  KernelScope kernel_scope;
+  constexpr int N = 8;
+  Placeholder a("a", kFloat, {N});
+  Tensor* b = Compute(
+      "b", {{N, "n"}}, [&](const VarHandle& n) { return a.load(n) + 1.0f; });
+  Tensor* c = Compute(
+      "c", {{N, "n"}}, [&](const VarHandle& n) { return b->call(n) + 2.0f; });
+  LoopNest nest({c});
+  auto loops = nest.getLoopStmtsFor(b);
+  nest.vectorize(loops[0]);
+  loops = nest.getLoopStmtsFor(c);
+  nest.vectorize(loops[0]);
+  nest.prepareForCodegen();
+  Stmt* s = nest.root_stmt();
+  std::ostringstream oss;
+  oss << *nest.root_stmt();
+  torch::jit::testing::FileCheck().run(
+      R"IR(
+# CHECK: c[Ramp
+)IR",
+      oss.str());
+}
+
+const char* int64Loop = R"IR(
+{
+  for (int64_t n = 0; n < 12; n++) {
+    b[n] = (a[n]) + 1;
+  }
+}
+)IR";
+
+TEST(LoopNest, DISABLED_Int64Direct) {
+  KernelScope kernel_scope;
+
+  constexpr int64_t N = 12;
+  Placeholder a("a", kLong, {N});
+  Placeholder b("b", kLong, {N});
+  VarHandle n("n", kLong);
+  Stmt* s = For::make(n, 0, N, b.store({n}, a.load({n}) + LongImm::make(1l)));
+  s = IRSimplifier::simplify(s);
+  std::ostringstream oss;
+  oss << *s;
+  ASSERT_EQ(oss.str(), int64Loop);
+}
+
+TEST(LoopNest, DISABLED_Int64Compute) {
+  KernelScope kernel_scope;
+
+  constexpr int64_t N = 12;
+  Placeholder a("a", kLong, {N});
+  Tensor* b = Compute("b", {{N, "n"}}, [&](const VarHandle& n) {
+    return a.load(n) + LongImm::make(1l);
+  });
+  LoopNest nest({b});
+  nest.prepareForCodegen();
+  nest.simplify();
+  std::ostringstream oss;
+  oss << *nest.root_stmt();
+  ASSERT_EQ(oss.str(), int64Loop);
+}
+
+TEST(LoopNest, DistributeLoopWithAllStmtsAsPivots) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = 0;
+  //     for (int j = 0; j < 100; j++) {
+  //       A[i] = A[i] + i * j;
+  //     }
+  //     B[i] = A[i];
+  //     for (int k = 0; k < 50; k++) {
+  //       B[i] = B[i] + i * k;
+  //     }
+  //   }
+  BufHandle a_buf("A", {20}, kInt);
+  BufHandle b_buf("B", {20}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto initA = Store::make(a_buf, {i}, 0);
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          a_buf, {i}, Add::make(Load::make(a_buf, {i}), Mul::make(i, j))));
+  auto initB = Store::make(b_buf, {i}, Load::make(a_buf, {i}));
+  auto forK = For::make(
+      k,
+      0,
+      50,
+      Store::make(
+          b_buf, {i}, Add::make(Load::make(b_buf, {i}), Mul::make(i, k))));
+  auto forI = For::make(i, 0, 20, Block::make({initA, forJ, initB, forK}));
+  auto par = Block::make({forI});
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: A[i] = 0
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i] =
+# CHECK: for (int i
+# CHECK-NEXT: B[i] = A[i]
+# CHECK: for (int i
+# CHECK-NEXT: for (int k
+# CHECK-NEXT: B[i] =
+# CHECK-NOT: for (
+      )IR";
+
+  LoopNest nest(par, {a_buf.node(), b_buf.node()});
+  auto new_loops = LoopNest::distributeLoop(forI, {initA, forJ, initB});
+
+  std::ostringstream oss;
+  oss << *par;
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The first loop after distribution must be same as the original For.
+  ASSERT_EQ(new_loops.front(), forI);
+}
+
+TEST(LoopNest, DistributeLoopWithOneStmtAsPivot) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = 0;
+  //     for (int j = 0; j < 100; j++) {
+  //       A[i] = A[i] + i * j;
+  //     }
+  //     B[i] = A[i];
+  //     for (int k = 0; k < 50; k++) {
+  //       B[i] = B[i] + i * k;
+  //     }
+  //   }
+  BufHandle a_buf("A", {20}, kInt);
+  BufHandle b_buf("B", {20}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto initA = Store::make(a_buf, {i}, 0);
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          a_buf, {i}, Add::make(Load::make(a_buf, {i}), Mul::make(i, j))));
+  auto initB = Store::make(b_buf, {i}, Load::make(a_buf, {i}));
+  auto forK = For::make(
+      k,
+      0,
+      50,
+      Store::make(
+          b_buf, {i}, Add::make(Load::make(b_buf, {i}), Mul::make(i, k))));
+  auto forI = For::make(i, 0, 20, Block::make({initA, forJ, initB, forK}));
+  auto par = Block::make({forI});
+
+  LoopNest nest(par, {a_buf.node(), b_buf.node()});
+  auto new_loops = LoopNest::distributeLoop(forI, {forJ});
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: A[i] = 0
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i] =
+# CHECK: for (int i
+# CHECK-NEXT: B[i] = A[i]
+# CHECK-NEXT: for (int k
+# CHECK-NEXT: B[i] =
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The first loop after distribution must be same as the original For.
+  ASSERT_EQ(new_loops.front(), forI);
+}
+
+TEST(LoopNest, DistributeLoopWithoutAnyPivot) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = 0;
+  //     for (int j = 0; j < 100; j++) {
+  //       A[i] = A[i] + i * j;
+  //     }
+  //     B[i] = A[i];
+  //     for (int k = 0; k < 50; k++) {
+  //       B[i] = B[i] + i * k;
+  //     }
+  //   }
+  BufHandle a_buf("A", {20}, kInt);
+  BufHandle b_buf("B", {20}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto initA = Store::make(a_buf, {i}, 0);
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          a_buf, {i}, Add::make(Load::make(a_buf, {i}), Mul::make(i, j))));
+  auto initB = Store::make(b_buf, {i}, Load::make(a_buf, {i}));
+  auto forK = For::make(
+      k,
+      0,
+      50,
+      Store::make(
+          b_buf, {i}, Add::make(Load::make(b_buf, {i}), Mul::make(i, k))));
+  auto forI = For::make(i, 0, 20, Block::make({initA, forJ, initB, forK}));
+  auto par = Block::make({forI});
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: A[i] = 0
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i] =
+# CHECK: for (int i
+# CHECK-NEXT: B[i] = A[i]
+# CHECK: for (int i
+# CHECK-NEXT: for (int k
+# CHECK-NEXT: B[i] =
+# CHECK-NOT: for (
+      )IR";
+
+  LoopNest nest(par, {a_buf.node(), b_buf.node()});
+  auto new_loops = LoopNest::distributeLoop(forI);
+
+  std::ostringstream oss;
+  oss << *par;
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The first loop after distribution must be same as the original For.
+  ASSERT_EQ(new_loops.front(), forI);
+}
+
+TEST(LoopNest, DistributeLoopOverInnerLoops) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     A[i] = 0;
+  //     for (int j = 0; j < 100; j++) {
+  //       A[i] = A[i] + i * j;
+  //     }
+  //     B[i] = A[i];
+  //     for (int k = 0; k < 50; k++) {
+  //       B[i] = B[i] + i * k;
+  //     }
+  //   }
+  BufHandle a_buf("A", {20}, kInt);
+  BufHandle b_buf("B", {20}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto initA = Store::make(a_buf, {i}, 0);
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          a_buf, {i}, Add::make(Load::make(a_buf, {i}), Mul::make(i, j))));
+  auto initB = Store::make(b_buf, {i}, Load::make(a_buf, {i}));
+  auto forK = For::make(
+      k,
+      0,
+      50,
+      Store::make(
+          b_buf, {i}, Add::make(Load::make(b_buf, {i}), Mul::make(i, k))));
+  auto forI = For::make(i, 0, 20, Block::make({initA, forJ, initB, forK}));
+  auto par = Block::make({forI});
+
+  LoopNest nest(par, {a_buf.node(), b_buf.node()});
+  auto new_loops = LoopNest::distributeLoopOverInnerLoops(forI);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: A[i] = 0
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[i] =
+# CHECK: for (int i
+# CHECK-NEXT: B[i] = A[i]
+# CHECK-NEXT: for (int k
+# CHECK-NEXT: B[i] =
+# CHECK-NOT: for (
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // The first loop after distribution must be same as the original For.
+  ASSERT_EQ(new_loops.front(), forI);
 }
 
 } // namespace jit

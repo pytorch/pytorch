@@ -23,10 +23,17 @@ at::DynamicLibrary& getNVRTCLibrary() {
   constexpr auto minor = ( CUDA_VERSION / 10 ) % 10;
 #if defined(_WIN32)
   auto libname = std::string("nvrtc64_") + std::to_string(major) + std::to_string(minor) + "_0.dll";
+  std::string alt_libname;
 #else
-  static auto libname = std::string("libnvrtc.so.") + std::to_string(major) + "." + std::to_string(minor);
+  static auto lib_version = std::to_string(major) + "." + std::to_string(minor);
+  static auto libname = std::string("libnvrtc.so.") + lib_version;
+#ifdef NVRTC_SHORTHASH
+  static auto alt_libname = std::string("libnvrtc-") + C10_STRINGIZE(NVRTC_SHORTHASH) + ".so." + lib_version;
+#else
+  std::string alt_libname;
 #endif
-  static at::DynamicLibrary lib(libname.c_str());
+#endif
+  static at::DynamicLibrary lib(libname.c_str(), alt_libname.empty() ? nullptr : alt_libname.c_str());
   return lib;
 }
 
@@ -94,6 +101,10 @@ nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog,
 NVRTC_STUB1(nvrtcDestroyProgram, nvrtcProgram *);
 NVRTC_STUB2(nvrtcGetPTXSize, nvrtcProgram, size_t *);
 NVRTC_STUB2(nvrtcGetPTX, nvrtcProgram, char *);
+#if CUDA_VERSION >= 11010
+NVRTC_STUB2(nvrtcGetCUBINSize, nvrtcProgram, size_t *);
+NVRTC_STUB2(nvrtcGetCUBIN, nvrtcProgram, char *);
+#endif
 NVRTC_STUB3(nvrtcCompileProgram, nvrtcProgram, int, const char * const *);
 _STUB_1(NVRTC, nvrtcGetErrorString, const char *, nvrtcResult);
 NVRTC_STUB2(nvrtcGetProgramLogSize,nvrtcProgram, size_t*);

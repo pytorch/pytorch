@@ -15,7 +15,7 @@
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
-  auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch.tensor"));
+  auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch._tensor"));
   if (!tensor_module)
     return nullptr;
 
@@ -39,6 +39,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   auto _C_m = py::handle(torch_C_module).cast<py::module>();
   auto m = _C_m.def_submodule("_autograd", "autograd bindings");
 
+  auto parameter_module = THPObjectPtr(PyImport_ImportModule("torch.nn.parameter"));
+  if (!parameter_module)
+    return nullptr;
+
+  // NOTE: "leaks" ParameterClass
+  ParameterClass = PyObject_GetAttrString(parameter_module, "Parameter");
+  if (!ParameterClass)
+    return nullptr;
 
   py::enum_<ProfilerState>(m, "ProfilerState")
       .value("Disabled", ProfilerState::Disabled)
@@ -87,6 +95,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("FPGA", c10::DeviceType::FPGA)
       .value("MSNPU", c10::DeviceType::MSNPU)
       .value("XLA", c10::DeviceType::XLA)
+      .value("MLC", c10::DeviceType::MLC)
+      .value("Meta", c10::DeviceType::Meta)
       .value("Vulkan", c10::DeviceType::Vulkan)
       .value("Metal", c10::DeviceType::Metal);
 
@@ -151,7 +161,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.deviceType();
       })
       // correlation id of a linked event
-      .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId);
+      .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId)
+      // compute flops
+      .def("flops", [](const KinetoEvent& e) {
+        return e.flops();
+      });
 
   py::class_<ProfilerResult>(m, "ProfilerResult")
     .def("events", &ProfilerResult::events)

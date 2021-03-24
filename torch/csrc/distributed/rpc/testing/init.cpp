@@ -22,11 +22,12 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
   // python module torch._C._distributed_rpc_testing
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
   if (!torch_C_module) {
-      throw python_error();
+    throw python_error();
   }
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
-  auto m = torch_C_m.def_submodule("_distributed_rpc_testing", "distributed rpc testing bindings");
+  auto m = torch_C_m.def_submodule(
+      "_distributed_rpc_testing", "distributed rpc testing bindings");
   auto module = py::handle(m).cast<py::module>();
 
   // Import the rpc_module so we can subclass ProcessGroupAgent
@@ -66,6 +67,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       module, "FaultyProcessGroupAgent", rpc_module.attr("ProcessGroupAgent"))
       .def(
           py::init<
+              const c10::intrusive_ptr<::c10d::Store>,
               std::string,
               c10::intrusive_ptr<::c10d::ProcessGroup>,
               int,
@@ -73,6 +75,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
               const std::vector<std::string>&,
               const std::unordered_map<std::string, float>&,
               int>(),
+          py::arg("store"),
           py::arg("name"),
           py::arg("process_group"),
           py::arg("num_send_recv_threads"),
@@ -83,19 +86,20 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       .def(
           "join",
           &ProcessGroupAgent::join,
-          py::call_guard<py::gil_scoped_release>())
+          py::call_guard<py::gil_scoped_release>(),
+          py::arg("shutdown") = false)
       .def(
           "shutdown",
           &ProcessGroupAgent::shutdown,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
+          (const WorkerInfo& (ProcessGroupAgent::*)(void) const) &
               RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
+          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&) const) &
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -115,10 +119,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
 } // namespace
 
 static PyMethodDef methods[] = { // NOLINT
-    {"_faulty_agent_init",
-     faulty_agent_init,
-     METH_NOARGS,
-     nullptr},
+    {"_faulty_agent_init", faulty_agent_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

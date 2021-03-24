@@ -16,7 +16,16 @@ namespace c10d {
 
 namespace {
 
-enum class QueryType : uint8_t { SET, GET, ADD, CHECK, WAIT, GETNUMKEYS, DELETE_KEY };
+enum class QueryType : uint8_t {
+  SET,
+  COMPARE_SET,
+  GET,
+  ADD,
+  CHECK,
+  WAIT,
+  GETNUMKEYS,
+  DELETE_KEY
+};
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
@@ -116,6 +125,9 @@ void TCPStoreDaemon::query(int socket) {
   if (qt == QueryType::SET) {
     setHandler(socket);
 
+  } else if (qt == QueryType::COMPARE_SET) {
+    compareSetHandler(socket);
+
   } else if (qt == QueryType::ADD) {
     addHandler(socket);
 
@@ -157,6 +169,24 @@ void TCPStoreDaemon::setHandler(int socket) {
   tcpStore_[key] = tcputil::recvVector<uint8_t>(socket);
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
+}
+
+void TCPStoreDaemon::compareSetHandler(int socket) {
+  std::string key = tcputil::recvString(socket);
+  std::vector<uint8_t> currentValue = tcputil::recvVector<uint8_t>(socket);
+  std::vector<uint8_t> newValue = tcputil::recvVector<uint8_t>(socket);
+
+  auto pos = tcpStore_.find(key);
+  if (pos == tcpStore_.end()) {
+    // TODO: This code path is not ideal as we are "lying" to the caller in case
+    // the key does not exist. We should come up with a working solution.
+    tcputil::sendVector<uint8_t>(socket, currentValue);
+  } else {
+    if (pos->second == currentValue) {
+      pos->second = std::move(newValue);
+    }
+    tcputil::sendVector<uint8_t>(socket, pos->second);
+  }
 }
 
 void TCPStoreDaemon::addHandler(int socket) {
@@ -218,10 +248,15 @@ void TCPStoreDaemon::waitHandler(int socket) {
     tcputil::sendValue<WaitResponseType>(
         socket, WaitResponseType::STOP_WAITING);
   } else {
+    int numKeysToAwait = 0;
     for (auto& key : keys) {
-      waitingSockets_[key].push_back(socket);
+      // Only count keys that have not already been set
+      if (tcpStore_.find(key) == tcpStore_.end()) {
+        waitingSockets_[key].push_back(socket);
+        numKeysToAwait++;
+      }
     }
-    keysAwaited_[socket] = keys.size();
+    keysAwaited_[socket] = numKeysToAwait;
   }
 }
 
@@ -366,7 +401,7 @@ void TCPStoreDaemon::run() {
 TCPStore::TCPStore(
     const std::string& masterAddr,
     PortType masterPort,
-    int numWorkers,
+    c10::optional<int> numWorkers,
     bool isServer,
     const std::chrono::milliseconds& timeout,
     bool waitWorkers)
@@ -381,15 +416,24 @@ TCPStore::TCPStore(
   if (isServer_) {
     // Opening up the listening socket
     std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(masterPort);
-    // Now start the daemon
-    tcpStoreDaemon_ = std::unique_ptr<TCPStoreDaemon>(
-        new TCPStoreDaemon(masterListenSocket_));
   }
-  // Connect to the daemon
-  storeSocket_ = tcputil::connect(
-      tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-  if (waitWorkers) {
-    waitForWorkers();
+  try {
+      if (isServer_) {
+        // Now start the daemon
+        tcpStoreDaemon_ = std::make_unique<TCPStoreDaemon>(masterListenSocket_);
+      }
+      // Connect to the daemon
+      storeSocket_ = tcputil::connect(
+          tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
+      if (numWorkers.value_or(-1) >= 0 && waitWorkers) {
+        waitForWorkers();
+      }
+  } catch (const std::exception&) {
+    if (isServer_) {
+        tcpStoreDaemon_ = nullptr;
+        tcputil::closeSocket(masterListenSocket_);
+    }
+    throw;
   }
 }
 
@@ -398,7 +442,7 @@ TCPStore::~TCPStore() {
   if (isServer_) {
     // Store daemon should end because of closed connection.
     // daemon destructor should join the thread
-    tcpStoreDaemon_.reset(nullptr);
+    tcpStoreDaemon_ = nullptr;
     tcputil::closeSocket(masterListenSocket_);
   }
 }
@@ -414,7 +458,7 @@ void TCPStore::waitForWorkers() {
       auto buf = reinterpret_cast<const char*>(value.data());
       auto len = value.size();
       int numWorkersCompleted = std::stoi(std::string(buf, len));
-      if (numWorkersCompleted >= numWorkers_) {
+      if (numWorkersCompleted >= numWorkers_.value_or(-1)) {
         break;
       }
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -433,6 +477,18 @@ void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::SET);
   tcputil::sendString(storeSocket_, regKey, true);
   tcputil::sendVector<uint8_t>(storeSocket_, data);
+}
+
+std::vector<uint8_t> TCPStore::compareSet(
+    const std::string& key,
+    const std::vector<uint8_t>& currentValue,
+    const std::vector<uint8_t>& newValue) {
+  std::string regKey = regularPrefix_ + key;
+  tcputil::sendValue<QueryType>(storeSocket_, QueryType::COMPARE_SET);
+  tcputil::sendString(storeSocket_, regKey, true);
+  tcputil::sendVector<uint8_t>(storeSocket_, currentValue);
+  tcputil::sendVector<uint8_t>(storeSocket_, newValue);
+  return tcputil::recvVector<uint8_t>(storeSocket_);
 }
 
 std::vector<uint8_t> TCPStore::get(const std::string& key) {
@@ -455,7 +511,7 @@ int64_t TCPStore::add(const std::string& key, int64_t value) {
 bool TCPStore::deleteKey(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::DELETE_KEY);
-  tcputil::sendString(storeSocket_, regKey, true);
+  tcputil::sendString(storeSocket_, regKey);
   auto numDeleted = tcputil::recvValue<int64_t>(storeSocket_);
   return (numDeleted == 1);
 }
@@ -536,7 +592,11 @@ void TCPStore::waitHelper_(
   }
 }
 
-PortType TCPStore::getPort() {
+const std::string& TCPStore::getHost() const noexcept {
+  return tcpStoreAddr_;
+}
+
+PortType TCPStore::getPort() const noexcept {
   return tcpStorePort_;
 }
 

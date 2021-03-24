@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+
 #include <ATen/ATen.h>
 
 namespace torch {
@@ -186,8 +187,9 @@ void listUnpack(Stack& stack, size_t num_outputs) {
 }
 
 void tupleConstruct(Stack& stack, size_t num_inputs) {
-  std::vector<IValue> elems{std::make_move_iterator(stack.end() - num_inputs),
-                            std::make_move_iterator(stack.end())};
+  std::vector<IValue> elems{
+      std::make_move_iterator(stack.end() - num_inputs),
+      std::make_move_iterator(stack.end())};
   drop(stack, num_inputs);
   push(stack, c10::ivalue::Tuple::create(std::move(elems)));
 }
@@ -196,8 +198,9 @@ void namedTupleConstruct(
     Stack& stack,
     at::TupleTypePtr type,
     size_t num_inputs) {
-  std::vector<IValue> elems{std::make_move_iterator(stack.end() - num_inputs),
-                            std::make_move_iterator(stack.end())};
+  std::vector<IValue> elems{
+      std::make_move_iterator(stack.end() - num_inputs),
+      std::make_move_iterator(stack.end())};
   drop(stack, num_inputs);
   push(
       stack,
@@ -213,7 +216,7 @@ void listConstruct(Stack& stack, const at::ListType& type, size_t num_inputs) {
         c10::List<IValue> vals(type.getElementType());
         vals.reserve(num_inputs);
         for (size_t i = stack.size() - num_inputs; i < stack.size(); ++i) {
-          vals.emplace_back(std::move(stack[i]));
+          vals.push_back(std::move(stack[i]));
         }
         drop(stack, num_inputs);
         return vals;

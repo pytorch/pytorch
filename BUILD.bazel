@@ -134,8 +134,12 @@ genrule(
         "aten/src/ATen/RegisterMeta.cpp",
         "aten/src/ATen/RegisterDefaultBackend.cpp",
         "aten/src/ATen/RegisterSchema.cpp",
+        "aten/src/ATen/CPUFunctions.h",
+        "aten/src/ATen/CUDAFunctions.h",
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
+        "aten/src/ATen/RedispatchFunctions.h",
+        "aten/src/ATen/RedispatchFunctions.cpp",
         "aten/src/ATen/NativeFunctions.h",
         "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/core/TensorBody.h",
@@ -190,6 +194,9 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/TraceType_3.cpp",
         "torch/csrc/autograd/generated/TraceType_4.cpp",
         # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
+        "torch/csrc/autograd/generated/InplaceOrViewType_0.cpp",
+        "torch/csrc/autograd/generated/InplaceOrViewType_1.cpp",
+        # "torch/csrc/autograd/generated/InplaceOrViewTypeEverything.cpp",
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
@@ -203,6 +210,7 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+        "torch/csrc/autograd/generated/python_special_functions.cpp",
 ]
 
 genrule(
@@ -324,9 +332,6 @@ filegroup(
         "aten/src/TH/THTensorLapack.cpp",
         "aten/src/TH/THTensorMath.cpp",
         "aten/src/TH/THTensorMoreMath.cpp",
-        "aten/src/TH/THTensorRandom.cpp",
-        "aten/src/TH/THVector.cpp",
-        "aten/src/TH/vector/AVX.cpp",
     ],
 )
 
@@ -348,7 +353,6 @@ filegroup(
         "aten/src/ATen/cudnn/Handle.cpp",
         "aten/src/ATen/cudnn/Types.cpp",
         "aten/src/ATen/native/cuda/CUDAUnaryOps.cpp",
-        "aten/src/ATen/native/cuda/LegacyDefinitions.cpp",
         "aten/src/ATen/native/cuda/TensorShapeCUDA.cpp",
         "aten/src/ATen/native/cudnn/AffineGridGenerator.cpp",
         "aten/src/ATen/native/cudnn/BatchNorm.cpp",
@@ -384,20 +388,9 @@ filegroup(
         "aten/src/THC/THCTensorMathReduce.cu.cc",
         "aten/src/THC/THCTensorMathScan.cu.cc",
         "aten/src/THC/THCTensorMode.cu.cc",
-        "aten/src/THC/THCTensorRandom.cu.cc",
         "aten/src/THC/THCTensorScatterGather.cu.cc",
         "aten/src/THC/THCTensorSort.cu.cc",
         "aten/src/THC/THCTensorTopK.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedBFloat16.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedBool.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedByte.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedChar.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedDouble.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedFloat.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedHalf.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedInt.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedLong.cu.cc",
-        "aten/src/THC/generated/THCTensorMaskedShort.cu.cc",
         "aten/src/THC/generated/THCTensorMathPointwiseBool.cu.cc",
         "aten/src/THC/generated/THCTensorMathPointwiseByte.cu.cc",
         "aten/src/THC/generated/THCTensorMathPointwiseChar.cu.cc",
@@ -1362,6 +1355,7 @@ filegroup(
         "caffe2/utils/threadpool/ThreadPool.cc",
         "caffe2/utils/threadpool/pthreadpool.cc",
         "caffe2/utils/threadpool/pthreadpool_impl.cc",
+        "caffe2/utils/threadpool/thread_pool_guard.cpp",
     ],
 )
 
@@ -1867,6 +1861,19 @@ cc_library(
 )
 
 # torch
+py_binary(
+    name = "gen_version_header",
+    srcs = ["tools/setup_helpers/gen_version_header.py"],
+)
+
+genrule(
+    name = "version_h",
+    srcs = ["torch/csrc/api/include/torch/version.h.in", "version.txt"],
+    outs = ["torch/csrc/api/include/torch/version.h"],
+    cmd = "$(location :gen_version_header) --template-path $(location torch/csrc/api/include/torch/version.h.in) --version-path $(location version.txt) --output-path $@",
+    tools = [':gen_version_header']
+)
+
 torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
 cc_library(
     name = "torch_headers",
@@ -1887,7 +1894,7 @@ cc_library(
             "torch/csrc/autograd/generated/variable_factories.h",
             "torch/csrc/autograd/generated/Functions.h",
         ] + torch_cuda_headers,
-    ) + [":cpp_generated_code"],
+    ) + [":cpp_generated_code", ":version_h"],
     includes = [
         "torch/csrc",
         "torch/csrc/api/include",

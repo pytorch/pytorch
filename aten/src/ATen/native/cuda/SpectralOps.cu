@@ -12,6 +12,7 @@
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
+#include <c10/util/accumulate.h>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
@@ -19,8 +20,10 @@
 #include <thrust/unique.h>
 #include <cufft.h>
 #include <cufftXt.h>
-#include <vector>
+
 #include <cmath>
+#include <vector>
+
 
 namespace at { namespace native {
 
@@ -116,7 +119,7 @@ void _fft_fill_with_conjugate_symmetry_cuda_(
   HermitianSymmetryOffsetCalculator<int64_t> output_offset_calculator(
       signal_half_sizes, out_strides, mirror_dims, element_size);
 
-  const auto numel = at::prod_intlist(signal_half_sizes);
+  const auto numel = c10::multiply_integers(signal_half_sizes);
   AT_DISPATCH_COMPLEX_TYPES(dtype, "_fft_fill_with_conjugate_symmetry", [&] {
         using namespace cuda::detail;
         _fft_conjugate_copy_kernel<<<
@@ -147,13 +150,13 @@ static void exec_cufft_plan(
         return;
       }
       case CuFFTTransformType::R2C: {
-        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(in_data),
-                                  static_cast<hipfftReal*>(out_data)));
+        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(in_data),
+                                  static_cast<hipfftComplex*>(out_data)));
         return;
       }
       case CuFFTTransformType::C2R: {
-        CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(in_data),
-                                  static_cast<hipfftComplex*>(out_data)));
+        CUFFT_CHECK(hipfftExecC2R(plan, static_cast<hipfftComplex*>(in_data),
+                                  static_cast<hipfftReal*>(out_data)));
         return;
       }
     }
@@ -253,7 +256,7 @@ static inline Tensor _run_cufft(
   // rescale if requested
   auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];
   if (norm != fft_norm_mode::none) {
-    auto signal_numel = at::prod_intlist(checked_signal_sizes);
+    auto signal_numel = c10::multiply_integers(checked_signal_sizes);
     double scale_denom;
     if (norm == fft_norm_mode::by_root_n) {
       scale_denom = std::sqrt(static_cast<double>(signal_numel));
@@ -533,8 +536,8 @@ Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   return output;
 }
 
-Tensor& _fft_r2c_cufft_out(Tensor& out, const Tensor& self, IntArrayRef dim,
-                           int64_t normalization, bool onesided) {
+Tensor& _fft_r2c_cufft_out(const Tensor& self, IntArrayRef dim,
+                           int64_t normalization, bool onesided, Tensor& out) {
   auto result = _fft_r2c_cufft(self, dim, static_cast<int64_t>(fft_norm_mode::none), /*onesided=*/true);
   if (onesided) {
     return _fft_apply_normalization_out(out, result, normalization, self.sizes(), dim);
@@ -575,8 +578,8 @@ Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   return _fft_apply_normalization(output, normalization, out_sizes, dim);
 }
 
-Tensor& _fft_c2r_cufft_out(Tensor& out, const Tensor& self, IntArrayRef dim,
-                           int64_t normalization, int64_t lastdim) {
+Tensor& _fft_c2r_cufft_out(const Tensor& self, IntArrayRef dim,
+                           int64_t normalization, int64_t lastdim, Tensor& out) {
   auto result = _fft_c2r_cufft(self, dim, static_cast<int64_t>(fft_norm_mode::none), lastdim);
   return _fft_apply_normalization_out(out, result, normalization, result.sizes(), dim);
 }
@@ -622,8 +625,8 @@ Tensor _fft_c2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   return _fft_apply_normalization(output, normalization, out_sizes, dim);
 }
 
-Tensor& _fft_c2c_cufft_out(Tensor& out, const Tensor& self, IntArrayRef dim,
-                           int64_t normalization, bool forward) {
+Tensor& _fft_c2c_cufft_out(const Tensor& self, IntArrayRef dim,
+                           int64_t normalization, bool forward, Tensor& out) {
   auto result = _fft_c2c_cufft(self, dim, static_cast<int64_t>(fft_norm_mode::none), forward);
   return _fft_apply_normalization_out(out, result, normalization, result.sizes(), dim);
 }

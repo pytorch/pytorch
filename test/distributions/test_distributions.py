@@ -36,9 +36,10 @@ import torch
 torch.set_default_dtype(torch.double)
 
 from torch._six import inf
-from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests, \
+    gradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.autograd import grad, gradcheck
+from torch.autograd import grad
 from torch.autograd.functional import jacobian
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
@@ -587,6 +588,20 @@ BAD_EXAMPLES = [
         {'scale': torch.tensor([0., 1.], requires_grad=True)},
         {'scale': torch.tensor([1., -1.], requires_grad=True)},
     ]),
+    Example(LKJCholesky, [
+        {
+            'dim': -2,
+            'concentration': 0.1
+        },
+        {
+            'dim': 1,
+            'concentration': 2.,
+        },
+        {
+            'dim': 2,
+            'concentration': 0.,
+        },
+    ]),
     Example(Laplace, [
         {
             'loc': torch.tensor([1., 1.], requires_grad=True),
@@ -877,6 +892,22 @@ class TestDistributions(TestCase):
                     and Dist is not Distribution and Dist is not ExponentialFamily:
                 self.assertIn(Dist, distributions_with_examples,
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
+
+    def test_support_attributes(self):
+        for Dist, params in EXAMPLES:
+            for param in params:
+                d = Dist(**param)
+                event_dim = len(d.event_shape)
+                self.assertEqual(d.support.event_dim, event_dim)
+                try:
+                    self.assertEqual(Dist.support.event_dim, event_dim)
+                except NotImplementedError:
+                    pass
+                is_discrete = d.support.is_discrete
+                try:
+                    self.assertEqual(Dist.support.is_discrete, is_discrete)
+                except NotImplementedError:
+                    pass
 
     def test_distribution_expand(self):
         shapes = [torch.Size(), torch.Size((2,)), torch.Size((2, 1))]
@@ -1359,7 +1390,7 @@ class TestDistributions(TestCase):
         self.assertFalse(RelaxedOneHotCategorical(probs=p, temperature=temp).sample().requires_grad)
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample((2, 2)).size(), (2, 2, 3))
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample((1,)).size(), (1, 3))
-        self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp, p))
+        self._gradcheck_log_prob(lambda t, p: RelaxedOneHotCategorical(t, p, validate_args=False), (temp, p))
 
     def test_relaxed_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
@@ -1373,8 +1404,8 @@ class TestDistributions(TestCase):
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample().size(), (2, 3))
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample((6,)).size(), (6, 2, 3))
-        self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp, p))
-        self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp_2, p))
+        self._gradcheck_log_prob(lambda t, p: RelaxedOneHotCategorical(t, p, validate_args=False), (temp, p))
+        self._gradcheck_log_prob(lambda t, p: RelaxedOneHotCategorical(t, p, validate_args=False), (temp_2, p))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_argmax_relaxed_categorical(self):
@@ -1495,7 +1526,7 @@ class TestDistributions(TestCase):
     def test_halfcauchy(self):
         scale = torch.ones(5, 5, requires_grad=True)
         scale_1d = torch.ones(1, requires_grad=True)
-        self.assertTrue(is_all_nan(HalfCauchy(scale_1d).mean))
+        self.assertTrue(torch.isinf(HalfCauchy(scale_1d).mean).all())
         self.assertEqual(HalfCauchy(scale_1d).variance, inf)
         self.assertEqual(HalfCauchy(scale).sample().size(), (5, 5))
         self.assertEqual(HalfCauchy(scale).sample((7,)).size(), (7, 5, 5))
@@ -1610,18 +1641,19 @@ class TestDistributions(TestCase):
                                         'LogNormal(loc={}, scale={})'.format(mean, std))
 
     def test_logisticnormal(self):
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         mean = torch.randn(5, 5).requires_grad_()
         std = torch.randn(5, 5).abs().requires_grad_()
         mean_1d = torch.randn(1).requires_grad_()
-        std_1d = torch.randn(1).requires_grad_()
+        std_1d = torch.randn(1).abs().requires_grad_()
         mean_delta = torch.tensor([1.0, 0.0])
         std_delta = torch.tensor([1e-5, 1e-5])
         self.assertEqual(LogisticNormal(mean, std).sample().size(), (5, 6))
         self.assertEqual(LogisticNormal(mean, std).sample((7,)).size(), (7, 5, 6))
         self.assertEqual(LogisticNormal(mean_1d, std_1d).sample((1,)).size(), (1, 2))
         self.assertEqual(LogisticNormal(mean_1d, std_1d).sample().size(), (2,))
-        self.assertEqual(LogisticNormal(0.2, .6).sample((1,)).size(), (2,))
-        self.assertEqual(LogisticNormal(-0.7, 50.0).sample((1,)).size(), (2,))
+        self.assertEqual(LogisticNormal(0.2, .6).sample().size(), (2,))
+        self.assertEqual(LogisticNormal(-0.7, 50.0).sample().size(), (2,))
 
         # sample check for extreme value of mean, std
         set_rng_seed(1)
@@ -1631,9 +1663,11 @@ class TestDistributions(TestCase):
                                        1. / (1. + 1. + math.exp(1))]),
                          atol=1e-4, rtol=0)
 
-        self._gradcheck_log_prob(LogisticNormal, (mean, std))
-        self._gradcheck_log_prob(LogisticNormal, (mean, 1.0))
-        self._gradcheck_log_prob(LogisticNormal, (0.0, std))
+        # TODO: gradcheck seems to mutate the sample values so that the simplex
+        # constraint fails by a very small margin.
+        self._gradcheck_log_prob(lambda m, s: LogisticNormal(m, s, validate_args=False), (mean, std))
+        self._gradcheck_log_prob(lambda m, s: LogisticNormal(m, s, validate_args=False), (mean, 1.0))
+        self._gradcheck_log_prob(lambda m, s: LogisticNormal(m, s, validate_args=False), (0.0, std))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_logisticnormal_logprob(self):
@@ -2561,7 +2595,7 @@ class TestDistributions(TestCase):
 
         for dim in range(2, 5):
             log_probs = []
-            lkj = LKJCholesky(dim, concentration=1.)
+            lkj = LKJCholesky(dim, concentration=1., validate_args=True)
             for i in range(2):
                 sample = lkj.sample()
                 sample_tril = tril_matrix_to_vec(sample, diag=-1)
@@ -2574,6 +2608,8 @@ class TestDistributions(TestCase):
                 # for dim=2, pdf = 0.5 (jacobian adjustment factor is 0.)
                 self.assertTrue(all([x == torch.tensor(0.5).log() for x in log_probs]))
             self.assertEqual(log_probs[0], log_probs[1])
+            invalid_sample = torch.cat([sample, sample.new_ones(1, dim)], dim=0)
+            self.assertRaises(ValueError, lambda: lkj.log_prob(invalid_sample))
 
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
@@ -3231,8 +3267,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(halfcauchy.sample().size(), torch.Size())
         self.assertEqual(halfcauchy.sample(torch.Size((3, 2))).size(),
                          torch.Size((3, 2)))
-        self.assertEqual(halfcauchy.log_prob(self.scalar_sample).size(),
-                         torch.Size())
+        self.assertRaises(ValueError, halfcauchy.log_prob, self.scalar_sample)
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_1).size(),
                          torch.Size((3, 2)))
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_2).size(),
@@ -3833,6 +3868,16 @@ class TestKL(TestCase):
                     'Actual {}'.format(kl.shape),
                 ]))
 
+    def test_kl_transformed(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/34859
+        scale = torch.ones(2, 3)
+        loc = torch.zeros(2, 3)
+        normal = Normal(loc=loc, scale=scale)
+        diag_normal = Independent(normal, reinterpreted_batch_ndims=1)
+        trans_dist = TransformedDistribution(diag_normal, AffineTransform(loc=0., scale=2.))
+        self.assertEqual(kl_divergence(diag_normal, diag_normal).shape, (2,))
+        self.assertEqual(kl_divergence(trans_dist, trans_dist).shape, (2,))
+
     def test_entropy_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
@@ -3900,6 +3945,11 @@ class TestConstraints(TestCase):
                     except KeyError:
                         continue  # ignore optional parameters
 
+                    # Check param shape is compatible with distribution shape.
+                    self.assertGreaterEqual(value.dim(), constraint.event_dim)
+                    value_batch_shape = value.shape[:value.dim() - constraint.event_dim]
+                    torch.broadcast_shapes(dist.batch_shape, value_batch_shape)
+
                     if is_dependent(constraint):
                         continue
 
@@ -3916,7 +3966,10 @@ class TestConstraints(TestCase):
                 constraint = dist.support
                 message = '{} example {}/{} sample = {}'.format(
                     Dist.__name__, i + 1, len(params), value)
-                self.assertTrue(constraint.check(value).all(), msg=message)
+                self.assertEqual(constraint.event_dim, len(dist.event_shape), msg=message)
+                ok = constraint.check(value)
+                self.assertEqual(ok.shape, dist.batch_shape, msg=message)
+                self.assertTrue(ok.all(), msg=message)
 
 
 class TestNumericalStability(TestCase):
@@ -4464,6 +4517,35 @@ class TestValidation(TestCase):
             for param in params:
                 Dist(validate_args=True, **param)
 
+    def test_invalid_log_probs_arg(self):
+        # Check that validation errors are indeed disabled,
+        # but they might raise another error
+        for Dist, params in EXAMPLES:
+            if Dist == TransformedDistribution:
+                # TransformedDistribution has a distribution instance
+                # as the argument, so we cannot do much about that
+                continue
+            for param in params:
+                d_nonval = Dist(validate_args=False, **param)
+                d_val = Dist(validate_args=True, **param)
+                for v in torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0]):
+                    # samples with incorrect shape must throw ValueError only
+                    try:
+                        log_prob = d_val.log_prob(v)
+                    except ValueError:
+                        pass
+                    # get sample of correct shape
+                    val = torch.full(d_val.batch_shape + d_val.event_shape, v)
+                    # check samples with incorrect support
+                    try:
+                        log_prob = d_val.log_prob(val)
+                    except ValueError as e:
+                        if e.args and 'must be within the support' in e.args[0]:
+                            try:
+                                log_prob = d_nonval.log_prob(val)
+                            except RuntimeError:
+                                pass
+
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
@@ -4474,6 +4556,27 @@ class TestValidation(TestCase):
                 except AssertionError as e:
                     fail_string = 'ValueError not raised for {} example {}/{}'
                     raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params))) from e
+
+    def test_warning_unimplemented_constraints(self):
+        class Delta(Distribution):
+            def __init__(self, validate_args=True):
+                super().__init__(validate_args=validate_args)
+
+            def sample(self, sample_shape=torch.Size()):
+                return torch.tensor(0.).expand(sample_shape)
+
+            def log_prob(self, value):
+                if self._validate_args:
+                    self._validate_sample(value)
+                value[value != 0.] = -float('inf')
+                value[value == 0.] = 0.
+                return value
+
+        with self.assertWarns(UserWarning):
+            d = Delta()
+        sample = d.sample((2,))
+        with self.assertWarns(UserWarning):
+            d.log_prob(sample)
 
     def tearDown(self):
         super(TestValidation, self).tearDown()

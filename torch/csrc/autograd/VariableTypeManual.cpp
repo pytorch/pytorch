@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <ATen/TracerMode.h>
+#include <ATen/RedispatchFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
 
@@ -203,7 +204,7 @@ Tensor _fw_primal(const Tensor & self, int64_t level) {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     return self_.alias();
   })();
-  c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+  std::function<at::Tensor(const at::Tensor&)> func=nullptr;
   if (!self.unsafeGetTensorImpl()->support_as_strided()) {
     auto size_vec = self.sizes().vec();
     func = [=](const at::Tensor& input_base) {
@@ -225,7 +226,7 @@ Tensor _fw_primal(const Tensor & self, int64_t level) {
 }
 
 // We don't have an outplace copy, so this can't be generated automatically
-Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -242,15 +243,15 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_.copy_(src_, non_blocking);
+    at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
 
   if (isDifferentiableType(self.scalar_type()) &&
       (generated::details::isFwGradDefined(self) || generated::details::isFwGradDefined(src))) {
-    auto self_fw_grad = generated::details::toLegacyFwGrad(self);
-    auto src_fw_grad = generated::details::toLegacyFwGrad(src);
+    auto self_fw_grad = generated::details::toNonOptFwGrad(self);
+    auto src_fw_grad = generated::details::toNonOptFwGrad(src);
     Tensor new_fw_grad;
     if (self_fw_grad.defined()) {
       if (src_fw_grad.defined()) {
@@ -261,13 +262,14 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     } else {
       new_fw_grad = src_fw_grad;
     }
-    self.set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true);
+    self._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true);
   }
 
   return self;
 }
 
 Tensor& resize_(
+    c10::DispatchKeySet ks,
     Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
@@ -277,10 +279,10 @@ Tensor& resize_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_.resize_(size, optional_memory_format);
+    at::redispatch::resize_(ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
   }
 
-  if (self.fw_grad(/* level */ 0).defined()) {
+  if (self._fw_grad(/* level */ 0).defined()) {
     AT_ERROR("cannot resize variables that has a forward grad");
   }
 
@@ -288,6 +290,7 @@ Tensor& resize_(
 }
 
 Tensor& resize_as_(
+    c10::DispatchKeySet ks,
     Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
@@ -298,11 +301,11 @@ Tensor& resize_as_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    at::resize_as_(self_, the_template_, optional_memory_format);
+    at::redispatch::resize_as_(ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
   }
 
   // Handle fw grad
-  if (self.fw_grad(/* level */ 0).defined()) {
+  if (self._fw_grad(/* level */ 0).defined()) {
     AT_ERROR("cannot resize variables that has a forward grad");
   }
   return self;
@@ -310,16 +313,16 @@ Tensor& resize_as_(
 
 Tensor detach(const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
-  c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+  std::function<at::Tensor(const at::Tensor&)> func=nullptr;
   auto result = as_view(/* base */ self, /* output */ self, /* is_bw_differentiable */ false,
                         /* is_fw_differentiable */ true, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT,
                         /*allow_tensor_metadata_change=*/false);
   namedinference::propagate_names(result, self);
 
   // detach only backward gradients for both primal and tangent
-  if (self.fw_grad(/* level */ 0).defined()) {
-    auto new_fw_grad = self.fw_grad(/* level */ 0).detach();
-    result.set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
+  if (self._fw_grad(/* level */ 0).defined()) {
+    auto new_fw_grad = self._fw_grad(/* level */ 0).detach();
+    result._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
   }
 
   return result;
@@ -360,8 +363,8 @@ Tensor & detach_(Tensor & self) {
   autograd_meta->output_nr_ = 0;
 
   // detach only backward gradients for both primal and tangent
-  if (self.fw_grad(/* level */ 0).defined()) {
-    self.fw_grad(/* level */ 0).detach_();
+  if (self._fw_grad(/* level */ 0).defined()) {
+    self._fw_grad(/* level */ 0).detach_();
   }
 
   return self;
