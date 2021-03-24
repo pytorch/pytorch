@@ -250,7 +250,7 @@ binary_install_miniconda: &binary_install_miniconda
 
 binary_install_VS2019: &binary_install_vs2019
   name: Install VS2019
-  no_output_timeout: "30m"
+  no_output_timeout: "8m"
   command: powershell .circleci/scripts/vs_install.ps1
 
 # This section is used in the binary_test and smoke_test jobs. It expects
@@ -704,7 +704,7 @@ jobs:
       - checkout
       - run:
           name: Install VS2019
-          no_output_timeout: 30m
+          no_output_timeout: 8m
           command: |
               powershell .circleci/scripts/vs_install.ps1
       - run:
@@ -773,7 +773,7 @@ jobs:
           at: c:/users/circleci/workspace
       - run:
           name: Install VS2019
-          no_output_timeout: 30m
+          no_output_timeout: 8m
           command: |
               powershell .circleci/scripts/vs_install.ps1
       - run:
@@ -1118,11 +1118,6 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
-    - run:
-        name: _HACK_ Install CUDA compatible cmath
-        no_output_timeout: 1m
-        command: |
-            powershell .circleci/scripts/vs_install_cmath.ps1
     - run:
         <<: *binary_checkout
     - run:
