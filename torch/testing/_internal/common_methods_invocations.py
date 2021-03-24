@@ -639,9 +639,9 @@ def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None, **
     b = make_tensor((S, S, S), device, dtype, low=1 if is_integral else 0.1, high=None,
                     requires_grad=requires_grad)
 
-    kwargs = None
+    kwargs = None  # type: ignore
     if rounding_mode is not None:
-        kwargs = dict(rounding_mode=rounding_mode)
+        kwargs = dict(rounding_mode=rounding_mode)  # type: ignore
 
     return (
         SampleInput(a, args=(b,), kwargs=kwargs),
@@ -1696,7 +1696,7 @@ def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
     for_inplace_variant = kwargs.get('for_inplace_variant', False)
-    samples = (
+    samples = (  # type: ignore
         SampleInput(_make_tensor_helper((M, M)),
                     args=(torch.randn(M, M, device=device) > 0, _make_tensor_helper((M, M)))),
 
@@ -1708,7 +1708,7 @@ def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad, **kwargs
     )
 
     if not for_inplace_variant:
-        samples += (SampleInput(_make_tensor_helper((M,)),
+        samples += (SampleInput(_make_tensor_helper((M,)),  # type: ignore
                                 args=(torch.randn(M, M, device=device) > 0, _make_tensor_helper((M, M)))),)
 
     return samples
