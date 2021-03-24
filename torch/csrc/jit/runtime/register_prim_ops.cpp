@@ -1075,22 +1075,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("prim::real(Tensor a) -> Tensor"),
-         [](Stack* stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, at::real(a));
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
-        TORCH_SELECTIVE_SCHEMA("prim::imag(Tensor a) -> Tensor"),
-        [](Stack* stack) {
-          at::Tensor a;
-        pop(stack, a);
-          push(stack, at::imag(a));
-        },
-        aliasAnalysisFromSchema()),
-     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::is_xpu(Tensor a) -> bool"),
          [](Stack* stack) {
            at::Tensor a;
