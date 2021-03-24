@@ -5784,50 +5784,45 @@ else:
             self.assertEqual(torch.eye(matsize, dtype=dtype, device=device).expand(sizes), M.pinverse().matmul(M),
                              atol=1e-7, rtol=0, msg='pseudo-inverse for invertible matrix')
 
-    @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_matrix_power(self, device, dtype):
-        def run_test(M, sign=1):
-            if sign == -1:
-                M = M.inverse()
-            MP2 = torch.matrix_power(M, 2)
-            self.assertEqual(MP2, torch.matmul(M, M))
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @dtypes(torch.double, torch.cdouble)
+    def test_matrix_power_non_negative(self, device, dtype):
+        def check(*size, discontiguous=False):
+            t = make_tensor(size, device, dtype, discontiguous=discontiguous)
+            for n in range(8):
+                res = torch.linalg.matrix_power(t, n)
+                ref = np.linalg.matrix_power(t.cpu().numpy(), n)
+                self.assertEqual(res.cpu(), torch.from_numpy(ref))
 
-            MP3 = torch.matrix_power(M, 3)
-            self.assertEqual(MP3, torch.matmul(MP2, M))
+        check(0, 0)
+        check(1, 1)
+        check(5, 5)
+        check(5, 5, discontiguous=True)
+        check(0, 3, 3)
+        check(2, 3, 3)
+        check(2, 3, 4, 4, discontiguous=True)
 
-            MP4 = torch.matrix_power(M, 4)
-            self.assertEqual(MP4, torch.matmul(MP2, MP2))
-
-            MP6 = torch.matrix_power(M, 6)
-            self.assertEqual(MP6, torch.matmul(MP3, MP3))
-
-            MP0 = torch.matrix_power(M, 0)
-            self.assertEqual(MP0, torch.eye(M.size(-2), dtype=dtype).expand_as(M))
-
-        # Single matrix
-        M = torch.randn(5, 5, dtype=dtype, device=device)
-        run_test(M)
-
-        # Batch matrices
-        M = torch.randn(3, 3, 3, dtype=dtype, device=device)
-        run_test(M)
-
-        # Many batch matrices
-        M = torch.randn(2, 3, 3, 3, dtype=dtype, device=device)
-        run_test(M)
-
-        # This is for negative powers
+    @skipCUDAIfRocm
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @dtypes(torch.double, torch.cdouble)
+    def test_matrix_power_negative(self, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-        M = random_fullrank_matrix_distinct_singular_value(5, dtype=dtype, device=device)
-        run_test(M, sign=-1)
 
-        M = random_fullrank_matrix_distinct_singular_value(3, 3, dtype=dtype, device=device)
-        run_test(M, sign=-1)
+        def check(*size):
+            t = random_fullrank_matrix_distinct_singular_value(*size, dtype=dtype, device=device)
+            for n in range(-7, 0):
+                res = torch.linalg.matrix_power(t, n)
+                ref = np.linalg.matrix_power(t.cpu().numpy(), n)
+                self.assertEqual(res.cpu(), torch.from_numpy(ref))
 
-        M = random_fullrank_matrix_distinct_singular_value(3, 2, 3, dtype=dtype, device=device)
-        run_test(M, sign=-1)
+        check(0)
+        check(5)
+        check(0, 2)
+        check(3, 0)
+        check(3, 2)
+        check(5, 2, 3)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

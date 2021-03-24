@@ -41,7 +41,7 @@ jobs:
       - name: Ensure canonical include
         run: |
           (! git grep -I -no $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
-      # note that this next step depends on a clean heckout;
+      # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
       - name: Ensure C++ source files are not executable
@@ -213,3 +213,31 @@ jobs:
           git ls-files -z -- bootstrap '*.cmake' '*.cmake.in' '*CMakeLists.txt' | \
           grep -E -z -v '^(cmake/Modules/|cmake/Modules_CUDA_fix/)' | \
           xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
+
+  mypy:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Install dependencies
+        run: |
+          set -eux
+          pip install -r requirements.txt
+          pip install mypy==0.770
+      - name: Run autogen
+        run: |
+          set -eux
+          time python -mtools.generate_torch_version --is_debug=false
+          time python -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
+          time python -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
+      - name: Run mypy
+        run: |
+          set -eux
+          for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done
