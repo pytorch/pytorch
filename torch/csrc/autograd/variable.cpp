@@ -134,7 +134,7 @@ namespace impl {
   void rebase_history(const Variable& self, Edge gradient_edge) {
     TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
     auto diff_view_meta = get_view_autograd_meta(self);
-    if (diff_view_meta) {
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
       // See NOTE [ View + Inplace detection ]
       auto creation_meta = diff_view_meta->get_creation_meta();
       if (creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
@@ -236,7 +236,7 @@ namespace impl {
     // operations can happen on a given Tensor before its gradient edge is set when
     // exiting the custom Function.
     auto diff_view_meta = get_view_autograd_meta(self);
-    if (diff_view_meta) {
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
       diff_view_meta->set_attr_version(self._version());
     }
   }
@@ -405,7 +405,7 @@ namespace {
 
 const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tensor& self) const {
   auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
-  if (diff_view_meta) {
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
     // See NOTE [ View + Inplace detection ]
     if (diff_view_meta->get_creation_meta() != CreationMeta::MULTI_OUTPUT_SAFE) {
       std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
