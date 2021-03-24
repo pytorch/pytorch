@@ -2495,7 +2495,8 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None):
     Args:
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
-        timeout (float, optional): Timeout in seconds for monitored_barrier.
+        timeout (datetime.timedelta, optional): Timeout for monitored_barrier.
+            If None, the default process group timeout will be used.
 
     Returns:
         ''None''.
