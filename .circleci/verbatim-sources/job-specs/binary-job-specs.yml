@@ -298,7 +298,7 @@
     - run:
         <<: *binary_populate_env
     - run:
-        <<: *binary_install_VS2019
+        <<: *binary_install_vs2019
     - run:
         name: Build
         no_output_timeout: "1h"
@@ -332,7 +332,7 @@
     - run:
         <<: *binary_populate_env
     - run:
-        <<: *binary_install_VS2019
+        <<: *binary_install_vs2019
     - run:
         name: Test
         no_output_timeout: "1h"

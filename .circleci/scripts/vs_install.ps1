@@ -26,10 +26,7 @@ if (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools") 
     echo "start uninstalling"
     Start-Process "${PWD}\vs_installer.exe"   -ArgumentList $VS_UNINSTALL_ARGS -NoNewWindow -Wait -PassThru
 }
-if (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC") {
-    Start-Process "${PWD}\vs_installer.exe"   -ArgumentList $VS_UNINSTALL_ARGS -NoNewWindow -Wait -PassThru
-}
-else {
+if ( -Not (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC") ) {
     echo "Original BuildTools uninstalled"
 }
 $process = Start-Process "${PWD}\vs_installer.exe" -ArgumentList $VS_INSTALL_ARGS -NoNewWindow -Wait -PassThru
