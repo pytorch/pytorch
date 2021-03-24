@@ -41,7 +41,7 @@ jobs:
       - name: Ensure canonical include
         run: |
           (! git grep -I -no $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
-      # note that this next step depends on a clean heckout;
+      # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
       - name: Ensure C++ source files are not executable
