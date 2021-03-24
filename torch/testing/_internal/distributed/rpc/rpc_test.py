@@ -4,8 +4,8 @@ import json
 import logging
 import os
 import sys
-from threading import Lock
 from threading import Event
+from threading import Lock
 import time
 import unittest
 from collections import namedtuple
@@ -3058,10 +3058,11 @@ class RpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         fut1 = rpc.rpc_async(dst, RpcTest.timed_out_rpc)
         fut2 = rpc.rpc_async(dst, raise_func)
+        fut3 = rpc.rpc_async(dst, raise_func)
 
         # We should receive the error from fut2
         with self.assertRaisesRegex(ValueError, expected_err):
-            torch.futures.wait_all([fut1, fut2])
+            torch.futures.wait_all([fut1, fut2, fut3])
 
         # Unblock RPC thread for fut1
         RpcTest.timed_out_rpc_event.set()
@@ -3078,10 +3079,11 @@ class RpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         fut1 = rpc.rpc_async(dst, RpcTest.timed_out_rpc)
         fut2 = rpc.rpc_async(dst, torch.add, args=(torch.rand(10), torch.rand(5)))
+        fut3 = rpc.rpc_async(dst, torch.add, args=(torch.rand(10), torch.rand(5)))
 
         # We should receive the error from fut2
         with self.assertRaisesRegex(RuntimeError, "size of tensor"):
-            torch.futures.wait_all([fut1, fut2])
+            torch.futures.wait_all([fut1, fut2, fut3])
 
         # Unblock RPC thread for fut1
         RpcTest.timed_out_rpc_event.set()
@@ -3098,10 +3100,11 @@ class RpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         fut1 = rpc.rpc_async(dst, RpcTest.timed_out_rpc)
         fut2 = rpc.rpc_async(dst, raise_func_script, args=(expected_err,))
+        fut3 = rpc.rpc_async(dst, raise_func_script, args=(expected_err,))
 
         # We should receive the error from fut2
         with self.assertRaisesRegex(RuntimeError, expected_err):
-            torch.futures.wait_all([fut1, fut2])
+            torch.futures.wait_all([fut1, fut2, fut3])
 
         # Unblock RPC thread for fut1
         RpcTest.timed_out_rpc_event.set()

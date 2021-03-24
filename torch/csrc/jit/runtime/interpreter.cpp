@@ -1513,7 +1513,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case DICT_CONSTRUCT: {
-            auto type = frame.function->type_table_[inst.X]->expect<DictType>();
+            const auto& type =
+                frame.function->type_table_[inst.X]->expectRef<DictType>();
             dictConstruct(stack, type, inst.N);
             ++frame.pc;
           } break;
