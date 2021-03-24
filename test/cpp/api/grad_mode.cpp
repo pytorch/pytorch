@@ -63,7 +63,7 @@ TEST(GradModeTest, TestRequiresGradViewOpExiting) {
     {
       torch::AutoGradMode mode(false);
       view_out = view_op(a);  // go through kernels: InplaceOrView, CPU
-      assert_tensor_creation_meta(view_out, torch::autograd::CreationMeta::NO_GRAD_FN);
+      assert_tensor_creation_meta(view_out, torch::autograd::CreationMeta::NO_GRAD_MODE);
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
       ASSERT_TRUE(view_out.is_leaf());
     }
@@ -73,7 +73,7 @@ TEST(GradModeTest, TestRequiresGradViewOpExiting) {
 
     if (requires_grad) {
       ASSERT_THROWS_WITH(inplace_op(view_out),  // go through kernels: VariableType, InplaceOrView, CPU
-        "A view was created in no_grad/inference mode and is being modified inplace")
+        "A view was created in no_grad mode and is being modified inplace")
     } else {
         inplace_op(view_out);
     }

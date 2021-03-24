@@ -136,12 +136,18 @@ ${assign_return_values} ([&]() {
 })();
 """)
 
-THROW_IF_VARIABLETYPE_ON = """
-TORCH_CHECK(c10::impl::is_all_dispatch_keyset_excluded(c10::autograd_dispatch_keyset),
-  "Calling inplace/view ops on inference tensor outside InferenceMode is not allowed, ",
-  "consider making a clone first. ",
+THROW_IF_VIEW_ON_INFERENCE_TENSOR = CodeTemplate("""\
+// Theorectically we can allow view ops on inference tensor in normal mode
+// as long as we mark the output also inference tensor in this kernel.
+// But it'll break an invariant we currently have: inference tensor can
+// only be created inside InferenceMode.
+// This invariant makes inference tensor easier for users to understand,
+// so we should only break it when there's a valid use case.
+TORCH_CHECK(!${base}.unsafeGetTensorImpl()->is_inference_tensor(),
+  "Calling view ops on inference tensor outside InferenceMode is not allowed, ",
+  "consider doing it inside infernce mode to work around this error. ",
   "If you have a valid use case, please make a feature request to PyTorch.");
-"""
+""")
 
 TMP_VAR = '_tmp'
 
@@ -308,8 +314,9 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         else:
             _, unpacked_bindings = unpack_args(f)
             call += emit_view_lambda(f, unpacked_bindings)
-            creation_meta = ('(!at::GradMode::is_enabled() || InferenceMode::is_enabled()) ? '
-                             'CreationMeta::NO_GRAD_FN : CreationMeta::DEFAULT')
+            creation_meta = ('InferenceMode::is_enabled() ? '
+                             'CreationMeta::INFERENCE_MODE : '
+                             '(at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE)')
             rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                          '/* is_fw_differentiable */ true, '
                          f'/* view_func */ func, /* creation_meta */ {creation_meta})')
@@ -341,19 +348,6 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         api_name = sig_group.faithful_signature.name()
     else:
         api_name = sig_group.signature.name()
-    # Throws if a InplaceOrView kernel is hit without Autograd being disabled.
-    # There're two valid cases calling InplaceOrView:
-    #  - redispatch from VariableType kernel (AutoNonVariableTypeMode is on)
-    #  - In inference mode where Autograd keys are excluded as well.
-    # If InplaceOrView is hit without Autograd keys being disabled, e.g. apply
-    # inplace/view op on inference tensor outside inference mode, we throw an
-    # error. You can find an example in Note [Expected TLS state in InferenceMode].
-    # If we want to properly support these cases, we need to setup
-    # InplaceOrView kernel to make sure the output is inference tensor as well (since
-    # their base tensor doesn't have complete information about view/version).
-    # This is possible to do, but we currently don't see such use cases so
-    # simply throwing errors here.
-    inplace_view_body.append(THROW_IF_VARIABLETYPE_ON)
     if modifies_arguments(f):  # inplace op
         inplace_view_body.append(INPLACE_REDISPATCH.substitute(
             api_name=api_name,
@@ -362,7 +356,9 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         for r in cpp.return_names(f):
             inplace_view_body.append(f'increment_version({r});')
     else:
-        assert(get_view_info(fn) is not None)
+        view_info = get_view_info(fn)
+        assert(view_info is not None)
+        inplace_view_body.append(THROW_IF_VIEW_ON_INFERENCE_TENSOR.substitute(base=view_info))
         inplace_view_body.append(VIEW_REDISPATCH.substitute(
             assign_return_values='auto ' + TMP_VAR + ' = ',
             api_name=api_name,

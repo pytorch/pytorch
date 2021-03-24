@@ -510,8 +510,11 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     if (grad_fn) {
       msg = c10::str("Output ", diff_view_meta->output_nr_, " of ", grad_fn->name(), " is a view and ",
                      modified_obj, " modified inplace.");
+    } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
+      msg = c10::str("A view was created in inference mode and ", modified_obj, " modified inplace in normal mode.");
     } else {
-      msg = c10::str("A view was created in no_grad/inference mode and ", modified_obj, " modified inplace with grad mode enabled.");
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(creation_meta == CreationMeta::NO_GRAD_MODE);
+      msg = c10::str("A view was created in no_grad mode and ", modified_obj, " modified inplace with grad mode enabled.");
     }
 
     if (creation_meta == CreationMeta::MULTI_OUTPUT_NODE) {
@@ -519,13 +522,20 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
                          " allow the output views to be modified inplace. You should replace the inplace operation by an"
                          " out-of-place one.");
     } else {
-      if (creation_meta == CreationMeta::NO_GRAD_FN) {
+      if (creation_meta == CreationMeta::NO_GRAD_MODE) {
         TORCH_INTERNAL_ASSERT(!grad_fn);
         msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is deprecated and will be forbidden"
                        "  starting 1.6 (see https://github.com/pytorch/pytorch/pull/32839 for more details about this). You"
                        " can clarify your code and remove this warning by moving both the view and the inplace either both"
                        " inside the no_grad block (if you don't want the inplace to be tracked) or both outside (if you want"
                        " the inplace to be tracked).");
+      } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
+        TORCH_INTERNAL_ASSERT(!grad_fn);
+        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is forbidden. "
+                       " You can clarify your code by moving both the view and the inplace either both"
+                       " inside the inference_mode block (if you don't want the inplace to be tracked) or both outside (if you want"
+                       " the inplace to be tracked).");
+        TORCH_CHECK(false, msg);
       } else if (creation_meta == CreationMeta::IN_CUSTOM_FUNCTION) {
         msg = c10::str(msg, " This view was created inside a custom Function (or because an input was returned as-is) and the"
                        " autograd logic to handle view+inplace would override the custom backward associated with the custom"

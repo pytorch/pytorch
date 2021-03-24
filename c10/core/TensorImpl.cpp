@@ -4,7 +4,6 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
-#include <c10/core/InferenceMode.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -88,7 +87,7 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   if (c10::InferenceMode::is_enabled()) {
     // See Note [Expected TLS state in InferenceMode] for why we don't add Autograd & InplaceOrView keys.
     key_set_ = key_set;
-    version_counter_ = VariableVersion(-1);
+    version_counter_ = VariableVersion(0, /*enabled=*/false);
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]
