@@ -1606,6 +1606,10 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
       return computeConv2d(v);
     }
 
+    case aten::matmul: {
+      return computeMatmul(v);
+    }
+
     default: {
       throw std::runtime_error("Unhandled node kind");
     }
@@ -1952,6 +1956,42 @@ Tensor* TensorExprKernel::computeConv2d(const torch::jit::Value* v) {
       {inp, w, b},
       {sH, sW, pH, pW, dH, dW, groups});
   return new Tensor(ResultBuf.node(), s);
+}
+
+Tensor* TensorExprKernel::computeMatmul(const torch::jit::Value* v) {
+  const Node* n = v->node();
+  auto const& shape = sizesForValue(v);
+  Dtype dtype = kFloat;
+  auto maybe_stype = findDtypeForValue(v);
+  if (maybe_stype) {
+    dtype = Dtype(*maybe_stype);
+  }
+  BufHandle ResultBuf("matmul", shape, dtype);
+  const Buf* a = tensors_.at(n->input(0)->unique())->buf();
+  const Buf* b = tensors_.at(n->input(1)->unique())->buf();
+
+  auto size_a = ExprVectorToExprHandleVector(a->dims());
+  auto size_b = ExprVectorToExprHandleVector(b->dims());
+  const IntImm* total_size = dynamic_cast<const IntImm*>(
+      IRSimplifier::simplify((size_a[0] * size_a[1] * size_b[1])).node());
+
+  if (total_size && total_size->value() < 1000) {
+    return Reduce(
+        "nnc_matmul",
+        {{size_a[0], "M"}, {size_b[1], "N"}},
+        Sum(),
+        [&](const ExprHandle& m, const ExprHandle& n, const ExprHandle& k) {
+          BufHandle ah(a);
+          BufHandle bh(b);
+          return Load::make(ah, {m, k}, 1) * Load::make(bh, {k, n}, 1);
+        },
+        {{size_a[1], "K"}});
+  } else {
+    return new Tensor(
+        ResultBuf.node(),
+        ExternalCall::make(
+            ResultBuf, "nnc_aten_matmul", {BufHandle(a), BufHandle(b)}, {}));
+  }
 }
 
 Tensor* TensorExprKernel::computeSoftmax(

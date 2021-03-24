@@ -164,6 +164,7 @@ static const OperatorSet& supported_eltwise_set() {
       // TODO: enable once we have an out variant for conv2d to use in the NNC's
       // external call or when we have a performant TE representation for conv
       // "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::matmul(Tensor self, Tensor other) -> Tensor",
   };
   // clang-format on
 
@@ -180,7 +181,9 @@ bool isSupported(Node* node) {
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
   };
   static const OperatorSet cpu_only_operator_set{
-      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor"};
+      "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::matmul(Tensor self, Tensor other) -> Tensor",
+  };
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
