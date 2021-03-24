@@ -2,12 +2,6 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorIndex.h"
 #else
 
-TORCH_CUDA_CU_API void THCTensor_(indexCopy)(
-    THCState* state,
-    THCTensor* res_,
-    int dim,
-    THCudaLongTensor* indices,
-    THCTensor* src);
 TORCH_CUDA_CU_API void THCTensor_(indexSelect)(
     THCState* state,
     THCTensor* tensor,
