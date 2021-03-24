@@ -3432,6 +3432,35 @@ torch.cuda.synchronize()
         self.assertTrue(memory_allocated(0) > current_alloc[0])
         self.assertTrue(all(memory_allocated(torch.cuda.device(idx)) == current_alloc[idx] for idx in range(1, device_count)))
 
+    def test_matmul_memory_use(self):
+        def get_max_used():
+            torch.cuda.synchronize()
+            val = torch.cuda.max_memory_allocated()
+            torch.cuda.reset_peak_memory_stats()
+            return val
+
+        a = torch.rand(1, 32, 32, device="cuda")
+        b = torch.rand(24, 32, 1, device="cuda")
+
+        get_max_used()
+
+        torch.matmul(a, b)
+
+        matmul_mem = get_max_used()
+
+        a = a.expand(24, 32, 32)
+        torch.matmul(a, b)
+
+        matmul_expand_mem = get_max_used()
+
+        torch.bmm(a, b)
+
+        bmm_mem = get_max_used()
+
+        print(matmul_mem, bmm_mem)
+        self.assertEqual(matmul_expand_mem, matmul_mem)
+        self.assertEqual(bmm_mem, matmul_mem)
+
 
 class TestCudaComm(TestCase):
     def _test_broadcast(self, input):
