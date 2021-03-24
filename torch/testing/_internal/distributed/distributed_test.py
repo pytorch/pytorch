@@ -5126,7 +5126,7 @@ class DistributedTest:
             tensors = [torch.ones(10) * self.rank]
             # Kick off some allreduce work on all ranks
             for _ in range(10):
-               dist.all_reduce(torch.cat(tensors))
+                dist.all_reduce(torch.cat(tensors))
             # Run monitored barrier
             timeout = timedelta(seconds=2)
             dist.monitored_barrier(timeout=timeout)
