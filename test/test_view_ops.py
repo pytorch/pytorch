@@ -120,6 +120,56 @@ class TestViewOps(TestCase):
         self.assertTrue(s is t)
 
     @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False), torch.complex64)
+    def test_view_dtype(self, device, dtype):
+        int_dtype = {
+            torch.half: torch.int16,
+            torch.bfloat16: torch.int16,
+            torch.float: torch.int,
+            torch.double: torch.long,
+            torch.complex64: torch.long,
+        }[dtype]
+        numpy_dtype = {
+            torch.half: np.int16,
+            torch.bfloat16: np.int16,
+            torch.float: np.int32,
+            torch.double: np.int64,
+            torch.complex64: np.int64,
+        }[dtype]
+
+        def generate_inputs():
+            yield make_tensor((5, 5, 5), device, dtype, low=-5, high=5)
+            yield make_tensor((5, 5, 5), device, dtype, low=-5, high=5).permute(2, 0, 1)
+            yield make_tensor((1, 5, 1), device, dtype, low=-5, high=5).expand(5, 5, 5)
+            yield make_tensor((10, 5, 10), device, dtype, low=-5, high=5)[::2, :, ::2]
+            yield make_tensor((0, 5, 10), device, dtype, low=-5, high=5)
+            yield make_tensor((), device, dtype, low=-5, high=5)
+
+        def run_test(fp_tensor):
+            self.assertRaises(RuntimeError, lambda: fp_tensor.view(torch.complex128))
+            self.assertRaises(RuntimeError, lambda: fp_tensor.view(torch.int8))
+
+            int_tensor = fp_tensor.view(int_dtype)
+            self.assertEqual(int_tensor.dtype, int_dtype)
+            self.assertEqual(int_tensor.shape, fp_tensor.shape)
+            self.assertEqual(int_tensor.stride(), fp_tensor.stride())
+
+            self.assertEqual(fp_tensor, int_tensor.view(dtype), rtol=0, atol=0)
+            self.assertEqual(fp_tensor.cpu().numpy().view(numpy_dtype), int_tensor, rtol=0, atol=0)
+
+            fp_tensor.zero_()
+            self.assertEqual(fp_tensor, torch.zeros_like(fp_tensor), rtol=0, atol=0)
+
+        for fp_tensor in generate_inputs():
+            run_test(fp_tensor)
+
+        # Test that requires_grad is dropped, because view(dtype) does not support backward
+        if dtype is torch.double:
+            t = make_tensor((5, 5, 5), device, torch.double, low=-5, high=5, requires_grad=True)
+            self.assertFalse(t.view(torch.complex64).requires_grad)
+
+
+    @onlyOnCPUAndCUDA
     def test_view_as_complex(self, device):
         def fn(contiguous_input=True, dim0=0, dim1=1):
             t = torch.randn(3, 2, 2, device=device)

@@ -36,7 +36,7 @@ if args.aten_root:
     if not os.path.exists(args.aten_root):
         raise ValueError('aten_root ({}) does not exist'.format(
             args.aten_root))
-    sys.path.append(os.path.join(args.aten_root, '..'))  # TODO: fix this
+    sys.path.insert(0, os.path.join(args.aten_root, '..'))
     from tools.codegen.code_template import CodeTemplate as CT
 else:
     from tools.codegen.code_template import CodeTemplate as CT  # type: ignore[import,no-redef]
@@ -47,9 +47,9 @@ OP_TEMPLATE = CT.from_file(
 
 try:
     # use faster C loader if available
-    from yaml import CLoader as Loader
+    from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import Loader  # type: ignore[misc]
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 
 def write(filename, s):
@@ -84,7 +84,7 @@ RETURN_MAP = {
 # attribute list. Most of these call runtime functions defined in the
 # template class.
 ARGUMENT_MAP = {
-    'Scalar': 'at::Scalar ${arg} = readScalarAttribute("${arg}");',
+    'const Scalar &': 'at::Scalar ${arg} = readScalarAttribute("${arg}");',
     'bool': 'bool ${arg} = readAttribute<int64_t>("${arg}");',
     'int': 'int ${arg} = readAttribute<int64_t>("${arg}");',
     'double': 'double ${arg} = readAttribute<float>("${arg}");',

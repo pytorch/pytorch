@@ -28,13 +28,13 @@ PLATFORM_TO_HASH = {
 CLANG_FORMAT_DIR = os.path.join(PYTORCH_ROOT, ".clang-format-bin")
 CLANG_FORMAT_PATH = os.path.join(CLANG_FORMAT_DIR, "clang-format")
 
-def compute_file_sha1(path):
-    """Compute the SHA1 hash of a file and return it as a hex string."""
+def compute_file_sha256(path: str) -> str:
+    """Compute the SHA256 hash of a file and return it as a hex string."""
     # If the file doesn't exist, return an empty string.
     if not os.path.exists(path):
         return ""
 
-    hash = hashlib.sha1()
+    hash = hashlib.sha256()
 
     # Open the file in binary mode and hash it.
     with open(path, "rb") as f:
@@ -84,13 +84,13 @@ def download_clang_format(path):
 def get_and_check_clang_format(verbose=False):
     """
     Download a platform-appropriate clang-format binary if one doesn't already exist at the expected location and verify
-    that it is the right binary by checking its SHA1 hash against the expected hash.
+    that it is the right binary by checking its SHA256 hash against the expected hash.
     """
     if not os.path.exists(CLANG_FORMAT_DIR):
         # If the directory doesn't exist, try to create it.
         try:
             os.mkdir(CLANG_FORMAT_DIR)
-        except os.OSError as e:
+        except OSError as e:
             print("Unable to create directory for clang-format binary: {}".format(CLANG_FORMAT_DIR))
             return False
         finally:
@@ -114,7 +114,7 @@ def get_and_check_clang_format(verbose=False):
                 print("Found pre-existing clang-format binary, skipping download")
 
     # Now that the binary is where it should be, hash it.
-    actual_bin_hash = compute_file_sha1(CLANG_FORMAT_PATH)
+    actual_bin_hash = compute_file_sha256(CLANG_FORMAT_PATH)
 
     # If the host platform is not in PLATFORM_TO_HASH, it is unsupported.
     if HOST_PLATFORM not in PLATFORM_TO_HASH:
@@ -142,7 +142,7 @@ def get_and_check_clang_format(verbose=False):
             # Err on the side of caution and try to delete the downloaded binary.
             try:
                 os.unlink(CLANG_FORMAT_PATH)
-            except os.OSError as e:
+            except OSError as e:
                 print("Failed to delete binary: {}".format(str(e)))
                 print("Delete this binary as soon as possible and do not execute it!")
 

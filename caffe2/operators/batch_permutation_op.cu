@@ -74,6 +74,7 @@ bool BatchPermutationOp<float, CUDAContext>::RunOnDevice() {
             X.data<float>(),
             indices.data<int>(),
             Y->mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -95,6 +96,7 @@ bool BatchPermutationGradientOp<float, CUDAContext>::RunOnDevice() {
             dY.data<float>(),
             indices.data<int>(),
             dX->mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

@@ -77,13 +77,14 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
+#ifdef DEBUG
   bool has_storage() const override;
-  const Storage& storage() const override;
-  int64_t storage_offset() const override;
+#endif
 
  private:
   // see NOTE: [BatchedTensorImpl levels invariant]
   void checkInvariants() const;
+  const char* tensorimpl_type_name() const override;
 
   Tensor value_;
 

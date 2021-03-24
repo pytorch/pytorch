@@ -8,7 +8,7 @@ import random
 from functools import partial
 from itertools import product, combinations, permutations
 
-from torch._six import inf, nan, istuple
+from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_SCIPY, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS)
@@ -499,8 +499,8 @@ class TestReductions(TestCase):
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     def test_max_with_inf(self, device, dtype):
         a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
         self.assertTrue(torch.all(torch.max(a, dim=1).values == inf).item())
@@ -508,8 +508,8 @@ class TestReductions(TestCase):
         self.assertTrue(torch.max(a).item() == inf)
         self.assertTrue(torch.amax(a).item() == inf)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.bfloat16, torch.double)
     def test_min_with_inf(self, device, dtype):
         a = torch.tensor([[-inf, -inf, inf, 3], [inf, inf, -inf, -1]], dtype=dtype, device=device)
         self.assertTrue(torch.all(torch.min(a, dim=1).values == (-inf)).item())
@@ -533,7 +533,7 @@ class TestReductions(TestCase):
         self.compare_with_numpy(torchfn, reffn, x)
 
         def get_values(x):
-            if istuple(x):
+            if isinstance(x, tuple):
                 return x[0]
             return x
 
@@ -546,7 +546,7 @@ class TestReductions(TestCase):
             for xinp, d in product(inputs, dims):
                 self.compare_with_numpy(lambda x: get_values(torchfn(x, d, False)), lambda x: reffn(x, d, keepdims=False), xinp)
                 result = torchfn(xinp, d, False)
-                if istuple(result):
+                if isinstance(result, tuple):
                     v, i = result
                     if d == 1:
                         self.assertEqual(xinp[torch.arange(size), i], v, atol=0, rtol=0)
@@ -561,30 +561,30 @@ class TestReductions(TestCase):
                     result = torchfn(x, 0)
                     v = get_values(result)
                     self.assertEqual(v, nan)
-                    if istuple(result):
+                    if isinstance(result, tuple):
                         i = result[1]
                         self.assertEqual(i, index)
                 self.assertEqual(torchfn(x), nan)
 
-    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool)
+    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.double)
     def test_max(self, device, dtype):
         self._test_minmax_helper(torch.max, np.amax, device, dtype)
 
-    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool)
+    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.double)
     def test_min(self, device, dtype):
         self._test_minmax_helper(torch.min, np.amin, device, dtype)
 
-    @dtypesIfCPU(torch.float, torch.double, torch.int, torch.long, torch.bool)
+    @dtypesIfCPU(torch.half, torch.float, torch.double, torch.int, torch.long, torch.bool)
     @dtypesIfCUDA(torch.half, torch.float, torch.int, torch.long, torch.bool)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.double)
     def test_amin(self, device, dtype):
         self._test_minmax_helper(torch.amin, np.amin, device, dtype)
 
-    @dtypesIfCPU(torch.float, torch.double, torch.int, torch.long, torch.bool)
+    @dtypesIfCPU(torch.half, torch.float, torch.double, torch.int, torch.long, torch.bool)
     @dtypesIfCUDA(torch.half, torch.float, torch.int, torch.long, torch.bool)
     @dtypes(torch.float, torch.double)
     def test_amax(self, device, dtype):
@@ -1133,8 +1133,13 @@ class TestReductions(TestCase):
         verify_against_numpy(t)
 
     @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
-                                           include_bool=True, include_complex=False)))
+                                           include_bool=True, include_complex=True)))
     def test_all_any_vs_numpy(self, device, dtype):
+        # Note [all, any uint8 compatibility]: However for compatibility reason,
+        # for `uint8`, they return Tensor of same dtype `uint8`.
+        # Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
+        exact_dtype = True if dtype != torch.uint8 else False
+
         def _test_all_any(x):
             self.compare_with_numpy(torch.all, np.all, x)
             self.compare_with_numpy(torch.any, np.any, x)
@@ -1142,38 +1147,102 @@ class TestReductions(TestCase):
         def _test_all_any_with_dim(x, dim):
             torch_fn = partial(torch.all, dim=dim)
             np_fn = partial(np.all, axis=dim)
-            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=exact_dtype)
 
             torch_fn = partial(torch.any, dim=dim)
             np_fn = partial(np.any, axis=dim)
-            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=False)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=exact_dtype)
+
+        def _test_out_variant(x, dim):
+            out = torch.empty_like(x)
+            if dtype == torch.bool or dtype == torch.uint8:
+                expected = torch.all(x, dim)
+                torch.all(x, dim, out=out)
+                self.assertEqual(expected, out)
+
+                expected = torch.any(x, dim)
+                torch.any(x, dim, out=out)
+                self.assertEqual(expected, out)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "all only supports bool tensor for result, got"):
+                    torch.all(x, dim, out=out)
+
+                with self.assertRaisesRegex(RuntimeError, "any only supports bool tensor for result, got"):
+                    torch.any(x, dim, out=out)
+
+        def _test_all_any_with_dim_keepdim(x, dim, keepdim):
+            torch_fn = partial(torch.all, dim=dim, keepdim=keepdim)
+            np_fn = partial(np.all, axis=dim, keepdims=keepdim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=exact_dtype)
+
+            torch_fn = partial(torch.any, dim=dim, keepdim=keepdim)
+            np_fn = partial(np.any, axis=dim, keepdims=keepdim)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=exact_dtype)
+
+        def _test_output_dtype(x):
+            # This test will fail once the functions return bool output
+            # for uint8 input.
+            expected_dtype = torch.uint8 if dtype == torch.uint8 else torch.bool
+            self.assertEqual(torch.all(x).dtype, expected_dtype)
+            self.assertEqual(torch.any(x).dtype, expected_dtype)
+
+            self.assertEqual(torch.all(x, dim=0).dtype, expected_dtype)
+            self.assertEqual(torch.any(x, dim=0).dtype, expected_dtype)
 
         for ndim in range(5):
             shape = _rand_shape(ndim, 1, 5)
             x = _generate_input(shape, dtype, device, with_extremal=False)
             _test_all_any(x)
+            _test_all_any(x.T)
+            _test_all_any(x[..., ::2])
 
             x = _generate_input(shape, dtype, device, with_extremal=True)
             _test_all_any(x)
+            _test_all_any(x.T)
+            _test_all_any(x[..., ::2])
 
             x = torch.zeros_like(x)
             _test_all_any(x)
+            _test_all_any(x.T)
+            _test_all_any(x[..., ::2])
 
             x = torch.ones_like(x)
             _test_all_any(x)
-
+            _test_all_any(x.T)
+            _test_all_any(x[..., ::2])
+            _test_output_dtype(x)
             for dim in range(ndim):
                 x = _generate_input(shape, dtype, device, with_extremal=False)
                 _test_all_any_with_dim(x, dim)
+                _test_all_any_with_dim(x.T, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
 
                 x = _generate_input(shape, dtype, device, with_extremal=True)
                 _test_all_any_with_dim(x, dim)
+                _test_all_any_with_dim(x.T, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
 
                 x = torch.zeros_like(x)
                 _test_all_any_with_dim(x, dim)
+                _test_all_any_with_dim(x.T, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
 
                 x = torch.ones_like(x)
                 _test_all_any_with_dim(x, dim)
+                _test_all_any_with_dim(x.T, dim)
+                _test_all_any_with_dim(x[..., ::2], dim)
+                _test_out_variant(x, dim)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=True)
+                _test_all_any_with_dim_keepdim(x, dim, keepdim=False)
 
     # TODO: part of this test covers torch.norm, with should be covered by test_linalg
     @onlyOnCPUAndCUDA
@@ -1331,7 +1400,7 @@ class TestReductions(TestCase):
         }
 
         # This won't test for 256bit instructions, since we usually
-        # only work on 1 cacheline (1024bit) at a time and these
+        # only work on 1 cacheline (512bit) at a time and these
         # examples aren't big enough to trigger that.
         for dtype in types:
             x = torch.tensor(example, device=device, dtype=dtype)
@@ -1445,7 +1514,7 @@ class TestReductions(TestCase):
 
             def fn(x, dim, keepdim=False, out=None):
                 ans = fn_attr(x, dim, keepdim=keepdim, out=out)
-                return ans if not istuple(ans) else ans[0]
+                return ans if not isinstance(ans, tuple) else ans[0]
 
             def fn_tuple(x, dim, keepdim=False, out=None):
                 return fn_attr(x, dim, keepdim=keepdim, out=out)
@@ -1851,82 +1920,6 @@ class TestReductions(TestCase):
                     RuntimeError, r'quantile\(\) out tensor must be on the same device as the input tensor'):
                 torch.quantile(torch.randn(1, device=device), 0.5, out=torch.scalar_tensor(1))
 
-    def test_logical_any(self, device):
-        x = torch.zeros([2, 3, 400], dtype=torch.uint8, device=device)
-
-        self.assertEqual(
-            torch.tensor(0, dtype=torch.uint8, device=device),
-            x.any())
-
-        self.assertEqual(
-            torch.zeros([1, 3, 400], dtype=torch.uint8, device=device),
-            x.any(0, keepdim=True))
-
-        self.assertEqual(
-            torch.zeros([2, 1, 400], dtype=torch.uint8, device=device),
-            x.any(1, keepdim=True))
-
-        self.assertEqual(
-            torch.zeros([2, 3, 1], dtype=torch.uint8, device=device),
-            x.any(2, keepdim=True))
-
-        # set the last element to 0
-        x[-1][-1][-1] = 1
-
-        self.assertEqual(
-            torch.tensor(1, dtype=torch.uint8, device=device),
-            x.any())
-
-        y = torch.zeros([1, 3, 400], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 1
-        self.assertEqual(y, x.any(0, keepdim=True))
-
-        y = torch.zeros([2, 1, 400], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 1
-        self.assertEqual(y, x.any(1, keepdim=True))
-
-        y = torch.zeros([2, 3, 1], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 1
-        self.assertEqual(y, x.any(2, keepdim=True))
-
-    def test_logical_all(self, device):
-        x = torch.ones([2, 3, 400], dtype=torch.uint8, device=device)
-
-        self.assertEqual(
-            torch.tensor(1, dtype=torch.uint8, device=device),
-            x.all())
-
-        self.assertEqual(
-            torch.ones([1, 3, 400], dtype=torch.uint8, device=device),
-            x.all(0, keepdim=True))
-
-        self.assertEqual(
-            torch.ones([2, 1, 400], dtype=torch.uint8, device=device),
-            x.all(1, keepdim=True))
-
-        self.assertEqual(
-            torch.ones([2, 3, 1], dtype=torch.uint8, device=device),
-            x.all(2, keepdim=True))
-
-        # set the last element to 0
-        x[-1][-1][-1] = 0
-
-        self.assertEqual(
-            torch.tensor(0, dtype=torch.uint8, device=device),
-            x.all())
-
-        y = torch.ones([1, 3, 400], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 0
-        self.assertEqual(y, x.all(0, keepdim=True))
-
-        y = torch.ones([2, 1, 400], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 0
-        self.assertEqual(y, x.all(1, keepdim=True))
-
-        y = torch.ones([2, 3, 1], dtype=torch.uint8, device=device)
-        y[-1][-1][-1] = 0
-        self.assertEqual(y, x.all(2, keepdim=True))
-
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
@@ -2251,21 +2244,29 @@ class TestReductions(TestCase):
                     # ignore if there is no allreduce.
                     self.assertTrue('dim' in str(err))
 
-        # any
-        xb = x.to(torch.uint8)
-        yb = x.to(torch.uint8)
-        self.assertEqual((2, 0), xb.any(2).shape)
-        self.assertEqual((2, 0, 1), xb.any(2, keepdim=True).shape)
-        self.assertEqual(torch.zeros((2, 4), device=device, dtype=torch.uint8), xb.any(1))
-        self.assertEqual(torch.zeros((2, 1, 4), device=device, dtype=torch.uint8), xb.any(1, keepdim=True))
-        self.assertEqual(torch.zeros((), device=device, dtype=torch.uint8), xb.any())
+        for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
+                                                  include_bool=True, include_complex=True):
+            # Refer: [all, any uint8 compatibility]
+            if dtype == torch.uint8:
+                out_dtype = torch.uint8
+            else:
+                out_dtype = torch.bool  # output of all/any is bool irrespective of input dtype
 
-        # all
-        self.assertEqual((2, 0), xb.all(2).shape)
-        self.assertEqual((2, 0, 1), xb.all(2, keepdim=True).shape)
-        self.assertEqual(torch.ones((2, 4), device=device, dtype=torch.uint8), xb.all(1))
-        self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=torch.uint8), xb.all(1, keepdim=True))
-        self.assertEqual(torch.ones((), device=device, dtype=torch.uint8), xb.all())
+            # any
+            xb = x.to(dtype)
+            yb = x.to(dtype)
+            self.assertEqual((2, 0), xb.any(2).shape)
+            self.assertEqual((2, 0, 1), xb.any(2, keepdim=True).shape)
+            self.assertEqual(torch.zeros((2, 4), device=device, dtype=out_dtype), xb.any(1))
+            self.assertEqual(torch.zeros((2, 1, 4), device=device, dtype=out_dtype), xb.any(1, keepdim=True))
+            self.assertEqual(torch.zeros((), device=device, dtype=out_dtype), xb.any())
+
+            # all
+            self.assertEqual((2, 0), xb.all(2).shape)
+            self.assertEqual((2, 0, 1), xb.all(2, keepdim=True).shape)
+            self.assertEqual(torch.ones((2, 4), device=device, dtype=out_dtype), xb.all(1))
+            self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=out_dtype), xb.all(1, keepdim=True))
+            self.assertEqual(torch.ones((), device=device, dtype=out_dtype), xb.all())
 
 
 instantiate_device_type_tests(TestReductions, globals())

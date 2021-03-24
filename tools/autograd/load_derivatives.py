@@ -9,16 +9,17 @@ import yaml
 
 from tools.codegen.api.autograd import *
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
-from tools.codegen.gen import parse_native_yaml, with_native_function
+from tools.codegen.api import cpp
+from tools.codegen.gen import parse_native_yaml
+from tools.codegen.context import with_native_function
 from tools.codegen.model import *
 from tools.codegen.utils import *
 
 try:
     # use faster C loader if available
-    from yaml import CLoader as Loader
+    from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import Loader  # type: ignore
+    from yaml import SafeLoader as Loader  # type: ignore
 
 def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
     with open(derivatives_yaml_path, 'r') as f:
@@ -278,6 +279,11 @@ def saved_variables(
         (r'to_args_sizes\({}\)', {
             'suffix': '_args_sizes',
             'type': 'std::vector<std::vector<int64_t>>',
+        }),
+        # replace to_args_scalartypes(self) with self_args_scalartypes
+        (r'to_args_scalartypes\({}\)', {
+            'suffix': '_args_scalartypes',
+            'type': 'std::vector<ScalarType>',
         }),
         # replace TensorGeometry(self) with self_geometry
         (r'TensorGeometry\({}\)', {

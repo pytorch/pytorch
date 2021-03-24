@@ -136,6 +136,8 @@ bool MaxPoolWithIndexOp::DoRunWithType() {
           pad_l(),
           Y->template mutable_data<T>(),
           mask->template mutable_data<int>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -185,6 +187,8 @@ bool MaxPoolWithIndexGradientOp::DoRunWithType() {
       pad_t(),
       pad_l(),
       dX->template mutable_data<T>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

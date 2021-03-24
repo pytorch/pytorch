@@ -9,9 +9,8 @@
 
 #define THC_DESC_BUFF_LEN 64
 
-typedef struct TORCH_CUDA_API THCDescBuff
-{
-    char str[THC_DESC_BUFF_LEN];
+typedef struct TORCH_CUDA_CU_API THCDescBuff {
+  char str[THC_DESC_BUFF_LEN];
 } THCDescBuff;
 
 #include <THC/generic/THCTensor.h>

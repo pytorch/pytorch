@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # shellcheck disable=SC2034
+# shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 conda install -y six
@@ -13,8 +14,6 @@ if [ -z "${IN_CI}" ]; then
   rm -rf ${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 fi
 
-git submodule sync --recursive
-git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Test PyTorch
@@ -134,11 +133,31 @@ test_custom_script_ops() {
   assert_git_not_dirty
 }
 
+test_jit_hooks() {
+  echo "Testing jit hooks in cpp"
+  pushd test/jit_hooks
+  # Build the custom operator library.
+  rm -rf build && mkdir build
+  pushd build
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  make VERBOSE=1
+  popd
+
+  # Run tests Python-side and export a script module.
+  python model.py --export-script-module=model
+  # Run tests C++-side and load the exported script module.
+  build/test_jit_hooks ./model
+  popd
+  assert_git_not_dirty
+}
+
 
 if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
   test_python_all
   test_libtorch
   test_custom_script_ops
+  test_jit_hooks
   test_custom_backend
 else
   if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
@@ -146,6 +165,7 @@ else
   elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
     test_libtorch
     test_custom_script_ops
+    test_jit_hooks
     test_custom_backend
   fi
 fi

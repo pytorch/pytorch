@@ -34,8 +34,19 @@ FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
 class FunctionCounts(object):
+    """Container for manipulating Callgrind results.
+
+    It supports:
+        1) Addition and subtraction to combine or diff results.
+        2) Tuple-like indexing.
+        3) A `denoise` function which strips CPython calls which are known to
+           be non-deterministic and quite noisy.
+        4) Two higher order methods (`filter` and `transform`) for custom
+           manipulation.
+    """
     _data: Tuple[FunctionCount, ...]
     inclusive: bool
+    truncate_rows: bool = True
 
     # For normal use, torch._tensor_str.PRINT_OPTS.linewidth determines
     # the print settings. This is simply to allow hermetic unit tests.
@@ -51,7 +62,7 @@ class FunctionCounts(object):
     def __getitem__(self, item: Any) -> "Union[FunctionCount, FunctionCounts]":
         data: Union[FunctionCount, Tuple[FunctionCount, ...]] = self._data[item]
         return (
-            FunctionCounts(cast(Tuple[FunctionCount, ...], data), self.inclusive)
+            FunctionCounts(cast(Tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
             if isinstance(data, tuple) else data
         )
 
@@ -70,7 +81,7 @@ class FunctionCounts(object):
                 fn = fn[:left_len] + " ... " + fn[-(fn_str_len - left_len - 5):]
             lines.append(f"  {c:>{count_len}}  {fn}")
 
-        if len(lines) > 18:
+        if self.truncate_rows and len(lines) > 18:
             lines = lines[:9] + ["...".rjust(count_len + 2)] + lines[-9:]
 
         if not self.inclusive:
@@ -90,7 +101,18 @@ class FunctionCounts(object):
     ) -> "FunctionCounts":
         return self._merge(other, lambda c: -c)
 
+    def __mul__(self, other: Union[int, float]) -> "FunctionCounts":
+        return self._from_dict({
+            fn: int(c * other) for c, fn in self._data
+        }, self.inclusive)
+
     def transform(self, map_fn: Callable[[str], str]) -> "FunctionCounts":
+        """Apply `map_fn` to all of the function names.
+
+        This can be used to regularize function names (e.g. stripping irrelevant
+        parts of the file path), coalesce entries by mapping multiple functions
+        to the same name (in which case the counts are added together), etc.
+        """
         counts: DefaultDict[str, int] = collections.defaultdict(int)
         for c, fn in self._data:
             counts[map_fn(fn)] += c
@@ -98,6 +120,7 @@ class FunctionCounts(object):
         return self._from_dict(counts, self.inclusive)
 
     def filter(self, filter_fn: Callable[[str], bool]) -> "FunctionCounts":
+        """Keep only the elements where `filter_fn` applied to function name returns True."""
         return FunctionCounts(tuple(i for i in self if filter_fn(i.function)), self.inclusive)
 
     def sum(self) -> int:
@@ -136,6 +159,13 @@ class FunctionCounts(object):
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
 class CallgrindStats(object):
+    """Top level container for Callgrind results collected by Timer.
+
+    Manipulation is generally done using the FunctionCounts class, which is
+    obtained by calling `CallgrindStats.stats(...)`. Several convenience
+    methods are provided as well; the most significant is
+    `CallgrindStats.as_standardized()`.
+    """
     task_spec: common.TaskSpec
     number_per_run: int
     built_with_debug_symbols: bool
@@ -143,6 +173,7 @@ class CallgrindStats(object):
     baseline_exclusive_stats: FunctionCounts
     stmt_inclusive_stats: FunctionCounts
     stmt_exclusive_stats: FunctionCounts
+    stmt_callgrind_out: Optional[str]
 
     def __repr__(self) -> str:
         newline = "\n"  # `\` cannot appear in fstring code section.
@@ -163,17 +194,18 @@ class CallgrindStats(object):
         return output
 
     def stats(self, inclusive: bool = False) -> FunctionCounts:
-        """Returns stats as a tuple of (count, function)
+        """Returns detailed function counts.
+
+        Conceptually, the FunctionCounts returned can be thought of as a tuple
+        of (count, path_and_function_name) tuples.
 
         `inclusive` matches the semantics of callgrind. If True, the counts
         include instructions executed by children. `inclusive=True` is useful
         for identifying hot spots in code; `inclusive=False` is useful for
-        identifying reducing noise when diffing counts from two different
-        runs. (See CallgrindStats.delta(...) for more details)
+        reducing noise when diffing counts from two different runs. (See
+        CallgrindStats.delta(...) for more details)
         """
-        if inclusive:
-            return self.stmt_inclusive_stats - self.baseline_inclusive_stats
-        return self.stmt_exclusive_stats - self.baseline_exclusive_stats
+        return self.stmt_inclusive_stats if inclusive else self.stmt_exclusive_stats
 
     def counts(self, *, denoise: bool = False) -> int:
         """Returns the total number of instructions executed.
@@ -188,7 +220,6 @@ class CallgrindStats(object):
         self,
         other,  # type: CallgrindStats
         inclusive: bool = False,
-        subtract_baselines: bool = True
     ) -> FunctionCounts:
         """Diff two sets of counts.
 
@@ -198,15 +229,9 @@ class CallgrindStats(object):
         next logical question is "why". This generally involves looking at what part
         if the code increased in instruction count. This function automates that
         process so that one can easily diff counts on both an inclusive and
-        exclusive basis. The `subtract_baselines` argument allows one to disable
-        baseline correction, though in most cases it shouldn't matter as the
-        baselines are expected to more or less cancel out.
+        exclusive basis.
         """
-        if subtract_baselines:
-            return self.stats(inclusive=inclusive) - other.stats(inclusive=inclusive)
-        elif inclusive:
-            return self.stmt_inclusive_stats - other.stmt_inclusive_stats
-        return self.stmt_exclusive_stats - other.stmt_exclusive_stats
+        return self.stats(inclusive=inclusive) - other.stats(inclusive=inclusive)
 
     def as_standardized(self) -> "CallgrindStats":
         """Strip library names and some prefixes from function strings.
@@ -216,7 +241,8 @@ class CallgrindStats(object):
         when reporting a function (as it should). However, this can cause
         issues when diffing profiles. If a key component such as Python
         or PyTorch was built in separate locations in the two profiles, which
-        can result in something resembling:
+        can result in something resembling::
+
             23234231 /tmp/first_build_dir/thing.c:foo(...)
              9823794 /tmp/first_build_dir/thing.c:bar(...)
               ...
@@ -256,6 +282,10 @@ class CallgrindStats(object):
             baseline_exclusive_stats=strip(self.baseline_exclusive_stats),
             stmt_inclusive_stats=strip(self.stmt_inclusive_stats),
             stmt_exclusive_stats=strip(self.stmt_exclusive_stats),
+
+            # `as_standardized` will change symbol names, so the contents will
+            # no longer map directly to `callgrind.out`
+            stmt_callgrind_out=None,
         )
 
 
@@ -468,7 +498,7 @@ class _ValgrindWrapper(object):
         if build_search is not None:
             self._build_type = build_search.groups()[0].split(",")[0]
 
-        self._baseline_cache: Dict[Tuple[int, int], Tuple[FunctionCounts, FunctionCounts]] = {}
+        self._baseline_cache: Dict[Tuple[int, int], Tuple[FunctionCounts, FunctionCounts, Optional[str]]] = {}
 
     def _validate(self) -> None:
         if not self._supported_platform:
@@ -485,6 +515,7 @@ class _ValgrindWrapper(object):
         number: int,
         collect_baseline: bool,
         is_python: bool,
+        retain_out_file: bool,
     ) -> CallgrindStats:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
@@ -504,12 +535,13 @@ class _ValgrindWrapper(object):
                     globals={},
                     number=number,
                     is_python=True,
+                    retain_out_file=False,
                 )
-            baseline_inclusive_stats, baseline_exclusive_stats = \
+            baseline_inclusive_stats, baseline_exclusive_stats, _ = \
                 self._baseline_cache[cache_key]
 
-        stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(
-            task_spec, globals, number, is_python)
+        stmt_inclusive_stats, stmt_exclusive_stats, out_contents = self._invoke(
+            task_spec, globals, number, is_python, retain_out_file)
         return CallgrindStats(
             task_spec=task_spec,
             number_per_run=number,
@@ -518,6 +550,7 @@ class _ValgrindWrapper(object):
             baseline_exclusive_stats=baseline_exclusive_stats,
             stmt_inclusive_stats=stmt_inclusive_stats,
             stmt_exclusive_stats=stmt_exclusive_stats,
+            stmt_callgrind_out=out_contents,
         )
 
     def _invoke(
@@ -526,7 +559,8 @@ class _ValgrindWrapper(object):
         globals: Dict[str, Any],
         number: int,
         is_python: bool,
-    ) -> Tuple[FunctionCounts, FunctionCounts]:
+        retain_out_file: bool,
+    ) -> Tuple[FunctionCounts, FunctionCounts, Optional[str]]:
         """Core invocation method for Callgrind collection.
 
         Valgrind operates by effectively replacing the CPU with an emulated
@@ -590,8 +624,9 @@ class _ValgrindWrapper(object):
                 run_loop_cmd = ["python", script_file]
             else:
                 run_loop_exec = cpp_jit.compile_callgrind_template(
-                    task_spec.stmt,
-                    task_spec.setup,
+                    stmt=task_spec.stmt,
+                    setup=task_spec.setup,
+                    global_setup=task_spec.global_setup,
                 )
                 run_loop_cmd = [
                     run_loop_exec,
@@ -624,6 +659,8 @@ class _ValgrindWrapper(object):
                 annotate_invocation, annotate_invocation_output = run([
                     "callgrind_annotate",
                     f"--inclusive={'yes' if inclusive else 'no'}",
+                    "--threshold=100",
+                    "--show-percs=no",
                     callgrind_out
                 ], check=True)
 
@@ -647,7 +684,17 @@ class _ValgrindWrapper(object):
                     begin_collecting = False
 
                 return FunctionCounts(tuple(sorted(fn_counts, reverse=True)), inclusive=inclusive)
-            return parse_output(inclusive=True), parse_output(inclusive=False)
+
+            callgrind_out_contents: Optional[str] = None
+            if retain_out_file:
+                with open(callgrind_out, "rt") as f:
+                    callgrind_out_contents = f.read()
+
+            return (
+                parse_output(inclusive=True),
+                parse_output(inclusive=False),
+                callgrind_out_contents,
+            )
         finally:
             shutil.rmtree(working_dir)
 

@@ -64,11 +64,11 @@ class TORCH_API Block : public StmtNode<Block> {
  public:
   static Block* make(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> valid_stmts;
-    for (size_t i = 0; i < stmts.size(); i++) {
-      if (!stmts[i]) {
+    for (auto& stmt : stmts) {
+      if (!stmt) {
         continue;
       }
-      valid_stmts.push_back(stmts[i]);
+      valid_stmts.push_back(stmt);
     }
     if (valid_stmts.empty()) {
       return nullptr;
@@ -173,13 +173,16 @@ class TORCH_API Block : public StmtNode<Block> {
 
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
-      if (s->get_parent()) {
-        throw malformed_input(
-            "Block creation has Stmt with existing parent", s);
+      if (!s) {
+        continue;
+      }
+      if (!s->get_parent()) {
+        // If we get here, it's a bug, but we cannot throw an error from a
+        // constructor. But IR verifier would catch this.
+        set_parent(s, this);
       }
 
       stmts_.push_back(s);
-      set_parent(s, this);
     }
   }
 
@@ -315,57 +318,52 @@ class TORCH_API Store : public StmtNode<Store> {
 // explicitly freed. An unfreed memory is likely considered an error.
 class TORCH_API Allocate : public StmtNode<Allocate> {
  public:
-  static Allocate* make(
-      const VarHandle& buffer_var,
-      Dtype dtype,
-      const std::vector<ExprHandle>& dims) {
-    std::vector<const Expr*> dims_nodes(dims.size());
-    for (size_t i = 0; i < dims.size(); i++) {
-      dims_nodes[i] = dims[i].node();
-    }
-    return new Allocate(buffer_var.node(), dtype, dims_nodes);
+  static Allocate* make(const BufHandle& buf_handle) {
+    return new Allocate(buf_handle.node());
   }
 
   const Var* buffer_var() const {
-    return buffer_var_;
+    return buf_->base_handle();
   }
 
   Dtype dtype() const {
-    return dtype_;
+    return buf_->dtype();
   }
 
-  const std::vector<const Expr*>& dims() const {
-    return dims_;
+  const std::vector<const Expr*> dims() const {
+    return buf_->dims();
   }
 
-  Allocate(
-      const Var* buffer_var,
-      Dtype dtype,
-      const std::vector<const Expr*>& dims)
-      : buffer_var_(buffer_var), dtype_(dtype), dims_(dims) {}
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  explicit Allocate(const Buf* buf) : buf_(buf) {}
 
  private:
-  const Var* buffer_var_;
-  Dtype dtype_;
-  std::vector<const Expr*> dims_;
+  const Buf* buf_;
   // TODO: add memory types.
 };
 
 // Free the specific buffer. It is an error.
 class TORCH_API Free : public StmtNode<Free> {
  public:
-  static Free* make(const VarHandle& buffer_var) {
-    return new Free(buffer_var.node());
+  static Free* make(const BufHandle& buf_handle) {
+    return new Free(buf_handle.node());
   }
 
   const Var* buffer_var() const {
-    return buffer_var_;
+    return buf_->base_handle();
   }
 
-  Free(const Var* buffer_var) : buffer_var_(buffer_var) {}
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  explicit Free(const Buf* buf) : buf_(buf) {}
 
  private:
-  const Var* buffer_var_;
+  const Buf* buf_;
 };
 
 class TORCH_API Let : public StmtNode<Let> {
@@ -540,17 +538,28 @@ class TORCH_API LoopOptions {
     gpu_thread_index_ = index;
   }
 
+  void set_parallel() {
+    is_parallel_ = true;
+  }
+
+  bool is_parallel() const {
+    return is_parallel_;
+  }
+
   std::string ToString() const {
     if (is_gpu_block_index()) {
       return gpu_block_index_str();
     } else if (is_gpu_thread_index()) {
       return gpu_thread_index_str();
+    } else if (is_parallel()) {
+      return "parallel";
     }
     return "";
   }
 
   bool isDefault() const {
-    return gpu_block_index_ == IDX_UNSET && gpu_thread_index_ == IDX_UNSET;
+    return gpu_block_index_ == IDX_UNSET && gpu_thread_index_ == IDX_UNSET &&
+        !is_parallel_;
   }
 
   void set_buffer_mapping(
@@ -565,6 +574,7 @@ class TORCH_API LoopOptions {
  private:
   int gpu_block_index_{IDX_UNSET};
   int gpu_thread_index_{IDX_UNSET};
+  bool is_parallel_{false};
   std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
 
@@ -609,16 +619,6 @@ class TORCH_API For : public StmtNode<For> {
 
   For(const Var* var, const Expr* start, const Expr* stop, Stmt* body)
       : var_(var), start_(start), stop_(stop) {
-    if (!var) {
-      throw malformed_input("invalid Var in For loop", var);
-    } else if (!start) {
-      throw malformed_input("invalid Start in For loop", start);
-    } else if (!stop) {
-      throw malformed_input("invalid Stop in For loop", stop);
-    } else if (!body || body->get_parent()) {
-      throw malformed_input("invalid Body in For loop", body);
-    }
-
     Block* b = dynamic_cast<Block*>(body);
     if (!b) {
       b = new Block({body});
@@ -657,6 +657,14 @@ class TORCH_API For : public StmtNode<For> {
 
   void set_gpu_thread_index(int thread_index) {
     loop_options_.set_gpu_thread_index(thread_index);
+  }
+
+  void set_parallel() {
+    loop_options_.set_parallel();
+  }
+
+  bool is_parallel() const {
+    return loop_options_.is_parallel();
   }
 
   void set_buffer_map(const std::unordered_map<std::string, const Buf*>& map) {
@@ -717,6 +725,63 @@ class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
 class TORCH_API SyncThreads : public StmtNode<SyncThreads> {
  public:
   SyncThreads() {}
+};
+
+/*
+ * ExternalCall statement represents a call to an external function that would
+ * compute the contents of the output buffer. An ExternalCall statement consists
+ * of:
+ *   1) output buffer - the buffer that'll be initialized by the call
+ *   2) external function name - a key from the NNC function registry to lookup
+ *      the actual function to call
+ *   3) buffer arguments - the input buffers used by the function
+ *   4) non-buffer arguments - scalar arguments to pass to the function
+ *
+ * An example:
+ *   A = nnc_conv2d(buf_args={Input, Weight, Bias}, args={1})
+ * Here 'A' is the output buffer, "nnc_conv2d" is the function name, the buffer
+ * arguments are 'Input', 'Weight', and 'Bias', and there is a single non-buffer
+ * argument - 1.
+ *
+ * The semantics of the scalar arguments is defined solely by the implementation
+ * of the external function.
+ */
+class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
+ public:
+  static ExternalCall* make(
+      BufHandle buf,
+      const std::string& func_name,
+      const std::vector<BufHandle>& buf_args,
+      const std::vector<ExprHandle>& args);
+
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  std::string func_name() const {
+    return func_name_;
+  }
+
+  std::vector<const Buf*> buf_args() const {
+    return buf_args_;
+  }
+
+  std::vector<const Expr*> args() const {
+    return args_;
+  }
+
+  ExternalCall(
+      const Buf* buf,
+      const std::string& func_name,
+      const std::vector<const Buf*>& buf_args,
+      const std::vector<const Expr*>& args)
+      : buf_(buf), func_name_(func_name), buf_args_(buf_args), args_(args) {}
+
+ private:
+  const Buf* buf_;
+  std::string func_name_;
+  std::vector<const Buf*> buf_args_;
+  std::vector<const Expr*> args_;
 };
 
 } // namespace tensorexpr

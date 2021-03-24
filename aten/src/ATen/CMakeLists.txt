@@ -116,7 +116,22 @@ append_filelist("jit_core_sources" ATen_CORE_SRCS)
 
 add_subdirectory(quantized)
 add_subdirectory(nnapi)
-set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp})
+
+if(BUILD_LITE_INTERPRETER)
+  set(all_cpu_cpp ${generated_cpp} ${core_generated_cpp} ${cpu_kernel_cpp})
+  append_filelist("jit_core_sources" all_cpu_cpp)
+  append_filelist("aten_cpu_source_non_codegen_list" all_cpu_cpp)
+  append_filelist("aten_native_source_non_codegen_list" all_cpu_cpp)
+  list(APPEND all_cpu_cpp ${Aten_TH_AVX_extra_src})
+else()
+  set(
+    all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp}
+    ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
+    ${native_utils_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp}
+    ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
+  )
+endif()
+
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
@@ -325,6 +340,7 @@ if(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
       )
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
@@ -338,9 +354,20 @@ if(USE_CUDA AND NOT USE_ROCM)
   if(CAFFE2_USE_CUDNN)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
   endif()
+  if($ENV{ATEN_STATIC_CUDA})
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
+  endif($ENV{ATEN_STATIC_CUDA})
+endif()
+
 
   if(USE_MAGMA)
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
+    if(USE_CUDA)
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
+    endif(USE_CUDA)
+    if(USE_ROCM)
+      list(APPEND ATen_HIP_DEPENDENCY_LIBS ${MAGMA_LIBRARIES})
+    endif(USE_ROCM)
     if(MSVC)
       if($ENV{TH_BINARY_BUILD})
         # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
@@ -350,11 +377,6 @@ if(USE_CUDA AND NOT USE_ROCM)
       endif($ENV{TH_BINARY_BUILD})
     endif(MSVC)
   endif(USE_MAGMA)
-  if($ENV{ATEN_STATIC_CUDA})
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
-  endif($ENV{ATEN_STATIC_CUDA})
-endif()
 
 # NB: We're relying on cmake/Dependencies.cmake to appropriately setup HIP dependencies.
 # In principle we could duplicate them, but handling the rocblas
@@ -434,6 +456,8 @@ install(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
 
 if(ATEN_NO_TEST)
   message("disable test because ATEN_NO_TEST is set")
+elseif(BUILD_LITE_INTERPRETER)
+  message("disable aten test when BUILD_LITE_INTERPRETER is enabled")
 else()
   add_subdirectory(test)
 endif()

@@ -1,6 +1,9 @@
+#include <ATen/Context.h>
 #include <ATen/BatchedFallback.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/VmapTransforms.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/llvmMathExtras.h>
 
 namespace at {
@@ -63,6 +66,9 @@ static bool isInplaceOp(const c10::FunctionSchema& schema) {
 }
 
 static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
+  if (!globalContext().areVmapFallbackWarningsEnabled()) {
+    return;
+  }
   auto uses_stack = is_inplace ? "" : " and stack";
   TORCH_WARN("Batching rule not implemented for ", schema.operator_name(), " falling back "
              "to slow (for loop", uses_stack, ") implementation");
@@ -158,7 +164,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
   auto first_physical_view_sizes = input_physical_views.front().tensor().sizes();
   auto batch_sizes = ArrayRef<int64_t>(
       first_physical_view_sizes.begin(), first_physical_view_sizes.begin() + num_batch_dims);
-  const auto num_batches = prod_intlist(batch_sizes);
+  const auto num_batches = c10::multiply_integers(batch_sizes);
   // Without a shape-checking API, we're unable to compute the correct shape of
   // the output so we just error out.
   TORCH_CHECK(num_batches > 0,
@@ -291,7 +297,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   auto num_batch_dims = input_physical_views.front().numBatchDims();
   auto some_sizes = input_physical_views.front().tensor().sizes();
   auto batch_sizes = ArrayRef<int64_t>(some_sizes.begin(), some_sizes.begin() + num_batch_dims);
-  const auto num_batches = prod_intlist(batch_sizes);
+  const auto num_batches = c10::multiply_integers(batch_sizes);
   // Without a shape-checking API, we're unable to compute the correct shape of
   // the output so we just error out.
   TORCH_CHECK(num_batches > 0,

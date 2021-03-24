@@ -6,9 +6,11 @@ import re
 from typing import Optional, List
 
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 import tools.codegen.api.python as python
-from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe
+from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.context import with_native_function
+from tools.codegen.utils import mapMaybe
 from tools.codegen.model import *
 
 OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
@@ -72,12 +74,7 @@ def process_function(f: NativeFunction) -> Optional[str]:
 
     return f"""\
 inline at::Tensor {name}({', '.join(formals)}) {{
-  at::Tensor tensor = ([&]() {{
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::{name}({', '.join(exprs)});
-  }})();
-  at::Tensor result =
-    autograd::make_variable(std::move(tensor), /*requires_grad=*/{requires_grad});
-  return result;
+  at::AutoDispatchBelowInplaceOrView guard;
+  return autograd::make_variable(at::{name}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
 }}
 """

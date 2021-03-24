@@ -1,10 +1,12 @@
 #pragma once
 
+#include <cstdint>
+
 namespace caffe2 {
 namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x5L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 
 // Versions (i.e. why was the version number bumped?)
 
@@ -44,15 +46,27 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x5L;
 //      (a versioned symbol preserves the historic behavior of versions 1--3)
 // 5. (Dynamic) Stops torch.full inferring a floating point dtype
 //      when given bool or integer fill values.
+// 6. Write version string to `./data/version` instead of `version`.
 constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 
-// the version we write when the archive contains bytecode.
+// The version we write when the archive contains bytecode.
 // It must be higher or eq to kProducedFileFormatVersion.
 // Because torchscript changes is likely introduce bytecode change.
 // If kProducedFileFormatVersion is increased, kProducedBytecodeVersion
 // should be increased too. The relationship is:
 // kMaxSupportedFileFormatVersion >= (most likely ==) kProducedBytecodeVersion
 //   >= kProducedFileFormatVersion
+// If a format change is forward compatible (still readable by older
+// executables), we will not increment the version number, to minimize the
+// risk of breaking existing clients. TODO: A better way would be to allow
+// the caller that creates a model to specify a maximum version that its
+// clients can accept.
+// Versions:
+//  0x1L: Initial version
+//  0x2L: (Comment missing)
+//  0x3L: (Comment missing)
+//  0x4L: (Comment missing)
+//  0x4L: (update) Added schema to function tuple. Forward-compatible change.
 constexpr uint64_t kProducedBytecodeVersion = 0x4L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,

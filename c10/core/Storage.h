@@ -87,7 +87,11 @@ struct C10_API Storage {
   // Returns the previous data_ptr
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) const {
     return storage_impl_.get()->set_data_ptr(std::move(data_ptr));
-  };
+  }
+
+  void set_data_ptr_noswap(at::DataPtr&& data_ptr) const {
+    return storage_impl_.get()->set_data_ptr_noswap(std::move(data_ptr));
+  }
 
   DeviceType device_type() const {
     return storage_impl_->device_type();
@@ -130,7 +134,7 @@ struct C10_API Storage {
       size_t capacity,
       DeleterFnPtr d = nullptr) {
     if (!storage_impl_.unique()) {
-      AT_ERROR(
+      TORCH_CHECK(false,
           "UniqueStorageShareExternalPointer can only be called when use_count == 1");
     }
     storage_impl_->UniqueStorageShareExternalPointer(src, capacity, d);
@@ -140,7 +144,7 @@ struct C10_API Storage {
       at::DataPtr&& data_ptr,
       size_t capacity) {
     if (!storage_impl_.unique()) {
-      AT_ERROR(
+      TORCH_CHECK(false,
           "UniqueStorageShareExternalPointer can only be called when use_count == 1");
     }
     storage_impl_->UniqueStorageShareExternalPointer(
