@@ -35,10 +35,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
 
   Tensor Y = at::native::empty_like(
       X,
-      nullopt /* dtype */,
-      nullopt /* layout */,
-      nullopt /* device */,
-      nullopt /* pin_memory */,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
       at::MemoryFormat::Contiguous);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
@@ -87,42 +87,42 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
     if (grad_input_mask[0]) {
       dX = at::native::empty_like(
           X,
-          nullopt /* dtype */,
-          nullopt /* layout */,
-          nullopt /* device */,
-          nullopt /* pin_memory */,
+          c10::nullopt /* dtype */,
+          c10::nullopt /* layout */,
+          c10::nullopt /* device */,
+          c10::nullopt /* pin_memory */,
           at::MemoryFormat::Contiguous);
     }
     if (grad_input_mask[1]) {
       dgamma = M > 0 ? at::native::empty_like(
                            gamma,
-                           nullopt /* dtype */,
-                           nullopt /* layout */,
-                           nullopt /* device */,
-                           nullopt /* pin_memory */,
+                           c10::nullopt /* dtype */,
+                           c10::nullopt /* layout */,
+                           c10::nullopt /* device */,
+                           c10::nullopt /* pin_memory */,
                            at::MemoryFormat::Contiguous)
                      : at::native::zeros_like(
                            gamma,
-                           nullopt /* dtype */,
-                           nullopt /* layout */,
-                           nullopt /* device */,
-                           nullopt /* pin_memory */,
+                           c10::nullopt /* dtype */,
+                           c10::nullopt /* layout */,
+                           c10::nullopt /* device */,
+                           c10::nullopt /* pin_memory */,
                            at::MemoryFormat::Contiguous);
     }
     if (grad_input_mask[2]) {
       dbeta = M > 0 ? at::native::empty_like(
                           beta,
-                          nullopt /* dtype */,
-                          nullopt /* layout */,
-                          nullopt /* device */,
-                          nullopt /* pin_memory */,
+                          c10::nullopt /* dtype */,
+                          c10::nullopt /* layout */,
+                          c10::nullopt /* device */,
+                          c10::nullopt /* pin_memory */,
                           at::MemoryFormat::Contiguous)
                     : at::native::zeros_like(
                           beta,
-                          nullopt /* dtype */,
-                          nullopt /* layout */,
-                          nullopt /* device */,
-                          nullopt /* pin_memory */,
+                          c10::nullopt /* dtype */,
+                          c10::nullopt /* layout */,
+                          c10::nullopt /* device */,
+                          c10::nullopt /* pin_memory */,
                           at::MemoryFormat::Contiguous);
     }
     if (M > 0) {

@@ -440,10 +440,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
 
   Tensor Y = at::native::empty_like(
       X,
-      nullopt /* dtype */,
-      nullopt /* layout */,
-      nullopt /* device */,
-      nullopt /* pin_memory */,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
@@ -492,42 +492,42 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
     if (grad_input_mask[0]) {
       dX = at::native::empty_like(
           X,
-          nullopt /* dtype */,
-          nullopt /* layout */,
-          nullopt /* device */,
-          nullopt /* pin_memory */,
+          c10::nullopt /* dtype */,
+          c10::nullopt /* layout */,
+          c10::nullopt /* device */,
+          c10::nullopt /* pin_memory */,
           LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     if (grad_input_mask[1]) {
       dgamma = M > 0 ? at::native::empty_like(
                            gamma,
-                           nullopt /* dtype */,
-                           nullopt /* layout */,
-                           nullopt /* device */,
-                           nullopt /* pin_memory */,
+                           c10::nullopt /* dtype */,
+                           c10::nullopt /* layout */,
+                           c10::nullopt /* device */,
+                           c10::nullopt /* pin_memory */,
                            LEGACY_CONTIGUOUS_MEMORY_FORMAT)
                      : at::native::zeros_like(
                            gamma,
-                           nullopt /* dtype */,
-                           nullopt /* layout */,
-                           nullopt /* device */,
-                           nullopt /* pin_memory */,
+                           c10::nullopt /* dtype */,
+                           c10::nullopt /* layout */,
+                           c10::nullopt /* device */,
+                           c10::nullopt /* pin_memory */,
                            LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     if (grad_input_mask[2]) {
       dbeta = M > 0 ? at::native::empty_like(
                           beta,
-                          nullopt /* dtype */,
-                          nullopt /* layout */,
-                          nullopt /* device */,
-                          nullopt /* pin_memory */,
+                          c10::nullopt /* dtype */,
+                          c10::nullopt /* layout */,
+                          c10::nullopt /* device */,
+                          c10::nullopt /* pin_memory */,
                           LEGACY_CONTIGUOUS_MEMORY_FORMAT)
                     : at::native::zeros_like(
                           beta,
-                          nullopt /* dtype */,
-                          nullopt /* layout */,
-                          nullopt /* device */,
-                          nullopt /* pin_memory */,
+                          c10::nullopt /* dtype */,
+                          c10::nullopt /* layout */,
+                          c10::nullopt /* device */,
+                          c10::nullopt /* pin_memory */,
                           LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     if (M > 0) {

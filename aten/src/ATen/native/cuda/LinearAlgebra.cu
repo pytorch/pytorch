@@ -143,9 +143,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         at::native::scalar_tensor(
             beta,
             self.scalar_type(),
-            nullopt /* layout */,
+            c10::nullopt /* layout */,
             at::kCPU,
-            nullopt /* pin_memory */));
+            c10::nullopt /* pin_memory */));
   }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {

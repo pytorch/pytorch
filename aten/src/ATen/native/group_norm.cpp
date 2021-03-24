@@ -30,10 +30,10 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
 
   Tensor Y = at::native::empty_like(
       X,
-      nullopt /* dtype */,
-      nullopt /* layout */,
-      nullopt /* device */,
-      nullopt /* pin_memory */,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mean = at::empty({N, group}, X.options());
   Tensor rstd = at::empty({N, group}, X.options());
@@ -61,28 +61,28 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   if (grad_input_mask[0]) {
     dX = at::native::empty_like(
         X,
-        nullopt /* dtype */,
-        nullopt /* layout */,
-        nullopt /* device */,
-        nullopt /* pin_memory */,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
     dgamma = at::native::empty_like(
         gamma,
-        nullopt /* dtype */,
-        nullopt /* layout */,
-        nullopt /* device */,
-        nullopt /* pin_memory */,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
     dbeta = at::native::empty_like(
         gamma,
-        nullopt /* dtype */,
-        nullopt /* layout */,
-        nullopt /* device */,
-        nullopt /* pin_memory */,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
         LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   GroupNormBackwardKernel(

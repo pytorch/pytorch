@@ -122,10 +122,10 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   auto input = input_.contiguous();
   Tensor output = at::native::empty_like(
       input,
-      nullopt /* dtype */,
-      nullopt /* layout */,
-      nullopt /* device */,
-      nullopt /* pin_memory */,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
 
@@ -152,10 +152,10 @@ Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half
   auto input = input_.contiguous();
   Tensor output = at::native::empty_like(
       input,
-      nullopt /* dtype */,
-      nullopt /* layout */,
-      nullopt /* device */,
-      nullopt /* pin_memory */,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
 
@@ -189,10 +189,10 @@ Tensor softmax_backward_cpu(
   auto output = output_.contiguous();
   Tensor grad_input = at::native::empty_like(
       grad,
-      nullopt /* dtype */,
-      nullopt /* layout */,
-      nullopt /* device */,
-      nullopt /* pin_memory */,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   if (output.numel() == 0) {
@@ -227,10 +227,10 @@ Tensor log_softmax_backward_cpu(
   auto output = output_.contiguous();
   Tensor grad_input = at::native::empty_like(
       grad,
-      nullopt /* dtype */,
-      nullopt /* layout */,
-      nullopt /* device */,
-      nullopt /* pin_memory */,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   if (output.numel() == 0) {

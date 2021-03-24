@@ -67,7 +67,7 @@ Tensor &addmv_out(const Tensor &self, const Tensor &mat, const Tensor &vec, cons
           result,
           self,
           at::native::scalar_tensor(
-              beta, self.scalar_type(), nullopt /* layout */, at::kCPU, nullopt /* pin_memory */));
+              beta, self.scalar_type(), c10::nullopt /* layout */, at::kCPU, c10::nullopt /* pin_memory */));
     }
   } else {
     if (!result.is_same(self_)) {

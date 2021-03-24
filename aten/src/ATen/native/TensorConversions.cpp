@@ -63,11 +63,7 @@ Tensor to(
   c10::optional<c10::MemoryFormat> optional_memory_format
 ) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options_ = TensorOptions()
-      .dtype(dtype)
-      .layout(layout)
-      .device(device)
-      .pinned_memory(pin_memory);
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   TORCH_CHECK(
     !(options_.has_memory_format() && optional_memory_format.has_value()),

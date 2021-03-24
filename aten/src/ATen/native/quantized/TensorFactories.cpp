@@ -20,11 +20,7 @@ Tensor empty_affine_quantized(
     int64_t zero_point,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options_ = TensorOptions()
-      .dtype(dtype)
-      .layout(layout)
-      .device(device)
-      .pinned_memory(pin_memory);
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   TORCH_CHECK(
     !(options_.has_memory_format() && optional_memory_format.has_value()),
@@ -52,11 +48,7 @@ Tensor empty_per_channel_affine_quantized(
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options_ = TensorOptions()
-      .dtype(dtype)
-      .layout(layout)
-      .device(device)
-      .pinned_memory(pin_memory);
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   TORCH_CHECK(
     !(options_.has_memory_format() && optional_memory_format.has_value()),

@@ -501,10 +501,10 @@ void silu_backward_kernel(TensorIterator& iter) {
 Tensor gelu_cuda(const Tensor& self) {
   Tensor Y = at::native::empty_like(
       self,
-      nullopt /* dtype */,
-      nullopt /* layout */,
-      nullopt /* device */,
-      nullopt /* pin_memory */,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::unary_op(Y, self);
   GeluCUDAKernelImpl(it);
@@ -514,10 +514,10 @@ Tensor gelu_cuda(const Tensor& self) {
 Tensor gelu_backward_cuda(const Tensor& grad, const Tensor& self) {
   Tensor dX = at::native::empty_like(
       self,
-      nullopt /* dtype */,
-      nullopt /* layout */,
-      nullopt /* device */,
-      nullopt /* pin_memory */,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::binary_op(dX, grad, self);
   GeluBackwardCUDAKernelImpl(it);
