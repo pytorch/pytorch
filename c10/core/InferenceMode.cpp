@@ -1,8 +1,6 @@
 
 #include <c10/core/InferenceMode.h>
 
-#include <stdexcept>
-
 namespace c10 {
 
 bool InferenceMode::is_enabled() {

@@ -136,19 +136,6 @@ ${assign_return_values} ([&]() {
 })();
 """)
 
-THROW_IF_VIEW_ON_INFERENCE_TENSOR = CodeTemplate("""\
-// Theorectically we can allow view ops on inference tensor in normal mode
-// as long as we mark the output also inference tensor in this kernel.
-// But it'll break an invariant we currently have: inference tensor can
-// only be created inside InferenceMode.
-// This invariant makes inference tensor easier for users to understand,
-// so we should only break it when there's a valid use case.
-TORCH_CHECK(!${base}.unsafeGetTensorImpl()->is_inference_tensor(),
-  "Calling view ops on inference tensor outside InferenceMode is not allowed, ",
-  "consider doing it inside infernce mode to work around this error. ",
-  "If you have a valid use case, please make a feature request to PyTorch.");
-""")
-
 TMP_VAR = '_tmp'
 
 # FIXME: Ideally these functions should be methods on Type class, but we have a
@@ -358,7 +345,6 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     else:
         view_info = get_view_info(fn)
         assert(view_info is not None)
-        inplace_view_body.append(THROW_IF_VIEW_ON_INFERENCE_TENSOR.substitute(base=view_info))
         inplace_view_body.append(VIEW_REDISPATCH.substitute(
             assign_return_values='auto ' + TMP_VAR + ' = ',
             api_name=api_name,
