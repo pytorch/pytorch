@@ -24,7 +24,7 @@ std::vector<IValue> toIValues(const Message& message, MessageType type) {
       payload,
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &message.tensors());
+      message.tensors());
   return value.toTuple()->elements();
 }
 
