@@ -5,7 +5,7 @@ from torch.overrides import is_tensor_like
 import collections
 from itertools import product
 import warnings
-from typing import Callable, Union, Optional, Iterable, List, Dict
+from typing import Callable, Union, Optional, Iterable, List
 from torch._vmap_internals import vmap
 import functools
 
