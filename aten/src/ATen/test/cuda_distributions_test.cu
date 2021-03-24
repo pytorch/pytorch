@@ -152,6 +152,9 @@ TEST(DistributionsTest, TestPhiloxIncrementSmallMultinomialTensor) {
   assert_with_expected_uniforms(4);
 }
 
+// this test is flaky on MSVC
+#ifndef _MSC_VER
+
 __managed__ int keys[] = {
   1, (1 << 15) + 1,  (1 << 16) + 1,
   2, (1 << 14) + 2
@@ -204,3 +207,5 @@ TEST(RandomPermutationTest, TestIslandShuffle) {
   ASSERT_TRUE(shuffled1);
   ASSERT_TRUE(shuffled2);
 }
+
+#endif
