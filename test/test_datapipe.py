@@ -269,12 +269,12 @@ class TestFunctionalIterDataPipe(TestCase):
 
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
             (dp.iter.Map, IDP(arr), (lambda x: x, ), {}),
-            (dp.iter.Collate, IDP(arr), (lambda x: xi, ), {}),
+            (dp.iter.Collate, IDP(arr), (lambda x: x, ), {}),
             (dp.iter.Filter, IDP(arr), (lambda x: x >= 5, ), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
             with warnings.catch_warnings(record=True) as wa:
-                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)
+                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore
                 self.assertEqual(len(wa), 1)
                 self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
                 with self.assertRaises(AttributeError):
@@ -288,7 +288,7 @@ class TestFunctionalIterDataPipe(TestCase):
             dp.iter.Concat()
 
         with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `IterDataPipe`"):
-            dp.iter.Concat(input_dp1, ())
+            dp.iter.Concat(input_dp1, ())  # type: ignore
 
         concat_dp = input_dp1.concat(input_dp2)
         self.assertEqual(len(concat_dp), 15)
@@ -532,7 +532,7 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
 
         # Single transform
-        input_dp = IDP_NoLen(inputs)
+        input_dp = IDP_NoLen(inputs)  # type: ignore
         transform = torchvision.transforms.ToTensor()
         tsfm_dp = input_dp.transforms(transform)
         with self.assertRaises(NotImplementedError):
@@ -542,9 +542,9 @@ class TestFunctionalIterDataPipe(TestCase):
 
     def test_zip_datapipe(self):
         with self.assertRaises(TypeError):
-            dp.iter.Zip(IDP(range(10)), list(range(10)))
+            dp.iter.Zip(IDP(range(10)), list(range(10)))  # type: ignore
 
-        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))
+        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))  # type: ignore
         with self.assertRaises(NotImplementedError):
             len(zipped_dp)
         exp = list((i, i) for i in range(5))
