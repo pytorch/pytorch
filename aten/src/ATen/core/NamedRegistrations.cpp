@@ -354,6 +354,7 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("nextafter_", CppFunction::makeFallthrough());
   m.impl("normal_", CppFunction::makeFallthrough());
   m.impl("ones_like", CppFunction::makeFallthrough());
+  m.impl("output_nr", CppFunction::makeFallthrough());
   m.impl("polygamma", CppFunction::makeFallthrough());
   m.impl("polygamma.out", CppFunction::makeFallthrough());
   m.impl("polygamma_", CppFunction::makeFallthrough());
@@ -502,5 +503,12 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   // supported because they were manually registered.  I'm not sure
   // if these registrations are right or not, but they preserve old behavior
   // (and some of them are exercised by the test suite).
+  m.impl("_backward", CppFunction::makeFallthrough());
+  m.impl("set_data", CppFunction::makeFallthrough());
+  m.impl("data", CppFunction::makeFallthrough());
+  m.impl("is_leaf", CppFunction::makeFallthrough());
+  m.impl("_version", CppFunction::makeFallthrough());
+  m.impl("requires_grad_", CppFunction::makeFallthrough());
+  m.impl("retain_grad", CppFunction::makeFallthrough());
   m.impl("_fw_primal", CppFunction::makeFallthrough());
 }
