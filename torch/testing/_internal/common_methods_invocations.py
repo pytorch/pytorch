@@ -385,43 +385,22 @@ def sample_inputs_binary(op_info, device, dtype, requires_grad):
     low = low if low is None else low + op_info._domain_eps
     high = high if high is None else high - op_info._domain_eps
 
-    return (
-        # empty tensors
-        SampleInput((make_tensor((), device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad),
-                     make_tensor((), device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad))),
-        # 1d - 1d
-        SampleInput((make_tensor((L), device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad),
-                     make_tensor((L), device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad))),
-        # 1d - 2d
-        SampleInput((make_tensor((L), device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad),
-                     make_tensor((L, L + 5), device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad))),
-        # 2d - 1d
-        SampleInput((make_tensor((L, L + 5), device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad),
-                     make_tensor((L), device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad))),
-        # 2d - 2d
-        SampleInput((make_tensor((L, L + 5), device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad),
-                     make_tensor((L, L + 5), device, dtype,
-                                 low=low, high=high,
-                                 requires_grad=requires_grad))),
+    test_cases = (
+        # scalar x scalar, scalar x 3d, flippped
+        ((), ()), ((), (S, S, S)), ((S, S, S), ()),
+        # 3d x 2d, 2d x3d, 3d x 3d
+        ((S, S), (S, S, S)), ((S, S, S), (S, S)), ((S, S, S), (S, S, S)), 
+        # 3d x 2d broadcasting
+        ((S, 1, S), (M, S)),
     )
+    return (
+        SampleInput((make_tensor(s1, device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad),
+                     make_tensor(s2, device, dtype,
+                                 low=low, high=high,
+                                 requires_grad=requires_grad)))
+        for s1, s2 in test_cases)
 
 
 # Metadata class for binary "universal functions (ufuncs)" that accept two

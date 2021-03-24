@@ -1177,12 +1177,17 @@ class TestBinaryUfuncs(TestCase):
         if dtype == torch.bfloat16:
             precision *= 10
             np_dtype = np.float16
+            def to_numpy(t):
+                return np.array(t.tolist(), dtype=np_dtype)
         else:
             np_dtype = torch_to_numpy_dtype_dict[dtype]
-        # TODO: I am missing how op.sample_inputs() is meant to be called
-        for tensors in op.sample_inputs(device, dtype):
-            torch_res = getattr(torch, op.name)(*tensors)
-            numpy_res = op.ref([np.array(t, dtype=np_dtype) for t in tensors])
+            def to_numpy(t):
+                return np.array(t.cpu(), dtype=np_dtype)
+        # TODO: turn these into separate tests
+        for sample in op.sample_inputs(device, dtype):
+            tensors = sample.input
+            torch_res = getattr(torch, op.name)(*tensors).cpu()
+            numpy_res = op.ref(*[to_numpy(t) for t in tensors])
             assert_allclose(torch_res, numpy_res, rtol=precision, atol=precision)
 
 
