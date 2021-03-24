@@ -2518,9 +2518,9 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.rand(100)
         self.run_test(PowModule3(), (x, y))
 
-    # the standardOps(Add\Sub\Mul\Div\Gemm\Pow\Mod) with low precision include unit8 will be failed in ORT
+    # the arithmeticOps(Add\Sub\Mul\Div\Gemm\Pow\Mod) with low precision include unit8 will be failed in ORT
     # add to(dtype=torch.long) to avoid ORT output type does not match expected type
-    def test_standardOps_with_low_precision(self):
+    def test_arithmeticOps_with_low_precision(self):
         class AddModule(torch.nn.Module):
             def forward(self, x, y):
                 return (x + y).to(dtype=torch.long)
