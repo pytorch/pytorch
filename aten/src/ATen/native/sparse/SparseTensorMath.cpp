@@ -909,12 +909,12 @@ Tensor& s_addmm_out_sparse_dense_cpu(
 
 }
 
-Tensor& addmm_out_sparse_dense_cpu(const Tensor& self,
+Tensor& addmm_out_sparse_dense_cpu(
+    const Tensor& self,
     const SparseTensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
-    const Scalar& alpha
-,
+    const Scalar& alpha,
     Tensor& result) {
   Tensor b_self;
   std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
@@ -1074,12 +1074,12 @@ SparseTensor hspmm_sparse_cpu(const SparseTensor& sparse, const Tensor& dense) {
 // S = beta * S1 + alpha * mm(S2, D)
 // --------------------------------------------------------------------
 
-SparseTensor& _sspaddmm_out_cpu(const SparseTensor& t,
+SparseTensor& _sspaddmm_out_cpu(
+    const SparseTensor& t,
     const SparseTensor& sparse_,
     const Tensor& dense,
     const Scalar& beta,
-    const Scalar& alpha
-,
+    const Scalar& alpha,
     SparseTensor& r) {
   AT_ASSERT(!t.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "sspaddmm: expected 'out' to be CPU tensor, but got CUDA tensor");
