@@ -88,7 +88,7 @@ class _CPatchManager(object):
         sys.setprofile(None)
 
 class Tracer(TracerBase):
-    """Tracer(self, autowrap_modules = (math, ), enable_cpatching = False)
+    """Tracer(autowrap_modules=(math,), enable_cpatching=False)
 
     ``Tracer`` is the class that implements the symbolic tracing functionality
     of ``torch.fx.symbolic_trace``. A call to ``symbolic_trace(m)`` is equivalent
