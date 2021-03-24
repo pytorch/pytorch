@@ -435,10 +435,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
-elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
-  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure
-  # cpp extension can be built correctly under this old env
-  test_cpp_extensions
 else
   install_torchvision
   test_python
