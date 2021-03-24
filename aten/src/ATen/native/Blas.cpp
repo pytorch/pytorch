@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/CPUFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ScalarOps.h>
@@ -62,7 +63,7 @@ Tensor &addmv_out(const Tensor &self, const Tensor &mat, const Tensor &vec, cons
     if (beta.toComplexDouble() == 0.0) {
       result.zero_();
     } else {
-      at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
+      at::cpu::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
     }
   } else {
     if (!result.is_same(self_)) {
