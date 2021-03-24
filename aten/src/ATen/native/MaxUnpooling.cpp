@@ -345,7 +345,7 @@ static void max_unpooling2d_backward_out_cpu_frame(
     int64_t owidth) {
   bool has_error = false;
   int64_t error_index = 0;
-  int k = 0;
+  int64_t k = 0;
 
   at::internal::lazy_init_num_threads();
 #pragma omp parallel for private(k)
@@ -479,7 +479,7 @@ static void max_unpooling3d_backward_out_cpu_frame(
     int64_t oT,
     int64_t oH,
     int64_t oW) {
-  int k = 0;
+  int64_t k = 0;
   bool has_error = false;
   int error_index = 0;
 
@@ -491,7 +491,7 @@ static void max_unpooling3d_backward_out_cpu_frame(
     scalar_t* gradOutput_p_k = gradOutput_p + k * oT * oH * oW;
     int64_t* ind_p_k = ind_p + k * iT * iH * iW;
 
-    int t, i, j, index;
+    int64_t t, i, j, index;
     int64_t maxp;
     for (t = 0; t < iT; t++) {
       for (i = 0; i < iH; i++) {

@@ -2315,8 +2315,12 @@
 
 - func: matrix_rank(Tensor self, bool symmetric=False) -> Tensor
 
+# Alias to linalg.matrix_power
 - func: matrix_power(Tensor self, int n) -> Tensor
   variants: function, method
+
+# Alias to linalg.matrix_power
+- func: matrix_power.out(Tensor self, int n, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: matrix_exp(Tensor self) -> Tensor
   variants: function, method
@@ -3543,6 +3547,10 @@
 
 - func: square_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+
+- func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: square_out
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   variants: function, method
@@ -9058,6 +9066,12 @@
     CPU: _linalg_qr_helper_cpu
     CUDA: _linalg_qr_helper_cuda
 
+- func: linalg_matrix_power(Tensor self, int n) -> Tensor
+  python_module: linalg
+
+- func: linalg_matrix_power.out(Tensor self, int n, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+
 - func: linalg_matrix_rank(Tensor self, float? tol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
@@ -9101,3 +9115,8 @@
 - func: _test_ambiguous_defaults.b(Tensor dummy, int a=2, str b="2") -> Tensor
   cpp_no_default_args: ['a', 'b']
   python_module: nn
+
+- func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _segment_reduce_cpu
