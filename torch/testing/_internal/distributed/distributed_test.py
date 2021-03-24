@@ -5184,7 +5184,7 @@ class DistributedTest:
         @require_backends_available({"gloo"})
         def test_monitored_barrier_gloo_subgroup(self):
             failed_rank = 1
-            timeout = 1
+            timeout = timedelta(seconds=1)
             subgroup = dist.new_group(ranks=[0, 1])
             if self.rank == failed_rank:
                 return
