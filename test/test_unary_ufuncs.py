@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy,
     gradcheck, IS_WINDOWS)
 from torch.testing._internal.common_methods_invocations import (
-    unary_ufuncs)
+    unary_ufuncs, _NOTHING)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyOnCPUAndCUDA,
     onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
@@ -24,6 +24,11 @@ from torch.testing import (
 
 if TEST_SCIPY:
     import scipy
+
+# Refer [scipy reference filter]
+# Filter operators for which the reference function
+# is available in the current environment (for reference_numerics tests).
+reference_filtered_ops = list(filter(lambda op: op.ref is not _NOTHING, unary_ufuncs))
 
 # Tests for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -238,32 +243,6 @@ class TestUnaryUfuncs(TestCase):
                                                                             high,
                                                                             result.item()))
 
-    # Tests that fn == method == inplace == jit on a simple single tensor input
-    # TODO: should this jitting the method and inplace variants, too?
-    @ops(unary_ufuncs)
-    def test_variant_consistency(self, device, dtype, op):
-        def _fn(t):
-            return op(t)
-
-        t = make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
-        expected = op(t)
-
-        for alt, inplace in ((op.get_method(), False), (op.get_inplace(), True),
-                             (torch.jit.script(_fn), False)):
-            if alt is None:
-                continue
-
-            if inplace and not torch.can_cast(expected.dtype, dtype):
-                # Assert that RuntimeError is raised
-                # for inplace variant of Operators that
-                # promote integer input to floating dtype.
-                with self.assertRaises(RuntimeError):
-                    alt(t.clone())
-                continue
-
-            actual = alt(t.clone())
-            self.assertEqual(actual, expected, rtol=0, atol=0)
-
     # Helper for comparing torch tensors and numpy arrays
     # TODO: should this or assertEqual also validate that strides are equal?
     def assertEqualHelper(self, actual, expected, msg, *, dtype, exact_dtype=True, **kwargs):
@@ -295,6 +274,18 @@ class TestUnaryUfuncs(TestCase):
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on given tensors
     def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
+        def _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan=True):
+            if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
+                exact_dtype = False
+
+            if dtype in [torch.uint8, torch.int8, torch.bool]:
+                # NOTE: For these dtypes, PyTorch computes in the default scalar type (float)
+                # while NumPy computes in float16
+                self.assertEqualHelper(actual, expected, msg, dtype=dtype,
+                                       exact_dtype=exact_dtype, rtol=1e-3, atol=1e-2)
+            else:
+                self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan=equal_nan, exact_dtype=exact_dtype)
+
         for t in tensors:
             if dtype is torch.bfloat16:
                 a = t.cpu().to(torch.float32).numpy()
@@ -313,31 +304,26 @@ class TestUnaryUfuncs(TestCase):
                 msg = None
 
             exact_dtype = True
-            if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
-                exact_dtype = False
-
-                if dtype in [torch.uint8, torch.int8, torch.bool]:
-                    # NOTE: For these dtypes, PyTorch computes in the default scalar type (float)
-                    # while NumPy computes in float16
-                    self.assertEqualHelper(actual, expected, msg, dtype=dtype,
-                                           exact_dtype=exact_dtype, rtol=1e-3, atol=1e-2)
-                    continue
-
-            self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan=equal_nan, exact_dtype=exact_dtype)
+            if isinstance(actual, torch.Tensor):
+                _helper_reference_numerics(expected, actual, msg, exact_dtype, equal_nan)
+            else:
+                for x, y in zip(expected, actual):
+                    # testing multi-outputs results
+                    _helper_reference_numerics(x, y, msg, exact_dtype, equal_nan)
 
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on a range of tensors, including empty tensors, scalar tensors,
     #   1D tensors and a large 2D tensor with interesting and extremal values
     #   and discontiguities.
     @suppress_warnings
-    @ops(unary_ufuncs)
+    @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
         tensors = generate_numeric_tensors(device, dtype,
                                            domain=op.domain)
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @ops(unary_ufuncs, allowed_dtypes=floating_and_complex_types_and(
+    @ops(reference_filtered_ops, allowed_dtypes=floating_and_complex_types_and(
         torch.bfloat16, torch.half, torch.int8, torch.int16, torch.int32, torch.int64
     ))
     def test_reference_numerics_hard(self, device, dtype, op):
@@ -349,7 +335,8 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @ops(unary_ufuncs, allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half))
+    @ops(reference_filtered_ops,
+         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half))
     def test_reference_numerics_extremal(self, device, dtype, op):
         handles_extremals = (op.handles_complex_extremals if
                              dtype in (torch.cfloat, torch.cdouble) else op.handles_extremals)
@@ -485,6 +472,9 @@ class TestUnaryUfuncs(TestCase):
 
     @ops(unary_ufuncs, dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
+        if not op.supports_out:
+            self.skipTest("Skipped! Op doesn't support out= kwarg.")
+
         input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
         expected = op(input)
@@ -572,6 +562,79 @@ class TestUnaryUfuncs(TestCase):
                                -100.99999994, 0.000000111,
                                -0.000000111, 0, -0, -1, -2, -931], dtype=dtype, device=device)
         self.compare_with_numpy(torch.digamma, scipy.special.digamma, tensor)
+
+    @skipCUDAIfRocm
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False))
+    def test_frexp(self, device, dtype):
+        input = make_tensor((50, 50), device, dtype)
+        mantissa, exponent = torch.frexp(input)
+        np_mantissa, np_exponent = np.frexp(input.cpu().numpy())
+
+        self.assertEqual(mantissa, np_mantissa)
+        self.assertEqual(exponent, np_exponent)
+
+        # torch.frexp returns exponent in int32 to be compatible with np.frexp
+        self.assertTrue(exponent.dtype == torch.int32)
+        self.assertTrue(torch_to_numpy_dtype_dict[exponent.dtype] == np_exponent.dtype)
+
+    @skipCUDAIfRocm
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False))
+    def test_frexp_out(self, device, dtype):
+        input = make_tensor((50, 50), device, dtype)
+        outputs = (
+            (torch.empty_like(input), torch.empty_like(input, dtype=torch.int)),
+            (torch.empty_like(input).transpose(0, 1), make_tensor((50, 50), device, torch.int, discontiguous=True)),
+        )
+        for mantissa, exponent in outputs:
+            torch.frexp(input, out=(mantissa, exponent))
+            np_mantissa, np_exponent = np.frexp(input.cpu().numpy())
+            self.assertEqual(mantissa, np_mantissa)
+            self.assertEqual(exponent, np_exponent)
+
+
+        # The warning is given when output tensors have wrong shape
+        with warnings.catch_warnings(record=True) as w:
+            mantissa = torch.empty((2, 2), device=device, dtype=dtype)
+            exponent = torch.empty((5, 5), device=device, dtype=torch.int)
+
+            torch.frexp(input, out=(mantissa, exponent))
+
+            self.assertEqual(len(w), 2)
+            self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
+            self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
+
+    @skipCUDAIfRocm
+    def test_frexp_assert_raises(self, device):
+        invalid_input_dtypes = torch.testing.get_all_int_dtypes() + \
+            torch.testing.get_all_complex_dtypes() + \
+            [torch.bool]
+        for dtype in invalid_input_dtypes:
+            input = make_tensor((50, 50), device, dtype)
+            with self.assertRaisesRegex(RuntimeError, r"torch\.frexp\(\) only supports floating-point dtypes"):
+                torch.frexp(input)
+
+        for dtype in torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False):
+            input = make_tensor((50, 50), device, dtype)
+
+            dtypes = list(torch.testing.all_types_and_complex_and(torch.bool,
+                                                                  torch.half,
+                                                                  torch.bfloat16))
+            dtypes.remove(dtype)
+            for mantissa_dtype in dtypes:
+                mantissa = torch.empty_like(input, dtype=mantissa_dtype)
+                exponent = torch.empty_like(input, dtype=torch.int)
+                with self.assertRaisesRegex(RuntimeError,
+                                            r"torch\.frexp\(\) expects mantissa to have dtype .+ but got .+"):
+                    torch.frexp(input, out=(mantissa, exponent))
+
+            dtypes.append(dtype)
+            dtypes.remove(torch.int)
+            for exponent_dtype in dtypes:
+                mantissa = torch.empty_like(input)
+                exponent = torch.empty_like(input, dtype=exponent_dtype)
+                with self.assertRaisesRegex(RuntimeError,
+                                            r"torch\.frexp\(\) expects exponent to have int dtype but got .+"):
+                    torch.frexp(input, out=(mantissa, exponent))
 
     # TODO opinfo mvlgamma
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
@@ -680,19 +743,6 @@ class TestUnaryUfuncs(TestCase):
                 if fn_name == 'angle':
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
-
-    # TODO: update sign to use opinfo-based testing
-    # XLA tests fail for self.assertRaises for complex dtypes
-    @onlyOnCPUAndCUDA
-    def test_sign_complex_assert_raises(self, device):
-        for dtype in [torch.complex64, torch.complex128]:
-            size = [5, 5]
-            tensor = torch.rand(size, dtype=dtype, device=device)
-
-            with self.assertRaisesRegex(RuntimeError,
-                                        (r'Unlike NumPy, torch.sign is not intended to support complex numbers\. '
-                                         r'Please use torch.sgn instead\.')):
-                torch.sign(torch.tensor([4j], device=device, dtype=dtype))
 
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
@@ -1441,63 +1491,6 @@ class TestUnaryUfuncs(TestCase):
                 self.assertTrue(math.isnan(nan_real_inf_imag_out.imag))
                 # Ensure we are notified when NumPy changes its behavior
                 self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
-
-    @dtypes(*torch.testing.get_all_dtypes(include_complex=False))
-    def test_sign(self, device, dtype):
-        if dtype == torch.bool:
-            a_bool = torch.tensor([True, True, False, float('nan')], device=device).bool()
-            a_bool_target = torch.tensor([True, True, False, True], device=device).bool()
-            self.assertEqual(a_bool.sign(), a_bool_target, msg='sign device={} dtype=bool'.format(device))
-            self.assertEqual(torch.sign(a_bool), a_bool_target, msg='sign device={} dtype=bool'.format(device))
-
-            a_out = torch.empty_like(a_bool)
-            torch.sign(a_bool, out=a_out)
-            self.assertEqual(a_out, a_bool_target, msg='sign_out device={} dtype=bool'.format(device))
-
-            a_bool.sign_()
-            self.assertEqual(a_bool, a_bool_target, msg='sign_ device={} dtype=bool'.format(device))
-            return
-
-        # Include NaN for floating point numbers
-        if dtype.is_floating_point:
-            dt_info = torch.finfo(dtype)
-
-            # Create tensor (with NaN checking)
-            a = torch.tensor([float('nan'), -12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
-            a_target = torch.tensor([0, -1, 0, 1, -1, 1], device=device, dtype=dtype)
-        else:
-            dt_info = torch.iinfo(dtype)
-
-            # If unsigned type, everything should be >= 0
-            if dt_info.min == 0:
-                a = torch.tensor([12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
-                a_target = torch.tensor([1, 0, 1, 0, 1], device=device, dtype=dtype)
-            else:
-                a = torch.tensor([-12, 0, 71, dt_info.min, dt_info.max], device=device, dtype=dtype)
-                a_target = torch.tensor([-1, 0, 1, -1, 1], device=device, dtype=dtype)
-
-        self.assertEqual(a.sign(), a_target, msg='sign device={} dtype={}'.format(device, dtype))
-        self.assertEqual(torch.sign(a), a_target, msg='sign device={} dtype={}'.format(device, dtype))
-
-        out = torch.empty_like(a)
-        torch.sign(a, out=out)
-        self.assertEqual(out, a_target, msg='sign_out device={} dtype={}'.format(device, dtype))
-
-        a.sign_()
-        self.assertEqual(a, a_target, msg='sign_ device={} dtype={}'.format(device, dtype))
-
-    @dtypes(torch.cfloat, torch.cdouble)
-    def test_sgn(self, device, dtype):
-        x = torch.randn(100, dtype=dtype)
-        angle = x.angle()
-        out = x.sgn()
-        self.assertEqual(out.angle(), angle)
-        self.assertEqual(out.abs(), torch.ones_like(x).real)
-
-        x_out = torch.empty_like(x)
-        torch.sgn(x, out=x_out)
-        self.assertEqual(x_out.angle(), angle)
-        self.assertEqual(x_out.abs(), torch.ones_like(x).real)
 
     # This function tests that a nan value is returned for input values not in domain
     @dtypes(torch.float32, torch.float64)
