@@ -1,11 +1,12 @@
 #include <gtest/gtest.h>
 #include <THC/THCAtomics.cuh>
-#include <cmath>
 #include <c10/test/util/Macros.h>
 
-const int blocksize = 256;
-const int factor = 4;
-const int arraysize = blocksize / factor;
+#include <cmath>
+
+constexpr int blocksize = 256;
+constexpr int factor = 4;
+constexpr int arraysize = blocksize / factor;
 
 template <typename T>
 __global__ void addition_test_kernel(T * a, T * sum) {
@@ -28,11 +29,11 @@ void test_atomic_add() {
   dim3 dimBlock(blocksize, 1);
   dim3 dimGrid(1, 1);
 
-  T *a, *sum, *answer, *ad, *sumd;
+  T *ad, *sumd;
 
-  a = (T*)malloc(arraysize * sizeof(T));
-  sum = (T*)malloc(arraysize * sizeof(T));
-  answer = (T*)malloc(arraysize * sizeof(T));
+  std::vector<T> a(arraysize);
+  std::vector<T> sum(arraysize);
+  std::vector<T> answer(arraysize);
 
   for (int i = 0; i < arraysize; ++i) {
     a[i] = 1;
@@ -43,12 +44,13 @@ void test_atomic_add() {
   cudaMalloc((void**)&ad, arraysize * sizeof(T));
   cudaMalloc((void**)&sumd, arraysize * sizeof(T));
 
-  cudaMemcpy(ad, a, arraysize * sizeof(T), cudaMemcpyHostToDevice);
-  cudaMemcpy(sumd, sum, arraysize * sizeof(T), cudaMemcpyHostToDevice);
+  cudaMemcpy(ad, a.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
+  cudaMemcpy(sumd, sum.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
 
   addition_test_kernel<<<dimGrid, dimBlock>>>(ad, sumd);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  cudaMemcpy(sum, sumd, arraysize * sizeof(T), cudaMemcpyDeviceToHost);
+  cudaMemcpy(sum.data(), sumd, arraysize * sizeof(T), cudaMemcpyDeviceToHost);
 
   for (int i = 0; i < arraysize; ++i) {
     ASSERT_EQ(sum[i], answer[i]) << typeid(T).name();
@@ -56,9 +58,6 @@ void test_atomic_add() {
 
   cudaFree(ad);
   cudaFree(sumd);
-  free(a);
-  free(sum);
-  free(answer);
 }
 
 template <typename T>
@@ -66,11 +65,11 @@ void test_atomic_mul() {
   dim3 dimBlock(blocksize, 1);
   dim3 dimGrid(1, 1);
 
-  T *a, *sum, *answer, *ad, *sumd;
+  T *ad, *sumd;
 
-  a = (T*)malloc(arraysize * sizeof(T));
-  sum = (T*)malloc(arraysize * sizeof(T));
-  answer = (T*)malloc(arraysize * sizeof(T));
+  std::vector<T> a(arraysize);
+  std::vector<T> sum(arraysize);
+  std::vector<T> answer(arraysize);
 
   for (int i = 0; i < arraysize; ++i) {
     a[i] = 2;
@@ -81,12 +80,13 @@ void test_atomic_mul() {
   cudaMalloc((void**)&ad, arraysize * sizeof(T));
   cudaMalloc((void**)&sumd, arraysize * sizeof(T));
 
-  cudaMemcpy(ad, a, arraysize * sizeof(T), cudaMemcpyHostToDevice);
-  cudaMemcpy(sumd, sum, arraysize * sizeof(T), cudaMemcpyHostToDevice);
+  cudaMemcpy(ad, a.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
+  cudaMemcpy(sumd, sum.data(), arraysize * sizeof(T), cudaMemcpyHostToDevice);
 
   mul_test_kernel<<<dimGrid, dimBlock>>>(ad, sumd);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  cudaMemcpy(sum, sumd, arraysize * sizeof(T), cudaMemcpyDeviceToHost);
+  cudaMemcpy(sum.data(), sumd, arraysize * sizeof(T), cudaMemcpyDeviceToHost);
 
   for (int i = 0; i < arraysize; ++i) {
     ASSERT_EQ(sum[i], answer[i]) << typeid(T).name();
@@ -94,9 +94,6 @@ void test_atomic_mul() {
 
   cudaFree(ad);
   cudaFree(sumd);
-  free(a);
-  free(sum);
-  free(answer);
 }
 
 TEST(TestAtomicOps, TestAtomicAdd) {

@@ -14,18 +14,24 @@ template <class TBackendInterface>
 class backend {
   static_assert(
       std::is_base_of<PyTorchBackendInterface, TBackendInterface>::value,
-      "torch::jit::backend_<T> requires T to inherit from PyTorchBackendInterface");
+      "torch::jit::backend<T> requires T to inherit from PyTorchBackendInterface");
   std::string backend_name_;
 
  public:
-  explicit backend(const std::string& name) : backend_name_(name) {
+  // Registers a new backend with /p name, and the given /p preprocess
+  // function.
+  backend(
+      const std::string& name,
+      const detail::BackendPreprocessFunction& preprocess)
+      : backend_name_(name) {
+    detail::registerBackendPreprocessFunction(name, preprocess);
     static auto cls =
         torch::class_<TBackendInterface>(detail::kBackendsNamespace, name)
             .def(torch::init<>())
             ._def_unboxed(
-                "preprocess",
-                detail::getPreprocessFunc<TBackendInterface>(),
-                detail::getPreprocessSchema())
+                "is_available",
+                detail::getIsAvailableFunc<TBackendInterface>(),
+                detail::getIsAvailableSchema())
             ._def_unboxed(
                 "compile",
                 detail::getCompileFunc<TBackendInterface>(),

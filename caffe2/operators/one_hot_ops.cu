@@ -29,6 +29,7 @@ void OneHotOp<CUDAContext>::DoOneHotOp(
       0,
       context_.cuda_stream()>>>(
       batch_size, index_size, indices.data<int64_t>(), output_ptr);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(OneHot, OneHotOp<CUDAContext>);

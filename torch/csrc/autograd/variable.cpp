@@ -34,30 +34,30 @@ DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl,
     : AutogradMeta(self_impl),
       backward_info_(std::move(backward_info)),
       forward_info_(std::move(forward_info)),
-      creation_meta(creation_meta) {
+      creation_meta_(creation_meta) {
   is_view_ = true;
   if (backward_info_.has_value()) {
     self_impl->set_version_counter(impl::version_counter(backward_info_.value().base_));
-    attr_version = self_impl->version_counter().current_version();
+    attr_version_ = self_impl->version_counter().current_version();
   }
 }
 
 // Chain this view info with the new view op between base and tensor
 ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
-  c10::optional<std::function<Variable(const Variable&)>> view_func) const {
+  std::function<Variable(const Variable&)> view_func) const {
   // Set `view_func` using the root base as input.
   // `view_func` is used to recover views in backward when either as_strided is not supported
   // or the view function changes the metadata which is not recorded by as_strided
   // See Note [View + Inplace update on base tensor] and [View + Inplace update on view tensor]
   // for more details how we use this function in backward.
-  if (view_func.has_value()) {
-    auto fn = view_func.value();
+  if (view_func) {
     // both current_view and it's parent have a view_func
-    if (view_fn_.has_value()) {
-      auto prev_fn = view_fn_.value();
+    if (view_fn_) {
+      // Copy parent view function to gain ownership
+      auto prev_fn = view_fn_;
       view_func = [=](const at::Tensor& root_base) {
         auto temp = prev_fn(root_base);
-        return fn(temp);
+        return view_func(temp);
       };
     } else {
       // current_view has a view_func and but it's parent doesn't have one
@@ -67,7 +67,7 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
         auto storage_offset = base.storage_offset();
         view_func = [=](const at::Tensor& root_base) {
           auto temp = root_base.as_strided(size, stride, storage_offset);
-          return fn(temp);
+          return view_func(temp);
         };
       } else {
         // When base is a view but doesn't carry a view_fn in DifferentiableViewMeta, it's
@@ -85,9 +85,10 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
         };
       }
     }
-  } else if(view_fn_.has_value()) {
+  } else if(view_fn_) {
     // if current_view doesn't have a view_func but it's parent has one
-    auto prev_view_fn = view_fn_.value();
+    // Copy parent view function to gain ownership
+    auto prev_view_fn = view_fn_;
     auto size = tensor.sizes().vec();
     auto stride = tensor.strides().vec();
     auto storage_offset = tensor.storage_offset();
@@ -132,10 +133,8 @@ namespace impl {
 
   void rebase_history(const Variable& self, Edge gradient_edge) {
     TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
-    if (self.is_view()) {
-      // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
-
+    auto diff_view_meta = get_view_autograd_meta(self);
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
       // See NOTE [ View + Inplace detection ]
       auto creation_meta = diff_view_meta->get_creation_meta();
       if (creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
@@ -163,7 +162,7 @@ namespace impl {
   }
 
   void create_cpp_hook(const Variable& self) {
-    auto &list = materialize_autograd_meta(self)->cpp_hooks_list;
+    auto &list = materialize_autograd_meta(self)->cpp_hooks_list_;
     list.reset(new hooks_list());
     std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, self.output_nr()));
     clear_hooks(self);
@@ -236,9 +235,8 @@ namespace impl {
     // This logic is only relevant for custom autograd Functions for which multiple
     // operations can happen on a given Tensor before its gradient edge is set when
     // exiting the custom Function.
-    if (self.is_view()) {
-      // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
+    auto diff_view_meta = get_view_autograd_meta(self);
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
       diff_view_meta->set_attr_version(self._version());
     }
   }
@@ -316,9 +314,19 @@ namespace impl {
   }
 
   AutogradMeta* get_autograd_meta(const Variable& self) {
-    // NB: could return null
+    // NB: could return nullptr
     TORCH_CHECK(self.defined(), "cannot call get_autograd_meta() on undefined tensor");
     return static_cast<AutogradMeta*>(self.unsafeGetTensorImpl()->autograd_meta());
+  }
+
+  DifferentiableViewMeta* get_view_autograd_meta(const Variable& self) {
+    // NB: return nullptr if self is not a view
+    AutogradMeta* meta = get_autograd_meta(self);
+    if (meta && meta->is_view_) {
+      return static_cast<DifferentiableViewMeta*>(meta);
+    } else {
+      return nullptr;
+    }
   }
 
 } // namespace impl
@@ -360,9 +368,8 @@ Tensor VariableHooks::tensor_data(const Tensor& self) const {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 bool VariableHooks::is_view(const Tensor& self) const {
-  auto meta = torch::autograd::impl::get_autograd_meta(self);
-  if (meta && meta->is_view_) {
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta) {
     return diff_view_meta->has_bw_view();
   } else {
     return false;
@@ -370,9 +377,8 @@ bool VariableHooks::is_view(const Tensor& self) const {
 }
 
 const Tensor& VariableHooks::base(const Tensor& self) const {
-  if (self.is_view()) {
-    // is_view() implies get_autograd_meta()
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta) {
     TORCH_CHECK(diff_view_meta->has_bw_view(), "Can't get base of non-backward view Tensor");
     return diff_view_meta->get_backward_view().base_;
   } else {
@@ -398,10 +404,8 @@ namespace {
 }
 
 const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tensor& self) const {
-  if (self.is_view()) {
-    // NB: is_view() ==> get_autograd_meta()
-    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
-
+  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
     // See NOTE [ View + Inplace detection ]
     if (diff_view_meta->get_creation_meta() != CreationMeta::MULTI_OUTPUT_SAFE) {
       std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
@@ -461,7 +465,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       return diff_view_meta->grad_fn_;
     }
   }
-  
+
   if (torch::autograd::impl::get_autograd_meta(self)) {
     return torch::autograd::impl::get_autograd_meta(self)->grad_fn_;
   } else {
@@ -470,7 +474,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
 }
 
 void VariableHooks::remove_hook(const Tensor& self, unsigned pos) const {
-  auto &list = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_list;
+  auto &list = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_list_;
   TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
   (*list)[pos] = nullptr;
@@ -480,7 +484,7 @@ unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(
   TORCH_CHECK(self.requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
   // NB: materialize_autograd_meta unnecessary due to requires grad check
-  auto &list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list;
+  auto &list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list_;
   if(!list) {
     torch::autograd::impl::create_cpp_hook(self);
   }

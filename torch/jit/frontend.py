@@ -166,9 +166,14 @@ def get_jit_class_def(cls, self_name):
         and not is_static_fn(cls, m.__name__)
         and m.__name__ in cls.__dict__
     )
+
+    def is_classmethod(fn):
+        return inspect.ismethod(fn) and getattr(fn, "__self__", None) == cls
+
     methods = [get_jit_def(method[1],
                            method[0],
-                           self_name=self_name) for method in methods]
+                           self_name=self_name,
+                           is_classmethod=is_classmethod(method[1])) for method in methods]
 
     properties = get_class_properties(cls, self_name)
 
@@ -217,7 +222,7 @@ def normalize_source_lines(sourcelines: List[str]) -> List[str]:
     return aligned_prefix + aligned_suffix
 
 
-def get_jit_def(fn, def_name, self_name=None):
+def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     """
     Build a JIT AST (TreeView) from the given function.
 
@@ -243,6 +248,12 @@ def get_jit_def(fn, def_name, self_name=None):
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
     fn_def = py_ast.body[0]
+
+    if is_classmethod:
+        arg_name = fn_def.args.args[0].arg
+        # Insert a statement that assigns the first argument to the class
+        assign_stmt = ast.parse(f"{arg_name} = {self_name}").body[0]
+        fn_def.body.insert(0, assign_stmt)
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
@@ -472,6 +483,9 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
+        if stmt.orelse:
+            raise NotSupportedError(r, "else branches of for loops aren't supported")
+
         return For(
             r, [build_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
@@ -603,6 +617,8 @@ class ExprBuilder(Builder):
             return FalseLiteral(r)
         elif expr.id == "None":
             return NoneLiteral(r)
+        elif expr.id == "Ellipsis":
+            return Dots(r)
         return Var(Ident(r, expr.id))
 
     @staticmethod
@@ -614,6 +630,8 @@ class ExprBuilder(Builder):
             return FalseLiteral(r)
         elif expr.value is None:
             return NoneLiteral(r)
+        elif expr.value == Ellipsis:
+            return Dots(r)
         else:
             raise ValueError("Name constant value unsupported: " + str(expr.value))
 
@@ -761,8 +779,11 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Dict(ctx, expr):
-        return DictLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
-                           [build_expr(ctx, e) for e in expr.keys], [build_expr(ctx, e) for e in expr.values])
+        range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        if expr.keys and not expr.keys[0]:
+            raise NotSupportedError(range, "Dict expansion (e.g. `{**dict}`) is not supported")
+        return DictLiteral(range, [build_expr(ctx, e) for e in expr.keys],
+                           [build_expr(ctx, e) for e in expr.values])
 
     @staticmethod
     def build_Num(ctx, expr):

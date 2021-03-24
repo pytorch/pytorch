@@ -12,10 +12,8 @@ class CustomBackend : public torch::jit::PyTorchBackendInterface {
   explicit CustomBackend() {}
   virtual ~CustomBackend() = default;
 
-  c10::IValue preprocess(
-      c10::IValue mod,
-      c10::impl::GenericDict method_compile_spec) override {
-    return mod;
+  bool is_available() override {
+    return true;
   }
 
   c10::impl::GenericDict compile(
@@ -66,6 +64,12 @@ class CustomBackend : public torch::jit::PyTorchBackendInterface {
     return c10::impl::toList(output_list);
   }
 };
+
+c10::IValue preprocess(
+    const torch::jit::Module& mod,
+    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec) {
+  return mod._ivalue();
+}
 
 // clang-format off
 #  if defined(_WIN32)

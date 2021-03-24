@@ -452,9 +452,9 @@ TEST(BoundsInference, MultipleTopLoopStore) {
   // Same as above but the offsets are on the Store now.
   // Can't do this through ComputeAPI without transforms we don't have yet.
   Stmt* stmt = Block::make(
-      {For::make(x, 0, 64, Store::make(b, {x}, Load::make(a, {x}, 1), 1)),
-       For::make(x, 0, 32, Store::make(c, {x + 10}, Load::make(a, {x}, 1), 1)),
-       For::make(x, 0, 96, Store::make(d, {x + 2}, Load::make(a, {x}, 1), 1))});
+      {For::make(x, 0, 64, Store::make(b, {x}, Load::make(a, {x}))),
+       For::make(x, 0, 32, Store::make(c, {x + 10}, Load::make(a, {x}))),
+       For::make(x, 0, 96, Store::make(d, {x + 2}, Load::make(a, {x})))});
 
   auto bounds_info = inferBounds(stmt);
 
@@ -612,10 +612,10 @@ void testGetPotentialHazards() {
      * C[0] = 5;
      */
 
-    Store* store1 = Store::make(a, {0}, Load::make(b, {0}, 1), 1);
-    Store* store2 = Store::make(b, {0}, 3, 1);
-    Store* store3 = Store::make(a, {0}, Load::make(b, {0}, 1), 1);
-    Store* store4 = Store::make(c, {0}, 5, 1);
+    Store* store1 = Store::make(a, {0}, Load::make(b, {0}));
+    Store* store2 = Store::make(b, {0}, 3);
+    Store* store3 = Store::make(a, {0}, Load::make(b, {0}));
+    Store* store4 = Store::make(c, {0}, 5);
     Stmt* stmt = Block::make({store1, store2, store3, store4});
 
     MemDependencyChecker analyzer;

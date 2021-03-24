@@ -1,11 +1,3 @@
-// define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
-#ifndef _USE_MATH_DEFINES
-#define _USE_MATH_DEFINES
-#endif
-#include <math.h>
-#endif
-
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
@@ -526,7 +518,7 @@ Tensor& fft_rfftfreq_out(Tensor& out, int64_t n, double d) {
   TORCH_CHECK(at::isFloatingType(dtype) || at::isComplexType(dtype),
               "rfftfreq requires a floating point or complex dtype");
   // TODO: arange doesn't have complex support
-  native::arange_out(out, n/2 + 1);
+  native::arange_out(n/2 + 1, out);
   return out.mul_(1.0 / (n * d));  // Slightly faster than div_(n*d)
 }
 
@@ -629,6 +621,10 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
     SS << ", normalized=" << normalized << ", onesided="; \
     write_opt(SS, onesidedOpt) << ", return_complex="; \
     write_opt(SS, return_complexOpt) << ") "
+
+  TORCH_CHECK(!window.defined() || window.device() == self.device(),
+              "stft input and window must be on the same device but got self on ",
+              self.device(), " and window on ", window.device())
 
   // default_init hop_length and win_length
   auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
@@ -776,6 +772,10 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     SS << ", center=" << center << ", normalized=" << normalized << ", onesided="; \
     write_opt(SS, onesidedOpt) << ", length="; \
     write_opt(SS, lengthOpt) << ", return_complex=" << return_complex << ") "
+
+  TORCH_CHECK(!window.defined() || window.device() == self.device(),
+              "istft input and window must be on the same device but got self on ",
+              self.device(), " and window on ", window.device())
 
   // default_init hop_length and win_length
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
