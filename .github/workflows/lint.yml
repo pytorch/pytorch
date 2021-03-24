@@ -41,7 +41,7 @@ jobs:
       - name: Ensure canonical include
         run: |
           (! git grep -I -no $'#include "' -- ./c10 ./aten ./torch/csrc ':(exclude)aten/src/ATen/native/quantized/cpu/qnnpack/**' || (echo "The above files have include with quotes; please convert them to #include <xxxx>"; false))
-      # note that this next step depends on a clean heckout;
+      # note that this next step depends on a clean checkout;
       # if you run it locally then it will likely to complain
       # about all the generated files in torch/test
       - name: Ensure C++ source files are not executable
@@ -218,7 +218,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v2
         with:
           python-version: 3.8
           architecture: x64
@@ -226,9 +226,6 @@ jobs:
         uses: actions/checkout@v2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - name: Get HEAD commit SHA
-        run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
-        id: get-commit-sha
       - name: Install dependencies
         run: |
           set -eux
@@ -243,8 +240,4 @@ jobs:
       - name: Run mypy
         run: |
           set -eux
-          mypy --config=mypy.ini
-      - name: Run mypy strict
-        run: |
-          set -eux
-          mypy --config=mypy-strict.ini
+          for CONFIG in mypy*.ini; do mypy --config="$CONFIG"; done

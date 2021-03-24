@@ -294,7 +294,17 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
       std::string(toString(tensor.scalar_type())).append("Storage");
   pushGlobal("torch", data_type);
   // root_key
-  const std::string root_key_path = archive_name_.has_value() ? archive_name_.value() + "/" : "";
+
+  const auto& found = tensors_archive_table_.find(tensor);
+  at::optional<std::string> archive_name_slash;
+  if(found == tensors_archive_table_.end()) {
+    if (archive_name_.has_value()) {
+      archive_name_slash = archive_name_.value() + "/";
+    }
+  } else {
+    archive_name_slash = found->second + "/";
+  }
+  const std::string root_key_path = archive_name_slash.has_value() ? archive_name_slash.value() : "";
   const std::string root_key = root_key_path + c10::to_string(tensor_data_.size());
   pushString(root_key);
   // location
@@ -309,6 +319,14 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   memoized_storage_map_[addr] = pushNextBinPut();
   tensor_data_.push_back(tensor);
 }
+
+//void Pickler::updateTensorsArchiveTable(const at::Tensor& tensor, const std::string& archive_name) {
+//  tensors_archive_table_[tensor] = archive_name;
+//}
+
+//void Pickler::updateTensorsArchiveTable(std::unordered_map<at::Tensor, std::string, tensor_value_hash, tensor_value_equal>) {
+//  tensors_archive_table_[tensor] = archive_name;
+//}
 
 void Pickler::pushBytes(const std::string& string) {
   static const size_t kSmallStr = 32;

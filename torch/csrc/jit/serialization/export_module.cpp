@@ -34,33 +34,33 @@ char const* toString(OpCode op);
 
 namespace {
 
-struct tensor_value_hash {
-  std::size_t operator()(const at::Tensor& tensor) const {
-    std::stringstream tensor_stream;
-    tensor_stream << tensor;
-
-//    std::cout << "tensor: " << std::endl;
-//    auto iv = IValue(tensor);
-//    iv.dump();
-
-    std::string tensor_str = tensor_stream.str();
-    std::size_t h1 = std::hash<std::string>{}(tensor_str);
-    return h1;
-  }
-};
-
-struct tensor_value_equal {
-  bool operator()(const at::Tensor& a, const at::Tensor& b) const {
-    std::stringstream a_stream;
-    a_stream << a;
-    std::string a_str = a_stream.str();
-
-    std::stringstream b_stream;
-    b_stream << b;
-    std::string b_str = b_stream.str();
-    return a_str == b_str;
-  }
-};
+//struct tensor_value_hash {
+//  std::size_t operator()(const at::Tensor& tensor) const {
+//    std::stringstream tensor_stream;
+//    tensor_stream << tensor;
+//
+////    std::cout << "tensor: " << std::endl;
+////    auto iv = IValue(tensor);
+////    iv.dump();
+//
+//    std::string tensor_str = tensor_stream.str();
+//    std::size_t h1 = std::hash<std::string>{}(tensor_str);
+//    return h1;
+//  }
+//};
+//
+//struct tensor_value_equal {
+//  bool operator()(const at::Tensor& a, const at::Tensor& b) const {
+//    std::stringstream a_stream;
+//    a_stream << a;
+//    std::string a_str = a_stream.str();
+//
+//    std::stringstream b_stream;
+//    b_stream << b;
+//    std::string b_str = b_stream.str();
+//    return a_str == b_str;
+//  }
+//};
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
@@ -493,10 +493,6 @@ class ScriptModuleSerializer {
       std::cout << "writing constant" << std::endl;
 //      value.dump();
     }
-    if (archive_name == "bytecode") {
-      std::cout << "writing bytecode" << std::endl;
-//      value.dump();
-    }
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
@@ -506,6 +502,10 @@ class ScriptModuleSerializer {
           return type_name_uniquer_.getUniqueName(t);
         },
         &memoizedClassTypes);
+    if (archive_name == "bytecode") {
+      std::cout << "writing bytecode" << std::endl;
+      data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
+    }
     data_pickle.updateArchiveName(archive_name);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
@@ -516,21 +516,21 @@ class ScriptModuleSerializer {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
 
-      //      std::cout << "fname: " << fname << std::endl;
-      const auto found = tensors_archive_table_.find(td);
-      if (found == tensors_archive_table_.end()) {
+      if(archive_name == "bytecode") {
+        const auto found = tensors_archive_table_.find(td);
+      } else if (archive_name == "constants") {
         tensors_archive_table_[td] = archive_name;
         writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
       } else {
-        std::cout << "archive " << found->second << " has the tensor. " << std::endl;
+        writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
       }
-
     }
+
     std::string fname = archive_name + ".pkl";
     writer_.writeRecord(fname, data.data(), data.size());
-    if(fname == "bytecode.pkl") {
-      std::cout << "bytcode.pkl data" << data.data() << std::endl;
-    }
+//    if(fname == "bytecode.pkl") {
+//      std::cout << "bytcode.pkl data" << data.data() << std::endl;
+//    }
     // serialize all the captured run-time class types
     for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
       convertNamedType(wroteType);

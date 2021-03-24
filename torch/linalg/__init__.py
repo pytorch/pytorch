@@ -519,6 +519,49 @@ Example::
     tensor(5.7220e-06)
 """)
 
+matrix_power = _add_docstr(_linalg.linalg_matrix_power, r"""
+matrix_power(input, n, *, out=None) -> Tensor
+
+Raises the square matrix :attr:`input`, or each square matrix in a batched
+:attr:`input`, to the integer power :attr:`n`.
+
+If :attr:`n` is 0, the identity matrix (or batch of identity matrices) of the same shape
+as :attr:`input` is returned. If :attr:`n` is negative, the inverse of each matrix
+(if invertible) is computed and then raised to the integer power ``abs(n)``.
+
+Args:
+    input (Tensor): the input matrix of size `(n, n)` or the batch of matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+    n (int): the exponent to raise the :attr:`input` matrix to
+
+Keyword args:
+    out (Tensor, optional): tensor to write the output to.
+
+Example:
+
+    >>> a = torch.randn(3, 3)
+    >>> a
+    tensor([[-0.2270,  0.6663, -1.3515],
+            [-0.9838, -0.4002, -1.9313],
+            [-0.7886, -0.0450,  0.0528]])
+    >>> torch.linalg.matrix_power(a, 0)
+    tensor([[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]])
+    >>> torch.linalg.matrix_power(a, 3)
+    tensor([[ 1.0756,  0.4980,  0.0100],
+            [-1.6617,  1.4994, -1.9980],
+            [-0.4509,  0.2731,  0.8001]])
+    >>> torch.linalg.matrix_power(a.expand(2, -1, -1), -2)
+    tensor([[[ 0.2640,  0.4571, -0.5511],
+            [-1.0163,  0.3491, -1.5292],
+            [-0.4899,  0.0822,  0.2773]],
+
+            [[ 0.2640,  0.4571, -0.5511],
+            [-1.0163,  0.3491, -1.5292],
+            [-0.4899,  0.0822,  0.2773]]])
+""")
+
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
 matrix_rank(input, tol=None, hermitian=False, *, out=None) -> Tensor
 
@@ -840,7 +883,7 @@ Args:
     compute_uv (bool, optional): whether to compute `U` and `V` or not. Defaults to True.
     out (tuple, optional): a tuple of three tensors to use for the outputs. If compute_uv=False,
                            the 1st and 3rd arguments must be tensors, but they are ignored. E.g. you can
-                           pass `(torch.Tensor(), out_S, torch.Tensor())`
+                           pass `(torch.tensor([]), out_S, torch.tensor([]))`
 
 Example::
 
@@ -1281,8 +1324,8 @@ Example::
     True
     >>> a = torch.randn(3, 4, 5)
     >>> q, r = torch.linalg.qr(a, mode='complete')
-    >>> torch.allclose(torch.matmul(q, r), a)
+    >>> torch.allclose(torch.matmul(q, r), a, atol=1e-5)
     True
-    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(5))
+    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(4), atol=1e-5)
     True
 """)
