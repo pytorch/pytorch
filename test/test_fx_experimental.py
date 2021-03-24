@@ -1140,6 +1140,7 @@ class TestNormalizeOperators(JitTestCase):
                 param_names = ['input']
                 param_values = [sample_input.input]
                 args = ['input']
+                arg_types = [torch.Tensor]
 
                 unsupported_arg_type = False
 
@@ -1149,22 +1150,26 @@ class TestNormalizeOperators(JitTestCase):
                         param_names.append(name)
                         param_values.append(v)
                         args.append(name)
+                        arg_types.append(type(v))
                     else:
                         if isinstance(v, complex):
                             # Complex type not supported in FX
                             unsupported_arg_type = True
                         args.append(repr(v))
+                        arg_types.append(type(v))
 
                 for k, v in sample_input.kwargs.items():
                     if isinstance(v, torch.Tensor):
                         param_names.append(k)
                         param_values.append(v)
                         args.append(f'{k} = {k}')
+                        arg_types.append(type(v))
                     else:
                         if isinstance(v, complex):
                             # Complex type not supported in FX
                             unsupported_arg_type = True
                         args.append(f'{k} = {repr(v)}')
+                        arg_types.append(type(v))
 
                 if unsupported_arg_type:
                     continue
@@ -1186,7 +1191,7 @@ class TestModule(torch.nn.Module):
 
                 for node in traced.graph.nodes:
                     if node.op == 'call_function':
-                        normalized_args = node.normalized_arguments(traced)
+                        normalized_args = node.normalized_arguments(traced, arg_types)
                         assert normalized_args
                         node.args = ()
                         node.kwargs = normalized_args.args_dict

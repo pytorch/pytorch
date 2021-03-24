@@ -453,7 +453,8 @@ class Node:
 
         return False
 
-    def normalized_arguments(self, root : torch.nn.Module) -> Optional[NormalizedArguments]:
+    def normalized_arguments(
+            self, root : torch.nn.Module, types : Optional[List[Any]] = None) -> Optional[NormalizedArguments]:
         if self.op == 'call_function':
             new_kwargs = None
 
@@ -477,6 +478,7 @@ class Node:
             else:
                 assert callable(self.target)
                 torch_op_schemas = get_signature_for_torch_op(self.target)
+                matched_schemas = []
                 if torch_op_schemas:
                     # Iterate through all of the schema until we find one that matches
                     # If one matches, populate `new_kwargs` with the combined args/kwargs
@@ -484,10 +486,37 @@ class Node:
                     for candidate_signature in torch_op_schemas:
                         try:
                             candidate_signature.bind(*self.args, **self.kwargs)
-                            new_kwargs = self._args_kwargs_to_normalized_kwargs(candidate_signature, self.args, self.kwargs)
-                            break
+                            matched_schemas.append(candidate_signature)
                         except TypeError as e:
                             continue
+
+                if len(matched_schemas) == 0:
+                    # Did not match any schema. Cannot normalize
+                    pass
+                elif len(matched_schemas) == 1:
+                    # Matched exactly one schema, unambiguous
+                    new_kwargs = self._args_kwargs_to_normalized_kwargs(matched_schemas[0], self.args, self.kwargs)
+                else:
+                    if types is not None:
+                        for candidate_signature in torch_op_schemas:
+                            sig_matches = True
+                            for i, param_name in enumerate(candidate_signature.parameters):
+                                param = candidate_signature.parameters[param_name]
+                                if i >= len(types):
+                                    if param.default == inspect.Parameter.empty:
+                                        sig_matches = False
+                                else:
+                                    sig_matches = sig_matches and param.annotation is types[i]
+                            if sig_matches:
+                                new_kwargs = self._args_kwargs_to_normalized_kwargs(candidate_signature, self.args, self.kwargs)
+                                break
+                    else:
+                        # Matched more than one schema. In this situation, the caller must provide the types of
+                        # the arguments of the overload they expect.
+                        schema_printouts = '\n'.join(str(schema) for schema in matched_schemas)
+                        raise RuntimeError(f'Tried to normalize arguments to {torch.typename(self.target)} but '
+                                           f'the schema match was ambiguous! Please provide argument types to '
+                                           f'the normalize_arguments() call. Available schemas:\n{schema_printouts}')
             if new_kwargs:
                 return NormalizedArguments(new_kwargs)
 
