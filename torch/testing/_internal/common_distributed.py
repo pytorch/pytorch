@@ -346,7 +346,7 @@ class MultiProcessTestCase(TestCase):
                 name='process ' + str(rank),
                 args=(rank, self._current_test_name(), self.file_name, child_conn, faulthandler_file.name))
             process.start()
-            logger.info('Started process {} with pid {}'.format(rank, process.pid))
+            logger.info(f'Started process {rank} with pid {process.pid}')
             self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
             self.faulthandler_files.append(faulthandler_file)
@@ -387,9 +387,8 @@ class MultiProcessTestCase(TestCase):
             pipe.close()
         except Exception as e:
             logger.error(
-                'Caught exception: \n{}exiting process with exit code: {}'
-                .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
-            )
+                f'Caught exception: \n{traceback.format_exc()} exiting '
+                'process with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}')
             # Send error to parent process.
             pipe.send(traceback.format_exc())
             pipe.close()
@@ -406,7 +405,7 @@ class MultiProcessTestCase(TestCase):
                     # This is the exit code processes exit with if they
                     # encountered an exception.
                     if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
-                        print("Process {} terminated with exit code {}, terminating remaining processes.".format(i, p.exitcode))
+                        print(f'Process {i} terminated with exit code {p.exitcode}, terminating remaining processes.')
                         active_children = torch.multiprocessing.active_children()
                         for ac in active_children:
                             ac.terminate()
@@ -420,11 +419,7 @@ class MultiProcessTestCase(TestCase):
                 # Check if we should time out the test. If so, we terminate each process.
                 elapsed = time.time() - start_time
                 if elapsed > timeout:
-                    print(
-                        "Timing out after {} seconds and killing subprocesses.".format(
-                            timeout
-                        )
-                    )
+                    print(f'Timing out after {timeout} seconds and killing subprocesses.')
                     for p in self.processes:
                         p.terminate()
                     break
@@ -454,7 +449,7 @@ class MultiProcessTestCase(TestCase):
         for i, file in enumerate(self.faulthandler_files):
             if os.path.getsize(file.name) != 0:
                 contents = file.read().decode('utf-8')
-                logger.error('Process {} encountered the following fault:\n{}'.format(i, contents))
+                logger.error(f'Process {i} encountered the following fault:\n{contents}')
 
     def _check_no_test_errors(self, elapsed_time):
         """
