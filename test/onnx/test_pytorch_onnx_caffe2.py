@@ -169,7 +169,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def run_actual_test(self, model, train, batch_size, state_dict=None,
                         input=None, use_gpu=True, rtol=0.001, atol=1e-7,
                         example_outputs=None, do_constant_folding=True,
-                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
+                        input_names=None, dynamic_axes=None,
+                        remained_onnx_input_idx=None):
         """
         This is what the user facing version will look like
         """
@@ -193,12 +195,17 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                       do_constant_folding=do_constant_folding,
                       opset_version=self.opset_version,
                       keep_initializers_as_inputs=True,
-                      operator_export_type=operator_export_type)
+                      operator_export_type=operator_export_type,
+                      input_names=input_names,
+                      dynamic_axes=dynamic_axes,
+                      remained_onnx_input_idx=remained_onnx_input_idx)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
                        example_outputs=None, do_constant_folding=True,
-                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX):
+                       operator_export_type=torch.onnx.OperatorExportTypes.ONNX,
+                       input_names=None, dynamic_axes=None,
+                       remained_onnx_input_idx=None):
         use_gpu_ = torch.cuda.is_available() and use_gpu
         # NOTE: do_constant_folding is turned on only when model has
         # parameters embedded (which are needed for constant folding),
@@ -209,7 +216,10 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                  use_gpu=use_gpu_, rtol=rtol, atol=atol,
                                  example_outputs=example_outputs,
                                  do_constant_folding=do_constant_folding,
-                                 operator_export_type=operator_export_type)
+                                 operator_export_type=operator_export_type,
+                                 input_names=input_names,
+                                 dynamic_axes=dynamic_axes,
+                                 remained_onnx_input_idx=remained_onnx_input_idx)
         else:
             self.run_debug_test(model, train, batch_size, state_dict, input,
                                 use_gpu=use_gpu_, example_outputs=example_outputs,
@@ -459,11 +469,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                                   do_constant_folding=False)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
-            assert len(prepared.init_net.op) == 879
-            assert len(prepared.predict_net.op) == 133
+            assert len(prepared.init_net.op) == 950
+            assert len(prepared.predict_net.op) == 101
         else:
-            assert len(prepared.init_net.op) == 12
-            assert len(prepared.predict_net.op) == 1000
+            assert len(prepared.init_net.op) == 83
+            assert len(prepared.predict_net.op) == 968
 
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)
@@ -1177,7 +1187,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(1, 2, requires_grad=True)
         y = torch.randn(2, 4, requires_grad=True)
-        self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+        self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False,
+                            input_names=["x", "y"], dynamic_axes={"x": [0, 1], "y": [0, 1]})
+        self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False, remained_onnx_input_idx=[0])
 
     def test_mean(self):
         shape = (3, 4, 5)
@@ -1228,7 +1240,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             def forward(self, x):
                 return (torch.randn(1, 2, 3, 4) + x).shape
         self.run_model_test(MyModule(), train=False, input=(x),
-                            batch_size=BATCH_SIZE, use_gpu=False)
+                            batch_size=BATCH_SIZE, use_gpu=False, remained_onnx_input_idx=[])
 
     def test_rand(self):
         x = torch.randn(1, 2, 3, 4)
@@ -1237,7 +1249,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
             def forward(self, x):
                 return (torch.rand(1, 2, 3, 4) + x).shape
         self.run_model_test(MyModule(), train=False, input=(x),
-                            batch_size=BATCH_SIZE, use_gpu=False)
+                            batch_size=BATCH_SIZE, use_gpu=False, remained_onnx_input_idx=[])
 
     def test_convtranspose(self):
         model = nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False, padding=1, output_padding=2)
@@ -1418,7 +1430,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return x.zero_()
 
         x = torch.randn(2, 3, 4)
-        self.run_model_test(Zero_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+        self.run_model_test(Zero_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False,
+                            input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        self.run_model_test(Zero_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_fill(self):
@@ -1427,7 +1441,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return x.fill_(3)
 
         x = torch.randn(2, 3, 4)
-        self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+        self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False,
+                            input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        self.run_model_test(Fill_(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False, remained_onnx_input_idx=[])
 
     # ConstantFill is a deprecated experimental op (used in opsets < 9).
     # Shape inference does not cover this op.
@@ -1454,7 +1470,10 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return torch.zeros(x.size()) + torch.ones(x.size())
 
         x = torch.randn(2, 3, 4)
-        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, remained_onnx_input_idx=[])
 
     def test_tensor_factories_script(self):
         class TensorFactory(torch.jit.ScriptModule):
@@ -1464,7 +1483,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
-                            use_gpu=False, example_outputs=(torch.ones(x.size()),))
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),),
+                            input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),),
+                            remained_onnx_input_idx=[])
 
     def test_tensor_like_factories_script(self):
         class TensorFactory(torch.jit.ScriptModule):
@@ -1476,7 +1499,12 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
-                            use_gpu=False, example_outputs=(torch.ones(x.size()),))
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),),
+                            input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        remained_onnx_input_idx = None if self.opset_version < 9 else []
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            use_gpu=False, example_outputs=(torch.ones(x.size()),),
+                            remained_onnx_input_idx=remained_onnx_input_idx)
 
     def test_full(self):
         class FullModel(torch.nn.Module):
@@ -2101,7 +2129,9 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                 return torch.arange(input.size(0)), torch.arange(input.size(-1))
 
         x = torch.randn(5, 3, 2)
-        self.run_model_test(SizeModel(), train=False, input=(x,), batch_size=BATCH_SIZE)
+        self.run_model_test(SizeModel(), train=False, input=(x,), batch_size=BATCH_SIZE,
+                            input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
+        self.run_model_test(SizeModel(), train=False, input=(x,), batch_size=BATCH_SIZE, remained_onnx_input_idx=[])
 
     def test_log2(self):
         class Log2Model(torch.nn.Module):
