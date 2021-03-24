@@ -160,7 +160,7 @@ def compute_gradient(fn, entry, v, norm_v):
     return tuple(compute(a, b) for (a, b) in zip(outa, outb))
 
 
-def get_numerical_jvp(jacobians_cols, delta, jvp_fn, input_is_complex, grad_out):
+def compute_numerical_jacobian_cols(jacobians_cols, delta, jvp_fn, input_is_complex, grad_out):
     # compute gradient only works for pure real or pure imaginary delta
     # for details on the algorithm used here, refer:
     # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
@@ -196,8 +196,8 @@ def get_numerical_jvp(jacobians_cols, delta, jvp_fn, input_is_complex, grad_out)
 def combine_jacobian_cols(jacobians_cols, outputs, input, dim=None):
     jacobians = make_jacobians_with_outputs(outputs, input.dtype, input.device, dim=dim)
     for i, jacobian in enumerate(jacobians):
-        for k, v in jacobians_cols.items():
-            jacobian[k] = v[i]
+        for j, col in enumerate(jacobians_cols):
+            jacobian[j] = col[i]
     return jacobians
 
 
@@ -206,7 +206,7 @@ def get_numerical_jacobian_for_input(fn, input, inputs, outputs, delta, eps, gra
     tensors, where N is the number of outputs. Input must require grad.
     """
     assert input.requires_grad
-    jacobian_cols: Dict[int, List[Optional[torch.Tensor]]] = {}
+    jacobian_cols: List[List[Optional[torch.Tensor]]] = []
     for x, idx, d_idx in iter_tensor(input):
         def wrapped_fn():
             if input.layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
@@ -223,9 +223,10 @@ def get_numerical_jacobian_for_input(fn, input, inputs, outputs, delta, eps, gra
 
         def jvp_fn(delta):
             return compute_gradient(wrapped_fn, entry, delta, eps)
-        jacobian_cols[d_idx] = []
-        get_numerical_jvp(jacobian_cols[d_idx], delta, jvp_fn, x.is_complex(), grad_out)
+        jacobian_cols.append([])
+        compute_numerical_jacobian_cols(jacobian_cols[d_idx], delta, jvp_fn, x.is_complex(), grad_out)
     return combine_jacobian_cols(jacobian_cols, outputs, input, dim=input.numel())
+
 
 def sparse_clone(input):
     # returns a new sparse tensor that shares storage with `input`
@@ -234,6 +235,7 @@ def sparse_clone(input):
     if input.layout == torch.sparse_coo:
         return torch.sparse_coo_tensor(input.indices(), input.values(), input.size())
     return input
+
 
 def get_fast_numerical_jacobian_for_input(fn, input_idx, input, inputs, outputs, delta, eps, grad_out):
     jacobian_cols: List[Optional[torch.Tensor]] = []
@@ -258,7 +260,7 @@ def get_fast_numerical_jacobian_for_input(fn, input_idx, input, inputs, outputs,
     def jvp_fn(delta):
         return compute_gradient(wrapped_fn, entry, delta, eps)
 
-    get_numerical_jvp(jacobian_cols, delta, jvp_fn, input.is_complex(), grad_out)
+    compute_numerical_jacobian_cols(jacobian_cols, delta, jvp_fn, input.is_complex(), grad_out)
     jacobians = make_jacobians_with_outputs(outputs, dtype=input.dtype, device=input.device)
 
     for i, jacobian in enumerate(jacobians):
@@ -279,7 +281,7 @@ def combine_jacobian_rows(jacobians_rows, inputs, dim):
     diff_input_list = list(iter_tensors(inputs, True))
     correct_grad_sizes = True
     correct_grad_types = True
-    for i, rows in jacobians_rows.items():
+    for i, rows in enumerate(jacobians_rows):
         inp = diff_input_list[i]
         out_jacobian = out_jacobians[i]
         for j, row in enumerate(rows):
@@ -292,25 +294,25 @@ def combine_jacobian_rows(jacobians_rows, inputs, dim):
             else:
                 row_dense = row.to_dense() if not row.layout == torch.strided else row
                 assert out_jacobian[:, j].numel() == row_dense.numel()
-                out_jacobian[:, j] = row_dense.contiguous().view(-1)
+                out_jacobian[:, j] = row_dense.reshape(-1)
     return out_jacobians, correct_grad_sizes, correct_grad_types
 
 
 def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_scale, check_grad_dtypes,
-                                         raise_exception, custom_backward_fn=None, fast_mode=False, v=None):
+                                         raise_exception, custom_vjp_fn=None, fast_mode=False, v=None):
     diff_input_list = list(iter_tensors(inputs, True))
 
     def backward_fn(grad_output):
         return torch.autograd.grad(output, diff_input_list, grad_output,
                                    retain_graph=True, allow_unused=True)
-    fn = custom_backward_fn if custom_backward_fn is not None else backward_fn
+    vjp_fn = custom_vjp_fn if custom_vjp_fn is not None else backward_fn
 
     if fast_mode:
-        jacobians_rows = get_fast_analytic_jacobian(fn, output.clone(), v, grad_out_scale)
-        jacobians_rows_reentrant = get_fast_analytic_jacobian(fn, output.clone(), v, grad_out_scale)
+        jacobians_rows = get_fast_analytic_jacobian(vjp_fn, output.clone(), v, grad_out_scale)
+        jacobians_rows_reentrant = get_fast_analytic_jacobian(vjp_fn, output.clone(), v, grad_out_scale)
     else:
-        jacobians_rows = get_analytical_jacobian(fn, output.clone(), grad_out_scale)
-        jacobians_rows_reentrant = get_analytical_jacobian(fn, output.clone(), grad_out_scale)
+        jacobians_rows = compute_analytical_jacobian_rows(vjp_fn, output.clone(), grad_out_scale)
+        jacobians_rows_reentrant = compute_analytical_jacobian_rows(vjp_fn, output.clone(), grad_out_scale)
     dim = output.numel() if not fast_mode else 1
 
     jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, dim)
@@ -338,30 +340,33 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_sc
     return jacobians, failed
 
 
-def get_analytical_jacobian(fn, sample_output, grad_out_scale):
-    # Computes Jacobian row-by-row using backward function `fn` = v^T J
-    # NB: we can't combine the rows into a single jacobian tensor because fn(v) for
-    # different v may return tensors with different number of elements
+def compute_analytical_jacobian_rows(vjp_fn, sample_output, grad_out_scale):
+    # Computes Jacobian row-by-row using backward function `vjp_fn` = v^T J
+    # NB: this function does not assume vjp_fn(v) to return tensors with
+    # the same number of elements for different v. This is checked when we
+    # later combine the rows into a single tensor.
     grad_out_base = torch.zeros_like(sample_output, memory_format=torch.legacy_contiguous_format)
     flat_grad_out = grad_out_base.view(-1)
     # jacobians_rows[i][j] represents the jth row of the ith input
-    jacobians_rows: Dict[int, List[Optional[torch.Tensor]]] = {}
+    jacobians_rows: List[List[Optional[torch.Tensor]]] = []
 
     for j in range(flat_grad_out.numel()):
         flat_grad_out.zero_()
         flat_grad_out[j] = grad_out_scale
-        grad_inputs = fn(grad_out_base)
+        grad_inputs = vjp_fn(grad_out_base)
         for i, d_x in enumerate(grad_inputs):
-            jacobians_rows[i] = jacobians_rows.get(i, []) + [d_x.clone() if isinstance(d_x, torch.Tensor) else None]
+            if j == 0:
+                jacobians_rows.append([])
+            jacobians_rows[i] += [d_x.clone() if isinstance(d_x, torch.Tensor) else None]
     return jacobians_rows
 
 
-def get_fast_analytic_jacobian(fn, sample_output, v, grad_out_scale):
-    # For each input, computes f(v), which is *supposed* to be v^T J
-    jacobians_rows: Dict[int, List[Optional[torch.Tensor]]] = {}
-    grad_inputs = fn(v.reshape(sample_output.shape) * grad_out_scale)
+def get_fast_analytic_jacobian(vjp_fn, sample_output, v, grad_out_scale):
+    # For each input, computes vjp_fn(v), which is *supposed* to be v^T J
+    jacobians_rows: List[List[Optional[torch.Tensor]]] = []
+    grad_inputs = vjp_fn(v.reshape(sample_output.shape) * grad_out_scale)
     for i, d_x in enumerate(grad_inputs):
-        jacobians_rows[i] = jacobians_rows.get(i, []) + [d_x.clone() if isinstance(d_x, torch.Tensor) else None]
+        jacobians_rows.append([d_x.clone() if isinstance(d_x, torch.Tensor) else None])
     return jacobians_rows
 
 
