@@ -240,6 +240,14 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=4.0.1
     ;;
+  pytorch-linux-bionic-rocm4.1-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=4.1
+    ;;
   *)
     # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
