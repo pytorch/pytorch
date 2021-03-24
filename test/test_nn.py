@@ -3737,8 +3737,7 @@ class TestNN(NNTestCase):
 
     def test_threshold_bfloat16(self):
         x = torch.randn(100)
-        nan = 0 * float(inf)
-        for threshold in [0, -0.5, 0.5, float(inf), float(-inf), nan]:
+        for threshold in [0, -0.5, 0.5, float('inf'), float('-inf'), float('nan')]:
             expected = F.threshold(x, threshold, 0).bfloat16().float()
             res_bf16 = F.threshold(x.bfloat16(), threshold, 0).float()
             self.assertEqual(res_bf16, expected)
