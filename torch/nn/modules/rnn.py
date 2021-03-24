@@ -84,12 +84,12 @@ class RNNBase(Module):
                 real_hidden_size = proj_size if proj_size > 0 else hidden_size
                 layer_input_size = input_size if layer == 0 else real_hidden_size * num_directions
 
-                w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
-                w_hh = Parameter(torch.Tensor(gate_size, real_hidden_size))
-                b_ih = Parameter(torch.Tensor(gate_size))
+                w_ih = Parameter(torch.empty(gate_size, layer_input_size))
+                w_hh = Parameter(torch.empty(gate_size, real_hidden_size))
+                b_ih = Parameter(torch.empty(gate_size))
                 # Second bias vector included for CuDNN compatibility. Only one
                 # bias vector is needed in standard definition.
-                b_hh = Parameter(torch.Tensor(gate_size))
+                b_hh = Parameter(torch.empty(gate_size))
                 layer_params: Tuple[Tensor, ...] = ()
                 if self.proj_size == 0:
                     if bias:
@@ -97,7 +97,7 @@ class RNNBase(Module):
                     else:
                         layer_params = (w_ih, w_hh)
                 else:
-                    w_hr = Parameter(torch.Tensor(proj_size, hidden_size))
+                    w_hr = Parameter(torch.empty(proj_size, hidden_size))
                     if bias:
                         layer_params = (w_ih, w_hh, b_ih, b_hh, w_hr)
                     else:
@@ -850,11 +850,11 @@ class RNNCellBase(Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
-        self.weight_ih = Parameter(torch.Tensor(num_chunks * hidden_size, input_size))
-        self.weight_hh = Parameter(torch.Tensor(num_chunks * hidden_size, hidden_size))
+        self.weight_ih = Parameter(torch.empty(num_chunks * hidden_size, input_size))
+        self.weight_hh = Parameter(torch.empty(num_chunks * hidden_size, hidden_size))
         if bias:
-            self.bias_ih = Parameter(torch.Tensor(num_chunks * hidden_size))
-            self.bias_hh = Parameter(torch.Tensor(num_chunks * hidden_size))
+            self.bias_ih = Parameter(torch.empty(num_chunks * hidden_size))
+            self.bias_hh = Parameter(torch.empty(num_chunks * hidden_size))
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
