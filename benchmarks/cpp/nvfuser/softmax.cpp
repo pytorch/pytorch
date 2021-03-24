@@ -217,14 +217,7 @@ static void MagicScheduler_Softmax_Dropout_Baseline(
 
   for (auto _ : benchmark_state) {
     // Create
-    float kernel_time_ms_ = 0;
-    cudaEvent_t start_event = {};
-    cudaEvent_t finish_event = {};
-
-    // Setup
-    cudaEventCreate(&start_event);
-    cudaEventCreate(&finish_event);
-    cudaEventRecord(start_event);
+    CudaKernelTimer timer;
 
     // Run
     attention_scores = attention_scores / sqrt(kAttentionHeadSize);
@@ -234,12 +227,7 @@ static void MagicScheduler_Softmax_Dropout_Baseline(
     attention_probs = at::dropout(attention_probs, kDropoutProbability, true);
 
     // Record
-    cudaEventRecord(finish_event);
-    cudaEventSynchronize(start_event);
-    cudaEventSynchronize(finish_event);
-    cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event);
-
-    benchmark_state.SetIterationTime(kernel_time_ms_ / 1000.0);
+    benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
     cudaDeviceSynchronize();
   }
 }

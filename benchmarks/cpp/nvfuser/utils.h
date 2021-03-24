@@ -37,6 +37,11 @@ class CudaKernelTimer {
     cudaEventRecord(start_event);
   }
 
+  ~CudaKernelTimer() {
+    cudaEventDestroy(start_event);
+    cudaEventDestroy(finish_event);
+  }
+
   float elapsed() {
     // Record
     cudaEventRecord(finish_event);
