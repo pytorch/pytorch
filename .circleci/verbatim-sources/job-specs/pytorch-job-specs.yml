@@ -261,6 +261,7 @@ jobs:
       - checkout
       - run:
           name: Install VS2019
+          no_output_timeout: 30m
           command: |
               powershell .circleci/scripts/vs_install.ps1
       - run:
@@ -329,6 +330,7 @@ jobs:
           at: c:/users/circleci/workspace
       - run:
           name: Install VS2019
+          no_output_timeout: 30m
           command: |
               powershell .circleci/scripts/vs_install.ps1
       - run:
