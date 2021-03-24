@@ -36,7 +36,9 @@ endif()
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
 file(GLOB_RECURSE ATen_CORE_HEADERS  "core/*.h")
 file(GLOB_RECURSE ATen_CORE_SRCS "core/*.cpp")
-file(GLOB_RECURSE ATen_CORE_TEST_SRCS "core/*_test.cpp")
+if (NOT BUILD_LITE_INTERPRETER)
+  file(GLOB_RECURSE ATen_CORE_TEST_SRCS "core/*_test.cpp")
+endif()
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
 file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec256/*.h" "quantized/*.h")

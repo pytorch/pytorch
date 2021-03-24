@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
-#include <torch/torch.h>
+// #include <torch/torch.h>
 
 #include <unordered_set>
 

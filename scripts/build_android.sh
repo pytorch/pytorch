@@ -101,7 +101,7 @@ if [ -z "$BUILD_MOBILE_TEST" ]; then
   BUILD_MOBILE_TEST=0
 fi
 # Don't build artifacts we don't need
-CMAKE_ARGS+=("-DBUILD_TEST=OFF")
+CMAKE_ARGS+=("-DBUILD_TEST=ON")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
 
 # If there exists env variable and it equals to 1, build lite interpreter.
