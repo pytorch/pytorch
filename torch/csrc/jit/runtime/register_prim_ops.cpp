@@ -853,7 +853,9 @@ RegisterOperators reg(
          aten::pow,
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
-         static_cast<c10::complex<double>>(pow(static_cast<c10::complex<double>>(a), static_cast<c10::complex<double>>(b))),
+         static_cast<c10::complex<double>>(
+             pow(static_cast<c10::complex<double>>(a),
+                 static_cast<c10::complex<double>>(b))),
          Scalar),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::pow.int_to_int(int a, int b) -> int"),
@@ -1083,13 +1085,13 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-        TORCH_SELECTIVE_SCHEMA("prim::imag(Tensor a) -> Tensor"),
-        [](Stack* stack) {
-          at::Tensor a;
-        pop(stack, a);
-          push(stack, at::imag(a));
-        },
-        aliasAnalysisFromSchema()),
+         TORCH_SELECTIVE_SCHEMA("prim::imag(Tensor a) -> Tensor"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, at::imag(a));
+         },
+         aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::is_xpu(Tensor a) -> bool"),
          [](Stack* stack) {
