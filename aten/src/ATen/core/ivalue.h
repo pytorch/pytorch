@@ -292,6 +292,13 @@ struct TORCH_API IValue final {
     if (this->isTensor()) {
       const auto& thisTensor = this->toTensor();
       const auto& rhsTensor = rhs.toTensor();
+      // mkldnn tensors dont have views or storage, we can compare them based on
+      // tensor impl
+      if (thisTensor.is_mkldnn() || rhsTensor.is_mkldnn()) {
+        return thisTensor.unsafeGetTensorImpl() ==
+            rhsTensor.unsafeGetTensorImpl();
+      }
+
       return thisTensor.is_alias_of(rhsTensor);
     }
 
@@ -849,8 +856,14 @@ struct TORCH_API IValue final {
   struct HashAliasedIValue {
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        return reinterpret_cast<size_t>(
-            val.toTensor().storage().unsafeGetStorageImpl());
+        if (val.toTensor().is_mkldnn()) {
+          // MKLDNN tensors dont have storage and dont create views
+          // or aliasing so we can just use Tensor pointer
+          return reinterpret_cast<size_t>(val.toTensor().unsafeGetTensorImpl());
+        } else {
+          return reinterpret_cast<size_t>(
+              val.toTensor().storage().unsafeGetStorageImpl());
+        }
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
       // if they are the same pointer.
