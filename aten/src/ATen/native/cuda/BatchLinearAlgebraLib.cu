@@ -526,6 +526,7 @@ inline static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, cons
 }
 
 
+// This code path is only dispatched to if MAGMA is not linked in the pytorch build.
 // cusolverDn<t>potrsBatched only supports nrhs == 1
 template<typename scalar_t>
 inline static void apply_cholesky_cusolver_potrsBatched(Tensor& self_working_copy, const Tensor& A_column_major_copy, bool upper, Tensor& infos) {
