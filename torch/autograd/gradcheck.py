@@ -174,7 +174,7 @@ def combine_jacobian_rows(jacobians_rows, inputs, output):
     diff_input_list = list(iter_tensors(inputs, True))
     correct_grad_sizes = True
     correct_grad_types = True
-    for i, rows in jacobians_rows.items():
+    for i, rows in enumerate(jacobians_rows):
         inp = diff_input_list[i]
         out_jacobian = out_jacobians[i]
         for j, row in enumerate(rows):
@@ -187,20 +187,20 @@ def combine_jacobian_rows(jacobians_rows, inputs, output):
             else:
                 row_dense = row.to_dense() if not row.layout == torch.strided else row
                 assert out_jacobian[:, j].numel() == row_dense.numel()
-                out_jacobian[:, j] = row_dense.contiguous().view(-1)
+                out_jacobian[:, j] = row_dense.reshape(-1)
     return out_jacobians, correct_grad_sizes, correct_grad_types
 
 
 def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_scale, check_grad_dtypes,
-                                         raise_exception, custom_backward_fn=None):
+                                         raise_exception, custom_vjp_fn=None):
     diff_input_list = list(iter_tensors(inputs, True))
 
     def backward_fn(grad_output):
         return torch.autograd.grad(output, diff_input_list, grad_output,
                                    retain_graph=True, allow_unused=True)
-    fn = custom_backward_fn if custom_backward_fn is not None else backward_fn
-    jacobians_rows = get_analytical_jacobian(fn, output.clone(), grad_out_scale)
-    jacobians_rows_reentrant = get_analytical_jacobian(fn, output.clone(), grad_out_scale)
+    vjp_fn = custom_vjp_fn if custom_vjp_fn is not None else backward_fn
+    jacobians_rows = compute_analytical_jacobian_rows(vjp_fn, output.clone(), grad_out_scale)
+    jacobians_rows_reentrant = compute_analytical_jacobian_rows(vjp_fn, output.clone(), grad_out_scale)
 
     jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, output)
     jacobians_reentrant, _, _ = combine_jacobian_rows(jacobians_rows_reentrant, inputs, output)
@@ -227,21 +227,24 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_sc
     return jacobians, failed
 
 
-def get_analytical_jacobian(fn, sample_output, grad_out_scale):
-    # Computes Jacobian row-by-row using backward function `fn` = v^T J
-    # NB: we can't combine the rows into a single jacobian tensor because fn(v) for
-    # different v may return tensors with different number of elements
+def compute_analytical_jacobian_rows(vjp_fn, sample_output, grad_out_scale):
+    # Computes Jacobian row-by-row using backward function `vjp_fn` = v^T J
+    # NB: this function does not assume vjp_fn(v) to return tensors with
+    # the same number of elements for different v. This is checked when we
+    # later combine the rows into a single tensor.
     grad_out_base = torch.zeros_like(sample_output, memory_format=torch.legacy_contiguous_format)
     flat_grad_out = grad_out_base.view(-1)
     # jacobians_rows[i][j] represents the jth row of the ith input
-    jacobians_rows: Dict[int, List[Optional[torch.Tensor]]] = {}
+    jacobians_rows: List[List[Optional[torch.Tensor]]] = []
 
     for j in range(flat_grad_out.numel()):
         flat_grad_out.zero_()
         flat_grad_out[j] = grad_out_scale
-        grad_inputs = fn(grad_out_base)
+        grad_inputs = vjp_fn(grad_out_base)
         for i, d_x in enumerate(grad_inputs):
-            jacobians_rows[i] = jacobians_rows.get(i, []) + [d_x.clone() if isinstance(d_x, torch.Tensor) else None]
+            if j == 0:
+                jacobians_rows.append([])
+            jacobians_rows[i] += [d_x.clone() if isinstance(d_x, torch.Tensor) else None]
     return jacobians_rows
 
 
