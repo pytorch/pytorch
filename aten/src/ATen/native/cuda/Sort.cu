@@ -7,6 +7,7 @@
 namespace at { namespace native {
 
 std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & indices, const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
+  // this algorithm is always stable
   TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
   bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
   int64_t ndim = self.dim();
@@ -46,17 +47,17 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     );
     // generate contiguous strides on permuted dims
     std::vector<int64_t> new_strides(ndim);
+    std::vector<int64_t> new_strides_unsort(ndim);
     int64_t cumprod = 1;
     for (int64_t i = 0; i < ndim; i++) {
       new_strides[ndim - 1 - i] = cumprod;
       cumprod *= self.sizes()[original_dim[ndim - 1 - i]];
     }
     // unsort new strides
-    thrust::sort_by_key(
-      thrust::host, original_dim.data(), original_dim.data() + ndim, new_strides.data(),
-      thrust::greater<int64_t>()
-    );
-    self_ = at::empty_strided(self.sizes(), new_strides, self.options());
+    for (int64_t i = 0; i < ndim; i++) {
+      new_strides_unsort[original_dim[i]] = new_strides[i];
+    }
+    self_ = at::empty_strided(self.sizes(), new_strides_unsort, self.options());
     self_.copy_(self);
   }
   Tensor values_tmp, indices_tmp;
