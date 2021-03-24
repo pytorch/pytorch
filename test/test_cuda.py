@@ -3457,7 +3457,6 @@ torch.cuda.synchronize()
 
         bmm_mem = get_max_used()
 
-        print(matmul_mem, bmm_mem)
         self.assertEqual(matmul_expand_mem, matmul_mem)
         self.assertEqual(bmm_mem, matmul_mem)
 
