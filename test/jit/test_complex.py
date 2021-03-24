@@ -141,3 +141,14 @@ class TestComplex(JitTestCase):
         complex_consts = ['infj', 'nanj']
         for x in (float_consts + complex_consts):
             checkCmathConst(x)
+
+    def test_tensor_attributes(self):
+        def tensor_real(x):
+            return x.real
+
+        def tensor_imag(x):
+            return x.imag
+
+        t = torch.randn(2, 3, dtype=torch.cdouble)
+        self.checkScript(tensor_real, (t, ))
+        self.checkScript(tensor_imag, (t, ))
