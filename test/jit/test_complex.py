@@ -61,7 +61,7 @@ class TestComplex(JitTestCase):
 
     def test_complex_math_ops(self):
         vals = ([0.0, 1.0, 2.2, -1.0, -0.0, -2.2, 1, 0, 2]
-                + [10.0 ** i for i in range(5)] + [-(10.0 ** i) for i in range(5)])
+                + [10.0 ** i for i in range(2)] + [-(10.0 ** i) for i in range(2)])
         complex_vals = tuple(complex(x, y) for x, y in product(vals, vals))
 
         def checkMath(func_name):
