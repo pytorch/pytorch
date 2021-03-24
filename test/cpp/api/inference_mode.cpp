@@ -44,7 +44,7 @@ void assert_tensor_creation_meta(torch::Tensor& x, torch::autograd::CreationMeta
 
 void assert_TLS_states(bool inference_mode) {
   ASSERT_EQ(InferenceMode::is_enabled(), inference_mode);
-  ASSERT_EQ(c10::impl::is_all_dispatch_keyset_excluded(c10::autograd_dispatch_keyset), inference_mode);
+  ASSERT_EQ(c10::impl::tls_is_dispatch_keyset_excluded(c10::autograd_dispatch_keyset), inference_mode);
   ASSERT_EQ(c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::InplaceOrView), !inference_mode);
 }
 
@@ -244,25 +244,25 @@ TEST(InferenceModeTest, TestNormalTensorViewOpInInferenceMode) {
       //   ```
       //   In addition, these view output tensors although are normal in the sense
       //   that it has both Autograd and InplaceOrView keys, they're still special
-      //   since they'll have CreationMeta::NO_GRAD_FN. In other words they behave
+      //   since they'll have CreationMeta::NO_GRAD_MODE. In other words they behave
       //   exactly the same as a view tensor created in no_grad mode.
 
       view_out = view_op(a);  // go through kernels: InplaceOrView, CPU
       ASSERT_FALSE(is_inference_tensor(view_out));
-      assert_tensor_creation_meta(view_out, torch::autograd::CreationMeta::NO_GRAD_FN);
+      assert_tensor_creation_meta(view_out, CreationMeta::INFERENCE_MODE);
       ASSERT_TRUE(view_out.requires_grad());
       ASSERT_TRUE(view_out.is_leaf());
 
       // view -> view
       tmp = view_op(view_out);  // go through kernels: InplaceOrView, CPU
       ASSERT_FALSE(is_inference_tensor(tmp));
-      assert_tensor_creation_meta(tmp, torch::autograd::CreationMeta::NO_GRAD_FN);
+      assert_tensor_creation_meta(tmp, CreationMeta::INFERENCE_MODE);
       ASSERT_TRUE(tmp.requires_grad());
       ASSERT_TRUE(tmp.is_leaf());
 
       // view -> view -> inplace
       inplace_op(tmp);  // kernels: InplaceOrView, CPU
-      assert_tensor_creation_meta(tmp, torch::autograd::CreationMeta::NO_GRAD_FN);
+      assert_tensor_creation_meta(tmp, CreationMeta::INFERENCE_MODE);
       ASSERT_FALSE(is_inference_tensor(tmp));
       ASSERT_TRUE(tmp.requires_grad());
       ASSERT_TRUE(tmp.is_leaf());
@@ -280,7 +280,7 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInNormalMode) {
       c10::InferenceMode guard;
       view_out = view_op(a);  // go through kernels: InplaceOrView, CPU
       ASSERT_FALSE(is_inference_tensor(view_out));
-      assert_tensor_creation_meta(view_out, torch::autograd::CreationMeta::NO_GRAD_FN);
+      assert_tensor_creation_meta(view_out, CreationMeta::INFERENCE_MODE);
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
       ASSERT_TRUE(view_out.is_leaf());
     }
@@ -291,9 +291,9 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInNormalMode) {
 
     if (requires_grad) {
       ASSERT_THROWS_WITH(inplace_op(view_out),  // go through kernels: VariableType, InplaceOrView, CPU
-        "A view was created in no_grad/inference mode and is being modified inplace")
+        "A view was created in inference mode and is being modified inplace")
     } else {
-        inplace_op(view_out);
+      inplace_op(view_out);
     }
 
     tmp = view_op(view_out);
@@ -362,12 +362,11 @@ TEST(InferenceModeTest, TestHandleDirectViewOnRebase) {
       InferenceMode guard;
       view_out = view_op(a);  // go through kernels: InplaceOrView, CPU
     }
-    // direct update on requires_grad=true tensor triggers error
     if (requires_grad) {
-        ASSERT_THROWS_WITH(inplace_op(view_out),
-        "A view was created in no_grad/inference mode and is being modified inplace")
+      ASSERT_THROWS_WITH(inplace_op(view_out),
+        "A view was created in inference mode and is being modified inplace")
     } else {
-        inplace_op(view_out);
+      inplace_op(view_out);
     }
   }
 }
@@ -381,14 +380,12 @@ TEST(InferenceModeTest, TestHandleInDirectViewOnRebase) {
       InferenceMode guard;
       view_out = view_op(a);  // go through kernels: InplaceOrView, CPU
     }
-    // indirect inplace update on requires_grad=true tensor triggers warning
-    WarningCapture warnings;
     inplace_op(a);
-    view_out.grad_fn();
     if (requires_grad) {
-      ASSERT_TRUE(warnings.str().find(
-        "A view was created in no_grad/inference mode and its base or another view of its base has been modified inplace")
-        != std::string::npos);
+      ASSERT_THROWS_WITH(view_out.grad_fn(),
+        "A view was created in inference mode and its base or another view of its base has been modified inplace");
+    } else {
+      view_out.grad_fn();
     }
   }
 }

@@ -137,7 +137,7 @@ ${assign_return_values} ([&]() {
 """)
 
 THROW_IF_VARIABLETYPE_ON = """
-TORCH_CHECK(c10::impl::is_all_dispatch_keyset_excluded(c10::autograd_dispatch_keyset),
+TORCH_CHECK(c10::impl::tls_is_dispatch_keyset_excluded(c10::autograd_dispatch_keyset),
   "Calling inplace/view ops on inference tensor outside InferenceMode is not allowed, ",
   "consider making a clone first. ",
   "If you have a valid use case, please make a feature request to PyTorch.");
@@ -308,8 +308,9 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         else:
             _, unpacked_bindings = unpack_args(f)
             call += emit_view_lambda(f, unpacked_bindings)
-            creation_meta = ('(!at::GradMode::is_enabled() || InferenceMode::is_enabled()) ? '
-                             'CreationMeta::NO_GRAD_FN : CreationMeta::DEFAULT')
+            creation_meta = ('InferenceMode::is_enabled() ? '
+                             'CreationMeta::INFERENCE_MODE : '
+                             '(at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE)')
             rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                          '/* is_fw_differentiable */ true, '
                          f'/* view_func */ func, /* creation_meta */ {creation_meta})')

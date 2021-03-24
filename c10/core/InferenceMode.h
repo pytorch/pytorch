@@ -8,8 +8,7 @@ namespace c10 {
 // A RAII, thread local (!) guard that enables or disables inference mode upon
 // construction, and sets it back to the original value upon destruction.
 struct TORCH_API InferenceMode {
-  InferenceMode(bool enabled=true) : prev_mode(is_enabled()),
-   prev_keyset(c10::impl::tls_local_dispatch_key_set()) {
+  InferenceMode(bool enabled=true): prev_keyset(c10::impl::tls_local_dispatch_key_set()) {
     // Note [Expected TLS state in InferenceMode]:
     //   InferenceMode: InplaceOrView not in included, Autograd in excluded
     //   NormalMode: InplaceOrView in included, Autograd not in excluded
@@ -58,7 +57,6 @@ struct TORCH_API InferenceMode {
   static bool is_enabled();
 
   private:
-    bool prev_mode;
     c10::impl::LocalDispatchKeySet prev_keyset;
 };
 } // namespace c10

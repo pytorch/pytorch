@@ -5,7 +5,6 @@
 namespace c10 {
 namespace impl {
 
-// NB: POD, zero initialized!
 thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set {DispatchKeySet(DispatchKey::InplaceOrView).raw_repr()};
 
 #if defined(_MSC_VER) || defined(C10_ANDROID)
@@ -101,7 +100,7 @@ void tls_set_dispatch_key_included(DispatchKey x, bool desired_state) {
   }
 }
 
-bool is_all_dispatch_keyset_excluded(DispatchKeySet ks) {
+bool tls_is_dispatch_keyset_excluded(DispatchKeySet ks) {
   return raw_local_dispatch_key_set.excluded().isSupersetOf(ks);
 }
 
