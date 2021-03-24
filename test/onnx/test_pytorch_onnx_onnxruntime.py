@@ -735,6 +735,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = (torch.randn(3, 4), torch.randn(4, 3))
         self.run_test(TupleModel(), input=(x,))
 
+    def test_tuple_primitive_input(self):
+        class TupleModel(torch.nn.Module):
+            def forward(self, a: Tuple[int, torch.Tensor], b):
+                return a[0], a[1] + b
+
+        x = (3, torch.randn(4, 3))
+        y = torch.randn(4, 3)
+        self.run_test(TupleModel(), input=(x, y))
+
     def test_nested_tuple_input(self):
         class NestedTupleModel(torch.nn.Module):
             def forward(self, a, b: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]):
