@@ -123,7 +123,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
   auto orig_indices = at::arange(nsort, indices.options()).repeat({nrepeat});
   int64_t *orig_indices_ptr = orig_indices.data_ptr<int64_t>();
 
-  auto tmp = at::empty_like(self_);
+  auto tmp = at::empty({nbatch}, self_.options());
   auto segment_id_tmp = at::empty_like(segment_id);
   int64_t *segment_id_tmp_ptr = segment_id_tmp.data_ptr<int64_t>();
   auto orig_indices_tmp = at::empty_like(orig_indices);
@@ -153,6 +153,9 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
         orig_indices_tmp_ptr, indices_ptr,
         n);
       remaining -= n;
+      self_ptr += n;
+      values_ptr += n;
+      indices_ptr += n;
     }
   });
 

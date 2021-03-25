@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU)
+     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU, largeTensorTest)
 
 # TODO: remove this
 SIZE = 100
@@ -134,6 +134,23 @@ class TestSortAndSelect(TestCase):
                 idx[ncopies:],
                 torch.arange(start=1, end=2 * ncopies, step=2, device=device)
             )
+
+    @onlyCUDA
+    @dtypes(torch.uint8)
+    @largeTensorTest('30GB')
+    def test_sort_large(self, device, dtype):
+        t0 = torch.randperm(256, device=device).to(dtype)
+        t = t0.view(1, 256).expand(2 ** 23 + 1, -1).contiguous()
+        v, i = t.sort()
+        del t
+        iv, im = i.var_mean(dim=0)
+        del i
+        vv, vm = v.var_mean(dim=0)
+        del v
+        self.assertEqual(vv, torch.zeros_like(vv))
+        self.assertEqual(iv, torch.zeros_like(iv))
+        self.assertEqual(vm, torch.arange(255, dtype=dtype, device=device))
+        self.assertEqual(im, t0.sort().indices)
 
     @onlyCPU
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
