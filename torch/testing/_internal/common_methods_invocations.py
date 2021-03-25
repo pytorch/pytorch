@@ -3178,7 +3178,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True),
     UnaryUfuncInfo('exp2',
                    aliases=('special.exp2', ),
-                   ref=np_unary_ufunc_integer_promotion_wrapper(scipy.special.exp2),
+                   ref=np_unary_ufunc_integer_promotion_wrapper(np.exp2),
                    dtypes=all_types_and(torch.bool, torch.half),
                    dtypesIfCPU=all_types_and(torch.bool, torch.half),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
