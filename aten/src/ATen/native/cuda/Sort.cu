@@ -131,11 +131,11 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     at::cuda::cub::sort_pairs(
       segment_id_tmp_ptr, segment_id_ptr,
       tmp_ptr, values_ptr,
-      self_.numel(), descending);
+      self_.numel());
     at::cuda::cub::sort_pairs(
       segment_id_tmp_ptr, segment_id_ptr,
       orig_indices_tmp_ptr, indices_ptr,
-      self_.numel(), descending);
+      self_.numel());
   });
 
   if (values_tmp.defined()) {
