@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Cancel duplicate workflow runs
-        uses: potiuk/cancel-workflow-runs@v4_8
+        uses: potiuk/cancel-workflow-runs@a81b3c4d59c61e27484cfacdc13897dd908419c9
         with:
           cancelMode: duplicates
           token: ${{ secrets.GITHUB_TOKEN }}
