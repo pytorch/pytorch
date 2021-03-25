@@ -104,6 +104,29 @@ def skip_if_lt_x_gpu(x):
 
     return decorator
 
+
+def with_nccl_blocking_wait(func):
+    """
+    Convenience Decorator to set/unset NCCL_BLOCKING_WAIT flag.
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Unset NCCL_ASYNC_ERROR_HANDLING if needed, and set
+        # NCCL_BLOCKING_WAIT.
+        if "NCCL_ASYNC_ERROR_HANDLING" in os.environ:
+            del os.environ["NCCL_ASYNC_ERROR_HANDLING"]
+        os.environ["NCCL_BLOCKING_WAIT"] = "1"
+
+        ret = func(*args, **kwargs)
+        # unset NCCL_BLOCKING_WAIT
+        if "NCCL_BLOCKING_WAIT" in os.environ:
+            del os.environ["NCCL_BLOCKING_WAIT"]
+
+        return ret
+
+    return wrapper
+
+
 def requires_gloo():
     return unittest.skipUnless(
         c10d.is_gloo_available(),
