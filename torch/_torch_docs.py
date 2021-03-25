@@ -6037,7 +6037,7 @@ The shapes of :attr:`input` and :attr:`other` must be
 
 .. math::
     \text{out}_i = \text{input}_i \times \text{other}_i
-""" + r"""
+""".format(**common_args) + r"""
 
 Args:
     input (Tensor): the first multiplicand tensor
