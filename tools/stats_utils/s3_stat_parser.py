@@ -107,16 +107,16 @@ def get_cases(
     data: Report,
     filename: Optional[str],
     suite_name: Optional[str],
-    test_name: str,
+    test_name: Optional[str],
 ) -> List[Version2Case]:
     cases: List[Version2Case] = []
     if 'format_version' not in data:  # version 1 implicitly
         v1report = cast(Version1Report, data)
         suites = v1report['suites']
         for sname, v1suite in suites.items():
-            if sname == suite_name or not suite_name:
+            if not suite_name or sname == suite_name:
                 for v1case in v1suite['cases']:
-                    if v1case['name'] == test_name:
+                    if not test_name or v1case['name'] == test_name:
                         cases.append(newify_case(v1case))
     else:
         v_report = cast(VersionedReport, data)
@@ -127,9 +127,9 @@ def get_cases(
                 if fname == filename or not filename:
                     for sname, v2suite in v2file['suites'].items():
                         if sname == suite_name or not suite_name:
-                            v2case = v2suite['cases'].get(test_name)
-                            if v2case:
-                                cases.append(v2case)
+                            for v2case in v2suite['cases']:
+                                if not test_name or v2case['name'] == test_name:
+                                    cases.append(v2case)
         else:
             raise RuntimeError(f'Unknown format version: {version}')
     return cases

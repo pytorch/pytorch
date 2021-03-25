@@ -29,7 +29,7 @@ def make_column(
     data: Optional[Report],
     filename: Optional[str],
     suite_name: Optional[str],
-    test_name: str,
+    test_name: Optional[str],
     digits: int,
 ) -> Tuple[str, int]:
     decimals = 3
@@ -62,7 +62,7 @@ def make_columns(
     omitted: Dict[str, int],
     filename: Optional[str],
     suite_name: Optional[str],
-    test_name: str,
+    test_name: Optional[str],
     digits: int,
 ) -> str:
     columns = []
@@ -95,7 +95,7 @@ def make_lines(
     omitted: Dict[str, int],
     filename: Optional[str],
     suite_name: Optional[str],
-    test_name: str,
+    test_name: Optional[str],
 ) -> List[str]:
     lines = []
     for job, data in jsons.items():
@@ -128,7 +128,7 @@ def history_lines(
     jobs: Optional[List[str]],
     filename: Optional[str],
     suite_name: Optional[str],
-    test_name: str,
+    test_name: Optional[str],
     delta: int,
     sha_length: int,
     mode: str,
@@ -254,6 +254,7 @@ def parse_args(raw: List[str]) -> argparse.Namespace:
         '--mode',
         choices=['columns', 'multiline'],
         help='output format',
+        default='columns',
     )
     parser.add_argument(
         '--pytorch',
@@ -303,12 +304,13 @@ def parse_args(raw: List[str]) -> argparse.Namespace:
     parser.add_argument(
         '--jobs',
         help='names of jobs to display columns for, in order',
-        default="",
+        default='',
     )
     args = parser.parse_args(raw)
 
     args.jobs = None if args.all else args.jobs.split(',')
-    if args.jobs == "":  # no jobs, and not None (which would mean all jobs)
+    # We dont allow implicit or empty "--jobs", unless "--all" is specified.
+    if args.jobs and (args.jobs == [] or args.jobs[0] == ''):  
         parser.error('No jobs specified.')
 
     return args
