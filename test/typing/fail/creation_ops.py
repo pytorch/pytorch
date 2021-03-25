@@ -2,4 +2,4 @@
 
 import torch
 
-torch.tensor(1j, dtype=torch.int32)  # E: 
+torch.tensor(1j, dtype=torch.int32)  # E:
