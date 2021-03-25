@@ -7,6 +7,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Clang version:"
@@ -35,7 +36,6 @@ CC="clang" CXX="clang++" LDSHARED="clang --shared" \
   CXX_FLAGS="-pthread" \
   USE_ASAN=1 USE_CUDA=0 USE_MKLDNN=0 \
   python setup.py install
-
 
 # Test building via the sdist source tarball
 python setup.py sdist

@@ -193,6 +193,42 @@ void index_fill_kernel_impl(
 }
 
 template <typename scalar_t>
+void index_copy_kernel_impl(
+  TensorIterator& iter,
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride) {
+  if (iter.numel() == 0) {
+    return;
+  }
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      index_copy_kernel_impl<scalar_t>(sub_iter, dim, self_dim_size, self_dim_stride);
+    }
+    return;
+  }
+
+  char* __restrict__ self_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
+  char* __restrict__ idx_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
+  char* __restrict__ source_ptr = reinterpret_cast<char*>(iter.data_ptr(2));
+
+  auto offset_calc = make_offset_calculator<3>(iter);
+
+  auto loop = [=]C10_DEVICE(int i) {
+    auto offsets = offset_calc.get(i);
+
+    auto* __restrict__ self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0]);
+    auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
+    auto* __restrict__ source_data = reinterpret_cast<scalar_t*>(source_ptr + offsets[2]);
+    CUDA_KERNEL_ASSERT(idx >= 0 && idx < self_dim_size && "index_copy_(): index out of bounds");
+
+    self_data[idx * self_dim_stride] = *source_data;
+  };
+  launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
+}
+
+template <typename scalar_t>
 void index_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
     *(scalar_t*)out_data = *(scalar_t*)(in_data + offset);
@@ -218,7 +254,7 @@ static void index_fill_kernel(
   int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride,
-  Scalar source) {
+  const Scalar& source) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "index_fill_cuda", [&] {
@@ -226,6 +262,19 @@ static void index_fill_kernel(
     auto fill_val = source.to<scalar_t>();
     auto fill_val_opaque = *reinterpret_cast<dtype*>(&fill_val);
     index_fill_kernel_impl<dtype>(iter, dim, self_dim_size, self_dim_stride, fill_val_opaque);
+  });
+}
+
+static void index_copy_kernel(
+  TensorIterator& iter,
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+    iter.dtype(), "index_copy_cuda", [&] {
+    using dtype = OpaqueType<sizeof(scalar_t)>;
+    index_copy_kernel_impl<dtype>(iter, dim, self_dim_size, self_dim_stride);
   });
 }
 
@@ -413,6 +462,7 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
 
 REGISTER_DISPATCH(index_stub, &index_kernel);
 REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 
 }} // namespace at::native

@@ -13,16 +13,17 @@ extern "C" char _binary_libtorch_deployinterpreter_so_start[];
 extern "C" char _binary_libtorch_deployinterpreter_so_end[];
 
 namespace torch {
+namespace deploy {
 
 Package InterpreterManager::load_package(const std::string& uri) {
   return Package(uri, this);
 }
 
-PythonObject InterpreterSession::from_movable(const MovableObject& obj) {
+Obj InterpreterSession::from_movable(const ReplicatedObj& obj) {
   return impl_->unpickle_or_get(obj.pImpl_->object_id_, obj.pImpl_->data_);
 }
 
-InterpreterSession MovableObject::acquire_session(
+InterpreterSession ReplicatedObj::acquire_session(
     const Interpreter* on_this_interpreter) {
   InterpreterSession I = on_this_interpreter
       ? on_this_interpreter->acquire_session()
@@ -37,7 +38,7 @@ InterpreterSession::~InterpreterSession() {
   }
 }
 
-void MovableObjectImpl::unload(const Interpreter* on_this_interpreter) {
+void ReplicatedObjImpl::unload(const Interpreter* on_this_interpreter) {
   if (!on_this_interpreter) {
     for (auto& interp : manager_->all_instances()) {
       unload(&interp);
@@ -49,20 +50,20 @@ void MovableObjectImpl::unload(const Interpreter* on_this_interpreter) {
   I.impl_->unload(object_id_);
 }
 
-MovableObjectImpl::~MovableObjectImpl() {
+ReplicatedObjImpl::~ReplicatedObjImpl() {
   unload(nullptr);
 }
 
-void MovableObject::unload(const Interpreter* on_this_interpreter) {
+void ReplicatedObj::unload(const Interpreter* on_this_interpreter) {
   pImpl_->unload(on_this_interpreter);
 }
 
-MovableObject InterpreterSession::create_movable(PythonObject obj) {
+ReplicatedObj InterpreterSession::create_movable(Obj obj) {
   TORCH_CHECK(
       manager_,
       "Can only create a movable object when the session was created from an interpreter that is part of a InterpreterManager");
   auto pickled = impl_->pickle(self, obj);
-  return MovableObject(std::make_shared<MovableObjectImpl>(
+  return ReplicatedObj(std::make_shared<ReplicatedObjImpl>(
       manager_->next_object_id_++, std::move(pickled), manager_));
 }
 
@@ -143,4 +144,5 @@ void LoadBalancer::free(int where) {
   __atomic_fetch_sub(&uses_[8 * where], 1ULL, __ATOMIC_SEQ_CST);
 }
 
+} // namespace deploy
 } // namespace torch
