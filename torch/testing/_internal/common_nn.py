@@ -147,6 +147,7 @@ module_tests = [
         module_name='RReLU',
         input_size=(1, 2, 2),
         test_cuda=False,
+        fast_gradcheck=False,
     ),
     dict(
         module_name='RReLU',
@@ -155,6 +156,7 @@ module_tests = [
         input_size=(4, 4, 5),
         desc='with_up_down',
         test_cuda=False,
+        fast_gradcheck=False,
     ),
     dict(
         module_name='Hardtanh',
@@ -5071,6 +5073,7 @@ class ModuleTest(TestBase):
             kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
         self.precision = kwargs.get('precision', 2e-4)
         self.check_forward_only = kwargs.get('check_forward_only', False)
+        self.fast_gradcheck = kwargs.get('fast_gradcheck', True)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -5260,6 +5263,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.test_cpu = kwargs.get('test_cpu', True)
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
+        self.fast_gradcheck = kwargs.get('fast_gradcheck', True)
 
     def _check_gradients(self, test_case, module, input_tuple):
         params = tuple(x for x in module.parameters())
@@ -5279,11 +5283,13 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
         else:
             test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params,
-                                           check_batched_grad=self.check_batched_grad))
+                                           check_batched_grad=self.check_batched_grad,
+                                           fast_mode=self.fast_gradcheck))
 
         if self.check_gradgrad:
             test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
-                                               check_batched_grad=self.check_batched_grad))
+                                               check_batched_grad=self.check_batched_grad,
+                                               fast_mode=self.fast_gradcheck))
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()
