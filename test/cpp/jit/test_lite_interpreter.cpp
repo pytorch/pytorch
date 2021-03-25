@@ -595,19 +595,19 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   )JIT");
 
   std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
   //  mobile::Module bc =
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example.ptl");
   //  Module m =
   //  load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
   //  m._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
-  Module m = load(
-      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
-  m._save_for_mobile(
-      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
+//  Module m = load(
+//      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
+//  m._save_for_mobile(
+//      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
 
   //  c._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/test.ptl");
-  c._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
   //  mobile::Module bc =
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
 

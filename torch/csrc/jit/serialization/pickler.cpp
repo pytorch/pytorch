@@ -319,16 +319,6 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   tensor_data_.push_back(tensor);
 }
 
-// void Pickler::updateTensorsArchiveTable(const at::Tensor& tensor, const
-// std::string& archive_name) {
-//  tensors_archive_table_[tensor] = archive_name;
-//}
-
-// void Pickler::updateTensorsArchiveTable(std::unordered_map<at::Tensor,
-// std::string, tensor_value_hash, tensor_value_equal>) {
-//  tensors_archive_table_[tensor] = archive_name;
-//}
-
 void Pickler::pushBytes(const std::string& string) {
   static const size_t kSmallStr = 32;
   if (string.size() <= kSmallStr &&

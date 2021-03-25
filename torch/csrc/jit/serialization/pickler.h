@@ -14,8 +14,6 @@
 namespace torch {
 namespace jit {
 
-namespace {
-
 struct tensor_value_hash {
   std::size_t operator()(const at::Tensor& tensor) const {
     std::stringstream tensor_stream;
@@ -45,7 +43,6 @@ using TensorIndexMap = std::unordered_map<
     tensor_value_hash,
     tensor_value_equal>;
 
-} // namespace
 
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
@@ -182,7 +179,7 @@ class TORCH_API Pickler {
     return tensor_data_;
   }
 
-  void updateTensorsArchiveTable(TensorIndexMap tensors_archive_table) {
+  void updateTensorsArchiveTable(const TensorIndexMap& tensors_archive_table) {
     tensors_archive_table_.insert(
         tensors_archive_table.begin(), tensors_archive_table.end());
   }
