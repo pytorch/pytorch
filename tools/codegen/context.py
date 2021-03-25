@@ -8,11 +8,11 @@ import contextlib
 
 # Helper functions for defining generators on things in the model
 
-F = TypeVar('F', NativeFunction, StructuredNativeFunctions, Union[NativeFunction, StructuredNativeFunctions])
+F = TypeVar('F', NativeFunction, NativeFunctionsGroup, Union[NativeFunction, NativeFunctionsGroup])
 
 @contextlib.contextmanager
-def native_function_manager(g: Union[StructuredNativeFunctions, NativeFunction]) -> Iterator[None]:
-    if isinstance(g, StructuredNativeFunctions):
+def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunction]) -> Iterator[None]:
+    if isinstance(g, NativeFunctionsGroup):
         # By default, we associate all errors with structured native functions
         # with the out variant.  In some cases, it might be better to have
         # a more specific place to hang things; if so, use

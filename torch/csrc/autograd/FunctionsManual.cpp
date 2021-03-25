@@ -41,18 +41,18 @@ bool isDefined(const c10::optional<Tensor>& t) {
 }
 
 bool isFwGradDefined(const c10::optional<Tensor>& t) {
-  return t.has_value() && t->defined() && t->fw_grad(/*level */ 0).defined();
+  return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
 }
 
-Tensor toLegacyTensor(const c10::optional<Tensor>& t) {
+Tensor toNonOptTensor(const c10::optional<Tensor>& t) {
   return t.has_value() ? *t : Tensor();
 }
 
-Tensor toLegacyFwGrad(const c10::optional<Tensor>& t) {
-  return (t.has_value() && t->defined()) ? t->fw_grad(/*level */ 0) : Tensor();
+Tensor toNonOptFwGrad(const c10::optional<Tensor>& t) {
+  return (t.has_value() && t->defined()) ? t->_fw_grad(/*level */ 0) : Tensor();
 }
 
-Tensor toLegacyPrimal(const c10::optional<Tensor>& t) {
+Tensor toNonOptPrimal(const c10::optional<Tensor>& t) {
   return (t.has_value() && t->defined()) ? t->_fw_primal(/*level */ 0) : Tensor();
 }
 
@@ -466,7 +466,7 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
   Tensor exclusive_reverse_nocp = at::cat({ones, narrow_reverse}, dim);
   Tensor exclusive_reverse = reverse_dim(exclusive_reverse_nocp.cumprod(dim), dim);
 
-  return grad * (exclusive_normal * exclusive_reverse);
+  return grad * (exclusive_normal * exclusive_reverse).conj();
 }
 
 // note that the gradient for prod is equivalent to:
@@ -482,7 +482,7 @@ Tensor prod_backward(const Tensor& grad, const Tensor& input, const Tensor& resu
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
-    return (grad * result) / input;
+    return grad * (result / input).conj();
   } else if (zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
@@ -504,7 +504,7 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
   Tensor slice_zero_count = zero_mask.sum(dim, true);
   int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
   if (total_zeros == 0) {
-    return (grad * result) / input;
+    return grad * (result / input).conj();
   } else {
     return prod_safe_zeros_backward(grad, input, dim);
   }
@@ -2786,11 +2786,11 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
   // for half inputs, save_mean, save_invstd are float (ideally, we would cast
   // everything else, but not now)
-  auto mu = unsqueeze_dim1(training ? toLegacyTensor(save_mean).to(input.scalar_type()) : toLegacyTensor(running_mean), input);
+  auto mu = unsqueeze_dim1(training ? toNonOptTensor(save_mean).to(input.scalar_type()) : toNonOptTensor(running_mean), input);
   auto input_sub_mu = input - mu;
   auto sigma2_eps_neg_1_2 = unsqueeze_dim1(
-      training ? toLegacyTensor(save_invstd).to(input.scalar_type())
-               : toLegacyTensor(running_var).add(Scalar(eps)).pow(-0.5),
+      training ? toNonOptTensor(save_invstd).to(input.scalar_type())
+               : toNonOptTensor(running_var).add(Scalar(eps)).pow(-0.5),
       input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
@@ -2969,10 +2969,10 @@ infinitely_differentiable_native_layer_norm_backward(
   if (grad_input_mask[1] && dY.defined()) {
     dgamma = (dY_tensor * (X_tensor - mean_tensor) * rstd_tensor)
                  .sum(0)
-                 .reshape_as(toLegacyTensor(gamma));
+                 .reshape_as(toNonOptTensor(gamma));
   }
   if (grad_input_mask[2] && dY.defined()) {
-    dbeta = dY_tensor.sum(0).reshape_as(toLegacyTensor(gamma));
+    dbeta = dY_tensor.sum(0).reshape_as(toNonOptTensor(gamma));
   }
 
   return std::make_tuple(dX, dgamma, dbeta);
@@ -3058,10 +3058,10 @@ infinitely_differentiable_native_group_norm_backward(
     }
   }
   if (grad_input_mask[1] && dY.defined()) {
-    dgamma = ((ds - db * mean_tensor) * rstd_tensor).sum(0).reshape_as(toLegacyTensor(gamma));
+    dgamma = ((ds - db * mean_tensor) * rstd_tensor).sum(0).reshape_as(toNonOptTensor(gamma));
   }
   if (grad_input_mask[2] && dY.defined()) {
-    dbeta = db.sum(0).reshape_as(toLegacyTensor(gamma));
+    dbeta = db.sum(0).reshape_as(toNonOptTensor(gamma));
   }
 
   return std::make_tuple(dX, dgamma, dbeta);

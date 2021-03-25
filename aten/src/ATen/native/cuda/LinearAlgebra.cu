@@ -135,7 +135,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     if (beta.toComplexDouble() == 0.) {
       return result.zero_();
     }
-    return at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
+    // TODO: We could squeeze some perf by calling at::cuda::mul_out here instead, to bypass the dispatcher.
+    // That requires some fixing some internal build dependencies though.
+    return at::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
   }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
@@ -266,9 +268,9 @@ Tensor mm_cuda(const Tensor& self, const Tensor& mat2) {
   return addmm_out_cuda_impl(result, result, self, mat2, 0, 1);
 }
 
-Tensor& addmm_out_cuda(Tensor &out, const Tensor &self,
+Tensor& addmm_out_cuda(const Tensor &self,
                         const Tensor &mat1, const Tensor &mat2,
-                        const Scalar& beta, const Scalar& alpha) {
+                        const Scalar& beta, const Scalar& alpha, Tensor &out) {
   {
     at::NoNamesGuard guard;
     Tensor& result = addmm_out_cuda_impl(out, self, mat1, mat2, beta, alpha);
@@ -280,13 +282,13 @@ Tensor& addmm_out_cuda(Tensor &out, const Tensor &self,
 Tensor addmm_cuda(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
                   const Scalar& beta, const Scalar& alpha) {
   Tensor out = at::empty({0}, self.options());
-  addmm_out_cuda(out, self, mat1, mat2, beta, alpha);
+  addmm_out_cuda(self, mat1, mat2, beta, alpha, out);
   return out;
 }
 
 Tensor& addmm__cuda(Tensor& self, const Tensor& mat1, const Tensor& mat2,
                     const Scalar& beta, const Scalar& alpha) {
-  addmm_out_cuda(self, self, mat1, mat2, beta, alpha);
+  addmm_out_cuda(self, mat1, mat2, beta, alpha, self);
   return self;
 }
 
