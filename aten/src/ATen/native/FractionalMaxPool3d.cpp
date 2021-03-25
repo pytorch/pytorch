@@ -145,7 +145,12 @@ void fractional_max_pool3d_out_cpu_template(
   IntArrayRef pool_size,
   IntArrayRef output_size,
   const Tensor& randomSamples) {
-
+  TORCH_CHECK(
+      pool_size.size() == 3,
+      "fractional_max_pool3d: kernel_size must either be a single Int or tuple of three Ints")
+  TORCH_CHECK(
+      output_size.size() == 3,
+      "fractional_max_pool3d: output_size must either be a single Int or tuple of three Ints")
   int64_t outputT = output_size[0];
   int64_t outputH = output_size[1];
   int64_t outputW = output_size[2];

@@ -1,6 +1,5 @@
-#include <c10d/ProcessGroup.hpp>
 #include <ATen/ThreadLocalState.h>
-
+#include <c10d/ProcessGroup.hpp>
 
 #include <c10/util/Logging.h>
 
@@ -53,17 +52,30 @@ bool isP2POp(OpType opType) {
       opType == OpType::RECVANYSOURCE;
 }
 
-
-ProcessGroup::Work::Work(int rank, OpType opType, const char* profilingTitle)
+ProcessGroup::Work::Work(
+    int rank,
+    OpType opType,
+    const char* profilingTitle,
+    const c10::optional<std::vector<at::Tensor>>& inputTensors)
     : rank_(rank), opType_(opType) {
   if (profilingTitle != nullptr) {
-    auto recordingFunction = std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
+    auto recordingFunction =
+        std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
     if (recordingFunction->isActive()) {
-        recordingFunction->before(profilingTitle, {});
-        std::function<void()> end_handler = [this, recordingFunction]() {
-          recordingFunction->end();
-        };
-        recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
+      // Passing input tensor to recordFunction allows for shape information in
+      // profiling output.
+      std::vector<c10::IValue> inputs;
+      if (inputTensors) {
+        inputs.reserve(inputTensors->size());
+        for (const auto& tensor : *inputTensors) {
+          inputs.push_back(tensor);
+        }
+      }
+      recordingFunction->before(profilingTitle, inputs);
+      std::function<void()> end_handler = [this, recordingFunction]() {
+        recordingFunction->end();
+      };
+      recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
     }
   }
 }

@@ -1,9 +1,9 @@
 import torch._C as C
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch._python_dispatcher import PythonDispatcher
 
 from collections import namedtuple
 import itertools
-import unittest
 import re
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
@@ -139,6 +139,7 @@ class TestDispatch(TestCase):
                 if not expect_raises:
                     raise
                 actual = str(e).replace(test_namespace, "test")
+                actual = actual.split("\nException raised from ")[0]
                 expected, _, expected_provenance = results.setdefault(
                     frozenset(active_ops),
                     Result(actual, "", "error after running ctors {}".format(ctor_order[:i + 1]))
@@ -256,7 +257,14 @@ Math[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
             # m.impl("foo", [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo"),
         ], expect_raises=True).state
-        self.assertExpectedInline(state, '''In registration for test::foo: expected schema of operator to be "test::foo(Tensor x, Tensor y) -> (Tensor)" (registered at /dev/null:0), but got inferred schema "(Tensor _0) -> (Tensor _0)" (impl_t_t). The number of arguments is different. 2 vs 1.''')  # noqa
+        self.assertExpectedInline(state, '''\
+Inferred operator schema for a C++ kernel function doesn't match the expected function schema.
+  operator: test::foo
+  expected schema: test::foo(Tensor x, Tensor y) -> (Tensor)
+    registered at /dev/null:0
+  inferred schema: (Tensor _0) -> (Tensor _0)
+    impl_t_t
+  reason: The number of arguments is different. 2 vs 1.''')  # noqa
 
     def test_def_with_inference(self):
         state = self.commute("foo", [
@@ -656,17 +664,19 @@ AutogradCUDA: fn_autograd [autograd kernel]
 AutogradXLA: fn_autograd [autograd kernel]
 ''')
 
-    # Can't do this yet for BC reasons
-    @unittest.expectedFailure
     def test_multiple_def_error(self):
-        state = self.commute("foo", [
+        ops = [
             # m.def("foo(Tensor x, Tensor y) -> Tensor")
             lambda m: m.def_("foo(Tensor x, Tensor y) -> Tensor"),
             # m.def("foo(Tensor x, Tensor y) -> Tensor")
             lambda m: m.def_("foo(Tensor x, Tensor y) -> Tensor"),
-        ], expect_raises=True).state
-        # TODO: fill in the error message here
-        # self.assertExpectedInline(state, '''''')
+        ]
+        self.assertExpectedInline(
+            self.commute("foo", ops, expect_raises=True).state,
+            '''Tried to register an operator (test::foo(Tensor x, Tensor y) -> (Tensor)) with the same name and overload '''
+            '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
+            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
+        )
 
     def test_def_with_explicit_alias(self):
         state = self.commute("foo", [
@@ -683,26 +693,7 @@ debug: registered at /dev/null:0
 alias analysis kind: PURE_FUNCTION
 ''')
 
-    # TODO: get rid of this test when multiple defs are wrong
-    def test_multiple_def_schema_mismatch(self):
-        # error message is order dependent
-        ops = [
-            # m.def("foo(Tensor x, Tensor y) -> Tensor")
-            lambda m: m.def_("foo(Tensor x, Tensor y) -> Tensor"),
-            # m.def("foo(Tensor x) -> Tensor")
-            lambda m: m.def_("foo(Tensor x) -> Tensor"),
-        ]
-        self.assertExpectedInline(
-            self.commute("foo", ops, ctor_order=(0, 1), expect_raises=True).state,
-            '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x) -> (Tensor) (registered at /dev/null:0) vs test::foo(Tensor x, Tensor y) -> (Tensor) (registered at /dev/null:0)'''  # noqa
-        )
-        self.assertExpectedInline(
-            self.commute("foo", ops, ctor_order=(1, 0), expect_raises=True).state,
-            '''Tried to register multiple operators with the same name and the same overload name but different schemas: test::foo(Tensor x, Tensor y) -> (Tensor) (registered at /dev/null:0) vs test::foo(Tensor x) -> (Tensor) (registered at /dev/null:0)'''  # noqa
-        )
-
     def test_multiple_def_alias_defaulting(self):
-        # TODO: should be an error in both directions soon
         ops = [
             # m.def(torch::schema("foo(Tensor x) -> Tensor",
             #                     c10::AliasAnalysisKind::PURE_FUNCTION))
@@ -710,25 +701,14 @@ alias analysis kind: PURE_FUNCTION
             # RegisterOperators().op("foo(Tensor x) -> Tensor")
             lambda m: m.def_legacy("foo(Tensor x) -> Tensor"),
         ]
-        state = self.commute("foo", ops, ctor_order=(0, 1)).state
         self.assertExpectedInline(
-            state,
-            '''\
-name: test::foo
-schema: test::foo(Tensor x) -> (Tensor)
-debug: registered at /dev/null:0
-alias analysis kind: PURE_FUNCTION
-'''
+            self.commute("foo", ops, expect_raises=True).state,
+            '''Tried to register an operator (test::foo(Tensor x) -> (Tensor)) with the same name and overload '''
+            '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
+            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
         )
-        # NB: When run with ctor order (1, 0), the destructors are NOT
-        # COMMUTATIVE.  THIS IS A BUG, however we are purposely leaving the bug
-        # in as it is very benign (only leaves us in a bad state during
-        # destruction, when no useful work is being done), will be fixed when we
-        # make alias defaulting a hard error, and is very nontrivial to fix
-        # prior to that.
 
     def test_multiple_def_alias_mismatch(self):
-        # error message is order dependent
         ops = [
             # m.def(torch::schema("foo(Tensor x) -> Tensor",
             #                     c10::AliasAnalysisKind::PURE_FUNCTION))
@@ -738,12 +718,10 @@ alias analysis kind: PURE_FUNCTION
             lambda m: m.def_("foo(Tensor x) -> Tensor", alias="CONSERVATIVE"),
         ]
         self.assertExpectedInline(
-            self.commute("foo", ops, ctor_order=(0, 1), expect_raises=True).state,
-            '''Tried to define the schema for test::foo with different alias analysis kinds: PURE_FUNCTION (registered at /dev/null:0) vs CONSERVATIVE (registered at /dev/null:0)'''  # noqa
-        )
-        self.assertExpectedInline(
-            self.commute("foo", ops, ctor_order=(1, 0), expect_raises=True).state,
-            '''Tried to define the schema for test::foo with different alias analysis kinds: CONSERVATIVE (registered at /dev/null:0) vs PURE_FUNCTION (registered at /dev/null:0)'''  # noqa
+            self.commute("foo", ops, expect_raises=True).state,
+            '''Tried to register an operator (test::foo(Tensor x) -> (Tensor)) with the same name and overload '''
+            '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
+            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''  # noqa
         )
 
     def test_multiple_fallback(self):
@@ -754,7 +732,8 @@ alias analysis kind: PURE_FUNCTION
         except RuntimeError as e:
             self.assertExpectedInline(
                 str(e),
-                '''Tried to register multiple backend fallbacks for the same dispatch key XLA; previous registration registered at /dev/null:0, new registration registered at /dev/null:0'''  # noqa
+                '''Tried to register multiple backend fallbacks for the same dispatch key XLA; previous registration '''
+                '''registered at /dev/null:0, new registration registered at /dev/null:0'''  # noqa
             )
         else:
             self.assertTrue(False)
@@ -774,6 +753,138 @@ Math[alias]: fn2 :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Math[alias] (inactive): fn1 :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 '''
         )
+
+class TestPythonDispatcher(TestCase):
+    def test_basic(self):
+        dispatcher = PythonDispatcher()
+        dispatcher.register(["CPU", "XLA", "Math"])
+        self.assertExpectedInline(
+            dispatcher.dispatchTable(),
+            '''\
+
+Computed Dispatch Table
+key             kernel
+---------------------------
+CPU             fn_CPU [kernel]
+XLA             fn_XLA [kernel]
+QuantizedCPU    fn_Math [math kernel]
+AutogradOther   fn_Math [math kernel]
+AutogradCPU     fallthrough [backend fallback]
+AutogradXLA     fallthrough [backend fallback]
+'''
+        )
+
+    def test_math_autogradcpu(self):
+        dispatcher = PythonDispatcher()
+        dispatcher.register(["CPU", "XLA", "Math", "AutogradCPU"])
+        self.assertExpectedInline(
+            dispatcher.dispatchTable(),
+            '''\
+
+Computed Dispatch Table
+key             kernel
+---------------------------
+CPU             fn_CPU [kernel]
+XLA             fn_XLA [kernel]
+QuantizedCPU    fn_Math [math kernel]
+AutogradOther   fn_Math [math kernel]
+AutogradCPU     fn_AutogradCPU [kernel]
+AutogradXLA     fallthrough [backend fallback]
+'''
+        )
+        self.assertExpectedInline(
+            dispatcher.registrations(),
+            '''\
+
+Registered Kernels
+key             kernel
+---------------------------
+CPU             fn_CPU
+XLA             fn_XLA
+AutogradCPU     fn_AutogradCPU
+Math[alias]     fn_Math
+'''
+        )
+
+    def test_defaultbackend_autogradcpu(self):
+        dispatcher = PythonDispatcher()
+        dispatcher.register(["CPU", "XLA", "DefaultBackend", "AutogradCPU"])
+        self.assertExpectedInline(
+            dispatcher.dispatchTable(),
+            '''\
+
+Computed Dispatch Table
+key             kernel
+---------------------------
+CPU             fn_CPU [kernel]
+XLA             fn_XLA [kernel]
+QuantizedCPU    fn_DefaultBackend [default backend kernel]
+AutogradOther   fallthrough [backend fallback]
+AutogradCPU     fn_AutogradCPU [kernel]
+AutogradXLA     fallthrough [backend fallback]
+'''
+        )
+
+        self.assertExpectedInline(
+            dispatcher.registrations(),
+            '''\
+
+Registered Kernels
+key             kernel
+---------------------------
+CPU             fn_CPU
+XLA             fn_XLA
+AutogradCPU     fn_AutogradCPU
+DefaultBackend[alias] fn_DefaultBackend
+'''
+        )
+
+    def test_autogradother(self):
+        dispatcher = PythonDispatcher()
+        dispatcher.register(["CPU", "QuantizedCPU", "Math"])
+        self.assertExpectedInline(
+            dispatcher.dispatchTable(),
+            '''\
+
+Computed Dispatch Table
+key             kernel
+---------------------------
+CPU             fn_CPU [kernel]
+XLA             fn_Math [math kernel]
+QuantizedCPU    fn_QuantizedCPU [kernel]
+AutogradOther   ambiguous_autogradother [ambiguous autogradother]
+AutogradCPU     fallthrough [backend fallback]
+AutogradXLA     fn_Math [math kernel]
+'''
+        )
+
+        self.assertExpectedInline(
+            dispatcher.registrations(),
+            '''\
+
+Registered Kernels
+key             kernel
+---------------------------
+CPU             fn_CPU
+QuantizedCPU    fn_QuantizedCPU
+Math[alias]     fn_Math
+'''
+        )
+
+    def test_duplicate_registrations(self):
+        dispatcher = PythonDispatcher()
+
+        with self.assertRaisesRegex(RuntimeError, r"Overriden is not allowed"):
+            dispatcher.register(["CPU", "CPU"])
+
+    def test_defaultbackend_math(self):
+        dispatcher = PythonDispatcher()
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"Registration to both Math and DefaultBackend is not allowed"):
+            dispatcher.register(["DefaultBackend", "Math"])
+
 
 if __name__ == '__main__':
     run_tests()

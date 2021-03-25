@@ -60,10 +60,10 @@ Tensor q_batch_norm1d_impl(
     return out;
   }
   int64_t ndim = qx.dim();
-  TORCH_CHECK(ndim == 3, "Expecting the input tensor of rank 3.");
+  TORCH_CHECK(ndim == 2 || ndim == 3, "Expecting the input tensor of rank 2 or 3.");
   const int64_t N = qx.size(0);
   const int64_t C = qx.size(1);
-  const int64_t H = qx.size(2);
+  const int64_t H = ndim == 3 ? qx.size(2) : 1;
 
   TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
   TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
@@ -82,8 +82,13 @@ Tensor q_batch_norm1d_impl(
   const float* mean_data = mean.template data_ptr<float>();
   const float* var_data = var.template data_ptr<float>();
 
-  // create a fake W dimension so we can use NHWC
-  qx = qx.unsqueeze(-1);
+  if (ndim == 2) {
+    // create a fake H and W dimension so we can use NHWC
+    qx = qx.unsqueeze(-1).unsqueeze(-1);
+  } else {
+    // create a fake W dimension so we can use NHWC
+    qx = qx.unsqueeze(-1);
+  }
 
   auto oSizes = qx.sizes();
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast);
@@ -341,7 +346,7 @@ Tensor q_batch_norm_impl(
     int64_t output_zero_point) {
   Tensor qy;
   int64_t dim = qx.dim();
-  if (dim == 3) {
+  if (dim == 2 || dim == 3) {
     qy = q_batch_norm1d_impl<ReluFused>(
         qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
   } else if (dim == 4) {
@@ -351,7 +356,7 @@ Tensor q_batch_norm_impl(
     qy = q_batch_norm3d_impl<ReluFused>(
         qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
   } else {
-    TORCH_CHECK(false, "quantized::batch_norm only support 3d, 4d or 5d inputs.");
+    TORCH_CHECK(false, "quantized::batch_norm only support 2d, 3d, 4d or 5d inputs.");
   }
   return qy;
 }

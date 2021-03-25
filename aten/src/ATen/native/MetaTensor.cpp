@@ -4,7 +4,6 @@
 namespace at {
 namespace native {
 
-// Will be promoted to a public API later, but not now
 Tensor empty_meta(
   IntArrayRef size,
   c10::optional<ScalarType> dtype,
@@ -16,11 +15,7 @@ Tensor empty_meta(
   // TODO: deduplicate this logic with empty_cpu
 
   auto tensor = detail::make_tensor<TensorImpl>(
-    // NB: We include the computed dispatch key, not because it will actually
-    // participate in dispatch, but so that tests like is_sparse/is_cuda
-    // give the correct result (a CUDA meta tensor "is cuda").  If we don't
-    // like this, remove the computeDispatchKey line
-    DispatchKeySet{DispatchKey::Meta, computeDispatchKey(dtype, layout, device)},
+    DispatchKeySet{DispatchKey::Meta},
     scalarTypeToTypeMeta(dtype_or_default(dtype)),
     device
   );

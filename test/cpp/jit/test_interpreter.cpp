@@ -23,7 +23,7 @@ class TypeCheckTest : public ::testing::Test {
         R"IR(
 graph(%a.1 : Tensor,
       %b.1 : Tensor):
-  %t0 : Float(2, 2, strides=[2, 1], device=cpu, requires_grad=1), %t1 : Float(3, 3, strides=[3, 1]), %type_matched : bool = prim::TypeCheck(%a.1, %b.1)
+  %t0 : Float(2, 2, strides=[2, 1], device=cpu, requires_grad=1), %t1 : Float(3, 3, strides=[3, 1]), %type_matched : bool = prim::TypeCheck[types=[Float(2, 2, strides=[2, 1], device=cpu, requires_grad=1), Float(3, 3, strides=[3, 1])]](%a.1, %b.1)
   return (%t0, %t1, %type_matched)
   )IR",
         &*graph,
@@ -155,7 +155,7 @@ TEST(InterpreterTest, runAsyncBasicTest) {
         r2 = torch.jit.fork(torch.mm, torch.rand(100,100),torch.rand(100,100))
         return r1.wait() + r2.wait()
   demo = DemoModule()
-  torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pth')
+  torch.jit.save(torch.jit.script(demo), 'test_interpreter_async.pt')
   */
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);

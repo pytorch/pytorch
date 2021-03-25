@@ -3,6 +3,7 @@ import sys
 import errno
 import os
 import ctypes
+import faulthandler
 import torch
 import gc
 import time
@@ -11,16 +12,14 @@ import unittest
 import itertools
 import warnings
 import tempfile
-import random
 from torch import multiprocessing as mp
-from torch.utils.data import (_utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset,
-                              ChainDataset, BufferedShuffleDataset)
+from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
                                                   IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
-                                                  load_tests, TEST_WITH_ROCM, TEST_WITH_TSAN, IS_SANDCASTLE)
+                                                  load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 try:
     import psutil
@@ -29,18 +28,6 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
-    if IS_PYTORCH_CI:
-        raise ImportError(err_msg) from None
-    else:
-        warnings.warn(err_msg)
-
-try:
-    import faulthandler
-    HAS_FAULTHANDLER = True
-except ImportError:
-    HAS_FAULTHANDLER = False
-    err_msg = ("faulthandler not found. Some data loader tests use it for error "
-               "reporting (e.g., TestDataLoader.test_proper_exit).")
     if IS_PYTORCH_CI:
         raise ImportError(err_msg) from None
     else:
@@ -86,9 +73,7 @@ if not NO_MULTIPROCESSING_SPAWN:
 JOIN_TIMEOUT = 60.0  # seconds
 
 
-supported_multiprocessing_contexts = [None]
-if torch.multiprocessing._supports_context:
-    supported_multiprocessing_contexts += list(torch.multiprocessing.get_all_start_methods())
+supported_multiprocessing_contexts = [None] + list(torch.multiprocessing.get_all_start_methods())
 
 
 @unittest.skipIf(
@@ -312,29 +297,25 @@ class TestConcatDataset(TestCase):
 
 # takes in dummy var so this can also be used as a `worker_init_fn`
 def set_faulthander_if_available(_=None):
-    if HAS_FAULTHANDLER:
-        faulthandler.enable(sys.__stderr__)
-        if not IS_WINDOWS:
-            # windows does not have faulthandler.register
-            # chain=False prevents the default behavior of killing the process
-            faulthandler.register(signal.SIGUSR1, file=sys.__stderr__, chain=False)
+    faulthandler.enable(sys.__stderr__)
+    if not IS_WINDOWS:
+        # windows does not have faulthandler.register
+        # chain=False prevents the default behavior of killing the process
+        faulthandler.register(signal.SIGUSR1, file=sys.__stderr__, chain=False)
 
 
 set_faulthander_if_available()
 
 # Process `pid` must have called `set_faulthander_if_available`
 def print_traces_of_all_threads(pid):
-    if HAS_FAULTHANDLER:
-        if not IS_WINDOWS:
-            # use the custom signal if available
-            os.kill(pid, signal.SIGUSR1)
-        else:
-            # otherwise we can still use the handler given by faulthandler.enable()
-            # at the cost of killing the process.
-            os.kill(pid, signal.SIGSEGV)
+    if not IS_WINDOWS:
+        # use the custom signal if available
+        os.kill(pid, signal.SIGUSR1)
     else:
-        # if there is no faulthandler, use SIGINT otherwise and hope for the best
-        os.kill(pid, signal.SIGINT)
+        # otherwise we can still use the handler given by faulthandler.enable()
+        # at the cost of killing the process.
+        os.kill(pid, signal.SIGSEGV)
+
     # wait in parent process to give subprocess some time to print
     time.sleep(5)
 
@@ -741,10 +722,6 @@ def init_fn(worker_id):
     torch.manual_seed(12345)
 
 
-def shuffle_ds_init_fn(worker_id):
-    random.seed(123)
-
-
 # used with test_error_in_init
 class ErrorIterableDataset(IterableDataset):
     def __iter__(self):
@@ -1037,17 +1014,13 @@ except RuntimeError as e:
                                     "batch_size=None option disables auto-batching and is mutually exclusive"):
             self._get_data_loader(self.dataset, batch_size=None, drop_last=True)
 
-        if torch.multiprocessing._supports_context:
-            valid_ctx = list(torch.multiprocessing.get_all_start_methods())[-1]
-            with self.assertRaisesRegex(ValueError, r"multi-process loading \(num_workers > 0\), but got"):
-                self._get_data_loader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
-            with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
-                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context='bad')
-            with self.assertRaisesRegex(TypeError, "multiprocessing_context option should be a valid context "):
-                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context=object())
-        else:
-            with self.assertRaisesRegex(ValueError, "multiprocessing_context relies on Python >= 3.4"):
-                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context='fork')
+        valid_ctx = list(torch.multiprocessing.get_all_start_methods())[-1]
+        with self.assertRaisesRegex(ValueError, r"multi-process loading \(num_workers > 0\), but got"):
+            self._get_data_loader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
+        with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
+            self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context='bad')
+        with self.assertRaisesRegex(TypeError, "multiprocessing_context option should be a valid context "):
+            self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context=object())
 
         # map-style
         sampler = torch.utils.data.SequentialSampler(self.dataset)
@@ -1115,7 +1088,7 @@ except RuntimeError as e:
         self.assertEqual(len(fetched), 20)
         for i, d in enumerate(fetched):
             # non-batched should not convert ints into tensors
-            self.assertIsInstance(d, torch._six.int_classes)
+            self.assertIsInstance(d, int)
             self.assertEqual(d, i)
         # DataLoader should match len of the iterable-style dataset (if implemented)
         self.assertEqual(len(dataloader), len(dataset))
@@ -1134,7 +1107,7 @@ except RuntimeError as e:
             fetched = sorted(dataloader_iter)
             for a, b in zip(fetched, expected):
                 # non-batched should not convert ints into tensors
-                self.assertIsInstance(a, torch._six.int_classes)
+                self.assertIsInstance(a, int)
                 self.assertEqual(a, b)
             # DataLoader should match len of the iterable-style dataset (if implemented)
             self.assertEqual(len(dataloader), len(dataset))
@@ -1266,37 +1239,6 @@ except RuntimeError as e:
         with self.assertRaisesRegex(AssertionError, "ChainDataset only supports IterableDataset"):
             list(iter(ChainDataset([dataset1, self.dataset])))
 
-    def test_buffer_shuffle_dataset(self):
-        dataset = CountingIterableDataset(20)
-        expected = list(range(20))
-        buffer_sizes = [5, 20, 25]
-        for num_workers in [0, 1]:
-            # Buffer Size <= 1: Not shuffled dataset
-            fetched_nos = list(self._get_data_loader(BufferedShuffleDataset(dataset, 1), num_workers=num_workers))
-            self.assertEqual(len(fetched_nos), len(expected))
-            for e, d in zip(expected, fetched_nos):
-                self.assertIsInstance(d, torch.Tensor)
-                self.assertEqual(e, d)
-            # Buffer Size > 1: Shuffled dataset
-            for buffer_size in buffer_sizes:
-                fetched = sorted(list(self._get_data_loader(BufferedShuffleDataset(dataset, buffer_size), num_workers=num_workers)))
-                self.assertEqual(len(fetched), len(expected))
-                for e, d in zip(expected, fetched):
-                    self.assertIsInstance(d, torch.Tensor)
-                    self.assertEqual(e, d)
-                # Random Seed for single process
-                random.seed(123)
-                fetched_seed1 = list(self._get_data_loader(BufferedShuffleDataset(dataset, buffer_size), num_workers=num_workers,
-                                     worker_init_fn=shuffle_ds_init_fn))
-                random.seed(123)
-                fetched_seed2 = list(self._get_data_loader(BufferedShuffleDataset(dataset, buffer_size), num_workers=num_workers,
-                                     worker_init_fn=shuffle_ds_init_fn))
-                self.assertEqual(len(fetched_seed1), len(fetched_seed2))
-                for d1, d2 in zip(fetched_seed1, fetched_seed2):
-                    self.assertIsInstance(d1, torch.Tensor)
-                    self.assertIsInstance(d2, torch.Tensor)
-                    self.assertEqual(d1, d2)
-
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
@@ -1308,7 +1250,7 @@ except RuntimeError as e:
         dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:
             # windows doesn't support sharing cuda tensor; ROCm does not yet fully support IPC
-            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS and not TEST_WITH_ROCM:
+            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS:
                 ds_cls = CUDACountingDataset
             else:
                 ds_cls = CountingDataset
@@ -1454,6 +1396,15 @@ except RuntimeError as e:
         self.assertEqual(int(math.ceil(float(num_samples) / batch_size)),
                          count_num_samples_in_data_loader)
 
+    def test_distributed_sampler_invalid_rank(self):
+        from torch.utils.data.distributed import DistributedSampler
+        dataset = torch.IntTensor(range(10))
+        with self.assertRaisesRegex(ValueError, "Invalid rank"):
+            sampler = DistributedSampler(dataset, 3, 3)
+
+        with self.assertRaisesRegex(ValueError, "Invalid rank"):
+            sampler = DistributedSampler(dataset, 3, -1)
+
     def test_duplicating_data_with_drop_last(self):
 
         from torch.utils.data.distributed import DistributedSampler
@@ -1495,7 +1446,7 @@ except RuntimeError as e:
     def test_sampler(self):
         self._test_sampler()
         self._test_sampler(num_workers=4)
-        if not NO_MULTIPROCESSING_SPAWN and torch.multiprocessing._supports_context:
+        if not NO_MULTIPROCESSING_SPAWN:
             self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
 
     def _test_batch_sampler(self, **kwargs):
@@ -1520,7 +1471,7 @@ except RuntimeError as e:
     def test_batch_sampler(self):
         self._test_batch_sampler()
         self._test_batch_sampler(num_workers=4)
-        if not NO_MULTIPROCESSING_SPAWN and torch.multiprocessing._supports_context:
+        if not NO_MULTIPROCESSING_SPAWN:
             self._test_batch_sampler(num_workers=4, multiprocessing_context='spawn')
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
@@ -2043,15 +1994,19 @@ except RuntimeError as e:
 
     def test_dataset_not_reset(self):
         dataset = DummyDataset()
-        dataloader = self._get_data_loader(dataset, num_workers=2)
-        dataset.start = 0
-        for i in range(10):
-            for x in dataloader:
-                pass
-            # Changing the start value here doesn't have any effect in the dataset
-            # cached by the workers. since they are not recreated between epochs
-            # and can cache values safely
-            dataset.start = i
+        pin_memory_configs = [False]
+        if TEST_CUDA:
+            pin_memory_configs.append(True)
+        for pin_memory in pin_memory_configs:
+            dataloader = self._get_data_loader(dataset, num_workers=2, pin_memory=pin_memory)
+            dataset.start = 0
+            for i in range(10):
+                for x in dataloader:
+                    pass
+                # Changing the start value here doesn't have any effect in the dataset
+                # cached by the workers. since they are not recreated between epochs
+                # and can cache values safely
+                dataset.start = i
 
 
 
@@ -2094,7 +2049,6 @@ class TestNamedTupleDataLoader(TestCase):
             self.assertIsInstance(batch.data, NamedTupleDataset.Data)
             self.assertNotIsInstance(batch.data.positive, torch.Tensor)
 
-
 class SimpleCustomBatch(object):
     def __init__(self, data):
         transposed_data = list(zip(*data))
@@ -2109,9 +2063,13 @@ class SimpleCustomBatch(object):
     def is_pinned(self):
         return self.inp.is_pinned() and self.tgt.is_pinned()
 
+# Workaround for https://github.com/pytorch/pytorch/issues/50661
+# Classes from  `__main__` can not be correctly unpickled from spawned module
+# See https://docs.python.org/3/library/multiprocessing.html#multiprocessing-programming
+self_module = __import__(os.path.splitext(os.path.basename(__file__))[0])
 
 def collate_wrapper(batch):
-    return SimpleCustomBatch(batch)
+    return self_module.SimpleCustomBatch(batch)
 
 
 def collate_into_packed_sequence(batch):
@@ -2140,10 +2098,9 @@ class TestCustomPinFn(TestCase):
         self.dataset = TensorDataset(inps, tgts)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_custom_batch_pin(self):
         test_cases = [
-            (collate_wrapper, SimpleCustomBatch),
+            (collate_wrapper, self_module.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
         ]
@@ -2155,10 +2112,9 @@ class TestCustomPinFn(TestCase):
                 self.assertTrue(sample.is_pinned())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @skipIfRocm
     def test_custom_batch_pin_worker(self):
         test_cases = [
-            (collate_wrapper, SimpleCustomBatch),
+            (collate_wrapper, self_module.SimpleCustomBatch),
             (collate_into_packed_sequence, torch.nn.utils.rnn.PackedSequence),
             (collate_into_packed_sequence_batch_first, torch.nn.utils.rnn.PackedSequence),
         ]

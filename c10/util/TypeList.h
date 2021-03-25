@@ -213,6 +213,21 @@ template<class TypeList> using head_t = typename head<TypeList>::type;
 
 
 /**
+ * Returns the first element of a type list, or the specified default if the type list is empty.
+ * Example:
+ *   int  ==  head_t<bool, typelist<int, string>>
+ *   bool  ==  head_t<bool, typelist<>>
+ */
+template<class Default, class TypeList> struct head_with_default final {
+  using type = Default;
+};
+template<class Default, class Head, class... Tail> struct head_with_default<Default, typelist<Head, Tail...>> final {
+  using type = Head;
+};
+template<class Default, class TypeList> using head_with_default_t = typename head_with_default<Default, TypeList>::type;
+
+
+/**
  * Returns the N-th element of a type list.
  * Example:
  * int == element_t<1, typelist<float, int, char>>
@@ -271,7 +286,7 @@ static_assert(
  * Take/drop a number of arguments from a typelist.
  * Example:
  *   typelist<int, string> == take_t<typelist<int, string, bool>, 2>
- *   typelist<string, bool> == drop_t<typelist<int, string, bool>, 2>
+ *   typelist<bool> == drop_t<typelist<int, string, bool>, 2>
  */
 namespace detail {
   template<class TypeList, size_t offset, class IndexSequence>
@@ -296,6 +311,22 @@ template<class TypeList, size_t num> struct drop final {
   using type = typename detail::take_elements<TypeList, num, std::make_index_sequence<size<TypeList>::value - num>>::type;
 };
 template<class TypeList, size_t num> using drop_t = typename drop<TypeList, num>::type;
+
+/**
+ * Like drop, but returns an empty list rather than an assertion error if `num`
+ * is larger than the size of the TypeList.
+ * Example:
+ *   typelist<> == drop_if_nonempty_t<typelist<string, bool>, 2>
+ *   typelist<> == drop_if_nonempty_t<typelist<int, string, bool>, 3>
+ */
+template<class TypeList, size_t num> struct drop_if_nonempty final {
+  static_assert(is_instantiation_of<typelist, TypeList>::value, "In typelist::drop<T, num>, the T argument must be typelist<...>.");
+  using type = typename detail::take_elements<
+    TypeList,
+    min(num, size<TypeList>::value),
+    std::make_index_sequence<size<TypeList>::value - min(num, size<TypeList>::value)>>::type;
+};
+template<class TypeList, size_t num> using drop_if_nonempty_t = typename drop_if_nonempty<TypeList, num>::type;
 
 
 /**

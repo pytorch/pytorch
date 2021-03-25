@@ -57,6 +57,7 @@ VmaAllocationCreateInfo create_allocation_create_info(
     0u,
     VK_NULL_HANDLE,
     nullptr,
+    0.5f,
   };
 }
 
@@ -192,6 +193,11 @@ VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
       "Invalid Vulkan fence!");
 
   const VkFence fence = pool->fence_.pool[id].get();
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      fence,
+      "Invalid Vulkan fence!");
+
   if (add_to_waitlist) {
     pool->fence_.waitlist.push_back(fence);
   }
@@ -360,14 +366,13 @@ Resource::Pool::Pool(
   : device_(gpu.device),
     allocator_(
         create_allocator(
-          gpu.adapter->runtime->instance(),
-          gpu.adapter->handle,
-          device_),
+            gpu.adapter->runtime->instance(),
+            gpu.adapter->handle,
+            device_),
         vmaDestroyAllocator),
     memory_{
       std::move(policy),
     },
-    buffer_{},
     image_{
       .sampler = Image::Sampler{gpu},
     },
@@ -377,23 +382,6 @@ Resource::Pool::Pool(
   fence_.pool.reserve(Configuration::kReserve);
 }
 
-Resource::Pool::~Pool() {
-  try {
-    if (device_ && allocator_) {
-      purge();
-    }
-  }
-  catch (const std::exception& e) {
-    LOG(WARNING)
-        << "Vulkan: Resource pool destructor raised an exception!  Error: "
-        << e.what();
-  }
-  catch (...) {
-    LOG(WARNING)
-        << "Vulkan: Resource pool destructor raised an unknown exception!";
-  }
-}
-
 Resource::Pool::Pool(Pool&& pool)
   : device_(std::move(pool.device_)),
     allocator_(std::move(pool.allocator_)),
@@ -401,7 +389,7 @@ Resource::Pool::Pool(Pool&& pool)
     buffer_(std::move(pool.buffer_)),
     image_(std::move(pool.image_)),
     fence_(std::move(pool.fence_)) {
-  pool.device_ = VK_NULL_HANDLE;
+  pool.invalidate();
 }
 
 Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
@@ -413,10 +401,28 @@ Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
     image_ = std::move(pool.image_);
     fence_ = std::move(pool.fence_);
 
-    pool.device_ = VK_NULL_HANDLE;
+    pool.invalidate();
   };
 
   return *this;
+}
+
+Resource::Pool::~Pool() {
+  try {
+    if (device_ && allocator_) {
+      purge();
+    }
+  }
+  catch (const std::exception& e) {
+    TORCH_WARN(
+        "Vulkan: Resource pool destructor raised an exception! Error: ",
+        e.what());
+  }
+  catch (...) {
+    TORCH_WARN(
+        "Vulkan: Resource pool destructor raised an exception! "
+        "Error: Unknown");
+  }
 }
 
 Resource::Buffer Resource::Pool::buffer(
@@ -676,6 +682,11 @@ void Resource::Pool::purge() {
   fence_.in_use = 0u;
   image_.pool.clear();
   buffer_.pool.clear();
+}
+
+void Resource::Pool::invalidate() {
+  device_ = VK_NULL_HANDLE;
+  allocator_.reset();
 }
 
 } // namespace api

@@ -2,9 +2,10 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/Fill.h>
+#include <ATen/native/TensorIterator.h>
 #include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
@@ -18,7 +19,7 @@ Tensor& fill_out(Tensor& self, Scalar value) {
     self.copy_(out);
     return self;
   }
-  if (self.device() == at::kCPU && self.numel() == 1 && !self.is_complex() && !value.isComplex()) {
+  if (self.device() == at::kCPU && self.numel() == 1) {
     return at::detail::scalar_fill(self, value);
   }
   auto iter = TensorIteratorConfig()
@@ -104,7 +105,7 @@ Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
 }
 
 Tensor& zero_(Tensor &self) {
-  int64_t nelements = at::prod_intlist(self.sizes());
+  int64_t nelements = c10::multiply_integers(self.sizes());
   if (self.device() == at::kCPU &&
       self.is_non_overlapping_and_dense() &&
       nelements < internal::GRAIN_SIZE) {

@@ -21,7 +21,8 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             data_type,
             device,
             opaque_handle,
-            sizes),
+            sizes,
+            false),
         strides_(strides.vec()) {}
 
   IntArrayRef strides() const override {
@@ -40,6 +41,10 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
   }
 
  private:
+  const char* tensorimpl_type_name() const override {
+    return "VulkanOpaqueTensorImpl";
+  }
+
   SmallVector<int64_t, 5> strides_;
 };
 
