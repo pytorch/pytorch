@@ -5589,8 +5589,6 @@
   device_guard: False
 
 - func: take_along_dim.out(Tensor self, Tensor indices, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    Math: take_along_dim_out
 
 - func: take_along_dim(Tensor self, Tensor indices, int? dim=None) -> Tensor
   variants: method, function
