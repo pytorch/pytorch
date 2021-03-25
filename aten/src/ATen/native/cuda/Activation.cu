@@ -328,13 +328,17 @@ void elu_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_s
   });
 }
 
-void elu_backward_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale) {
+void elu_backward_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "elu_backward_cuda", [&]() {
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
-    gpu_kernel(iter, [negcoef, poscoef, negiptcoef]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
+    gpu_kernel(iter, [negcoef, poscoef, negiptcoef, is_result]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      if (is_result) {
+        return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
+      } else {
+        return b <= scalar_t(0) ? a * negiptcoef * negcoef * (static_cast<scalar_t>(std::exp(b * negiptcoef))) : a * poscoef;
+      }
     });
   });
 }
@@ -448,7 +452,7 @@ void hardsigmoid_backward_kernel(TensorIterator& iter) {
       [zero, three, neg_three, one_sixth]GPU_LAMBDA(scalar_t grad_val_, scalar_t self_val_) -> scalar_t {
         T_ACC grad_val = static_cast<T_ACC>(grad_val_);
         T_ACC self_val = static_cast<T_ACC>(self_val_);
-        return (self_val >= neg_three && self_val <= three)
+        return (self_val > neg_three && self_val < three)
           ? grad_val * one_sixth
           : zero;
     });

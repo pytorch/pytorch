@@ -18,7 +18,8 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
       rpc::worker_id_t fromWorkerId,
       rpc::MessageType messageType,
       const AutogradMetadata& autogradMetadata,
-      rpc::Message&& wrappedMessage);
+      rpc::Message&& wrappedMessage,
+      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap = {});
 
   // Used when receiving an RPC over the wire.
   RpcWithAutograd(
@@ -27,7 +28,8 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
       const AutogradMetadata& autogradMetadata,
       std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
       rpc::MessageType wrappedMessageType,
-      std::vector<torch::Tensor> tensors);
+      std::vector<torch::Tensor> tensors,
+      std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap = {});
 
   rpc::Message toMessageImpl() && override;
 
@@ -51,6 +53,9 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
 
   // Retrieve the worker id from which the RPC originated.
   rpc::worker_id_t fromWorkerId() const;
+
+  // Retrieve the device map.
+  const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap();
 
  private:
   // WorkerId from which this RPC originated. This is necessary for knowing
@@ -83,6 +88,9 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
 
   // Tensors part of the wrappedRpc that need to be considered for autograd.
   std::vector<torch::Tensor> tensors_;
+
+  // Device mapping for tensors that are sent across an RPC to another node.
+  std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> deviceMap_;
 };
 
 } // namespace autograd

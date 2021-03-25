@@ -13,6 +13,7 @@ static const int OPSET_VERSION_9 = 9;
 static const int OPSET_VERSION_10 = 10;
 static const int OPSET_VERSION_11 = 11;
 static const int OPSET_VERSION_12 = 12;
+static const int OPSET_VERSION_13 = 13;
 
 using ValueToParamPairMap = std::map<Value*, std::pair<std::string, IValue>>;
 
@@ -33,5 +34,13 @@ Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs);
 Value* addInputToBlock(Block* block);
 
 TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
+
+Node* createONNXUnsqueeze(
+    Graph* graph,
+    Node* n_to_insert_before,
+    Value* input,
+    int axis,
+    int opset_version);
+
 } // namespace jit
 } // namespace torch

@@ -5,7 +5,7 @@ from .optimizer import Optimizer
 class Rprop(Optimizer):
     """Implements the resilient backpropagation algorithm.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
@@ -29,7 +29,7 @@ class Rprop(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
