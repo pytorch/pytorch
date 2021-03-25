@@ -1,5 +1,6 @@
 #include <ATen/ThreadLocalState.h>
 #include <c10/util/C++17.h>
+#include <exception>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
@@ -45,8 +46,10 @@ IValue toPyIValue(const Message& message) {
       auto& pythonRpcHandler = PythonRpcHandler::getInstance();
       // Need GIL to destruct the py::object returned by deserialize()
       py::gil_scoped_acquire acquire;
+      py::object value = pythonRpcHandler.deserialize(resp.serializedPyObj());
+      pythonRpcHandler.handleException(value);
       return jit::toIValue(
-          pythonRpcHandler.deserialize(resp.serializedPyObj()),
+          value,
           PyObjectType::get());
     }
     default: {
@@ -152,8 +155,18 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
             for (const auto& tensor : message.tensors()) {
               dataPtrs.emplace_back(tensor.storage().data_ptr());
             }
+
+            // toPyIValue might throw and we need to record the appropriate exception.
+            IValue ivalue;
+            try {
+              ivalue = toPyIValue(message);
+            } catch (std::exception& e) {
+              child->setErrorIfNeeded(std::current_exception());
+              return;
+            }
+
             child->markCompletedWithDataPtrs(
-                toPyIValue(message), std::move(dataPtrs));
+                ivalue, std::move(dataPtrs));
           }
         }));
     return child;
