@@ -730,13 +730,26 @@ TupleTypePtr TupleType::createNamed(
     const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
     const std::vector<TypePtr>& field_types) {
-  TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
+      std::vector<std::pair<std::string, IValue>> fields;
+      for (size_t i = 0; i < field_names.size(); ++i) {
+        fields.emplace_back(std::pair<std::string, IValue>(field_names[i], IValue()));
+      }
+      return TupleType::createNamed(qualName, fields, field_types);
+    }
+
+
+TupleTypePtr TupleType::createNamed(
+    const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<std::pair<std::string, IValue>>& fields,
+    const std::vector<TypePtr>& field_types) {
+  TORCH_INTERNAL_ASSERT(fields.size() == field_types.size());
   std::vector<Argument> arguments;
-  for (size_t i = 0; i < field_names.size(); ++i) {
+  for (size_t i = 0; i < fields.size(); ++i) {
     arguments.emplace_back(
-        /*name=*/field_names[i],
+        /*name=*/fields[i].first,
         /*type=*/field_types[i],
-        /*N=*/i);
+        /*N=*/i,
+        /*default_value*/fields[i].second);
   }
 
   auto schema = std::make_shared<FunctionSchema>(

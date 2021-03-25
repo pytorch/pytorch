@@ -119,6 +119,9 @@ def canonical(graph):
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
 
+class Point(NamedTuple):
+    x: Optional[torch.Tensor] = None
+    y: Optional[torch.Tensor] = None
 
 def doAutodiffCheck(testname):
     # TODO: setting false on test itself is not working
@@ -14467,6 +14470,20 @@ dedent """
                                                   r"for argument \'value\' but instead found type \'int\'."):
             torch.jit.script(test_error)
 
+    def test_namedtuple_default_values(self):
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, point: Point):
+                return point
+
+        p = Point(x=torch.rand(3), y=torch.rand(3))
+
+        self.checkModule(M(), (p,))
+        self.checkModule(M(), (Point(),))
+
     def test_isinstance_dynamic(self):
         @torch.jit.script
         def foo(a):
@@ -15632,7 +15649,7 @@ dedent """
         self.checkScript(fn, ((3, 4),))
         self.checkScript(fn, ())
 
-    def test_named_tuple_redefine(self):
+    def test_namedtuple_redefine(self):
         global _1, _2
         _1 = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
         _2 = namedtuple('GoogLeNetOutputs', ['different'])
@@ -15643,7 +15660,7 @@ dedent """
                 # type: (_1, _2) -> _1
                 return x
 
-    def test_named_tuple_py2(self):
+    def test_namedtuple_py2(self):
         global _GoogLeNetOutputs  # see [local resolution in python]
         _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
 
@@ -15658,7 +15675,7 @@ dedent """
         self.assertEqual(out.aux_logits2, vals[1])
         self.assertEqual(out.aux_logits1, vals[2])
 
-    def test_named_tuple_good_error(self):
+    def test_namedtuple_good_error(self):
         global _GoogLeNetOutputs  # see [local resolution in python]
         _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
 

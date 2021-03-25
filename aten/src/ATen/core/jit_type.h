@@ -925,9 +925,15 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
 struct TORCH_API TupleType : public NamedType {
+
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<std::pair<std::string, IValue>>& fields,
+      const std::vector<TypePtr>& types);
+    
   static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
       const std::vector<std::string>& field_names,
       const std::vector<TypePtr>& types);
+
   static TupleTypePtr create(
       std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(

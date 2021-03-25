@@ -924,34 +924,22 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   TORCH_INTERNAL_ASSERT(isNamedTupleClass(obj));
   auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
       py::module::import("torch._jit_internal").attr("_qualified_name")(obj)));
-  // Currently don't support default values
-  if (py::hasattr(obj, "_field_defaults")) {
-    auto default_dict = py::cast<std::map<std::string, py::object>>(
-        py::getattr(obj, "_field_defaults"));
-    if (default_dict.size()) {
-      std::string error_msg =
-          "Default values are currently not supported"
-          " on NamedTuple fields in TorchScript. Fields "
-          "with default values: [";
-      bool first = true;
-      for (const auto& kv : default_dict) {
-        if (!first) {
-          error_msg += ", ";
-        }
-        error_msg += kv.first;
-      }
-      error_msg += "]";
-      throw ErrorReport(loc) << error_msg;
-    }
-  }
 
   py::object props = py::module::import("torch._jit_internal")
                          .attr("_get_named_tuple_properties")(obj);
   std::string unqualName;
-  std::vector<std::string> fields;
+  std::map<std::string, py::object> given_fields;
+  std::vector<std::pair<std::string, IValue>> fields;
   std::vector<TypePtr> annotations;
-  std::tie(unqualName, fields, annotations) = py::cast<
-      std::tuple<std::string, decltype(fields), decltype(annotations)>>(props);
+  std::tie(unqualName, given_fields, annotations) = py::cast<
+      std::tuple<std::string, decltype(given_fields), decltype(annotations)>>(
+      props);
+
+  for (const auto& pair : given_fields) {
+    auto type = tryToInferType(pair.second);
+    auto ival = toIValue(pair.second, type.type());
+    fields.push_back(std::pair<std::string, IValue>(pair.first, ival));
+  }
 
   auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
   if (auto type = get_python_cu()->get_type(qualifiedName)) {
