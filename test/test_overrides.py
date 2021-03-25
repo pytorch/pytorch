@@ -963,6 +963,7 @@ class TestIndexing(TestCase):
 
 
 class TestIterator(TestCase):
+    # Regression test for gh-54457
     def test_iterator(self):
         t = torch.tensor([5, 6, 7]).as_subclass(SubTensor2)
         it = iter(t)
