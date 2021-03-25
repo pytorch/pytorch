@@ -20,11 +20,6 @@ struct tensor_value_hash {
   std::size_t operator()(const at::Tensor& tensor) const {
     std::stringstream tensor_stream;
     tensor_stream << tensor;
-
-    //    std::cout << "tensor: " << std::endl;
-    //    auto iv = IValue(tensor);
-    //    iv.dump();
-
     std::string tensor_str = tensor_stream.str();
     std::size_t h1 = std::hash<std::string>{}(tensor_str);
     return h1;
@@ -183,9 +178,8 @@ class TORCH_API Pickler {
   void updateArchiveName(std::string archive_name) {
     archive_name_ = archive_name;
   }
-//  void updateTensorsArchiveTable(const at::Tensor& tensor, const std::string& archive_name);
+
   void updateTensorsArchiveTable(std::unordered_map<at::Tensor, std::string, tensor_value_hash, tensor_value_equal> tensors_archive_table) {
-//    tensors_archive_table_[tensor] = archive_name;
     tensors_archive_table_.insert(tensors_archive_table.begin(), tensors_archive_table.end());
   }
 

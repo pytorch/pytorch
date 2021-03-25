@@ -34,34 +34,6 @@ char const* toString(OpCode op);
 
 namespace {
 
-//struct tensor_value_hash {
-//  std::size_t operator()(const at::Tensor& tensor) const {
-//    std::stringstream tensor_stream;
-//    tensor_stream << tensor;
-//
-////    std::cout << "tensor: " << std::endl;
-////    auto iv = IValue(tensor);
-////    iv.dump();
-//
-//    std::string tensor_str = tensor_stream.str();
-//    std::size_t h1 = std::hash<std::string>{}(tensor_str);
-//    return h1;
-//  }
-//};
-//
-//struct tensor_value_equal {
-//  bool operator()(const at::Tensor& a, const at::Tensor& b) const {
-//    std::stringstream a_stream;
-//    a_stream << a;
-//    std::string a_str = a_stream.str();
-//
-//    std::stringstream b_stream;
-//    b_stream << b;
-//    std::string b_str = b_stream.str();
-//    return a_str == b_str;
-//  }
-//};
-
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
   return func;
@@ -237,28 +209,8 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // that we emitted for the converted INTERFACE_CALL nodes above.
   auto constants = code.constant_table();
 
-//  std::vector<IValue> deduplicated_constants;
-//  for (const auto& constant : constants) {
-//    if (constant.isTensor()) {
-//      const auto& constant_tensor = constant.toTensor();
-//      std::cout << "constant tensor name: " << constant_tensor.toString() << std::endl;
-//      const auto found = constants_from_jit.find(constant_tensor);
-//      if (found == constants_from_jit.end()) {
-//        deduplicated_constants.emplace_back(constant);
-//        std::cout << "doesn't exist" << std::endl;
-//      } else {
-//        at::Tensor t = found->second;
-//        deduplicated_constants.emplace_back(t);
-//        std::cout << "find one" << std::endl;
-//      }
-//    } else {
-//      deduplicated_constants.emplace_back(constant);
-//    }
-//  }
-
   for (auto& method_name : method_names) {
     constants.emplace_back(std::move(method_name));
-//    deduplicated_constants.emplace_back(std::move(method_name));
   }
 
   // types
@@ -282,13 +234,6 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // since the register location is embedded into the bytecode, pass the
   // register size
   auto register_size = static_cast<int>(code.register_size());
-
-//  auto codeTable = Table(
-//      {{"instructions", Tup(instructions)},
-//       {"operators", Tup(operators)},
-//       {"constants", Tup(deduplicated_constants)},
-//       {"types", Tup(types)},
-//       {"register_size", register_size}});
 
   auto codeTable = Table(
       {{"instructions", Tup(instructions)},
@@ -463,10 +408,6 @@ class ScriptModuleSerializer {
         constants_from_jit[ivalue_constants[i].toTensor()] = "constants";
       }
     }
-//    for(auto it: constants_from_jit) {
-//      std::cout << "key: " << it.first << std::endl;
-//      std::cout << "value: " << it.second << std::endl;
-//    }
     
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
@@ -485,10 +426,6 @@ class ScriptModuleSerializer {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
     std::vector<c10::ClassTypePtr> memoizedClassTypes;
-    if (archive_name == "constants") {
-      std::cout << "writing constant" << std::endl;
-//      value.dump();
-    }
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
@@ -498,13 +435,8 @@ class ScriptModuleSerializer {
           return type_name_uniquer_.getUniqueName(t);
         },
         &memoizedClassTypes);
-//    if (archive_name == "bytecode") {
-//      std::cout << "writing bytecode" << std::endl;
-//      data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
-//    }
     bool supportTensorsArchiveTable = false;
     if (!tensors_archive_table_.empty()) {
-      std::cout << "tensors_archive_table_ is not empty, updating" << std::endl;
       data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
       supportTensorsArchiveTable = true;
     }
