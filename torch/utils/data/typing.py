@@ -56,16 +56,7 @@ def issubtype(left, right, recursive=True):
         return False
 
     # Right-side type
-    if isinstance(right, TypeVar):  # type: ignore
-        if right.__bound__ is not None:
-            constraints = [right.__bound__]
-        else:
-            constraints = right.__constraints__
-    elif hasattr(right, '__origin__') and right.__origin__ == Union:
-        constraints = right.__args__
-    else:
-        constraints = [right]
-    constraints = [TYPE2ABC.get(constraint, constraint) for constraint in constraints]
+    constraints = _decompose_type(right)
 
     if len(constraints) == 0 or Any in constraints:
         return True
@@ -74,21 +65,30 @@ def issubtype(left, right, recursive=True):
         return False
 
     # Left-side type
-    if isinstance(left, TypeVar):  # type: ignore
-        if left.__bound__ is not None:
-            variants = [left.__bound__]
-        else:
-            variants = left.__constraints__
-    elif hasattr(left, '__origin__') and left.__origin__ == Union:
-        variants = left.__args__
-    else:
-        variants = [left]
-    variants = [TYPE2ABC.get(variant, variant) for variant in variants]
+    variants = _decompose_type(left)
 
+    # all() will return True for empty variants
     if len(variants) == 0:
         return False
 
     return all(_issubtype_with_constraints(variant, constraints, recursive) for variant in variants)
+
+
+def _decompose_type(t, to_list=True):
+    if isinstance(t, TypeVar):  # type: ignore
+        if t.__bound__ is not None:
+            ts = [t.__bound__]
+        else:
+            # For T_co, __constraints__ is ()
+            ts = t.__constraints__
+    elif hasattr(t, '__origin__') and t.__origin__ == Union:
+        ts = t.__args__
+    else:
+        if not to_list:
+            return None
+        ts = [t]
+    ts = list(TYPE2ABC.get(_t, _t) for _t in ts)
+    return ts
 
 
 def _issubtype_with_constraints(variant, constraints, recursive=True):
@@ -101,9 +101,9 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
         return True
 
     # [Note: Subtype for Union and TypeVar]
-    # Python typing is able to flatten Union[Union[...]] to one Union[...]
+    # Python typing is able to flatten Union[Union[...]] or Union[TypeVar].
     # But it couldn't flatten the following scenarios:
-    #   - Union[TypeVar[Union[...]]]
+    #   - Union[int, TypeVar[Union[...]]]
     #   - TypeVar[TypeVar[...]]
     # So, variant and each constraint may be a TypeVar or a Union.
     # In these cases, all of inner types from the variant are required to be
@@ -113,18 +113,10 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
     # any of them.
 
     # Variant
-    vs = None
-    if isinstance(variant, TypeVar):  # type: ignore
-        if variant.__bound__ is not None:
-            vs = [variant.__bound__]
-        elif len(variant.__constraints__) > 0:
-            vs = variant.__constraints__
-        # Both empty like T_co
-    elif hasattr(variant, '__origin__') and variant.__origin__ == Union:
-        vs = variant.__args__
+    vs = _decompose_type(variant, to_list=False)
+
     # Variant is TypeVar or Union
     if vs is not None:
-        vs = [TYPE2ABC.get(v, v) for v in vs]
         return all(_issubtype_with_constraints(v, constraints, recursive) for v in vs)
 
     # Variant is not TypeVar or Union
@@ -137,18 +129,10 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
 
     # Constraints
     for constraint in constraints:
-        cs = None
-        if isinstance(constraint, TypeVar):  # type: ignore
-            if constraint.__bound__ is not None:
-                cs = [constraint.__bound__]
-            elif len(constraint.__constraints__) > 0:
-                cs = constraint.__constraints__
-        elif hasattr(constraint, '__origin__') and constraint.__origin__ == Union:
-            cs = constraint.__args__
+        cs = _decompose_type(constraint, to_list=False)
 
         # Constraint is TypeVar or Union
         if cs is not None:
-            cs = [TYPE2ABC.get(c, c) for c in cs]
             if _issubtype_with_constraints(variant, cs, recursive):
                 return True
         # Constraint is not TypeVar or Union
