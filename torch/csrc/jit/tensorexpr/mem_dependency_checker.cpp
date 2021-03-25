@@ -1254,9 +1254,10 @@ void MemDependencyChecker::updateWriteHistory(
 
       // Add all new slices.
       for (auto& b : newBounds) {
-        it = writeHistory.insert(it, std::make_pair(b, other));
+        writeHistory.insert(it, std::make_pair(b, other));
       }
-      it++;
+      // No need to increment the iterator since it has been updated after
+      // `erase` above.
     }
   }
 
