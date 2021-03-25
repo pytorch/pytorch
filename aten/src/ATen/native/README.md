@@ -264,37 +264,54 @@ dispatch:
 
 This specifies the actual name of the function you want to dispatch to, so you
 can dispatch to different functions depending on which backend the passed tensors
-belong to.  Technically, it is also possible to write `dispatch: func_name`
-to unconditionally dispatch to a native function whose name is different than
-the name in the public ATen API, but this is generally frowned upon (just name
-them the same thing!)
+belong to.  If the dispatch table is omitted, we assume a default dispatch
+table:
+
+```
+# overload is ignored
+func: func.overload(...) -> ...
+dispatch:
+    CompositeImplicitAutograd: func
+
+# overload is ignored, but out functions get suffixed with _out in their name
+func: func.out_overload(...) -> ...
+dispatch:
+    CompositeImplicitAutograd: func_out
+```
 
 If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
 Available backend options can be found by searching `dispatch_keys` in
 [codegen](https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py).
-Among the supported backends, there're a few alias keys that maps to a set of backends:
-  - `DefaultBackend`: an alias that maps to all backends. Functions registered to
-    `DefaultBackend` should work for any backend for inference.  (Note:
-    calling into a DispatchStub does NOT mean it works for any backend;
+There are also two special "generic" backends:
+
+  - `CompositeExplicitAutograd` (previously known as `DefaultBackend`):
+    implementations of kernels that work for all backends, but require an
+    explicit definition of backward function in `derivatives.yaml` to support autograd.
+    The most typical use of this key are for delegating functions; i.e.,
+    functions that do a very small amount of work and then delegate to another
+    operator to do the actual heavy lifting.  Under the hood, registering a
+    kernel to `CompositeExplicitAutograd` is equivalent to registering that
+    kernel to every backend (e.g., `CPU, CUDA`). Note: kernels which call
+    DispatchStub should NOT be registered as CompositeExplicitAutograd, as
     DispatchStub only works for `CPU, CUDA`)
-  - `Math`: an alias that maps to all backend and autograd backend keys. Functions
-    registered to `Math` key should be plain mathematical composition of other
-    `at::` functions and support training and inference for any backend.
 
-`DefaultBackend` and `Math` keys act as defaults that can be overridden: for example, you can specify a custom
-kernel for a particular backend using a backend-specific dispatch key, and use
-`DefaultBackend` or `Math` to specify a generic kernel for the others.
+  - `CompositeImplicitAutograd` (previously known as `Math`): implementations of
+    kernels that work for all backends, and also can implicitly support autograd,
+    because all of the operations it calls support autograd.  Direct use of
+    this key should be rare: if you provide no dispatch table, we default to
+    registering your kernel as `CompositeImplicitAutograd`.  Explicitly adding
+    this key to an existing dispatch table may be useful if you have specialized
+    CPU and CUDA implementations, but you might want to provide a fallback
+    lowering for external backends that may not have a specialized
+    implementation.
 
-Note that like those registered to `Math`, kernels registered to `DefaultBackend` are
-very often implemented as mathematical expressions built up from calls to other `at::`
-functions.  This is because in both cases, the kernel needs to delegate backend-specific
-computation to the functions it calls.  The difference between `DefaultBackend` and `Math`
-is that a `Math` kernel also implicitly defines a derivative formula: to do this, it must
-call only functions that themselves support autograd.
+Functions registered to composite backends should work for any backend, if the
+nested functions they call work for those backends.
 
 For example, suppose `my_op` can be implemented in the following way:
+
 ```
 at::Tensor my_op(const Tensor& self, const Tensor& other) {
   return self + 2 * other;
@@ -302,26 +319,26 @@ at::Tensor my_op(const Tensor& self, const Tensor& other) {
 ```
 
 If we already know inference kernels and derivative formulas for operators `+` and `*` in our system,
-you can just register `my_op` to `Math` and both inference & autograd will just work.
+you can just register `my_op` to `CompositeImplicitAutograd` and both inference & autograd will just work.
 Although it seems we only write down the inference formula here, PyTorch autograd system would correctly
 set up the backward for `my_op` using the chain formula and derivatives of `+` & `*` operators.
 In other words `d_out/d_self = 1; d_out/d_other = 2` can be derived automatically from
 the `my_op` inference kernel. Of course if we don't have derivative formula defined for either `+` or `*`,
 backward of `my_op` can no longer be derived automatically.
 
-Whether to use `Math` or `DefaultBackend` for your kernel can be decided by the following steps:
-1. If you can, always start with a `Math` kernel that's composable from existing operators.
-2. If you don't want to use the derived gradient formula from `Math` kernel for autograd, either to
-   get better performance or better numerical stability, you should put the kernel in `DefaultBackend`
+Whether to use implicit or explicit autograd for your kernel can be decided by the following steps:
+1. If you can, always start with a `CompositeImplicitAutograd` kernel that's composable from existing operators.
+2. If you don't want to use the derived gradient formula from `CompositeImplicitAutograd` kernel for autograd, either to
+   get better performance or better numerical stability, you should register the kernel with `CompositeExplicitAutograd`
    so that it's only used in inference.
    Later for autograd, depending on whether your autograd kernel works for all backends or not,
    you can put them in alias `Autograd` or specific keys like `AutogradCPU`.
 3. If you prefer to write backend-specific kernels, use reserved dispatch keys for your backend instead,
    e.g. `CPU/AutogradCPU`.
 
-**Important**: because a `Math` kernel is implicitly registered for ops with no `dispatch:` section,
+**Important**: because a `CompositeImplicitAutograd` kernel is implicitly registered for ops with no `dispatch:` section,
 when you add a backend-specific kernel (and hence a `dispatch:` section) to one of these, you **must** also
-add a `Math:` entry that names the old kernel implementation (it's named after the op, with _<overload name>
+add a `CompositeImplicitAutograd:` entry that names the old kernel implementation (it's named after the op, with _<overload name>
 added if applicable), so that it's still available for other backends to use.
 
 If you implemented a native function in C++ and want to find out which dispatch keyword
@@ -460,14 +477,10 @@ Here're steps to follow to decide the right dispatch keyword:
     - Yes: you're likely calling other `at::` ops in the implemetation. Go to step 2.
 
 2. Think about training: does your kernel support autograd? [check autograd support](#will-your-function-be-automatically-differentiable)
-    - Yes: in other words, you're providing a `Math` kernel which supports both inference and autograd.
-      To use autograd support for training, simply skip adding a dispatch section or write
-      ```
-      dispatch:
-        Math: kernel
-      ```
-
-      You're done. This will allow this op to be correctly registered for both inference and training.
+    - Yes: in other words, you're providing a `CompositeImplicitAutograd` kernel which supports both inference and autograd.
+      To use autograd support for training, simply skip adding a dispatch
+      section and you're done. This will allow this op to be correctly
+      registered for both inference and training.
 
     - Yes, but you still want to provide a numerically stable gradient formula instead of using autograd, write
       ```
@@ -508,7 +521,7 @@ It shows for a certain operator, what the computed dispatch table looks like aft
 
     ```
     dispatcher = PythonDispatcher()
-    dispatcher.register(["CPU", "XLA", "AutogradCPU", "Math"])
+    dispatcher.register(["CPU", "XLA", "AutogradCPU", "CompositeImplicitAutograd"])
     print(dispatcher.dispatchTable()) # Tells you exactly which kernel is used for certain backend.
     ```
 
@@ -516,8 +529,8 @@ It shows for a certain operator, what the computed dispatch table looks like aft
 
 Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
   - direct registration to backend always has higher precendence than alias
-  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `DefaultBackend > Math`,
-    e.g. adding both `Math` and `DefaultBackend` kernels for one op will completely ignore `Math` kernel for
+  - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `DefaultBackend > CompositeImplicitAutograd`,
+    e.g. adding both `CompositeImplicitAutograd` and `DefaultBackend` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
     both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
 
 

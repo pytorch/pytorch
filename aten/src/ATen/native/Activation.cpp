@@ -8,6 +8,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/DistributionsHelper.h>
 
+#include <c10/util/irange.h>
+
 namespace at { namespace native {
 
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
@@ -209,7 +211,7 @@ Tensor& silu_(Tensor& self) {
   return at::silu_out(self, self);
 }
 
-Tensor& silu_out(Tensor& result, const Tensor& self) {
+Tensor& silu_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(
       result.dtype() == self.dtype(),
       "Output Tensor should have the same type as in Input Tensor.")
@@ -405,7 +407,7 @@ Tensor& threshold_(Tensor& self, const Scalar& threshold, const Scalar& value) {
   return self;
 }
 
-Tensor& threshold_out(Tensor& result, const Tensor& self, const Scalar& threshold, const Scalar& value) {
+Tensor& threshold_out(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
   threshold_out(make_optional(result), self, threshold, value, self);
   return result;
 }
@@ -453,12 +455,12 @@ void inline prelu_cpu_kernel_multi_weights(
   scalar_t* weight_data = weight.data_ptr<scalar_t>();
 
   auto loop = [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; ++i) {
+    for (const auto i : c10::irange(start, end)) {
       int64_t offset = i * channel_size * input_stride1;
       scalar_t* n_input_data = input_data + offset;
       scalar_t* n_result_data = result_data + offset;
-      for (auto j = 0; j < channel_size; ++j) {
-        for (auto k = 0; k < input_stride1; ++k) {
+      for (const auto j : c10::irange(channel_size)) {
+        for (const auto k : c10::irange(input_stride1)) {
           // to allow for compiler optimization, here splitting into two lines:
           scalar_t w = (n_input_data[k] > 0) ? scalar_t(1) : weight_data[j];
           n_result_data[k] = w * n_input_data[k];
@@ -578,9 +580,9 @@ void inline prelu_cpu_backward_kernel_multi_weights(
   auto weight_grad_collector_data = weight_grad_collector.data_ptr<scalar_t>();
 
   auto loop = [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      for (auto j = 0; j < channel_size; j++) {
-        for (auto k = 0; k < input_stride1; k++) {
+    for (const auto i : c10::irange(start, end)) {
+      for (const auto j : c10::irange(channel_size)) {
+        for (const auto k : c10::irange(input_stride1)) {
           int64_t pos = i * input_stride0 + j * input_stride1 + k;
           scalar_t weight_data_val = weight_data[j];
           scalar_t input_data_val = input_data[pos];

@@ -125,35 +125,38 @@ using LivenessInformation = std::pair<
 LivenessInformation GetLivenessInformation(
     const std::shared_ptr<torch::jit::Graph>& graph,
     AliasDb& db) {
+  // map a Value to a set of Values that overlap live-ranges with the Value's
   std::unordered_map<const Value*, std::set<const Value*>> liveness_map;
+  // a set of Values whose live-range exceed current inference
   std::unordered_set<const Value*> always_alive;
 
+  // map Values to its creation order in graph (Note: only traverse top-level
+  // nodes such that nodes under control-flows are represented by top-level
+  // block nodes)
   std::vector<const Value*> values_in_creation_order;
-  std::unordered_map<const Value*, size_t> values_in_creation_order_idx;
+  std::unordered_map<const Value*, size_t> values_to_idx_in_creation_order;
   for (const auto* node : graph->nodes()) {
     for (const auto* v : node->outputs()) {
-      values_in_creation_order_idx[v] = values_in_creation_order.size();
+      values_to_idx_in_creation_order[v] = values_in_creation_order.size();
       values_in_creation_order.emplace_back(v);
     }
   }
 
-  // maps values to any nodes that consume or produce them
-  //
-  // updated as we traverse the graph. the presence of a key in `live_values`
-  // means that the value is currently alive.
-  //
-  // invariant: set.size() > 0
-  std::unordered_map<const Value*, std::set<const Node*>> live_values;
-  std::unordered_map<const Node*, std::set<const Value*>> live_nodes;
+  // presence of a Value in live_values_use_chain means the Value alive
+  // Value mapped to set of Nodes that may use the Value (i.e., use-chain of
+  // Value)
+  std::unordered_map<const Value*, std::set<const Node*>> live_values_use_chain;
+  // Node mapped to set of Values that the Node may use (i.e., def-chain of node
+  // inputs)
+  std::unordered_map<const Node*, std::set<const Value*>> live_nodes_def_chain;
 
-  // inputs and outputs are marked permanently alive
+  // mark inputs, constants, outputs as always_alive
   for (const auto* input : graph->inputs()) {
     always_alive.insert(input);
   }
   for (const auto* output : graph->outputs()) {
     always_alive.insert(output);
   }
-
   for (const auto* node : graph->nodes()) {
     if (node->kind() == prim::Constant) {
       for (const auto* output : node->outputs()) {
@@ -162,14 +165,14 @@ LivenessInformation GetLivenessInformation(
     }
   }
 
-  std::function<void(const Value* v)> add_live_value;
-  add_live_value = [&](const Value* v) {
+  // add v to the current liveness_map
+  std::function<void(const Value* v)> add_live_value_fn = [&](const Value* v) {
     if (liveness_map.count(v)) {
       return;
     }
     liveness_map[v] = {};
 
-    for (const auto& live_v : live_values) {
+    for (const auto& live_v : live_values_use_chain) {
       liveness_map.at(v).insert(live_v.first);
       liveness_map.at(live_v.first).insert(v);
     }
@@ -177,44 +180,53 @@ LivenessInformation GetLivenessInformation(
     // only add values to the live set if they
     // have deps, otherwise they die immediately
     if (v->uses().size()) {
-      live_values[v] = {};
+      live_values_use_chain[v] = {};
     }
 
+    // record the relationship between v (Value) and its uses (Node)
     for (const auto& u : v->uses()) {
       const auto* node = u.user;
-      // track deps of this value
-      live_values.at(v).insert(node);
-      live_nodes[node].insert(v);
+      live_values_use_chain.at(v).insert(node);
+      live_nodes_def_chain[node].insert(v);
     }
 
-    // values created after this one that alias it
-    std::vector<const Value*> aliased_vs;
-    auto idx = values_in_creation_order_idx[v];
+    // FIXME(penguin): the following alias refinement seems to assume
+    // that `v` refers to a new  tensor created by the node that defines
+    // v, thus other Values "before" the node that defines `v` cannot
+    // possibly be aliased to `v`.
+    // TODO(penguin): Is it a limitation of TS alias analysis
+    // so that we need to do such refinement? If so, better improve
+    // alias analysis so that we dont need this special handling here
+    //
+    // Refine aliases of v by include only those created after v
+    std::vector<const Value*> refined_aliases;
+    auto idx = values_to_idx_in_creation_order[v];
     for (; idx < values_in_creation_order.size(); ++idx) {
       auto* alias_v = values_in_creation_order[idx];
       if (mayContainAlias(db, v, alias_v)) {
-        aliased_vs.emplace_back(alias_v);
+        refined_aliases.emplace_back(alias_v);
       }
     }
     // for all the values in the alias set,
     // we set them "alive"
-    for (auto* aliased_v : aliased_vs) {
-      add_live_value(aliased_v);
+    for (auto* aliased_v : refined_aliases) {
+      add_live_value_fn(aliased_v);
       for (const auto& u : aliased_v->uses()) {
         const auto* node = u.user;
         // track deps of the aliased values is if they
         // are our own
-        live_values.at(v).insert(node);
-        live_nodes[node].insert(v);
+        live_values_use_chain.at(v).insert(node);
+        live_nodes_def_chain[node].insert(v);
       }
     }
   };
 
-  auto traverse_node = [&](const Node* node, std::vector<const Value*>& dead) {
-    if (live_nodes.count(node)) {
-      for (const auto* v : live_nodes.at(node)) {
-        live_values.at(v).erase(node);
-        if (!live_values.at(v).size()) {
+  auto traverse_node_fn = [&](const Node* node,
+                              std::vector<const Value*>& dead) {
+    if (live_nodes_def_chain.count(node)) {
+      for (const auto* v : live_nodes_def_chain.at(node)) {
+        live_values_use_chain.at(v).erase(node);
+        if (!live_values_use_chain.at(v).size()) {
           dead.emplace_back(v);
         }
       }
@@ -226,18 +238,18 @@ LivenessInformation GetLivenessInformation(
       if (mayContainAlias(db, ValueSet{v}, always_alive)) {
         always_alive.insert(v);
       } else {
-        add_live_value(v);
+        add_live_value_fn(v);
       }
     }
 
     std::vector<const Value*> dead;
-    traverse_node(node, dead);
+    traverse_node_fn(node, dead);
     for (const auto* dead_value : dead) {
-      live_values.erase(dead_value);
+      live_values_use_chain.erase(dead_value);
     }
   }
 
-  for (const auto& v : live_values) {
+  for (const auto& v : live_values_use_chain) {
     TORCH_CHECK(always_alive.count(v.first));
   }
 
@@ -255,16 +267,16 @@ LivenessInformation GetLivenessInformation(
   return std::make_pair(liveness_map, always_alive);
 }
 
-// Implementation specific pruning of values
-// from "optimzable" set.  GetLivenessInformation and FindShared
-// work with any graph, but we prune out values
-// that aren't produced by "_out" variants here.
+// Collect the set of Values that are candidates for memory planning:
+//   - Values that are used in in-place operators (i.e., _out variants), and
+//   - excluding those that are either inputs or outputs of
+//     non in-place operators
 //
 // Returns
-//   first: Values that can be optimized
+//   first: Values that are candidates for memory planning
 //   second: A deterministc order of all values
 std::pair<std::vector<const Value*>, std::vector<const Value*>>
-GetOptimizableValues(const std::shared_ptr<torch::jit::Graph>& graph) {
+GetMemoryPlanningCandidates(const std::shared_ptr<torch::jit::Graph>& graph) {
   // for determinism
   std::unordered_set<const Value*> seen_values;
   std::vector<const Value*> all_values;
@@ -316,7 +328,7 @@ GetOptimizableValues(const std::shared_ptr<torch::jit::Graph>& graph) {
 //
 // Algorithm:
 // # clusters of values sharing the same memory
-// # are called "shared" in the implementation
+// # are called "value_to_same_storage_values" in the implementation
 // # inserting into a cluster denotes sharing memory.
 //
 // clusters = {}
@@ -333,7 +345,8 @@ GetOptimizableValues(const std::shared_ptr<torch::jit::Graph>& graph) {
 //
 // NB: This is a deterministic implementation, which makes it easier to tune
 // and debug.
-std::unordered_map<const Value*, std::vector<const Value*>> FindShared(
+std::unordered_map<const Value*, std::vector<const Value*>>
+GenerateSameStorageValues(
     const LivenessInformation& lm,
     const std::pair<std::vector<const Value*>, std::vector<const Value*>>&
         optimizable,
@@ -343,24 +356,27 @@ std::unordered_map<const Value*, std::vector<const Value*>> FindShared(
   const auto& optimizable_values = optimizable.first;
   const auto& all_values = optimizable.second;
 
-  std::unordered_map<const Value*, std::vector<const Value*>> shared;
+  // map Value* to a set Value* that can share the same storage with it
+  std::unordered_map<const Value*, std::vector<const Value*>>
+      same_storage_values;
 
-  // make these two values share memory
-  auto share = [&](const Value* new_v, const Value* old_v) {
+  // make new_v and old_v map to the same storage (i.e., add to each other's
+  // same_storage_values set)
+  auto share_storage_fn = [&](const Value* new_v, const Value* old_v) {
     if (new_v == old_v) {
       return;
     }
-    DCHECK(shared.count(old_v));
+    DCHECK(same_storage_values.count(old_v));
     std::set<const Value*> seen;
     std::vector<const Value*> values;
-    for (auto* v : shared.at(old_v)) {
+    for (auto* v : same_storage_values.at(old_v)) {
       if (seen.count(v)) {
         continue;
       }
       seen.insert(v);
       values.emplace_back(v);
     }
-    for (auto* v : shared.at(new_v)) {
+    for (auto* v : same_storage_values.at(new_v)) {
       if (seen.count(v)) {
         continue;
       }
@@ -368,24 +384,26 @@ std::unordered_map<const Value*, std::vector<const Value*>> FindShared(
       values.emplace_back(v);
     }
     for (const auto* v : values) {
-      shared[v] = values;
+      same_storage_values[v] = values;
     }
   };
 
-  // initialize with known shared (aliasing values)
+  // initialize with known same_storage_values (aliasing values)
   for (const auto* v : all_values) {
-    if (!shared.count(v)) {
-      shared[v] = {v};
+    if (!same_storage_values.count(v)) {
+      same_storage_values[v] = {v};
     }
     // skip always alive values (alias inputs/outputs/weights)
     if (always_alive.count(v)) {
       continue;
     }
-    for (const auto& p : shared) {
+    for (const auto& p : same_storage_values) {
       // NB: this means we cannot optimize operations that "sometimes alias"
       // TODO: add a more robust check of this behavior at runtime
+      // FIXME (penguin): this handling makes v and MayAlias(v) share the
+      // same storage, which is not correct.
       if (db.mayAlias(p.first, v)) {
-        share(v, p.first);
+        share_storage_fn(v, p.first);
       }
     }
   }
@@ -393,40 +411,51 @@ std::unordered_map<const Value*, std::vector<const Value*>> FindShared(
   // to preserve determinism
   std::vector<const Value*> seen;
 
+  auto compute_liveset_fn =
+      [&always_alive, &alive_during, &same_storage_values](
+          std::set<const Value*>& live, const Value* v) {
+        for (const auto* sv : same_storage_values.at(v)) {
+          const auto& l = alive_during.count(sv) ? alive_during.at(sv)
+                                                 : std::set<const Value*>{};
+          live.insert(l.begin(), l.end());
+        }
+        live.insert(always_alive.begin(), always_alive.end());
+      };
+
+  // check if same_storage_values[s] intersects with live
+  auto intersect_fn = [&same_storage_values](
+                          std::set<const Value*>& live, const Value* s) {
+    bool intersect = false;
+    for (const auto* v : same_storage_values.at(s)) {
+      if (live.count(v)) {
+        intersect = true;
+        break;
+      }
+    }
+    return intersect;
+  };
+
   for (const auto* v : optimizable_values) {
     if (always_alive.count(v)) {
       continue;
     }
     // get values that are live during the lifetime of v
     std::set<const Value*> live;
-    for (const auto* sv : shared.at(v)) {
-      const auto& l = alive_during.count(sv) ? alive_during.at(sv)
-                                             : std::set<const Value*>{};
-      live.insert(l.begin(), l.end());
-    }
-    live.insert(always_alive.begin(), always_alive.end());
-
+    compute_liveset_fn(live, v);
     for (const auto* s : seen) {
-      // check if any values in this set of shared
-      // are alive at the time of v
-      // effectively finding | set_intersection(live, set_of_shared(s)) | > 0
-      bool intersects = false;
-      for (const auto* candidate_v : shared.at(s)) {
-        if (live.count(candidate_v)) {
-          intersects = true;
-          break;
-        }
-      }
-      // we can share memory if there's no overlap
-      if (!intersects) {
-        share(v, s);
+      // if live(same_storage_values[v]) and same_storage_values[s]
+      // do not overlap, then s and v can share the same storage
+      if (!intersect_fn(live, s)) {
+        share_storage_fn(v, s);
+        // since s is added to same_storage_values[v], live needs
+        // to be recomputed, so bail out here
         break;
       }
     }
     seen.emplace_back(v);
   }
 
-  return shared;
+  return same_storage_values;
 }
 
 } // namespace
@@ -482,16 +511,16 @@ StaticModule::StaticModule(
     : opts_(opts),
       graph_(std::move(graph_and_schema.first)),
       schema_(std::move(graph_and_schema.second)) {
-  std::unordered_map<Value*, IValue*> val_to_ival;
-  // value -> index into nodes, index into outputs of node
-  std::unordered_map<Value*, std::pair<int, int>> val_to_idx;
+  // map Value* to IValue (from inputs or prim::Constant) or null
+  std::unordered_map<Value*, IValue*> value_to_ivalue;
+  // map Value* to its SSA definition IR
+  std::unordered_map<Value*, DefInfo> value_to_ssa_def;
 
   // N inputs map to the first N entries in storage
   for (auto i = 0; i < graph_->inputs().size(); ++i) {
     Value* input = graph_->inputs()[i];
-    val_to_ival[input] = nullptr;
-    // input denoted by -1
-    val_to_idx[input] = std::make_pair(-1, i);
+    value_to_ivalue[input] = nullptr;
+    value_to_ssa_def[input] = std::make_pair(INPUT_VALUE, i);
   }
 
   // NB: before optimizing the order of execution, ensure that the
@@ -509,51 +538,53 @@ StaticModule::StaticModule(
     constants_.emplace_back(toIValue(v).value());
   }
   {
+    // construct SSA definition for constant nodes
     int i = 0;
     for (Node* node : graph_->nodes()) {
       if (node->kind() != prim::Constant) {
         continue;
       }
       auto* v = node->output();
-      // constants denoted -2, i
-      val_to_idx[v] = std::make_pair(-2, i);
-      val_to_ival[v] = &(constants_[i++]);
+      value_to_ssa_def[v] = std::make_pair(CONSTANT_VALUE, i);
+      value_to_ivalue[v] = &(constants_[i++]);
     }
   }
 
+  // construct SSA definition for non-constant nodes
   int node_idx = 0;
   for (Node* node : graph_->nodes()) {
     if (node->kind() == prim::Constant) {
       continue;
     }
-    std::vector<const IValue*> inputs;
-    std::vector<std::pair<int, int>> indices;
+    std::vector<const IValue*> ivalue_inputs;
+    std::vector<DefInfo> input_ssa_defs;
     for (Value* input : node->inputs()) {
-      inputs.emplace_back(val_to_ival.at(input));
-      indices.emplace_back(val_to_idx.at(input));
+      ivalue_inputs.emplace_back(value_to_ivalue.at(input));
+      input_ssa_defs.emplace_back(value_to_ssa_def.at(input));
     }
-    index_map_[node_idx] = indices;
+    node_inputs_ssa_def_map_[node_idx] = input_ssa_defs;
     nodes_.emplace_back(
-        ProcessedNode(node, std::move(inputs), opts.enable_out_variant));
-    for (auto i = 0; i < node->outputs().size(); ++i) {
-      val_to_ival[node->outputs()[i]] = nullptr;
-      val_to_idx[node->outputs()[i]] = std::make_pair(node_idx, i);
+        ProcessedNode(node, std::move(ivalue_inputs), opts.enable_out_variant));
+    for (size_t i = 0; i < node->outputs().size(); ++i) {
+      value_to_ivalue[node->outputs()[i]] = nullptr;
+      value_to_ssa_def[node->outputs()[i]] = std::make_pair(node_idx, i);
     }
     node_idx++;
   }
   for (auto output : graph_->outputs()) {
-    output_indices_.emplace_back(val_to_idx[output]);
+    output_ssa_defs_.emplace_back(value_to_ssa_def[output]);
   }
 
   AliasDb alias_db(graph_);
   auto lm = GetLivenessInformation(graph_, alias_db);
   external_values_ = lm.second;
   if (opts_.optimize_memory) {
-    auto values = GetOptimizableValues(graph_);
+    auto values = GetMemoryPlanningCandidates(graph_);
     if (!opts_.enable_out_variant) {
       values.first = {};
     }
-    shared_values_ = FindShared(lm, values, alias_db);
+    value_to_same_storage_values_ =
+        GenerateSameStorageValues(lm, values, alias_db);
   }
 }
 
@@ -602,9 +633,9 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
         std::tie(node_idx, out_idx) = sm.index_map().at(idx)[i];
         DCHECK(out_idx >= 0);
         // input
-        if (node_idx == -1) {
+        if (node_idx == StaticModule::INPUT_VALUE) {
           n.set_input(i, &inputs_[out_idx]);
-        } else if (node_idx == -2) {
+        } else if (node_idx == StaticModule::CONSTANT_VALUE) {
           n.set_input(i, &sm.constants()[out_idx]);
         } else {
           n.set_input(i, &(nodes_[node_idx].Output(out_idx)));
@@ -617,9 +648,9 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
     int node_idx;
     int out_idx;
     std::tie(node_idx, out_idx) = index_pair;
-    if (node_idx == -1) {
+    if (node_idx == StaticModule::INPUT_VALUE) {
       outputs_.emplace_back(&inputs_[out_idx]);
-    } else if (node_idx == -2) {
+    } else if (node_idx == StaticModule::CONSTANT_VALUE) {
       // This is a very rare case where const correctness
       // breaks -- the user is returning a constant from
       // the graph.
@@ -697,7 +728,7 @@ c10::IValue StaticRuntime::operator()(
     if (!planner_) {
       planner_ = std::make_unique<MemoryPlanner>(
           this,
-          static_module_.shared_values(),
+          static_module_.values_share_same_storage(),
           static_module_.external_values(),
           static_module_.opts().enable_out_variant);
     }
@@ -859,7 +890,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
       if (!planner_) {
         planner_ = std::make_unique<MemoryPlanner>(
             this,
-            static_module_.shared_values(),
+            static_module_.values_share_same_storage(),
             static_module_.external_values(),
             static_module_.opts().enable_out_variant);
       }
@@ -961,12 +992,12 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
 MemoryPlanner::MemoryPlanner(
     StaticRuntime* runtime,
     const std::unordered_map<const Value*, std::vector<const Value*>>&
-        should_share,
+        value_to_same_storage_values,
     const std::unordered_set<const Value*>& external_values,
     bool out_variants) {
   // collect register indices of outputs of ops with out variant
   std::unordered_set<const Value*> managed_values;
-  std::unordered_set<IValue*> unmanaged_ivalue_set;
+  std::unordered_set<IValue*> unmanaged_ivalues;
   for (ProcessedNode& pnode : runtime->nodes()) {
     if (canReuseInputsOutputs(pnode.node())) {
       for (auto i = 0; i < pnode.outputs().size(); ++i) {
@@ -980,35 +1011,35 @@ MemoryPlanner::MemoryPlanner(
           } else if (canOptimizeConstruct(pnode.node())) {
             // We "leak" containers of this type
           } else {
-            unmanaged_ivalue_set.insert(&out);
+            unmanaged_ivalues.insert(&out);
           }
         } else {
-          unmanaged_ivalue_set.insert(&out);
+          unmanaged_ivalues.insert(&out);
         }
       }
     } else {
       for (auto i = 0; i < pnode.outputs().size(); ++i) {
-        unmanaged_ivalue_set.insert(&pnode.Output(i));
+        unmanaged_ivalues.insert(&pnode.Output(i));
       }
     }
   }
 
-  // remove model outputs from managed_values and unmanaged_ivalue_set
+  // remove model outputs from managed_values and unmanaged_ivalues
   for (const Value* output : runtime->graph().outputs()) {
     managed_values.erase(output);
   }
   for (IValue* output : runtime->outputs()) {
-    unmanaged_ivalue_set.erase(output);
+    unmanaged_ivalues.erase(output);
   }
 
-  // unmanaged_ivalue_set => unmanaged_values_
-  for (IValue* out : unmanaged_ivalue_set) {
-    unmanaged_values_.emplace_back(out);
+  // unmanaged_ivalues => unmanaged_ivalues_
+  for (IValue* out : unmanaged_ivalues) {
+    unmanaged_ivalues_.emplace_back(out);
   }
 
-  // some Values should share storage, this map will
-  // keep track of the index into managed_storage_
-  std::unordered_map<const Value*, size_t> shared;
+  // map Value to index to managed_storage_, where multiple values can
+  // map to the same index (i.e., sharing the same storage)
+  std::unordered_map<const Value*, size_t> value_to_storage_idx;
   // the StorageImpls of Tensor views should not be managed
   std::unordered_set<c10::StorageImpl*> managed_storage_impls;
 
@@ -1026,16 +1057,18 @@ MemoryPlanner::MemoryPlanner(
           continue;
         }
 
-        if (shared.count(val)) {
-          managed_storage_[shared.at(val)].second.emplace_back(impl);
+        if (value_to_storage_idx.count(val)) {
+          managed_storage_[value_to_storage_idx.at(val)].second.emplace_back(
+              impl);
         } else {
           auto p =
               std::make_pair<size_t, std::vector<c10::StorageImpl*>>(0, {impl});
           managed_storage_.emplace_back(std::move(p));
-          // first of a group, update the shared map with the index
-          if (should_share.count(val)) {
-            for (const auto* v : should_share.at(val)) {
-              shared[v] = managed_storage_.size() - 1;
+          // first of a group, update the value_to_storage_idx map with the
+          // index
+          if (value_to_same_storage_values.count(val)) {
+            for (const auto* v : value_to_same_storage_values.at(val)) {
+              value_to_storage_idx[v] = managed_storage_.size() - 1;
             }
           }
         }
@@ -1103,7 +1136,7 @@ void MemoryPlanner::deallocate() {
     ms.first = max;
     managed_bytes_ += max;
   }
-  for (auto& iv : unmanaged_values_) {
+  for (auto& iv : unmanaged_ivalues_) {
     *iv = IValue();
   }
   buffer_ = {};
@@ -1130,7 +1163,7 @@ ProcessedNode::ProcessedNode(
   } else if (
       node->kind() != prim::ListConstruct &&
       node->kind() != prim::TupleConstruct &&
-      node->kind() != prim::ListUnpack) {
+      node->kind() != prim::DictConstruct && node->kind() != prim::ListUnpack) {
     const Operator& op = node->getOperator();
     TORCH_CHECK(op.hasOperation());
     op_ = op.getOperation(node);
