@@ -5171,6 +5171,7 @@ class DistributedTest:
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
+        @skip_if_rocm
         def test_monitored_barrier_allreduce_hang(self):
             # tests expected behavior when nonzero rank hangs.
             if "NCCL_ASYNC_ERROR_HANDLING" in os.environ:
