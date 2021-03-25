@@ -158,7 +158,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // int64_t blockX = min(stride, (int64_t) 512);
   // dim3 block(blockX, 512 / blockX);
   // int64_t grid = min((int64_t) 1024, THCCeilDiv((int64_t) newNnz * stride, (int64_t) block.x * block.y));
-  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream>>>(
+  // THCSTensor_coalesceValuesKernel_gridStrided<real, accreal><<<grid, block, 0, stream> >>(
   //   THCIndexTensor_(data)(state, uniqueOffsets),
   //   THCIndexTensor_(data)(state, origIndices),
   //   THCTensor_(data)(state, values),
