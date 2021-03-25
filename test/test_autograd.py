@@ -4464,7 +4464,7 @@ for shape in [(1,), ()]:
         inp_change_err = "Output {} of UnbindBackward is a view and is being modified inplace."
         run_test(grad_mode=True, requires_grad=True, is_view=True,
                  should_raise_tuple=(None, inp_change_err.format("0"), inp_change_err.format("1")))
-        leaf_grad_err = "A view was created in no_grad/inference mode and is being modified inplace"
+        leaf_grad_err = "A view was created in no_grad mode and is being modified inplace"
         run_test(grad_mode=False, requires_grad=True, is_view=True,
                  should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,
@@ -4860,7 +4860,7 @@ for shape in [(1,), ()]:
         self.assertEqual(output.requires_grad, expected_output.requires_grad)
 
         # Check that in-place modification on view throws
-        leaf_grad_err = "A view was created in no_grad/inference mode and is being modified inplace"
+        leaf_grad_err = "A view was created in no_grad mode and is being modified inplace"
         with self.assertRaisesRegex(RuntimeError, leaf_grad_err):
             output.zero_()
 
