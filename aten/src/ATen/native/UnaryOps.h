@@ -32,6 +32,7 @@ DECLARE_DISPATCH(unary_fn_with_scalar, clamp_min_stub);
 DECLARE_DISPATCH(unary_fn, cos_stub);
 DECLARE_DISPATCH(unary_fn, cosh_stub);
 DECLARE_DISPATCH(unary_fn, digamma_stub);
+DECLARE_DISPATCH(unary_fn, entr_stub);
 DECLARE_DISPATCH(unary_fn, erf_stub);
 DECLARE_DISPATCH(unary_fn, erfc_stub);
 DECLARE_DISPATCH(unary_fn, erfinv_stub);
