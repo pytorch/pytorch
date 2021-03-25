@@ -1000,7 +1000,7 @@ Tensor alias_with_sizes_and_strides(
     self_ = Tensor(std::move(impl));
   } else {
     auto impl = c10::make_intrusive<TensorImpl>(
-        Storage(self.storage()), self.key_set(), self.dtype());
+        Storage(self.storage()), self.key_set(), self.dtype(), true);
     impl->set_storage_offset(self.storage_offset());
     impl->set_sizes_and_strides(sizes, strides);
     self_ = Tensor(std::move(impl));
@@ -2082,7 +2082,8 @@ Tensor view(const Tensor& self, IntArrayRef size) {
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
-  return alias_with_sizes_and_strides(self, inferred_size, stride_value);
+  auto res = alias_with_sizes_and_strides(self, inferred_size, stride_value);
+  return res;
 }
 
 Tensor alias(const Tensor& self) {

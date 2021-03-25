@@ -16,6 +16,24 @@ namespace torch { namespace autograd {
 
 SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_inplace_view) {
   if (variable.defined()) {
+    // Note [Inference tensor cannot be saved for backward]
+    // Invariant:
+    //   You can't save an inference tensor for backwards.
+    // If an inference tensor was saved for backward in an autograd session and
+    // then you reenter inference mode and make an inplace update to the tensor
+    // without bumping version_counter, it'll lead to silent wrong result when
+    // you do backward() for the previous autograd session. (It should error out!)
+    //
+    // Note in the documentation we say "inference tensor cannot participate
+    // in autograd" which is more restrictive than the invariant.  In practice the check is
+    // more permissive and only error out when an inference tensor is saved for
+    // backward.  Whether a tensor is saved for backward is determined by derivative
+    // formula and thus varies op by op, so by saying "no inference tensor in autograd"
+    // it's easier for users to follow.
+    TORCH_CHECK(!variable.unsafeGetTensorImpl()->is_inference_tensor(),
+      "Inference tensors cannot be saved for backward. To work around "
+      "you can make a clone to get a normal tensor and use it in autograd.")
+
     was_default_constructed_ = false;
     output_nr_ = variable.output_nr();
     requires_grad_ = variable.requires_grad();

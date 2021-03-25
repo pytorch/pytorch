@@ -4,6 +4,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
+#include <c10/core/InferenceMode.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -58,15 +59,16 @@ void TensorImpl::_set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self
 TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
-    const caffe2::TypeMeta data_type)
+    const caffe2::TypeMeta data_type,
+    bool is_view)
     // Use std::forward to suppress static analyzer false positive.
-    : TensorImpl(std::forward<Storage>(storage), key_set, data_type, storage.device()) {}
+    : TensorImpl(std::forward<Storage>(storage), key_set, data_type, storage.device(), is_view) {}
 
 TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta data_type, c10::optional<c10::Device> device_opt)
     : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
 
 TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::TypeMeta data_type,
-                       c10::optional<c10::Device> device_opt)
+                       c10::optional<c10::Device> device_opt, bool is_view)
     : storage_(std::move(storage)),
       storage_offset_(0),
       numel_(0),
@@ -84,10 +86,9 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   // a backend DispatchKey and an AutogradBackend key.
   // We automatically add the corresponding autograd key to key_set_ so that backends can stay
   // in the old way of only registering with backend key like DispatchKey::CPU.
-  if (c10::InferenceMode::is_enabled()) {
+  if (is_view || c10::InferenceMode::is_enabled()) {
     // See Note [Expected TLS state in InferenceMode] for why we don't add Autograd & InplaceOrView keys.
     key_set_ = key_set;
-    version_counter_ = VariableVersion(0, /*enabled=*/false);
   } else {
     // TODO: Ideally we only add AutogradBackend key when the tensor requires grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]

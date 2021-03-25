@@ -139,17 +139,6 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_differentiable,
         bool is_fw_differentiable, std::function<Tensor(const Tensor&)> view_func=nullptr,
         CreationMeta creation_meta=CreationMeta::DEFAULT, bool allow_tensor_metadata_change=true) {
-  // Note [View on inference tensor outside InferenceMode]
-  // Theorectically we can allow view ops on inference tensor in normal mode
-  // as long as we mark the output also inference tensor in this kernel.
-  // But it'll break an invariant we currently have: inference tensor can
-  // only be created inside InferenceMode.
-  // This invariant makes inference tensor easier for users to understand,
-  // so we should only break it when there's a valid use case.
-  TORCH_CHECK(!base.unsafeGetTensorImpl()->is_inference_tensor(),
-    "Calling view ops on inference tensor outside InferenceMode is not allowed, ",
-    "consider doing it inside infernce mode to work around this error. ",
-    "If you have a valid use case, please make a feature request to PyTorch.");
   if (!isForwardADEnabled()) {
     // Fast codepath for backward only code
     // It is useful as it avoids the creation of the temporary c10<optional> which makes
@@ -216,11 +205,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
                                    bool is_fw_differentiable, CreationMeta creation_meta=CreationMeta::DEFAULT) {
   c10::optional<ViewInfo> new_bw_info = c10::nullopt;
   c10::optional<ViewInfo> new_fw_info = c10::nullopt;
-  // See Note [View on inference tensor outside InferenceMode]
-  TORCH_CHECK(!base.unsafeGetTensorImpl()->is_inference_tensor(),
-    "Calling view ops on inference tensor outside InferenceMode is not allowed, ",
-    "consider doing it inside infernce mode to work around this error. ",
-    "If you have a valid use case, please make a feature request to PyTorch.");
+
   if (is_bw_differentiable) {
     auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta) {
