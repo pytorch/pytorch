@@ -79,6 +79,7 @@ pushd docs
 pip -q install -r requirements.txt
 if [ "$is_master_doc" = true ]; then
   build_docs html
+  build_docs linkcheck
   [ $? -eq 0 ] || exit $?
   make coverage
   # Now we have the coverage report, we need to make sure it is empty.
