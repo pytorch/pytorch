@@ -588,86 +588,22 @@ Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A,
 }
 
 
-template<typename scalar_t>
-inline static void apply_cholesky_cusolver_potri(Tensor& result, bool upper, Tensor& infos) {
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-  const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
-  const int n = cuda_int_cast(result.size(-2), "n");
-  const int lda = std::max<int>(1, n);
-  const int64_t batch_size = batchCount(result);
-  scalar_t* result_ptr = result.data_ptr<scalar_t>();
-  const int64_t result_stride = matrixStride(result);
 
-  int lwork;
-  at::cuda::solver::potri_buffersize<scalar_t>(handle, uplo, n, nullptr, lda, &lwork);
-  
-  auto& allocator = *at::cuda::getCUDADeviceAllocator();
-  auto work_data = allocator.allocate(sizeof(scalar_t)*lwork * batch_size);
-  scalar_t* work_data_ptr = static_cast<scalar_t*>(work_data.get());
-
-  int* infos_ptr = infos.data_ptr<int>();
-
-  for (int64_t i = 0; i < batch_size; i++) {
-    at::cuda::solver::potri<scalar_t>(
-      handle,
-      uplo,
-      n,
-      result_ptr + i * result_stride,
-      lda,
-      work_data_ptr + i * lwork,
-      lwork,
-      infos_ptr + i
-    );
-  }
-}
-
-void _cholesky_inverse_cusolver_potrs_path(Tensor& result, Tensor& infos, bool upper) {
+void _cholesky_inverse_cusolver_potrs_based(Tensor& result, Tensor& infos, bool upper) {
   at::Tensor input_working_copy = cloneBatchedColumnMajor(result);
-  at::Tensor infos_gpu = at::zeros({1}, result.options().dtype(at::kInt));
+  at::Tensor infos_gpu = at::empty({1}, result.options().dtype(at::kInt));
   result.fill_(0);
   result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_cuda_potri-potrs_path", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_cuda_potri", [&] {
     apply_cholesky_cusolver_potrs<scalar_t>(result, input_working_copy, upper, infos_gpu);
   });
-
   // Debug only: info of cusolver potrs only check if the i-th parameter is wrong
-  // Function argument `infos` is a CPU tensor, the following copy will cause a device-host sync.
+  // Function argument `infos` is a CPU tensor, the following copy will result in a device-host sync.
   // infos.copy_(infos_gpu);
 }
 
-void _cholesky_inverse_cusolver_potri_path(Tensor& result, Tensor& infos, bool upper) {
-  const int64_t batch_size = batchCount(result);
-  at::Tensor infos_gpu = at::zeros({std::max<int64_t>(1, batch_size)}, result.options().dtype(at::kInt));
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_cuda_potri-potri_path", [&] {
-    apply_cholesky_cusolver_potri<scalar_t>(result, upper, infos_gpu);
-  });
-
-  /*
-  Todo: currently the potri path returns an incomplete resut, e.g.:
-    Expected:
-    1 2 3
-    2 4 7
-    3 7 5
-
-    Returned:
-    1 2 3
-    0 4 7
-    0 0 5
-  
-  We may need some extra kernels to complete this. However, even without any extra kernels,
-  the current potri performance is no better than potrs. So we will not use this path.
-  */
-
-  // info of cusolver potri checks if a input matrix is valid. 
-  // If devInfo = i, the leading minor of order i is zero.
-  // Function argument `infos` is a CPU tensor. This will cause a device-host sync.
-  infos.copy_(infos_gpu);
-}
-
 Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, bool upper) {
-  _cholesky_inverse_cusolver_potri_path(result, infos, upper);
-  // _cholesky_inverse_cusolver_potrs_path(result, infos, upper);
+  _cholesky_inverse_cusolver_potrs_based(result, infos, upper);
   return result;
 }
 
