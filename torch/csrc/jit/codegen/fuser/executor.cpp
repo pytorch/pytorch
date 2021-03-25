@@ -362,6 +362,8 @@ bool runFusion(const int64_t key, Stack& stack, std::string* code_out) {
     return false;
   if (device.is_cpu() && !canFuseOnCPU())
     return false;
+  if (device.is_xpu())
+    return false;
 
   // Validates sizes and expands inputs as needed
   auto maybe_map_size = canRunKernel(spec, inputs);
