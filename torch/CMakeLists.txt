@@ -53,6 +53,7 @@ if(BUILD_TEST)
       )
 endif()
 
+
 set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${PYTHON_INCLUDE_DIR}
 
@@ -65,6 +66,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${CMAKE_BINARY_DIR}/caffe2/aten/src
     ${CMAKE_BINARY_DIR}/third_party
     ${CMAKE_BINARY_DIR}/third_party/onnx
+    ${CMAKE_BINARY_DIR}/third_party/breakpad/src
 
     ${TORCH_ROOT}/third_party/valgrind-headers
 
@@ -130,6 +132,8 @@ if(USE_CUDA)
     endif()
 
 endif()
+
+list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CMAKE_BINARY_DIR}/lib/libbreakpad_client.a)
 
 if(USE_ROCM)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
@@ -294,6 +298,7 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 add_dependencies(torch_python torch_python_stubs)
+
 
 # Required workaround for generated sources
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories

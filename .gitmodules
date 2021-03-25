@@ -133,3 +133,6 @@
 [submodule "third_party/kineto"]
     path = third_party/kineto
     url = https://github.com/pytorch/kineto
+[submodule "third_party/breakpad"]
+	path = third_party/breakpad
+	url = https://chromium.googlesource.com/breakpad/breakpad

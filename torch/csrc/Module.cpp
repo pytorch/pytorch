@@ -53,6 +53,7 @@
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
+#include <torch/csrc/utils/crash_handler.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 
 #ifdef USE_DISTRIBUTED
@@ -833,6 +834,7 @@ PyObject* initModule() {
   torch::jit::initJITBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
+  torch::crash_handler::initCrashHandlerBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
   torch::autograd::initLinalgFunctions(module);
