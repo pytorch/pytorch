@@ -376,24 +376,10 @@ struct DDPLoggingData {
     std::ostream& output,
     const DDPLoggingData& ddp_logging_data
   ) {
-    std::stringstream deviceIdsStream, bucketSizesStream;
-    auto toString = [](std::stringstream& ss, const std::vector<int>& vec ) -> std::string {
-      for (size_t i = 0; i < vec.size(); ++i) {
-        if (i != 0) {
-          ss << ",";
-        }
-        ss << vec[i];
-      }
-      return ss.str();
-    };
 
-    std::string devicesStr = toString(deviceIdsStream, ddp_logging_data.device_ids);
-    std::string bucketSizesStr = toString(bucketSizesStream, ddp_logging_data.bucket_sizes);
-    std::string dtypesStr;
-    for (const auto & dtype : ddp_logging_data.dtypes) {
-      dtypesStr += dtype;
-      dtypesStr += " ";
-    }
+    std::string devicesStr = c10::Join(", ", ddp_logging_data.device_ids);
+    std::string bucketSizesStr = c10::Join(", ", ddp_logging_data.bucket_sizes);
+    std::string dtypesStr = c10::Join(" ", ddp_logging_data.dtypes);
 
     std::string ddpLoggingDataInfo = c10::str(
       "world_size: ", ddp_logging_data.world_size, ", module_name: ",
