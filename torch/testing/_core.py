@@ -341,7 +341,7 @@ def all_types():
 def all_types_and(*dtypes):
     return _all_types + _validate_dtypes(*dtypes)
 
-_complex_types = (torch.cfloat, torch.cdouble)
+_complex_types = _dispatch_dtypes((torch.cfloat, torch.cdouble))
 def complex_types():
     return _complex_types
 
