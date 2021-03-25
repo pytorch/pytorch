@@ -172,7 +172,8 @@ def _fixed_type(param) -> bool:
     if isinstance(param, TypeVar) or param in (Any, ...):  # type: ignore
         return False
     if hasattr(param, '__args__'):
-        if len(param.__args__) == 0:
+        # For Python 3.6, `__args__` can be None
+        if param.__args__ is None or len(param.__args__) == 0:
             return False
         for arg in param.__args__:
             if not _fixed_type(arg):
@@ -181,6 +182,10 @@ def _fixed_type(param) -> bool:
 
 
 class _DataPipeType:
+    r"""
+    Save type in `param` and check if it's fixed or non-fixed type
+    """
+
     def __init__(self, param):
         self.param = param
         self.fixed = _fixed_type(param)
@@ -204,10 +209,17 @@ class _DataPipeType:
         raise TypeError("Expected '_DataPipeType' or 'type', but found {}".format(type(other)))
 
 
+# Default type for DataPipe without annotation
 _DEFAULT_TYPE = _DataPipeType(Any)
 
 
 def _mro_subclass_init(obj, fixed):
+    r"""
+    Run through MRO to check if any super class has already built in
+    the corresponding `__init_subclass__`. If so, no need to add
+    `__init_subclass__`.
+    """
+
     mro = obj.__mro__
     for b in mro:
         if isinstance(b, _DataPipeMeta):
@@ -227,6 +239,10 @@ def _mro_subclass_init(obj, fixed):
 
 
 class _DataPipeMeta(GenericMeta):
+    r"""
+    Metaclass for `DataPipe`. Add `type` attribute and `__init_subclass__` based
+    on the type, and validate the return hint of `__iter__`.
+    """
     type: _DataPipeType
 
     def __new__(cls, name, bases, namespace, **kargs):
@@ -264,7 +280,7 @@ class _DataPipeMeta(GenericMeta):
             raise TypeError('Can not subclass a DataPipe[{}] from DataPipe[{}]'
                             .format(t, self.type))
 
-        # Types are equal
+        # Types are equal, fast path for inheritance
         if self.type.issubtype(t):
             if _mro_subclass_init(self, t.fixed):
                 return self
@@ -314,7 +330,7 @@ def _validate_iter(sub_cls):
                                 ', but found {}'.format(sub_cls.__name__, hints['return']))
             data_type = return_hint.__args__[0]
             # Double-side subtype checking to make sure type matched
-            # e.g. T_co == Any
+            # e.g. T_co == Any, T_co == S_co
             if not (issubtype(sub_cls.type.param, data_type) and issubtype(data_type, sub_cls.type.param)):
                 raise TypeError('Unmatched type annotation for {} ({} vs {})'
                                 .format(sub_cls.__name__, sub_cls.type, _type_repr(data_type)))
@@ -326,9 +342,10 @@ def fixed_type_init(sub_cls, *args, **kwargs):
         sub_cls.__init__ = sub_cls._origin_init
     else:
 
-        def new_init(self, *args, **kwargs):
+        # Fake __init__ function
+        def fake_init(self, *args, **kwargs):
             pass
-        sub_cls.__init__ = new_init
+        sub_cls.__init__ = fake_init
 
 
 def nonfixed_type_init(sub_cls, *args, **kwargs):
