@@ -8752,7 +8752,7 @@
   dispatch:
     DefaultBackend: linalg_lstsq
 
-- func: _lstsq_helper(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor a, float cond, str driver_name) -> Tensor(a!)
+- func: _lstsq_helper(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float cond, str driver_name) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _lstsq_helper_cpu
