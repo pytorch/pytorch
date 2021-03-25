@@ -645,6 +645,8 @@ std::string generateKernel(
   }
   if (has_bfloat_tensor) {
     env.s("BFloat16Header", cuda::bfloat16_support_literal);
+  } else {
+    env.s("BFloat16Header", "");
   }
 
   if (has_random) {
