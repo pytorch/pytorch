@@ -297,12 +297,7 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def(
           "_jit_pass_fold_convbn",
-          [](Module& module,
-             const std::vector<std::string>& methods_to_optimize) {
-            return FoldConvBatchNorm(module, methods_to_optimize);
-          },
-          py::arg("module"),
-          py::arg("methods_to_optimize") = std::vector<std::string>())
+          [](Module& module) { return FoldConvBatchNorm(module, {}); })
       .def(
           "_jit_onnx_list_model_parameters",
           [](Module& module) { return list_module_parameters(module); })
