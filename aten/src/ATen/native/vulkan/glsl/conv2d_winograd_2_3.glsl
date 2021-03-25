@@ -22,7 +22,6 @@ void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
   const ivec3 opos00 = ivec3(2*pos.xy, pos.z);
 
-  /*
   if (all(lessThan(opos00, uBlock.size.xyz))) {
     const ivec2 ipos00 = 4*pos.xy;
 
@@ -36,10 +35,11 @@ void main() {
         for (int x = 0; x < 4; ++x) {
           const ivec2 wpos00 = ivec2(16*z4 + 4*x, 4*pos.z);
           const vec4 intex = texelFetch(uInput, ivec3(ipos00.x+x, ipos00.y+y, z4), 0);
-          dg[4*y+x].x += dot(intex, texelFetch(uKernel, ivec3(wpos00.x  , wpos00.y+y, 0), 0));
-          dg[4*y+x].y += dot(intex, texelFetch(uKernel, ivec3(wpos00.x+1, wpos00.y+y, 0), 0));
-          dg[4*y+x].z += dot(intex, texelFetch(uKernel, ivec3(wpos00.x+2, wpos00.y+y, 0), 0));
-          dg[4*y+x].w += dot(intex, texelFetch(uKernel, ivec3(wpos00.x+3, wpos00.y+y, 0), 0));
+          dg[4*y+x] += vec4(
+            dot(intex, texelFetch(uKernel, ivec3(wpos00.x  , wpos00.y+y, 0), 0)),
+            dot(intex, texelFetch(uKernel, ivec3(wpos00.x+1, wpos00.y+y, 0), 0)),
+            dot(intex, texelFetch(uKernel, ivec3(wpos00.x+2, wpos00.y+y, 0), 0)),
+            dot(intex, texelFetch(uKernel, ivec3(wpos00.x+3, wpos00.y+y, 0), 0)));
         }
       }
     }
@@ -61,5 +61,4 @@ void main() {
     if (opos00.x+1 < uBlock.size.x && opos00.y+1 < uBlock.size.y)
       imageStore(uOutput, ivec3(opos00.x+1, opos00.y+1, opos00.z), o11 - o12 - o13);
   }
-  */
 }

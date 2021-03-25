@@ -42,13 +42,11 @@ inline bool is_winograd_n_3(
     const IntArrayRef filter,
     const IntArrayRef stride,
     const IntArrayRef dilation) {
-  /*
   return (3 == filter[Layout::Filter::height]) &&
          (3 == filter[Layout::Filter::width]) &&
          all_lessthan(stride, 2) &&
          all_lessthan(dilation, 2);
-   */
-  return false;
+  //return false;
 }
 
 Conv2dMethod determine_method(
@@ -863,10 +861,9 @@ void conv2d(
   }
 }
 
-Tensor conv2d_winograd_2_3(
+void conv2d_winograd_2_3(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
-    api::Command::Pool& command_pool,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -891,14 +888,9 @@ Tensor conv2d_winograd_2_3(
     },
     v_input.options(),
   };
-  vTensor v_output_interm{
-    context,
-    v_output.sizes(),
-    v_input.options(),
-  };
 
-  //if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) 
-  api::Command::Buffer& transform_buffer = command_pool.stream();
+  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image());
+  TORCH_CHECK(valid, "Not Implemented!")
   {
     const struct TransformBlock final {
       uvec3 extents;
@@ -919,7 +911,7 @@ Tensor conv2d_winograd_2_3(
     };
 
     context->dispatch(
-        transform_buffer,
+        command_buffer,
         {
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -932,24 +924,16 @@ Tensor conv2d_winograd_2_3(
           v_input_winograd.extents().data[2u],
         },
         context->gpu().adapter->local_work_group_size(),
-        // Write-only access bypasses synchronization but inserts appropriate
-        // barriers if necessary.
         v_input_winograd.image(
-            transform_buffer,
+            command_buffer,
             vTensor::Stage::Compute,
             vTensor::Access::Write),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
         v_input.image(
-            transform_buffer,
+            command_buffer,
             vTensor::Stage::Compute),
-        // Object lifetime is managed by the resource pool.
-        // It is OK not to keep track of the handle.
         context->resource().pool.uniform(transform_block).object);
 
   }
-  command_pool.submit(context->gpu().queue, transform_buffer);
-  api::Command::Buffer& conv_buffer = command_pool.stream();
   {
     const struct Block final {
       uvec3 extents;
@@ -957,7 +941,7 @@ Tensor conv2d_winograd_2_3(
       vec2 clamp;
       ivec4 src_filter;
     } block {
-      v_output_interm.extents(),
+      v_output.extents(),
       safe_downcast<int32_t>(filter[Layout::Filter::input] / 4),
       {
         output_min,
@@ -965,7 +949,7 @@ Tensor conv2d_winograd_2_3(
       },
     };
     context->dispatch(
-        conv_buffer,
+        command_buffer,
         {
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -977,37 +961,24 @@ Tensor conv2d_winograd_2_3(
         {
           out_w_units,
           out_h_units,
-          v_output_interm.extents().data[2u],
+          v_output.extents().data[2u],
         },
         context->gpu().adapter->local_work_group_size(),
-        // Write-only access bypasses synchronization but inserts appropriate
-        // barriers if necessary.
-        v_output_interm.image(
-            conv_buffer,
+        v_output.image(
+            command_buffer,
             vTensor::Stage::Compute,
             vTensor::Access::Write),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
         v_input_winograd.image(
-            conv_buffer,
+            command_buffer,
             vTensor::Stage::Compute),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
         v_weight.image(
-            conv_buffer,
+            command_buffer,
             vTensor::Stage::Compute),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
         v_bias.buffer(
-            conv_buffer,
+            command_buffer,
             vTensor::Stage::Compute),
-        // Object lifetime is managed by the resource pool.
-        // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
   }
-  command_pool.submit(context->gpu().queue, conv_buffer);
-
-  return convert(v_output_interm);
 }
 
 void conv2d_old(
@@ -1283,21 +1254,7 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
         conv_func = &conv2d_old;
         break;
       case Conv2dWinograd_2_3:
-        return conv2d_winograd_2_3(
-                context,
-                command_buffer,
-                command_pool,
-                v_output,
-                v_input,
-                packed_.v_weight,
-                packed_.v_bias,
-                packed_.filter,
-                unpacked_.filter,
-                packed_.stride,
-                packed_.padding,
-                packed_.dilation,
-                packed_.output_min,
-                packed_.output_max);
+        conv_func = &conv2d_winograd_2_3;
         break;
       default:
         conv_func = &conv2d;
