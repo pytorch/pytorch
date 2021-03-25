@@ -366,6 +366,7 @@ _(aten, hardshrink_backward) \
 _(aten, hardsigmoid) \
 _(aten, hardsigmoid_backward) \
 _(aten, hardtanh) \
+_(aten, hardtanh_) \
 _(aten, hardtanh_backward) \
 _(aten, hardtanh_forward) \
 _(aten, heaviside) \
