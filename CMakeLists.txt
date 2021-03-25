@@ -121,21 +121,10 @@ endif()
 set(CPU_AARCH64 OFF)
 set(CPU_INTEL OFF)
 
-if(WIN32)
-  # On Windows, CMAKE_HOST_SYSTEM_PROCESSOR is calculated through `PROCESSOR_ARCHITECTURE`,
-  # which only has the value of `x86` or `AMD64`. We cannot infer whether it's a Intel CPU
-  # or not. However, the environment variable `PROCESSOR_IDENTIFIER` could be used.
-  if($ENV{PROCESSOR_IDENTIFIER} MATCHES "Intel")
-    set(CPU_INTEL ON)
-  else()
-    set(CPU_INTEL OFF)
-  endif()
-else()
- if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|i[3-6]+86)")
-    set(CPU_INTEL ON)
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
-    set(CPU_AARCH64 ON)
-  endif()
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(AMD64|x86_64)")
+  set(CPU_INTEL ON)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
+  set(CPU_AARCH64 ON)
 endif()
 
 
