@@ -77,7 +77,10 @@ unsigned int getReplayablePosPasC(
             root_dim.begin(),
             root_dim.end(),
             [&mappable_roots](IterDomain* root_id) {
-              return mappable_roots.find(root_id) == mappable_roots.end();
+              return mappable_roots.find(root_id) == mappable_roots.end() &&
+                  // TODO: Check replayablePosCasP and see if we need something
+                  // similar
+                  !root_id->isBroadcast();
             })) {
       continue;
     }

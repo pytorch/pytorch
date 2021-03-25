@@ -26,11 +26,14 @@ DataType aten_opt_type_map(const c10::optional<at::ScalarType>& scalar_type) {
 
 TensorView::TensorView(TensorDomain* domain, DataType dtype, MemoryType mtype)
     : Val(ValType::TensorView, dtype), domain_(domain), memory_type_(mtype) {
-  // Mark the size-1 axes as broadcast to support implicit broadcast semantic
-  for (auto* id : domain_->domain()) {
-    if (!id->isBroadcast() && !id->isReduction() &&
-        id->rawExtent()->isOneInt()) {
-      id->convertToBroadcast();
+  // Don't do this after transforms
+  if (domain_->domain() == domain_->getRootDomain()) {
+    // Mark the size-1 axes as broadcast to support implicit broadcast semantic
+    for (auto* id : domain_->domain()) {
+      if (!id->isBroadcast() && !id->isReduction() &&
+          id->rawExtent()->isOneInt()) {
+        id->convertToBroadcast();
+      }
     }
   }
 }
@@ -209,9 +212,16 @@ TensorView* TensorView::computeAt(
   // means producer will be computed inline with consumer, hence the +1.
   if (position < 0)
     position += int(consumer->nDims()) + 1;
+
   TORCH_CHECK(
-      position >= 0 && (unsigned int)position < consumer->nDims() + 1,
+      (position >= 0 && (unsigned int)position < consumer->nDims() + 1) ||
+          mode == ComputeAtMode::BestEffort,
       "Compute at called on an position outside valid range.");
+
+  if (mode == ComputeAtMode::BestEffort) {
+    position = std::max(-1, position);
+    position = std::min((int)consumer->nDims(), position);
+  }
 
   ComputeAt::runAt(this, consumer, (unsigned int)position, mode);
 

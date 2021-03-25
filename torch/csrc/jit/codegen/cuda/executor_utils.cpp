@@ -630,16 +630,16 @@ NvrtcFunction nvrtcCompile(
 #ifndef __HIP_PLATFORM_HCC__
   const char* prefix_env = getenv("PYTORCH_NVFUSER_CUBIN");
   if (prefix_env) {
+    FUSER_PERF_SCOPE("load CUBIN");
 #if CUDA_VERSION >= 11010
     TORCH_CHECK(
         !compile_to_sass,
         "PYTORCH_NVFUSER_CUBIN cannot be used when compile direct to SASS. Please set PYTORCH_NVFUSER_CUBIN to empty");
 #endif
-    FUSER_PERF_SCOPE("load CUBIN");
-
     // Output ptx file
     std::stringstream ptx_file_name;
-    ptx_file_name << prefix_env << "_" << id << ".ptx";
+    ptx_file_name << prefix_env << "_" << id
+                  << (compile_to_sass ? ".cubin" : ".ptx");
     std::ofstream myPtxFile(ptx_file_name.str().c_str(), std::ios::out);
     if (myPtxFile.is_open()) {
       myPtxFile.write(ptx.data(), ptx.size());

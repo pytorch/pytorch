@@ -40,7 +40,7 @@ class TORCH_CUDA_CU_API TrivialReductionInfo {
   //! undetected trivial domains. For example, split by one creates a
   //! trivial reduction domain, which is detected. However, if it is
   //! further split, both of the two resulting axes are also trivial,
-  //! however, only the inner axis is recognized as rivial. While this
+  //! however, only the inner axis is recognized as trivial. While this
   //! is a limitation, it would have very little practical
   //! implication.
   std::unordered_set<IterDomain*> domains_;

@@ -850,13 +850,12 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
         // Prepare for the next dimension which may also be contiguous, multiply
         // by extent of this dimension
         cur_contig_stride = ir_builder.mulExpr(
-            cur_contig_stride,
-            gpu_lower->lowerValue(root_dom[dim]->rawExtent()));
+            cur_contig_stride, gpu_lower->lowerValue(root_dom[dim]->extent()));
       } else {
         // If non contiguous dimension, keep local stride information, set cur
         // stride to local stride * local raw extent
         cur_contig_stride = ir_builder.mulExpr(
-            strides[dim], gpu_lower->lowerValue(root_dom[dim]->rawExtent()));
+            strides[dim], gpu_lower->lowerValue(root_dom[dim]->extent()));
       }
     }
   }
@@ -1288,13 +1287,12 @@ std::vector<kir::Val*> Index::getGlobalConsumerStridedIndices(
         // Prepare for the next dimension which may also be contiguous, multiply
         // by extent of this dimension
         cur_contig_stride = ir_builder.mulExpr(
-            cur_contig_stride,
-            gpu_lower->lowerValue(root_dom[dim]->rawExtent()));
+            cur_contig_stride, gpu_lower->lowerValue(root_dom[dim]->extent()));
       } else {
         // If non contiguous dimension, keep local stride information, set cur
         // stride to local stride * local raw extent
         cur_contig_stride = ir_builder.mulExpr(
-            strides[dim], gpu_lower->lowerValue(root_dom[dim]->rawExtent()));
+            strides[dim], gpu_lower->lowerValue(root_dom[dim]->extent()));
       }
     }
   }

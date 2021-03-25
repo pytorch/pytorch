@@ -75,6 +75,40 @@ void cacheInputs(
     const std::vector<TensorView*>& reduction_tv,
     std::vector<TensorView*>& other_tv);
 
+// TODO: Is there a use for this?
+std::vector<TensorView*> producerTvsOf(TensorView* tv);
+
+// TODO: Is there a use for this?
+std::vector<TensorView*> consumerTvsOf(TensorView* tv);
+
+// TODO: Is there a use for this?
+std::vector<TensorView*> producerTvsOf(const std::vector<TensorView*>& tvs);
+
+// TODO: Is there a use for this?
+std::vector<TensorView*> consumerTvsOf(const std::vector<TensorView*>& tvs);
+
+std::vector<TensorView*> allTvs();
+
+void parallelizeAllLike(
+    TensorView* reference_tv,
+    const std::vector<TensorView*>& all_tvs);
+
+void computeAtInputs(
+    TensorView* consumer,
+    int pos,
+    ComputeAtMode mode = ComputeAtMode::Standard);
+
+void computeWithOutputs(
+    TensorView* producer,
+    int pos,
+    ComputeAtMode mode = ComputeAtMode::Standard);
+
+// returns all tensor views in fusion that are used between outputs and inputs.
+// Order is non-deterministic and non-repeating.
+// TODO: This would be good to have determinsitic and to put outside scheduling
+// as it's generally useful
+std::vector<TensorView*> allTvs(Fusion* fusion);
+
 } // namespace scheduler_utils
 } // namespace cuda
 } // namespace fuser

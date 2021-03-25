@@ -564,7 +564,9 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       outer->start()->isZeroInt() && inner->start()->isZeroInt(),
       "Merging IterDomains with starting values that aren't 0 is not supported at this time.");
   TORCH_CHECK(
-      outer->isReduction() == inner->isReduction(),
+      outer->isReduction() == inner->isReduction() ||
+          (!outer->isReduction() && inner->rawExtent()->isOneInt()) ||
+          (outer->rawExtent()->isOneInt() && !inner->isReduction()),
       "Merging IterDomains requires that their iteration types match.");
 
   Val* merged_id_size = mul(outer->extent(), inner->extent());
@@ -579,6 +581,13 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       itype = IterType::BroadcastWithoutStride;
     }
   } else if (outer->isBroadcast() || inner->isBroadcast()) {
+    itype = IterType::Iteration;
+  }
+
+  // Merging trivial reduction with iter domain, that's fine, just make it an
+  // iter domain.
+  if ((outer->isReduction() || inner->isReduction()) &&
+      (!outer->isReduction() || !inner->isReduction())) {
     itype = IterType::Iteration;
   }
 

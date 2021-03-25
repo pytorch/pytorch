@@ -1,7 +1,10 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 namespace torch {
 namespace jit {
@@ -361,6 +364,105 @@ void cacheInputs(
       }
     }
   }
+}
+
+namespace {
+
+std::vector<TensorView*> uniqueEntries(
+    const std::vector<TensorView*>& tv_deuqe) {
+  std::vector<TensorView*> unique_entries;
+  std::unordered_set<TensorView*> inserted;
+  for (auto tv_entry : tv_deuqe) {
+    if (inserted.emplace(tv_entry).second) {
+      unique_entries.emplace_back(tv_entry);
+    }
+  }
+  return unique_entries;
+}
+
+} // namespace
+
+std::vector<TensorView*> producerTvsOf(TensorView* tv) {
+  auto producer_vals =
+      ir_utils::filterByType<TensorView>(tv->definition()->inputs());
+  return uniqueEntries({producer_vals.begin(), producer_vals.end()});
+}
+
+std::vector<TensorView*> consumerTvsOf(TensorView* tv) {
+  std::vector<TensorView*> consumer_tvs;
+  for (auto use_expr : tv->uses()) {
+    auto outputs = ir_utils::filterByType<TensorView>(use_expr->outputs());
+    consumer_tvs.insert(consumer_tvs.end(), outputs.begin(), outputs.end());
+  }
+  return uniqueEntries(consumer_tvs);
+}
+
+std::vector<TensorView*> producerTvsOf(const std::vector<TensorView*>& tvs) {
+  std::vector<TensorView*> all_producer_tvs;
+  for (auto tv : tvs) {
+    auto producer_tvs = producerTvsOf(tv);
+    all_producer_tvs.insert(
+        all_producer_tvs.end(), producer_tvs.begin(), producer_tvs.end());
+  }
+
+  return uniqueEntries(all_producer_tvs);
+}
+
+std::vector<TensorView*> consumerTvsOf(const std::vector<TensorView*>& tvs) {
+  std::vector<TensorView*> all_consumer_tvs;
+  for (auto tv : tvs) {
+    auto consumer_tvs = consumerTvsOf(tv);
+    all_consumer_tvs.insert(
+        all_consumer_tvs.end(), consumer_tvs.begin(), consumer_tvs.end());
+  }
+
+  return uniqueEntries(all_consumer_tvs);
+}
+
+void parallelizeAllLike(
+    TensorView* reference_tv,
+    const std::vector<TensorView*>& all_tvs) {
+  FusionGuard fg(reference_tv->fusion());
+
+  auto ca_loop_map = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
+  ca_loop_map.build(FusionGuard::getCurFusion());
+  for (auto id : reference_tv->domain()->domain()) {
+    ca_loop_map.getConcreteMappedID(id)->parallelize(id->getParallelType());
+  }
+
+  for (auto tv : all_tvs) {
+    if (tv->isFusionInput()) {
+      continue;
+    }
+    for (size_t i = 0; i < tv->domain()->domain().size(); i++) {
+      tv->axis(i)->parallelize(
+          ca_loop_map.getConcreteMappedID(tv->axis(i))->getParallelType());
+    }
+  }
+}
+
+void computeAtInputs(TensorView* consumer, int pos, ComputeAtMode mode) {
+  auto inp_vals = IterVisitor::getInputsTo({consumer});
+  auto inp_tvs = ir_utils::filterByType<TensorView>(inp_vals);
+  for (auto inp_tv : inp_tvs) {
+    inp_tv->computeAt(consumer, pos, mode);
+  }
+}
+
+void computeWithOutputs(TensorView* producer, int pos, ComputeAtMode mode) {
+  auto out_vals = DependencyCheck::getAllOutputsOf({producer});
+  auto out_tvs = ir_utils::filterByType<TensorView>(out_vals);
+  for (auto out_tv : out_tvs) {
+    producer->computeWith(out_tv, pos, mode);
+  }
+}
+
+std::vector<TensorView*> allTvs(Fusion* fusion) {
+  auto used_vals = DependencyCheck::getAllValsBetween(
+      {fusion->inputs().begin(), fusion->inputs().end()}, fusion->outputs());
+
+  auto used_tvs = ir_utils::filterByType<TensorView>(used_vals);
+  return uniqueEntries({used_tvs.begin(), used_tvs.end()});
 }
 
 } // namespace scheduler_utils
