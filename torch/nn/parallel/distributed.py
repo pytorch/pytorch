@@ -476,7 +476,7 @@ class DistributedDataParallel(Module):
         # debug mode is enabled. Note: need to call this before it is possible
         # that some ranks crash during comm. such as in _verify_model_across_ranks,
         # otherwise other ranks will hang at creating pg.
-        if _GLOO_AVAILABLE and dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
+        if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
             self._cpu_pg = self._create_gloo_pg()
         # Module replication within process (single-process multi device)
         self._module_copies = self._replicate_modules_within_process()
@@ -563,7 +563,10 @@ class DistributedDataParallel(Module):
         self._check_default_group()
         attrs = copy.copy(self.__dict__)
         del attrs['process_group']
-        del attrs['_cpu_pg']
+
+        if hasattr(self, '_cpu_pg'):
+            del attrs['_cpu_pg']
+
         del attrs['reducer']
         del attrs['logger']
         return attrs
