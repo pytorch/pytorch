@@ -181,6 +181,10 @@ enum class DispatchKey : uint8_t {
   // to view/inplace ops to minimize its perf impact to real models.
   InplaceOrView,
 
+  // This key is post-autograd. For pre-autograd keys with backend fallbacks, we'd
+  // need to be careful because RecordFunction can't handle pre-autograd redispatches.
+  AlwaysCall,
+
   // Note [Alias Dispatch Key : Autograd]
   // All backends are oblivious to autograd; autograd is handled as a
   // layer which happens on top of all backends. It inspects the autograd
@@ -254,8 +258,6 @@ enum class DispatchKey : uint8_t {
   // for a usage example
   TESTING_ONLY_GenericMode,
 
-  AlwaysCall,
-
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   NumDispatchKeys, // Sentinel, end of runtime keys.
 
@@ -272,7 +274,7 @@ enum class DispatchKey : uint8_t {
 
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
-  Math, // registered at build/aten/src/ATen/RegisterMath.cpp
+  CompositeImplicitAutograd, // registered at build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
   DefaultBackend, // registered at
                   // build/aten/src/ATen/RegisterDefaultBackend.cpp
 

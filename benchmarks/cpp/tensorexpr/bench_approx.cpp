@@ -278,7 +278,7 @@ static void logit_aten(benchmark::State& state) {
   at::Tensor B_t = torch::randn({state.range(0)});
   auto clamp = 1e-6f;
   for (auto _ : state) {
-    at::native::logit_out(B_t, A_t, clamp);
+    at::native::logit_out(A_t, clamp, B_t);
   }
   state.counters["logit/s"] = benchmark::Counter(
       uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
@@ -302,7 +302,7 @@ static void logit_caffe2(benchmark::State& state) {
   auto X = A_t.data_ptr<float>();
   auto Y = B_t.data_ptr<float>();
   auto clamp = 1e-6f;
-  at::native::logit_out(B_ref, A_t, clamp);
+  at::native::logit_out(A_t, clamp, B_ref);
   logit_caffe2_impl(N, X, Y, clamp);
   TORCH_CHECK(at::allclose(at::nan_to_num(B_t), at::nan_to_num(B_ref)));
 
@@ -348,7 +348,7 @@ static void tanh_aten(benchmark::State& state) {
   at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
   at::Tensor B_t = torch::randn({state.range(0)});
   for (auto _ : state) {
-    at::native::tanh_out(B_t, A_t);
+    at::native::tanh_out(A_t, B_t);
   }
   state.counters["tanh/s"] = benchmark::Counter(
       uint64_t(state.range(0) * state.iterations()), benchmark::Counter::kIsRate);
@@ -364,7 +364,7 @@ static void tanh_caffe2(benchmark::State& state) {
   auto Y = B_t.data_ptr<float>();
   caffe2::CPUContext c;
   auto tanh = caffe2::TanhFunctor<caffe2::CPUContext>();
-  at::native::tanh_out(B_ref, A_t);
+  at::native::tanh_out(A_t, B_ref);
   tanh(N, X, Y, &c);
   TORCH_CHECK(at::native::allclose(B_t, B_ref, 1e-3f, 1e-6f));
 

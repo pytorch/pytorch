@@ -109,8 +109,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::VmapMode:
       return "VmapMode";
 
-    case DispatchKey::Math:
-      return "Math";
+    case DispatchKey::CompositeImplicitAutograd:
+      return "CompositeImplicitAutograd";
 
     case DispatchKey::DefaultBackend:
       return "DefaultBackend";

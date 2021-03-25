@@ -14,7 +14,7 @@ coverage.xml
 .gradle
 .hypothesis
 .mypy_cache
-.pytorch-test-times
+**/.pytorch-test-times
 */*.pyc
 */*.so*
 */**/__pycache__
@@ -173,6 +173,9 @@ docs/source/scripts/activation_images/
 *.swo
 *.swp
 *~
+
+# NFS handle files
+**/.nfs*
 
 # Sublime Text settings
 *.sublime-workspace
