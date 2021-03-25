@@ -653,8 +653,8 @@
           no_output_timeout: "90m"
           command: |
             set -e
-            pip install requests
-            python ./.circleci/scripts/trigger_azure_pipeline.py
+            python3 -m pip install requests
+            python3 ./.circleci/scripts/trigger_azure_pipeline.py
 
   pytorch_doc_test:
     environment:
