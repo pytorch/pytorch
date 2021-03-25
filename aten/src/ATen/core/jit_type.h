@@ -1324,7 +1324,7 @@ struct TORCH_API NoneType : public Type {
     return rhs.kind() == kind();
   }
   std::string str() const override {
-    return "NoneType";
+    return "None";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const override {
     if (rhs->kind() == OptionalType::Kind) {
