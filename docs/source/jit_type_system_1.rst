@@ -87,8 +87,8 @@ where
     * ``Any`` is the Python class name from the typing module, therefore usage of the ``Any`` type requires from ``typing import Any``
     * Since ``Any`` can represent any type, the set of operators allowed to operate on values of this type on Any is limited.
 
-Operators supported for Any type
-""""""""""""""""""""""""""""""""
+Operators supported for ``Any`` type
+""""""""""""""""""""""""""""""""""""
 
 * assignment to data of ``Any`` type
 * binding to parameter or return of ``Any`` type
