@@ -9564,7 +9564,7 @@ Example::
 """.format(**factory_like_common_args))
 
 add_docstr(torch.empty,
-           r"""
+           """
 empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False, \
 memory_format=torch.contiguous_format) -> Tensor
 
