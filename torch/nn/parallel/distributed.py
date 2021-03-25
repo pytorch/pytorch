@@ -395,8 +395,11 @@ class DistributedDataParallel(Module):
 
         assert (
             device_ids is None or len(device_ids) <= 1
-        ), "device_ids can only be 1) None or an empty list, which corresponds to multi-device model mode (used for model parallelism);"
-        " 2) a list that has a single device id, which corresponds to the single-process single-device mode."
+        ), "device_ids can only be 1) None or an empty list,"
+        " which corresponds to multi-device model mode"
+        " (used for modelparallelism);"
+        " 2) a list that has a single device id, "
+        "which corresponds to the single-process single-device mode."
 
         self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
         distinct_device_types = {p.device.type for p in module.parameters()}
