@@ -129,7 +129,8 @@ bool canRunNatively(Node* n) {
       "aten::to",
       "prim::ListConstruct",
       "prim::ListUnpack",
-      "prim::TupleConstruct"};
+      "prim::TupleConstruct",
+      "prim::DictConstruct"};
   auto str = std::string(n->kind().toQualString());
   if (!native_nodes.count(str)) {
     return false;
@@ -882,6 +883,24 @@ std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
       } else {
         tupleConstruct(stack, node->inputs().size());
       }
+      // put output back
+      p_node->Output(0) = std::move(stack[0]);
+    };
+  } else if (n->kind() == prim::DictConstruct) {
+    return [](ProcessedNode* p_node) {
+      // prepare inputs
+      std::vector<IValue> stack;
+      const size_t size = p_node->inputs().size();
+      stack.reserve(size);
+      for (size_t i = 0; i < size; i++) {
+        stack.emplace_back(p_node->Input(i));
+      }
+      // run op
+      auto* node = p_node->node();
+      dictConstruct(
+          stack,
+          node->output()->type()->expectRef<DictType>(),
+          node->inputs().size());
       // put output back
       p_node->Output(0) = std::move(stack[0]);
     };
