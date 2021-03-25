@@ -30,8 +30,14 @@ class MLCAdam(MLCOptimizer):
 
     """
 
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, amsgrad=False, max_gradient_clipping=float("inf"), min_gradient_clipping=float("-inf")):
+    def __init__(self,
+                 params,
+                 lr=1e-3, betas=(0.9, 0.999),
+                 eps=1e-8,
+                 weight_decay=0,
+                 amsgrad=False,
+                 max_gradient_clipping=float("inf"),
+                 min_gradient_clipping=float("-inf")):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -44,13 +50,30 @@ class MLCAdam(MLCOptimizer):
             raise RuntimeError("amsgrad is not supported with MLC backend.")
         use_gradient_clipping = True if (max_gradient_clipping is not float("inf") or
                                          min_gradient_clipping is not float("-inf")) else False
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, amsgrad=amsgrad, use_gradient_clipping=use_gradient_clipping,
-                        max_gradient_clipping=max_gradient_clipping, min_gradient_clipping=min_gradient_clipping)
+        defaults = dict(lr=lr,
+                        betas=betas,
+                        eps=eps,
+                        weight_decay=weight_decay,
+                        amsgrad=amsgrad,
+                        use_gradient_clipping=use_gradient_clipping,
+                        max_gradient_clipping=max_gradient_clipping,
+                        min_gradient_clipping=min_gradient_clipping)
         params = list(params)
         super(MLCAdam, self).__init__(params, defaults)
-        self.mlcopt = torch._C.MLCOptimizerAdam(lr, betas[0], betas[1], eps, weight_decay, use_gradient_clipping, max_gradient_clipping,
+        self.mlcopt = torch._C.MLCOptimizerAdam(lr,
+                                                betas[0],
+                                                betas[1],
+                                                eps,
+                                                weight_decay,
+                                                use_gradient_clipping,
+                                                max_gradient_clipping,
                                                 min_gradient_clipping)
-        self.torchopt = Adam(params, lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, amsgrad=amsgrad)
+        self.torchopt = Adam(params,
+                             lr=lr,
+                             betas=betas,
+                             eps=eps,
+                             weight_decay=weight_decay,
+                             amsgrad=amsgrad)
 
 
 

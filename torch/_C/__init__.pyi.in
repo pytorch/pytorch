@@ -554,6 +554,7 @@ def _valgrind_toggle_and_dump_stats() -> None: ...  # CALLGRIND_TOGGLE_COLLECT a
 
 has_openmp: _bool
 has_mkl: _bool
+has_mlc: _bool
 has_lapack: _bool
 has_cuda: _bool
 has_mkldnn: _bool
@@ -693,6 +694,93 @@ class _TensorBase(object):
 
 # Defined in torch/csrc/multiprocessing/init.cpp
 def _multiprocessing_init() -> None: ...
+
+# Defined in mlc/csrc/MLCInit.mm
+def _get_mlc_enabled() -> _bool: ...  # THPModule_userEnabledMLC
+def _set_mlc_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledMLC
+def _get_mlc_device() -> _int: ...  # THPModule_getMLCDevice
+def _set_mlc_device(arg: _int) -> None: ...  # THPModule_setMLCDevice
+def _get_mlc_cache_memory_limit_mb() -> _int: ...  # THPModule_getMLCCacheMemoryLimitMB
+def _set_mlc_cache_memory_limit_mb(arg: _int) -> None: ...  # THPModule_setMLCCacheMemoryLimitMB
+def _get_mlc_cache_node_limit() -> _int: ...  # THPModule_getMLCCacheNodeLimit
+def _set_mlc_cache_node_limit(arg: _int) -> None: ...  # THPModule_setMLCCacheNodeLimit
+
+class MLCOptimizer:
+    def __init__(self) -> None: ...
+    def step(
+        self,
+        atweights:List[Tensor],
+        atgrads:List[Tensor],
+        weightids:List[_int]) -> List[_int]: ...
+    def get_step_count(self) -> _int: ...
+    def set_step_count(self, step_count:_int) -> None: ...
+    def get_optimizer_data(self) -> Dict[_int, _int]: ...
+    def set_optimizer_data(self, optim_data:Dict[_int, _int]) -> None: ...
+
+class MLCOptimizerSGD:
+    def __init__(
+        self,
+        lr:_float,
+        momentum:_float,
+        dampening:_float,
+        weight_decay:_float,
+        nesterov:_bool,
+        use_gradient_clipping:_bool,
+        gradient_clip_max:_float,
+        gradient_clip_min:_float) -> None: ...
+    def step(
+        self,
+        atweights:List[Tensor],
+        atgrads:List[Tensor],
+        weightids:List[_int]) -> List[_int]: ...
+    def get_step_count(self) -> _int: ...
+    def set_step_count(self, step_count:_int) -> None: ...
+    def get_optimizer_data(self) -> Dict[_int, _int]: ...
+    def set_optimizer_data(self, optim_data:Dict[_int, _int]) -> None: ...
+
+class MLCOptimizerAdam:
+    def __init__(
+        self,
+        lr:_float,
+        beta1:_float,
+        beta2:_float,
+        eps:_float,
+        weight_decay:_float,
+        use_gradient_clipping:_bool,
+        gradient_clip_max:_float,
+        gradient_clip_min:_float) -> None: ...
+    def step(
+        self,
+        atweights:List[Tensor],
+        atgrads:List[Tensor],
+        weightids:List[_int]) -> List[_int]: ...
+    def get_step_count(self) -> _int: ...
+    def set_step_count(self, step_count:_int) -> None: ...
+    def get_optimizer_data(self) -> Dict[_int, _int]: ...
+    def set_optimizer_data(self, optim_data:Dict[_int, _int]) -> None: ...
+
+class MLCOptimizerRMSProp:
+    def __init__(
+        self,
+        lr:_float,
+        momentum:_float,
+        alpha:_float,
+        eps:_float,
+        centered:_bool,
+        weight_decay:_float,
+        use_gradient_clipping:_bool,
+        gradient_clip_max: _float,
+        gradient_clip_min: _float) -> None: ...
+    def step(
+        self,
+        atweights:List[Tensor],
+        atgrads:List[Tensor],
+        weightids:List[_int]) -> List[_int]: ...
+    def get_step_count(self) -> _int: ...
+    def set_step_count(self, step_count:_int) -> None: ...
+    def get_optimizer_data(self) -> Dict[_int, _int]: ...
+    def set_optimizer_data(self, optim_data:Dict[_int, _int]) -> None: ...
+
 
 # Defined in torch/csrc/cuda/Module.cpp
 def _cuda_getCurrentStream(device: _int) -> _int: ...

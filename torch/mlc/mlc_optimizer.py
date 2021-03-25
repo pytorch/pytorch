@@ -58,7 +58,7 @@ class MLCOptimizer(Optimizer):
                     grads.append(p.grad)
                     weightids.append(id(p))
 
-        modified_weights = self.mlcopt.step(updateable, grads, weightids, lr)
+        modified_weights = self.mlcopt.step(updateable, grads, weightids, lr)  # type: ignore[union-attr]
         modified_weights = set(modified_weights)
 
         # One more pass through the parameter set to clear out
@@ -76,8 +76,8 @@ class MLCOptimizer(Optimizer):
                             min_clip = self.defaults.get("min_gradient_clipping", float("-inf"))
                             p.grad, = torch.clamp(p.grad, min_clip, max_clip)
 
-        self.torchopt.param_groups = param_groups_copy
-        self.torchopt.step()
+        self.torchopt.param_groups = param_groups_copy  # type: ignore[union-attr]
+        self.torchopt.step()  # type: ignore[union-attr]
 
         # We need to ensure to materialize the ValueNode prior to sending it to MLC.
         # In the case that it we need to perform a `+=`, this means that the
@@ -96,7 +96,7 @@ class MLCOptimizer(Optimizer):
                 if p.grad is not None:
                     p.grad.detach_()
                     p.grad = None
-        self.torchopt.zero_grad()
+        self.torchopt.zero_grad()  # type: ignore[union-attr]
 
     def state_dict(self):
         # shift everything into self.state
@@ -104,25 +104,26 @@ class MLCOptimizer(Optimizer):
         # or sometimes just str -> stuff for other things like optimizer parameters
         # first fill with torchopt state
         # then fill with our state
-        self.state = {k: {'mlc': 0, 'contents': v} for k, v in self.torchopt.state.items()}
-        mlcdata = self.mlcopt.get_optimizer_data()
+        self.state = {k: {'mlc': 0, 'contents': v}
+                      for k, v in self.torchopt.state.items()}  # type: ignore[union-attr]
+        mlcdata = self.mlcopt.get_optimizer_data()  # type: ignore[union-attr]
 
         for group in self.param_groups:
             for i in range(len(group['params'])):
                 p = group['params'][i]
                 if id(p) in mlcdata:
                     self.state[p] = {'mlc': 1, 'contents': mlcdata[id(p)]}
-        self.state['step_count'] = self.mlcopt.get_step_count()
+        self.state['step_count'] = self.mlcopt.get_step_count()  # type: ignore[union-attr]
 
         ret = super().state_dict()
-        self.state = None
+        self.state = None  # type: ignore[union-attr, assignment]
         return ret
 
     def load_state_dict(self, state_dict):
         super().load_state_dict(state_dict)
         # ok. rebuild from self.state
         if 'step_count' in self.state:
-            self.mlcopt.set_step_count(self.state['step_count'])
+            self.mlcopt.set_step_count(self.state['step_count'])  # type: ignore[union-attr]
 
         del self.state['step_count']
         # split the rest of the parameters.
@@ -136,9 +137,9 @@ class MLCOptimizer(Optimizer):
                 else:
                     torchstate[k] = v['contents']
 
-        self.torchopt.state = torchstate
-        self.mlcopt.set_optimizer_data(mlcstate)
-        self.state = None
+        self.torchopt.state = torchstate  # type: ignore[union-attr]
+        self.mlcopt.set_optimizer_data(mlcstate)  # type: ignore[union-attr]
+        self.state = None  # type: ignore[union-attr, assignment]
 
     def _same_parameters(self, group):
         # Dummy same parameters

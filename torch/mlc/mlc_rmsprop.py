@@ -34,7 +34,14 @@ class MLCRMSprop(MLCOptimizer):
 
     """
 
-    def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0, momentum=0, centered=False,
+    def __init__(self,
+                 params,
+                 lr=1e-2,
+                 alpha=0.99,
+                 eps=1e-8,
+                 weight_decay=0,
+                 momentum=0,
+                 centered=False,
                  max_gradient_clipping=float("inf"), min_gradient_clipping=float("-inf")):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -48,13 +55,33 @@ class MLCRMSprop(MLCOptimizer):
             raise ValueError("Invalid alpha value: {}".format(alpha))
         use_gradient_clipping = True if (max_gradient_clipping is not float("inf") or
                                          min_gradient_clipping is not float("-inf")) else False
-        defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered, weight_decay=weight_decay, use_gradient_clipping=use_gradient_clipping,
-                        max_gradient_clipping=max_gradient_clipping, min_gradient_clipping=min_gradient_clipping)
+        defaults = dict(lr=lr,
+                        momentum=momentum,
+                        alpha=alpha,
+                        eps=eps,
+                        centered=centered,
+                        weight_decay=weight_decay,
+                        use_gradient_clipping=use_gradient_clipping,
+                        max_gradient_clipping=max_gradient_clipping,
+                        min_gradient_clipping=min_gradient_clipping)
         params = list(params)
         super(MLCRMSprop, self).__init__(params, defaults)
-        self.mlcopt = torch._C.MLCOptimizerRMSProp(lr, momentum, alpha, eps, centered, weight_decay, use_gradient_clipping, max_gradient_clipping,
+        self.mlcopt = torch._C.MLCOptimizerRMSProp(lr,
+                                                   momentum,
+                                                   alpha,
+                                                   eps,
+                                                   centered,
+                                                   weight_decay,
+                                                   use_gradient_clipping,
+                                                   max_gradient_clipping,
                                                    min_gradient_clipping)
-        self.torchopt = RMSprop(params, lr=lr, alpha=alpha, eps=eps, weight_decay=weight_decay, momentum=momentum, centered=centered)
+        self.torchopt = RMSprop(params,
+                                lr=lr,
+                                alpha=alpha,
+                                eps=eps,
+                                weight_decay=weight_decay,
+                                momentum=momentum,
+                                centered=centered)
 
     def __setstate__(self, state):
         super(MLCRMSprop, self).__setstate__(state)

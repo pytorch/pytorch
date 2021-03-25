@@ -1,7 +1,7 @@
 import torch
 from .mlc_optimizer import MLCOptimizer
 from ..optim.sgd import SGD
-from ..optim.optimizer import required
+from ..optim.optimizer import required  # type: ignore[attr-defined]
 
 
 class MLCSGD(MLCOptimizer):
