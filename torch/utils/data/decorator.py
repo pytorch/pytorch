@@ -1,6 +1,6 @@
 from typing import Any, Callable, Optional, Type, Union
 from torch.utils.data import IterDataPipe
-from torch.utils.data.typing import _DataPipeMeta
+from torch.utils.data._typing import _DataPipeMeta
 
 
 class functional_datapipe(object):
