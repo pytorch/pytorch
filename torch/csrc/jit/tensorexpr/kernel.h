@@ -36,6 +36,16 @@ class TORCH_API TensorExprKernel {
   }
 
  private:
+  enum ElementType {
+    kAllTypes = 0,
+    kIntegralTypes = 1 << 0,
+    kFloatingPointTypes = 1 << 1,
+    kBoolType = 1 << 2,
+    kComplexTypes = 1 << 3,
+    kQintTypes = 1 << 4,
+    kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
+  };
+
   enum BackendType {
     kUninitialized,
     kSimpleIREval,
@@ -45,6 +55,7 @@ class TORCH_API TensorExprKernel {
   };
 
   void compile();
+  void genInputDebugNames();
 
   void runKernel(Stack& stack);
 
@@ -71,7 +82,11 @@ class TORCH_API TensorExprKernel {
 
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
 
-  void promoteInputs(std::vector<ExprHandle>& inputs);
+  bool checkTypes(const ScalarType highType, const int typeConstraints);
+
+  void promoteInputs(
+      std::vector<ExprHandle>& inputs,
+      int typeConstraints = kAllTypes);
 
   ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
 
@@ -82,7 +97,8 @@ class TORCH_API TensorExprKernel {
   Tensor* computeOneOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      const std::function<ExprHandle(const ExprHandle&)>& innerExpr);
+      const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
+      const int checkParamTypes = kAllTypes);
 
   Tensor* computeTwoOperand(
       const std::string& name,
@@ -101,7 +117,8 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::function<
           ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
-          innerExpr);
+          innerExpr,
+      bool promote_inputs = true);
 
   Tensor* computeConditionWithTwoOperand(
       const std::string& name,
@@ -125,8 +142,7 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeValue(const torch::jit::Value* v);
 
-  Stmt* generateStmt(BackendType backendType);
-  std::vector<CodeGen::BufferArg> prepareBufferArgs();
+  Stmt* transformLoops(BackendType backendType, Stmt* st);
 
   std::string getCodeGenName(BackendType backendType);
 
@@ -136,6 +152,8 @@ class TORCH_API TensorExprKernel {
   BackendType inferBackendTypeFromDevice(at::Device device);
 
   void bindInput(const torch::jit::Value* input);
+
+  Tensor* convertOutputToCorrectStrides(torch::jit::Value* v);
 
   // Captures the information for reduction operation nodes.
   struct ReductionInfo {
@@ -153,52 +171,36 @@ class TORCH_API TensorExprKernel {
   std::vector<int64_t> getReductionAxes(const torch::jit::Node* node);
 
  private:
-  struct ShapeArg {
-    size_t idx;
-    VarHandle var;
+  struct UnpackedTensorOptions {
+    c10::optional<c10::ScalarType> dtype;
+    c10::optional<c10::Layout> layout;
+    c10::optional<c10::Device> device;
+    c10::optional<bool> pinned_memory;
 
-    ShapeArg(size_t i, VarHandle v) : idx(i), var(v) {}
-  };
-
-  struct KernelArg {
-    template <typename B>
-    KernelArg(B&& b) : bufferArg_(std::forward<B>(b)) {}
-
-    template <typename B, typename T>
-    KernelArg(B&& b, T&& sizes, T&& strides)
-        : bufferArg_(b),
-          sizeArgs_(std::forward<T>(sizes)),
-          strideArgs_(std::forward<T>(strides)) {}
-
-    const CodeGen::BufferArg& buffer() const {
-      return bufferArg_;
-    }
-
-    const std::vector<ShapeArg>& sizes() const {
-      return sizeArgs_;
-    }
-
-    const std::vector<ShapeArg>& strides() const {
-      return strideArgs_;
-    }
-
-    CodeGen::BufferArg bufferArg_;
-    std::vector<ShapeArg> sizeArgs_;
-    std::vector<ShapeArg> strideArgs_;
+    UnpackedTensorOptions(const c10::TensorOptions& opts)
+        : dtype(optTypeMetaToScalarType(opts.dtype_opt())),
+          layout(opts.layout_opt()),
+          device(opts.device_opt()),
+          pinned_memory(opts.pinned_memory_opt()) {}
   };
 
   int64_t nInputs_ = 0;
-  std::vector<KernelArg> kernelArgs_;
+  std::vector<CodeGen::BufferArg> bufferArgs_;
+  std::vector<std::vector<int64_t>> tensorOutputSizes_;
+  std::vector<std::vector<int64_t>> tensorOutputStrides_;
+  std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
   std::vector<Tensor*> tensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;
+  std::unordered_map<const torch::jit::Value*, std::string> input_name_map_;
   std::unique_ptr<CodeGen> codegen_;
   at::Device device_ = at::kCPU;
   KernelArena kernelArena_;
   std::vector<TypePtr> inputTypes_;
   std::shared_ptr<Graph> graph_;
   Code code_;
-  bool fallback_{false};
+  bool allow_fallback_{false};
+  bool use_fallback_{false};
   bool hasRandom_{false};
   bool hasBroadcast_{false};
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>

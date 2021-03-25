@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/ScalarOps.h>
 
 namespace at {
 namespace native {
@@ -48,6 +49,23 @@ Tensor _test_string_default(const Tensor& dummy, std::string a, std::string b) {
   TORCH_CHECK(a == expect, "Default A failed");
   TORCH_CHECK(b == expect, "Default B failed");
   return dummy;
+}
+
+// Test that overloads with ambiguity created by defaulted parameters work.
+// The operator declared first should have priority always
+
+// Overload a
+Tensor _test_ambiguous_defaults(const Tensor& dummy, int64_t a, int64_t b) {
+  TORCH_CHECK(a == 1);
+  TORCH_CHECK(b == 1);
+  return c10::scalar_to_tensor(1);
+}
+
+// Overload b
+Tensor _test_ambiguous_defaults(const Tensor& dummy, int64_t a, std::string b) {
+  TORCH_CHECK(a == 2);
+  TORCH_CHECK(b == "2");
+  return c10::scalar_to_tensor(2);
 }
 
 } // namespace native

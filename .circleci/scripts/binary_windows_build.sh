@@ -15,6 +15,10 @@ else
   export VC_YEAR=2019
 fi
 
+if [[ "${DESIRED_CUDA}" == "cu111" ]]; then
+  export BUILD_SPLIT_CUDA="ON"
+fi
+
 set +x
 export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
 export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
@@ -25,6 +29,10 @@ if [[ "$CIRCLECI" == 'true' && -d "C:\\ProgramData\\Microsoft\\VisualStudio\\Pac
   rm -rf "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
   mkdir -p "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
   mv _Instances "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
+fi
+
+if [[ "$CIRCLECI" == 'true' && -d "C:\\Microsoft" ]]; then
+  rm -rf "C:\\Microsoft\\Android*"
 fi
 
 echo "Free space on filesystem before build:"

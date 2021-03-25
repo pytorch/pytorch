@@ -22,7 +22,7 @@ inline void fill_inplace(Tensor& self, Scalar value_scalar) {
 
 namespace detail {
 Tensor& scalar_fill(Tensor& self, Scalar value) {
-  AT_DISPATCH_ALL_TYPES_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kHalf, kBool, kBFloat16, self.scalar_type(), "fill_out", [&]() {
         fill_inplace<scalar_t>(self, value);
       });

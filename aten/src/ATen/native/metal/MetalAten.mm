@@ -16,7 +16,7 @@ at::Tensor& copy_from_metal_(at::Tensor& dst, const at::Tensor& src) {
       src.device().type() == DeviceType::Metal,
       "copy_from_metal input tensor's device is not metal");
   TORCH_INTERNAL_ASSERT(
-      dst.device().type() == DeviceType::CPU,
+      dst.device().is_cpu(),
       "copy_from_metal is implemented only for CPU device output");
   TORCH_INTERNAL_ASSERT(
       dst.layout() == Layout::Strided,
@@ -39,7 +39,7 @@ at::Tensor& copy_to_metal_(at::Tensor& dst, const at::Tensor& src) {
       dst.device().type() == DeviceType::Metal,
       "copy_to_metal_ output tensor's device is not metal");
   TORCH_INTERNAL_ASSERT(
-      src.device().type() == DeviceType::CPU,
+      src.device().is_cpu(),
       "copy_to_metal_ is implemented only for CPU device input");
   TORCH_INTERNAL_ASSERT(
       src.layout() == Layout::Strided,
@@ -153,7 +153,6 @@ Tensor max_pool2d(
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(
       dilation[0] == dilation[1] == 1, "dilation is not supported on MPSCNN");
-  TORCH_CHECK(ceil_mode == false, "ceil_mode is not supported on MPSCNN");
   return mpscnn::max_pool2d(
       input, kernel_size, stride, padding, dilation, ceil_mode);
 }
@@ -173,6 +172,16 @@ Tensor sigmoid(const Tensor& input) {
   return mpscnn::sigmoid(input);
 }
 
+Tensor& hardsigmoid_(Tensor& input) {
+  TORCH_CHECK(input.is_metal());
+  return mpscnn::hardsigmoid_(input);
+}
+
+Tensor& hardswish_(Tensor& input) {
+  TORCH_CHECK(input.is_metal());
+  return mpscnn::hardswish_(input);
+}
+
 Tensor t(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(input.dim() == 2);
@@ -182,6 +191,10 @@ Tensor t(const Tensor& input) {
 Tensor view(const Tensor& input, IntArrayRef size) {
   TORCH_CHECK(input.is_metal());
   return mpscnn::view(input, size);
+}
+
+Tensor cat(const TensorList inputs, int64_t dim) {
+  return mpscnn::cat(inputs, dim);
 }
 
 Tensor upsample_nearest2d_vec(
@@ -260,9 +273,12 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl("relu", TORCH_FN(relu));
   m.impl("relu_", TORCH_FN(relu_));
   m.impl("sigmoid", TORCH_FN(sigmoid));
+  m.impl("hardsigmoid_", TORCH_FN(hardsigmoid_));
+  m.impl("hardswish_", TORCH_FN(hardswish_));
   m.impl("sub.Tensor", TORCH_FN(sub_Tensor));
   m.impl("upsample_nearest2d.vec", TORCH_FN(upsample_nearest2d_vec));
   m.impl("view", TORCH_FN(view));
+  m.impl("_cat", TORCH_FN(cat));
   m.impl("adaptive_avg_pool2d", TORCH_FN(adaptive_avg_pool2d));
   m.impl("hardtanh_", TORCH_FN(hardtanh_));
   m.impl("reshape", TORCH_FN(reshape));

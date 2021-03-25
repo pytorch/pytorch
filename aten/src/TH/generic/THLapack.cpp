@@ -4,10 +4,6 @@
 
 TH_EXTERNC void dgels_(char *trans, int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *work, int *lwork, int *info);
 TH_EXTERNC void sgels_(char *trans, int *m, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, float *work, int *lwork, int *info);
-TH_EXTERNC void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
-TH_EXTERNC void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
-TH_EXTERNC void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
-TH_EXTERNC void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
 TH_EXTERNC void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
 TH_EXTERNC void dgeqrf_(int *m, int *n, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 TH_EXTERNC void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
@@ -31,35 +27,6 @@ void THLapack_(gels)(char trans, int m, int n, int nrhs, scalar_t *a, int lda, s
 #endif
 }
 
-/* Compute for an N-by-N real nonsymmetric matrix A, the eigenvalues and,
-optionally, the left and/or right eigenvectors */
-void THLapack_(geev)(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *wr, scalar_t *wi, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, int *info)
-{
-#ifdef USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
-#else
-  sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
-#endif
-#else
-  THError("geev : Lapack library not found in compile time\n");
-#endif
-}
-
-/* Cholesky factorization based Matrix Inverse */
-void THLapack_(potri)(char uplo, int n, scalar_t *a, int lda, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dpotri_(&uplo, &n, a, &lda, info);
-#else
-  spotri_(&uplo, &n, a, &lda, info);
-#endif
-#else
-  THError("potri: Lapack library not found in compile time\n");
-#endif
-}
-
 /* QR decomposition */
 void THLapack_(geqrf)(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info)
 {
@@ -71,20 +38,6 @@ void THLapack_(geqrf)(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_
 #endif
 #else
   THError("geqrf: Lapack library not found in compile time\n");
-#endif
-}
-
-/* Build Q from output of geqrf */
-void THLapack_(orgqr)(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
-#else
-  sorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
-#endif
-#else
-  THError("orgqr: Lapack library not found in compile time\n");
 #endif
 }
 
