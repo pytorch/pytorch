@@ -83,7 +83,7 @@ MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
 def insert_observer(
         node: Node, observer: torch.quantization.ObserverBase,
         model: torch.nn.Module,
-        activation_post_process_map: Dict[str, List[torch.quantization.ObserverBase]],
+        activation_post_process_map: Dict[str, List[str]],
         activation_post_process_indexes: Dict[str, int],
         env: Dict[Any, Any], observed_graph: Graph, load_arg: Callable,
         observed_node_names_set: Set[str],
@@ -109,7 +109,7 @@ def insert_observer(
     setattr(model, observer_name, observer)
     # put observer instance activation_post_process map
     assert activation_post_process_map is not None
-    activation_post_process_map[node.name].append(observer)
+    activation_post_process_map[node.name].append(observer_name)
     # initialize index map for activation_post_process
     if node.name not in activation_post_process_indexes:
         activation_post_process_indexes[node.name] = 0
@@ -170,7 +170,7 @@ def insert_observer_for_output_of_the_node(
         modules: Dict[str, torch.nn.Module],
         model: torch.nn.Module,
         pattern: Any,
-        activation_post_process_map: Dict[str, List[torch.quantization.ObserverBase]],
+        activation_post_process_map: Dict[str, List[str]],
         activation_post_process_indexes: Dict[str, int],
         env: Dict[Any, Any],
         observed_graph: Graph,
@@ -313,7 +313,7 @@ def insert_observer_for_input_arg_of_observed_node(
         node: Node, observed_node_names_set: Set[str],
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
         model: torch.nn.Module,
-        activation_post_process_map: Dict[str, List[torch.quantization.ObserverBase]],
+        activation_post_process_map: Dict[str, List[str]],
         activation_post_process_indexes: Dict[str, int],
         env: Dict[str, str], observed_graph: Graph,
         load_arg: Callable):
@@ -377,7 +377,7 @@ class Quantizer:
         # mapping from matched node to activation_post_process
         # must be filled before convert
         self.activation_post_process_map: Optional[
-            Dict[str, List[torch.quantization.observer.ObserverBase]]] = None
+            Dict[str, List[str]]] = None
 
         # mapping from matched node to the index of activation_post_process that we are
         # using currently
