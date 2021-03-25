@@ -731,7 +731,7 @@ def onlyOnCPUAndCUDA(fn):
     @wraps(fn)
     def only_fn(self, device, *args, **kwargs):
         if self.device_type != 'cpu' and self.device_type != 'cuda':
-            reason = "Doesn't run on {0}".format(self.device_type)
+            reason = "onlyOnCPUAndCUDA: doesn't run on {0}".format(self.device_type)
             raise unittest.SkipTest(reason)
 
         return fn(self, device, *args, **kwargs)

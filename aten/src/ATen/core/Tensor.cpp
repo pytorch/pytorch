@@ -39,7 +39,7 @@ std::string Tensor::toString() const {
   if (scalar_type() == ScalarType::Undefined) {
     base_str = "UndefinedType";
   } else {
-    base_str = std::string(at::toString(options().backend())) + at::toString(scalar_type()) + "Type";
+    base_str = std::string(at::toString(options().computeDispatchKey())) + at::toString(scalar_type()) + "Type";
   }
   return base_str;
 }
