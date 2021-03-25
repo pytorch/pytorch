@@ -10,7 +10,7 @@ on:
       - labeled
     branches:
       - base/*
-      - gh/*
+      - gh/**
 
 jobs:
   quick-checks:
