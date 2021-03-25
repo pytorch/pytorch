@@ -24,7 +24,9 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/remove_exceptions.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
+#include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -79,6 +81,9 @@ static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
 
+// Controls EliminateExceptions optimization
+static bool exceptions_enabled_ = true;
+
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
 }
@@ -103,6 +108,17 @@ std::atomic<size_t>& getBailoutDepth() {
   }();
   (void)init; // Silence clang-tidy.
   return bailout_depth;
+}
+
+bool exceptionsEnabled() {
+  static const char* enable_c_str = std::getenv("PYTORCH_JIT_EXCEPTIONS");
+  if (!enable_c_str) {
+    return exceptions_enabled_;
+  }
+  if (std::string(enable_c_str) == "0") {
+    return false;
+  }
+  return true;
 }
 
 static bool needsGradientInProfilingMode(Block* b) {
@@ -407,6 +423,9 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
 
+      GRAPH_DEBUG("Before RemoveInplaceOps:\n", *copy);
+      RemoveInplaceOps(copy);
+
       FuseTensorExprs(graph, getFusionGroupInlining() ? 2 : 1);
       GRAPH_DEBUG(
           "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
@@ -440,6 +459,11 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   if (!getGraphExecutorOptimize()) {
     runNooptPassPipeline(copy);
     return;
+  }
+
+  if (!exceptionsEnabled()) {
+    GRAPH_DEBUG("Before EliminateExceptions:\n", *copy);
+    EliminateExceptions(copy);
   }
 
   runPreAutodiffPassPipeline(copy);
