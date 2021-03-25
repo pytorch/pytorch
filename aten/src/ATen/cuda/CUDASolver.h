@@ -169,6 +169,41 @@ template<>
 void potrsBatched<c10::complex<double>>(CUDASOLVER_POTRS_BATCHED_ARGTYPES(c10::complex<double>));
 
 
+
+#define CUDASOLVER_POTRI_BUFFERSIZE_ARGTYPES(Dtype)  \
+    cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, Dtype *A, int lda, int *Lwork
+
+template<class Dtype>
+void potri_buffersize(CUDASOLVER_POTRI_BUFFERSIZE_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potri_buffersize: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void potri_buffersize<float>(CUDASOLVER_POTRI_BUFFERSIZE_ARGTYPES(float));
+template<>
+void potri_buffersize<double>(CUDASOLVER_POTRI_BUFFERSIZE_ARGTYPES(double));
+template<>
+void potri_buffersize<c10::complex<float>>(CUDASOLVER_POTRI_BUFFERSIZE_ARGTYPES(c10::complex<float>));
+template<>
+void potri_buffersize<c10::complex<double>>(CUDASOLVER_POTRI_BUFFERSIZE_ARGTYPES(c10::complex<double>));
+
+
+#define CUDASOLVER_POTRI_ARGTYPES(Dtype)  \
+    cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, Dtype *A, int lda, Dtype *Workspace, int Lwork, int *devInfo
+
+template<class Dtype>
+void potri(CUDASOLVER_POTRI_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potri: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void potri<float>(CUDASOLVER_POTRI_ARGTYPES(float));
+template<>
+void potri<double>(CUDASOLVER_POTRI_ARGTYPES(double));
+template<>
+void potri<c10::complex<float>>(CUDASOLVER_POTRI_ARGTYPES(c10::complex<float>));
+template<>
+void potri<c10::complex<double>>(CUDASOLVER_POTRI_ARGTYPES(c10::complex<double>));
+
+
 #define CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES(Dtype)                        \
   cusolverDnHandle_t handle, int m, int n, int k, const Dtype *A, int lda, \
       const Dtype *tau, int *lwork

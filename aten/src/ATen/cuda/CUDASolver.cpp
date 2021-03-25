@@ -544,6 +544,86 @@ void potrsBatched<c10::complex<double>>(
 }
 
 
+template<>
+void potri_buffersize<float>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, float *A, int lda, int *Lwork
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSpotri_bufferSize(handle, uplo, n, A, lda, Lwork));
+}
+
+template<>
+void potri_buffersize<double>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, double* A, int lda, int* Lwork
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDpotri_bufferSize(handle, uplo, n, A, lda, Lwork));
+}
+
+template<>
+void potri_buffersize<c10::complex<float>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<float>* A, int lda, int* Lwork
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCpotri_bufferSize(
+    handle, uplo, n,
+    reinterpret_cast<cuComplex*>(A),
+    lda, Lwork));
+}
+
+template<>
+void potri_buffersize<c10::complex<double>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<double>* A, int lda, int* Lwork
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZpotri_bufferSize(
+    handle, uplo, n,
+    reinterpret_cast<cuDoubleComplex*>(A),
+    lda, Lwork));
+}
+
+
+template<>
+void potri<float>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, float *A, int lda, float *Workspace, int Lwork, int *devInfo
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnSpotri(handle, uplo, n, A, lda, Workspace, Lwork, devInfo));
+}
+
+template<>
+void potri<double>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, double *A, int lda, double *Workspace, int Lwork, int *devInfo
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnDpotri(handle, uplo, n, A, lda, Workspace, Lwork, devInfo));
+}
+
+template<>
+void potri<c10::complex<float>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<float> *A, int lda, c10::complex<float> *Workspace, int Lwork, int *devInfo
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCpotri(
+    handle,
+    uplo,
+    n,
+    reinterpret_cast<cuComplex*>(A),
+    lda,
+    reinterpret_cast<cuComplex*>(Workspace),
+    Lwork,
+    devInfo));
+}
+
+template<>
+void potri<c10::complex<double>>(
+  cusolverDnHandle_t handle, cublasFillMode_t uplo, int n, c10::complex<double> *A, int lda, c10::complex<double> *Workspace, int Lwork, int *devInfo
+) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZpotri(
+    handle,
+    uplo,
+    n,
+    reinterpret_cast<cuDoubleComplex*>(A),
+    lda,
+    reinterpret_cast<cuDoubleComplex*>(Workspace),
+    Lwork,
+    devInfo));
+}
+
+
 template <>
 void orgqr_buffersize<float>(
     cusolverDnHandle_t handle,
