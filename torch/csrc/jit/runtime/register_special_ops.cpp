@@ -309,8 +309,10 @@ RegisterOperators reg({
                     c10::complex<double>,
                     at::native::scalar_tensor(
                         scalar_val,
-                        at::device(at::kCPU).dtype(
-                            c10::get_default_complex_dtype())))
+                        typeMetaToScalarType(c10::get_default_complex_dtype()),
+                        c10::nullopt /* layout */,
+                        at::kCPU,
+                        c10::nullopt /* pin_memory */))
 
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp
