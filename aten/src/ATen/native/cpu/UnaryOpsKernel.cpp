@@ -303,7 +303,7 @@ static void sgn_kernel(TensorIterator& iter){
   });
 }
 
-static void sinc_kernel(TensorIterator& iter) {
+static void sinc_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "sinc_cpu", [&]() {
     cpu_kernel(
         iter,

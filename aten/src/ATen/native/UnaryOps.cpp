@@ -26,11 +26,15 @@ namespace at {
 
 namespace meta {
 
-TORCH_META_FUNC(sin) (
-  const Tensor& self
-) {
-  build_unary_float_op(maybe_get_output(), self);
-}
+#define CREATE_UNARY_META_FUNC(func)                  \
+  TORCH_META_FUNC(func) (const Tensor& self) {        \
+    build_unary_float_op(maybe_get_output(), self);   \
+  }
+
+// Use this macro iff you need to dispatch and don't need
+// extra error checking/have a different signature, etc.
+CREATE_UNARY_META_FUNC(sin)
+CREATE_UNARY_META_FUNC(sinc)
 
 } // namespace meta
 
@@ -40,6 +44,11 @@ namespace native {
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
 // macro that implements everything, because the former allows some simple preprocessing that are unique to some
 // operators (more is foreseeable) and is more flexible and elegant than the latter.
+#define CREATE_UNARY_TORCH_IMPL_FUNC(func)                                \
+TORCH_IMPL_FUNC(func##_out) (const Tensor& self, const Tensor& result) {  \
+  func##_stub(device_type(), *this);                                      \
+}
+
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
   auto iter = TensorIterator::unary_op(result, self);
@@ -384,17 +393,13 @@ Tensor& sgn_out(const Tensor& self, Tensor& result) {
 Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
-TORCH_IMPL_FUNC(sin_out) (const Tensor& self, const Tensor& result) {
-  sin_stub(device_type(), *this);
-}
+CREATE_UNARY_TORCH_IMPL_FUNC(sin)
 
 Tensor& cos_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, cos_stub); }
 Tensor cos(const Tensor& self) { return unary_op_impl_float(self, cos_stub); }
 Tensor& cos_(Tensor& self) { return unary_op_impl_(self, at::cos_out); }
 
-Tensor& sinc_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, sinc_stub); }
-Tensor sinc(const Tensor& self) { return unary_op_impl_float(self, sinc_stub); }
-Tensor& sinc_(Tensor& self) { return unary_op_impl_(self, at::sinc_out); }
+CREATE_UNARY_TORCH_IMPL_FUNC(sinc)
 
 Tensor& sinh_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, sinh_stub); }
 Tensor sinh(const Tensor& self) { return unary_op_impl_float(self, sinh_stub); }
