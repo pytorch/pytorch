@@ -71,7 +71,7 @@ TEST(InferenceModeTest, TestInferenceTensorCreation) {
     ASSERT_TRUE(is_inference_tensor(c));
 
     torch::Tensor tmp = torch::ones({1, 2, 3}).set_requires_grad(true);
-    ASSERT_TRUE(tmp.requires_grad()); // requires_grad is silently ignored when it's an inference tensor.
+    ASSERT_TRUE(tmp.requires_grad()); // requires_grad=true on inference tensor is no-op.
     ASSERT_TRUE(is_inference_tensor(tmp));
 
     tmp = torch::ones({1, 2, 3}).set_requires_grad(false);
