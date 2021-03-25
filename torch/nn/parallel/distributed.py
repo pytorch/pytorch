@@ -305,12 +305,15 @@ class DistributedDataParallel(Module):
 
     Args:
         module (Module): module to be parallelized
-        device_ids (list of int or torch.device): CUDA devices. This should
-                   only be provided when the input module resides on a single
-                   CUDA device. For single-device modules, the i'th
-                   :attr:`module` replica is placed on ``device_ids[i]``. For
-                   CPU modules, ``device_ids`` must be ``None`` or an empty list.
-                   Multi-device module is no longer supported.
+        device_ids (list of int or torch.device): CUDA devices.
+                   1) For single-device modules, ``device_ids`` should only
+                   contain exactly one device id, which represents the only
+                   CUDA device where the input module resides.
+                   2) For multi-device modules and CPU modules,
+                   ``device_ids`` must be ``None`` or an empty list,
+                   and input data for the forward pass must be placed on the
+                   correct device.
+                   (default: all visible devices for single-device modules)
         output_device (int or torch.device): Device location of output for
                       single-device CUDA modules. For multi-device modules and
                       CPU modules, it must be ``None``, and the module itself
@@ -388,7 +391,8 @@ class DistributedDataParallel(Module):
 
         assert (
             device_ids is None or len(device_ids) <= 1
-        ), "Single-process multiple-device mode is no longer supported by DistributedDataParallel."
+        ), "device_ids can only be 1) None or an empty list, which corresponds to multi-device model mode (used for model parallelism);"
+        " 2) a list that has a single device id, which corresponds to the single-process single-device mode."
 
         self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
         distinct_device_types = {p.device.type for p in module.parameters()}

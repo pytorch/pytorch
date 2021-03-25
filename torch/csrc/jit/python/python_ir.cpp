@@ -615,6 +615,7 @@ void initPythonIRBindings(PyObject* module_) {
   })
       .CREATE_ACCESSOR(Float, f)
       .CREATE_ACCESSOR(Floats, fs)
+      .CREATE_ACCESSOR(Complex, c)
       .CREATE_ACCESSOR(String, s)
       .CREATE_ACCESSOR(Strings, ss)
       .CREATE_ACCESSOR(Int, i)
