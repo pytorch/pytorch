@@ -301,6 +301,11 @@ Normalization functions
 
 .. autofunction:: batch_norm
 
+:hidden:`group_norm`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: group_norm
+
 :hidden:`instance_norm`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
