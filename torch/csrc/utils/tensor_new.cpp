@@ -472,8 +472,8 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
 
   TORCH_WARN_ONCE(
       "Legacy tensor constructor is deprecated. "
-      "Use: torch.tensor(...) for creating a tensor out of a tensor-like object; "
-      "or torch.empty(...) for creating an uninitialized tensor out of dimension sizes.");
+      "Use: torch.tensor(...) for creating tensors from tensor-like objects; "
+      "or torch.empty(...) for creating an uninitialized tensor with specific sizes.");
 
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
