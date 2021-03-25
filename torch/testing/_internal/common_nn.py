@@ -1721,7 +1721,7 @@ new_module_tests = [
         cudnn=True,
         desc='pad1',
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='Conv1d',
@@ -2025,6 +2025,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.01,
     ),
     dict(
         fullname='Conv2d_depthwise',
@@ -2375,7 +2376,7 @@ new_module_tests = [
         cudnn=True,
         desc='1x1x1_no_bias',
         check_with_long_tensor=False,
-        with_tf32=False,
+        with_tf32=True,
         tf32_precision=0.05,
     ),
     dict(
@@ -3798,7 +3799,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='TransformerDecoderLayer',
@@ -3810,7 +3811,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='relu_activation',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='TransformerDecoderLayer',
@@ -3823,7 +3824,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Transformer',
