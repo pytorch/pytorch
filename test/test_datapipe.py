@@ -585,6 +585,7 @@ class TestTyping(TestCase):
         types = ((int, Optional[int]),
                  (List, Union[int, list]),
                  (Tuple[int, str], S),
+                 (Tuple[int, str], tuple),
                  (T, S),
                  (S, T_co),
                  (T, Union[S, Set]))
