@@ -14,19 +14,20 @@ steps:
     IF %ERRORLEVEL% EQU 128 exit 0
   displayName: End previous Python processes
 
-# Always clean up env directory in conda for fresh builds
-- powershell: Remove-Item 'C:\Miniconda\envs' -Recurse -ErrorAction Ignore
-  displayName: Pre-build clean up previous environments
+# Clean up env directory in conda for fresh builds and set up conda environment YAML
+- powershell: |
+    Remove-Item 'C:\Miniconda\envs' -Recurse -ErrorAction Ignore
+    $env:PYTHON_VERSION = $env:SYSTEM_JOBNAME.Substring(3,1) + '.' + $env:SYSTEM_JOBNAME.Substring(4,1)
+    (Get-Content .azure_pipelines\job_templates\common-packages.yml) -replace 'PYTHON_VERSION', $env:PYTHON_VERSION | Out-File -encoding ASCII .azure_pipelines\job_templates\common-packages.yml
+  displayName: Clean up previous environments and Set up conda environment YAML
 
 # Make conda environment and install required packages
 - script: |
-    call conda env create -n $(configuration) --file $(Build.SourcesDirectory)\.azure_pipelines\conda_envs\%configuration:~0,18%_env.yml
-  displayName: Set up conda environment for building from source
-
-- script: |
+    call conda clean --all -y
+    call conda env create -n $(configuration) --file .azure_pipelines\job_templates\common-packages.yml
     call activate $(configuration)
     call conda install -c conda-forge libuv=1.39
-  displayName: Downgrade libuv
+  displayName: Set up conda environment for building from source
 
 - ${{ if eq(parameters.build_stage, 'True') }}:
   # Install MKL

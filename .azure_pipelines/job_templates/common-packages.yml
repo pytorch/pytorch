@@ -1,5 +1,5 @@
 dependencies:
-  - python=3.7.6
+  - python=PYTHON_VERSION
   - numpy
   - ninja
   - pyyaml
@@ -13,3 +13,5 @@ dependencies:
   - six
   - requests
   - dataclasses
+  - pip:
+    - -r ../../requirements.txt

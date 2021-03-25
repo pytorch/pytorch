@@ -61,10 +61,8 @@ stages:
       customMatrixes:
         Py_38:
           configuration: windows_2019_py_38_cpu
-          python_version: 3.8
         Py_37:
           configuration: windows_2019_py_37_cpu
-          python_version: 3.7
 
   - template: job_templates/build-verify-publish-template-win.yml
     parameters:
@@ -77,15 +75,12 @@ stages:
       customMatrixes:
         Py_39_CUDA_112_cuDNN_810:
           configuration: windows_2019_py_39_cuda_112_cudnn_810
-          python_version: 3.9
           CUDA_VERSION: 112
         Py_38_CUDA_102_cuDNN_765:
           configuration: windows_2019_py_38_cuda_102_cudnn_765
-          python_version: 3.8
           CUDA_VERSION: 102
         Py_37_CUDA_101_cuDNN_764:
           configuration: windows_2019_py_37_cuda_101_cudnn_764
-          python_version: 3.7
           CUDA_VERSION: 101
 
 - stage: 'Verify'
