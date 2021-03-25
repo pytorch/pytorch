@@ -3,7 +3,7 @@ import inspect
 import numbers
 import typing
 import enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 _manual_overrides : Dict[Callable, List[inspect.Signature]] = {}
 
@@ -42,6 +42,12 @@ def _torchscript_type_to_python_type(ts_type : 'torch._C.JitType') -> Any:
     eval'ing the annotation_str. _type_eval_globals sets up expressions
     like "List" and "Future" to map to actual types (typing.List and jit.Future)
     """
+    if isinstance(ts_type, torch._C.TupleType) and len(ts_type.elements()) == 0:
+        # TODO: remove after https://github.com/pytorch/pytorch/pull/54641
+        return Tuple[()]
+    if ts_type is torch._C.NoneType.get():
+        # TODO: remove after https://github.com/pytorch/pytorch/pull/54642
+        return type(None)
     return eval(ts_type.annotation_str, _type_eval_globals)
 
 def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> inspect.Signature:
