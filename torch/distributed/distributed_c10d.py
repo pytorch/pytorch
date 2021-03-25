@@ -1117,7 +1117,7 @@ def all_reduce_multigpu(tensor_list,
     tensors should only be GPU tensors
 
     Args:
-        tensor list (List[Tensor]): List of input and output tensors of
+        tensor_list (List[Tensor]): List of input and output tensors of
             the collective. The function operates in-place and requires that
             each tensor to be a GPU tensor on different GPUs.
             You also need to make sure that ``len(tensor_list)`` is the same for
