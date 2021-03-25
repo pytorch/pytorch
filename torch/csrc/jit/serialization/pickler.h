@@ -43,7 +43,6 @@ using TensorIndexMap = std::unordered_map<
     tensor_value_hash,
     tensor_value_equal>;
 
-
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
   MARK = '(',

@@ -602,10 +602,10 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //  Module m =
   //  load("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
   //  m._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
-//  Module m = load(
-//      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
-//  m._save_for_mobile(
-//      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
+  //  Module m = load(
+  //      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_resave.ptl");
+  //  m._save_for_mobile(
+  //      "/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
 
   //  c._save_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/test.ptl");
   //  mobile::Module bc =
