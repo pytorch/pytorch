@@ -5,6 +5,7 @@
 #include <caffe2/serialize/inline_container.h>
 
 namespace torch {
+namespace deploy {
 
 struct InterpreterSessionImpl;
 
@@ -23,16 +24,17 @@ struct PickledObject {
 // link against libpython. Instead all interaction with the Python state in each
 // interpreter is done via this wrapper class, and methods on
 // InterpreterSession.
-struct PythonObject {
+struct Obj {
   friend struct InterpreterSessionImpl;
-  PythonObject() : interaction_(nullptr), id_(0) {}
-  PythonObject(InterpreterSessionImpl* interaction, int64_t id)
+  Obj() : interaction_(nullptr), id_(0) {}
+  Obj(InterpreterSessionImpl* interaction, int64_t id)
       : interaction_(interaction), id_(id) {}
 
   at::IValue toIValue() const;
-  PythonObject operator()(at::ArrayRef<PythonObject> args);
-  PythonObject operator()(at::ArrayRef<at::IValue> args);
-  PythonObject attr(const char* attr);
+  Obj operator()(at::ArrayRef<Obj> args);
+  Obj operator()(at::ArrayRef<at::IValue> args);
+  Obj call_kwargs(std::vector<std::tuple<std::string, at::IValue>> kwargs);
+  Obj attr(const char* attr);
 
  private:
   InterpreterSessionImpl* interaction_;
@@ -41,38 +43,36 @@ struct PythonObject {
 
 struct InterpreterSessionImpl {
   friend struct Package;
-  friend struct MovableObject;
-  friend struct PythonObject;
+  friend struct ReplicatedObj;
+  friend struct Obj;
   friend struct InterpreterSession;
-  friend struct MovableObjectImpl;
+  friend struct ReplicatedObjImpl;
 
   virtual ~InterpreterSessionImpl() = default;
 
  private:
-  virtual PythonObject global(const char* module, const char* name) = 0;
-  virtual PythonObject from_ivalue(at::IValue value) = 0;
-  virtual PythonObject create_or_get_package_importer_from_container_file(
+  virtual Obj global(const char* module, const char* name) = 0;
+  virtual Obj from_ivalue(at::IValue value) = 0;
+  virtual Obj create_or_get_package_importer_from_container_file(
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           container_file_) = 0;
 
-  virtual PickledObject pickle(PythonObject container, PythonObject obj) = 0;
-  virtual PythonObject unpickle_or_get(
-      int64_t id,
-      const PickledObject& obj) = 0;
+  virtual PickledObject pickle(Obj container, Obj obj) = 0;
+  virtual Obj unpickle_or_get(int64_t id, const PickledObject& obj) = 0;
   virtual void unload(int64_t id) = 0;
 
-  virtual at::IValue toIValue(PythonObject obj) const = 0;
+  virtual at::IValue toIValue(Obj obj) const = 0;
 
-  virtual PythonObject call(
-      PythonObject obj,
-      at::ArrayRef<PythonObject> args) = 0;
-  virtual PythonObject call(
-      PythonObject obj,
-      at::ArrayRef<at::IValue> args) = 0;
-  virtual PythonObject attr(PythonObject obj, const char* attr) = 0;
+  virtual Obj call(Obj obj, at::ArrayRef<Obj> args) = 0;
+  virtual Obj call(Obj obj, at::ArrayRef<at::IValue> args) = 0;
+  virtual Obj call_kwargs(
+      Obj obj,
+      std::vector<std::tuple<std::string, at::IValue>> kwargs) = 0;
+  virtual Obj attr(Obj obj, const char* attr) = 0;
+
 
  protected:
-  int64_t ID(PythonObject obj) const {
+  int64_t ID(Obj obj) const {
     return obj.id_;
   }
 };
@@ -82,23 +82,27 @@ struct InterpreterImpl {
   virtual ~InterpreterImpl() = default; // this will uninitialize python
 };
 
-// inline definitions for PythonObject are necessary to avoid introducing a
+// inline definitions for Objs are necessary to avoid introducing a
 // source file that would need to exist it both the libinterpreter.so and then
 // the libtorchpy library.
-inline at::IValue PythonObject::toIValue() const {
+inline at::IValue Obj::toIValue() const {
   return interaction_->toIValue(*this);
 }
 
-inline PythonObject PythonObject::operator()(at::ArrayRef<PythonObject> args) {
+inline Obj Obj::operator()(at::ArrayRef<Obj> args) {
   return interaction_->call(*this, args);
 }
 
-inline PythonObject PythonObject::operator()(at::ArrayRef<at::IValue> args) {
+inline Obj Obj::operator()(at::ArrayRef<at::IValue> args) {
   return interaction_->call(*this, args);
 }
 
-inline PythonObject PythonObject::attr(const char* attr) {
+inline Obj Obj::call_kwargs(std::vector<std::tuple<std::string, at::IValue>> kwargs) {
+  return interaction_->call_kwargs(*this, std::move(kwargs));
+}
+inline Obj Obj::attr(const char* attr) {
   return interaction_->attr(*this, attr);
 }
 
+} // namespace deploy
 } // namespace torch

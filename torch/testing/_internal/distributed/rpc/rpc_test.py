@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+from threading import Event
 from threading import Lock
 import time
 import unittest
@@ -326,6 +327,10 @@ def my_script_func(tensor):
 
 expected_err = "Expected error"
 def raise_func():
+    raise ValueError(expected_err)
+
+@torch.jit.script
+def raise_func_script(expected_err: str) -> torch.Tensor:
     raise ValueError(expected_err)
 
 expected_err_escape = "\nFirst line of error \n next line of error \n last line of error"
@@ -3034,6 +3039,77 @@ class RpcTest(RpcAgentTestFixture):
                 raise_func()
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
+
+    timed_out_rpc_event = None
+
+    @staticmethod
+    def timed_out_rpc():
+        RpcTest.timed_out_rpc_event.wait()
+
+    @dist_init
+    def test_wait_all_exit_early_python(self):
+        # Initialize the event in the subprocess.
+        RpcTest.timed_out_rpc_event = Event()
+
+        # Wait for all processes to initialize event.
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        dist.barrier()
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        fut1 = rpc.rpc_async(dst, RpcTest.timed_out_rpc)
+        fut2 = rpc.rpc_async(dst, raise_func)
+        fut3 = rpc.rpc_async(dst, raise_func)
+
+        # We should receive the error from fut2
+        with self.assertRaisesRegex(ValueError, expected_err):
+            torch.futures.wait_all([fut1, fut2, fut3])
+
+        # Unblock RPC thread for fut1
+        RpcTest.timed_out_rpc_event.set()
+
+    @dist_init
+    def test_wait_all_exit_early_builtin(self):
+        # Initialize the event in the subprocess.
+        RpcTest.timed_out_rpc_event = Event()
+
+        # Wait for all processes to initialize event.
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        dist.barrier()
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        fut1 = rpc.rpc_async(dst, RpcTest.timed_out_rpc)
+        fut2 = rpc.rpc_async(dst, torch.add, args=(torch.rand(10), torch.rand(5)))
+        fut3 = rpc.rpc_async(dst, torch.add, args=(torch.rand(10), torch.rand(5)))
+
+        # We should receive the error from fut2
+        with self.assertRaisesRegex(RuntimeError, "size of tensor"):
+            torch.futures.wait_all([fut1, fut2, fut3])
+
+        # Unblock RPC thread for fut1
+        RpcTest.timed_out_rpc_event.set()
+
+    @dist_init
+    def test_wait_all_exit_early_script_function(self):
+        # Initialize the event in the subprocess.
+        RpcTest.timed_out_rpc_event = Event()
+
+        # Wait for all processes to initialize event.
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        dist.barrier()
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        fut1 = rpc.rpc_async(dst, RpcTest.timed_out_rpc)
+        fut2 = rpc.rpc_async(dst, raise_func_script, args=(expected_err,))
+        fut3 = rpc.rpc_async(dst, raise_func_script, args=(expected_err,))
+
+        # We should receive the error from fut2
+        with self.assertRaisesRegex(RuntimeError, expected_err):
+            torch.futures.wait_all([fut1, fut2, fut3])
+
+        # Unblock RPC thread for fut1
+        RpcTest.timed_out_rpc_event.set()
+
+
     @dist_init
     def test_function_not_on_callee(self):
         # test that if a function does not exist on a callee, we don't crash,
@@ -4697,6 +4773,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
+    @unittest.skip("Disallow new devices in user-function output tensors. See https://github.com/pytorch/pytorch/issues/54017")
     @skip_if_lt_x_gpu(2)
     def test_device_maps_gpu(self):
         options = self.rpc_backend_options
@@ -4731,6 +4808,53 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             return x.to(z_to) + y.to(z_to)
         else:
             raise ValueError("Wrong device affinity")
+
+    def _test_device_maps_new_gpu(self, x_from, y_from, z_to, device_map, dst=None):
+        x_to = device_map[x_from]
+        y_to = device_map[y_from]
+
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size) if dst is None else dst
+        options.set_device_map(dst, device_map)
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        x = torch.zeros(2).to(x_from)
+        y = torch.ones(2).to(y_from)
+
+        errMsg = "RPC detected that a user-function output tensor on device"
+        with self.assertRaisesRegex(RuntimeError, errMsg):
+            ret = rpc.rpc_sync(
+                dst,
+                TensorPipeAgentRpcTest._gpu_add_given_gpus,
+                args=(x, y, x_to, y_to, z_to)
+            )
+
+        rpc.shutdown()
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_error_on_new_gpu_0(self):
+        self._test_device_maps_new_gpu(
+            x_from=1,
+            y_from=1,
+            z_to=0,
+            device_map={0 : 0, 1 : 1}
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_error_on_new_gpu_1(self):
+        self._test_device_maps_new_gpu(
+            x_from=0,
+            y_from=0,
+            z_to=1,
+            device_map={0 : 0, 1 : 1}
+        )
 
     def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map, dst=None):
         x_to = device_map[x_from]

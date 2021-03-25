@@ -19,7 +19,7 @@ from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
-from jit.test_freezing import TestFreezing, TestFrozenOptimizations  # noqa: F401
+from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_module_containers import TestModuleContainers  # noqa: F401
@@ -1137,7 +1137,7 @@ class TestJit(JitTestCase):
         out = torch.empty([2, 5], dtype=torch.complex128)
         self.checkScript(fn_out, (real, img, out, ))
 
-    def test_torch_complex_scalar(self):
+    def test_complex_constructor(self):
         # Test all scalar types
         def fn_int(real: int, img: int):
             return complex(real, img)
@@ -1211,45 +1211,41 @@ class TestJit(JitTestCase):
         self.checkScript(fn_int_float, (-3, 0.0, ))
         self.checkScript(fn_int_float, (2, -8.9, ))
 
-    def test_torch_complex_fails(self):
-        # The following operations are not allowed
-        # in Torchscript
+    def test_torch_complex_constructor_with_tensor(self):
+        tensors = ([torch.rand(1), torch.randint(-5, 5, (1, )), torch.tensor([False])])
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_tensor_float(real, img: float):
-                return complex(real, img)
-            fn_tensor_float(torch.rand(1), 1.2)
+        def fn_tensor_float(real, img: float):
+            return complex(real, img)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_tensor_float(real: float, img):
-                return complex(real, img)
-            fn_tensor_float(2.4, torch.rand(1))
+        def fn_tensor_int(real, img: int):
+            return complex(real, img)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_int_tensor(real: int, img):
-                return complex(real, img)
-            fn_int_tensor(6, torch.rand(1))
+        def fn_tensor_bool(real, img: bool):
+            return complex(real, img)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_bool_tensor(real: bool, img):
-                return complex(real, img)
-            fn_bool_tensor(True, torch.rand(1))
+        def fn_float_tensor(real: float, img):
+            return complex(real, img)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_int_tensor(real: int, img):
-                return complex(real, img)
-            fn_int_tensor(4, torch.rand(1))
+        def fn_int_tensor(real: int, img):
+            return complex(real, img)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot input a tensor of dimension"):
-            @torch.jit.script
-            def fn_bool_tensor(real, img: bool):
-                return complex(real, img)
-            fn_bool_tensor(torch.rand(1), False)
+        def fn_bool_tensor(real: bool, img):
+            return complex(real, img)
+
+        for tensor in tensors:
+            self.checkScript(fn_tensor_float, (tensor, 1.2))
+            self.checkScript(fn_tensor_int, (tensor, 3))
+            self.checkScript(fn_tensor_bool, (tensor, True))
+
+            self.checkScript(fn_float_tensor, (1.2, tensor))
+            self.checkScript(fn_int_tensor, (3, tensor))
+            self.checkScript(fn_bool_tensor, (True, tensor))
+
+        def fn_tensor_tensor(real, img):
+            return complex(real, img) + complex(2)
+
+        for x, y in product(tensors, tensors):
+            self.checkScript(fn_tensor_tensor, (x, y, ))
 
     def test_torch_sum(self):
         def fn(x):
@@ -7529,7 +7525,8 @@ a")
 
         dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
                   ", dtype=torch.uint8", ", dtype=torch.int8", ", dtype=torch.short",
-                  ", dtype=torch.int", ", dtype=torch.long"]
+                  ", dtype=torch.int", ", dtype=torch.long", ", dtype=torch.cfloat",
+                  ", dtype=torch.cdouble"]
 
         ops = ['tensor', 'as_tensor']
         devices = ['', ", device='cpu'"]
@@ -7557,10 +7554,11 @@ a")
                     self.assertEqual(t1.device, t2.device)
 
         def test_as_tensor_tensor_input(input):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return torch.as_tensor(input, dtype=torch.float), torch.as_tensor(input, dtype=torch.int32)
+            # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
+            return torch.as_tensor(input, dtype=torch.cfloat), torch.as_tensor(input, dtype=torch.float), \
+                torch.as_tensor(input, dtype=torch.int32)
 
-        inp = torch.randn(3, 4)
+        inp = torch.randn(3, 4, dtype=torch.cfloat)
         self.checkScript(test_as_tensor_tensor_input, (inp,))
 
     def test_torch_tensor_dtype(self):
@@ -9282,6 +9280,47 @@ dedent """
 
         self.checkScript(torch_unique_consecutive, (None,))
         self.checkScript(torch_unique_consecutive, (0,))
+
+    def test_torch_functional_tensordot_int(self):
+        def tensordot_dims_int(a: torch.Tensor, b: torch.Tensor, dims: int):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(120.).reshape(2, 3, 4, 5)
+        b = torch.arange(840.).reshape(4, 5, 6, 7)
+        dims = 2
+        self.checkScript(tensordot_dims_int, (a, b, dims))
+
+    def test_torch_functional_tensordot_tensor(self):
+        def tensordot_dims_tensor(a: torch.Tensor, b: torch.Tensor, dims: torch.Tensor):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(120.).reshape(2, 3, 4, 5)
+        b = torch.arange(840.).reshape(4, 5, 6, 7)
+        dims = torch.Tensor([2])
+        self.checkScript(tensordot_dims_tensor, (a, b, dims))
+
+        a = torch.arange(60.).reshape(3, 4, 5)
+        b = torch.arange(24.).reshape(4, 3, 2)
+        dims = torch.tensor([[1, 0], [0, 1]], dtype=torch.long)
+        self.checkScript(tensordot_dims_tensor, (a, b, dims))
+
+    def test_torch_functional_tensordot_list(self):
+        def tensordot_dims_list(a: torch.Tensor, b: torch.Tensor, dims: List[List[int]]):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(60.).reshape(3, 4, 5)
+        b = torch.arange(24.).reshape(4, 3, 2)
+        dims = [[1, 0], [0, 1]]
+        self.checkScript(tensordot_dims_list, (a, b, dims))
+
+    def test_torch_functional_tensordot_tuple(self):
+        def tensordot_dims_tuple(a: torch.Tensor, b: torch.Tensor, dims: Tuple[List[int], List[int]]):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(60.).reshape(3, 4, 5)
+        b = torch.arange(24.).reshape(4, 3, 2)
+        dims = ([1, 0], [0, 1])
+        self.checkScript(tensordot_dims_tuple, (a, b, dims))
 
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
@@ -16542,7 +16581,7 @@ for test in autograd_method_tests():
 # NB: There isn't much utility in running these tests for CUDA, as the kernels
 # are exercised in test_autograd.py, and the JIT tests intention is to test the
 # JIT infrastructure around it, not the kernels themselves
-instantiate_device_type_tests(TestJitGeneratedAutograd, globals(), except_for='cuda')
+instantiate_device_type_tests(TestJitGeneratedAutograd, globals(), only_for='cpu')
 
 for test in nn_functional_tests:
     add_nn_functional_test(*test)

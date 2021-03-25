@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
-    skipCUDAMemoryLeakCheckIf, BytesIOContext,
+    skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor, _wrap_warn_once)
 from multiprocessing.reduction import ForkingPickler
@@ -2581,6 +2581,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertEqual(output3, output1)
                     self.assertEqual(output3, output2)
 
+        @noarchTest
         def test_empty_meta(self):
             x = torch.empty(2 ** 20, 2 ** 20, device='meta')
             y = torch.empty(2 ** 20, device='meta')
@@ -2588,10 +2589,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(z.size(), (2 ** 20, 2 ** 20))
             self.assertRaises(RuntimeError, lambda: z[0][0].item())
 
+        @noarchTest
         def test_upsample_nearest1d_meta(self):
-            # TODO: this is not a sustainable way of testing meta functions,
-            # but I want some quick scaffolding first before a more
-            # integrated testing strategy
+            # TODO: this test should be triggered by test_nn.py but right
+            # now meta is not enabled (and even if it was, we are probably
+            # missing too many meta functions to get through the test unmolested)
+
             # NB: Can't make the exponent too big, or it will overflow
             # signed 64-bit integer
             x = torch.empty(2 * 10 ** 8, 3, 2 * 10 ** 8, device='meta')
@@ -2599,12 +2602,54 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
             self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
+            # TODO: the out tests cannot be triggered by test_nn.py because
+            # we don't actually do out= arguments for nn functions, so there
+            # is no public API by which to get the out version
+
             # interpolate doesn't seem to support out=
             # (not sure why passing None here doesn't work? How strange...)
             z = torch.empty(0, device='meta')
             torch._C._nn.upsample_nearest1d(x, (4 * 10 ** 8,), 2, out=z)
             self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
             self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
+
+        @noarchTest
+        def test_upsample_nearest2d_meta(self):
+            # TODO: the out tests cannot be triggered by test_nn.py because
+            # we don't actually do out= arguments for nn functions, so there
+            # is no public API by which to get the out version
+
+            # Make sure we don't clobber strides of out tensor.  NB: this
+            # test must be done on 2d/3d, because 1d doesn't have any meaningful
+            # layout support
+            x = torch.empty(4, 3, 8, 8, device='meta')
+            out = torch.empty(4, 3, 16, 16, device='meta', memory_format=torch.channels_last)
+            torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+
+            x = torch.empty(4, 3, 8, 8, device='meta', memory_format=torch.channels_last)
+            out = torch.empty(4, 3, 16, 16, device='meta')
+            torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
+            self.assertTrue(out.is_contiguous())
+
+            # But if resize occurs, do clobber
+            x = torch.empty(4, 3, 8, 8, device='meta', memory_format=torch.channels_last)
+            out = torch.empty(0, device='meta')
+            torch._C._nn.upsample_nearest2d(x, (16, 16), out=out)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+
+        @noarchTest
+        def test_detach_meta(self):
+            x = torch.empty(2, device='meta')
+            # This used to segfault
+            self.assertRaises(RuntimeError, lambda: x.detach().storage())
+
+        @noarchTest
+        def test_add_meta_scalar(self):
+            # From https://github.com/pytorch/pytorch/issues/53815
+            x = torch.empty(2, device='meta')
+            y = x + 2
+            self.assertEqual(y.size(), x.size())
 
         def test_normal_shape(self):
             warned = False
@@ -4446,37 +4491,75 @@ class TestTorchDeviceType(TestCase):
             sz[d] = 0
             self.assertEqual(sz, y.size())
 
-    def test_index_copy(self, device):
-        num_copy, num_dest = 3, 20
-        dest = torch.randn(num_dest, 4, 5, device=device)
-        src = torch.randn(num_copy, 4, 5, device=device)
-        idx = torch.randperm(num_dest, device=device).narrow(0, 0, num_copy)
-        dest2 = dest.clone()
-        dest.index_copy_(0, idx, src)
-        for i in range(idx.size(0)):
-            dest2[idx[i]] = src[i]
-        self.assertEqual(dest, dest2, atol=0, rtol=0)
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_index_copy(self, device, dtype):
+        # We just test for num_copy <= num_dest, as otherwise there are repeated indices
+        # and the behavior is undefined
+        num_copy, num_dest = 3, 5
 
-        dest = torch.randn(num_dest, device=device)
-        src = torch.randn(num_copy, device=device)
-        idx = torch.randperm(num_dest, device=device).narrow(0, 0, num_copy)
-        dest2 = dest.clone()
-        dest.index_copy_(0, idx, src)
-        for i in range(idx.size(0)):
-            dest2[idx[i]] = src[i]
-        self.assertEqual(dest, dest2, atol=0, rtol=0)
+        def make_arg(batch_sizes, n, dim, contig):
+            size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
+            return make_tensor(size_arg, device, dtype, low=None, high=None, discontiguous=not contig)
 
-        # Bool tensor
-        dest = torch.zeros(2, 2, dtype=torch.bool, device=device)
-        src = torch.tensor([[True, True], [True, True]], device=device)
-        index = torch.tensor([0, 1], device=device)
-        dest.index_copy_(0, index, src)
-        self.assertEqual(dest, torch.tensor([[True, True], [True, True]], device=device))
+        def ref_index_copy(tgt, dim, idx, src):
+            for i in range(idx.size(0)):
+                idx_dest = dim * (slice(None),) + (idx[i],)
+                idx_src = dim * (slice(None),) + (i,)
+                tgt[idx_dest] = src[idx_src]
 
-        # Error cases
-        a = torch.randn(3, 5)
-        c = torch.zeros(3)
-        self.assertRaises(IndexError, lambda: a.index_copy_(dim=1, index=torch.tensor([3]), source=c))
+        # More thorough testing as in index_add
+        for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
+            for other_sizes in ((), (4, 5)):
+                for dim in range(len(other_sizes)):
+                    dest = make_arg(other_sizes, num_dest, dim, dest_contig)
+                    src = make_arg(other_sizes, num_copy, dim, src_contig)
+                    idx = torch.randperm(num_dest, dtype=torch.int64, device=device)[:num_copy]
+                    if not index_contig:
+                        idx = torch.repeat_interleave(idx, 2, dim=-1)
+                        idx = idx[..., ::2]
+                    dest2 = dest.clone()
+                    dest.index_copy_(dim, idx, src)
+                    ref_index_copy(dest2, dim, idx, src)
+                    self.assertEqual(dest, dest2)
+
+    # onlyOnCPUAndCUDA due to an XLA error:
+    # https://github.com/pytorch/pytorch/issues/53256
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_index_copy_scalars(self, device, dtype):
+        # Create the 8 possible combinations of scalar sizes for target / index / source
+        scalars = ((make_tensor(size_t, dtype=dtype, device=device, low=None, high=None),
+                    make_tensor(size_i, dtype=torch.int64, device=device, low=0, high=1),
+                    make_tensor(size_s, dtype=dtype, device=device, low=None, high=None))
+                   for size_t, size_i, size_s in product([(), (1,)], repeat=3))
+        for target, idx, source in scalars:
+            target.index_copy_(0, idx, source)
+            self.assertEqual(target.item(), source.item())
+
+    @onlyCPU
+    def test_errors_index_copy(self, device):
+        # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
+        idx_dim = 8
+        tgt_dim = 5
+        batch_dim = 3
+
+        # Too large of an index
+        a = torch.randn(batch_dim, tgt_dim, device=device)
+        idx = torch.full((idx_dim,), tgt_dim, device=device)
+        c = torch.zeros(batch_dim, idx_dim, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+        # Too small (negative indices)
+        idx = torch.full((idx_dim,), -1, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+        # Too small (very negative indices) - they should be unsupported even
+        # when support for negative indices is implemented for index_copy_
+        idx = torch.full((idx_dim,), -tgt_dim - 1, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
 
     # Ensures that index_copy throws nondeterministic alerts in the correct cases
     @onlyOnCPUAndCUDA
@@ -4516,38 +4599,50 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(0, x.index_fill(0, index, -1).dim())
         self.assertEqual(0, x.index_fill_(0, index, -1).dim())
 
-    def test_index_select(self, device):
-        for dtype in [torch.int, torch.long]:
-            src = torch.randn(3, 4, 5, device=device)
-            # Index can be duplicated.
-            idx = torch.tensor([2, 1, 0, 1, 2], dtype=dtype, device=device)
-            dest = torch.index_select(src, 0, idx)
-            self.assertEqual(dest.shape, (5, 4, 5))
-            for i in range(idx.size(0)):
-                self.assertEqual(dest[i], src[idx[i]])
+    # The test fails for zero-dimensional tensors on XLA
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_index_select(self, device, dtype):
+        num_src, num_out = 3, 5
 
-            # Check that 'out' is used correctly.
-            out = torch.randn(5 * 4 * 5, device=device)
-            dest = torch.index_select(src, 0, idx, out=out.view(5, 4, 5))
-            self.assertEqual(dest.shape, (5, 4, 5))
-            for i in range(idx.size(0)):
-                self.assertEqual(dest[i], src[idx[i]])
-            out.fill_(0.123)
-            self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
+        def make_arg(batch_sizes, n, dim, contig):
+            size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
+            return make_tensor(size_arg, device, dtype, low=None, high=None, discontiguous=not contig)
 
-            # Bool tensor
-            src = torch.tensor([False, True, False, False], device=device, dtype=torch.bool)
-            idx = torch.tensor([1], dtype=dtype, device=device)
-            dest = torch.index_select(src, 0, idx)
-            self.assertEqual(torch.tensor([True]), dest)
+        def ref_index_select(src, dim, idx):
+            # bfloat16 is just used on GPU, so it's not supported on numpy
+            if dtype == torch.bfloat16:
+                src = src.float()
+            out = torch.from_numpy(np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim))
+            if dtype == torch.bfloat16:
+                out = out.to(device=device, dtype=dtype)
+            return out
 
-            # Complex Tensor
-            src = torch.randn(3, 4, 5, dtype=torch.complex64, device=device)
-            idx = torch.tensor([2, 1, 0, 1, 2], dtype=dtype, device=device)
-            dest = torch.index_select(src, 0, idx)
-            self.assertEqual(dest.shape, (5, 4, 5))
-            for i in range(idx.size(0)):
-                self.assertEqual(dest[i], src[idx[i]])
+        for src_contig, idx_contig in product([True, False], repeat=2):
+            for other_sizes in ((), (4, 5)):
+                for dim in range(len(other_sizes)):
+                    src = make_arg(other_sizes, num_src, dim, src_contig)
+                    idx = make_tensor((num_out,), device, dtype=torch.int64, low=0, high=num_src, discontiguous=not idx_contig)
+                    out = torch.index_select(src, dim, idx)
+                    out2 = ref_index_select(src, dim, idx)
+                    self.assertEqual(out, out2)
+
+        for idx_type in (torch.int32, torch.int64):
+            other_sizes = (3, 2)
+            dim = 1
+            src = make_arg(other_sizes, num_src, dim, True)
+            idx = make_tensor((num_out,), device, dtype=idx_type, low=0, high=num_src, discontiguous=False)
+            out = torch.index_select(src, dim, idx)
+            out2 = ref_index_select(src, dim, idx)
+            self.assertEqual(out, out2)
+
+        # Create the 4 possible combinations of scalar sizes for index / source
+        scalars = ((make_tensor(size_s, device, dtype),
+                    torch.zeros(size_i, dtype=torch.int64, device=device))
+                   for size_s, size_i in product([(), (1,)], repeat=2))
+        for source, idx in scalars:
+            out = source.index_select(0, idx)
+            self.assertEqual(out.item(), source.item())
 
     def test_take_empty(self, device):
         for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
@@ -7090,7 +7185,6 @@ tensor_op_tests = [
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
-    ('sign', '', _small_3d, lambda t, d: []),
 ]
 
 # Creates and decorates a generic test and adds it to the class.

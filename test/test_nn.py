@@ -888,6 +888,108 @@ class TestNN(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
 
+    def test_Conv1d_module_same_padding(self):
+        # Compare module against functional: without strides/dilation, asymmetric padding
+        x = torch.rand(1, 1, 20)
+        module = nn.Conv1d(in_channels=1, out_channels=1, kernel_size=10,
+                           padding='same')
+        expect = F.conv1d(x, module.weight, module.bias, padding='same')
+        self.assertEqual(expect, module(x))
+
+        # Test dilation, symmetric padding
+        module = nn.Conv1d(in_channels=1, out_channels=1, kernel_size=10,
+                           padding='same', dilation=2)
+        expect = F.conv1d(x, module.weight, module.bias, padding='same', dilation=2)
+        self.assertEqual(expect, module(x))
+
+        # Test non-zero padding_mode, requiring explicit padding
+        module = nn.Conv1d(in_channels=1, out_channels=1, kernel_size=10,
+                           padding='same', padding_mode='replicate')
+        x_padded = F.pad(x, [4, 5], mode='replicate')
+        expect = F.conv1d(x_padded, module.weight, module.bias, padding='valid')
+        self.assertEqual(expect, module(x))
+        self.assertEqual(x.size(), expect.size())
+
+        # Test connstruction with invalid padding string raises
+        with self.assertRaisesRegex(ValueError, 'Invalid padding string'):
+            module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, padding='foo')
+
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=2)
+
+    def test_Conv2d_module_same_padding(self):
+        # Compare module against functional:
+        # without strides/dilation, both symmetric and asymmetric padding
+        x = torch.rand(1, 1, 9, 20)
+        module = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=(5, 10),
+                           padding='same')
+        expect = F.conv2d(x, module.weight, module.bias, padding='same')
+        self.assertEqual(expect, module(x))
+
+        # with dilation, symmetric padding
+        module = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=(3, 4),
+                           padding='same', dilation=(1, 2))
+        expect = F.conv2d(x, module.weight, module.bias, padding='same', dilation=(1, 2))
+        self.assertEqual(expect, module(x))
+
+        # Test non-zero padding_mode, requiring explicit padding
+        module = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=(3, 4),
+                           padding='same', padding_mode='reflect')
+        x_padded = F.pad(x, [1, 2, 1, 1], mode='reflect')
+        expect = F.conv2d(x_padded, module.weight, module.bias, padding='valid')
+        self.assertEqual(expect, module(x))
+        self.assertEqual(x.size(), expect.size())
+
+        # Test connstruction with invalid padding string raises
+        with self.assertRaisesRegex(ValueError, 'Invalid padding string'):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='foo')
+
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=2)
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(1, 3))
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(4, 1))
+
+    def test_Conv3d_module_same_padding(self):
+        # Compare module against functional:
+        x = torch.rand(1, 1, 4, 4, 4)
+        # without dilation, both symmetric and asymmetric padding
+        module = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=(2, 3, 4),
+                           padding='same')
+        expect = F.conv3d(x, module.weight, module.bias, padding='same')
+        self.assertEqual(expect, module(x))
+
+        # with dilation, both symmetric and asymmetric padding
+        module = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=(2, 3, 4),
+                           padding='same', dilation=(3, 2, 1))
+        expect = F.conv3d(x, module.weight, module.bias, padding='same', dilation=(3, 2, 1))
+        self.assertEqual(expect, module(x))
+
+        # Test non-zero padding_mode, requiring explicit padding
+        module = nn.Conv3d(in_channels=1, out_channels=1, kernel_size=(2, 3, 4),
+                           padding='same', padding_mode='circular')
+        x_padded = F.pad(x, [1, 2, 1, 1, 0, 1], mode='circular')
+        expect = F.conv3d(x_padded, module.weight, module.bias, padding='valid')
+        self.assertEqual(expect, module(x))
+        self.assertEqual(x.size(), expect.size())
+
+        # Test connstruction with invalid padding string raises
+        with self.assertRaisesRegex(ValueError, 'Invalid padding string'):
+            module = nn.Conv3d(in_channels=3, out_channels=33, kernel_size=10, padding='foo')
+
+        # Test connstruction with same padding and strides raises
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=2)
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(1, 1, 3))
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(1, 4, 1))
+        with self.assertRaisesRegex(ValueError, "padding='same'"):
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, padding='same', stride=(5, 1, 1))
+
     def _test_alpha_dropout(self, cls, input):
         mean = input.mean()
         std = input.std()
@@ -3633,6 +3735,13 @@ class TestNN(NNTestCase):
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
         self.assertEqual(F.threshold(x, 0, 99), expected)
 
+    def test_threshold_bfloat16(self):
+        x = torch.randn(100)
+        for threshold in [0, -0.5, 0.5, float('inf'), float('-inf'), float('nan')]:
+            expected = F.threshold(x, threshold, 0).bfloat16().float()
+            res_bf16 = F.threshold(x.bfloat16(), threshold, 0).float()
+            self.assertEqual(res_bf16, expected)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_embedding_max_norm_unsorted_repeating_indices(self):
         def create_embedding(device):
@@ -4269,6 +4378,8 @@ class TestNN(NNTestCase):
         self.assertEqual(out, ref_out)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
+    @skipIfRocm
     def test_broadcast_double_backwards_gpu(self):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True),
                    torch.randn(4, 4, device='cuda', requires_grad=True),
@@ -4368,15 +4479,23 @@ class TestNN(NNTestCase):
             'block.conv1.bias': torch.arange(1, 4),
             'bn.running_mean': torch.randn(2),
         })
-        incompatible_keys = net.load_state_dict(state_dict)
-        self.assertEqual(len(incompatible_keys.missing_keys), 0)
-        self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
-        self.assertNotIn('Incompatible', str(incompatible_keys))
-        self.assertNotIn('Incompatible', repr(incompatible_keys))
-        self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
-        self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
+        # Also test if a DDP state_dict can be loaded from a local model.
+        ddp_state_dict = net.state_dict()
+        ddp_state_dict.update({
+            'module.linear1.weight': torch.ones(5, 5),
+            'module.block.conv1.bias': torch.arange(1, 4),
+            'module.bn.running_mean': torch.randn(2),
+        })
+        torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(ddp_state_dict, 'module.')
+        for sd in [state_dict, ddp_state_dict]:
+            incompatible_keys = net.load_state_dict(sd)
+            self.assertEqual(len(incompatible_keys.missing_keys), 0)
+            self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
+            self.assertNotIn('Incompatible', str(incompatible_keys))
+            self.assertEqual(net.linear1.weight, sd['linear1.weight'])
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(net.block.conv1.bias, sd['block.conv1.bias'])
+            self.assertEqual(net.bn.running_mean, sd['bn.running_mean'])
 
         state_dict = net.state_dict()
         state_dict.update({'extra': torch.ones(5)})
@@ -4386,7 +4505,6 @@ class TestNN(NNTestCase):
         self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
         self.assertIn('extra', incompatible_keys.unexpected_keys)
         self.assertIn('Incompatible', str(incompatible_keys))
-        self.assertIn('Incompatible', repr(incompatible_keys))
 
         state_dict = net.state_dict()
         state_dict.update({'extra.param': torch.ones(5)})
@@ -4425,9 +4543,9 @@ class TestNN(NNTestCase):
             'nonexistent_key': torch.rand(3)
         }
         net.load_state_dict(state_dict, strict=False)
-        self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
+        self.assertEqual(net.linear1.weight, state_dict['linear1.weight'])
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
+        self.assertEqualIgnoreType(net.block.conv1.bias, state_dict['block.conv1.bias'])
         self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
         new_state_dict = net.state_dict()
         del old_state_dict['linear1.weight']
@@ -4596,6 +4714,35 @@ class TestNN(NNTestCase):
         self.assertIn('buf', l.state_dict())
         self.assertEqual(l.state_dict()['buf'], buf)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_thnn_conv_strided_padded_dilated(self):
+        for convfn, dims, transposed in (
+                (torch.nn.functional.conv2d, 2, False),
+                (torch.nn.functional.conv_transpose2d, 2, True),
+                (torch.nn.functional.conv3d, 3, False),
+                (torch.nn.functional.conv_transpose3d, 3, True)):
+            for stride, padding, dilation in (
+                    (2, 0, 1), (1, 1, 1), (2, 1, 1), (1, 0, 2)):
+                kwargs = {"stride": stride, "padding": padding, "dilation": dilation}
+                inp_shape = (1, 2) + dims * (4,)
+                weight_shape = (2, 2) + dims * (1,)
+                inputs = torch.randn(inp_shape, dtype=torch.double, device="cuda", requires_grad=True)
+                weight = torch.randn(weight_shape, dtype=torch.double, device="cuda", requires_grad=True)
+                bias = torch.randn(2, dtype=torch.double, device="cuda", requires_grad=True)
+                with torch.backends.cudnn.flags(enabled=False):
+                    res = convfn(inputs, weight, bias, **kwargs)
+                res_cpu = convfn(inputs.cpu(), weight.cpu(), bias.cpu(), **kwargs)
+                self.assertEqual(res, res_cpu)
+                with torch.backends.cudnn.flags(enabled=False):
+                    torch.autograd.gradcheck(
+                        lambda x, w, b: convfn(x, w, b, **kwargs),
+                        (inputs, weight, bias)
+                    )
+                    torch.autograd.gradcheck(
+                        lambda x, w, b: convfn(x, w, b, **kwargs),
+                        (inputs.cpu(), weight.cpu(), bias.cpu())
+                    )
+
     def test_Conv2d_inconsistent_types(self):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float)
         weights = torch.randn(1, 1, 3, 3, dtype=torch.double)
@@ -4628,8 +4775,7 @@ class TestNN(NNTestCase):
                 gradcheck(F.conv2d, (input, mod.weight))
 
     def test_Conv2d_OneDNN(self):
-        def run_once():
-            group_val = 24
+        def run_once(group_val=24, dilation=1):
             ifm = torch.ones([1, group_val, 6, 6], dtype=torch.float32)
             weights = torch.ones([group_val, 1, 3, 3], dtype=torch.float32)
             op = torch.nn.Conv2d(
@@ -4638,7 +4784,7 @@ class TestNN(NNTestCase):
                 kernel_size=[3, 3],
                 stride=[2, 2],
                 padding=[1, 1],
-                dilation=[1, 1],
+                dilation=[dilation, dilation],
                 groups=group_val,
                 bias=False,
                 padding_mode='zeros'
@@ -4650,13 +4796,15 @@ class TestNN(NNTestCase):
             res.backward(grad_in)
             return op.weight.grad
 
-        with torch.backends.mkldnn.flags(enabled=False):
-            without_onednn = run_once()
+        for gorup_val in (24, 48, 23, 25):
+            for dilation in (1, 2):
+                with torch.backends.mkldnn.flags(enabled=False):
+                    without_onednn = run_once(gorup_val, dilation)
 
-        with torch.backends.mkldnn.flags(enabled=True):
-            with_onednn = run_once()
+                with torch.backends.mkldnn.flags(enabled=True):
+                    with_onednn = run_once(gorup_val, dilation)
 
-        self.assertEqual(without_onednn, with_onednn)
+                self.assertEqual(without_onednn, with_onednn)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -4996,6 +5144,7 @@ class TestNN(NNTestCase):
     # the number of groups == number of input channels
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @tf32_on_and_off(0.01)
     def test_Conv2d_depthwise_naive_groups_cuda(self, dtype=torch.float):
         for depth_multiplier in [1, 2]:
             m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
@@ -5036,6 +5185,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @tf32_on_and_off(0.001)
     def test_Conv3d_depthwise_naive_groups_cuda(self, dtype=torch.float):
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to("cuda", dtype)
@@ -11396,6 +11546,235 @@ class TestNNDeviceType(NNTestCase):
                         self.assertEqual(affine_tensor[0, i, r, c], grid_out[:3])
 
             self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
+
+    def test_conv1d_same_padding(self, device):
+        # Test padding='same' outputs the correct shape
+        test_args = [
+            # in_size
+            range(50, 55),
+            # kernel_size
+            [1, 2, 3, 8],
+            # dilation
+            range(1, 4),
+            # stride
+            [1],
+        ]
+        for in_size, k_size, dilation, stride in itertools.product(*test_args):
+            x = torch.rand(1, 1, in_size, device=device)
+            y = torch.rand(1, 1, k_size, device=device)
+            z = F.conv1d(x, y, padding='same', dilation=dilation, stride=stride)
+            self.assertEqual(z.size(2), int(math.ceil(in_size / stride)))
+
+        # Compare F.conv1d padding='same' output against manual padding
+        # Without strides/dilation
+        x = torch.rand(1, 1, 12, device=device)
+        y = torch.rand(1, 1, 3, device=device)
+        expect = F.conv1d(x, y, padding=1)
+        actual = F.conv1d(x, y, padding='same')
+        self.assertEqual(expect, actual)
+
+        # With dilation
+        x = torch.rand(1, 1, 12, device=device)
+        y = torch.rand(1, 1, 4, device=device)
+        expect = F.conv1d(x, y, padding=3, dilation=2)
+        actual = F.conv1d(x, y, padding='same', dilation=2)
+        self.assertEqual(expect, actual)
+
+        # Dilation with asymmetric padding
+        expect = F.conv1d(x, y, padding=5, dilation=3)[..., 1:]
+        actual = F.conv1d(x, y, padding='same', dilation=3)
+        self.assertEqual(expect, actual)
+
+
+    def test_conv2d_same_padding(self, device):
+        # Compare F.conv2d padding='same' output against manual padding
+        # Without strides/dilation
+        x = torch.rand(1, 1, 10, 11, device=device)
+        y = torch.rand(1, 1, 4, 5, device=device)
+        expect = F.conv2d(x, y, padding=(2, 2))[..., 1:, :]
+        actual = F.conv2d(x, y, padding='same')
+        self.assertEqual(expect, actual)
+
+        # With dilation
+        y = torch.rand(1, 1, 3, 4, device=device)
+        expect = F.conv2d(x, y, padding=(2, 3), dilation=2)
+        actual = F.conv2d(x, y, padding='same', dilation=2)
+        self.assertEqual(expect, actual)
+
+        # Dilation with asymmetric padding
+        y = torch.rand(1, 1, 4, 4, device=device)
+        expect = F.conv2d(x, y, padding=5, dilation=3)[..., 1:, 1:]
+        actual = F.conv2d(x, y, padding='same', dilation=3)
+        self.assertEqual(expect, actual)
+
+    def test_conv3d_same_padding(self, device):
+        # Compare F.conv3d padding='same' output against manual padding
+        # Without strides/dilation
+        x = torch.rand(1, 1, 10, 11, 12, device=device)
+        y = torch.rand(1, 1, 1, 2, 5, device=device)
+        expect = F.conv3d(x, y, padding=(0, 1, 2))[..., :, 1:, :]
+        actual = F.conv3d(x, y, padding='same')
+        self.assertEqual(expect, actual)
+
+        # With dilation
+        expect = F.conv3d(x, y, padding=(0, 1, 4), dilation=2)
+        actual = F.conv3d(x, y, padding='same', dilation=2)
+        self.assertEqual(expect, actual)
+
+        # Dilation with asymmetric padding
+        y = torch.rand(1, 1, 4, 4, 4, device=device)
+        expect = F.conv3d(x, y, padding=5, dilation=3)[..., 1:, 1:, 1:]
+        actual = F.conv3d(x, y, padding='same', dilation=3)
+        self.assertEqual(expect, actual)
+
+    def test_conv1d_valid_padding(self, device):
+        # Test F.conv1d padding='valid' is the same as no padding
+        x = torch.rand(1, 1, 10, device=device)
+        y = torch.rand(1, 1, 4, device=device)
+        expect = F.conv1d(x, y)
+        actual = F.conv1d(x, y, padding='valid')
+        self.assertEqual(expect, actual)
+
+    def test_conv2d_valid_padding(self, device):
+        # Test F.conv2d padding='valid' is the same as no padding
+        x = torch.rand(1, 1, 1, 10, device=device)
+        y = torch.rand(1, 1, 1, 4, device=device)
+        expect = F.conv2d(x, y)
+        actual = F.conv2d(x, y, padding='valid')
+        self.assertEqual(expect, actual)
+
+    def test_conv3d_valid_padding(self, device):
+        # Test F.conv3d padding='valid' is the same as no padding
+        x = torch.rand(1, 1, 1, 1, 10, device=device)
+        y = torch.rand(1, 1, 1, 1, 4, device=device)
+        expect = F.conv3d(x, y)
+        actual = F.conv3d(x, y, padding='valid')
+        self.assertEqual(expect, actual)
+
+    def test_conv1d_same_padding_backward(self, device):
+        # Test F.conv1d gradients work with padding='same'
+        x = torch.rand(1, 1, 12, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 4, device=device, requires_grad=True)
+
+        # Symmetric padding
+        z = F.conv1d(x, y, padding=3, dilation=2)
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv1d(x, y, padding='same', dilation=2)
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+        x.grad, y.grad = None, None
+
+        # Asymmetric padding
+        z = F.conv1d(x, y, padding=2)[..., 1:]
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv1d(x, y, padding='same')
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+
+    def test_conv2d_same_padding_backward(self, device):
+        # Test F.conv2d gradients work with padding='same'
+        x = torch.rand(1, 1, 10, 11, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 4, 5, device=device, requires_grad=True)
+
+        # Symmetric padding
+        z = F.conv2d(x, y, padding=(3, 4), dilation=2)
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv2d(x, y, padding='same', dilation=2)
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+        x.grad, y.grad = None, None
+
+        # Asymmetric padding
+        y = torch.rand(1, 1, 4, 4, device=device, requires_grad=True)
+        z = F.conv2d(x, y, padding=2)[..., 1:, 1:]
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv1d(x, y, padding='same')
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+
+    def test_conv3d_same_padding_backward(self, device):
+        # Test F.conv3d gradients work with padding='same'
+        x = torch.rand(1, 1, 1, 11, 12, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 1, 2, 5, device=device, requires_grad=True)
+
+        # Symmetric padding
+        z = F.conv3d(x, y, padding=(0, 1, 4), dilation=2)
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv3d(x, y, padding='same', dilation=2)
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+        x.grad, y.grad = None, None
+
+        # Asymmetric padding
+        y = torch.rand(1, 1, 1, 4, 4, device=device, requires_grad=True)
+        z = F.conv3d(x, y, padding=2)[..., 1:, 1:]
+        z.sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        z = F.conv3d(x, y, padding='same')
+        z.sum().backward()
+        self.assertEqual(gx_expect, x.grad)
+        self.assertEqual(gy_expect, y.grad)
+
+    def test_conv1d_valid_padding_backward(self, device):
+        # Test F.conv1d gradients work with padding='valid'
+        x = torch.rand(1, 1, 10, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 4, device=device, requires_grad=True)
+        F.conv1d(x, y, padding=0).sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        F.conv1d(x, y, padding='valid').sum().backward()
+        gx_actual, gy_actual = x.grad, y.grad
+        self.assertEqual(gx_expect, gx_actual)
+        self.assertEqual(gy_expect, gy_actual)
+
+    def test_conv2d_valid_padding_backward(self, device):
+        # Test F.conv2d gradients work with padding='valid'
+        x = torch.rand(1, 1, 1, 10, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 1, 4, device=device, requires_grad=True)
+        F.conv2d(x, y, padding=0).sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        F.conv2d(x, y, padding='valid').sum().backward()
+        gx_actual, gy_actual = x.grad, y.grad
+        self.assertEqual(gx_expect, gx_actual)
+        self.assertEqual(gy_expect, gy_actual)
+
+    def test_conv3d_valid_padding_backward(self, device):
+        # Test F.conv3d gradients work with padding='valid'
+        x = torch.rand(1, 1, 1, 1, 10, device=device, requires_grad=True)
+        y = torch.rand(1, 1, 1, 1, 4, device=device, requires_grad=True)
+        F.conv3d(x, y, padding=0).sum().backward()
+        gx_expect, gy_expect = x.grad, y.grad
+        x.grad, y.grad = None, None
+
+        F.conv3d(x, y, padding='valid').sum().backward()
+        gx_actual, gy_actual = x.grad, y.grad
+        self.assertEqual(gx_expect, gx_actual)
+        self.assertEqual(gy_expect, gy_actual)
 
     def test_Dropout(self, device):
         input = torch.empty(1000)

@@ -117,7 +117,7 @@ void LogitMKLKernel(T eps, TensorIterator* it) {
 
 #endif // AT_MKL_ENABLED
 
-void logit_kernel(TensorIterator& iter, Scalar eps_scalar) {
+void logit_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
@@ -426,7 +426,7 @@ static void nan_to_num_kernel(
   });
 }
 
-static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
+static void clamp_kernel(TensorIterator& iter, const Scalar& min_scalar, const Scalar& max_scalar) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
     auto min = min_scalar.to<scalar_t>();
     auto max = max_scalar.to<scalar_t>();
@@ -438,7 +438,7 @@ static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_sca
   });
 }
 
-static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
+static void clamp_max_kernel(TensorIterator& iter, const Scalar& max_scalar) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
     auto max = max_scalar.to<scalar_t>();
     auto max_vec = Vec256<scalar_t>(max);
@@ -448,7 +448,7 @@ static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
   });
 }
 
-static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
+static void clamp_min_kernel(TensorIterator& iter, const Scalar& min_scalar) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
     auto min = min_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
@@ -598,6 +598,39 @@ static void rsqrt_kernel(TensorIterator& iter) {
   });
 }
 
+static void entr_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, iter.common_dtype(), "entr_cpu", [&] {
+        cpu_kernel(iter, [](scalar_t x) -> scalar_t {
+          if (at::_isnan(x)) {
+            return x;
+          } else if (x > 0) {
+            return -x * std::log(x);
+          } else if (x == 0) {
+            return static_cast<scalar_t>(0);
+          }
+          return static_cast<scalar_t>(-INFINITY);
+        });
+      });
+}
+
+static void frexp_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf,
+    // The iter.dtype() here is the dtype of mantissa output.
+    // It's a floating point type and must be the same as the input's dtype.
+    iter.dtype(),
+    "frexp_cpu", [&]() {
+      cpu_kernel_multiple_outputs(
+        iter,
+        [](scalar_t a) -> std::tuple<scalar_t, int32_t> {
+          int32_t exponent;
+          scalar_t mantissa = std::frexp(a, &exponent);
+          return std::tuple<scalar_t, int32_t>(mantissa, exponent);
+        }
+      );
+  });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -700,7 +733,9 @@ REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
-REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel)
+REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel);
+REGISTER_DISPATCH(entr_stub, &entr_kernel);
+REGISTER_DISPATCH(frexp_stub, &frexp_kernel);
 
 
 IMPLEMENT_COMPLEX_KERNEL(acos)

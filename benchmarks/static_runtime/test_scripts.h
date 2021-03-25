@@ -74,6 +74,7 @@ const auto reshape_script_3 = R"JIT(
       return b.reshape(shape), g
 )JIT";
 
+// exercise reshape_copy and flatten_copy
 const auto reshape_script_4 = R"JIT(
   def forward(self, inp: Tensor, shape: List[int]):
       k = inp + inp
@@ -83,11 +84,12 @@ const auto reshape_script_4 = R"JIT(
       return b + c
 )JIT";
 
+// exercise reshape_copy
 const auto reshape_script_5 = R"JIT(
   def forward(self, inp: Tensor, shape: List[int]):
       a = inp + inp
       b = a.reshape(shape)
-      c = a.reshape(shape)
+      c = a.reshape(shape).relu()
       d = c + c
       e = d + d
       f = e * e
@@ -95,10 +97,33 @@ const auto reshape_script_5 = R"JIT(
       return g
 )JIT";
 
+const auto reshape_inplace_script = R"JIT(
+  def forward(self, inp: Tensor, shape: List[int]):
+      a = inp + inp
+      b = a.reshape(shape)
+      c = b.sigmoid_()
+      d = c + c
+      e = a + a
+      f = b + b
+      return (d, e, f)
+)JIT";
+
+// b is in_contiguous
+const auto reshape_incontiguous_script = R"JIT(
+  def forward(self, a: Tensor, shape: List[int]):
+      b = a.transpose(0, 1)
+      c = b.reshape(shape)
+      c = c.relu()
+      return (c)
+)JIT";
+
+// exercise flatten_copy
 const auto flatten_script_1 = R"JIT(
   def forward(self, a: Tensor, start_dim: int, end_dim: int):
-      b = torch.flatten(a, start_dim, end_dim)
-      return b + b
+      b = a * a
+      c = torch.flatten(b, start_dim, end_dim)
+      d = torch.relu(c)
+      return d
 )JIT";
 
 const auto flatten_script_2 = R"JIT(
@@ -155,4 +180,34 @@ const auto to_script_0 = R"JIT(
 const auto to_script_1 = R"JIT(
   def forward(self, input:Tensor, dtype: int, non_blocking: bool, copy: bool):
       return torch.to(input, dtype, non_blocking, copy)
+)JIT";
+
+const std::string embedding_bag_default = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c)
+)JIT";
+
+const std::string embedding_bag_mean = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c, False, 1)
+)JIT";
+
+const std::string embedding_bag_max = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c, False, 2)
+)JIT";
+
+const std::string embedding_bag_sum_last_offset = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c, False, 0, False, None, True)
+)JIT";
+
+const std::string embedding_bag_mean_last_offset = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c, False, 1, False, None, True)
+)JIT";
+
+const std::string embedding_bag_max_last_offset = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.embedding_bag(a, b, c, False, 2, False, None, True)
 )JIT";

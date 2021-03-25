@@ -652,12 +652,12 @@ Tensor nanquantile(
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     int64_t k,
     int64_t dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   auto result = [&]() {
     NoNamesGuard guard;
     return kthvalue_out_impl_cpu(values, indices, self, k, dim, keepdim);
@@ -668,12 +668,12 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     int64_t k,
     Dimname dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   return at::kthvalue_out(
       values, indices, self, k, dimname_to_position(self, dim), keepdim);
 }
@@ -735,11 +735,11 @@ std::tuple<Tensor, Tensor> topk(
 }
 
 std::tuple<Tensor&, Tensor&> median_out_cpu(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     int64_t dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   auto result = [&]() {
     NoNamesGuard guard;
     return median_with_indices_impl(
@@ -751,11 +751,11 @@ std::tuple<Tensor&, Tensor&> median_out_cpu(
 }
 
 std::tuple<Tensor&, Tensor&> median_out(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     Dimname dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   return at::median_out(
       values, indices, self, dimname_to_position(self, dim), keepdim);
 }
@@ -782,11 +782,11 @@ Tensor median_cpu(const Tensor& self) {
 }
 
 std::tuple<Tensor&, Tensor&> nanmedian_out_cpu(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     int64_t dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   auto result = [&]() {
     NoNamesGuard guard;
     return median_with_indices_impl(
@@ -798,11 +798,11 @@ std::tuple<Tensor&, Tensor&> nanmedian_out_cpu(
 }
 
 std::tuple<Tensor&, Tensor&> nanmedian_out(
-    Tensor& values,
-    Tensor& indices,
     const Tensor& self,
     Dimname dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
   return at::nanmedian_out(
       values, indices, self, dimname_to_position(self, dim), keepdim);
 }

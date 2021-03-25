@@ -77,6 +77,15 @@ class TensorProto(google.protobuf.message.Message):
     ZERO_COLLISION_HASH = TensorProto.DataType.V(14)
     REBATCHING_BUFFER = TensorProto.DataType.V(15)
 
+    class _SerializationFormat(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[SerializationFormat.V], builtins.type):
+        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
+        FMT_PROTOBUF = TensorProto.SerializationFormat.V(0)
+        FMT_BFLOAT16 = TensorProto.SerializationFormat.V(1)
+    class SerializationFormat(metaclass=_SerializationFormat):
+        V = typing.NewType('V', builtins.int)
+    FMT_PROTOBUF = TensorProto.SerializationFormat.V(0)
+    FMT_BFLOAT16 = TensorProto.SerializationFormat.V(1)
+
     class Segment(google.protobuf.message.Message):
         DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
         BEGIN_FIELD_NUMBER: builtins.int
@@ -94,6 +103,7 @@ class TensorProto(google.protobuf.message.Message):
 
     DIMS_FIELD_NUMBER: builtins.int
     DATA_TYPE_FIELD_NUMBER: builtins.int
+    DATA_FORMAT_FIELD_NUMBER: builtins.int
     FLOAT_DATA_FIELD_NUMBER: builtins.int
     INT32_DATA_FIELD_NUMBER: builtins.int
     BYTE_DATA_FIELD_NUMBER: builtins.int
@@ -106,6 +116,7 @@ class TensorProto(google.protobuf.message.Message):
     SEGMENT_FIELD_NUMBER: builtins.int
     dims: google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.int] = ...
     data_type: global___TensorProto.DataType.V = ...
+    data_format: builtins.int = ...
     float_data: google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.float] = ...
     int32_data: google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.int] = ...
     byte_data: builtins.bytes = ...
@@ -125,6 +136,7 @@ class TensorProto(google.protobuf.message.Message):
         *,
         dims : typing.Optional[typing.Iterable[builtins.int]] = ...,
         data_type : typing.Optional[global___TensorProto.DataType.V] = ...,
+        data_format : typing.Optional[builtins.int] = ...,
         float_data : typing.Optional[typing.Iterable[builtins.float]] = ...,
         int32_data : typing.Optional[typing.Iterable[builtins.int]] = ...,
         byte_data : typing.Optional[builtins.bytes] = ...,
@@ -136,8 +148,8 @@ class TensorProto(google.protobuf.message.Message):
         device_detail : typing.Optional[global___DeviceOption] = ...,
         segment : typing.Optional[global___TensorProto.Segment] = ...,
         ) -> None: ...
-    def HasField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_type",b"data_type",u"device_detail",b"device_detail",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_type",b"data_type",u"device_detail",b"device_detail",u"dims",b"dims",u"double_data",b"double_data",u"float_data",b"float_data",u"int32_data",b"int32_data",u"int64_data",b"int64_data",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment",u"string_data",b"string_data"]) -> None: ...
+    def HasField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_format",b"data_format",u"data_type",b"data_type",u"device_detail",b"device_detail",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing_extensions.Literal[u"byte_data",b"byte_data",u"data_format",b"data_format",u"data_type",b"data_type",u"device_detail",b"device_detail",u"dims",b"dims",u"double_data",b"double_data",u"float_data",b"float_data",u"int32_data",b"int32_data",u"int64_data",b"int64_data",u"name",b"name",u"raw_data",b"raw_data",u"segment",b"segment",u"string_data",b"string_data"]) -> None: ...
 global___TensorProto = TensorProto
 
 class QTensorProto(google.protobuf.message.Message):
@@ -695,6 +707,50 @@ class DBReaderProto(google.protobuf.message.Message):
     def HasField(self, field_name: typing_extensions.Literal[u"db_type",b"db_type",u"key",b"key",u"name",b"name",u"source",b"source"]) -> builtins.bool: ...
     def ClearField(self, field_name: typing_extensions.Literal[u"db_type",b"db_type",u"key",b"key",u"name",b"name",u"source",b"source"]) -> None: ...
 global___DBReaderProto = DBReaderProto
+
+class BlobSerializationOptions(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
+    class _FloatFormat(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[FloatFormat.V], builtins.type):
+        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
+        FLOAT_DEFAULT = BlobSerializationOptions.FloatFormat.V(0)
+        FLOAT_PROTOBUF = BlobSerializationOptions.FloatFormat.V(1)
+        FLOAT_BFLOAT16 = BlobSerializationOptions.FloatFormat.V(2)
+    class FloatFormat(metaclass=_FloatFormat):
+        V = typing.NewType('V', builtins.int)
+    FLOAT_DEFAULT = BlobSerializationOptions.FloatFormat.V(0)
+    FLOAT_PROTOBUF = BlobSerializationOptions.FloatFormat.V(1)
+    FLOAT_BFLOAT16 = BlobSerializationOptions.FloatFormat.V(2)
+
+    BLOB_NAME_REGEX_FIELD_NUMBER: builtins.int
+    CHUNK_SIZE_FIELD_NUMBER: builtins.int
+    FLOAT_FORMAT_FIELD_NUMBER: builtins.int
+    blob_name_regex: typing.Text = ...
+    chunk_size: builtins.int = ...
+    float_format: global___BlobSerializationOptions.FloatFormat.V = ...
+
+    def __init__(self,
+        *,
+        blob_name_regex : typing.Optional[typing.Text] = ...,
+        chunk_size : typing.Optional[builtins.int] = ...,
+        float_format : typing.Optional[global___BlobSerializationOptions.FloatFormat.V] = ...,
+        ) -> None: ...
+    def HasField(self, field_name: typing_extensions.Literal[u"blob_name_regex",b"blob_name_regex",u"chunk_size",b"chunk_size",u"float_format",b"float_format"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing_extensions.Literal[u"blob_name_regex",b"blob_name_regex",u"chunk_size",b"chunk_size",u"float_format",b"float_format"]) -> None: ...
+global___BlobSerializationOptions = BlobSerializationOptions
+
+class SerializationOptions(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
+    OPTIONS_FIELD_NUMBER: builtins.int
+
+    @property
+    def options(self) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[global___BlobSerializationOptions]: ...
+
+    def __init__(self,
+        *,
+        options : typing.Optional[typing.Iterable[global___BlobSerializationOptions]] = ...,
+        ) -> None: ...
+    def ClearField(self, field_name: typing_extensions.Literal[u"options",b"options"]) -> None: ...
+global___SerializationOptions = SerializationOptions
 
 DeviceType = DeviceTypeProto
 
