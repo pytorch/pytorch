@@ -150,11 +150,11 @@ def _parse_s3_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[Any]]
 # optional jobs filter
 def get_test_stats_summaries(*, sha: str, jobs: Optional[List[str]] = None) -> Dict[str, List[Any]]:
     bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
-    summaries = list(bucket.objects.filter(Prefix=f"test_time/{sha}"))
+    summaries = bucket.objects.filter(Prefix=f"test_time/{sha}")
     return _parse_s3_summaries(summaries, jobs=list(jobs or []))
 
 
 def get_test_stats_summaries_for_job(*, sha: str, job_prefix: str) -> Dict[str, List[Any]]:
     bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
-    summaries = list(bucket.objects.filter(Prefix=f"test_time/{sha}/{job_prefix}"))
+    summaries = bucket.objects.filter(Prefix=f"test_time/{sha}/{job_prefix}")
     return _parse_s3_summaries(summaries, jobs=list())

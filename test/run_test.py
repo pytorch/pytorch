@@ -395,10 +395,10 @@ def get_test_time_reports_from_S3() -> List[Dict[str, Any]]:
         nightly_commit = nightly_commits[commit_index]
         print(f'Grabbing reports from nightly commit: {nightly_commit}')
         summaries = get_test_stats_summaries_for_job(sha=nightly_commit, job_prefix=stripped_job)
-        for _, summary in summaries.items():
+        for job_name, summary in summaries.items():
             reports.append(summary[0])
             if len(summary) > 1:
-                print(f'Warning: multiple summary object found for {nightly_commit}/{stripped_job}')
+                print(f'Warning: multiple summary object found for {nightly_commit}/{job_name}')
         commit_index += 1
     return reports
 
