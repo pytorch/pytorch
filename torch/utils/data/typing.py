@@ -39,8 +39,13 @@ TYPE2ABC = {
 }
 
 
-# Check if the left-side type is a subtype for the right-side type
 def issubtype(left, right):
+    r"""
+    Check if the left-side type is a subtype of the right-side type.
+    If any of type is a composite type like `Union` and `TypeVar` with
+    bounds, it would be expanded into a list of types and check all
+    of left-side types are subtypes of either one from right-side types.
+    """
     left = TYPE2ABC.get(left, left)
     right = TYPE2ABC.get(right, right)
 
@@ -86,8 +91,12 @@ def issubtype(left, right):
     return all(_issubtype_with_constraints(variant, constraints) for variant in variants)
 
 
-# Check if the variant is a subtype for any of constraints
 def _issubtype_with_constraints(variant, constraints):
+    r"""
+    Check if the variant is a subtype of either one from constraints.
+    For composite types like `Union` and `TypeVar` with bounds, they
+    would be expanded for testing.
+    """
     if variant in constraints:
         return True
 
@@ -126,8 +135,8 @@ def _issubtype_with_constraints(variant, constraints):
         v_origin = variant
         v_args = None
 
+    # Constraints
     for constraint in constraints:
-        # Constraint
         cs = None
         if isinstance(constraint, TypeVar):  # type: ignore
             if constraint.__bound__ is not None:
@@ -144,7 +153,7 @@ def _issubtype_with_constraints(variant, constraints):
                 return True
         # Constraint is not TypeVar or Union
         else:
-            # __origin__ can be None for list, tuple, ... in Python 3.6
+            # __origin__ can be None for plain list, tuple, ... in Python 3.6
             if hasattr(constraint, '__origin__') and constraint.__origin__ is not None:
                 c_origin = constraint.__origin__
                 if v_origin == c_origin:
@@ -154,9 +163,10 @@ def _issubtype_with_constraints(variant, constraints):
                     if v_args is not None and len(v_args) == len(c_args) and \
                             all(issubtype(v_arg, c_arg) for v_arg, c_arg in zip(v_args, c_args)):
                         return True
+            # Tuple[int] -> Tuple
             else:
                 if v_origin == constraint:
-                    return v_args is None or len(v_args) == 0
+                    return True
 
     return False
 
