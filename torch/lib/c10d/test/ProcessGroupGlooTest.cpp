@@ -447,16 +447,13 @@ void testMonitoredBarrier(const std::string& path) {
         return;
       }
 
-      bool exceptionCaught = false;
       try {
           tests[i].getProcessGroup().monitoredBarrier();
           FAIL() << "Exception should have been thrown.";
       } catch (const std::exception& e) {
-          exceptionCaught = true;
           auto pos = std::string(e.what()).find("Rank 1");
           EXPECT_TRUE(pos != std::string::npos);
       }
-      EXPECT_TRUE(exceptionCaught);
   };
   threads.clear();
   for (int r = 0; r < size; r++) {
