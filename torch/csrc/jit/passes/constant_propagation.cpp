@@ -383,6 +383,7 @@ struct ConstantPropagator {
   }
 
   std::shared_ptr<Graph> graph_;
+  // lazily initialized if using aliasing_types, otherwise not initialized
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
   bool aliasing_types_;
   bool made_change_ = false;
