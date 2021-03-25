@@ -6,6 +6,7 @@
 #include <ATen/cpu/vec256/intrinsics.h>
 
 #include <ATen/cpu/vec256/vec256_base.h>
+#if !defined(__VSX__)  || !defined(CPU_CAPABILITY_VSX)
 #include <ATen/cpu/vec256/vec256_float.h>
 #include <ATen/cpu/vec256/vec256_float_neon.h>
 #include <ATen/cpu/vec256/vec256_bfloat16.h>
@@ -14,6 +15,9 @@
 #include <ATen/cpu/vec256/vec256_qint.h>
 #include <ATen/cpu/vec256/vec256_complex_float.h>
 #include <ATen/cpu/vec256/vec256_complex_double.h>
+#else
+#include <ATen/cpu/vec256/vsx/vec256_common_vsx.h>
+#endif
 
 #include <algorithm>
 #include <cstddef>
@@ -35,15 +39,15 @@ namespace vec256 {
 // static means something different in the context of classes).
 namespace {
 
- std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
+ C10_UNUSED std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
      stream << val.val_;
      return stream;
  }
- std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
+ C10_UNUSED std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
      stream << static_cast<int>(val.val_);
      return stream;
  }
- std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
+ C10_UNUSED std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
      stream << static_cast<unsigned int>(val.val_);
      return stream;
  }

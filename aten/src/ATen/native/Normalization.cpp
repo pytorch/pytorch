@@ -118,7 +118,7 @@ void batch_norm_cpu_inference_channels_last(Tensor& output, const Tensor& input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
   // No need to use parallel_for as this function is supposed to be
   // memory-limited.
-  // Keep the loop struture simple to make sure compiler vectorization kicks in.
+  // Keep the loop structure simple to make sure compiler vectorization kicks in.
   if (n_channel != 1) {
     for (int64_t n = 0; n < n_batch; ++n) {
       for (int64_t i = 0; i < image_size; ++i) {
@@ -415,6 +415,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 
   bool use_cudnn = false;
   use_cudnn = (input.is_cuda()
+               && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
                && (input.scalar_type() != at::kHalf
                  || weight.scalar_type() == at::kFloat)
                && weight.defined() && bias.defined()
@@ -485,13 +486,17 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   } else if (impl_index == 2) {
     return at::miopen_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon);
   }
-  AT_ASSERTM(false, "Unsupported impl_index in _batch_norm_impl_index_backward: ", impl_index);
+  TORCH_INTERNAL_ASSERT(false, "Unsupported impl_index in _batch_norm_impl_index_backward: ", impl_index);
 }
 
 Tensor batch_norm(
-    const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     bool training, double momentum, double eps, bool cudnn_enabled) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
+  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   if (input.numel()==0){
     //don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();

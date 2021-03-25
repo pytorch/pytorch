@@ -47,6 +47,10 @@ Tensor qnnpack_clamp(Tensor input, Scalar min, Scalar max) {
     max_q,
     0, // flags
     &clamp_op);
+
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+      qnnpack_uniq_ptr(clamp_op);
+
   TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
                         "failed to create QNNPACK Clamp operator");
 

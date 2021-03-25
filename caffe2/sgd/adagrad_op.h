@@ -257,7 +257,9 @@ class SparseAdagradOp final : public Operator<CPUContext> {
           reinterpret_cast<const std::int32_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_);
+          weight_decay_,
+          /*counter=*/nullptr,
+          /*counter_halflife=*/0);
     } else {
       num_rows_processed = kernel_i64_(
           n,
@@ -268,7 +270,9 @@ class SparseAdagradOp final : public Operator<CPUContext> {
           reinterpret_cast<const std::int64_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_);
+          weight_decay_,
+          /*counter=*/nullptr,
+          /*counter_halflife=*/0);
     }
     if (num_rows_processed < n) {
       CAFFE_ENFORCE_GE(
@@ -454,7 +458,9 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
           reinterpret_cast<const std::int32_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_);
+          weight_decay_,
+          /*counter=*/nullptr,
+          /*counter_halflife=*/0);
     } else {
       num_rows_processed = kernel_i64_(
           n,
@@ -465,7 +471,9 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
           reinterpret_cast<const std::int64_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_);
+          weight_decay_,
+          /*counter=*/nullptr,
+          /*counter_halflife=*/0);
     }
 
     if (num_rows_processed < n) {

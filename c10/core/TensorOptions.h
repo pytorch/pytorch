@@ -607,6 +607,12 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             }
             return DispatchKey::CUDA;
           }
+          case DeviceType::XPU: {
+            if (isQIntType(dtype_)) {
+              return DispatchKey::QuantizedXPU;
+            }
+            return DispatchKey::XPU;
+          }
           case DeviceType::MKLDNN:
             return DispatchKey::MKLDNN;
           case DeviceType::OPENGL:
@@ -623,12 +629,16 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             return DispatchKey::MSNPU;
           case DeviceType::XLA:
             return DispatchKey::XLA;
+          case DeviceType::MLC:
+            return DispatchKey::MLC;
           case DeviceType::Vulkan:
             return DispatchKey::Vulkan;
           case DeviceType::Metal:
             return DispatchKey::Metal;
+          case DeviceType::Meta:
+            return DispatchKey::Meta;
           default:
-            AT_ERROR("Unsupported device type for dense layout: ", device_.type());
+            TORCH_CHECK(false, "Unsupported device type for dense layout: ", device_.type());
         }
       }
       case Layout::Sparse:
@@ -639,18 +649,20 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
             return DispatchKey::SparseCUDA;
           case DeviceType::HIP:
             return DispatchKey::SparseHIP;
+          case DeviceType::XPU:
+            return DispatchKey::SparseXPU;
           default:
-            AT_ERROR("Unsupported device type for sparse layout: ", device_.type());
+            TORCH_CHECK(false, "Unsupported device type for sparse layout: ", device_.type());
         }
       case Layout::Mkldnn:
         switch (device_.type()) {
           case DeviceType::CPU:
             return DispatchKey::MkldnnCPU;
           default:
-            AT_ERROR("Unsupported device type for mkldnn layout: ", device_.type());
+            TORCH_CHECK(false, "Unsupported device type for mkldnn layout: ", device_.type());
         }
       default:
-        AT_ERROR("Unsupported layout: ", layout_);
+        TORCH_CHECK(false, "Unsupported layout: ", layout_);
     }
 }
 
@@ -679,6 +691,10 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::MSNPU;
   } else if (tid == DispatchKey::XLA) {
     return DeviceType::XLA;
+  } else if (tid == DispatchKey::MLC) {
+    return DeviceType::MLC;
+  } else if (tid == DispatchKey::Meta) {
+    return DeviceType::Meta;
   } else if (tid == DispatchKey::SparseCPU) {
     return DeviceType::CPU;
   } else if (tid == DispatchKey::SparseCUDA) {
@@ -691,8 +707,16 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::Vulkan;
   } else if (tid == DispatchKey::Metal) {
     return DeviceType::Metal;
+  } else if (tid == DispatchKey::QuantizedCPU) {
+    return DeviceType::CPU;
+  } else if (tid == DispatchKey::XPU) {
+    return DeviceType::XPU;
+  } else if (tid == DispatchKey::SparseXPU) {
+    return DeviceType::XPU;
+  } else if (tid == DispatchKey::QuantizedXPU) {
+    return DeviceType::XPU;
   } else {
-    AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
+    TORCH_INTERNAL_ASSERT(false, "Unknown DispatchKey: ", tid);
   }
 }
 
