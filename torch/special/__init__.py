@@ -6,6 +6,33 @@ from torch._torch_docs import common_args  # type: ignore
 
 Tensor = torch.Tensor
 
+entr = _add_docstr(_special.special_entr,
+                   r"""
+entr(input, *, out=None) -> Tensor
+Computes the entropy on :attr:`input` (as defined below), elementwise.
+
+.. math::
+    \text{entr(x)} = \begin{cases}
+        -x * \ln(x)  & x > 0 \\
+        0 &  x = 0.0 \\
+        -\infty & x < 0
+    \end{cases}
+""" + """
+
+Args:
+   input (Tensor): the input tensor.
+
+Keyword args:
+    out (Tensor, optional): the output tensor.
+
+Example::
+    >>> a = torch.arange(-0.5, 1, 0.5)
+    >>> a
+    tensor([-0.5000,  0.0000,  0.5000])
+    >>> torch.special.entr(a)
+    tensor([  -inf, 0.0000, 0.3466])
+""")
+
 gammaln = _add_docstr(_special.special_gammaln,
                       r"""
 gammaln(input, *, out=None) -> Tensor

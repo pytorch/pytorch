@@ -8604,6 +8604,18 @@
 #   torch/special/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/special.h.
 #   The "special_" names should be hidden from the user and not documented.
 
+- func: special_entr(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    DefaultBackend: special_entr
+
+- func: special_entr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_entr_out
+
 - func: special_gammaln(Tensor self) -> Tensor
   python_module: special
   variants: function
