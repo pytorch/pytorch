@@ -3,7 +3,7 @@ import operator
 import unittest
 import sys
 import math
-from typing import Callable, Dict, Union, List
+from typing import Callable, Dict, Union, List, Optional
 from torch.fx.symbolic_trace import symbolic_trace
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
@@ -775,7 +775,12 @@ terrible spacing
         modules = dict(traced.named_modules())
         for node in traced.graph.nodes:
             if node.op == 'call_function' and node.target.__module__ != '_operator':
-                normalized_args = node.normalized_arguments(traced)
+                if node.target is torch.conv2d:
+                    overload_types = [torch.Tensor, torch.Tensor, Optional[torch.Tensor], List[int], List[int],
+                                      List[int], int]
+                    normalized_args = node.normalized_arguments(traced, overload_types, {})
+                else:
+                    normalized_args = node.normalized_arguments(traced)
                 assert normalized_args
                 node.args = ()
                 node.kwargs = normalized_args.args_dict

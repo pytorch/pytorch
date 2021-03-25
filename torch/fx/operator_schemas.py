@@ -101,23 +101,24 @@ def type_matches(signature_type : Any, argument_type : Any):
 
     # Union types in signature. Given type needs to match one of the
     # contained types in the Union
-    if sig_origin_type is typing.Union:
-        contained = signature_type.__args__
-        return any(type_matches(c, argument_type) for c in contained)
+    if sig_origin_type is typing.Union and signature_type != argument_type:
+        sig_contained = signature_type.__args__
+        return any(type_matches(c, argument_type) for c in sig_contained)
 
-    if type(signature_type) is typing._GenericAlias and sig_origin_type is list:
-        contained = signature_type.__args__
-        assert len(contained) == 1
+    if signature_type is List[int] and argument_type is int:
+        # int can be promoted to List[int]
+        return True
 
-        if contained[0] == int:
-            # int can be promoted to List[int]
-            if argument_type is int:
-                return True
+    def is_homogeneous_int_tuple(t):
+        if not getattr(t, '__origin__', None) is tuple:
+            return False
 
-            # Tuple[int] is accepted for List[int] parameters
-            if type(argument_type) is typing._GenericAlias and argument_origin_type is tuple:
-                argument_contained_types = argument_type.__args__
-                return all(a is int for a in argument_contained_types)
+        contained = t.__args__
+        return all(c is int for c in contained)
+
+    if signature_type is List[int] and is_homogeneous_int_tuple(argument_type):
+        # Tuple[int] is accepted for List[int] parameters
+        return True
 
     # Dtype is an int in schemas
     if signature_type is int and argument_type is torch.dtype:
