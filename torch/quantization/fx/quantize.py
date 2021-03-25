@@ -1261,7 +1261,7 @@ class Quantizer:
 
         return match_map
 
-    def _find_quants(self, graph: Graph, modules: Dict[str, torch.nn.Module],  matches: Dict[str, MatchResult],
+    def _find_quants(self, graph: Graph, modules: Dict[str, torch.nn.Module],  matches: Dict[str, MatchResult]
                      ) -> Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]]:
         """
         Takes the nodes in the input graph and pending matches, and finds and
