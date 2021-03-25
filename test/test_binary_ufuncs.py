@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import re
 
 import itertools
 from itertools import product
@@ -18,6 +19,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
     skipCUDAIfRocm, skipIf)
+from torch.testing import all_types_and_complex_and
 
 if TEST_SCIPY:
     import scipy.special
@@ -573,56 +575,38 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(res1, res2)
                 self.assertEqual(res1.dtype, expected_dtype)
 
-    def test_pow(self, device):
-        # [res] torch.pow([res,] x)
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    def test_pow(self, device, dtype):
+        m1 = torch.empty(0, dtype=dtype, device=device)
+        if m1.is_floating_point() or m1.is_complex():
+            m1 = make_tensor((100, 100), low=0, high=1, dtype=dtype, device=device) + 0.5
+        else:
+            # math.pow will overflow and throw exceptions for large integers
+            range_high = 4 if dtype in (torch.int8, torch.uint8) else 10
+            m1 = make_tensor((100, 100), low=1, high=range_high, dtype=dtype, device=device)
 
-        # pow has dedicated implementation for different exponents
-        for dtype in torch.testing.get_all_math_dtypes(device):
+        exponents = [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]
+        complex_exponents = [-2.5j, -1.0j, 0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j, 3.3j]
+        if m1.is_complex():
+            self._do_pow_for_exponents(m1, exponents + complex_exponents, pow, 10e-4)
+        else:
+            self._do_pow_for_exponents(m1, exponents, math.pow, None)
+            self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
 
-            # This test won't work on torch.half because math.pow will generate a much more accurate result. We skip it
-            # for now.
-            if dtype == torch.half:
-                continue
+        # base - number, exponent - tensor
+        # contiguous
+        res1 = torch.pow(3, m1[4])
+        res2 = res1.clone().zero_()
+        for i in range(res2.size(0)):
+            res2[i] = pow(3, m1[4, i])
+        self.assertEqual(res1, res2)
 
-            # deferring to https://github.com/pytorch/pytorch/pull/36793
-            if dtype.is_complex:
-                continue
-
-            m1 = torch.empty(0, dtype=dtype, device=device)
-            if m1.is_floating_point() or m1.is_complex():
-                m1 = torch.rand(100, 100, dtype=dtype, device=device) + 0.5
-            else:
-                # math.pow will overflow and throw exceptions for large integers
-                range_high = 4 if dtype in (torch.int8, torch.uint8) else 10
-                m1 = torch.randint(1, range_high, (100, 100), dtype=dtype, device=device)
-
-            exponents = [-2.8, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 4, 3.3]
-            complex_exponents = [-2.5j, -1.0j, 0j, 1.0j, 2.5j, 1.0 + 1.0j, -1.0 - 1.5j, 3.3j]
-            if m1.is_complex():
-                self._do_pow_for_exponents(m1, exponents + complex_exponents, pow, 10e-4)
-            else:
-                self._do_pow_for_exponents(m1, exponents, math.pow, None)
-                self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
-
-            # base - number, exponent - tensor
-            # contiguous
-            res1 = torch.pow(3, m1[4])
-            res2 = res1.clone().zero_()
-            for i in range(res2.size(0)):
-                res2[i] = math.pow(3, m1[4, i])
-            self.assertEqual(res1, res2)
-
-            # non-contiguous
-            res1 = torch.pow(3, m1[:, 4])
-            res2 = res1.clone().zero_()
-            for i in range(res2.size(0)):
-                res2[i] = math.pow(3, m1[i][4])
-            self.assertEqual(res1, res2)
-
-            # resize behavior for exp == 1
-            out = torch.zeros(1, dtype=dtype, device=device)
-            torch.pow(m1, 1, out=out)
-            self.assertEqual(out, m1)
+        # non-contiguous
+        res1 = torch.pow(3, m1[:, 4])
+        res2 = res1.clone().zero_()
+        for i in range(res2.size(0)):
+            res2[i] = pow(3, m1[i][4])
+        self.assertEqual(res1, res2)
 
     # TODO: refactor all these tests using opinfos properly
     def _test_pow(self, base, exponent, np_exponent=None):
@@ -656,8 +640,10 @@ class TestBinaryUfuncs(TestCase):
                 actual = base.clone()
                 # When base is a 0-dim cpu tensor and exp is a cuda tensor, we exp `pow` to work but `pow_` to fail, since
                 # `pow` will try to create the output tensor on a cuda device, but `pow_` needs to use the cpu tensor as the output
-                if base.dim() == 0 and base.device.type == 'cpu' and exponent.device.type == 'cuda':
+                if (isinstance(exponent, torch.Tensor) and base.dim() == 0 and base.device.type == 'cpu' and 
+                    exponent.device.type == 'cuda'):
                     regex = 'Expected all tensors to be on the same device, but found at least two devices, cuda.* and cpu!'
+                    self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent)
                 elif torch.can_cast(torch.result_type(base, exponent), base.dtype):
                     actual2 = actual.pow_(exponent)
                     self.assertEqual(actual, expected)
@@ -672,20 +658,74 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(actual, expected.to(actual))
             self.assertEqual(actual2, expected.to(actual))
 
-    def test_int_pow(self, device):
 
-        def _test_integral_pow(dt, range, dev):
-            tensor = torch.tensor((3, 3), dtype=dt, device=dev).random_(*range)
-            exps = [0, 1, 2, 4,
-                    torch.tensor((3, 3), dtype=dt, device=dev).random_(0, 5)]
-            for exp in exps:
-                self._test_pow(tensor, exp)
+    # Tests pow() for integral, floating-type tensors, with 
+    # integral, floating-type exponents (tensor or scalar exponents), respectively
+    def test_int_and_float_pow(self, device):
 
-        _test_integral_pow(torch.int8, (-3, 4), device)
-        _test_integral_pow(torch.uint8, (0, 4), device)
-        _test_integral_pow(torch.int16, (-5, 5), device)
-        _test_integral_pow(torch.int64, (-10, 10), device)
-        _test_integral_pow(torch.int32, (-10, 10), device)
+        def _generate_test_inputs(dt, low, high, dev):
+            test_cases = (
+                ((4, 4), 0, (4, 1)),
+                ((3, 1), 4, (3, 1)),
+                ((2,), 4, (1,)),
+                ((1,), 2, ()),
+                ((513, 513), 4, (513,)),
+                ((5, 5, 5), 5, (5,)),
+                ((), 2, ()),
+            )
+            for base_shape, exp_scalar, exp_shape in test_cases:
+                base_tensor = make_tensor(base_shape, dtype=dt, device=dev, low=low, high=high)
+                # int tensors don't take negative exponents
+                if dt in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+                    exp_tensor = make_tensor(exp_shape, dtype=dt, device=dev, low=0, high=high)
+                else:
+                    exp_tensor = make_tensor(exp_shape, dtype=dt, device=dev, low=low, high=high)
+                self._test_pow(base_tensor, exp_scalar)
+                self._test_pow(base_tensor, exp_tensor)
+                # test non-contiguous tensors as well
+                base_tensor = make_tensor(base_shape, dtype=dt, device=dev, low=low, high=high,
+                                          discontiguous=True)
+                if dt in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+                    exp_tensor = make_tensor(exp_shape, dtype=dt, device=dev, low=0, high=high,
+                                             discontiguous=True)
+                else:
+                    exp_tensor = make_tensor(exp_shape, dtype=dt, device=dev, low=low, high=high,
+                                             discontiguous=True) 
+                self._test_pow(base_tensor, exp_scalar)
+                self._test_pow(base_tensor, exp_tensor)
+
+        _generate_test_inputs(torch.int8, -3, 4, device)
+        _generate_test_inputs(torch.uint8, 0, 4, device)
+        _generate_test_inputs(torch.int16, -5, 5, device)
+        _generate_test_inputs(torch.int64, -10, 10, device)
+        _generate_test_inputs(torch.int32, -10, 10, device)
+        _generate_test_inputs(torch.float16, 0., 5., device)
+        _generate_test_inputs(torch.float32, 0., 10., device)
+        _generate_test_inputs(torch.float64, 0., 10., device)
+        # pow's output would have some NaNs as well
+        _generate_test_inputs(torch.float32, -10., 10., device)
+        _generate_test_inputs(torch.float64, -10., 10., device)
+
+
+    # Tests that a Runtime error occurs when a base tensor cannot be resized
+    # by pow's inplace variant due to PyTorch's broadcasting semantics.
+    # pow's inplace variant for bool tensors is unsupported, so bool isn't tested.
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
+    def test_pow_inplace_resizing_exception(self, device, dtype):
+        test_cases = (
+            ((), (3,)),
+            ((2,), (2, 1)),
+            ((2, 1), (2, 2)),
+            ((2, 2), (2, 1, 1)),
+        )
+        test_inputs = list((make_tensor(base_size, dtype=dtype, device=device,
+                                        high=5, low=0),
+                            make_tensor(exp_size, dtype=dtype, device=device,
+                                        high=2, low=0))
+                           for base_size, exp_size in test_cases)
+        for base, exponent in test_inputs:
+            regex = "doesn't match the broadcast shape"
+            self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent) 
 
     def test_int_tensor_pow_neg_ints(self, device):
         ints = [torch.iinfo(torch.int32).min,
@@ -703,12 +743,23 @@ class TestBinaryUfuncs(TestCase):
         for pow in floats:
             self._test_pow(tensor, pow)
 
-    def test_float_scalar_pow_float_tensor(self, device):
+    @dtypes(*[torch.float32, torch.float64])
+    def test_float_scalar_pow_float_tensor(self, device, dtype):
         floats = [2.0, -3 / 2, -1.0, -1 / 2, -1 / 3, 0.0,
                   1 / 3, 1 / 2, 1.0, 3 / 2, 2.0]
-        tensor = torch.tensor(floats, dtype=torch.float32, device=device)
+        exponent_shapes = (
+            (1,),
+            (2, 2),
+            (2, 1),
+            (2, 2, 2),
+        )
+        tensors = list(make_tensor(shape, dtype=dtype, device=device, low=0)
+                       for shape in exponent_shapes)
+        floats_tensor = torch.tensor(floats, dtype=dtype, device=device)
         for base in floats:
-            self._test_pow(base, tensor)
+            self._test_pow(base, floats_tensor)
+            for tensor in tensors:
+                self._test_pow(base, tensor)
 
     @onlyCUDA
     def test_cuda_tensor_pow_scalar_tensor(self, device):
@@ -742,10 +793,13 @@ class TestBinaryUfuncs(TestCase):
     @dtypes(*(torch.testing.get_all_dtypes(include_bool=False, include_bfloat16=False)))
     def test_complex_scalar_pow_tensor(self, device, dtype):
         complexes = [0.5j, 1. + 1.j, -1.5j, 2.2 - 1.6j, 1 + 0j]
-        exp = make_tensor((100,), device, dtype, low=-2, high=2)
-        exp[0] = exp[10] = exp[20] = 0
+        first_exp = make_tensor((100,), device, dtype, low=-2, high=2)
+        second_exp = make_tensor((100,), device, dtype, low=-2, high=2, discontiguous=True)
+        first_exp[0] = first_exp[10] = first_exp[20] = 0
+        second_exp[0] = second_exp[10] = second_exp[20] = 0
         for base in complexes:
-            self._test_pow(base, exp)
+            self._test_pow(base, first_exp)
+            self._test_pow(base, second_exp)
 
     def test_tensor_pow_tensor(self, dev):
         def rotate(l, n):
@@ -759,14 +813,19 @@ class TestBinaryUfuncs(TestCase):
                 self._test_pow(vals_tensor, pows_tensor)
 
         ints = [0, 1, 2, 3]
+        test_tensor_pow_tensor(ints, torch.uint8, np.uint8)
+        test_tensor_pow_tensor(ints, torch.int8, np.int8)
+        test_tensor_pow_tensor(ints, torch.int16, np.int16)
         test_tensor_pow_tensor(ints, torch.int32, np.int32)
         test_tensor_pow_tensor(ints, torch.int64, np.int64)
 
         floats = [-3.0, -2.0, -1.0, -1 / 2, -1 / 3,
                   0.0,
-                  1 / 3, 1 / 2, 1.0, 2.0, 3.0]
+                  1 / 3, 1 / 2, 1.0, 2.0, 3.0]     
+        test_tensor_pow_tensor(floats, torch.float16, np.float16)
         test_tensor_pow_tensor(floats, torch.float32, np.float32)
         test_tensor_pow_tensor(floats, torch.float64, np.float64)
+
 
     def test_logical_xor_with_nontrivial_alignment(self, device):
         # test tensor that is not aligned to multiple of 16 bytes
