@@ -78,8 +78,8 @@ void KernelArgumentHolder::push(const IValue& val) {
       " Tried to create argument to send to a fused kernel, but got a non-scalar type.");
 }
 
-void KernelArgumentHolder::push(const uint64_t& val) {
-  arguments_.push_back(std::make_unique<ULongArg>(val));
+void KernelArgumentHolder::push(const at::PhiloxCudaState& val) {
+  arguments_.push_back(std::make_unique<PhiloxCudaStateArg>(val));
 }
 
 // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers
@@ -115,17 +115,16 @@ void KernelArgumentHolder::push(const std::vector<at::Tensor>& tensors) {
 }
 
 void KernelArgumentHolder::appendPhiloxRNGSeed(uint64_t rand_offset) {
-  std::pair<uint64_t, uint64_t> philox_engine_inputs;
+  at::PhiloxCudaState philox_engine_inputs;
   auto gen = at::cuda::detail::getDefaultCUDAGenerator();
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
     philox_engine_inputs =
-        at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
+        at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_cuda_state(
             rand_offset);
   }
-  push(philox_engine_inputs.first);
-  push(philox_engine_inputs.second);
+  push(philox_engine_inputs);
 }
 
 } // namespace cuda

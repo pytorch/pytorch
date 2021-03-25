@@ -2,7 +2,9 @@
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int int16_t;
+typedef unsigned int uint32_t;
 typedef long long int int64_t;
+typedef unsigned long long int uint64_t;
 
 template <typename T, int N>
 struct Tensor {

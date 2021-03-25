@@ -1973,6 +1973,57 @@ class TestCudaFuser(JitTestCase):
         x = x.to("cuda:1")
         jit_o = t_jit(x)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_graph_rng(self):
+        self.assertTrue(torch._C._jit_nvfuser_enabled())
+        size = 10000
+        a = torch.randn((size,), device="cuda", dtype=torch.float)
+
+        def t(x):
+            o = x + 1.0
+            o = torch.nn.functional.dropout(o, p=0.1)
+            o = o + 1.0
+            o = torch.nn.functional.dropout(o, p=0.1)
+            return o
+
+        t_jit = torch.jit.script(t)
+
+        for _ in range(3):
+            t_jit(a)
+
+        self.assertGraphContainsExactly(t_jit.graph_for(a), FUSION_GUARD, 1)
+
+        # Control (jitted, ungraphed)
+        torch.cuda.manual_seed(5)
+        eager_out = a.clone()
+        for _ in range(3):
+            eager_out = t_jit(eager_out)
+
+        graph_in = a.clone()
+        g = torch.cuda._Graph()
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            torch.cuda.manual_seed(5)
+            g.capture_begin()
+            graph_out = t_jit(graph_in)
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+        # g is now a jitted, graphed version of t.
+
+        # Runs a (jitted, graphed) -> (jitted, ungraphed) -> (jitted, graphed) sequence.
+        # The ops in the overall sequence should be the same as Control.
+        g.replay()
+        # graph_out is now filled with g's result. Use it as ungraphed input.
+        out = t_jit(graph_out)
+        graph_in.copy_(out)
+        g.replay()
+
+        # If replay() updated RNG state correctly, graph_out should now equal eager_out
+        self.assertEqual(graph_out, eager_out)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")

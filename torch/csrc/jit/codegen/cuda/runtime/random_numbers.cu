@@ -1,4 +1,3 @@
-
 class Philox {
  public:
   __device__ Philox(
