@@ -591,14 +591,15 @@ Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A,
 
 void _cholesky_inverse_cusolver_potrs_based(Tensor& result, Tensor& infos, bool upper) {
   at::Tensor input_working_copy = cloneBatchedColumnMajor(result);
-  at::Tensor infos_gpu = at::empty({1}, result.options().dtype(at::kInt));
+  at::Tensor infos_gpu = at::zeros({1}, result.options().dtype(at::kInt));
   result.fill_(0);
   result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_cuda_potri", [&] {
     apply_cholesky_cusolver_potrs<scalar_t>(result, input_working_copy, upper, infos_gpu);
   });
+
   // Debug only: info of cusolver potrs only check if the i-th parameter is wrong
-  // Function argument `infos` is a CPU tensor, the following copy will result in a device-host sync.
+  // Function argument `infos` is a CPU tensor, the following copy will cause a device-host sync.
   // infos.copy_(infos_gpu);
 }
 
