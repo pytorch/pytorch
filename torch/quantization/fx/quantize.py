@@ -374,7 +374,7 @@ WEIGHT_PREPACK_OPS = {
 
 class Quantizer:
     def __init__(self):
-        # mapping from matched node to activation_post_process
+        # mapping from matched node to full qualified path of activation_post_process
         # must be filled before convert
         self.activation_post_process_map: Optional[
             Dict[str, List[str]]] = None
