@@ -1,7 +1,7 @@
 $VS_DOWNLOAD_LINK = "https://aka.ms/vs/16/release/vs_community.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
 $VS_INSTALL_ARGS = @("modify","--nocache","--quiet","--wait", "--installPath ""C:\Program Files (x86)\Microsoft Visual Studio\2019\Community""",
-                                                              "--add Microsoft.VisualStudio.Component.VC.14.27.x86.x64")
+                                                              "--add Microsoft.VisualStudio.Component.VC.14.28.29333.x86.x64")
 
 curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
 if ($LASTEXITCODE -ne 0) {
