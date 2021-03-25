@@ -48,12 +48,11 @@ def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_
 
 
 def iter_tensor(x_tensor):
-    """For strided and sparse tensors, provides a "view" of the original tensor.
-    Updates through the view update the original, but do not bump version count.
-    For mkldnn tensors, however, the returned tensor will be a dense *copy*.
-    Also provides the current index into that tensor, as well as a corresponding
-    "flat index" which translates to a given row/col in the jacobian matrix.
-    """
+    # Enumerates over a tensor and provides a corresponding flat index that translates
+    # to a given rol/col in the jacobian matrix. iter_tensor also returns a
+    # strided version of the original tensor that is able to be modified inplace.
+    # If the input tensor is strided or sparse, the returned tensor will share storage with
+    # the original. Otherwise, for opaque tensor types like mkldnn, a copy is returned.
     if x_tensor.is_sparse:
         def get_stride(size):
             dim = len(size)
@@ -95,9 +94,8 @@ def iter_tensor(x_tensor):
 
 
 def compute_gradient(fn, inputs, x, idx, delta, eps, is_mkldnn):
-    """Perturbs inputs in-place by delta as to obtain the gradient
-    of each of the outputs wrt to x at idx.
-    """
+    # Perturbs inputs in-place by delta as to obtain the gradient
+    # of each of the outputs wrt to x at idx.
     # we currently assume that the norm of delta equals eps
     assert(delta == eps or delta == (eps * 1j))
 
