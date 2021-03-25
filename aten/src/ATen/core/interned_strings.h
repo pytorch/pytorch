@@ -88,9 +88,11 @@ namespace c10 {
   _(aten, Bool)                      \
   _(aten, Int)                       \
   _(aten, FloatImplicit)             \
+  _(aten, ComplexImplicit)           \
   _(aten, IntImplicit)               \
   _(aten, ScalarImplicit)            \
   _(aten, Float)                     \
+  _(aten, Complex)                   \
   _(aten, str)                       \
   _(aten, is_pinned)                 \
   _(aten, Delete)                    \
