@@ -922,6 +922,8 @@ class Quantizer:
 
             # Need to get correct quantized/non-quantized state forn the output
             # of FixedQParamsQuantizeHandler
+            # TODO: we may want to try to remove the special case here
+            # as well
             if type(obj) in [
                     CopyNodeQuantizeHandler,
                     FixedQParamsOpQuantizeHandler
