@@ -259,35 +259,6 @@ class EmbeddingBag(Module):
         weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
                          initialized from :math:`\mathcal{N}(0, 1)`.
 
-    Inputs:
-        :attr:`input` (IntTensor or LongTensor), :attr:`offsets` (IntTensor or LongTensor, optional), and
-        :attr:`per_index_weights` (Tensor, optional)
-
-        - :attr:`input` and :attr:`offsets` have to be of the same type, either int or long
-
-        - If :attr:`input` is 2D of shape `(B, N)`,
-
-          it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
-          this will return ``B`` values aggregated in a way depending on the :attr:`mode`.
-          :attr:`offsets` is ignored and required to be ``None`` in this case.
-
-        - If :attr:`input` is 1D of shape `(N)`,
-
-          it will be treated as a concatenation of multiple bags (sequences).
-          :attr:`offsets` is required to be a 1D tensor containing the
-          starting index positions of each bag in :attr:`input`. Therefore,
-          for :attr:`offsets` of shape `(B)`, :attr:`input` will be viewed as
-          having ``B`` bags. Empty bags (i.e., having 0-length) will have
-          returned vectors filled by zeros.
-
-        per_sample_weights (Tensor, optional): a tensor of float / double weights, or None
-            to indicate all weights should be taken to be ``1``. If specified, :attr:`per_sample_weights`
-            must have exactly the same shape as input and is treated as having the same
-            :attr:`offsets`, if those are not ``None``. Only supported for ``mode='sum'``.
-
-
-    Output shape: `(B, embedding_dim)`
-
     Examples::
 
         >>> # an Embedding module containing 10 tensors of size 3
