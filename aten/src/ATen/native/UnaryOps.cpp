@@ -290,6 +290,14 @@ Tensor& expm1_out(const Tensor& self, Tensor& result) { return unary_op_impl_flo
 Tensor expm1(const Tensor& self) { return unary_op_impl_float(self, expm1_stub); }
 Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
 
+// special_exp2, alias for exp2
+Tensor& special_exp2_out(const Tensor& self, Tensor& result) { return at::exp2_out(result, self); }
+Tensor special_exp2(const Tensor& self) { return self.exp2(); }
+
+// special_expm1, alias for expm1
+Tensor& special_expm1_out(const Tensor& self, Tensor& result) { return at::expm1_out(result, self); }
+Tensor special_expm1(const Tensor& self) { return self.expm1(); }
+
 Tensor& erf_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, erf_stub); }
 Tensor erf(const Tensor& self) { return unary_op_impl_float(self, erf_stub); }
 Tensor& erf_(Tensor& self) { return unary_op_impl_(self, at::erf_out); }
@@ -302,12 +310,15 @@ Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_fl
 Tensor erfinv(const Tensor& self) { return unary_op_impl_float(self, erfinv_stub); }
 Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
 
+// special_erf, alias for erf
 Tensor& special_erf_out(const Tensor& self, Tensor& result) { return at::erf_out(result, self); }
 Tensor special_erf(const Tensor& self) { return self.erf(); }
 
+// special_erfc, alias for erfc
 Tensor& special_erfc_out(const Tensor& self, Tensor& result) { return at::erfc_out(result, self); }
 Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 
+// special_erfinv, alias for erfinv
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 

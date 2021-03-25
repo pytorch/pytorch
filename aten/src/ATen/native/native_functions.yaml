@@ -8616,6 +8616,22 @@
   dispatch:
     CPU, CUDA: special_entr_out
 
+- func: special_expm1(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_expm1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_exp2(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_exp2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
 - func: special_gammaln(Tensor self) -> Tensor
   python_module: special
   variants: function

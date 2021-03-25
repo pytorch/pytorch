@@ -121,3 +121,52 @@ Example::
     >>> torch.erfinv(torch.tensor([0, 0.5, -1.]))
     tensor([ 0.0000,  0.4769,    -inf])
 """.format(**common_args))
+
+exp2 = _add_docstr(_special.special_exp2,
+                   r"""
+exp2(input, *, out=None) -> Tensor
+
+Computes the base two exponential function of :attr:`input`.
+
+.. math::
+    y_{i} = 2^{x_{i}}
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.special.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
+    tensor([ 1.,  2.,  8., 16.])
+""".format(**common_args))
+
+expm1 = _add_docstr(_special.special_expm1,
+                    r"""
+expm1(input, *, out=None) -> Tensor
+
+Computes the exponential of the elements minus 1
+of :attr:`input`.
+
+..
+
+.. math::
+    y_{i} = e^{x_{i}} - 1
+
+.. note:: This function is more numerically stable for computing `torch.exp(x) - 1` for smaller values of x.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.expm1(torch.tensor([0, math.log(2.)]))
+    tensor([ 0.,  1.])
+""".format(**common_args))

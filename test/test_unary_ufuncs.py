@@ -294,7 +294,7 @@ class TestUnaryUfuncs(TestCase):
 
             actual = op(t)
             expected = op.ref(a)
-
+            print(t, actual, expected)
             # Crafts a custom error message for smaller, printable tensors
             if t.numel() < 10:
                 msg = ("Failed to produce expected results! Input tensor was"

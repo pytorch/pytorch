@@ -319,6 +319,10 @@ namespace c10 {
   _(aten, special_erfc)              \
   _(aten, erfinv)                    \
   _(aten, special_erfinv)            \
+  _(aten, expm1)                     \
+  _(aten, special_expm1)             \
+  _(aten, exp2)                      \
+  _(aten, special_exp2)              \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
