@@ -394,13 +394,17 @@ Utility functions in other modules
 .. autosummary::
     :toctree: generated
     :nosignatures:
-    :template: classtemplate.rst
 
     nn.utils.rnn.PackedSequence
     nn.utils.rnn.pack_padded_sequence
     nn.utils.rnn.pad_packed_sequence
     nn.utils.rnn.pad_sequence
     nn.utils.rnn.pack_sequence
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
     nn.Flatten
     nn.Unflatten
