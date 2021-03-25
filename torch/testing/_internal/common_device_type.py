@@ -495,13 +495,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
-                # Requires tests be a function for Python2 compat
-                # (In Python2 tests are type checked methods wrapping functions)
                 test = getattr(generic_test_class, name)
-                if hasattr(test, '__func__'):
-                    test = test.__func__
-                assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
-
                 # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
                 sig = inspect.signature(device_type_test_class.instantiate_test)
                 if len(sig.parameters) == 3:
@@ -511,12 +505,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                     device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member
                 assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
-
-                # Unwraps to functions (when available) for Python2 compat
                 nontest = getattr(generic_test_class, name)
-                if hasattr(nontest, '__func__'):
-                    nontest = nontest.__func__
-
                 setattr(device_type_test_class, name, nontest)
 
         # Mimics defining the instantiated class in the caller's file
