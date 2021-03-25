@@ -2,7 +2,6 @@ import torch
 import torch.fx
 import inspect
 import operator
-import numbers
 from typing import Any, Callable, Dict, Optional, Tuple
 from torch.fx.node import Argument, Target
 from torch._jit_internal import boolean_dispatched
