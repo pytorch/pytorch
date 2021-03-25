@@ -128,11 +128,8 @@ def construct_time_validation(f):
                                     .format(argument_name, type(value)))
                 if not value.type.issubtype(hint.type):
                     raise TypeError("Expected type of argument '{}' as a subtype of "
-                                    "hint {}, but {} found"
+                                    "hint {}, but found {}"
                                     .format(argument_name, hint.type, value.type))
-                # Replace by subtype from hint
-                if value.type != hint.type:
-                    value.type = copy.deepcopy(hint.type)  # type: ignore
 
         return f(*args, **kwargs)
 

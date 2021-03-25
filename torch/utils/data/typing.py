@@ -151,9 +151,9 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
                     if not recursive:
                         return True
                     c_args = constraint.__args__
-                    if v_args is None or len(c_args) == 0:
+                    if c_args is None or len(c_args) == 0:
                         return True
-                    if len(v_args) == len(c_args) and \
+                    if v_args is not None and len(v_args) == len(c_args) and \
                             all(issubtype(v_arg, c_arg) for v_arg, c_arg in zip(v_args, c_args)):
                         return True
             else:
