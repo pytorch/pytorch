@@ -4,7 +4,7 @@
 import collections
 import copy
 import numbers
-from typing import (Any, Dict, Iterator, Generic, List, Set, Sequence, Tuple,
+from typing import (Any, Dict, Iterator, List, Set, Sequence, Tuple,
                     TypeVar, Union, get_type_hints)
 from typing import _tp_cache, _type_check, _type_repr  # type: ignore
 try:
@@ -167,18 +167,18 @@ def issubinstance(data, data_type):
     if not issubtype(type(data), data_type, recursive=False):
         return False
 
-    if isinstance(data, Tuple):
+    if isinstance(data, tuple):
         if data_type.__args__ is None or len(data_type.__args__) == 0:
             return True
         if len(data_type.__args__) != len(data):
             return False
         return all(issubinstance(d, t) for d, t in zip(data, data_type.__args__))
-    elif isinstance(data, (List, Set)):
+    elif isinstance(data, (list, set)):
         if data_type.__args__ is None or len(data_type.__args__) == 0:
             return True
         t = data_type.__args__[0]
         return all(issubinstance(d, t) for d in data)
-    elif isinstance(data, Dict):
+    elif isinstance(data, dict):
         if data_type.__args__ is None or len(data_type.__args__) == 0:
             return True
         kt, vt = data_type.__args__
@@ -193,45 +193,6 @@ def issubinstance(data, data_type):
 # typing system will gain benefit of performance and metaclass conflicts,
 # as elaborated in https://www.python.org/dev/peps/pep-0560/
 
-# Took reference from
-# https://github.com/python/cpython/blob/3.6/Lib/typing.py#L1180-L1201
-def _generic_new(base_cls, cls, *args, **kwds):
-    # Assure type is erased on instantiation,
-    # but attempt to store it in __orig_class__
-    if cls.__origin__ is None:
-        if (base_cls.__new__ is object.__new__ and
-                cls.__init__ is not object.__init__):
-            return base_cls.__new__(cls)
-        else:
-            return base_cls.__new__(cls, *args, **kwds)
-    else:
-        origin = cls._gorg
-        if (base_cls.__new__ is object.__new__ and
-                cls.__init__ is not object.__init__):
-            obj = base_cls.__new__(origin)
-        else:
-            obj = base_cls.__new__(origin, *args, **kwds)
-        try:
-            obj.__orig_class__ = cls
-        except AttributeError:
-            pass
-        obj.__init__(*args, **kwds)
-        return obj
-
-# Took reference from
-# https://github.com/python/cpython/blob/3.6/Lib/typing.py#L852-L863
-def _next_in_mro(cls):
-    """Helper for Generic.__new__.
-
-    Returns the class after the last occurrence of Generic or
-    Generic[...] in cls.__mro__.
-    """
-    next_in_mro = object
-    # Look for the last occurrence of Generic or Generic[...].
-    for i, c in enumerate(cls.__mro__[:-1]):
-        if isinstance(c, GenericMeta) and hasattr(c, '_gorg') and c._gorg is Generic:  # type: ignore
-            next_in_mro = cls.__mro__[i + 1]
-    return next_in_mro
 
 def _fixed_type(param) -> bool:
     if isinstance(param, TypeVar) or param in (Any, ...):  # type: ignore
@@ -256,7 +217,7 @@ class _DataPipeType:
     def __eq__(self, other):
         if isinstance(other, _DataPipeType):
             return self.param == other.param
-        return NotImplementedError
+        return NotImplemented
 
     def __hash__(self):
         return hash(self.param)
@@ -275,28 +236,48 @@ class _DataPipeType:
 _DEFAULT_TYPE = _DataPipeType(Any)
 
 
+def _mro_subclass_init(obj, fixed):
+    mro = obj.__mro__
+    for b in mro:
+        if isinstance(b, _DataPipeMeta):
+            if fixed:
+                if b.__init_subclass__ == fixed_type_init:
+                    return True
+                if hasattr(b.__init_subclass__, '__func__') and \
+                        b.__init_subclass__.__func__ == fixed_type_init:  # type: ignore
+                    return True
+            if not fixed:
+                if b.__init_subclass__ == nonfixed_type_init:
+                    return True
+                if hasattr(b.__init_subclass__, '__func__') and \
+                        b.__init_subclass__.__func__ == nonfixed_type_init:  # type: ignore
+                    return True
+    return False
+
+
 class _DataPipeMeta(GenericMeta):
+    type: _DataPipeType
+
     def __new__(cls, name, bases, namespace, **kargs):
         # For Python > 3.6
         cls.__origin__ = None
+        # Save __init__ function
+        if '__init__' in namespace:
+            namespace.update({'_origin_init': namespace['__init__']})
+        if 'type' in namespace:
+            return super().__new__(cls, name, bases, namespace)
 
         # For plain derived class without annotation
         t = None
         for base in bases:
-            if hasattr(base, 'type') and isinstance(base.type, _DataPipeType):
+            if isinstance(base, _DataPipeMeta):
                 t = base.type
                 break
         if t is not None:
-            if 'type' in namespace:
-                if not namespace['type'].issubtype(t):
-                    raise TypeError('Can not derive a DataPipe[{}] from DataPipe[{}]'
-                                    .format(namespace['type'], t))
-            else:
-                namespace['type'] = t
+            namespace.update({'type': t})
         else:
-            if 'type' not in namespace:
-                namespace['type'] = _DEFAULT_TYPE
-                namespace['__init_subclass__'] = nonfixed_type_init
+            namespace.update({'type': _DEFAULT_TYPE, '__init_subclass__': nonfixed_type_init})
+
         return super().__new__(cls, name, bases, namespace)
 
     @_tp_cache
@@ -307,8 +288,19 @@ class _DataPipeMeta(GenericMeta):
             param = Tuple[param]
         _type_check(param, msg="{}[t]: t must be a type".format(self.__name__))
         t = _DataPipeType(param)
-        name = 'DataPipe[' + str(t) + ']'
-        bases = (self,) if self.__origin__ is None else ()
+
+        if not t.issubtype(self.type):
+            raise TypeError('Can not subclass a DataPipe[{}] from DataPipe[{}]'
+                            .format(t, self.type))
+
+        # Types are equal
+        if self.type.issubtype(t):
+            if _mro_subclass_init(self, t.fixed):
+                return self
+
+        name = self.__name__ + '[' + str(t) + ']'
+        bases = (self,) + self.__bases__
+
         if t.fixed:
             return self.__class__(name, bases,
                                   {'__init_subclass__': fixed_type_init,
@@ -321,11 +313,13 @@ class _DataPipeMeta(GenericMeta):
     def __eq__(self, other):
         if not isinstance(other, _DataPipeMeta):
             return NotImplemented
+        if self.__origin__ is None or other.__origin__ is None:
+            return self is other
         return (self.__origin__ == other.__origin__
-                and self.type == other.type)  # type: ignore
+                and self.type == other.type)
 
     def __hash__(self):
-        return hash((self.__origin__, self.type))  # type: ignore
+        return hash((self.__name__, self.type))
 
 
 def _validate_iter(sub_cls):
@@ -340,14 +334,16 @@ def _validate_iter(sub_cls):
         if 'return' in hints:
             return_hint = hints['return']
             # Plain Return Hint for Python 3.6
-            if return_hint is Iterator:
+            if return_hint == Iterator:
                 return
             if not (hasattr(return_hint, '__origin__') and
-                    (return_hint.__origin__ is Iterator or
-                     return_hint.__origin__ is collections.abc.Iterator)):
+                    (return_hint.__origin__ == Iterator or
+                     return_hint.__origin__ == collections.abc.Iterator)):
                 raise TypeError('Expected Iterator as the return annotation for `__iter__` of {}'
                                 ', but found {}'.format(sub_cls.__name__, hints['return']))
             data_type = return_hint.__args__[0]
+            # Double-side subtype checking to make sure type matched
+            # e.g. T_co == Any
             if not (issubtype(sub_cls.type.param, data_type) and issubtype(data_type, sub_cls.type.param)):
                 raise TypeError('Unmatched type annotation for {} ({} vs {})'
                                 .format(sub_cls.__name__, sub_cls.type, _type_repr(data_type)))
@@ -355,12 +351,19 @@ def _validate_iter(sub_cls):
 
 def fixed_type_init(sub_cls, *args, **kwargs):
     _validate_iter(sub_cls)
+    if '_origin_init' in sub_cls.__dict__:
+        sub_cls.__init__ = sub_cls._origin_init
+    else:
+
+        def new_init(self, *args, **kwargs):
+            pass
+        sub_cls.__init__ = new_init
 
 
 def nonfixed_type_init(sub_cls, *args, **kwargs):
     _validate_iter(sub_cls)
-    if '__init__' in sub_cls.__dict__:
-        init_fn = sub_cls.__dict__['__init__']
+    if '_origin_init' in sub_cls.__dict__:
+        init_fn = sub_cls.__dict__['_origin_init']
 
         def new_init(self, *args, **kwargs):
             init_fn(self, *args, **kwargs)

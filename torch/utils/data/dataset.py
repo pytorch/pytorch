@@ -6,7 +6,7 @@ from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
-from torch.utils.data.typing import _DataPipeMeta, _generic_new, _next_in_mro
+from torch.utils.data.typing import _DataPipeMeta
 from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
 from ... import Tensor, Generator
 
@@ -145,15 +145,6 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
     """
     functions: Dict[str, Callable] = {}
     reduce_ex_hook : Optional[Callable] = None
-
-    def __new__(cls, *args, **kwds):
-        if hasattr(cls, '_gorg') and cls._gorg is Generic:  # type: ignore
-            raise TypeError("Type Generic cannot be instantiated; "
-                            "it can be used only as a base class")
-        if hasattr(cls, '__next_in_mro__'):
-            return _generic_new(cls.__next_in_mro__, cls, *args, **kwds)  # type: ignore
-        else:
-            return _generic_new(_next_in_mro(cls), cls, *args, **kwds)
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError

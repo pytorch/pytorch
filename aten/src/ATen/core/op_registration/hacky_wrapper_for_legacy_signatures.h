@@ -12,6 +12,23 @@
 // and then delete this file. This transition process can happen kernel-by-kernel, since this wrapper
 // is a no-op for kernels that already have a non-legacy signature.
 
+/*
+ * [Note: hacky wrapper removal for optional tensor]
+ *
+ * The kernel implementation takes an optional tensor marked in the schema as
+ * Tensor? but the C++ function takes Tensor instead of the optional<Tensor>
+ * expected by the dispatcher.
+ *
+ * To remove the hacky wrapper, the C++ function is changed to take
+ * optional<Tensor> and unwrap the Tensor value at the beginning of
+ * the function, e.g.:
+ *   > const Tensor& weight =
+     >     c10::value_or_else(weight_opt, [] {returnTensor();});
+ *
+ * We may want make the kernel handle optional directly without going through
+ * the creation of a default constructed tensor.
+ */
+
 namespace c10 {
 namespace impl {
 

@@ -17,7 +17,7 @@ class functional_datapipe(object):
 
     def __call__(self, cls):
         if isinstance(cls, Type):  # type: ignore
-            if not issubclass(cls, IterDataPipe):
+            if not isinstance(cls, _DataPipeMeta):
                 raise TypeError('`functional_datapipe` can only decorate IterDataPipe')
         # with non_deterministic decorator
         else:

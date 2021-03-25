@@ -278,7 +278,7 @@ class TestFunctionalIterDataPipe(TestCase):
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in unpicklable_datapipes:
             with warnings.catch_warnings(record=True) as wa:
-                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)
+                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore
                 self.assertEqual(len(wa), 1)
                 self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
                 with self.assertRaises(AttributeError):
@@ -292,7 +292,7 @@ class TestFunctionalIterDataPipe(TestCase):
             dp.iter.Concat()
 
         with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `IterDataPipe`"):
-            dp.iter.Concat(input_dp1, ())
+            dp.iter.Concat(input_dp1, ())  # type: ignore
 
         concat_dp = input_dp1.concat(input_dp2)
         self.assertEqual(len(concat_dp), 15)
@@ -302,6 +302,7 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
         input_dp_nl = IDP_NoLen(range(5))
+
         concat_dp = input_dp1.concat(input_dp_nl)
         with self.assertRaises(NotImplementedError):
             len(concat_dp)
@@ -536,7 +537,7 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(tsfm_data[:, 1:(h + 1), 1:(w + 1)], input_data)
 
         # Single transform
-        input_dp = IDP_NoLen(inputs)
+        input_dp = IDP_NoLen(inputs)  # type: ignore
         transform = torchvision.transforms.ToTensor()
         tsfm_dp = input_dp.transforms(transform)
         with self.assertRaises(NotImplementedError):
@@ -546,9 +547,9 @@ class TestFunctionalIterDataPipe(TestCase):
 
     def test_zip_datapipe(self):
         with self.assertRaises(TypeError):
-            dp.iter.Zip(IDP(range(10)), list(range(10)))
+            dp.iter.Zip(IDP(range(10)), list(range(10)))  # type: ignore
 
-        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))
+        zipped_dp = dp.iter.Zip(IDP(range(10)), IDP_NoLen(range(5)))  # type: ignore
         with self.assertRaises(NotImplementedError):
             len(zipped_dp)
         exp = list((i, i) for i in range(5))
@@ -581,7 +582,7 @@ class TestTyping(TestCase):
                 self.assertFalse(issubtype(t1, t2))
 
         T = TypeVar('T', int, str)
-        S = TypeVar('S', bool, Union[str, int], Tuple[int, T])
+        S = TypeVar('S', bool, Union[str, int], Tuple[int, T])  # type: ignore
         types = ((int, Optional[int]),
                  (List, Union[int, list]),
                  (Tuple[int, str], S),
@@ -601,8 +602,8 @@ class TestTyping(TestCase):
         for subscript_type, n in subscriptable_types.items():
             for ts in itertools.combinations(types, n):
                 subs, pars = zip(*ts)
-                sub = subscript_type[subs]
-                par = subscript_type[pars]
+                sub = subscript_type[subs]  # type: ignore
+                par = subscript_type[pars]  # type: ignore
                 self.assertTrue(issubtype(sub, par))
                 self.assertFalse(issubtype(par, sub))
                 # Non-recursive check
@@ -630,8 +631,8 @@ class TestTyping(TestCase):
         dt = (([1, '1', 2], List), (set({1, '1', 2}), Set))
         for d, t in dt:
             self.assertTrue(issubinstance(d, t))
-            self.assertTrue(issubinstance(d, t[T_co]))
-            self.assertFalse(issubinstance(d, t[int]))
+            self.assertTrue(issubinstance(d, t[T_co]))  # type: ignore
+            self.assertFalse(issubinstance(d, t[int]))  # type: ignore
 
         # dict
         d = dict({'1': 1, '2': 2.})
@@ -655,12 +656,12 @@ class TestTyping(TestCase):
 
         with self.assertRaisesRegex(TypeError, r"Expected Iterator as the return"):
             class InvalidDP2(IterDataPipe[int]):
-                def __iter__(self) -> str:
+                def __iter__(self) -> str:  # type: ignore
                     yield 0
 
         with self.assertRaisesRegex(TypeError, r"Unmatched type annotation"):
-            class InvalidDP3(IterDataPipe[int]):
-                def __iter__(self) -> Iterator[Tuple]:
+            class InvalidDP3(IterDataPipe[Tuple]):
+                def __iter__(self) -> Iterator[int]:  # type: ignore
                     yield 0
 
         class DP1(IterDataPipe[Tuple[int, str]]):
@@ -672,8 +673,9 @@ class TestTyping(TestCase):
                 for d in range(self.length):
                     yield d, str(d)
 
+        self.assertTrue(issubclass(DP1, IterDataPipe))
         dp1 = DP1(10)
-        self.assertEqual(DP1.type, dp1.type)
+        self.assertTrue(DP1.type.issubtype(dp1.type) and dp1.type.issubtype(DP1.type))
         # Fixed type share one type instance
         self.assertEqual(id(DP1.type), id(dp1.type))
         dp2 = DP1(5)
@@ -684,13 +686,14 @@ class TestTyping(TestCase):
             r""" DataPipe without fixed type"""
             def __iter__(self) -> Iterator[T_co]:
                 for d in range(10):
-                    yield d
+                    yield d  # type: ignore
 
-        dp1 = DP2()
-        self.assertEqual(DP2.type, dp1.type)
+        self.assertTrue(issubclass(DP2, IterDataPipe))
+        dp1 = DP2()  # type: ignore
+        self.assertTrue(DP2.type.issubtype(dp1.type) and dp1.type.issubtype(DP2.type))
         # DataPipe instance with non-fixed type has own type instance
         self.assertNotEqual(id(DP2.type), id(dp1.type))
-        dp2 = DP2()
+        dp2 = DP2()  # type: ignore
         self.assertEqual(dp1.type, dp2.type)
         self.assertNotEqual(id(dp1.type), id(dp2.type))
 
@@ -703,11 +706,12 @@ class TestTyping(TestCase):
                 for d in self.datasource:
                     yield d, str(d)
 
-        dp1 = DP3(range(10))
-        self.assertEqual(DP3.type, dp1.type)
+        self.assertTrue(issubclass(DP3, IterDataPipe))
+        dp1 = DP3(range(10))  # type: ignore
+        self.assertTrue(DP3.type.issubtype(dp1.type) and dp1.type.issubtype(DP3.type))
         # DataPipe instance with non-fixed type has own type instance
         self.assertNotEqual(id(DP3.type), id(dp1.type))
-        dp2 = DP3(5)
+        dp2 = DP3(5)  # type: ignore
         self.assertEqual(dp1.type, dp2.type)
         self.assertNotEqual(id(dp1.type), id(dp2.type))
 
@@ -716,6 +720,7 @@ class TestTyping(TestCase):
             def __iter__(self):
                 raise NotImplementedError
 
+        self.assertTrue(issubclass(DP4, IterDataPipe))
         dp = DP4()
         self.assertTrue(dp.type.param == Any)
         self.assertNotEqual(id(DP4.type), id(dp.type))
@@ -730,12 +735,14 @@ class TestTyping(TestCase):
             def __iter__(self) -> Iterator:
                 raise NotImplementedError
 
-        dp = DP5()
+        self.assertTrue(issubclass(DP5, IterDataPipe))
+        dp = DP5()  # type: ignore
         self.assertTrue(dp.type.param == Any)
         self.assertNotEqual(id(DP5.type), id(dp.type))
-        dp = DP6()
+        self.assertTrue(issubclass(DP6, IterDataPipe))
+        dp = DP6()  # type: ignore
         self.assertTrue(dp.type.param == int)
-        self.assertNotEqual(id(DP6.type), id(dp.type))
+        self.assertEqual(id(DP6.type), id(dp.type))
 
     def test_construct_time(self):
         from torch.utils.data import construct_time_validation
@@ -788,13 +795,13 @@ class TestTyping(TestCase):
         dss = ([(1, '1'), (2, '2')],
                [(1, 1), (2, '2')])
         for ds in dss:
-            dp = DP(ds)
+            dp = DP(ds)  # type: ignore
             self.assertEqual(list(d for d in dp), ds)
             # Reset __iter__
             self.assertEqual(list(d for d in dp), ds)
 
-        dss = ([(1, 1), ('2', 2)],
-               [[1, '1'], [2, '2']],
+        dss = ([(1, 1), ('2', 2)],  # type: ignore
+               [[1, '1'], [2, '2']],  # type: ignore
                [1, '1', 2, '2'])
         for ds in dss:
             dp = DP(ds)
