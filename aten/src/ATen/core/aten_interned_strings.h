@@ -314,6 +314,7 @@ _(aten, embedding_sparse_backward) \
 _(aten, empty) \
 _(aten, empty_like) \
 _(aten, empty_strided) \
+_(aten, special_entr) \
 _(aten, eq) \
 _(aten, equal) \
 _(aten, exp) \
@@ -450,7 +451,6 @@ _(aten, masked_fill) \
 _(aten, masked_scatter) \
 _(aten, masked_select) \
 _(aten, matmul) \
-_(aten, matrix_power) \
 _(aten, matrix_rank) \
 _(aten, matrix_exp) \
 _(aten, max) \
@@ -619,6 +619,7 @@ _(aten, rrelu_with_noise_forward) \
 _(aten, rsqrt) \
 _(aten, scatter) \
 _(aten, scatter_add) \
+_(aten, segment_reduce) \
 _(aten, select) \
 _(aten, selu) \
 _(aten, set) \
