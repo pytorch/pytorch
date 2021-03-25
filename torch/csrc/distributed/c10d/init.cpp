@@ -65,7 +65,6 @@ constexpr auto kDeprecationWarning =
     "{} API is being deprecated, please ping "
     "https://github.com/pytorch/pytorch/issues/46291 "
     "if you see this warning";
-
 template <typename T>
 using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
 
