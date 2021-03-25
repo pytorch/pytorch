@@ -28,6 +28,7 @@ from torch.fx.experimental.fuser import fuse
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.fx.operator_schemas import _torchscript_type_to_python_type
 
 try:
     from torchvision.models import resnet18
@@ -1141,6 +1142,7 @@ class TestNormalizeOperators(JitTestCase):
                 param_values = [sample_input.input]
                 args = ['input']
                 arg_types = [torch.Tensor]
+                kwarg_types = {}
 
                 unsupported_arg_type = False
 
@@ -1156,7 +1158,10 @@ class TestNormalizeOperators(JitTestCase):
                             # Complex type not supported in FX
                             unsupported_arg_type = True
                         args.append(repr(v))
-                        arg_types.append(type(v))
+                        inferred_arg_type = torch._C._jit_try_infer_type(v)
+                        assert inferred_arg_type.success()
+                        t = _torchscript_type_to_python_type(inferred_arg_type.type())
+                        arg_types.append(t)
 
                 for k, v in sample_input.kwargs.items():
                     if isinstance(v, torch.Tensor):
@@ -1169,7 +1174,10 @@ class TestNormalizeOperators(JitTestCase):
                             # Complex type not supported in FX
                             unsupported_arg_type = True
                         args.append(f'{k} = {repr(v)}')
-                        arg_types.append(type(v))
+                        inferred_arg_type = torch._C._jit_try_infer_type(v)
+                        assert inferred_arg_type.success()
+                        t = _torchscript_type_to_python_type(inferred_arg_type.type())
+                        kwarg_types[k] = t
 
                 if unsupported_arg_type:
                     continue
@@ -1191,7 +1199,7 @@ class TestModule(torch.nn.Module):
 
                 for node in traced.graph.nodes:
                     if node.op == 'call_function':
-                        normalized_args = node.normalized_arguments(traced, arg_types)
+                        normalized_args = node.normalized_arguments(traced, arg_types, kwarg_types)
                         assert normalized_args
                         node.args = ()
                         node.kwargs = normalized_args.args_dict

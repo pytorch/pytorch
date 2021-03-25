@@ -6,7 +6,7 @@ import builtins
 import inspect
 import types
 from torch._jit_internal import boolean_dispatched
-from torch.fx.operator_schemas import get_signature_for_torch_op
+from torch.fx.operator_schemas import get_signature_for_torch_op, type_matches
 
 if TYPE_CHECKING:
     from .graph import Graph
@@ -454,7 +454,8 @@ class Node:
         return False
 
     def normalized_arguments(
-            self, root : torch.nn.Module, types : Optional[List[Any]] = None) -> Optional[NormalizedArguments]:
+            self, root : torch.nn.Module, arg_types : Optional[List[Any]] = None,
+            kwarg_types : Optional[Dict[str, Any]] = None) -> Optional[NormalizedArguments]:
         if self.op == 'call_function':
             new_kwargs = None
 
@@ -497,16 +498,18 @@ class Node:
                     # Matched exactly one schema, unambiguous
                     new_kwargs = self._args_kwargs_to_normalized_kwargs(matched_schemas[0], self.args, self.kwargs)
                 else:
-                    if types is not None:
+                    if arg_types is not None or kwarg_types is not None:
                         for candidate_signature in torch_op_schemas:
                             sig_matches = True
-                            for i, param_name in enumerate(candidate_signature.parameters):
-                                param = candidate_signature.parameters[param_name]
-                                if i >= len(types):
-                                    if param.default == inspect.Parameter.empty:
-                                        sig_matches = False
-                                else:
-                                    sig_matches = sig_matches and param.annotation is types[i]
+                            try:
+                                arg_types = arg_types if arg_types else ()
+                                kwarg_types = kwarg_types if kwarg_types else {}
+                                bound_types = candidate_signature.bind(*arg_types, **kwarg_types)
+                                for arg_name, arg_type in bound_types.arguments.items():
+                                    param = candidate_signature.parameters[arg_name]
+                                    sig_matches = sig_matches and type_matches(param.annotation, arg_type)
+                            except TypeError as e:
+                                sig_matches = False
                             if sig_matches:
                                 new_kwargs = self._args_kwargs_to_normalized_kwargs(candidate_signature, self.args, self.kwargs)
                                 break

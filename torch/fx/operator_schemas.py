@@ -31,7 +31,7 @@ class _FakeGlobalNamespace:
 _type_eval_globals = {'Tensor' : torch.Tensor, 'Device' : torch.device, 'Layout' : torch.layout,
                       'number' : numbers.Number, 'Future' : torch.jit.Future,
                       'AnyEnumType' : enum.Enum, 'QScheme' : torch.qscheme,
-                      '__torch__': _FakeGlobalNamespace(),
+                      '__torch__': _FakeGlobalNamespace(), 'NoneType': type(None),
                       't': typing.TypeVar('t')}  # type: ignore
 for k in dir(typing):
     _type_eval_globals[k] = getattr(typing, k)
@@ -93,3 +93,37 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
     signatures = [_torchscript_schema_to_signature(schema) for schema in schemas]
 
     return signatures
+
+
+def type_matches(signature_type : Any, argument_type : Any):
+    sig_origin_type = getattr(signature_type, '__origin__', signature_type)
+    argument_origin_type = getattr(argument_type, '__origin__', argument_type)
+
+    # Union types in signature. Given type needs to match one of the
+    # contained types in the Union
+    if sig_origin_type is typing.Union:
+        contained = signature_type.__args__
+        return any(type_matches(c, argument_type) for c in contained)
+
+    if type(signature_type) is typing._GenericAlias and sig_origin_type is list:
+        contained = signature_type.__args__
+        assert len(contained) == 1
+
+        if contained[0] == int:
+            # int can be promoted to List[int]
+            if argument_type is int:
+                return True
+
+            # Tuple[int] is accepted for List[int] parameters
+            if type(argument_type) is typing._GenericAlias and argument_origin_type is tuple:
+                argument_contained_types = argument_type.__args__
+                return all(a is int for a in argument_contained_types)
+
+    # Dtype is an int in schemas
+    if signature_type is int and argument_type is torch.dtype:
+        return True
+
+    if signature_type is numbers.Number and argument_type in {int, float}:
+        return True
+
+    return signature_type is argument_type
