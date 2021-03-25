@@ -637,11 +637,12 @@ Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::native::sum(self, std::vector<int64_t>{}, false, dtype);
 }
 
-Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype(self, opt_dtype, true);
   Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::sum_out(self, dim, keepdim, dtype, result);
 }
+
 Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
   return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
@@ -674,7 +675,7 @@ Tensor nansum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::native::nansum(self, std::vector<int64_t>{}, false, dtype);
 }
 
-Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype(self, opt_dtype, true);
   Tensor result = create_reduction_result(self, dim, keepdim, dtype);
   return at::native::nansum_out(self, dim, keepdim, dtype, result);
