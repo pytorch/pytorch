@@ -60,36 +60,46 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     self_ = at::empty_strided(self.sizes(), new_strides_unsort, self.options());
     self_.copy_(self);
   }
+
   Tensor values_tmp, indices_tmp;
   void *values_ptr_;
   int64_t *indices_ptr;
   if (!values.defined()) {
-    values = at::empty_strided(self_.sizes(), self_.strides(), self_.options());
-    values_ptr_ = values.data_ptr();
+    if (is_non_overlapping_and_dense) {
+      values = at::empty_strided(self.sizes(), self.strides(), self.options());
+    } else {
+      auto strides = at::infer_dense_strides(self.sizes(), self.strides());
+      values = at::empty_strided(self.sizes(), strides, self.options());
+    }
   } else {
     TORCH_CHECK(self_.scalar_type() == values.scalar_type(),
       "Unexpected dtype for values, expect ", self_.scalar_type(), ", got ", values.scalar_type());
-    values.resize_as_(self_);
-    if (values.strides() != self_.strides()) {
-      values_tmp = at::empty_strided(self_.sizes(), self_.strides(), self_.options());
-      values_ptr_ = values_tmp.data_ptr();
-    } else {
-      values_ptr_ = values.data_ptr();
-    }
+    values.resize_as_(self);
   }
+  if (values.strides() != self_.strides()) {
+    values_tmp = at::empty_strided(self_.sizes(), self_.strides(), self_.options());
+    values_ptr_ = values_tmp.data_ptr();
+  } else {
+    values_ptr_ = values.data_ptr();
+  }
+
   if (!indices.defined()) {
-    indices = at::empty_strided(self_.sizes(), self_.strides(), self_.options().dtype(kLong));
-    indices_ptr = indices.data_ptr<int64_t>();
+    if (is_non_overlapping_and_dense) {
+      indices = at::empty_strided(self.sizes(), self.strides(), self.options().dtype(kLong));
+    } else {
+      auto strides = at::infer_dense_strides(self.sizes(), self.strides());
+      indices = at::empty_strided(self.sizes(), strides, self.options().dtype(kLong));
+    }
   } else {
     TORCH_CHECK(kLong == indices.scalar_type(),
       "Unexpected dtype for values, expect torch.long, got ", indices.scalar_type());
-    indices.resize_as_(self_);
-    if (indices.strides() != indices.strides()) {
-      indices_tmp = at::empty_strided(self_.sizes(), self_.strides(), self_.options().dtype(kLong));
-      indices_ptr = indices_tmp.data_ptr<int64_t>();
-    } else {
-      indices_ptr = indices.data_ptr<int64_t>();
-    }
+    indices.resize_as_(self);
+  }
+  if (indices.strides() != self_.strides()) {
+    indices_tmp = at::empty_strided(self_.sizes(), self_.strides(), self_.options().dtype(kLong));
+    indices_ptr = indices_tmp.data_ptr<int64_t>();
+  } else {
+    indices_ptr = indices.data_ptr<int64_t>();
   }
 
   int64_t nrange = self_.size(dim);
