@@ -103,7 +103,7 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
   return self;
 }
 
-Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
+Tensor& tril_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
   if (result.sizes() != self.sizes()) {
     result.resize_as_(self);
   }
@@ -139,7 +139,7 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
   return self;
 }
 
-Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
+Tensor& triu_cpu_out(const Tensor& self, int64_t k, Tensor &result) {
   if (result.sizes() != self.sizes()) {
     result.resize_as_(self);
   }
