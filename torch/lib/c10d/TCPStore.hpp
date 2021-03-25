@@ -14,9 +14,11 @@
 
 namespace c10d {
 
-// Background thread that runs exclusively on the master process
+// Background thread that runs on the master process
 class TCPStoreDaemon {
  public:
+  // Empty constructor used for derived classes
+  explicit TCPStoreDaemon() {}
   explicit TCPStoreDaemon(int storeListenSocket);
   ~TCPStoreDaemon();
 
@@ -41,6 +43,9 @@ class TCPStoreDaemon {
 
   bool checkKeys(const std::vector<std::string>& keys) const;
   void wakeupWaitingClients(const std::string& key);
+  void sendKeyUpdatesToClients(const std::string& key,
+      std::vector<uint8_t>& oldData,
+      std::vector<uint8_t>& newData);
 
   void initStopSignal();
   void closeStopSignal();
@@ -66,21 +71,18 @@ class TCPStoreDaemon {
 
 // Listener thread runs on all processes
 // Right now only handles callbacks registered from watchKey()
-class ListenThread {
+class ListenThread : public TCPStoreDaemon {
   public:
     explicit ListenThread(int listenSocket);
-    ~ListenThread();
     // Adds a callback to run key change
     void addCallback(std::string key, std::function<void(std::string, std::string)> cb);
 
   protected:
     void run();
-    std::thread listenerThread_;
-    // Socket from which to receive data from TCPStoreDaemon
+    void callbackHandler();
     int storeListenSocket_;
     // List of callbacks map each watched key
     std::unordered_map<std::string, std::function<void(std::string, std::string)>> keyToCallbacks_;
-    std::vector<int> controlPipeFd_{-1, -1};
 };
 
 class TCPStore : public Store {
