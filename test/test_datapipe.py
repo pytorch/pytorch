@@ -610,18 +610,13 @@ class TestTyping(TestCase):
 
     # Static checking annotation
     def test_compile_time(self):
-        with self.assertRaisesRegex(TypeError, r"No return annotation"):
-            class InvalidDP1(IterDataPipe[int]):
-                def __iter__(self):
-                    yield 0
-
         with self.assertRaisesRegex(TypeError, r"Expected Iterator as the return"):
-            class InvalidDP2(IterDataPipe[int]):
+            class InvalidDP1(IterDataPipe[int]):
                 def __iter__(self) -> str:  # type: ignore
                     yield 0
 
         with self.assertRaisesRegex(TypeError, r"Unmatched type annotation"):
-            class InvalidDP3(IterDataPipe[Tuple]):
+            class InvalidDP2(IterDataPipe[Tuple]):
                 def __iter__(self) -> Iterator[int]:  # type: ignore
                     yield 0
 
@@ -676,22 +671,17 @@ class TestTyping(TestCase):
         self.assertEqual(dp1.type, dp2.type)
         self.assertNotEqual(id(dp1.type), id(dp2.type))
 
-        class DP4(IterDataPipe):
+        class DP4(IterDataPipe[tuple]):
             r""" DataPipe without annotation"""
             def __iter__(self):
                 raise NotImplementedError
 
         self.assertTrue(issubclass(DP4, IterDataPipe))
         dp = DP4()
-        self.assertTrue(dp.type.param == Any)
-        self.assertNotEqual(id(DP4.type), id(dp.type))
+        self.assertTrue(dp.type.param == tuple)
+        self.assertEqual(id(DP4.type), id(dp.type))
 
         class DP5(IterDataPipe):
-            r""" DataPipe with plain Iterator"""
-            def __iter__(self) -> Iterator:
-                raise NotImplementedError
-
-        class DP6(IterDataPipe[int]):
             r""" DataPipe with plain Iterator"""
             def __iter__(self) -> Iterator:
                 raise NotImplementedError
@@ -700,6 +690,12 @@ class TestTyping(TestCase):
         dp = DP5()  # type: ignore
         self.assertTrue(dp.type.param == Any)
         self.assertNotEqual(id(DP5.type), id(dp.type))
+
+        class DP6(IterDataPipe[int]):
+            r""" DataPipe with plain Iterator"""
+            def __iter__(self) -> Iterator:
+                raise NotImplementedError
+
         self.assertTrue(issubclass(DP6, IterDataPipe))
         dp = DP6()  # type: ignore
         self.assertTrue(dp.type.param == int)

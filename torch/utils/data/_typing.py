@@ -306,12 +306,9 @@ class _DataPipeMeta(GenericMeta):
 def _validate_iter(sub_cls):
     # TODO:
     # - add global switch for type checking at compile-time
-    # - Determine if __iter__ is strictly required for DataPipe
     if '__iter__' in sub_cls.__dict__:
         iter_fn = sub_cls.__dict__['__iter__']
         hints = get_type_hints(iter_fn)
-        if sub_cls.type != _DEFAULT_TYPE and 'return' not in hints:
-            raise TypeError('No return annotation found for `__iter__` of {}'.format(sub_cls.__name__))
         if 'return' in hints:
             return_hint = hints['return']
             # Plain Return Hint for Python 3.6
