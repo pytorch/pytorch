@@ -5,7 +5,7 @@ import os
 import re
 import shutil
 from collections import defaultdict
-from typing import IO, Dict, List
+from typing import IO, Dict, List, Optional
 
 import pytest
 
@@ -55,7 +55,7 @@ def run_mypy() -> None:
     # if os.path.isdir(CACHE_DIR):
     #     shutil.rmtree(CACHE_DIR)
 
-    for directory in (REVEAL_DIR, PASS_DIR):
+    for directory in (REVEAL_DIR, PASS_DIR, FAIL_DIR):
         # Run mypy
         stdout, stderr, _ = api.run(
             [
@@ -138,6 +138,21 @@ def test_fail(path):
             pytest.fail(f"Unexpected mypy output\n\n{errors[lineno]}")
 
 
+_FAIL_MSG1 = """Extra error at line {}
+Extra error: {!r}
+"""
+
+_FAIL_MSG2 = """Error mismatch at line {}
+Expected error: {!r}
+Observed error: {!r}
+"""
+
+
+def _test_fail(path: str, error: str, expected_error: Optional[str], lineno: int) -> None:
+    if expected_error is None:
+        raise AssertionError(_FAIL_MSG1.format(lineno, error))
+    elif error not in expected_error:
+        raise AssertionError(_FAIL_MSG2.format(lineno, expected_error, error))
 
 
 def _construct_format_dict():
