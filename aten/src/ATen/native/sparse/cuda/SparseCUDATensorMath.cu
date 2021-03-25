@@ -162,12 +162,12 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
 }
 
 Tensor& addmm_out_sparse_dense_cuda(
-    Tensor& result,
     const Tensor& self,
     const SparseTensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
-    const Scalar& alpha
+    const Scalar& alpha,
+    Tensor& result
 ) {
   Tensor b_self;
   std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
@@ -216,7 +216,11 @@ Tensor& s_addmm_sparse_dense_cuda_(
 // hspmm(SparseTensor mat1, Tensor mat2)
 // --------------------------------------------------------------------
 
-SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse_, const Tensor& dense/* , const Scalar& alpha */) {
+SparseTensor& hspmm_out_sparse_cuda(
+    const SparseTensor& sparse_,
+    const Tensor& dense,
+    SparseTensor& r_
+    /* , const Scalar& alpha */) {
   TORCH_CHECK(sparse_.is_cuda(), "hspmm: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "hspmm: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(dense.is_cuda(), "hspmm: expected 'mat2' to be CUDA, but got CPU");
@@ -276,7 +280,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 
 SparseTensor hspmm_sparse_cuda(const SparseTensor& sparse, const Tensor& dense) {
   SparseTensor r = at::empty({0}, sparse.options());
-  hspmm_out_sparse_cuda(r, sparse, dense);
+  hspmm_out_sparse_cuda(sparse, dense, r);
   return r;
 }
 
@@ -476,7 +480,7 @@ SparseTensor& add_out_sparse_cuda(const SparseTensor& t, const SparseTensor& src
 // mul(SparseTensor, SparseTensor)  [broadcasts]
 // --------------------------------------------------------------------
 
-SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, const SparseTensor& src_) {
+SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& src_, SparseTensor& r_) {
   if (src_.dim() == 0) {
     return mul_out_sparse_zerodim(r_, t_, src_);
   } else if (t_.dim() == 0) {

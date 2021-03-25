@@ -303,7 +303,7 @@ static void sgn_kernel(TensorIterator& iter){
   });
 }
 
-static void sinc_kernel(TensorIterator& iter) {
+static void sinc_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "sinc_cpu", [&]() {
     cpu_kernel(
         iter,
@@ -598,6 +598,22 @@ static void rsqrt_kernel(TensorIterator& iter) {
   });
 }
 
+static void entr_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, iter.common_dtype(), "entr_cpu", [&] {
+        cpu_kernel(iter, [](scalar_t x) -> scalar_t {
+          if (at::_isnan(x)) {
+            return x;
+          } else if (x > 0) {
+            return -x * std::log(x);
+          } else if (x == 0) {
+            return static_cast<scalar_t>(0);
+          }
+          return static_cast<scalar_t>(-INFINITY);
+        });
+      });
+}
+
 static void frexp_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kHalf,
     // The iter.dtype() here is the dtype of mantissa output.
@@ -717,8 +733,9 @@ REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
-REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel)
-REGISTER_DISPATCH(frexp_stub, &frexp_kernel)
+REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel);
+REGISTER_DISPATCH(entr_stub, &entr_kernel);
+REGISTER_DISPATCH(frexp_stub, &frexp_kernel);
 
 
 IMPLEMENT_COMPLEX_KERNEL(acos)

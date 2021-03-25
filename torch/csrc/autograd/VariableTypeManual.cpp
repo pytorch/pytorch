@@ -250,8 +250,8 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
 
   if (isDifferentiableType(self.scalar_type()) &&
       (generated::details::isFwGradDefined(self) || generated::details::isFwGradDefined(src))) {
-    auto self_fw_grad = generated::details::toLegacyFwGrad(self);
-    auto src_fw_grad = generated::details::toLegacyFwGrad(src);
+    auto self_fw_grad = generated::details::toNonOptFwGrad(self);
+    auto src_fw_grad = generated::details::toNonOptFwGrad(src);
     Tensor new_fw_grad;
     if (self_fw_grad.defined()) {
       if (src_fw_grad.defined()) {
@@ -262,7 +262,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     } else {
       new_fw_grad = src_fw_grad;
     }
-    self.set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true);
+    self._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ true);
   }
 
   return self;
@@ -282,7 +282,7 @@ Tensor& resize_(
     at::redispatch::resize_(ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
   }
 
-  if (self.fw_grad(/* level */ 0).defined()) {
+  if (self._fw_grad(/* level */ 0).defined()) {
     AT_ERROR("cannot resize variables that has a forward grad");
   }
 
@@ -305,7 +305,7 @@ Tensor& resize_as_(
   }
 
   // Handle fw grad
-  if (self.fw_grad(/* level */ 0).defined()) {
+  if (self._fw_grad(/* level */ 0).defined()) {
     AT_ERROR("cannot resize variables that has a forward grad");
   }
   return self;
@@ -320,9 +320,9 @@ Tensor detach(const Tensor & self) {
   namedinference::propagate_names(result, self);
 
   // detach only backward gradients for both primal and tangent
-  if (self.fw_grad(/* level */ 0).defined()) {
-    auto new_fw_grad = self.fw_grad(/* level */ 0).detach();
-    result.set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
+  if (self._fw_grad(/* level */ 0).defined()) {
+    auto new_fw_grad = self._fw_grad(/* level */ 0).detach();
+    result._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
   }
 
   return result;
@@ -363,24 +363,24 @@ Tensor & detach_(Tensor & self) {
   autograd_meta->output_nr_ = 0;
 
   // detach only backward gradients for both primal and tangent
-  if (self.fw_grad(/* level */ 0).defined()) {
-    self.fw_grad(/* level */ 0).detach_();
+  if (self._fw_grad(/* level */ 0).defined()) {
+    self._fw_grad(/* level */ 0).detach_();
   }
 
   return self;
 }
 
 // Ops in the following registration list are registered as
-//   (1) Math kernels
+//   (1) CompositeImplicitAutograd kernels
 //   (2) Autograd kernels
 //   (3) DefaultBackend kernels and additionally Autograd kernels
 // The reason for (3) is that ops that also use dispatch (e.g. register CPU/CUDA/QuantizedCPU
-// kernels) will skip picking up Math kernels for Autograd, so we register them to both
+// kernels) will skip picking up CompositeImplicitAutograd kernels for Autograd, so we register them to both
 // DefaultBackend and Autograd instead. See
 // https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword
 // for more details.
 // Invariant:
-// - Ops registered to Math or DefaultBackend below must match `MANUAL_BACKEND` set in tools/autograd/gen_variable_type.py.
+// - Ops registered to CompositeImplicitAutograd or DefaultBackend below must match `MANUAL_BACKEND` set in tools/autograd/gen_variable_type.py.
 //   and they have manual_kernel_registration=True in native_functions.yaml.
 // - Ops registered to DispatchKey::Autograd below must be included in `MANUAL_AUTOGRAD` in tools/autograd/gen_variable_type.py
 
@@ -398,13 +398,13 @@ TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {
   m.impl("requires_grad_", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::requires_grad_)));
 }
 
-TORCH_LIBRARY_IMPL(aten, Math, m) {
-  m.impl("set_data", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::set_data)));
-  m.impl("data", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::data)));
-  m.impl("is_leaf", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::is_leaf)));
-  m.impl("output_nr", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::output_nr)));
-  m.impl("_version", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::_version)));
-  m.impl("retain_grad", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::retain_grad)));
+TORCH_LIBRARY_IMPL(aten, CompositeImplicitAutograd, m) {
+  m.impl("set_data", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::set_data)));
+  m.impl("data", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::data)));
+  m.impl("is_leaf", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::is_leaf)));
+  m.impl("output_nr", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::output_nr)));
+  m.impl("_version", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::_version)));
+  m.impl("retain_grad", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::retain_grad)));
 }
 
 }  // namespace
