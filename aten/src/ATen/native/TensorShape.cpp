@@ -2082,8 +2082,7 @@ Tensor view(const Tensor& self, IntArrayRef size) {
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
   auto stride_value = *stride;
-  auto res = alias_with_sizes_and_strides(self, inferred_size, stride_value);
-  return res;
+  return alias_with_sizes_and_strides(self, inferred_size, stride_value);
 }
 
 Tensor alias(const Tensor& self) {
