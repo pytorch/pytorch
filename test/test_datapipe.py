@@ -564,7 +564,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
 class TestTyping(TestCase):
     def test_subtype(self):
-        from torch.utils.data.typing import issubtype
+        from torch.utils.data._typing import issubtype
 
         basic_type = (int, str, bool, float, complex,
                       list, tuple, dict, set, T_co)
@@ -611,7 +611,7 @@ class TestTyping(TestCase):
                 self.assertTrue(issubtype(par, sub, recursive=False))
 
     def test_issubinstance(self):
-        from torch.utils.data.typing import issubinstance
+        from torch.utils.data._typing import issubinstance
 
         basic_data = (1, '1', True, 1., complex(1., 0.))
         basic_type = (int, str, bool, float, complex)
