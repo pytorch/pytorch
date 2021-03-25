@@ -16,4 +16,3 @@
 #if PY_MAJOR_VERSION < 3
 #error "Python 2 has reached end-of-life and is no longer supported by PyTorch."
 #endif
-

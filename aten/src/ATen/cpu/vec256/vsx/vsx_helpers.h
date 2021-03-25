@@ -386,4 +386,3 @@ const vfloat64 vd_pi_2 = vfloat64{M_PI / 2.0, 0.0};
 } // namespace
 } // namespace vec256
 } // namespace at
-

@@ -88,7 +88,3 @@ if python_protobuf_installed and native_protobuf_installed:
         print(VERSION_MISMATCH)
     else:
         print('All looks good.')
-
-
-
-

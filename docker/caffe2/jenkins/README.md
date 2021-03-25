@@ -30,6 +30,3 @@ build environment into parameters for the image build.
 * `centos-cuda` -- Dockerfile for CentOS image with CUDA support for nvidia-docker
 * `ubuntu` -- Dockerfile for Ubuntu image
 * `ubuntu-cuda` -- Dockerfile for Ubuntu image with CUDA support for nvidia-docker
-
-
-

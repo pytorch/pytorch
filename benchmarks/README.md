@@ -26,4 +26,3 @@ python -c "import torch; print(torch.__version__)"
 Please refer to each subfolder to discover each benchmark suite
 
 * [Fast RNNs benchmarks](fastrnns/README.md)
-

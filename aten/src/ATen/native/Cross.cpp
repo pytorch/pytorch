@@ -51,4 +51,3 @@ Tensor & cross_out(Tensor & out, const Tensor & input, const Tensor & other, con
 }
 
 }} // namespace at::native
-
