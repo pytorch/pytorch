@@ -7798,16 +7798,6 @@ class TestONNXRuntime(unittest.TestCase):
         output = module(x, win_length)
         self.run_test(module, (x, win_length))
 
-    def test_index_func(self):
-        class M(torch.nn.Module):
-            def forward(self, input_ids):
-                input_shape = input_ids.size()
-                input_ids = input_ids.view(-1, input_shape[-1])
-                return input_ids.transpose(0, 1)
-        x = torch.randn(3, 16)
-        self.run_test(M(), (x,), input_names=['input_ids'],
-                      dynamic_axes={'input_ids': {0: 'batch', 1: 'sequence'}})
-
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
               **extra_kwargs):
