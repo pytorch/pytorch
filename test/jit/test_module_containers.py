@@ -405,6 +405,46 @@ class TestModuleContainers(JitTestCase):
             b = AnotherBadModule()
             torch.jit.script(b)
 
+    def test_normal_list_attribute_with_modules_error(self):
+        """
+        Test that an attempt to script a module with a regular list attribute
+        containing other modules fails with a relevant error message.
+        """
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = [torch.nn.ReLU(), torch.nn.ReLU()]
+
+            def forward(self):
+                return len(self.a)
+
+        error_msg = "Could not infer type of list element: Cannot infer concrete type of torch.nn.Module"
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.jit.script(Mod())
+
+    def test_unannotated_module_attribute_error(self):
+        """
+        Test that an attempt to script a module with an unannotated attribute
+        whose type cannot be inferred fails with a relevant error message
+        suggesting annotating the attribute.
+        """
+        class JitClass:  # noqa: B903
+            def __init__(self, v: int):
+                self.v = v
+
+        class Mod(torch.nn.Module):
+            # Adding following line makes the case pass
+            # v: JitClass
+            def __init__(self):
+                super().__init__()
+                self.v = JitClass(2)
+
+            def forward(self):
+                return self.v
+
+        with self.assertRaisesRegex(RuntimeError, "try adding a type annotation for the attribute"):
+            torch.jit.script(Mod())
+
     def test_empty_dict_override_contains(self):
         class CustomModuleInterface(torch.nn.Module):
             def __init__(self):

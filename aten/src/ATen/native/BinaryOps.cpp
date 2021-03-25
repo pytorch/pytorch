@@ -11,13 +11,27 @@
 #include <torch/library.h>
 
 namespace at {
+namespace meta {
+
+TORCH_META_FUNC2(add, Tensor) (
+  const Tensor& self, const Tensor& other, Scalar alpha
+) {
+  build_binary_op(maybe_get_output(), self, other);
+  native::alpha_check(dtype(), alpha);
+}
+
+} // namespace meta
+
+
 namespace native {
 
 DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(add_clamp_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
-DEFINE_DISPATCH(div_stub);
+DEFINE_DISPATCH(div_true_stub);
+DEFINE_DISPATCH(div_floor_stub);
+DEFINE_DISPATCH(div_trunc_stub);
 DEFINE_DISPATCH(remainder_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(bitwise_and_stub);
@@ -39,6 +53,8 @@ DEFINE_DISPATCH(logit_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(maximum_stub);
 DEFINE_DISPATCH(minimum_stub);
+DEFINE_DISPATCH(fmax_stub);
+DEFINE_DISPATCH(fmin_stub);
 DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(logaddexp_stub);
 DEFINE_DISPATCH(logaddexp2_stub);
@@ -50,6 +66,7 @@ DEFINE_DISPATCH(igammac_stub);
 DEFINE_DISPATCH(nextafter_stub);
 DEFINE_DISPATCH(heaviside_stub);
 DEFINE_DISPATCH(copysign_stub);
+DEFINE_DISPATCH(xlogy_stub);
 
 static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
@@ -57,24 +74,11 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
   return tensor;
 }
 
-Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter.dtype(), alpha);
-  add_stub(iter.device_type(), iter, alpha);
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
-  return result;
-}
-
-Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter.dtype(), alpha);
-  add_stub(iter.device_type(), iter, alpha);
-  return iter.output();
-}
-
-Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
-  return native::add_out(self, self, other, alpha);
+TORCH_IMPL_FUNC(add_out) (
+  const Tensor& self, const Tensor& other, Scalar alpha, const Tensor& result
+) {
+  add_stub(device_type(), *this, alpha);
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
 }
 
 Tensor& add_relu_impl(
@@ -148,21 +152,46 @@ Tensor& copysign_(Tensor& self, Scalar other) {
   return native::copysign_(self, wrapped_scalar_tensor(other));
 }
 
-Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& div_true_out(const Tensor& self, const Tensor& other, Tensor& result) {
   auto iter = TensorIterator::binary_float_op(result, self, other);
-  div_stub(iter.device_type(), iter);
+  div_true_stub(iter.device_type(), iter);
+  if (!result.defined()) {
+    result = iter.output();
+  }
   return result;
+}
+
+Tensor& div_trunc_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  div_trunc_stub(iter.device_type(), iter);
+  if (!result.defined()) {
+    result = iter.output();
+  }
+  return result;
+}
+
+Tensor& div_floor_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  div_floor_stub(iter.device_type(), iter);
+  if (!result.defined()) {
+    result = iter.output();
+  }
+  return result;
+}
+
+Tensor& div_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return div_true_out(self, other, result);
 }
 
 Tensor div(const Tensor& self, const Tensor& other) {
   Tensor result;
   auto iter = TensorIterator::binary_float_op(result, self, other);
-  div_stub(iter.device_type(), iter);
+  div_true_stub(iter.device_type(), iter);
   return iter.output();
 }
 
 Tensor& div_(Tensor& self, const Tensor& other) {
-  return native::div_out(self, self, other);
+  return div_true_out(self, other, self);
 }
 
 // WARNING: There doesn't appear to be any testing for this function
@@ -177,6 +206,38 @@ Tensor div(const Tensor& self, Scalar other) {
 // used for Python)
 Tensor& div_(Tensor& self, Scalar other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
+}
+
+Tensor& div_out(const Tensor& self, const Tensor& other, std::string rounding_mode, Tensor& result) {
+  if (rounding_mode == "true") {
+    return div_true_out(self, other, result);
+  } else if (rounding_mode == "trunc") {
+    return div_trunc_out(self, other, result);
+  } else if (rounding_mode == "floor") {
+    return div_floor_out(self, other, result);
+  }
+
+  TORCH_CHECK(false,
+      "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
+      "but found '", rounding_mode, "'");
+}
+
+Tensor div(const Tensor& self, const Tensor& other, std::string rounding_mode) {
+  Tensor result;
+  native::div_out(self, other, std::move(rounding_mode), result);
+  return result;
+}
+
+Tensor& div_(Tensor& self, const Tensor& other, std::string rounding_mode) {
+  return native::div_out(self, other, std::move(rounding_mode), self);
+}
+
+Tensor div(const Tensor& self, Scalar other, std::string rounding_mode) {
+  return self.div(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
+}
+
+Tensor& div_(Tensor& self, Scalar other, std::string rounding_mode) {
+  return self.div_(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
 // divide, alias for div
@@ -198,6 +259,26 @@ Tensor divide(const Tensor& self, Scalar other) {
 
 Tensor& divide_(Tensor& self, Scalar other) {
   return self.div_(other);
+}
+
+Tensor& divide_out(const Tensor& self, const Tensor& other, std::string rounding_mode, Tensor& result) {
+  return at::div_out(result, self, other, std::move(rounding_mode));
+}
+
+Tensor divide(const Tensor& self, const Tensor& other, std::string rounding_mode) {
+  return self.div(other, std::move(rounding_mode));
+}
+
+Tensor& divide_(Tensor& self, const Tensor& other, std::string rounding_mode) {
+  return self.div_(other, std::move(rounding_mode));
+}
+
+Tensor divide(const Tensor& self, Scalar other, std::string rounding_mode) {
+  return self.div(other, std::move(rounding_mode));
+}
+
+Tensor& divide_(Tensor& self, Scalar other, std::string rounding_mode) {
+  return self.div_(other, std::move(rounding_mode));
 }
 
 // true_divide, an alias for div
@@ -239,28 +320,30 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  div_stub(iter.device_type(), iter);
-
-  if (result.is_floating_point()) {
-    result.trunc_();
-  }
-
-  return result;
+  TORCH_WARN_ONCE(
+    "floor_divide is deprecated, and will be removed in a future version of pytorch. "
+    "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+    "This results in incorrect rounding for negative values.\n"
+    "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+    "or for actual floor division, use torch.div(a, b, rounding_mode='floor')."
+  );
+  // FIXME: Not actually doing floor division (#43874)
+  return div_trunc_out(self, other, result);
 }
 
 Tensor floor_divide(const Tensor& self, const Tensor& other) {
+  TORCH_WARN_ONCE(
+    "floor_divide is deprecated, and will be removed in a future version of pytorch. "
+    "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+    "This results in incorrect rounding for negative values.\n"
+    "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
+    "or for actual floor division, use torch.div(a, b, rounding_mode='floor')."
+  );
+  // FIXME: Not actually doing floor division (#43874)
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
-
-  div_stub(iter.device_type(), iter);
-
-  auto out = iter.output();
-  if (out.is_floating_point()) {
-    out.trunc_();
-  }
-
-  return out;
+  div_trunc_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor& floor_divide_(Tensor& self, const Tensor& other) {
@@ -285,11 +368,11 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
 }
 
 Tensor mul(const Tensor& self, Scalar other) {
-  return native::mul(self, wrapped_scalar_tensor(other));
+  return at::mul(self, wrapped_scalar_tensor(other)); // redispatch!
 }
 
 Tensor& mul_(Tensor& self, Scalar other) {
-  return native::mul_(self, wrapped_scalar_tensor(other));
+  return at::mul_out(self, self, wrapped_scalar_tensor(other)); // redispatch!
 }
 
 // multiply, alias for mul
@@ -449,36 +532,27 @@ static Tensor wrapped_scalar_tensor_and_check_convert(Scalar scalar, Tensor tens
   return wrapped_scalar_tensor(scalar);
 }
 
+// TODO: Make this structured to undo the perf regression from native:: removal
+// in call here
+
 Tensor add(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::add(self, wrapped_scalar_tensor(other), alpha);
+  return at::add(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
-  return native::add_(self, wrapped_scalar_tensor(other), alpha);
+  return self.add_(wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor remainder(const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder(self, other_tensor.toType(self.scalar_type()));
+  return native::remainder(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_(Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder_(self, other_tensor.toType(self.scalar_type()));
+  return native::remainder_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder_out(result, self, other_tensor.toType(self.scalar_type()));
+  return native::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
@@ -835,16 +909,12 @@ Tensor logical_xor(const Tensor& self, Scalar other) { return comparison_op(self
 Tensor& logical_xor_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
 Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
-
   auto iter = TensorIterator::binary_op(result, self, other);
   maximum_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor maximum(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
-
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   maximum_stub(iter.device_type(), iter);
@@ -860,17 +930,30 @@ Tensor max(const Tensor& self, const Tensor& other) {
   return at::maximum(self, other);
 }
 
-Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
+Tensor& fmax_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
 
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmax_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor fmax(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmax_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
   minimum_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor minimum(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
-
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   minimum_stub(iter.device_type(), iter);
@@ -884,6 +967,23 @@ Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
 
 Tensor min(const Tensor& self, const Tensor& other) {
   return at::minimum(self, other);
+}
+
+Tensor& fmin_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
+
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmin_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor fmin(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmin_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor floor_divide(const Tensor& self, Scalar other) {
@@ -901,13 +1001,7 @@ Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
-  at::fmod_out(result, self, other_tensor.to(self.dtype()));
-  return result;
+  return native::fmod_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor fmod(const Tensor& self, const Tensor & other) {
@@ -918,12 +1012,7 @@ Tensor fmod(const Tensor& self, const Tensor & other) {
 }
 
 Tensor fmod(const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
-  return native::fmod(self, other_tensor.to(self.dtype()));
+  return native::fmod(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& fmod_(Tensor& self, const Tensor& other) {
@@ -931,7 +1020,7 @@ Tensor& fmod_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmod_(Tensor& self, Scalar other) {
-  return native::fmod_out(self, self, other);
+  return native::fmod_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -1099,36 +1188,41 @@ Tensor& ldexp_(Tensor& self, const Tensor& other) {
   return at::ldexp_out(self, self, other);
 }
 
-// TODO: Deduplicate this with the TensorIterator logic.  This would
-// also fix the TODOs below.
-Tensor binary_op_meta(const Tensor& self, const Tensor& other) {
-  // TODO: Doesn't do type promotion correctly
-  // TODO: Doesn't do strides correctly
-  int64_t dim = std::max(self.dim(), other.dim());
-  std::vector<int64_t> sizes(dim);
-  for (int64_t i = 0; i < dim; i++) {
-    int64_t j = -1 - i;
-    if (i >= self.dim() || self.size(j) == 1) {
-      sizes[dim + j] = other.size(j);
-    } else if (i >= other.dim() || self.size(i) == 1) {
-      sizes[dim + j] = self.size(j);
-    } else {
-      TORCH_CHECK(
-        self.size(j) == other.size(j),
-        "Expected self.size(", j, ") == other.size(", j, "), but got ", self.size(j), " != ", other.size(j)
-      );
-      sizes[dim + j] = self.size(j);
-    }
-  }
-  return at::empty_meta(sizes, self.options());
+Tensor& xlogy_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_float_op(result, self, other);
+  xlogy_stub(iter.device_type(), iter);
+  return result;
 }
 
-Tensor binary_op_with_scalar_meta(const Tensor& self, const Tensor& other, Scalar x) {
-  return binary_op_meta(self, other);
+Tensor& xlogy_out(Tensor& result, Scalar self, const Tensor& other) {
+  return at::xlogy_out(result, wrapped_scalar_tensor(self), other);
 }
 
-TORCH_LIBRARY_IMPL(aten, Meta, m) {
-  m.impl("add.Tensor", binary_op_with_scalar_meta);
+Tensor& xlogy_out(Tensor& result, const Tensor& self, Scalar other) {
+  return at::xlogy_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor xlogy(const Tensor& x, const Tensor& y) {
+  Tensor result;
+  auto iter = TensorIterator::binary_float_op(result, x, y);
+  xlogy_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor xlogy(Scalar x, const Tensor& y) {
+  return at::xlogy(wrapped_scalar_tensor(x), y);
+}
+
+Tensor xlogy(const Tensor& x, Scalar y) {
+  return at::xlogy(x, wrapped_scalar_tensor(y));
+}
+
+Tensor& xlogy_(Tensor& x, const Tensor& y) {
+  return at::xlogy_out(x, x, y);
+}
+
+Tensor& xlogy_(Tensor& x, Scalar y) {
+  return at::xlogy_out(x, x, wrapped_scalar_tensor(y));
 }
 
 } // namespace native

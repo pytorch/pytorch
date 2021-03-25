@@ -13,6 +13,7 @@ enum class C10_API_ENUM DebugInfoKind : uint8_t {
   PRODUCER_INFO = 0,
   MOBILE_RUNTIME_INFO,
   PROFILER_STATE,
+  INFERENCE_CONTEXT, // for inference usage
 
   TEST_INFO, // used only in tests
   TEST_INFO_2, // used only in tests

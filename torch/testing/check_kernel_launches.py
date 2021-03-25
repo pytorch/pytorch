@@ -18,12 +18,13 @@ import sys
 # But this should be sufficient to detect and fix most problem
 # instances and can be refined before the test is made binding
 kernel_launch_regex = re.compile(r"""
-    >>>           # Identifies kernel launch
+    ^.*>>>        # Identifies kernel launch
     \s*           # Maybe some whitespace (includes newlines)
     \([^;]+\);    # And then arguments in parens and semi-colon
     (?!           # Negative lookahead: we trigger if we don't find the launch guard
         \s*                                  # Maybe some whitespace (includes newlines)
         \\?                                  # 0 or 1 backslashes (for launches in preprocessor macros)
+        \s*                                  # Maybe some whitespace (includes newlines)
         (?:[0-9]+: )?                        # Detects and ignores a line numbering, if present
         \s*                                  # Maybe some whitespace (includes newlines)
         C10_CUDA_KERNEL_LAUNCH_CHECK\(\);  # Kernel launch guard!

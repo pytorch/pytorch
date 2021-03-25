@@ -1,11 +1,13 @@
 import unittest
+import os
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
-    enable_profiling_mode_for_profiling_tests
+    enable_profiling_mode_for_profiling_tests, IS_WINDOWS, TemporaryDirectoryName, shell
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, _inline_everything, \
     RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward
 from textwrap import dedent
@@ -59,6 +61,21 @@ class TestFuser(JitTestCase):
     @enable_cpu_fuser
     def test_abs_cpu(self):
         self._test_fused_abs()
+
+    @unittest.skipIf(not IS_WINDOWS, "This is meant to be Windows-specific")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    @enable_cpu_fuser
+    def test_abs_cpu_unicode_temp_dir(self):
+        with TemporaryDirectoryName(suffix='中文') as dname:
+            shell_env = os.environ.copy()
+            shell_env['TMP'] = dname
+            cmd = [sys.executable, os.path.basename(__file__), type(self).__name__ + '.test_abs_cpu']
+            legacy_jit_flag = '--jit_executor=legacy'
+            for v in sys.argv:
+                if v == legacy_jit_flag:
+                    cmd.append(legacy_jit_flag)
+            return_code = shell(cmd, cwd=os.path.dirname(__file__), env=shell_env)
+            self.assertEqual(return_code, 0)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_abs_cuda(self):
@@ -540,8 +557,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_scalar_arg_cuda(self):
-        def fn_test_scalar_arg(x, p):
-            # type: (Tensor, float) -> Tensor
+        def fn_test_scalar_arg(x: torch.Tensor, p: float) -> torch.Tensor:
             return p * (x * x + x)
 
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
@@ -553,8 +569,7 @@ class TestFuser(JitTestCase):
 
         # use another function otherwise we will bailout
         # and won't be able to do fused checks
-        def fn_test_scalar_arg_requires_grad(x, p):
-            # type: (Tensor, float) -> Tensor
+        def fn_test_scalar_arg_requires_grad(x: torch.Tensor, p: float) -> torch.Tensor:
             return p * (x * x + x)
 
         scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
