@@ -728,6 +728,9 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
 Tensor special_gammaln(const Tensor& self) { return self.lgamma(); }
 Tensor& special_gammaln_out(const Tensor& self, Tensor& result) { return at::lgamma_out(result, self); }
 
+Tensor special_entr(const Tensor& self) { return unary_op_impl_float(self, entr_stub); }
+Tensor& special_entr_out(const Tensor& self, Tensor& result) { return unary_op_impl_float_out(result, self, entr_stub);}
+
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(angle_stub);
 DEFINE_DISPATCH(real_stub);
@@ -747,6 +750,7 @@ DEFINE_DISPATCH(clamp_min_stub);
 DEFINE_DISPATCH(cos_stub);
 DEFINE_DISPATCH(cosh_stub);
 DEFINE_DISPATCH(digamma_stub);
+DEFINE_DISPATCH(entr_stub);
 DEFINE_DISPATCH(erf_stub);
 DEFINE_DISPATCH(erfc_stub);
 DEFINE_DISPATCH(erfinv_stub);
