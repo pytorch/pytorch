@@ -4020,7 +4020,7 @@ class TestAutograd(TestCase):
         def fn(sparse):
             return torch.sparse.sum(sparse)
 
-        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True)
+        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True, check_batched_grad=False)
         with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
             gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
 
@@ -4088,6 +4088,9 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Numerical gradient for function expected to be zero'):
             gradcheck(lambda x: torch.tensor([x]), x)
         self.assertFalse(gradcheck(lambda x: torch.tensor([x]), x, raise_exception=False))
+
+        # succeed when no outputs at all
+        self.assertTrue(gradcheck(lambda x: (), (x,)))
 
     def test_gradcheck_check_batched_grad(self):
         x = torch.rand(10, requires_grad=True).to_sparse()
@@ -4194,6 +4197,26 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Gradients failed to compare equal for grad output = 1'):
             gradcheck(fn3, (x_c,))
         self.assertFalse(gradcheck(fn3, (x_c,), raise_exception=False))
+
+    def test_gradcheck_dense_and_sparse_inputs(self):
+        def fn(x, y):
+            return x * y.coalesce().to_dense()
+        a = torch.rand(2, 2, requires_grad=True)
+        b = torch.rand(2, 2).to_sparse().requires_grad_(True)
+        self.assertTrue(gradcheck(fn, (a, b), check_sparse_nnz=True, check_batched_grad=False))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_gradcheck_multiple_mkldnn_inputs(self):
+        def fn(x, y):
+            return x + y.to_dense()
+        a = torch.rand(10, requires_grad=True)
+        b = torch.rand(10, dtype=torch.float32).to_mkldnn().requires_grad_(True)
+        self.assertTrue(gradcheck(fn, (a, b), atol=1e-1, check_batched_grad=False))
+
+        def fn2(x, y):
+            return x.to_dense() + y.to_dense()
+        c = torch.rand(10, dtype=torch.float32).to_mkldnn().requires_grad_(True)
+        self.assertTrue(gradcheck(fn, (a, c), atol=1e-1, check_batched_grad=False))
 
     def test_version_counter(self):
         x = torch.randn(1, 2)
@@ -7938,6 +7961,14 @@ class TestAutogradDeviceType(TestCase):
 
         gradcheck(fn, (vec))
         gradgradcheck(fn, (vec))
+
+    @onlyCUDA
+    def test_gradcheck_input_output_different_device(self, device):
+        x = torch.ones((1,), device="cuda", requires_grad=True)
+        gradcheck(lambda x: x.to("cpu"), (x,))
+
+        x = torch.ones((1,), device="cpu", requires_grad=True)
+        gradcheck(lambda x: x.to("cuda"), (x,))
 
     def test_logcumsumexp_large_value(self, device):
         a = torch.rand(4, 4, 4, dtype=torch.double, requires_grad=True)
