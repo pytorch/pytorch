@@ -277,7 +277,7 @@ void Reducer::copy_grad_to_bucket(
     auto wrapped = c10::scalar_to_tensor(double(1.) / divFactor_);
     wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
     // Divides while copying into the bucket view.
-    at::native::mul_out(bucket_view, grad, wrapped);
+    at::mul_out(bucket_view, grad, wrapped);
   } else {
     bucket_view.copy_(grad);
   }
@@ -577,9 +577,15 @@ void Reducer::mark_variable_ready(VariableIndex index) {
           //
           // ** In the hoped-for case where all params are used, DDP itself won't do any
           // blocking work between now and the re-zeroing, so the danger is real.
-          auto local_used_maps_tmp = local_used_maps_[i].pin_memory();
-          // Defensively ensures a deep copy to a pinned temporary
-          TORCH_INTERNAL_ASSERT(local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr())
+          //
+          // Defensively ensures local_used_maps_tmp is distinct from local_used_maps_[i]
+          auto local_used_maps_tmp = at::native::empty_like(local_used_maps_[i],
+                                                            local_used_maps_[i].options().pinned_memory(true));
+          // Paranoid asserts here because in some workloads, the pinned allocator behaves in a way we
+          // don't understand, and may be bugged. See https://github.com/pytorch/pytorch/pull/54474
+          TORCH_INTERNAL_ASSERT(local_used_maps_tmp.is_pinned());
+          TORCH_INTERNAL_ASSERT(local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr());
+          local_used_maps_tmp.copy_(local_used_maps_[i]);
           local_used_maps_dev_[i].copy_(local_used_maps_tmp, true);
         } else {
           local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
