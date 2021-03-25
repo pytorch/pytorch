@@ -2033,24 +2033,6 @@ def reference_sgn(x):
     return out
 
 
-def scipy_reference_wrapper(ref):
-    # Note [scipy reference filter]
-    # SciPy is not available in all build environments.
-    # If you're using a SciPy op as a reference,
-    # then pass it wrapped in a lambda to this function,
-    # which will either return the lambda or,
-    # if SciPy is unavailable, _NOTHING.
-    #
-    # Wrapping the operation in a lambda will prevent
-    # the Python interpreter from attempting to discover
-    # the operation, which will fail if SciPy is unavailable.
-    # See the OpInfo for digamma for an example.
-    if TEST_SCIPY:
-        return ref
-
-    return _NOTHING
-
-
 def reference_sigmoid(x):
     # 'scipy.special.expit' not supported for the input types
     if x.dtype in [np.complex64, np.complex128]:
@@ -3561,7 +3543,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_trace),
     UnaryUfuncInfo('sigmoid',
-                   ref=scipy_reference_wrapper(reference_sigmoid),
+                   ref=reference_sigmoid if TEST_SCIPY else None,
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
                    skips=(
@@ -3578,14 +3560,14 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    supports_complex_autograd=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
     UnaryUfuncInfo('digamma',
-                   ref=scipy_reference_wrapper(lambda *args, **kwargs: scipy.special.digamma(*args, **kwargs)),
+                   ref=scipy.special.digamma if TEST_SCIPY else None,
                    decorators=(precisionOverride({torch.float16: 5e-1}),),
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCPU=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    safe_casts_outputs=True),
     UnaryUfuncInfo('special.entr',
-                   ref=scipy.special.entr,
+                   ref=scipy.special.entr if TEST_SCIPY else None,
                    aten_name='special_entr',
                    decorators=(precisionOverride({torch.float16: 1e-1,
                                                   torch.bfloat16: 1e-1}),),
@@ -3600,7 +3582,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    sample_inputs_func=sample_inputs_entr),
     UnaryUfuncInfo('erf',
-                   ref=scipy_reference_wrapper(lambda x: scipy.special.erf(x)),
+                   ref=scipy.special.erf if TEST_SCIPY else None,
                    aliases=('special.erf', ),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
@@ -3614,7 +3596,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
                    )),
     UnaryUfuncInfo('erfc',
-                   ref=scipy_reference_wrapper(lambda x: scipy.special.erfc(x)),
+                   ref=scipy.special.erfc if TEST_SCIPY else None,
                    aliases=('special.erfc', ),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
@@ -3628,7 +3610,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestOpInfo', 'test_supported_backward', dtypes=(torch.bfloat16,)),
                    )),
     UnaryUfuncInfo('erfinv',
-                   ref=scipy_reference_wrapper(lambda x: scipy.special.erfinv(x)),
+                   ref=scipy.special.erfinv if TEST_SCIPY else None,
                    aliases=('special.erfinv', ),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2,
@@ -3650,7 +3632,7 @@ op_db: List[OpInfo] = [
                                 active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
                    )),
     UnaryUfuncInfo('lgamma',
-                   ref=scipy_reference_wrapper(reference_lgamma),
+                   ref=reference_lgamma if TEST_SCIPY else None,
                    aliases=('special.gammaln', ),
                    decorators=(precisionOverride({torch.float16: 7e-1}),),
                    dtypes=all_types_and(torch.bool),
@@ -3676,7 +3658,7 @@ op_db: List[OpInfo] = [
                    ),
                    safe_casts_outputs=True),
     UnaryUfuncInfo('logit',
-                   ref=scipy_reference_wrapper(lambda x: scipy.special.logit(x)),
+                   ref=scipy.special.logit if TEST_SCIPY else None,
                    domain=(0, 1),
                    decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                   torch.float16: 5e-1}),),
