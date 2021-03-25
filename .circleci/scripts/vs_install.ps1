@@ -45,7 +45,7 @@ if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
     exit 1
 }
 
-if (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC\14.27.29110") {
+if (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Tools\MSVC\14.28.29333") {
     echo "Install Successfully"
 }
 else {
