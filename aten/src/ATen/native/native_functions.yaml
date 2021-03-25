@@ -3245,16 +3245,16 @@
     CPU, CUDA: sin_out
 
 - func: sinc(Tensor self) -> Tensor
+  structured_delegate: sinc.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: sinc
 
 - func: sinc_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: sinc.out
   variants: function, method
-  dispatch:
-    DefaultBackend: sinc_
 
 - func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sinc_out
 
