@@ -108,7 +108,7 @@ class VcSpec:
         return [self.prefixed_year()] + self.version_elements
 
     def get_product(self):
-        return "BuildTools"
+        return "Community"
 
     def dotted_version(self):
         return ".".join(self.version_elements)
