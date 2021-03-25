@@ -19,6 +19,7 @@
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/out_types.h"
 #include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
@@ -53,42 +54,12 @@ using at::Dimname;
 using at::DimnameList;
 using at::ArrayRef;
 
+using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
 
 static PyObject* THPVariableFunctionsModule = NULL;
-
-static void check_out_type_matches(Tensor result,
-                                   ScalarType scalarType, bool scalarType_is_none,
-                                   c10::optional<at::Layout> layout,
-                                   const Device& device, bool device_is_none) {
-  if (scalarType_is_none && !layout && device_is_none) {  // common case
-    return;
-  }
-  if (!scalarType_is_none && result.scalar_type() != scalarType) {
-    AT_ERROR(
-        "dtype ", scalarType,
-        " does not match dtype of out parameter (", result.scalar_type(), ")");
-  }
-  auto scalarType_arg = scalarType_is_none ? result.scalar_type() : scalarType;
-  auto device_type_arg = device_is_none ? result.device().type() : device.type();
-  if (result.scalar_type() != scalarType_arg) {
-    AT_ERROR(
-        "scalar type ", scalarType_arg,
-        " does not match scalar type of out parameter (", result.scalar_type(), ")");
-  }
-  if (layout && result.layout() != *layout) {
-    AT_ERROR(
-        "layout ", *layout,
-        " does not match layout of out parameter (", result.layout(), ")");
-  }
-  if (result.device().type() != device_type_arg) {
-    AT_ERROR(
-        "device type ", device_type_arg,
-        " does not match device type of out parameter (", result.device().type(), ")");
-  }
-}
 
 inline Tensor dispatch_arange(Scalar end, Tensor result) {
   pybind11::gil_scoped_release no_gil;

@@ -20,14 +20,21 @@ void broadcast_coalesced(
 class GradBucket {
  public:
   explicit GradBucket(
+      size_t index,
       const std::vector<at::Tensor>& tensors,
-      const std::vector<size_t>& offsets = {},
-      const std::vector<size_t>& lengths = {},
-      const std::vector<c10::IntArrayRef>& sizes_vec = {})
-      : tensors_(tensors),
+      const std::vector<size_t>& offsets,
+      const std::vector<size_t>& lengths,
+      const std::vector<c10::IntArrayRef>& sizes_vec)
+      : index_(index),
+        tensors_(tensors),
         offsets_(offsets),
         lengths_(lengths),
         sizes_vec_(sizes_vec) {}
+
+  // Returns the index of the bucket, which is unique across all the buckets.
+  size_t getIndex() const {
+    return index_;
+  }
 
   // Each tensor in the list that getTensors returns refers to the replica on
   // each device. There will be multiple replicas only in the case of single
@@ -37,27 +44,21 @@ class GradBucket {
     return tensors_;
   }
 
+  // Returns a mutable tensor vector compared with the above method.
   std::vector<at::Tensor>& getTensorsRef() {
     return tensors_;
   }
 
-  // Returns the start index of each variable in tensors_[0].
-  const std::vector<size_t>& getOffsets() const {
-    return offsets_;
-  }
+  // Each tensor in the list that getPerParameterTensors corresponds to a parameter.
+  std::vector<at::Tensor> getPerParameterTensors() const;
 
-  // Returns the total (i.e., flattened) length of each variable in
-  // tensors_[0].
-  const std::vector<size_t>& getLengths() const {
-    return lengths_;
-  }
-
-  // Returns the multi-dimensional sizes/shape of each variable in tensors_[0].
-  const std::vector<c10::IntArrayRef>& getSizesVec() const {
-    return sizes_vec_;
+  // Returns whther this bucket is the last bucket to allreduce in an iteration.
+  bool isTheLastBucketToAllreduce() const {
+    return index_ == 0;
   }
 
  private:
+  size_t index_;
   std::vector<at::Tensor> tensors_;
 
   // Per-variable info in tensors_[0].

@@ -93,6 +93,7 @@ from .independent import Independent
 from .kl import kl_divergence, register_kl
 from .kumaraswamy import Kumaraswamy
 from .laplace import Laplace
+from .lkj_cholesky import LKJCholesky
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import LowRankMultivariateNormal
@@ -134,6 +135,7 @@ __all__ = [
     'HalfNormal',
     'Independent',
     'Kumaraswamy',
+    'LKJCholesky',
     'Laplace',
     'LogNormal',
     'LogisticNormal',

@@ -6,13 +6,14 @@ from . import tensor_engine
 
 from . import attention      # noqa: F401
 from . import broadcast      # noqa: F401
+from . import concat         # noqa: F401
 # from . import conv           # noqa: F401
 from . import elementwise    # noqa: F401
 from . import matmul         # noqa: F401
 # from . import normalization  # noqa: F401
 # from . import pooling        # noqa: F401
 from . import reduction      # noqa: F401
-# from . import softmax        # noqa: F401
+from . import softmax        # noqa: F401
 from . import rnn_eltwise    # noqa: F401
 from . import swish          # noqa: F401
 
@@ -116,6 +117,12 @@ Works only with Python3.\n A few examples:
         action='store_true',
         help="Disable shape randomization in dynamic benchmarks.",
     )
+    parser.add_argument(
+        "--cpu_fusion",
+        default=False,
+        action='store_true',
+        help="Enable CPU fusion.",
+    )
 
     args = parser.parse_args()
 
@@ -138,6 +145,13 @@ Works only with Python3.\n A few examples:
         torch._C._jit_set_profiling_mode(True)
     else :
         raise ValueError("Undefined fuser: {}".format(args.cuda_fuser))
+
+    if args.cpu_fusion:
+        import torch
+        torch._C._jit_override_can_fuse_on_cpu(True)
+    else:
+        import torch
+        torch._C._jit_override_can_fuse_on_cpu(False)
 
     def set_global_threads(num_threads):
         os.environ["OMP_NUM_THREADS"] = str(num_threads)
@@ -276,9 +290,10 @@ Works only with Python3.\n A few examples:
                             config[i] = value
                         except ValueError:
                             pass
-                    bench = bench_cls(*config)
+                    # TODO: output dtype in the config and  parse it back from the str
+                    bench = bench_cls(config[0], config[1], torch.float32, *config[2:])
                     bench.jit_mode = args.jit_mode
-                    bench.output_type = args.output_type
+                    bench.output_type = args.output
                     bench.run(args)
 
             if not match_class_name:

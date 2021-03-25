@@ -1,3 +1,34 @@
+# IR Specification (Updated 2/26/21)
+Stmt
+= Block(stmts_ = [Stmt])
+| Store(buf_ = Buf, indices = [Expr], value_ = Expr, mask_ = Expr)
+| Allocate(buf_ = Buf)
+| Free(buf_ = Buf)
+| Let(var_ = Var, val_ = Expr)
+| Cond(condition_ = Expr, true_stmt_ = Block, false_stmt_ = Block)
+| For(var_ = Var, start_ = Expr, stop_ = Expr, body_ = Block, loopOptions = LoopOptions)
+| AtomicAdd(buf_ = Buf, indices = [Expr], value_ = Expr)
+| SyncThreads()
+| ExternalCall(buf_ = Buf, buf_args_ = [Buf], args_ = [Expr])
+
+Expr
+= Var()
+| Buf(base_handle_ = Var, dims = [Expr])
+| Term(variables_ = [Expr], scalar_ = Expr)
+| Polynomial(variables_ = [Term], scalar_ = Expr)
+| MaxTerm(variables_ = [Term], scalar_ = Expr)
+| MinTerm(variables_ = [Term], scalar_ = Expr)
+| Cast(src_value_ = Expr)
+| BitCast(src_value_ = Expr)
+| BinaryOpNode(lhs_ = Expr, rhs_ = Expr)
+| ImmInt/ImmFloat/etc.()
+| Ramp(base_ = Expr, stride_ = Expr)
+| Load(buf_ = Buf, indices = [Expr], mask_ = Expr)
+| Broadcast(value_ = Expr, lanes_ = int)
+| IfThenElse(condition_ = Expr, true_ = Expr, false_ = Expr)
+| CallNode(call_type_ = {kIntrinsics, kFunctionCall}, params_ = [Expr])
+| CompareSelect(lhs_ = Expr, rhs_ = Expr, ret_val1_ = Expr, ret_val2_ = Expr, compare_op_ = {kEQ, kGT, kGE, ...}, bias_ = {kUnbiased, kLikely, kUnlikely})
+| ReduceOp(body_ = Expr, reduce_args_ = [Var], reducer = Reducer)
 # Current workflow
 
 ## Step 1: input from the user.
@@ -17,7 +48,7 @@ User construct a kernel from tensor expressions, like:
         });
     Tensor* y = ...;
     Tensor* z = ...;
-    std::vector<Tensor*> tensors_to_compute = {x, z}; // Tensor y might be used in x or z - in this case it will also be computed. 
+    std::vector<Tensor*> tensors_to_compute = {x, z}; // Tensor y might be used in x or z - in this case it will also be computed.
 ```
 
 ## Step 2: Lower to a LoopNest:

@@ -1,10 +1,11 @@
 from collections import namedtuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing import FileCheck
 from torch import jit
 from textwrap import dedent
-from typing import NamedTuple, List, Optional, Dict, Tuple, Any
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import inspect
 import unittest
@@ -189,8 +190,7 @@ class TestScriptPy3(JitTestCase):
                 super().__init__()
 
             @torch.jit.ignore
-            def foo(self, x, z):
-                # type: (Tensor, Tensor) -> Tuple[GG, GG]
+            def foo(self, x: torch.Tensor, z: torch.Tensor) -> Tuple[GG, GG]:
                 return GG(x, z), GG(x, z)
 
             def forward(self, x, z):
@@ -412,8 +412,7 @@ class TestScriptPy3(JitTestCase):
         """
         Test that using an optional with no contained types produces an error.
         """
-        def fn_with_comment(x):
-            # type: (torch.Tensor) -> Optional
+        def fn_with_comment(x: torch.Tensor) -> Optional:
             return (x, x)
 
         def annotated_fn(x: torch.Tensor) -> Optional:
@@ -437,8 +436,7 @@ class TestScriptPy3(JitTestCase):
         """
         Test that using a tuple with no contained types produces an error.
         """
-        def fn_with_comment(x):
-            # type: (torch.Tensor) -> Tuple
+        def fn_with_comment(x: torch.Tensor) -> Tuple:
             return (x, x)
 
         def annotated_fn(x: torch.Tensor) -> Tuple:
@@ -675,7 +673,7 @@ class TestScriptPy3(JitTestCase):
         mod = ModuleWithProperties(3)
         scripted_mod = torch.jit.script(mod)
 
-        with self.assertRaisesRegex(torch.nn.modules.module.ModuleAttributeError, "has no attribute"):
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
             scripted_mod.ignored_attr
 
     def test_ignoring_module_attributes(self):
@@ -729,47 +727,39 @@ class TestScriptPy3(JitTestCase):
 
 
     def test_export_opnames_interface(self):
-        global OneTwoModule
 
         @torch.jit.interface
         class OneTwoModule(nn.Module):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
+            def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 pass
 
-            def two(self, x):
-                # type: (Tensor) -> Tensor
+            def two(self, x: torch.Tensor) -> torch.Tensor:
                 pass
 
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
                 pass
 
         class FooMod(nn.Module):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
+            def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 return x + y
 
-            def two(self, x):
-                # type: (Tensor) -> Tensor
+            def two(self, x: torch.Tensor) -> torch.Tensor:
                 return 2 * x
 
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.one(self.two(x), x)
 
         class BarMod(nn.Module):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
+            def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 return x * y
 
-            def two(self, x):
-                # type: (Tensor) -> Tensor
+            def two(self, x: torch.Tensor) -> torch.Tensor:
                 return 2 / x
 
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.two(self.one(x, x))
+
+        make_global(OneTwoModule)
 
         class M(nn.Module):
             sub : OneTwoModule
@@ -778,8 +768,7 @@ class TestScriptPy3(JitTestCase):
                 super(M, self).__init__()
                 self.sub = BarMod()
 
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.sub.forward(x)
 
         def use_module_interface(mod_list: List[OneTwoModule], x: torch.Tensor):

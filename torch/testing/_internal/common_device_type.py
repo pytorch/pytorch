@@ -5,13 +5,13 @@ import runpy
 import threading
 from enum import Enum
 from functools import wraps
-from typing import List, Any, ClassVar, Optional, Sequence
+from typing import List, Any, ClassVar, Optional, Sequence, Tuple
 import unittest
 import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing import \
     (get_all_dtypes)
@@ -171,7 +171,9 @@ except ImportError:
 
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
-        test_name += "_" + op.name
+        test_name += "_" + op.name.replace('.', '_')
+        if op.variant_test_name:
+            test_name += "_" + op.variant_test_name
 
     test_name += "_" + device_type
 
@@ -186,6 +188,9 @@ def _construct_test_name(test_name, op, device_type, dtype):
 
 class DeviceTypeTestBase(TestCase):
     device_type: str = 'generic_device_type'
+
+    # Flag to disable test suite early due to unrecoverable error such as CUDA error.
+    _stop_test_suite = False
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
@@ -241,12 +246,25 @@ class DeviceTypeTestBase(TestCase):
             #   op-specific decorators to the original test.
             #   Test-sepcific decorators are applied to the original test,
             #   however.
-            if op is not None and op.decorators is not None:
+            if op is not None:
+                active_decorators = []
+                if op.should_skip(generic_cls.__name__, name, cls.device_type, dtype):
+                    active_decorators.append(skipIf(True, "Skipped!"))
+
+                if op.decorators is not None:
+                    for decorator in op.decorators:
+                        # Can't use isinstance as it would cause a circular import
+                        if decorator.__class__.__name__ == 'DecorateInfo':
+                            if decorator.is_active(generic_cls.__name__, name, cls.device_type, dtype):
+                                active_decorators += decorator.decorators
+                        else:
+                            active_decorators.append(decorator)
+
                 @wraps(test)
                 def test_wrapper(*args, **kwargs):
                     return test(*args, **kwargs)
 
-                for decorator in op.decorators:
+                for decorator in active_decorators:
                     test_wrapper = decorator(test_wrapper)
 
                 test_fn = test_wrapper
@@ -254,12 +272,8 @@ class DeviceTypeTestBase(TestCase):
                 test_fn = test
 
             # Constructs the test
-            @wraps(test)
+            @wraps(test_fn)
             def instantiated_test(self, name=name, test=test_fn, dtype=dtype, op=op):
-                if op is not None and op.should_skip(generic_cls.__name__, name,
-                                                     self.device_type, dtype):
-                    self.skipTest("Skipped!")
-
                 device_arg: str = cls.get_primary_device()
                 if hasattr(test_fn, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
@@ -271,6 +285,11 @@ class DeviceTypeTestBase(TestCase):
                     self.precision = self._get_precision_override(test_fn, dtype)
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
                     result = test_fn(self, *args)
+                except RuntimeError as rte:
+                    # check if rte should stop entire test suite.
+                    self._stop_test_suite = self._should_stop_test_suite()
+                    # raise the runtime error as is for the test suite to record.
+                    raise rte
                 finally:
                     self.precision = guard_precision
 
@@ -313,10 +332,19 @@ class DeviceTypeTestBase(TestCase):
             for dtype in dtypes:
                 instantiate_test_helper(cls, name, test=test, dtype=dtype, op=None)
 
+    def run(self, result=None):
+        super().run(result=result)
+        # Early terminate test if _stop_test_suite is set.
+        if self._stop_test_suite:
+            result.stop()
+
 
 class CPUTestBase(DeviceTypeTestBase):
     device_type = 'cpu'
 
+    # No critical error should stop CPU test suite
+    def _should_stop_test_suite(self):
+        return False
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = 'cuda'
@@ -326,7 +354,6 @@ class CUDATestBase(DeviceTypeTestBase):
     cudnn_version: ClassVar[Any]
     no_magma: ClassVar[bool]
     no_cudnn: ClassVar[bool]
-
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -790,24 +817,21 @@ class expectedAlertNondeterministic:
         @wraps(fn)
         def efail_fn(slf, device, *args, **kwargs):
             if self.device_type is None or self.device_type == slf.device_type:
-                deterministic_restore = torch.is_deterministic()
-                torch.set_deterministic(True)
-                try:
-                    if self.fn_has_device_arg:
-                        fn(slf, device, *args, **kwargs)
+                with DeterministicGuard(True):
+                    try:
+                        if self.fn_has_device_arg:
+                            fn(slf, device, *args, **kwargs)
+                        else:
+                            fn(slf, *args, **kwargs)
+                    except RuntimeError as e:
+                        if self.error_message not in str(e):
+                            slf.fail(
+                                'expected non-deterministic error message to start with "'
+                                + self.error_message
+                                + '" but got this instead: "' + str(e) + '"')
+                        return
                     else:
-                        fn(slf, *args, **kwargs)
-                except RuntimeError as e:
-                    torch.set_deterministic(deterministic_restore)
-                    if self.error_message not in str(e):
-                        slf.fail(
-                            'expected non-deterministic error message to start with "'
-                            + self.error_message
-                            + '" but got this instead: "' + str(e) + '"')
-                    return
-                else:
-                    torch.set_deterministic(deterministic_restore)
-                    slf.fail('expected a non-deterministic error, but it was not raised')
+                        slf.fail('expected a non-deterministic error, but it was not raised')
 
             if self.fn_has_device_arg:
                 return fn(slf, device, *args, **kwargs)
@@ -839,7 +863,7 @@ def skipCUDAIfNoMagma(fn):
 
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
     version = _get_torch_cuda_version()
-    if version >= [10, 2]:
+    if version >= (10, 2):
         return fn
     else:
         # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
@@ -853,6 +877,21 @@ def skipCUDAIfRocm(fn):
 def skipCUDAIfNotRocm(fn):
     return skipCUDAIf(not TEST_WITH_ROCM, "test doesn't currently work on the CUDA stack")(fn)
 
+# Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
+def skipCUDAVersionIn(versions : List[Tuple[int, int]] = None):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            version = _get_torch_cuda_version()
+            if version == (0, 0):  # cpu
+                return fn(self, *args, **kwargs)
+            if version in (versions or []):
+                reason = "test skipped for CUDA version {0}".format(version)
+                raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
+    return dec_fn
 
 # Skips a test on CUDA if cuDNN is unavailable or its version is lower than requested.
 def skipCUDAIfCudnnVersionLessThan(version=0):

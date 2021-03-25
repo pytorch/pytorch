@@ -1,12 +1,12 @@
-from typing import List
 
-from torch._six import container_abcs
+import collections
 from itertools import repeat
+from typing import List
 
 
 def _ntuple(n):
     def parse(x):
-        if isinstance(x, container_abcs.Iterable):
+        if isinstance(x, collections.abc.Iterable):
             return x
         return tuple(repeat(x, n))
     return parse
@@ -26,8 +26,7 @@ def _reverse_repeat_tuple(t, n):
     return tuple(x for x in reversed(t) for _ in range(n))
 
 
-def _list_with_default(out_size, defaults):
-    # type: (List[int], List[int]) -> List[int]
+def _list_with_default(out_size: List[int], defaults: List[int]) -> List[int]:
     if isinstance(out_size, int):
         return out_size
     if len(defaults) <= len(out_size):

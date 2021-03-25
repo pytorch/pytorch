@@ -82,3 +82,11 @@ TEST_F(AutogradTest, CanPassCustomGradientInputs) {
   z.sum().backward(torch::ones({}) * 2);
   ASSERT_TRUE(x.grad().allclose(y * 2));
 }
+
+TEST(UtilsTest, AmbiguousOperatorDefaults) {
+  auto tmp = at::empty({}, at::kCPU);
+  at::_test_ambiguous_defaults(tmp);
+  at::_test_ambiguous_defaults(tmp, 1);
+  at::_test_ambiguous_defaults(tmp, 1, 1);
+  at::_test_ambiguous_defaults(tmp, 2, "2");
+}

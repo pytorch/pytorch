@@ -42,13 +42,13 @@ void min_values_kernel_cuda_impl(TensorIterator& iter) {
 }
 
 void max_values_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "max_values_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "max_values_cuda", [&]() {
     max_values_kernel_cuda_impl<scalar_t>(iter);
   });
 }
 
 void min_values_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "min_values_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "min_values_cuda", [&]() {
     min_values_kernel_cuda_impl<scalar_t>(iter);
   });
 }
@@ -95,7 +95,7 @@ void argmin_kernel_cuda(TensorIterator& iter) {
 
 static void min_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
   at::TensorIterator iter = make_reduction("min", result, indice, self, dim, keepdim, self.scalar_type(), kLong);
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(2), "min_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(2), "min_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       MinOps<scalar_t>{},
@@ -105,7 +105,7 @@ static void min_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, 
 
 static void max_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
   at::TensorIterator iter = make_reduction("max", result, indice, self, dim, keepdim, self.scalar_type(), kLong);
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(2), "max_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(2), "max_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       MaxOps<scalar_t>{},
@@ -136,7 +136,7 @@ static void _aminmax_kernel_impl(
 static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
   auto dtype = input.scalar_type();
   auto iter = make_reduction("min_all", result, input, std::vector<int64_t>{}, false, dtype);
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, dtype, "min_all_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, dtype, "min_all_cuda", [&] {
     min_values_kernel_cuda_impl<scalar_t>(iter);
   });
 }
@@ -144,7 +144,7 @@ static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
 static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
   auto dtype = input.scalar_type();
   auto iter = make_reduction("min_all", result, input, std::vector<int64_t>{}, false, dtype);
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, dtype, "max_all_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, dtype, "max_all_cuda", [&] {
     max_values_kernel_cuda_impl<scalar_t>(iter);
   });
 }

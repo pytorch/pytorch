@@ -85,16 +85,16 @@ if is_available():
         and distributed autograd, which immediately makes the current
         process ready to send and receive RPCs.
 
-        Arguments:
+        Args:
+            name (str): a globally unique name of this node. (e.g.,
+                ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
+                Name can only contain number, alphabet, underscore, colon,
+                and/or dash, and must be shorter than 128 characters.
             backend (BackendType, optional): The type of RPC backend
                 implementation. Supported values include
                 ``BackendType.TENSORPIPE`` (the default) and
                 ``BackendType.PROCESS_GROUP``. See :ref:`rpc-backends` for more
                 information.
-            name (str): a globally unique name of this node. (e.g.,
-                ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
-                Name can only contain number, alphabet, underscore, colon,
-                and/or dash, and must be shorter than 128 characters.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
             rpc_backend_options (RpcBackendOptions, optional): The options

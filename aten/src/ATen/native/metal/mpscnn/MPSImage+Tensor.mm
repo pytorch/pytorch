@@ -3,6 +3,7 @@
 #include <ATen/native/metal/mpscnn/MPSCNNContext.h>
 #include <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 
+#include <c10/util/accumulate.h>
 #include <torch/script.h>
 
 using namespace at::native;
@@ -99,7 +100,7 @@ using namespace at::native;
   auto fp32 = metal::fp16_to_fp32(fp16);
   std::vector<float> fp32_nchw = metal::NC4_to_NCHW(fp32.data(), outputSize);
   auto tensor = at::empty(outputSize);
-  int64_t size_bytes = at::prod_intlist(outputSize) * sizeof(float);
+  int64_t size_bytes = c10::multiply_integers(outputSize) * sizeof(float);
   memcpy(tensor.data_ptr(), fp32_nchw.data(), size_bytes);
   return tensor;
 }
@@ -233,7 +234,7 @@ using namespace at::native;
 
 + (MPSImage*)imageFromHost:(const float*)src
                      Sizes:(const std::vector<int64_t>&)sizes {
-  int64_t size_bytes = at::prod_intlist(sizes) * sizeof(float);
+  int64_t size_bytes = c10::multiply_integers(sizes) * sizeof(float);
   // allocte buffer on CPU
   id<MTLBuffer> buff = [[MPSCNNContext sharedInstance].device
       newBufferWithLength:size_bytes
@@ -268,7 +269,7 @@ using namespace at::native;
                                        Sizes:(const std::vector<int64_t>&)sizes
                                CommandBuffer:(MetalCommandBuffer*)cb {
   NSCAssert(cb, @"CommandBuffer is nil!");
-  int64_t size_bytes = at::prod_intlist(sizes) * sizeof(float);
+  int64_t size_bytes = c10::multiply_integers(sizes) * sizeof(float);
   // allocte buffer on CPU
   id<MTLBuffer> buff = [[MPSCNNContext sharedInstance].device
       newBufferWithLength:size_bytes
@@ -301,7 +302,7 @@ using namespace at::native;
 
 + (void)copyToHost:(float*)dst FromImage:(MPSImage*)image {
   auto&& sizes = [image sizes];
-  int64_t size_bytes = at::prod_intlist(sizes) * sizeof(float);
+  int64_t size_bytes = c10::multiply_integers(sizes) * sizeof(float);
   id<MTLBuffer> buffer = [[MPSCNNContext sharedInstance].device
       newBufferWithLength:size_bytes
                   options:MTLResourceOptionCPUCacheModeDefault];

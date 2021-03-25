@@ -15,7 +15,7 @@ namespace caffe2 {
 // max_seq_size is the upper bound of length of every item in a batch.
 // Upper bound of length of a batch of items should be max_batch_size *
 // max_seq_size.
-struct CAFFE2_API BoundShapeSpec {
+struct TORCH_API BoundShapeSpec {
   explicit BoundShapeSpec(int64_t b, int64_t q)
       : max_batch_size(b),
         max_seq_size(q),
@@ -86,7 +86,7 @@ class BoundShapeInferencerBase {
   bool extract_feature_len_;
 };
 
-class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
+class TORCH_API BoundShapeInferencer : public BoundShapeInferencerBase {
  public:
   explicit BoundShapeInferencer(const BoundShapeSpec& spec)
       : BoundShapeInferencerBase(spec) {}
@@ -134,6 +134,9 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   void InferQuantizationTransformation(const OperatorDef& op);
   void InferUnPackRecords(const OperatorDef& op);
   void InferTile(const OperatorDef& op);
+  void InferSparseLengthsSumSparseLookup(const OperatorDef& op);
+  void InferSoftmax(const OperatorDef& op);
+  void InferLpNorm(const OperatorDef& op);
 
   // Standard shape/type inference using op schema registered shape inference
   // function
@@ -149,7 +152,7 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
   int64_t current_max_batch_size_{0};
 };
 
-CAFFE2_API std::shared_ptr<BoundShapeInferencerBase> getBoundShapeInferencer(
+TORCH_API std::shared_ptr<BoundShapeInferencerBase> getBoundShapeInferencer(
     const BoundShapeSpec& spec);
 
 C10_DECLARE_SHARED_REGISTRY(
