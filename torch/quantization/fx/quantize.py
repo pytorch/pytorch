@@ -326,7 +326,11 @@ def insert_observer_for_input_arg_of_observed_node(
                     activation_post_process_indexes,
                     env, observed_graph, load_arg, observed_node_names_set, quants)
 
-def handle_copy_nodes(observed_graph, matches, quants, activation_post_process_map, modules):
+def handle_copy_nodes(
+        observed_graph: Graph, matches: Dict[str, MatchResult],
+        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
+        activation_post_process_map: Dict[str, List[str]],
+        modules: Dict[str, torch.nn.Module]):
     # map from node name to whether it is observed or not
     observed_nodes: Set[Node] = set()
     copy_nodes: Set[Node] = set()
