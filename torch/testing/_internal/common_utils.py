@@ -1150,7 +1150,7 @@ class TestCase(expecttest.TestCase):
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
     def _is_dict(self, obj):
-        return isinstance(obj, dict) or isinstance(obj, torch._C.ScriptDict)  # type: ignore
+        return isinstance(obj, (dict, torch._C.ScriptDict, torch.jit._script.ScriptDict))  # type: ignore
 
     # Compares x and y
     # TODO: default exact_device to True

@@ -804,7 +804,6 @@ class TestGradCheckOverride(TestCase):
         # Tensor-likes.
         self.assertEqual(total_used_attrs, {
             'data',
-            'device',
             'dtype',
             'is_complex',
             'is_floating_point',

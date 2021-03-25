@@ -13,6 +13,7 @@ import inspect
 import copy
 import pickle
 import warnings
+import collections
 from typing import Any, Dict
 
 
@@ -87,6 +88,57 @@ def _compile_and_register_class(obj, rcb, qualified_name):
 #  view.items()
 #  view.keys()
 #  len(view)
+
+
+class ScriptDictIterator(collections.abc.Iterator):
+    def __init__(self, _c):
+        self._c = _c
+
+    def __next__(self):
+        return self._c.__next__()
+
+    def __iter__(self):
+        return self._c.__iter__()
+
+
+class ScriptDict(collections.abc.MutableMapping, collections.abc.Iterable):
+    def __init__(self, _c):
+        self._c = _c
+
+    def __repr__(self):
+        return repr(self._c)
+
+    def __bool__(self):
+        return bool(self._c)
+
+    def __len__(self):
+        return len(self._c)
+
+    def __contains__(self, key):
+        return key in self._c
+
+    def __getitem__(self, key):
+        res = self._c[key]
+        if isinstance(res, torch._C.ScriptDict):
+            res = ScriptDict(res)
+
+        return res
+
+
+    def __setitem__(self, key, value):
+        self._c[key] = value
+
+    def __delitem__(self, key):
+        del self._c[key]
+
+    def __iter__(self):
+        return ScriptDictIterator(self._c.__iter__())
+
+    def items(self):
+        return self._c.items()
+
+    def keys(self):
+        return self._c.keys()
 
 
 class OrderedDictWrapper(object):
@@ -807,9 +859,9 @@ def create_script_dict(obj, type_hint=None):
     """
     if type_hint:
         ty = ann_to_type(type_hint, None)
-        return torch._C.ScriptDict(obj, ty)  # type: ignore
+        return ScriptDict(torch._C.ScriptDict(obj, ty))  # type: ignore
 
-    return torch._C.ScriptDict(obj)  # type: ignore
+    return ScriptDict(torch._C.ScriptDict(obj))  # type: ignore
 
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None, type_hint=None):

@@ -139,10 +139,11 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
 
       // If the object is a ScriptDict, retrieve the c10::Dict
       // instance inside it.
-      try {
-        auto script_dict = py::cast<ScriptDict>(obj);
+      if (py::isinstance(
+              obj,
+              py::module::import("torch.jit._script").attr("ScriptDict"))) {
+        auto script_dict = py::cast<ScriptDict>(obj.attr("_c"));
         return script_dict.dict_;
-      } catch (py::cast_error& e) {
       }
 
       TORCH_WARN(

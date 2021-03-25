@@ -59,7 +59,7 @@ namespace jit {
 
 void clear_registered_instances(void* ptr);
 
-IValue toIValue(
+TORCH_API IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N = c10::nullopt);
@@ -697,7 +697,8 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
   } else if (ivalue.isGenericDict()) {
-    return py::cast(ScriptDict(ivalue));
+    return py::module::import("torch.jit._script")
+        .attr("ScriptDict")(py::cast(ScriptDict(ivalue)));
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     auto RRefPtr =
