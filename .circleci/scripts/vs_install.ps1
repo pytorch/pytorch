@@ -1,4 +1,6 @@
-$VS_DOWNLOAD_LINK = "https://aka.ms/vs/16/release/vs_community.exe"
+# For the VS download link, we could get a rather new one from `curl -vvv "http://aka.ms/vs/16/release/vs_Community.exe"`
+# As long as the installer don't update itself, we could pin the version of a toolchain to a revision version level 
+$VS_DOWNLOAD_LINK = "https://download.visualstudio.microsoft.com/download/pr/1192d0de-5c6d-4274-b64d-c387185e4f45/b6bf2954c37e1caf796ee06436a02c79f7b13ae99c89b8a3b3b023d64a5935e4/vs_Community.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
 $VS_INSTALL_ARGS = @("modify","--nocache","--quiet","--wait", "--installPath ""C:\Program Files (x86)\Microsoft Visual Studio\2019\Community""",
                                                               "--add Microsoft.VisualStudio.Component.VC.14.27.x86.x64")
