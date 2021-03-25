@@ -46,7 +46,7 @@ class TORCH_API DistEngine {
   // The gradients are accumulated in the provided autograd context.
   std::shared_ptr<c10::ivalue::Future> executeSendFunctionAsync(
       const ContextPtr& autogradContext,
-      const std::shared_ptr<torch::autograd::Node>& sendFunction,
+      const std::shared_ptr<SendRpcBackward>& sendFunction,
       bool retainGraph);
 
   // Number of backward passes currently running for the Distributed Engine.
