@@ -184,6 +184,7 @@ def _get_global_builtins():
         'print',
         'tuple',
         'float',
+        'complex',
         'int',
         'bool',
         'str',
@@ -214,6 +215,7 @@ def _get_global_builtins():
         'bool': 'aten::Bool',
         'int': 'aten::Int',
         'float': 'aten::Float',
+        'complex': 'aten::Complex',
         'abs': 'prim::abs',
         'max': 'prim::max',
         'min': 'prim::min',
@@ -232,6 +234,7 @@ def _get_global_builtins():
     }
 
     magic_methods = [
+        ('complex', '__complex__'),
         ('float', '__float__'),
         ('int', '__int__'),
         ('bool', '__bool__'),
