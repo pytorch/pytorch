@@ -1,0 +1,43 @@
+name: Pin base branch
+on:
+  pull_request_target:
+    branches:
+      - base/*
+      - master
+
+jobs:
+  pin:
+    runs-on: ubuntu-18.04
+    steps:
+      # should be safe according to
+      # https://securitylab.github.com/research/github-actions-preventing-pwn-requests
+      # because we're only going to use it to compute the git merge-base
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Update base branch
+        # https://stackoverflow.com/a/50184923
+        run: |
+          set -eux
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          MERGE_BASE=$(git merge-base origin/main "$HEAD_SHA")
+          BRANCH="base/$(git rev-parse --short=7 "$MERGE_BASE")"
+          git checkout -B "$BRANCH" "$MERGE_BASE"
+          git push origin "$BRANCH"
+          curl "https://api.github.com/repos/samestep/gha-sandbox/pulls/$NUMBER" \
+            -H "Authorization: token $TOKEN" \
+            -d "{ \"base\": \"$BRANCH\" }"
+        env:
+          NUMBER: ${{ github.event.number }}
+          # use standard GITHUB_TOKEN since this needn't trigger pull_request
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add label
+        uses: actions-ecosystem/action-add-labels@v1
+        with:
+          # the GITHUB_BASE_BRANCH_TOKEN secret must be configured on the repo!
+          # we use this label to trigger pull_request workflows
+          github_token: ${{ secrets.GITHUB_BASE_BRANCH_TOKEN }}
+          number: ${{ github.event.number }}
+          labels: 'base pinned'

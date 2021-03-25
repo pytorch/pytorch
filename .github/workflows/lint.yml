@@ -5,6 +5,12 @@ on:
     branches:
     - master
   pull_request:
+    types:
+      - synchronize
+      - labeled
+    branches:
+      - base/*
+      - gh/*
 
 jobs:
   quick-checks:

@@ -2,6 +2,12 @@ name: clang-format
 
 on:
   pull_request:
+    types:
+      - synchronize
+      - labeled
+    branches:
+      - base/*
+      - gh/*
 
 jobs:
   clang-format:
