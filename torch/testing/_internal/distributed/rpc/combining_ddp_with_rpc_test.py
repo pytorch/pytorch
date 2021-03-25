@@ -125,7 +125,10 @@ def _get_device(x):
 class CombiningDDPWithRpcTest(RpcAgentTestFixture):
 
     @dist_init(setup_rpc=False)
-    def test_combining_dpp_with_rpc(self):
+    def test_combining_ddp_with_rpc(self):
+        if not torch.cuda.is_available():
+            sys.exit(TEST_SKIPS['no_cuda'].exit_code)
+
         if torch.cuda.is_available() and torch.cuda.device_count() < 2:
             sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
 
