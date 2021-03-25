@@ -104,7 +104,7 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<Sc
 // Reference
 // [1] https://osf.io/af2hy/
 
-Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> generator) {
+Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
   TORCH_CHECK(n <= std::numeric_limits<int>::max(),

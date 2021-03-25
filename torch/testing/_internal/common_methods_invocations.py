@@ -1380,6 +1380,18 @@ def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False):
     return out
 
 
+def sample_inputs_lu(op_info, device, dtype, requires_grad=False):
+    # not needed once OpInfo tests support Iterables
+    def generate_samples():
+        batch_shapes = ((), (3,), (3, 3))
+        for batch_shape, get_infos in product(batch_shapes, (True, False)):
+            shape = batch_shape + (S, S)
+            input = make_tensor(shape, device, dtype, requires_grad=requires_grad, low=None, high=None)
+            yield SampleInput(input, args=(True, get_infos))
+
+    return list(generate_samples())
+
+
 def sample_inputs_std_var(op_info, device, dtype, requires_grad):
     tensor_nd = make_tensor((S, S, S), device=device, dtype=dtype,
                             low=None, high=None, requires_grad=requires_grad)
@@ -1745,6 +1757,20 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
     )
 
     return samples
+
+
+def sample_inputs_entr(op_info, device, dtype, requires_grad):
+    low, _ = op_info.domain
+
+    if requires_grad:
+        low = 0 + op_info._domain_eps
+
+    return (SampleInput(make_tensor((L,), device, dtype,
+                                    low=low,
+                                    requires_grad=requires_grad)),
+            SampleInput(make_tensor((), device, dtype,
+                                    low=low,
+                                    requires_grad=requires_grad)))
 
 
 def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
@@ -2727,7 +2753,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_qr',
            op=torch.linalg.qr,
            dtypes=floating_and_complex_types(),
-           supports_out=False,
+           supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_linalg_qr,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -2829,6 +2855,24 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
                                 dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
                    )),
+    OpInfo('lu',
+           op=torch.lu,
+           dtypes=floating_and_complex_types(),
+           supports_inplace_autograd=False,
+           check_batched_gradgrad=False,
+           supports_out=False,
+           sample_inputs_func=sample_inputs_lu,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
+               # we skip jit tests because lu_backward is impelemented as autograd.Function,
+               # which does not support autograd with scripting
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+               # Skip operator schema test because this is a functional and not an operator
+               SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           )),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -2931,7 +2975,6 @@ op_db: List[OpInfo] = [
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
-           supports_out=False,
            sample_inputs_func=sample_inputs_linalg_qr,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -3332,7 +3375,6 @@ op_db: List[OpInfo] = [
     OpInfo('eig',
            op=torch.eig,
            dtypes=floating_and_complex_types(),
-           supports_out=False,
            sample_inputs_func=sample_inputs_eig,
            decorators=[
                skipCUDAIfNoMagma,
@@ -3542,6 +3584,21 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    safe_casts_outputs=True),
+    UnaryUfuncInfo('special.entr',
+                   ref=scipy.special.entr,
+                   aten_name='special_entr',
+                   decorators=(precisionOverride({torch.float16: 1e-1,
+                                                  torch.bfloat16: 1e-1}),),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                dtypes=[torch.bfloat16, torch.float16]),
+                   ),
+                   supports_inplace_autograd=False,
+                   safe_casts_outputs=True,
+                   sample_inputs_func=sample_inputs_entr),
     UnaryUfuncInfo('erf',
                    ref=scipy_reference_wrapper(lambda x: scipy.special.erf(x)),
                    aliases=('special.erf', ),
@@ -4253,18 +4310,6 @@ def method_tests():
          'batched_symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
         ('logdet', lambda dtype, device: make_nonzero_det(random_fullrank_matrix_distinct_singular_value(S, 3), 1, 0), NO_ARGS,
          'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (S, S), (True, False), 'square_single_no_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (S, S), (True, True), 'square_single_with_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (3, S, S), (True, False), 'square_batch_no_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (3, S, S), (True, True), 'square_batch_with_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (3, 3, S, S), (True, False), 'square_many_batches_no_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
-        ('lu', (3, 3, S, S), (True, True), 'square_many_batches_with_info',
-         (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm]),
         ('fill_', (S, S, S), (1,), 'number'),
         ('fill_', (), (1,), 'number_scalar'),
         ('fill_', (S, S, S), ((),), 'variable'),
