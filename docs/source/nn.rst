@@ -394,6 +394,7 @@ Utility functions in other modules
 .. autosummary::
     :toctree: generated
     :nosignatures:
+    :template: classtemplate.rst
 
     nn.utils.rnn.PackedSequence
     nn.utils.rnn.pack_padded_sequence
