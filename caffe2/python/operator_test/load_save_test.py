@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Generator, List, NamedTuple, Optional, Tuple, Type
 
 from caffe2.proto import caffe2_pb2
+from caffe2.proto.caffe2_pb2 import BlobSerializationOptions
 from caffe2.python import core, test_util, workspace
 
 if workspace.has_gpu_support:
@@ -460,9 +461,9 @@ class TestLoadSave(TestLoadSaveBase):
 
         return blobs
 
-    def load_and_check_blobs(
+    def load_blobs(
         self,
-        blobs: List[Tuple[str, np.ndarray]],
+        blob_names: List[str],
         dbs: List[str],
         db_type: Optional[str] = None
     ) -> None:
@@ -471,13 +472,21 @@ class TestLoadSave(TestLoadSaveBase):
         load_op = core.CreateOperator(
             "Load",
             [],
-            [name for name, data in blobs],
+            blob_names,
             absolute_path=1,
             dbs=dbs,
             db_type=db_type or self._db_type,
         )
         self.assertTrue(workspace.RunOperatorOnce(load_op))
-        self.assertEqual(len(workspace.Blobs()), len(blobs))
+        self.assertEqual(len(workspace.Blobs()), len(blob_names))
+
+    def load_and_check_blobs(
+        self,
+        blobs: List[Tuple[str, np.ndarray]],
+        dbs: List[str],
+        db_type: Optional[str] = None
+    ) -> None:
+        self.load_blobs([name for name, data in blobs], dbs, db_type)
         for name, data in blobs:
             np.testing.assert_array_equal(workspace.FetchBlob(name), data)
 
@@ -578,6 +587,110 @@ class TestLoadSave(TestLoadSaveBase):
             num_elems=default_chunk_size + 10,
             chunk_size=0,
             expected_num_chunks=1,
+        )
+
+    def testSaveWithOptions(self) -> None:
+        tmp_folder = self.make_tempdir()
+        tmp_file = str(tmp_folder / "save.output")
+
+        num_elems = 1234
+        blobs = self.create_test_blobs(num_elems)
+
+        # Saves the blobs to a local db.
+        save_op = core.CreateOperator(
+            "Save",
+            [name for name, data in blobs],
+            [],
+            absolute_path=1,
+            db=tmp_file,
+            db_type=self._db_type,
+            chunk_size=40,
+            options=caffe2_pb2.SerializationOptions(
+                options=[
+                    BlobSerializationOptions(
+                        blob_name_regex="int16_data", chunk_size=10
+                    ),
+                    BlobSerializationOptions(
+                        blob_name_regex=".*16_data", chunk_size=20
+                    ),
+                    BlobSerializationOptions(
+                        blob_name_regex="float16_data", chunk_size=30
+                    ),
+                ],
+            ),
+        )
+        self.assertTrue(workspace.RunOperatorOnce(save_op))
+
+        self.load_and_check_blobs(blobs, [tmp_file])
+
+        blob_chunks = self._read_chunk_info(Path(tmp_file))
+        # We explicitly set a chunk_size of 10 for int16_data
+        self.assertEqual(
+            len(blob_chunks["int16_data"]), math.ceil(num_elems / 10)
+        )
+        # uint16_data should match the .*16_data pattern, and get a size of 20
+        self.assertEqual(
+            len(blob_chunks["uint16_data"]), math.ceil(num_elems / 20)
+        )
+        # float16_data should also match the .*16_data pattern, and get a size
+        # of 20.  The explicitly float16_data rule came after the .*16_data
+        # pattern, so it has lower precedence and will be ignored.
+        self.assertEqual(
+            len(blob_chunks["float16_data"]), math.ceil(num_elems / 20)
+        )
+        # int64_data will get the default chunk_size of 40
+        self.assertEqual(
+            len(blob_chunks["int64_data"]), math.ceil(num_elems / 40)
+        )
+
+
+    def testSaveFloatToBfloat16(self) -> None:
+        tmp_folder = self.make_tempdir()
+        tmp_file = str(tmp_folder / "save.output")
+
+        # Create 2 blobs with the same float data
+        float_data = np.random.random_sample(4000).astype(np.float32)
+        workspace.FeedBlob("float1", float_data)
+        workspace.FeedBlob("float2", float_data)
+        blob_names = ["float1", "float2"]
+
+        # Serialize the data, using bfloat16 serialization for one of the blobs
+        save_op = core.CreateOperator(
+            "Save",
+            blob_names,
+            [],
+            absolute_path=1,
+            db=tmp_file,
+            db_type=self._db_type,
+            options=caffe2_pb2.SerializationOptions(
+                options=[
+                    BlobSerializationOptions(
+                        blob_name_regex="float1",
+                        float_format=BlobSerializationOptions.FLOAT_BFLOAT16,
+                    ),
+                ],
+            ),
+        )
+        self.assertTrue(workspace.RunOperatorOnce(save_op))
+
+        # As long as fbgemm was available for us to perform bfloat16 conversion,
+        # the serialized data for float1 should be almost half the size of float2
+        if workspace.has_fbgemm:
+            blob_chunks = self._read_chunk_info(Path(tmp_file))
+            self.assertEqual(len(blob_chunks["float1"]), 1, blob_chunks["float1"])
+            self.assertEqual(len(blob_chunks["float2"]), 1, blob_chunks["float2"])
+            self.assertLess(
+                blob_chunks["float1"][0].value_size,
+                0.6 * blob_chunks["float2"][0].value_size
+            )
+
+        self.load_blobs(blob_names, [tmp_file])
+
+        # float2 should be exactly the same as the input data
+        np.testing.assert_array_equal(workspace.FetchBlob("float2"), float_data)
+        # float2 should be close-ish to the input data
+        np.testing.assert_array_almost_equal(
+            workspace.FetchBlob("float1"), float_data, decimal=2
         )
 
 
