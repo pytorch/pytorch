@@ -415,3 +415,5 @@ def patched_make_field(self, types, domain, items, **kw):
     return nodes.field('', fieldname, fieldbody)
 
 TypedField.make_field = patched_make_field
+
+nitpicky = True
