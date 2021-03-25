@@ -97,7 +97,6 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
 
 def type_matches(signature_type : Any, argument_type : Any):
     sig_origin_type = getattr(signature_type, '__origin__', signature_type)
-    argument_origin_type = getattr(argument_type, '__origin__', argument_type)
 
     # Union types in signature. Given type needs to match one of the
     # contained types in the Union
