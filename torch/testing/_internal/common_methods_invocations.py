@@ -1387,7 +1387,7 @@ def sample_inputs_lu(op_info, device, dtype, requires_grad=False):
         for batch_shape, get_infos in product(batch_shapes, (True, False)):
             shape = batch_shape + (S, S)
             input = make_tensor(shape, device, dtype, requires_grad=requires_grad, low=None, high=None)
-            yield SampleInput((input, True, get_infos))
+            yield SampleInput(input, args=(True, get_infos))
 
     return list(generate_samples())
 
@@ -2858,7 +2858,7 @@ op_db: List[OpInfo] = [
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),
-           test_inplace_grad=False,
+           supports_inplace_autograd=False,
            check_batched_gradgrad=False,
            supports_out=False,
            sample_inputs_func=sample_inputs_lu,
@@ -2870,6 +2870,8 @@ op_db: List[OpInfo] = [
                # we skip jit tests because lu_backward is impelemented as autograd.Function,
                # which does not support autograd with scripting
                SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+               # Skip operator schema test because this is a functional and not an operator
+               SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
