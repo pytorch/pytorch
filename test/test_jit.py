@@ -108,6 +108,7 @@ import string
 import sys
 import tempfile
 import types
+import typing
 import unittest
 import warnings
 import zipfile
@@ -11546,6 +11547,12 @@ dedent """
             def range_non_float():
                 for i in range(.5):
                     print(i)
+
+    def test_empty_tuple_str(self):
+        empty_tuple_type = torch._C.TupleType([])
+        g = {'Tuple' : typing.Tuple}
+        python_type = eval(empty_tuple_type.annotation_str, g)
+        assert python_type is typing.Tuple[()]
 
     def test_zip_enumerate_modulelist(self):
         class Sub(torch.nn.Module):

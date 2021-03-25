@@ -27,6 +27,19 @@ TypePtr ScriptTypeParser::subscriptToType(
     const std::string& typeName,
     const Subscript& subscript) const {
   if (typeName == "Tuple") {
+    if (subscript.subscript_exprs().size() == 1 &&
+        subscript.subscript_exprs()[0].kind() == TK_TUPLE_LITERAL) {
+      // `typing.Tuple` special cases syntax for empty tuple annotations,
+      // i.e. `typing.Tuple[()]`. Allow for parsing an empty tuple literal
+      // here. See https://docs.python.org/3/library/typing.html#typing.Tuple
+      auto tup_literal = TupleLiteral(subscript.subscript_exprs()[0]);
+      if (tup_literal.inputs().size() > 0) {
+        throw ErrorReport(tup_literal.range())
+            << "Tuple literal in Tuple type annotation must not "
+            << "have any elements!";
+      }
+      return TupleType::create({});
+    }
     std::vector<TypePtr> subscript_expr_types;
     for (auto expr : subscript.subscript_exprs()) {
       subscript_expr_types.push_back(parseTypeFromExprImpl(expr));
