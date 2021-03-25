@@ -2805,17 +2805,36 @@ static void linalg_lstsq_out_info(
   // now the actual call that computes the result in-place (apply_lstsq)
   at::_lstsq_helper(solution, rank, singular_values, infos, input_working_copy, rcond, driver);
 
+  // residuals are available only if m > n and drivers other than gelsy used
   if (m > n && driver != "gelsy") {
-    // LAPACK stores residuals data for postprocessing in rows n:(m-n)
-    auto raw_residuals = solution.narrow(/*dim=*/-2, /*start=*/n, /*length*/m - n);
-    if (raw_residuals.is_complex()) {
-      // in-place abs is not supported for complex tensors
-      raw_residuals = raw_residuals.abs();
-      raw_residuals.pow_(2);
-    } else {
-      raw_residuals.abs_().pow_(2);
+    // if the driver is gelss or gelsd then the residuals are available only if rank == n
+    bool compute_residuals = true;
+    if (driver != "gels") {
+      if (input.dim() == 2) {
+        compute_residuals = (rank.item().toInt() == n);
+      } else {
+        // if any of the computed ranks in equal to n then do the computation of residuals
+        compute_residuals = at::any(rank == n).item().toBool();
+      }
     }
-    at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
+    if (compute_residuals) {
+      // LAPACK stores residuals data for postprocessing in rows n:(m-n)
+      auto raw_residuals = solution.narrow(/*dim=*/-2, /*start=*/n, /*length*/m - n);
+      if (raw_residuals.is_complex()) {
+        // in-place abs is not supported for complex tensors
+        raw_residuals = raw_residuals.abs();
+        raw_residuals.pow_(2);
+      } else {
+        raw_residuals.abs_().pow_(2);
+      }
+      at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
+
+      // if at::any(rank != n) then the residuals for i-th batch with rank[i] != n are not available
+      // and the computed result is not meaningful, we fill it with INFINITY as we cannot resize it to (0,) shape
+      if (driver != "gels") {
+        residuals.masked_fill_((rank != n).unsqueeze_(-1), INFINITY);
+      }
+    }
   }
   solution = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
   if (m == 0) {

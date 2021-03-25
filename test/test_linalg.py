@@ -141,7 +141,7 @@ class TestLinalg(TestCase):
                     return t
 
             def select_if_not_empty(t, i):
-                selected = apply_if_not_empty(t, lambda x: x.select(0, i).numpy())
+                selected = apply_if_not_empty(t, lambda x: x.select(0, i))
                 return selected
 
             m = a.size(-2)
@@ -168,9 +168,20 @@ class TestLinalg(TestCase):
                     if singular_values is None:
                         singular_values = []
                     self.assertEqual(sol, solution_3d.select(0, i), atol=1e-5, rtol=1e-5)
-                    self.assertEqual(residuals, select_if_not_empty(residuals_2d, i), atol=1e-5, rtol=1e-5)
                     self.assertEqual(rank, select_if_not_empty(rank_1d, i), atol=1e-5, rtol=1e-5)
                     self.assertEqual(singular_values, singular_values_2d.select(0, i), atol=1e-5, rtol=1e-5)
+
+                    # SciPy and NumPy operate only on non-batched input and
+                    # return an empty array with shape (0,) if rank(a) != n
+                    # but in PyTorch we can't replicate this behavior for batched inputs
+                    # instead if the corresponding rank for batched input is not equal to n
+                    # we fill residuals with inf
+                    if m > n:
+                        if rank == n:
+                            self.assertEqual(residuals, select_if_not_empty(residuals_2d, i), atol=1e-5, rtol=1e-5)
+                        else:
+                            self.assertTrue(torch.all(torch.isinf(select_if_not_empty(residuals_2d, i))))
+
             else:
                 self.assertEqual(res.solution.shape, (*a.shape[:-2], n, nrhs))
                 self.assertEqual(res.rank.shape, a.shape[:-2])
