@@ -326,6 +326,99 @@ def insert_observer_for_input_arg_of_observed_node(
                     activation_post_process_indexes,
                     env, observed_graph, load_arg, observed_node_names_set, quants)
 
+def insert_observers_for_model(
+        model: torch.nn.Module,
+        modules: Dict[str, torch.nn.Module],
+        matches: Dict[str, MatchResult],
+        quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
+        observed_node_names_set: Set[str],
+        qconfig_map: Dict[str, QConfigAny],
+        activation_post_process_map: Dict[str, List[str]],
+        activation_post_process_indexes: Dict[str, int],
+        observed_graph: Graph,
+        prepare_custom_config_dict: Dict[str, Any],
+        input_quantized_idxs: List[int],
+        output_quantized_idxs: List[int]) -> Optional[Node]:
+    env: Dict[Any, Any] = {}
+
+    def load_arg(a):
+        return map_arg(a, lambda node: env[node.name])
+
+    graph_inputs = [node.name for node in model.graph.nodes if node.op == "placeholder"]
+    get_new_observer_name = get_new_attr_name_with_prefix(
+        'activation_post_process_')
+    placeholder_node_seen_cnt = 0
+    output_node_seen_cnt = 0
+    result_node: Optional[Node] = None
+    for node in model.graph.nodes:
+        if node.op == 'output':
+            # If this output is hardcoded to be quantized, insert an
+            # observer on the previous node if it does not already
+            # exist.
+            cur_output_node_idx = output_node_seen_cnt
+            output_node_seen_cnt += 1
+            if cur_output_node_idx in output_quantized_idxs:
+                prev_node = node.args[0]
+                assert isinstance(prev_node, Node), \
+                    ('hardcoding list/dict outputs to be quantized is ' +
+                     'not supported')
+                if prev_node.name not in observed_node_names_set:
+                    assert qconfig_map is not None
+                    local_qconfig = qconfig_map[prev_node.name]
+                    assert local_qconfig is not None, \
+                        'qconfig of a node before a quantized output must exist'
+                    insert_observer(
+                        prev_node, local_qconfig.activation(),
+                        model,
+                        activation_post_process_map,
+                        activation_post_process_indexes,
+                        env, observed_graph, load_arg, observed_node_names_set, quants)
+
+            observed_graph.output(load_arg(node.args[0]))
+            result_node = node
+            continue
+
+        if node.name in observed_node_names_set:
+            continue
+
+        root_node, matched_nodes, pattern, obj, qconfig = matches.get(
+            node.name, (None, None, None, None, None))
+        env[node.name] = observed_graph.node_copy(node, load_arg)
+        if root_node is node:
+            # index for input of custom module that needs to be observed in
+            # parent
+            if qconfig is not None:
+                assert obj is not None
+                standalone_module_input_idxs = \
+                    maybe_insert_observer_for_special_module(
+                        obj, modules, prepare_custom_config_dict, qconfig,
+                        node)
+                insert_observer_for_output_of_the_node(
+                    node, obj, qconfig, modules, model, pattern,
+                    activation_post_process_map,
+                    activation_post_process_indexes,
+                    env,
+                    observed_graph, load_arg, observed_node_names_set,
+                    matched_nodes, standalone_module_input_idxs, quants)
+
+        if node.op == 'placeholder':
+            # skip adding observers at the graph input if the input is
+            # overriden to be quantized
+            cur_placeholder_node_idx = placeholder_node_seen_cnt
+            placeholder_node_seen_cnt += 1
+            if cur_placeholder_node_idx in input_quantized_idxs:
+                observed_node_names_set.add(node.name)
+                continue
+
+        insert_observer_for_input_arg_of_observed_node(
+            node, observed_node_names_set, quants,
+            model, activation_post_process_map,
+            activation_post_process_indexes,
+            env,
+            observed_graph, load_arg)
+
+    return result_node
+
 def handle_copy_nodes(
         observed_graph: Graph, matches: Dict[str, MatchResult],
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
@@ -598,99 +691,20 @@ class Quantizer:
             self._find_quants(model.graph, self.modules, matches)
 
         self.activation_post_process_map = defaultdict(list)
-        env: Dict[Any, Any] = {}
         observed_graph = Graph()
         observed_node_names_set: Set[str] = set()
 
-        def load_arg(a):
-            return map_arg(a, lambda node: env[node.name])
-
-        graph_inputs = []
-        for node in model.graph.nodes:
-            if node.op == 'placeholder':
-                graph_inputs.append(node.name)
-
-        get_new_observer_name = get_new_attr_name_with_prefix(
-            'activation_post_process_')
-
-        placeholder_node_seen_cnt = 0
-        output_node_seen_cnt = 0
         input_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
             "input_quantized_idxs", [])
         output_quantized_idxs: List[int] = self.prepare_custom_config_dict.get(
             "output_quantized_idxs", [])
 
-        result_node : Optional[Node] = None
-        for node in model.graph.nodes:
-            if node.op == 'output':
-                # If this output is hardcoded to be quantized, insert an
-                # observer on the previous node if it does not already
-                # exist.
-                cur_output_node_idx = output_node_seen_cnt
-                output_node_seen_cnt += 1
-                if cur_output_node_idx in output_quantized_idxs:
-                    prev_node = node.args[0]
-                    assert isinstance(prev_node, Node), \
-                        ('hardcoding list/dict outputs to be quantized is ' +
-                         'not supported')
-                    if prev_node.name not in observed_node_names_set:
-                        assert self.qconfig_map is not None
-                        local_qconfig = self.qconfig_map[prev_node.name]
-                        assert local_qconfig is not None, \
-                            'qconfig of a node before a quantized output must exist'
-                        insert_observer(
-                            prev_node, local_qconfig.activation(),
-                            model,
-                            self.activation_post_process_map,
-                            self.activation_post_process_indexes,
-                            env, observed_graph, load_arg, observed_node_names_set, quants)
-
-                observed_graph.output(load_arg(node.args[0]))
-                result_node = node
-                continue
-
-            if node.name in observed_node_names_set:
-                continue
-
-            root_node, matched_nodes, pattern, obj, qconfig = matches.get(
-                node.name, (None, None, None, None, None))
-            env[node.name] = observed_graph.node_copy(node, load_arg)
-            if root_node is node:
-                # index for input of custom module that needs to be observed in
-                # parent
-                if qconfig is not None:
-                    assert obj is not None
-                    standalone_module_input_idxs = \
-                        maybe_insert_observer_for_special_module(
-                            obj, self.modules, prepare_custom_config_dict, qconfig,
-                            node)
-                    insert_observer_for_output_of_the_node(
-                        node, obj, qconfig, self.modules, model, pattern,
-                        self.activation_post_process_map,
-                        self.activation_post_process_indexes,
-                        env,
-                        observed_graph, load_arg, observed_node_names_set,
-                        matched_nodes, standalone_module_input_idxs, quants)
-
-            if node.op == 'placeholder':
-                # skip adding observers at the graph input if the input is
-                # overriden to be quantized
-                cur_placeholder_node_idx = placeholder_node_seen_cnt
-                placeholder_node_seen_cnt += 1
-                if cur_placeholder_node_idx in input_quantized_idxs:
-                    observed_node_names_set.add(node.name)
-                    continue
-
-            insert_observer_for_input_arg_of_observed_node(
-                node, observed_node_names_set, quants,
-                model, self.activation_post_process_map,
-                self.activation_post_process_indexes,
-                env,
-                observed_graph, load_arg)
-
+        result_node = insert_observers_for_model(
+            model, self.modules, matches, quants, observed_node_names_set,
+            self.qconfig_map, self.activation_post_process_map, self.activation_post_process_indexes,
+            observed_graph, prepare_custom_config_dict, input_quantized_idxs, output_quantized_idxs)
 
         self.modules = dict(model.named_modules())
-
         # TODO: refactor this to a separate function
         matches = self._find_matches(
             observed_graph, self.modules, self.patterns, standalone_module_names,
