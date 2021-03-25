@@ -230,7 +230,7 @@ class TestLinalg(TestCase):
         rconds = (None, True, -1)
 
         for batch, matrix_size, driver, rcond in itertools.product(batches, matrix_sizes, drivers, rconds):
-            if rcond == True and driver != 'gels':
+            if rcond and driver != 'gels':
                 if driver in ('gelss', 'gelsd'):
                     # SVD based algorithm; set to zero roughly half of all the singular values
                     rcond = 1.0
