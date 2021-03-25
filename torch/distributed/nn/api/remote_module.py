@@ -196,9 +196,11 @@ class _RemoteModule(nn.Module):
             method = torch.jit.export(method)
             setattr(self, method_name, types.MethodType(method, self))
 
-    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
-        r"""Returns a list of RRefs of remote module parameters.
+    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef]:
+        """
+        Returns a list of RRefs of remote module parameters.
         This is typically passed to a distributed optimizer.
+
         Args:
             recurse (bool): if True, then returns parameters of the remote module
                 and all submodules of the remote module.
@@ -209,7 +211,7 @@ class _RemoteModule(nn.Module):
         """
         return rpc.rpc_sync(self.on, _param_rrefs, args=(self.module_rref, recurse))
 
-    def get_module_rref(self) -> rpc.RRef[nn.Module]:
+    def get_module_rref(self) -> rpc.RRef:
         """Returns the RRef to remote module."""
         return self.module_rref
 
