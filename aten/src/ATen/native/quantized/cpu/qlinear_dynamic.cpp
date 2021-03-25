@@ -10,6 +10,8 @@
 
 #include <torch/custom_class.h>
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <string>
 
@@ -135,7 +137,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(at::Tensor input, bool reduce_
     // This is the end of the pipeline, pass the resulting matrix through.
     fbgemm::DoNothing<float, float> doNothingObj{};
 
-    for (int task_id = begin; task_id < end; ++task_id) {
+    for (const auto task_id : c10::irange(begin, end)) {
       if (q_scheme == c10::kPerTensorAffine) {
         // Process the per tensor quantization.
         //

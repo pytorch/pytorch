@@ -763,20 +763,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                 pickledPythonUDF,
                 tensors,
                 rpcTimeoutSeconds,
-                isAsyncExecution),
-            /* unwrap_func */ [](const py::object& value) {
-              py::gil_scoped_release release;
-              auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-              // This will unwrap RemoteException and raise the contained
-              // server-side Python exception on client side. A caveat here is
-              // that the exception must be raise in the client thread calling
-              // the pybind "wait" API, so that it can be correctly shown to
-              // user. A wrong way is to raise it in RPC server thread, where
-              // the exception would be swallowed in the ThreadPool task, and
-              // also no pybind handling code can help shown the Python
-              // exception.
-              pythonRpcHandler.handleException(value);
-            });
+                isAsyncExecution)
+            );
       },
       py::call_guard<py::gil_scoped_release>());
 
