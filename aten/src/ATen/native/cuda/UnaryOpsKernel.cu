@@ -252,6 +252,26 @@ void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, doub
   });
 }
 
+void entr_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      iter.common_dtype(),
+      "entr_cuda",
+      [&]() {
+        gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t x) -> scalar_t {
+          if (at::_isnan(x)) {
+            return x;
+          } else if (x > 0) {
+            return -x * std::log(x);
+          } else if (x == 0) {
+            return 0;
+          }
+          return static_cast<scalar_t>(-INFINITY);
+        });
+      });
+}
+
 void frexp_kernel_cuda(TensorIterator& iter) {
 #ifdef __HIP_PLATFORM_HCC__
   // Reference: https://rocmdocs.amd.com/en/latest/ROCm_API_References/HIP-MATH.html
@@ -291,6 +311,7 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
+REGISTER_DISPATCH(entr_stub, &entr_kernel_cuda);
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
 
 } // namespace native
