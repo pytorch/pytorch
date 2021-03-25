@@ -1,3 +1,5 @@
+#include <limits>
+
 #include <ATen/ATen.h>
 #include <ATen/WrapDimUtils.h>
 
@@ -11,7 +13,12 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
   TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
   bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
   int64_t ndim = self.dim();
+  dim = maybe_wrap_dim(dim, ndim);
   int64_t numel = self.numel();
+  int64_t nsort = self.sizes()[dim];
+
+  TORCH_CHECK(nsort <= std::numeric_limits<int>::max(),
+    "The dimension being sorted can not have more than INT_MAX elsments.");
 
   if (ndim == 0) {
     if (!values.defined()) {
@@ -30,7 +37,6 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
   }
 
   Tensor self_;
-  dim = maybe_wrap_dim(dim, ndim);
   if (is_non_overlapping_and_dense && self.stride(dim) == 1) {
     self_ = self;
   } else {
@@ -107,12 +113,11 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     return {values, indices};
   }
 
-  int64_t nrange = self_.size(dim);
   int64_t nrepeat = numel / self_.size(dim);
   auto segment_id = at::repeat_interleave(
-    at::tensor(nrange, indices.options()).expand(nrepeat));
+    at::tensor(nsort, indices.options()).expand(nrepeat));
   int64_t *segment_id_ptr = segment_id.data_ptr<int64_t>();
-  auto orig_indices = at::arange(nrange, indices.options()).repeat({nrepeat});
+  auto orig_indices = at::arange(nsort, indices.options()).repeat({nrepeat});
   int64_t *orig_indices_ptr = orig_indices.data_ptr<int64_t>();
 
   auto tmp = at::empty_like(self_);
