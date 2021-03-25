@@ -74,13 +74,15 @@ from torch.testing._internal.jit_utils import get_forward_graph
 from torch.jit._recursive import wrap_cpp_module
 
 # Standard library
+from typing import List, Tuple
+import io
 import itertools
 import unittest
-import io
 
 class TestQuantizeJitPasses(QuantizationTestCase):
     """ Test graph mode quantization passes used by quantize_jit
     """
+
     def test_foldbn_trivial(self):
         bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
         conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
@@ -741,8 +743,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                    .run(m.graph)
 
     def test_insert_observers_propagate_observed_for_function(self):
-        def channel_shuffle(x, groups):
-            # type: (torch.Tensor, int) -> torch.Tensor
+        def channel_shuffle(x: torch.Tensor, groups: int) -> torch.Tensor:
             batchsize, num_channels, height, width = x.data.size()
             channels_per_group = num_channels // groups
             # reshape
@@ -1125,8 +1126,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
                 self.use_skip = True
 
-            def forward(self, x, cond):
-                # type: (Tensor, bool) -> Tensor
+            def forward(self, x: torch.Tensor, cond: bool) -> torch.Tensor:
                 # to avoid being frozen
                 self.use_skip = cond
                 if self.use_skip:
@@ -1226,8 +1226,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 super(ComplexModel, self).__init__()
                 self.layers = torch.nn.ModuleList([SimpleLinearLayer() for i in range(2)])
 
-            def forward(self, x):
-                # type: (torch.Tensor) -> List[torch.Tensor]
+            def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
                 states = []
                 for layer in self.layers:
                     val = layer(x)
@@ -1323,8 +1322,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         @torch.jit.interface
         class ModInterface(torch.nn.Module):
-            def forward(self, x, y):
-                # type:  (Tensor, Tensor) -> Tensor
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 pass
 
         class TestModule(torch.nn.Module):
@@ -2023,7 +2021,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                        .run(model.graph)
 
     @skipIfNoFBGEMM
-    def test_qbatch_norm_relu(self):
+    def test_qbatch_norm_relu_BNRelu(self):
         bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
 
         class BNRelu(torch.nn.Module):
@@ -2035,6 +2033,20 @@ class TestQuantizeJitOps(QuantizationTestCase):
             def forward(self, x):
                 return self.relu(self.bn(x))
 
+        options = itertools.product([True, False], [2, 3])
+        for tracing, dim in options:
+            for instance in [BNRelu(dim, True), BNRelu(dim, False)]:
+                model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
+                                              "quantized::batch_norm_relu", tracing)
+                FileCheck().check_not("aten::batch_norm") \
+                           .check_not("aten::relu") \
+                           .check_not("aten::relu_") \
+                           .run(model.graph)
+
+    @skipIfNoFBGEMM
+    def test_qbatch_norm_relu_BNFuncRelu(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+
         class BNFuncRelu(torch.nn.Module):
             def __init__(self, dim):
                 super(BNFuncRelu, self).__init__()
@@ -2042,6 +2054,20 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
             def forward(self, x):
                 return F.relu(self.bn(x), False)
+
+        options = itertools.product([True, False], [2, 3])
+        for tracing, dim in options:
+            instance = BNFuncRelu(dim)
+            model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
+                                          "quantized::batch_norm_relu", tracing)
+            FileCheck().check_not("aten::batch_norm") \
+                       .check_not("aten::relu") \
+                       .check_not("aten::relu_") \
+                       .run(model.graph)
+
+    @skipIfNoFBGEMM
+    def test_qbatch_norm_relu_BNFuncInplaceRelu(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
 
         class BNFuncInplaceRelu(torch.nn.Module):
             def __init__(self, dim):
@@ -2053,14 +2079,13 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         options = itertools.product([True, False], [2, 3])
         for tracing, dim in options:
-            for instance in [BNRelu(dim, True), BNRelu(dim, False),
-                             BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
-                model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
-                                              "quantized::batch_norm_relu", tracing)
-                FileCheck().check_not("aten::batch_norm") \
-                           .check_not("aten::relu") \
-                           .check_not("aten::relu_") \
-                           .run(model.graph)
+            instance = BNFuncInplaceRelu(dim)
+            model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
+                                          "quantized::batch_norm_relu", tracing)
+            FileCheck().check_not("aten::batch_norm") \
+                       .check_not("aten::relu") \
+                       .check_not("aten::relu_") \
+                       .run(model.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_mul(self):
@@ -2427,8 +2452,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
 
-            def forward(self, x):
-                # type: (Tensor) -> Tuple[Tensor, Tensor]
+            def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
                 x1 = self.conv1(x)
                 x2 = self.conv2(x)
                 return x1, x2
@@ -2708,6 +2732,28 @@ class TestQuantizeJitOps(QuantizationTestCase):
             FileCheck().check("quantized::conv2d") \
                        .run(converted_model.graph)
 
+    @skipIfNoFBGEMM
+    def test_cat_linear(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super(LinearModel, self).__init__()
+                self.weight = torch.randn(5, 5)
+
+            def forward(self, x, y):
+                a = torch.cat([x, y])
+                b = F.linear(a, self.weight)
+                c = F.linear(b, self.weight)
+                return b, c
+
+        model = LinearModel().eval()
+        qconfig = {'' : default_qconfig}
+        float_model = torch.jit.script(model)
+        prepared_model = prepare_jit(float_model, qconfig)
+        prepared_model(torch.rand(5, 5), torch.rand(5, 5))
+        converted_model = convert_jit(prepared_model)
+        FileCheck().check("quantized::linear") \
+                   .check("quantized::linear") \
+                   .run(converted_model.graph)
 
 class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_prepare_dynamic(self):
@@ -2896,8 +2942,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
                 super(Res, self).__init__()
                 self.weight = torch.nn.Parameter(torch.ones(5, 5))
 
-            def forward(self, x, cond):
-                # type: (Tensor, bool) -> Tensor
+            def forward(self, x: torch.Tensor, cond: bool) -> torch.Tensor:
                 if cond:
                     return torch.nn.functional.linear(x, self.weight)
                 else:

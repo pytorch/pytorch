@@ -18,6 +18,14 @@ LaunchParams spatialPointwiseKernelLaunchParams(
     MPSImage* im);
 
 API_AVAILABLE(ios(10.0), macos(10.13))
+LaunchParams spatialPointwiseKernelLaunchParams(
+    id<MTLComputePipelineState> pipeline,
+    NSUInteger numberOfImages,
+    NSUInteger featureChannels,
+    NSUInteger height,
+    NSUInteger width);
+
+API_AVAILABLE(ios(10.0), macos(10.13))
 NSString* kernelFor(
     MPSImage* image,
     NSString* arrayKernel,

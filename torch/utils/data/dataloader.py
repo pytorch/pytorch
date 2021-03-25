@@ -9,13 +9,14 @@ import os
 import threading
 import itertools
 import warnings
+import queue
 from typing import Any, Callable, TypeVar, Generic, Sequence, List, Optional
 
 import multiprocessing as python_multiprocessing
 import torch
 import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
-from torch._six import queue, string_classes
+from torch._six import string_classes
 
 from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
 from . import _utils
@@ -55,7 +56,7 @@ class _InfiniteConstantSampler(Sampler):
     r"""Analogous to ``itertools.repeat(None, None)``.
     Used as sampler for :class:`~torch.utils.data.IterableDataset`.
 
-    Arguments:
+    Args:
         data_source (Dataset): dataset to sample from
     """
 
@@ -78,7 +79,7 @@ class DataLoader(Generic[T_co]):
 
     See :py:mod:`torch.utils.data` documentation page for more details.
 
-    Arguments:
+    Args:
         dataset (Dataset): dataset from which to load the data.
         batch_size (int, optional): how many samples per batch to load
             (default: ``1``).
@@ -110,7 +111,7 @@ class DataLoader(Generic[T_co]):
         worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
-        prefetch_factor (int, optional, keyword-only arg): Number of sample loaded
+        prefetch_factor (int, optional, keyword-only arg): Number of samples loaded
             in advance by each worker. ``2`` means there will be a total of
             2 * num_workers samples prefetched across all workers. (default: ``2``)
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
@@ -158,9 +159,9 @@ class DataLoader(Generic[T_co]):
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
                  shuffle: bool = False, sampler: Optional[Sampler[int]] = None,
                  batch_sampler: Optional[Sampler[Sequence[int]]] = None,
-                 num_workers: int = 0, collate_fn: _collate_fn_t = None,
+                 num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
-                 timeout: float = 0, worker_init_fn: _worker_init_fn_t = None,
+                 timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
                  multiprocessing_context=None, generator=None,
                  *, prefetch_factor: int = 2,
                  persistent_workers: bool = False):
@@ -308,10 +309,6 @@ class DataLoader(Generic[T_co]):
     def multiprocessing_context(self, multiprocessing_context):
         if multiprocessing_context is not None:
             if self.num_workers > 0:
-                if not multiprocessing._supports_context:
-                    raise ValueError('multiprocessing_context relies on Python >= 3.4, with '
-                                     'support for different start methods')
-
                 if isinstance(multiprocessing_context, string_classes):
                     valid_start_methods = multiprocessing.get_all_start_methods()
                     if multiprocessing_context not in valid_start_methods:
@@ -498,6 +495,7 @@ class _BaseDataLoaderIter(object):
         self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
+        self._profile_name = "enumerate(DataLoader)#{}.__next__".format(self.__class__.__name__)
 
     def __iter__(self) -> '_BaseDataLoaderIter':
         return self
@@ -514,22 +512,23 @@ class _BaseDataLoaderIter(object):
         raise NotImplementedError
 
     def __next__(self) -> Any:
-        if self._sampler_iter is None:
-            self._reset()
-        data = self._next_data()
-        self._num_yielded += 1
-        if self._dataset_kind == _DatasetKind.Iterable and \
-                self._IterableDataset_len_called is not None and \
-                self._num_yielded > self._IterableDataset_len_called:
-            warn_msg = ("Length of IterableDataset {} was reported to be {} (when accessing len(dataloader)), but {} "
-                        "samples have been fetched. ").format(self._dataset, self._IterableDataset_len_called,
-                                                              self._num_yielded)
-            if self._num_workers > 0:
-                warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
-                             "IterableDataset replica at each worker. Please see "
-                             "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.")
-            warnings.warn(warn_msg)
-        return data
+        with torch.autograd.profiler.record_function(self._profile_name):
+            if self._sampler_iter is None:
+                self._reset()
+            data = self._next_data()
+            self._num_yielded += 1
+            if self._dataset_kind == _DatasetKind.Iterable and \
+                    self._IterableDataset_len_called is not None and \
+                    self._num_yielded > self._IterableDataset_len_called:
+                warn_msg = ("Length of IterableDataset {} was reported to be {} (when accessing len(dataloader)), but {} "
+                            "samples have been fetched. ").format(self._dataset, self._IterableDataset_len_called,
+                                                                  self._num_yielded)
+                if self._num_workers > 0:
+                    warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
+                                 "IterableDataset replica at each worker. Please see "
+                                 "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.")
+                warnings.warn(warn_msg)
+            return data
 
     next = __next__  # Python 2 compatibility
 
@@ -964,8 +963,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 self._index_queues[idx].put(_utils.worker._ResumeIteration())
             resume_iteration_cnt = self._num_workers
             while resume_iteration_cnt > 0:
-                data = self._get_data()
-                if isinstance(data, _utils.worker._ResumeIteration):
+                return_idx, return_data = self._get_data()
+                if isinstance(return_idx, _utils.worker._ResumeIteration):
+                    assert return_data is None
                     resume_iteration_cnt -= 1
         # prime the prefetch loop
         for _ in range(self._prefetch_factor * self._num_workers):

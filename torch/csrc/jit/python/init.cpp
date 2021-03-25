@@ -22,6 +22,9 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_conv_folding.h>
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -38,7 +41,9 @@
 #include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
+#include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
+#include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
@@ -53,7 +58,6 @@
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
 #include <torch/csrc/jit/passes/quantization/quantization_type.h>
-#include <torch/csrc/jit/passes/reconstruct_scopes.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
@@ -83,6 +87,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
+#include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -91,6 +96,7 @@
 
 #include <pybind11/functional.h>
 #include <pybind11/iostream.h>
+#include <pybind11/operators.h>
 
 #include <memory>
 #include <sstream>
@@ -128,6 +134,7 @@ TORCH_API void runJITCPPTests();
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  auto jit = m.def_submodule("_jit");
 
   py::register_exception<JITException>(m, "JITException");
 
@@ -145,11 +152,17 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_onnx_assign_output_shape",
           [](std::shared_ptr<Graph>& graph,
              const std::vector<at::Tensor>& tensors,
+             const python::IODescriptor& desc,
              bool onnx_shape_inference = false) {
-            ONNXAssignOutputShape(graph, tensors, onnx_shape_inference);
+            ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
           })
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
+      .def(
+          "_jit_pass_onnx_fold_if",
+          [](std::shared_ptr<Graph>& graph) {
+            return FoldIfNodeONNX(graph->block());
+          })
       .def(
           "_jit_pass_onnx_peephole",
           [](std::shared_ptr<Graph>& graph,
@@ -199,13 +212,17 @@ void initJITBindings(PyObject* module) {
           PrepareInplaceOpsForONNX)
       .def(
           "_jit_pass_onnx_node_shape_type_inference",
-          [](Node* n, int opset_version) {
-            ONNXShapeTypeInference(n, opset_version);
+          [](Node* n,
+             std::map<std::string, IValue>& params_dict,
+             int opset_version) {
+            ONNXShapeTypeInference(n, params_dict, opset_version);
           })
       .def(
           "_jit_pass_onnx_graph_shape_type_inference",
-          [](std::shared_ptr<Graph>& graph, int opset_version) {
-            ONNXShapeTypeInference(graph, opset_version);
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& params_dict,
+             int opset_version) {
+            ONNXShapeTypeInference(graph, params_dict, opset_version);
           })
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_fuse", FuseGraph)
@@ -280,6 +297,9 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm)
       .def(
+          "_jit_onnx_list_model_parameters",
+          [](Module& module) { return list_module_parameters(module); })
+      .def(
           "_freeze_module",
           [](Module& module,
              std::vector<std::string>& preservedAttrs,
@@ -292,6 +312,11 @@ void initJITBindings(PyObject* module) {
           py::arg("preservedAttrs") = std::vector<std::string>(),
           py::arg("freezeInterfaces") = true,
           py::arg("preserveParameters") = false)
+      .def("_jit_pass_fold_frozen_conv_bn", &FoldFrozenConvBatchnorm)
+      .def("_jit_pass_fold_frozen_conv_add_or_sub", &FoldFrozenConvAddOrSub)
+      .def("_jit_pass_fold_frozen_conv_mul_or_div", &FoldFrozenConvMulOrDiv)
+      .def("_jit_pass_convert_frozen_ops_to_mkldnn", &ConvertFrozenOpsToMKLDNN)
+      .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
@@ -336,16 +361,6 @@ void initJITBindings(PyObject* module) {
             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnGraph(g);
           })
-      .def(
-          "_jit_pass_reconstruct_scopes",
-          [](script::Module& module,
-             std::shared_ptr<Graph>& g,
-             const std::string& prefix) {
-            ReconstructScopes(module, *g, prefix);
-          },
-          py::arg("module"),
-          py::arg("graph"),
-          py::arg("prefix") = "top")
       .def(
           "_jit_pass_remove_inplace_ops",
           [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
@@ -479,7 +494,6 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
-      .def("_jit_pass_fixup_onnx_loop_node_inputs", FixupONNXLoopNodeInputs)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
@@ -556,12 +570,8 @@ void initJITBindings(PyObject* module) {
           []() { return getInlineEverythingMode(); })
       .def(
           "_jit_try_infer_type",
-          [](py::object obj) -> TypePtr {
-            auto match = tryToInferType(std::move(obj));
-            if (match.success()) {
-              return match.type();
-            }
-            return nullptr;
+          [](py::object obj) -> InferredType {
+            return tryToInferType(std::move(obj));
           })
       .def(
           "_jit_get_trigger_value",
@@ -809,6 +819,15 @@ void initJITBindings(PyObject* module) {
             }
             return states;
           })
+      .def(
+          "differentiable_op_executor_states",
+          [](Code& c) {
+            std::vector<GraphExecutorState> states;
+            for (auto& e : c.diff_graph_op_executors()) {
+              states.emplace_back(e->getDebugState());
+            }
+            return states;
+          })
       .def("num_bailouts", [](Code& c) { return c.num_bailouts(); })
       .def("request_bailout", [](Code& c, size_t index) {
         c.request_bailout(index);
@@ -861,6 +880,7 @@ void initJITBindings(PyObject* module) {
              const char* data,
              size_t size) { return self.writeRecord(name, data, size); })
       .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,
@@ -869,7 +889,11 @@ void initJITBindings(PyObject* module) {
              size_t size) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data), size);
-          });
+          })
+      .def("archive_name", &PyTorchStreamWriter::archiveName)
+      .def(
+          "get_all_written_records",
+          &PyTorchStreamWriter::getAllWrittenRecords);
 
   py::enum_<MobileOptimizerType>(m, "MobileOptimizerType")
       .value("CONV_BN_FUSION", MobileOptimizerType::CONV_BN_FUSION)
@@ -946,17 +970,18 @@ void initJITBindings(PyObject* module) {
     bool use_readinto_;
   };
 
-  py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
+  py::class_<PyTorchStreamReader, std::shared_ptr<PyTorchStreamReader>>(
+      m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto adapter = std::make_unique<BufferAdapter>(buffer);
-        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
+        return std::make_shared<PyTorchStreamReader>(std::move(adapter));
       }))
       .def(
           "get_record",
           [](PyTorchStreamReader& self, const std::string& key) {
             at::DataPtr data;
-            size_t size;
+            size_t size = 0;
             std::tie(data, size) = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
@@ -1177,6 +1202,21 @@ void initJITBindings(PyObject* module) {
           // Intentionally not releasing GIL
           &PythonFutureWrapper::markCompleted)
       .def(
+          "_set_unwrap_func",
+          // Intentionally not releasing GIL as this just does an assign
+          [](PythonFutureWrapper& self, py::function unwrapFunc) {
+            auto functionGuard =
+                std::make_shared<torch::jit::PythonFunctionGuard>(
+                    std::move(unwrapFunc));
+
+            std::function<void(py::object)> pf =
+                [functionGuard(std::move(functionGuard))](
+                    const py::object& inp) {
+                  return functionGuard->func_(inp);
+                };
+            self.unwrap_func = std::move(pf);
+          })
+      .def(
           py::pickle(
               /* __getstate__ */
               [](const PythonFutureWrapper& /* unused */) {
@@ -1211,7 +1251,7 @@ void initJITBindings(PyObject* module) {
       auto fork_node = graph->insertNode(graph->create(prim::TracedFork, 1));
       auto body_block = fork_node->addBlock();
 
-      Value* node_output;
+      Value* node_output = nullptr;
       py::object py_func_output;
       // Insert new trace ops into the fork op's sub-block
       WithInsertPoint guard(body_block);
@@ -1295,7 +1335,8 @@ void initJITBindings(PyObject* module) {
   initTreeViewBindings(module);
   initJitScriptBindings(module);
   initJitBackendBindings(module);
-  initStaticRuntimeBindings(module);
+  initStaticModuleBindings(module);
+  initTensorExprBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;

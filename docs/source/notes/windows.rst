@@ -15,8 +15,8 @@ MKL and MAGMA. Here are the steps to build with them.
     REM Make sure you have 7z and curl installed.
 
     REM Download MKL files
-    curl https://s3.amazonaws.com/ossci-windows/mkl_2020.0.166.7z -k -O
-    7z x -aoa mkl_2020.0.166.7z -omkl
+    curl https://s3.amazonaws.com/ossci-windows/mkl_2020.2.254.7z -k -O
+    7z x -aoa mkl_2020.2.254.7z -omkl
 
     REM Download MAGMA files
     REM version available:
