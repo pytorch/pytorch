@@ -163,7 +163,7 @@ class TestGradients(TestCase):
     @_gradcheck_ops(op_db)
     def test_inplace_grad(self, device, dtype, op):
         self._skip_helper(op, dtype)
-        if not op.supports_inplace_autograd:
+        if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
@@ -183,7 +183,7 @@ class TestGradients(TestCase):
     @_gradcheck_ops(op_db)
     def test_inplace_gradgrad(self, device, dtype, op):
         self._skip_helper(op, dtype)
-        if not op.supports_inplace_autograd:
+        if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
@@ -367,7 +367,7 @@ class TestCommon(JitCommonTestCase):
         if len(sample.kwargs) > 0:
             sample_args_kwargs += (sample.kwargs, )
 
-        original_name = op.name
+        original_name = op.aten_name
         original_name_inplace = original_name + "_"
         expected_dtype = op(sample.input, *sample.args, **sample.kwargs).dtype
 
@@ -383,8 +383,8 @@ class TestCommon(JitCommonTestCase):
 
                 if variant in method_or_inplace:
                     fn_template = '''
-                    def _fn(t0{c}{args_annot_kw}):
-                        return t0.{alias_name}({args_kw})
+                        def _fn(t0{c}{args_annot_kw}):
+                            return t0.{alias_name}({args_kw})
                     '''
                     # remove the first input tensor
                     script = fn_template.format(
