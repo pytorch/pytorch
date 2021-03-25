@@ -4,7 +4,11 @@
 namespace at {
 namespace native {
 namespace {
-
+// Check foreach API restrictions 
+// - Tensor lists must be non-empty.
+// - All tensors in all lists must have the same dtype.
+// - All TensorLists and ScalarLists must have the same number of elements.
+// - Corresponding tensors must have the same size.
 void check_foreach_api_restrictions(TensorList tensors) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_dtype = tensors[0].dtype();
@@ -13,7 +17,7 @@ void check_foreach_api_restrictions(TensorList tensors) {
   }
 }
 
-void check_foreach_api_restrictions(TensorList tensors, ArrayRef<double> scalars) {
+void check_foreach_api_restrictions(TensorList tensors, ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors);
   TORCH_CHECK(tensors.size() == scalars.size(), "Tensor list must have same number of elements as scalar list.");
 }
@@ -49,7 +53,7 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
   }
 }
 
-void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<double> scalars) {
+void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
   TORCH_CHECK(tensors1.size() == scalars.size(), "Tensor list must have same number of elements as scalar list, got ", tensors1.size(), " and ", scalars.size());
 }
@@ -85,21 +89,8 @@ bool has_same_attributes(Device expected_device, TensorList tensors) {
 }
 
 bool will_promote_tensor(const Tensor& tensor, Scalar scalar) {
-  // complex scalar + integral or boolean tensor will result in complex tensor
-  if (scalar.isComplex() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
-    return false;
-  }
-
-  // float scalar + integral or boolean tensor will result in float tensor
-  if (scalar.isFloatingPoint() && at::isIntegralType(tensor.scalar_type(), /*includeBool*/ true)) {
-    return false;
-  }
-
-  // integral scalar + boolean tensor will result in integral tensor
-  if (scalar.isIntegral(/*includeBool*/ false) && tensor.dtype() == at::kBool) {
-    return false;
-  }
-  return true;
+  auto result_dtype = at::result_type(tensor, scalar);
+  return result_dtype != tensor.scalar_type();
 }
 
 bool can_use_fast_route(TensorList tensors) {
@@ -107,6 +98,7 @@ bool can_use_fast_route(TensorList tensors) {
   return false;
 #else
   auto expected_device = tensors[0].device();
+
   for (auto t : tensors) {
     if (!has_same_attributes(expected_device, {t})) {
       return false;
@@ -128,7 +120,7 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar) {
       return false;
     }
 
-    if (!will_promote_tensor(t, scalar)) {
+    if (will_promote_tensor(t, scalar)) {
       return false;
     }
   }
@@ -137,8 +129,24 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar) {
 #endif
 }
 
-bool can_use_fast_route(TensorList tensors, ArrayRef<double> scalars) {
-  return can_use_fast_route(tensors);
+bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars) {
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
+  auto expected_device = tensors[0].device();
+
+  for (int i = 0; i < tensors.size(); i++) {
+    if (will_promote_tensor(tensors[i], scalars[i])) {
+      return false;
+    }
+  }
+
+  if (!has_same_attributes(expected_device, tensors)) {
+      return false;
+  }
+
+  return true;
+#endif
 }
 
 bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
@@ -166,7 +174,7 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, Scalar scalar)
       return false;
     }
 
-    if (!will_promote_tensor(tensors1[i], scalar)) {
+    if (will_promote_tensor(tensors1[i], scalar)) {
       return false;
     }
   }
@@ -200,7 +208,7 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
       return false;
     }
 
-    if (!will_promote_tensor(tensors1[i], scalar)) {
+    if (will_promote_tensor(tensors1[i], scalar)) {
       return false;
     }
   }
@@ -209,8 +217,23 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList ten
 #endif
 }
 
-bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<double> scalars) {
-  return can_use_fast_route(tensors1, tensors2, tensors3);
+bool can_use_fast_route(TensorList tensors1, TensorList tensors2, TensorList tensors3, ArrayRef<Scalar> scalars) {
+#ifdef __HIP_PLATFORM_HCC__
+  return false;
+#else
+  auto expected_device = tensors1[0].device();
+  for (int64_t i = 0; i < tensors1.size(); i++) {
+    if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i], tensors3[i]})) {
+      return false;
+    }
+
+    if (will_promote_tensor(tensors1[i], scalars[i])) {
+      return false;
+    }
+  }
+
+  return true;
+#endif
 }
 
 }

@@ -16,7 +16,7 @@ import warnings
 import threading
 from typing import List, Optional, Tuple, Union
 from ._utils import _get_device_index, _dummy_type
-from .streams import Stream, Event
+from .streams import Stream, Event, _Graph
 from .. import device as _device
 import torch._C
 
@@ -113,6 +113,10 @@ def _lazy_call(callable):
     if is_initialized():
         callable()
     else:
+        # TODO(torch_deploy): this accesses linecache, which attempts to read the
+        # file system to get traceback info. Patch linecache or do something
+        # else here if this ends up being important.
+
         # Don't store the actual traceback to avoid memory cycle
         _queued_calls.append((callable, traceback.format_stack()))
 
@@ -153,15 +157,9 @@ def _lazy_init():
         # immediately, while we are still guaranteed to have the GIL, because some
         # of the C calls we make below will release the GIL
         if _is_in_bad_fork():
-            from sys import version_info
-            if version_info < (3, 4):
-                msg = ("To use CUDA with multiprocessing, you must use Python "
-                       "3.4+ and the 'spawn' start method")
-            else:
-                msg = ("To use CUDA with multiprocessing, you must use the "
-                       "'spawn' start method")
             raise RuntimeError(
-                "Cannot re-initialize CUDA in forked subprocess. " + msg)
+                "Cannot re-initialize CUDA in forked subprocess. To use CUDA with "
+                "multiprocessing, you must use the 'spawn' start method")
         if not hasattr(torch._C, '_cuda_getDeviceCount'):
             raise AssertionError("Torch not compiled with CUDA enabled")
         if _cudart is None:
@@ -210,7 +208,7 @@ def check_error(res: int) -> None:
 class device(object):
     r"""Context-manager that changes the selected device.
 
-    Arguments:
+    Args:
         device (torch.device or int): device index to select. It's a no-op if
             this argument is a negative integer or ``None``.
     """
@@ -239,7 +237,7 @@ class device_of(device):
     You can use both tensors and storages as arguments. If a given object is
     not allocated on a GPU, this is a no-op.
 
-    Arguments:
+    Args:
         obj (Tensor or Storage): object allocated on the selected device.
     """
 
@@ -254,7 +252,7 @@ def set_device(device: _device_t) -> None:
     Usage of this function is discouraged in favor of :any:`device`. In most
     cases it's better to use ``CUDA_VISIBLE_DEVICES`` environmental variable.
 
-    Arguments:
+    Args:
         device (torch.device or int): selected device. This function is a no-op
             if this argument is negative.
     """
@@ -266,11 +264,14 @@ def set_device(device: _device_t) -> None:
 def get_device_name(device: Optional[_device_t] = None) -> str:
     r"""Gets the name of a device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to return the
             name. This function is a no-op if this argument is a negative
             integer. It uses the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
+
+    Returns:
+        str: the name of the device
     """
     return get_device_properties(device).name
 
@@ -278,7 +279,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
     r"""Gets the cuda capability of a device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to return the
             device capability. This function is a no-op if this argument is
             a negative integer. It uses the current device, given by
@@ -293,11 +294,32 @@ def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]
 
 
 def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
+    r"""Gets the properties of a device.
+
+    Args:
+        device (torch.device or int or str): device for which to return the
+            properties of the device.
+
+    Returns:
+        _CudaDeviceProperties: the properties of the device
+    """
     _lazy_init()  # will define _get_device_properties
     device = _get_device_index(device, optional=True)
     if device < 0 or device >= device_count():
         raise AssertionError("Invalid device id")
     return _get_device_properties(device)  # type: ignore[name-defined]
+
+def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
+    r"""Checks if peer access between two devices is possible.
+    """
+    _lazy_init()
+    device = _get_device_index(device, optional=True)
+    peer_device = _get_device_index(peer_device)
+    if device < 0 or device >= device_count():
+        raise AssertionError("Invalid device id")
+    if peer_device < 0 or peer_device >= device_count():
+        raise AssertionError("Invalid peer device id")
+    return torch._C._cuda_canDeviceAccessPeer(device, peer_device)
 
 
 @contextlib.contextmanager
@@ -307,7 +329,7 @@ def stream(stream):
     All CUDA kernels queued within its context will be enqueued on a selected
     stream.
 
-    Arguments:
+    Args:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
 
@@ -352,7 +374,7 @@ def get_arch_list() -> List[str]:
     return arch_flags.split()
 
 def get_gencode_flags() -> str:
-    r"""Returns NVCC gencode flags this library were compiled with."""
+    r"""Returns NVCC gencode flags this library was compiled with."""
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return ""
@@ -370,7 +392,7 @@ def current_device() -> int:
 def synchronize(device: _device_t = None) -> None:
     r"""Waits for all kernels in all streams on a CUDA device to complete.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): device for which to synchronize.
             It uses the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -396,7 +418,7 @@ def ipc_collect():
 def current_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Returns the currently selected :class:`Stream` for a given device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             the currently selected :class:`Stream` for the current device, given
             by :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
@@ -410,7 +432,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
 def default_stream(device: Optional[_device_t] = None) -> Stream:
     r"""Returns the default :class:`Stream` for a given device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             the default :class:`Stream` for the current device, given by
             :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``

@@ -14,6 +14,7 @@ from torch._C._jit_tree_views import (
     ListLiteral, TupleLiteral, DictLiteral, Const,
     StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
     SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
+    DictComp,
 )
 from torch._utils_internal import get_source_lines_and_file
 
@@ -133,7 +134,7 @@ def get_class_properties(cls, self_name):
     """
     Get a list of Property objects representing the properties of a class.
 
-    Arguments:
+    Args:
         cls:  The class to get properties of.
         self_name: The name of the class that the properties should belong to.
     Returns:
@@ -165,9 +166,14 @@ def get_jit_class_def(cls, self_name):
         and not is_static_fn(cls, m.__name__)
         and m.__name__ in cls.__dict__
     )
+
+    def is_classmethod(fn):
+        return inspect.ismethod(fn) and getattr(fn, "__self__", None) == cls
+
     methods = [get_jit_def(method[1],
                            method[0],
-                           self_name=self_name) for method in methods]
+                           self_name=self_name,
+                           is_classmethod=is_classmethod(method[1])) for method in methods]
 
     properties = get_class_properties(cls, self_name)
 
@@ -187,7 +193,7 @@ def normalize_source_lines(sourcelines: List[str]) -> List[str]:
     all lines in the function body to a point at or greater than that
     level. This allows for comments and continued string literals that
     are at a lower indentation than the rest of the code.
-    Arguments:
+    Args:
         sourcelines: function source code, separated into lines by
                         the '\n' character
     Returns:
@@ -216,11 +222,11 @@ def normalize_source_lines(sourcelines: List[str]) -> List[str]:
     return aligned_prefix + aligned_suffix
 
 
-def get_jit_def(fn, def_name, self_name=None):
+def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     """
     Build a JIT AST (TreeView) from the given function.
 
-    Arguments:
+    Args:
         fn: A function object to compile
         def_name: The name to give to the resulting AST object. This is not
             always the same as `fn.__name__`, for example:
@@ -242,6 +248,12 @@ def get_jit_def(fn, def_name, self_name=None):
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
     fn_def = py_ast.body[0]
+
+    if is_classmethod:
+        arg_name = fn_def.args.args[0].arg
+        # Insert a statement that assigns the first argument to the class
+        assign_stmt = ast.parse(f"{arg_name} = {self_name}").body[0]
+        fn_def.body.insert(0, assign_stmt)
 
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
@@ -388,6 +400,12 @@ class StmtBuilder(Builder):
         ast.Mult: '*',
         ast.Div: '/',
         ast.Mod: '%',
+        ast.BitOr: '|',
+        ast.BitAnd: '&',
+        ast.BitXor: '^',
+        ast.LShift: '<<',
+        ast.RShift: '>>',
+        ast.Pow: '**',
     }
 
     @staticmethod
@@ -417,12 +435,9 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Delete(ctx, stmt):
-        if len(stmt.targets) > 1:
-            source_range = ctx.make_range(stmt.lineno, stmt.col_offset,
-                                          stmt.col_offset + len("del"))
-            raise NotSupportedError(
-                source_range, 'del with more than one operand is not supported')
-        return Delete(build_expr(ctx, stmt.targets[0]))
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("del"))
+
+        return Delete(r, [build_expr(ctx, target) for target in stmt.targets])
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -468,6 +483,9 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
+        if stmt.orelse:
+            raise NotSupportedError(r, "else branches of for loops aren't supported")
+
         return For(
             r, [build_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
@@ -757,8 +775,11 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Dict(ctx, expr):
-        return DictLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
-                           [build_expr(ctx, e) for e in expr.keys], [build_expr(ctx, e) for e in expr.values])
+        range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        if expr.keys and not expr.keys[0]:
+            raise NotSupportedError(range, "Dict expansion (e.g. `{**dict}`) is not supported")
+        return DictLiteral(range, [build_expr(ctx, e) for e in expr.keys],
+                           [build_expr(ctx, e) for e in expr.values])
 
     @staticmethod
     def build_Num(ctx, expr):
@@ -813,17 +834,33 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_ListComp(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
-        if (len(stmt.generators) > 1):
-            raise NotSupportedError(r, "multiple comprehension generators not supported yet")
+        if (len(stmt.generators) != 1):
+            raise NotSupportedError(r, "Only a single generator is currently supported")
 
         if (len(stmt.generators[0].ifs) != 0):
-            raise NotSupportedError(r, "comprehension ifs not supported yet")
+            raise NotSupportedError(r, "Comprehension ifs are not supported yet")
 
         elt_expr = build_expr(ctx, stmt.elt)
         target_expr = build_expr(ctx, stmt.generators[0].target)
-
         iter_expr = build_expr(ctx, stmt.generators[0].iter)
+
         return ListComp(r, elt_expr, target_expr, iter_expr)
+
+    @staticmethod
+    def build_DictComp(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
+        if (len(stmt.generators) != 1):
+            raise NotSupportedError(r, "Only a single generator is currently supported")
+
+        if (len(stmt.generators[0].ifs) != 0):
+            raise NotSupportedError(r, "Comprehension ifs are not supported yet")
+
+        key_expr = build_expr(ctx, stmt.key)
+        value_expr = build_expr(ctx, stmt.value)
+        target_expr = build_expr(ctx, stmt.generators[0].target)
+        iter_expr = build_expr(ctx, stmt.generators[0].iter)
+
+        return DictComp(r, key_expr, value_expr, target_expr, iter_expr)
 
     @staticmethod
     def build_Starred(ctx, expr):

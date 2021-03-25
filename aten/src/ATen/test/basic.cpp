@@ -399,6 +399,14 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_FALSE(tensor1.requires_grad());
   ASSERT_FALSE(tensor1.is_pinned());
 
+  // Sparse tensor CPU test to avoid requiring CUDA to catch simple bugs.1
+  tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf).layout(at::kSparse));
+  ASSERT_EQ(tensor1.dtype(), at::kHalf);
+  ASSERT_EQ(tensor1.layout(), at::kSparse);
+  ASSERT_EQ(tensor1.device(), at::kCPU);
+  ASSERT_FALSE(tensor1.requires_grad());
+  ASSERT_ANY_THROW(tensor1.is_pinned());
+
   if (torch::cuda::is_available()) {
     // Test setting pin memory
     tensor1 = at::empty({4}, at::TensorOptions().pinned_memory(true));

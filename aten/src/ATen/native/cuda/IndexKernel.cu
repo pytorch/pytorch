@@ -9,7 +9,14 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
+#include <ATen/native/cuda/Loops.cuh>
 #include <THC/THCTensorInfo.cuh>
+#include <THC/THCThrustAllocator.cuh>
+
+#include <thrust/execution_policy.h>
+#include <thrust/device_ptr.h>
+#include <thrust/scan.h>
 
 namespace at { namespace native {
 
@@ -147,6 +154,43 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
 // size to avoid redundant kernels for different types of the same size.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
+template <typename scalar_t>
+void index_fill_kernel_impl(
+  TensorIterator& iter,
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride,
+  scalar_t fill_val) {
+  if (0 == iter.numel()) {
+    return;
+  }
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      index_fill_kernel_impl(sub_iter, dim, self_dim_size, self_dim_stride, fill_val);
+    }
+    return;
+  }
+
+  char* __restrict__ self_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
+  char* __restrict__ idx_ptr = reinterpret_cast<char*>(iter.data_ptr(1));
+
+  auto offset_calc = make_offset_calculator<2>(iter);
+
+  auto loop = [=]C10_DEVICE(int i) {
+    auto offsets = offset_calc.get(i);
+
+    auto* __restrict__ self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0]);
+    auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
+    CUDA_KERNEL_ASSERT(idx >= -self_dim_size && idx < self_dim_size && "index out of bounds");
+    if (idx < 0) {
+      idx += self_dim_size;
+    }
+
+    self_data[idx * self_dim_stride] = fill_val;
+  };
+  launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
+}
 
 template <typename scalar_t>
 void index_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
@@ -166,6 +210,22 @@ static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayR
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_kernel_impl<dtype>(iter, index_size, index_stride);
+  });
+}
+
+static void index_fill_kernel(
+  TensorIterator& iter,
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride,
+  Scalar source) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+    iter.dtype(), "index_fill_cuda", [&] {
+    using dtype = OpaqueType<sizeof(scalar_t)>;
+    auto fill_val = source.to<scalar_t>();
+    auto fill_val_opaque = *reinterpret_cast<dtype*>(&fill_val);
+    index_fill_kernel_impl<dtype>(iter, dim, self_dim_size, self_dim_stride, fill_val_opaque);
   });
 }
 
@@ -189,7 +249,7 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   Tensor _mask = (mask.dim() == 0) ? mask.unsqueeze(0) : mask;
   Tensor _self = (self.dim() == 0) ? self.unsqueeze(0) : self;
   std::tie(_mask, _self) = expand_outplace(_mask, _self);
-  at::native::index_out(result, _self, _mask);
+  at::native::index_out(result, _self, c10::List<c10::optional<at::Tensor>>({_mask}));
 
   return result;
 }
@@ -229,6 +289,10 @@ void take_out_cuda_template(Tensor& output, const Tensor& input, const Tensor& i
 
   TORCH_CHECK(!(input.numel() == 0 && index.numel() != 0), "tried to take from an empty tensor");
 
+  at::assert_no_internal_overlap(output);
+  at::assert_no_partial_overlap(output, index);
+  at::assert_no_overlap(output, input);
+
   output.resize_(index.sizes());
 
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, input.scalar_type(), "take_cuda", [&] {
@@ -247,7 +311,108 @@ Tensor& take_out_cuda(Tensor& out, const Tensor& self, const Tensor& index) {
     return out;
 }
 
+namespace {
+
+template <typename mask_t>
+void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& source){
+  auto srcSize = source.numel();
+
+  // Determine our output size
+  auto totalElements = mask.sum().item<int64_t>();
+
+  // The number of `1` elements present in the mask must be <= the
+  // number of elements available in `src`
+  TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");
+
+  auto mask_cont = mask.contiguous();
+
+  // Use a prefix sum to determine the output locations of the masked elements
+  auto maskPrefixSum = at::empty_like(mask, mask.options().dtype(kLong));
+
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+
+  thrust::device_ptr<mask_t> maskData(mask_cont.data_ptr<mask_t>());
+  thrust::device_ptr<int64_t> maskPrefixSumData(
+      maskPrefixSum.data_ptr<int64_t>());
+
+  // Reference for using static_cast on `init_value`:
+  // https://github.com/NVIDIA/thrust/issues/1379
+  thrust::exclusive_scan(
+      thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
+      maskData,
+      maskData + mask_cont.numel(),
+      maskPrefixSumData,
+      static_cast<int64_t>(0));
+
+  // We are getting elements from `src` based on an offset from
+  // `maskPrefixSum`, so that should be made contiguous too
+  auto source_contig = source.contiguous();
+
+  auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(self)
+      .add_input(self)
+      .add_input(mask_cont)
+      .add_input(maskPrefixSum)
+      .build();
+
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Bool,
+      ScalarType::BFloat16,
+      ScalarType::Half,
+      self.scalar_type(),
+      "masked_scatter_",
+      [&]() {
+        auto source_ptr = source_contig.data_ptr<scalar_t>();
+        gpu_kernel(
+            iter, [=] GPU_LAMBDA(scalar_t a, mask_t mask, int64_t maskPrefixSum) -> scalar_t {
+              if (mask) {
+                return source_ptr[maskPrefixSum];
+              }
+              return a;
+            });
+        cudaGetLastError();
+      });
+}
+
+} // anonymous namespace
+
+Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& source) {
+  at::assert_no_internal_overlap(self);
+  TORCH_CHECK(
+      self.scalar_type() == source.scalar_type(),
+      "masked_scatter: expected self and source to have same dtypes but got",
+      self.scalar_type(),
+      " and ",
+      source.scalar_type());
+
+  TensorArg self_arg{self, "self", 1};
+  TensorArg mask_arg{mask, "mask", 2};
+  TensorArg source_arg{source, "source", 3};
+  checkAllSameGPU("masked_scatter_", {self_arg, mask_arg, source_arg});
+
+  Tensor b_mask;
+  std::tie(b_mask) = expand_inplace(self, mask, "masked_scatter_");
+
+  if (b_mask.dtype() == ScalarType::Byte) {
+    TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
+  }
+
+  auto mask_dtype = b_mask.scalar_type();
+  if (mask_dtype == ScalarType::Bool) {
+    masked_scatter_cuda_impl<bool>(self, b_mask, source);
+  } else {
+    masked_scatter_cuda_impl<uint8_t>(self, b_mask, source);
+  }
+
+  return self;
+}
+
 REGISTER_DISPATCH(index_stub, &index_kernel);
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 
 }} // namespace at::native

@@ -1,6 +1,6 @@
 import torch
 from ..optimizer import Optimizer
-
+from collections import defaultdict
 
 class RMSprop(Optimizer):
     r"""Implements RMSprop algorithm.
@@ -17,7 +17,7 @@ class RMSprop(Optimizer):
     is the scheduled learning rate and :math:`v` is the weighted moving average
     of the squared gradient.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
@@ -56,7 +56,7 @@ class RMSprop(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
@@ -121,3 +121,26 @@ class RMSprop(Optimizer):
                 torch._foreach_addcdiv_(params_with_grad, grads, avg, value=-group['lr'])
 
         return loss
+
+    # TODO: refactor to a base class once foreach ops are in a good shape.
+    def zero_grad(self, set_to_none: bool = False):
+        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is not None:
+                    if set_to_none:
+                        p.grad = None
+                    else:
+                        if p.grad.grad_fn is not None:
+                            p.grad.detach_()
+                        else:
+                            p.grad.requires_grad_(False)
+
+                        if p.grad.is_sparse:
+                            p.grad.zero_()
+                        else:
+                            per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
+
+            for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                for grads in per_dtype_grads.values():
+                    torch._foreach_zero_(grads)

@@ -1293,7 +1293,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
   // Constant Folding.
   if (lhs_new->isConstant() && rhs_new->isConstant()) {
     const Expr* v_new = new CompareSelect(
-        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+        lhs_new,
+        rhs_new,
+        true_branch,
+        false_branch,
+        v->compare_select_op(),
+        v->bias());
     return evaluateOp(v_new);
   }
 
@@ -1302,7 +1307,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
   if (lhs_new->dtype().is_floating_point() ||
       rhs_new->dtype().is_floating_point()) {
     return new CompareSelect(
-        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+        lhs_new,
+        rhs_new,
+        true_branch,
+        false_branch,
+        v->compare_select_op(),
+        v->bias());
   }
 
   // If diff is constant, we can determine it.
@@ -1311,7 +1321,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
 
   if (!diff->isConstant()) {
     return new CompareSelect(
-        lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+        lhs_new,
+        rhs_new,
+        true_branch,
+        false_branch,
+        v->compare_select_op(),
+        v->bias());
   }
 
   bool equal = immediateEquals(diff, 0);
@@ -1334,7 +1349,12 @@ const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
 
   // should not be possible but just in case.
   return new CompareSelect(
-      lhs_new, rhs_new, true_branch, false_branch, v->compare_select_op());
+      lhs_new,
+      rhs_new,
+      true_branch,
+      false_branch,
+      v->compare_select_op(),
+      v->bias());
 }
 
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
@@ -1663,9 +1683,9 @@ const Expr* polyGCD(const Polynomial* poly) {
   // We ony want to factorize if we're saving complete operations, i.e. no
   // value in factorizing 6x + 4y into 2 * (3x + 2y) since we don't save work.
   int opsSaved = 1; // default to saving the scalar.
-  long GCD = immediateAs<long>(scalar);
+  long GCD = std::abs(immediateAs<long>(scalar));
   for (auto* t : variables) {
-    long termScalar = immediateAs<long>(t->scalar());
+    long termScalar = std::abs(immediateAs<long>(t->scalar()));
     long newGCD = gcd(std::max(GCD, termScalar), std::min(GCD, termScalar));
     if (newGCD == 1) {
       return nullptr;
@@ -1961,51 +1981,51 @@ const Expr* TermExpander::mutate(const RoundOff* v) {
   return term->accept_mutator(this);
 }
 
-Stmt* TermExpander::mutate(const Allocate* v) {
-  const Var* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
-  bool any_change = buffer_var_new == buffer_var_old;
+const Expr* buf_flat_size(const Buf* v) {
+  std::vector<const Expr*> dims = v->dims();
 
   const Expr* flattened = getImmediateByType(kInt, 1);
-  std::vector<const Expr*> dims_old = v->dims();
-  std::vector<const Expr*> dims_new(dims_old.size());
-  for (size_t i = 0; i < dims_old.size(); i++) {
-    dims_new[i] = dims_old[i]->accept_mutator(this);
-    any_change |= (dims_new[i] == dims_old[i]);
-    flattened = new Mul(flattened, dims_new[i]);
+  for (auto& dim : dims) {
+    flattened = new Mul(flattened, dim);
   }
-
-  // Safe to do this as there can't be an Allocate inside an Allocate:
   flattened = IRSimplifier::simplify(flattened);
 
+  return flattened;
+}
+
+Stmt* TermExpander::mutate(const Allocate* v) {
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(v->buf()->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(buf_new);
+  const Expr* flattened = buf_flat_size(buf_new);
+
   if (flattened->isConstant() && immediateEquals(flattened, 0)) {
-    eliminated_allocations_.insert(buffer_var_new);
+    eliminated_allocations_.insert(buf_new->base_handle());
     return nullptr;
   }
 
-  if (!any_change) {
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
 
-  return new Allocate(buffer_var_new, v->dtype(), dims_new);
+  return new Allocate(buf_new);
 }
 
 Stmt* TermExpander::mutate(const Free* v) {
-  const Expr* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(v->buf()->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(buf_new);
 
-  if (eliminated_allocations_.count(buffer_var_new)) {
-    eliminated_allocations_.erase(buffer_var_new);
+  if (eliminated_allocations_.count(buf_new->base_handle())) {
+    eliminated_allocations_.erase(buf_new->base_handle());
     return nullptr;
   }
 
-  if (buffer_var_new == buffer_var_old) {
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
 
-  return new Free(buffer_var_new);
+  return new Free(buf_new);
 }
 
 // Combines adjactent Cond nodes with identical conditions.

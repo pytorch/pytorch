@@ -88,7 +88,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
     if (q_min > z - c_q) {
       s_prime = (((double)q_max - (z - c_q))) / ((double)q_max - q_min) * s;
       z_prime = q_min;
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
         qadd_scalar_relu_stub(self.device().type(), out, self, c_q);
@@ -98,7 +98,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
     } else if (q_max < z - c_q) {
       s_prime = ((double)(z - c_q) - q_min) / ((double)q_max - q_min) * s;
       z_prime = q_max;
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
         qadd_scalar_relu_stub(self.device().type(), out, self, c_q);
@@ -109,7 +109,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
       s_prime = s;
       z_prime = z - c_q;
       out.copy_(self);
-      out.set_quantizer_(make_per_tensor_affine_quantizer(
+      set_quantizer_(out, make_per_tensor_affine_quantizer(
           s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
         at::native::relu_quantized_cpu_(out);

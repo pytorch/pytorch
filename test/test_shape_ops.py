@@ -4,13 +4,15 @@ import numpy as np
 from itertools import product, combinations, permutations
 from functools import partial
 import random
+import warnings
 
 from torch._six import nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, make_tensor, torch_to_numpy_dtype_dict)
+from torch.testing._internal.common_methods_invocations import shape_funcs
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, dtypes, onlyOnCPUAndCUDA,
-    dtypesIfCPU, dtypesIfCUDA)
+    dtypesIfCPU, dtypesIfCUDA, ops)
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -86,95 +88,97 @@ class TestShapeOps(TestCase):
         shape = self._rand_shape(4, min_size=5, max_size=10)
         x = _generate_input(shape, dtype, device, False)
 
-        # Invalid `source` and `destination` dimension
-        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
-            torch.movedim(x, 5, 0)
+        for fn in [torch.movedim, torch.moveaxis]:
+            # Invalid `source` and `destination` dimension
+            with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+                fn(x, 5, 0)
 
-        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
-            torch.movedim(x, 0, 5)
+            with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+                fn(x, 0, 5)
 
-        # Mismatch in size of `source` and `destination`
-        with self.assertRaisesRegex(RuntimeError, "movedim: Invalid source or destination dims:"):
-            torch.movedim(x, (1, 0), (0, ))
+            # Mismatch in size of `source` and `destination`
+            with self.assertRaisesRegex(RuntimeError, "movedim: Invalid source or destination dims:"):
+                fn(x, (1, 0), (0, ))
 
-        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `source`"):
-            torch.movedim(x, (0, 0), (0, 1))
+            with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `source`"):
+                fn(x, (0, 0), (0, 1))
 
-        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `source`"):
-            torch.movedim(x, (0, 1, 0), (0, 1, 2))
+            with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `source`"):
+                fn(x, (0, 1, 0), (0, 1, 2))
 
-        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `destination`"):
-            torch.movedim(x, (0, 1), (1, 1))
+            with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `destination`"):
+                fn(x, (0, 1), (1, 1))
 
-        with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `destination`"):
-            torch.movedim(x, (0, 1, 2), (1, 0, 1))
+            with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `destination`"):
+                fn(x, (0, 1, 2), (1, 0, 1))
 
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_movedim(self, device, dtype):
-        for nd in range(5):
-            shape = self._rand_shape(nd, min_size=5, max_size=10)
-            x = _generate_input(shape, dtype, device, with_extremal=False)
-            for random_negative in [True, False]:
-                for src_dim, dst_dim in permutations(range(nd), r=2):
-                    random_prob = random.random()
+        for fn in [torch.moveaxis, torch.movedim]:
+            for nd in range(5):
+                shape = self._rand_shape(nd, min_size=5, max_size=10)
+                x = _generate_input(shape, dtype, device, with_extremal=False)
+                for random_negative in [True, False]:
+                    for src_dim, dst_dim in permutations(range(nd), r=2):
+                        random_prob = random.random()
 
-                    if random_negative and random_prob > 0.66:
-                        src_dim = src_dim - nd
-                    elif random_negative and random_prob > 0.33:
-                        dst_dim = dst_dim - nd
-                    elif random_negative:
-                        src_dim = src_dim - nd
-                        dst_dim = dst_dim - nd
+                        if random_negative and random_prob > 0.66:
+                            src_dim = src_dim - nd
+                        elif random_negative and random_prob > 0.33:
+                            dst_dim = dst_dim - nd
+                        elif random_negative:
+                            src_dim = src_dim - nd
+                            dst_dim = dst_dim - nd
 
-                    # Integer `source` and `destination`
-                    torch_fn = partial(torch.movedim, source=src_dim, destination=dst_dim)
-                    np_fn = partial(np.moveaxis, source=src_dim, destination=dst_dim)
-                    self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+                        # Integer `source` and `destination`
+                        torch_fn = partial(fn, source=src_dim, destination=dst_dim)
+                        np_fn = partial(np.moveaxis, source=src_dim, destination=dst_dim)
+                        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
-                if nd == 0:
-                    continue
+                    if nd == 0:
+                        continue
 
-                def make_index_negative(sequence, idx):
-                    sequence = list(sequence)
-                    sequence[random_idx] = sequence[random_idx] - nd
-                    return tuple(src_sequence)
+                    def make_index_negative(sequence, idx):
+                        sequence = list(sequence)
+                        sequence[random_idx] = sequence[random_idx] - nd
+                        return tuple(src_sequence)
 
-                for src_sequence in permutations(range(nd), r=random.randint(1, nd)):
-                    # Sequence `source` and `destination`
-                    dst_sequence = tuple(random.sample(range(nd), len(src_sequence)))
+                    for src_sequence in permutations(range(nd), r=random.randint(1, nd)):
+                        # Sequence `source` and `destination`
+                        dst_sequence = tuple(random.sample(range(nd), len(src_sequence)))
 
-                    # Randomly change a dim to a negative dim representation of itself.
-                    random_prob = random.random()
-                    if random_negative and random_prob > 0.66:
-                        random_idx = random.randint(0, len(src_sequence) - 1)
-                        src_sequence = make_index_negative(src_sequence, random_idx)
-                    elif random_negative and random_prob > 0.33:
-                        random_idx = random.randint(0, len(src_sequence) - 1)
-                        dst_sequence = make_index_negative(dst_sequence, random_idx)
-                    elif random_negative:
-                        random_idx = random.randint(0, len(src_sequence) - 1)
-                        dst_sequence = make_index_negative(dst_sequence, random_idx)
-                        random_idx = random.randint(0, len(src_sequence) - 1)
-                        src_sequence = make_index_negative(src_sequence, random_idx)
+                        # Randomly change a dim to a negative dim representation of itself.
+                        random_prob = random.random()
+                        if random_negative and random_prob > 0.66:
+                            random_idx = random.randint(0, len(src_sequence) - 1)
+                            src_sequence = make_index_negative(src_sequence, random_idx)
+                        elif random_negative and random_prob > 0.33:
+                            random_idx = random.randint(0, len(src_sequence) - 1)
+                            dst_sequence = make_index_negative(dst_sequence, random_idx)
+                        elif random_negative:
+                            random_idx = random.randint(0, len(src_sequence) - 1)
+                            dst_sequence = make_index_negative(dst_sequence, random_idx)
+                            random_idx = random.randint(0, len(src_sequence) - 1)
+                            src_sequence = make_index_negative(src_sequence, random_idx)
 
-                    torch_fn = partial(torch.movedim, source=src_sequence, destination=dst_sequence)
-                    np_fn = partial(np.moveaxis, source=src_sequence, destination=dst_sequence)
-                    self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+                        torch_fn = partial(fn, source=src_sequence, destination=dst_sequence)
+                        np_fn = partial(np.moveaxis, source=src_sequence, destination=dst_sequence)
+                        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
-        # Move dim to same position
-        x = torch.randn(2, 3, 5, 7, 11)
-        torch_fn = partial(torch.movedim, source=(0, 1), destination=(0, 1))
-        np_fn = partial(np.moveaxis, source=(0, 1), destination=(0, 1))
-        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+            # Move dim to same position
+            x = torch.randn(2, 3, 5, 7, 11)
+            torch_fn = partial(fn, source=(0, 1), destination=(0, 1))
+            np_fn = partial(np.moveaxis, source=(0, 1), destination=(0, 1))
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
-        torch_fn = partial(torch.movedim, source=1, destination=1)
-        np_fn = partial(np.moveaxis, source=1, destination=1)
-        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+            torch_fn = partial(fn, source=1, destination=1)
+            np_fn = partial(np.moveaxis, source=1, destination=1)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
-        # Empty Sequence
-        torch_fn = partial(torch.movedim, source=(), destination=())
-        np_fn = partial(np.moveaxis, source=(), destination=())
-        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+            # Empty Sequence
+            torch_fn = partial(fn, source=(), destination=())
+            np_fn = partial(np.moveaxis, source=(), destination=())
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     @dtypes(torch.float, torch.bool)
     def test_diag(self, device, dtype):
@@ -376,20 +380,24 @@ class TestShapeOps(TestCase):
             self.assertEqual(size, list(data.flip(ds).size()))
 
         # test rectangular case
-        data = torch.tensor([1, 2, 3, 4, 5, 6]).view(2, 3).to(device)
-        flip0_result = torch.tensor([[4, 5, 6], [1, 2, 3]]).to(device)
-        flip1_result = torch.tensor([[3, 2, 1], [6, 5, 4]]).to(device)
+        data = torch.tensor([1, 2, 3, 4, 5, 6], device=device).view(2, 3)
+        flip0_result = torch.tensor([[4, 5, 6], [1, 2, 3]], device=device)
+        flip1_result = torch.tensor([[3, 2, 1], [6, 5, 4]], device=device)
 
         self.assertEqual(flip0_result, data.flip(0))
         self.assertEqual(flip1_result, data.flip(1))
 
         # test empty tensor, should just return an empty tensor of the same shape
-        data = torch.tensor([])
+        data = torch.tensor((), device=device)
         self.assertEqual(data, data.flip(0))
 
         # test bool tensor
-        a = torch.tensor([False, True])
+        a = torch.tensor([False, True], device=device)
         self.assertEqual(a.flip(0), torch.tensor([True, False]))
+
+        # case: dims=()
+        a = torch.randn(3, 2, 1, device=device)
+        self.assertEqual(a.flip(dims=()), a)
 
     def _rand_shape(self, dim, min_size, max_size):
         shape = []
@@ -483,6 +491,17 @@ class TestShapeOps(TestCase):
             torch_fn = partial(torch.rot90, k=rot_times, dims=[0, 1])
             np_fn = partial(np.rot90, k=rot_times, axes=[0, 1])
             self.compare_with_numpy(torch_fn, np_fn, data)
+
+    # TODO: update once warning flag is available to always trigger ONCE warnings
+    # Ensures nonzero does not throw a warning, even when the as_tuple argument
+    #   is not provided
+    def test_nonzero_no_warning(self, device):
+        t = torch.randn((2, 2), device=device)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            torch.nonzero(t)
+            t.nonzero()
+            self.assertEqual(len(w), 0)
 
     @dtypes(*torch.testing.get_all_dtypes(include_complex=False))
     def test_nonzero(self, device, dtype):
@@ -593,7 +612,21 @@ class TestShapeOps(TestCase):
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
+class TestShapeFuncs(TestCase):
+    """Test suite for Shape manipulating operators using the ShapeFuncInfo."""
+
+    @dtypes(*(torch.uint8, torch.int64, torch.double, torch.complex128))
+    @ops([op for op in shape_funcs if op.name in ['tile', 'repeat']])
+    def test_repeat_tile_vs_numpy(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            (t, dims) = sample.input
+            expected = op.ref(t.cpu().numpy(), dims, **sample.kwargs)
+            result = op(t, dims, **sample.kwargs).cpu().numpy()
+            self.assertEqual(expected, result)
+
 instantiate_device_type_tests(TestShapeOps, globals())
+instantiate_device_type_tests(TestShapeFuncs, globals())
 
 if __name__ == '__main__':
     run_tests()
