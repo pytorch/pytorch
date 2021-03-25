@@ -222,7 +222,7 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
 static c10::optional<c10::ScalarType> LowPrecisionCastForStandardOps(
     const Node* n,
     const c10::ScalarType& scalar_type) {
-  // StandardOps are ont support uint8\int8\int16 in ORT now.
+  // StandardOps do not support uint8\int8\int16 in ONNX now.
   if (n->kind() != onnx::Gemm &&
       standardOps.find(n->kind()) != standardOps.end() &&
       (scalar_type == c10::kByte || scalar_type == c10::kChar ||
