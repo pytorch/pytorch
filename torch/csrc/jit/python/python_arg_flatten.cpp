@@ -67,9 +67,9 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.structure.push_back(D::NoneType);
   } else {
     std::string msg =
-        "Only tuples, lists and Variables supported as JIT inputs/outputs. "
-        "Dictionaries and strings are also accepted but their usage is not "
-        "recommended. But got unsupported type ";
+        "Only tuples, lists and Variables are supported as JIT inputs/outputs. "
+        "Dictionaries and strings are also accepted, but their usage is not "
+        "recommended. Here, received an input of unsupported type: ";
     msg += THPUtils_typename(obj);
     throw std::runtime_error(msg);
   }

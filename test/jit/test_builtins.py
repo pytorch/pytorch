@@ -2,7 +2,7 @@ import os
 import sys
 import inspect
 import unittest
-from typing import List
+from typing import Dict, List
 
 import torch
 
@@ -78,8 +78,7 @@ class TestBuiltins(JitTestCase):
             torch.jit.script(Mod())
 
     def test_del(self):
-        def fn(x):
-            # type: (List[int]) -> List[int]
+        def fn(x: List[int]) -> List[int]:
             a = x * 2
             del a
             return x
@@ -109,22 +108,28 @@ class TestBuiltins(JitTestCase):
                 return a
 
     def test_del_multiple_operands(self):
+        def fn(x: List[int]) -> List[int]:
+            a, b, c = x[0], x[1], x[2]
+            del a, b, c
+            return x
 
-        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
-                                    "with more than one operand"):
-            @torch.jit.script
-            def del_list_multiple_operands(x):
-                # type: (List[int]) -> List[int]
-                del x[0], x[1]
-                return x
+        self.checkScript(fn, ([1, 2, 3],))
 
-        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
-                                    "with more than one operand"):
-            @torch.jit.script
-            def del_dict_multiple_operands(x):
-                # type: (Dict[str, int]) -> Dict[str, int]
-                del x['hi'], x['there']
-                return x
+        def del_list_multiple_operands(x: List[int]) -> List[int]:
+            del x[0], x[1]
+            return x
+
+        py_out = del_list_multiple_operands([0, 1, 2])
+        jit_out = torch.jit.script(del_list_multiple_operands)([0, 1, 2])
+        self.assertEquals(py_out, jit_out)
+
+        def del_dict_multiple_operands(x: Dict[str, int]) -> Dict[str, int]:
+            del x['hi'], x['there']
+            return x
+
+        py_out = del_dict_multiple_operands({"hi": 5, "there": 6})
+        jit_out = torch.jit.script(del_dict_multiple_operands)({"hi": 5, "there": 6})
+        self.assertEquals(py_out, jit_out)
 
 
 class TestTensorBuiltins(JitTestCase):

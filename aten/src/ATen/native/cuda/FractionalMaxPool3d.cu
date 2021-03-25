@@ -148,6 +148,10 @@ void fractional_max_pool3d_out_cuda_template(
   IntArrayRef pool_size,
   IntArrayRef output_size,
   const Tensor& randomSamples) {
+    TORCH_CHECK(pool_size.size() == 3,
+                "fractional_max_pool3d: kernel_size must either be a single Int or tuple of three Ints")
+    TORCH_CHECK(output_size.size() == 3,
+                "fractional_max_pool3d: output_size must either be a single Int or tuple of three Ints")
     int64_t planeDim = 0;
     int64_t dimt = 1;
     int64_t dimh = 2;

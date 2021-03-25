@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -114,7 +115,7 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
     PyObject *py_fn = functionToPyObject(c_tuple.function);
     if (!py_fn) return nullptr;
     PyTuple_SET_ITEM(tuple.get(), 0, py_fn);
-    PyObject *py_idx = PyLong_FromLong(c_tuple.input_nr);
+    PyObject *py_idx = THPUtils_packUInt32(c_tuple.input_nr);
     if (!py_idx) return nullptr;
     PyTuple_SET_ITEM(tuple.get(), 1, py_idx);
     PyTuple_SET_ITEM(py_functions.get(), i, tuple.release());

@@ -121,9 +121,6 @@ public:
     auto inverse = _mm256_xor_si256(values, is_larger);
     return _mm256_sub_epi64(inverse, is_larger);
   }
-  Vec256<int64_t> angle() const {
-    return _mm256_set1_epi64x(0);
-  }
   Vec256<int64_t> real() const {
     return *this;
   }
@@ -249,9 +246,6 @@ public:
   int32_t& operator[](int idx)  = delete;
   Vec256<int32_t> abs() const {
     return _mm256_abs_epi32(values);
-  }
-  Vec256<int32_t> angle() const {
-    return _mm256_set1_epi32(0);
   }
   Vec256<int32_t> real() const {
     return *this;
@@ -466,9 +460,6 @@ public:
   int16_t& operator[](int idx)  = delete;
   Vec256<int16_t> abs() const {
     return _mm256_abs_epi16(values);
-  }
-  Vec256<int16_t> angle() const {
-    return _mm256_set1_epi16(0);
   }
   Vec256<int16_t> real() const {
     return *this;
@@ -718,9 +709,6 @@ public:
   int8_t& operator[](int idx)  = delete;
   Vec256<int8_t> abs() const {
     return _mm256_abs_epi8(values);
-  }
-  Vec256<int8_t> angle() const {
-    return _mm256_set1_epi8(0);
   }
   Vec256<int8_t> real() const {
     return *this;

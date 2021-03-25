@@ -638,6 +638,8 @@ class _NnapiSerializer(object):
             self.add_unsqueeze(node),
         "aten::reshape": lambda self, node:
             self.add_reshape(node),
+        "aten::size": lambda self, node:
+            self.add_size(node),
         "aten::cat": lambda self, node:
             self.add_cat(node),
         "aten::mean": lambda self, node:
@@ -668,6 +670,8 @@ class _NnapiSerializer(object):
             self.add_prelu_op(node),
         "aten::addmm": lambda self, node:
             self.add_addmm(node),
+        "aten::linear": lambda self, node:
+            self.add_linear(node),
         "aten::_convolution": lambda self, node:
             self.add_conv_underscore(node),
         "aten::conv2d": lambda self, node:
@@ -795,6 +799,16 @@ class _NnapiSerializer(object):
         outputs[0] = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
         self.add_operation(NNAPI_OperationCode.RESHAPE, inputs, outputs)
+
+    def add_size(self, node):
+        assert node.inputsSize() == 2
+        assert node.outputsSize() == 1
+
+        _, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        _, value = self.constants[node.inputsAt(1)]
+        res = in_oper.shape[value]
+        output = node.outputsAt(0)
+        self.add_constant_value(output, output.type(), res)
 
     def add_cat(self, node):
         assert node.inputsSize() == 2
@@ -1192,6 +1206,16 @@ class _NnapiSerializer(object):
             if scale_value != 1:
                 raise Exception("NNAPI Fully-Connected does not support alpha and beta.")
 
+        self.add_addmm_or_linear(node, True, jit_input, jit_weight, jit_bias)
+
+    def add_linear(self, node):
+        assert node.inputsSize() == 3
+        assert node.outputsSize() == 1
+        jit_input, jit_weight, jit_bias = node.inputs()
+
+        self.add_addmm_or_linear(node, False, jit_input, jit_weight, jit_bias)
+
+    def add_addmm_or_linear(self, node, transpose_weight, jit_input, jit_weight, jit_bias):
         input_id, input_oper = self.get_tensor_operand_by_jitval(jit_input)
         bias_id, bias_oper = self.get_tensor_operand_for_weight(jit_bias)
 
@@ -1201,7 +1225,10 @@ class _NnapiSerializer(object):
         # TODO: Transform at load time to share weights with CPU model.
         _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
         assert len(weight_tensor.shape) == 2
-        nnapi_weight_tensor = weight_tensor.t().contiguous()
+        if transpose_weight:
+            nnapi_weight_tensor = weight_tensor.t().contiguous()
+        else:
+            nnapi_weight_tensor = weight_tensor.contiguous()
         weight_id = self.add_tensor_operand_for_weight(nnapi_weight_tensor)
         weight_oper = self.operands[weight_id]
 

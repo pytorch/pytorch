@@ -80,10 +80,43 @@ class DifferentiabilityInfo:
     # The function's input arguments for which it calculates derivatives.
     # It's the union of 'var_names' of all 'derivatives', sorted by the
     # argument order in the function schema.
-    args_with_derivatives: Sequence[CppArgument]
+    args_with_derivatives: Sequence[Binding]
 
     # Names of arguments whose derivative formula is 'non_differentiable'.
     non_differentiable_arg_names: Sequence[str]
 
     # Raw data read from derivatives.yaml.
     output_differentiability: Optional[List[bool]]
+
+    @property
+    def has_derivatives(self) -> bool:
+        return len(self.args_with_derivatives) > 0
+
+# Represents a differentiable `Argument`.
+# How is it different from the `Argument` type?
+# - It's processed Arguments which are differentiable and only used in the
+#   context of the autograd codegen;
+# - It can represent SelfArgument or regular Argument but not TensorOptionsArgument;
+@dataclass(frozen=True)
+class DifferentiableInput:
+    name: str
+    type: Type
+
+    # TODO: only to keep it byte-for-byte compatible with the old codegen, should remove.
+    cpp_type: str
+
+# Represents a differentiable `Return`.
+# How it it different from the `Return` type?
+# - The name in `Return` is optional. Here it is always populated using the same
+#   `cpp.return_names()` method.
+#   TODO: some cpp naming logic (e.g. resolving name conflict) might be irrelevant?
+# - It's processed Returns which are differentiable, in compliance with the
+#   `output_differentiability` field defined in derivatives.yaml (if specified),
+#   and are only used in the context of the autograd codegen;
+@dataclass(frozen=True)
+class DifferentiableOutput:
+    name: str
+    type: Type
+
+    # TODO: only to keep it byte-for-byte compatible with the old codegen, should remove.
+    cpp_type: str

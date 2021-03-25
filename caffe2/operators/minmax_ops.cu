@@ -43,6 +43,7 @@ bool SelectGradientOpBase<float, CUDAContext>::RunOnDevice() {
       SelectGradientCUDAKernel<float>
           <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
               N, dY_data, Xi_data, Y_data, dXi_data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
   return true;
