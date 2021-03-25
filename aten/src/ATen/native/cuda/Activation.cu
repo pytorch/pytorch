@@ -544,7 +544,7 @@ Tensor& threshold__cuda(Tensor& self, const Scalar& threshold, const Scalar& val
   return self;
 }
 
-Tensor& threshold_out_cuda(Tensor& result, const Tensor& self, const Scalar& threshold, const Scalar& value) {
+Tensor& threshold_out_cuda(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
   threshold_out_cuda(make_optional(result), self, threshold, value, self);
   return result;
 }
