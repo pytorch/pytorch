@@ -218,7 +218,7 @@ def prepped_input(input, input_idx, entry, entry_idx, fast_mode=False):
         else:
             # for non fast mode, modifications to entry are reflected in input
             # TODO: get rid of this extra clone once https://github.com/pytorch/pytorch/pull/52874 is landed
-            return input.clone()
+            return torch.sparse_coo_tensor(input._indices(), input._values(), input.size())
     else:
         # We cannot use entry (input.data) if we want gradgrad to work because
         # fn (in the gradgrad case) needs to compute grad wrt input
@@ -717,12 +717,10 @@ def vec_from_tensor(x):
     if x.layout == torch.sparse_coo:
         # For sparse, create a random sparse vec with random values in the same
         # indices. Make sure size is set so that it isn't inferred to be smaller.
-        # TODO: get rid of this extra clone once https://github.com/pytorch/pytorch/pull/52874 is landed
-        x = x.clone().coalesce()
-        x_values = x.values()
+        x_values = x._values()
         values = torch.rand(x_values.nelement()).to(dtype=x.dtype, device=x.device).reshape(x_values.shape)
         values /= values.norm()
-        vec = torch.sparse_coo_tensor(x.indices(), values, x.size())
+        vec = torch.sparse_coo_tensor(x._indices(), values, x.size())
     else:
         vec = torch.rand(x.nelement()).to(dtype=x.dtype, device=x.device)
         vec /= vec.norm()
