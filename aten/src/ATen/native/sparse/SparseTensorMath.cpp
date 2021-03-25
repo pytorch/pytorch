@@ -200,7 +200,7 @@ SparseTensor sqrt_sparse(const SparseTensor& t) {
 
 // TODO: add in-place variant
 
-SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, const Scalar& value) {
+SparseTensor& pow_out_sparse_scalar(const SparseTensor& t_, const Scalar& value, SparseTensor& r) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t_.is_sparse());
   TORCH_CHECK(value.toDouble() != 0, "pow: cannot raise to zeroth power on sparse tensor; it would make the result tensor dense");
@@ -220,7 +220,7 @@ SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, con
 
 SparseTensor pow_sparse_scalar(const SparseTensor& t, const Scalar& value) {
   SparseTensor r = at::empty({0}, t.options());
-  pow_out_sparse_scalar(r, t, value);
+  pow_out_sparse_scalar(t, value, r);
   return r;
 }
 
@@ -448,7 +448,7 @@ Tensor& sub_sparse_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   return native::add_sparse_(self, other, -alpha);
 }
 
-Tensor& sub_out_sparse(Tensor& r, const Tensor& self, const Tensor& other, const Scalar& alpha) {
+Tensor& sub_out_sparse(const Tensor& self, const Tensor& other, const Scalar& alpha, Tensor& r) {
   sub_check(self, other);
   return at::add_out(r, self, other, -alpha);  // redispatch!
 }
@@ -702,7 +702,7 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
   return at::mul_out(self, self, other);  // redispatch!
 }
 
-SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor& src_) {
+SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTensor& r) {
   if (src_.dim() == 0) {
     return mul_out_sparse_zerodim(r, t_, src_);
   } else if (t_.dim() == 0) {

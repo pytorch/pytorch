@@ -29,24 +29,20 @@ Tensor _cudnn_rnn_flatten_weight(
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& input_r,
-    TensorList weight, int64_t weight_stride0,
-    const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
+    TensorList weight, int64_t weight_stride0, const c10::optional<Tensor>& weight_buf_r_opt, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
     int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_proj_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
-    const Tensor& fn_dropout_state
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
     ) {
   AT_ERROR("_cudnn_rnn: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
-    const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
-    const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
-    const Tensor& grad_cy_r,
+    const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
+    const Tensor& output, const c10::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt,
     int64_t mode, int64_t hidden_size, int64_t proj_size,
     int64_t num_layers, bool batch_first, double dropout,
-    bool train, bool bidirectional, IntArrayRef batch_sizes,
-    const Tensor& dropout_state, const Tensor& reserve,
+    bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
   AT_ERROR("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
@@ -902,13 +898,16 @@ const char * WEIGHT_FORMAT_WARN = "RNN module weights are not part of single con
 // NB: when fn_batch_sizes is empty, that means no batch sizes was specified
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& input_r,
-    TensorList weight, int64_t weight_stride0,
-    const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
+    TensorList weight, int64_t weight_stride0, const c10::optional<Tensor>& weight_buf_r_opt, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
     int64_t fn_mode, int64_t fn_hidden_size, int64_t fn_proj_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
-    const Tensor& fn_dropout_state
+    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes, const c10::optional<Tensor>& fn_dropout_state_opt
     ) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight_buf_r = c10::value_or_else(weight_buf_r_opt, [] {return Tensor();});
+  const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
+  const Tensor& fn_dropout_state = c10::value_or_else(fn_dropout_state_opt, [] {return Tensor();});
+
   check_attributes(input_r, weight, {hx, cx}, /*check_dtype=*/true);
   auto input = input_r;
   auto weight_buf = weight_buf_r;
@@ -1277,15 +1276,20 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
 // We need this dispatcher because _cudnn_rnn_backward_weight has a stringent
 // ordering requirement with _cudnn_rnn_backward_input
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
-    const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
-    const Tensor& output, const Tensor& grad_output_r, const Tensor& grad_hy_r,
-    const Tensor& grad_cy_r,
+    const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const c10::optional<Tensor>& cx_opt,
+    const Tensor& output, const c10::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt,
     int64_t mode, int64_t hidden_size, int64_t proj_size,
     int64_t num_layers, bool batch_first, double dropout,
-    bool train, bool bidirectional, IntArrayRef batch_sizes,
-    const Tensor& dropout_state, const Tensor& reserve,
+    bool train, bool bidirectional, IntArrayRef batch_sizes, const c10::optional<Tensor>& dropout_state_opt, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& cx = c10::value_or_else(cx_opt, [] {return Tensor();});
+  const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
+  const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
+  const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
+  const Tensor& dropout_state = c10::value_or_else(dropout_state_opt, [] {return Tensor();});
+
   if (!grad_output_r.defined() && !grad_hy_r.defined() && !grad_cy_r.defined()) {
     return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>(Tensor(), Tensor(), Tensor(), std::vector<Tensor>(weight.size()));
   }
