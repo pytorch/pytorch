@@ -363,6 +363,18 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
+# Convert something like pytorch_windows_vs2019_py36_cuda10.1_build to pytorch_windows_vs2019_py36_cuda10.1
+def get_stripped_CI_job() -> str:
+    job = os.environ.get("CIRCLE_JOB", "").rstrip('0123456789')
+    if job.endswith('_slow_test'):
+        job = job[:len(job) - len('_slow_test')]
+    elif job.endswith('_test'):
+        job = job[:len(job) - len('_test')]
+    elif job.endswith('_build'):
+        job = job[:len(job) - len('_build')]
+    return job
+
+
 # This function returns a list of S3 test time reports. This function can run into errors if HAVE_BOTO3 = False
 # or the S3 bucket is somehow unavailable. Even though this function goes through ten nightly commits' reports
 # to find a non-empty report, it is still conceivable (though highly unlikely) for this function to return no reports.
@@ -377,16 +389,14 @@ def get_test_time_reports_from_S3() -> List[Dict[str, Any]]:
         ["git", "rev-list", f"--before={day_before_commit}", "--max-count=10", "--remotes=*origin/nightly"],
         encoding="ascii").splitlines()
 
-    job = os.environ.get("CIRCLE_JOB", "")
-    job_minus_shard_number = job.rstrip('0123456789')
-
+    stripped_job = get_stripped_CI_job()
     bucket = get_S3_bucket_readonly('ossci-metrics')
     reports = []
     commit_index = 0
     while len(reports) == 0 and commit_index < len(nightly_commits):
         nightly_commit = nightly_commits[commit_index]
         print(f'Grabbing reports from nightly commit: {nightly_commit}')
-        summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{job_minus_shard_number}")
+        summaries = bucket.objects.filter(Prefix=f"test_time/{nightly_commit}/{stripped_job}")
         for summary in summaries:
             binary = summary.get()["Body"].read()
             string = bz2.decompress(binary).decode("utf-8")
@@ -442,20 +452,24 @@ def get_past_job_times() -> Dict[str, float]:
 
         curr_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip()
         file_commit = test_times_json.get('commit', '')
-        if curr_commit == file_commit:
-            print(f'Found stats for current commit: {curr_commit}. Proceeding with those values.')
+        curr_ci_job = get_stripped_CI_job()
+        file_ci_job = test_times_json.get('CIRCLE_JOB', 'N/A')
+        if curr_commit != file_commit:
+            print(f'Current test times file is from different commit {file_commit}.')
+        elif curr_ci_job != file_ci_job:
+            print(f'Current test times file is for different CI job {file_ci_job}.')
+        else:
+            print(f'Found stats for current commit: {curr_commit} and job: {curr_ci_job}. Proceeding with those values.')
             return test_times_json.get('job_times', {})
 
-        # Found file, but commit in JSON doesn't match
-        print(f'Current test times file is from different commit {file_commit}.')
-        print(f'Proceeding to overwrite current file with stats based on current commit: {curr_commit}.')
+        # Found file, but commit or CI job in JSON doesn't match
+        print(f'Overwriting current file with stats based on current commit: {curr_commit} and CI job: {curr_ci_job}')
 
     job_times = pull_job_times_from_S3()
     print(f'Exporting S3 test stats to {TEST_TIMES_FILE}.')
     export_S3_test_times(TEST_TIMES_FILE, job_times)
 
     return job_times
-
 
 
 class JobTimeJSON(TypedDict):
@@ -466,6 +480,7 @@ class JobTimeJSON(TypedDict):
 def get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
     return {
         'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip(),
+        'CIRCLE_JOB': get_stripped_CI_job(),
         'job_times': job_times,
     }
 
