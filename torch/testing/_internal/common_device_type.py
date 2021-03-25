@@ -770,9 +770,7 @@ class precisionOverride(object):
 # @dtypes((torch.long, torch.float32), (torch.int, torch.float64))
 class dtypes(object):
 
-    # Note: *args, **kwargs for Python2 compat.
-    # Python 3 allows (self, *args, device_type='all').
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, device_type="all"):
         if len(args) > 0 and isinstance(args[0], (list, tuple)):
             for arg in args:
                 assert isinstance(arg, (list, tuple)), \
@@ -784,7 +782,7 @@ class dtypes(object):
             assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
 
         self.args = args
-        self.device_type = kwargs.get('device_type', 'all')
+        self.device_type = device_type
 
     def __call__(self, fn):
         d = getattr(fn, 'dtypes', {})
