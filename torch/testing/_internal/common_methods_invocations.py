@@ -1538,7 +1538,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad):
         samples = list(SampleInput(make_tensor((2, 2), device, dtype,
                                                requires_grad=requires_grad),
                                    args=(arg,))
-                       for arg in arg_tuple) 
+                       for arg in arg_tuple)
         samples.append(SampleInput(make_tensor((2, 2), device, dtype,
                                                requires_grad=requires_grad),
                                    args=(make_tensor((2, 2), device, dtype=torch.float64,
