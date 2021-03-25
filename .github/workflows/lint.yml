@@ -32,6 +32,9 @@ jobs:
           rm -r "shellcheck-${scversion}"
           shellcheck --version
           .jenkins/run-shellcheck.sh
+      - name: Ensure correct trailing newlines
+        run: |
+          (! git grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' | tools/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
         run: |
           (! git grep -I -no ' $' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above files have trailing spaces; please remove them"; false))
