@@ -1,6 +1,5 @@
 import torch
 import numpy as np
-import re
 
 import itertools
 from itertools import product
@@ -640,8 +639,7 @@ class TestBinaryUfuncs(TestCase):
                 actual = base.clone()
                 # When base is a 0-dim cpu tensor and exp is a cuda tensor, we exp `pow` to work but `pow_` to fail, since
                 # `pow` will try to create the output tensor on a cuda device, but `pow_` needs to use the cpu tensor as the output
-                if (isinstance(exponent, torch.Tensor) and base.dim() == 0 and base.device.type == 'cpu' and 
-                    exponent.device.type == 'cuda'):
+                if isinstance(exponent, torch.Tensor) and base.dim() == 0 and base.device.type == 'cpu' and exponent.device.type == 'cuda':
                     regex = 'Expected all tensors to be on the same device, but found at least two devices, cuda.* and cpu!'
                     self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent)
                 elif torch.can_cast(torch.result_type(base, exponent), base.dtype):
@@ -659,11 +657,11 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(actual2, expected.to(actual))
 
 
-    # Tests pow() for integral, floating-type tensors, with 
-    # integral, floating-type exponents (tensor or scalar exponents), respectively
+    # Tests pow() for integral, floating-type tensors, with ntegral, floating-type
+    # exponents (tensor or scalar exponents), respectively.
     def test_int_and_float_pow(self, device):
 
-        def _generate_test_inputs(dt, low, high, dev):
+        def _test_int_and_float_pow(dt, low, high, dev):
             test_cases = (
                 ((4, 4), 0, (4, 1)),
                 ((3, 1), 4, (3, 1)),
@@ -690,21 +688,21 @@ class TestBinaryUfuncs(TestCase):
                                              discontiguous=True)
                 else:
                     exp_tensor = make_tensor(exp_shape, dtype=dt, device=dev, low=low, high=high,
-                                             discontiguous=True) 
+                                             discontiguous=True)
                 self._test_pow(base_tensor, exp_scalar)
                 self._test_pow(base_tensor, exp_tensor)
 
-        _generate_test_inputs(torch.int8, -3, 4, device)
-        _generate_test_inputs(torch.uint8, 0, 4, device)
-        _generate_test_inputs(torch.int16, -5, 5, device)
-        _generate_test_inputs(torch.int64, -10, 10, device)
-        _generate_test_inputs(torch.int32, -10, 10, device)
-        _generate_test_inputs(torch.float16, 0., 5., device)
-        _generate_test_inputs(torch.float32, 0., 10., device)
-        _generate_test_inputs(torch.float64, 0., 10., device)
+        _test_int_and_float_pow(torch.int8, -3, 4, device)
+        _test_int_and_float_pow(torch.uint8, 0, 4, device)
+        _test_int_and_float_pow(torch.int16, -5, 5, device)
+        _test_int_and_float_pow(torch.int64, -10, 10, device)
+        _test_int_and_float_pow(torch.int32, -10, 10, device)
+        _test_int_and_float_pow(torch.float16, 0., 5., device)
+        _test_int_and_float_pow(torch.float32, 0., 10., device)
+        _test_int_and_float_pow(torch.float64, 0., 10., device)
         # pow's output would have some NaNs as well
-        _generate_test_inputs(torch.float32, -10., 10., device)
-        _generate_test_inputs(torch.float64, -10., 10., device)
+        _test_int_and_float_pow(torch.float32, -10., 10., device)
+        _test_int_and_float_pow(torch.float64, -10., 10., device)
 
 
     # Tests that a Runtime error occurs when a base tensor cannot be resized
@@ -725,7 +723,7 @@ class TestBinaryUfuncs(TestCase):
                            for base_size, exp_size in test_cases)
         for base, exponent in test_inputs:
             regex = "doesn't match the broadcast shape"
-            self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent) 
+            self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent)
 
     def test_int_tensor_pow_neg_ints(self, device):
         ints = [torch.iinfo(torch.int32).min,
@@ -820,8 +818,7 @@ class TestBinaryUfuncs(TestCase):
         test_tensor_pow_tensor(ints, torch.int64, np.int64)
 
         floats = [-3.0, -2.0, -1.0, -1 / 2, -1 / 3,
-                  0.0,
-                  1 / 3, 1 / 2, 1.0, 2.0, 3.0]     
+                  0.0, 1 / 3, 1 / 2, 1.0, 2.0, 3.0]
         test_tensor_pow_tensor(floats, torch.float16, np.float16)
         test_tensor_pow_tensor(floats, torch.float32, np.float32)
         test_tensor_pow_tensor(floats, torch.float64, np.float64)

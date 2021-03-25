@@ -1538,7 +1538,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad):
         samples = list(SampleInput(make_tensor((2, 2), device, dtype,
                                                requires_grad=requires_grad),
                                    args=(arg,))
-                       for arg in arg_tuple)        
+                       for arg in arg_tuple) 
         samples.append(SampleInput(make_tensor((2, 2), device, dtype,
                                                requires_grad=requires_grad),
                                    args=(make_tensor((2, 2), device, dtype=torch.float64,
@@ -1564,11 +1564,11 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad):
                                    args=(make_tensor((2, 1), device, dtype=torch.float64,
                                                      requires_grad=requires_grad),)))
     else:
-        arg_tuple = (1, 2, 3)
+        exp_tuple = (1, 2, 3)
         samples = list(SampleInput(make_tensor((2, 2), device, dtype,
                                                requires_grad=requires_grad),
                                    args=(arg,))
-                       for arg in arg_tuple)
+                       for arg in exp_tuple)
         samples.append(SampleInput(make_tensor((2, 2), device, dtype,
                                                requires_grad=requires_grad),
                                    args=(make_tensor((2, 2), device, dtype,
@@ -3022,11 +3022,7 @@ op_db: List[OpInfo] = [
                # unsupported on CPU.
                SkipInfo('TestOpInfo', 'test_supported_backward',
                         device_type='cpu', dtypes=[torch.float16]),
-               # Bool is not present in the dtypes list, as its function variant is unsupported,
-               # and only its method variant is supported, so adding bool to the dtypes list results
-               # in Runtime errors when tests are run for it. So, this test needs to be skipped.
-               #SkipInfo('TestOpInfo', 'test_unsupported_dtypes', dtypes=[torch.bool]),
-               )
+           )
            ),
     OpInfo('prod',
            dtypes=all_types_and_complex_and(torch.bool),
