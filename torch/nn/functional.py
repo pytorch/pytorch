@@ -2075,7 +2075,7 @@ def embedding_bag(
             :attr:`offsets`, if those are not None.
 
         include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
-        The last element is the size of the input, or the ending index position of the last bag (sequence).
+            The last element is the size of the input, or the ending index position of the last bag (sequence).
 
 
     Shape:
