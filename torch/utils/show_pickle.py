@@ -12,9 +12,6 @@ class FakeObject(object):
         self.module = module
         self.name = name
         self.args = args
-        print("module: ", module)
-        print("name: ", name)
-        print("args: ", args)
         # NOTE: We don't distinguish between state never set and state set to None.
         self.state = None
 
@@ -109,7 +106,6 @@ def main(argv, output_stream=None):
                         break
                 if not found:
                     raise Exception(f"Could not find member matching {mname} in {zfname}")
-    print("finish dumping pickler.")
 
 
 if __name__ == "__main__":

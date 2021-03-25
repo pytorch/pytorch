@@ -208,7 +208,6 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // Make a copy of the constants and append the method names
   // that we emitted for the converted INTERFACE_CALL nodes above.
   auto constants = code.constant_table();
-
   for (auto& method_name : method_names) {
     constants.emplace_back(std::move(method_name));
   }
@@ -337,7 +336,6 @@ void moduleMethodsTuple(
     std::vector<c10::IValue>& elements, // note: appended to in-place
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
     bool save_mobile_debug_info) {
-
   auto methods = module.get_methods();
   std::unordered_set<std::string> qn_cache;
   // top level methods
@@ -395,20 +393,25 @@ class ScriptModuleSerializer {
     // Then we serialize all code info.
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
-    // so loading the code does not depend on loading the data
+    // (constant archive) so loading the code does not depend on loading the
+    // data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
-    std::unordered_map<at::Tensor, std::pair<std::string, int>, tensor_value_hash, tensor_value_equal>
-        constants_from_jit;
+    TensorIndexMap constants_from_jit;
 
+    // Use constants_from_jit to store the mapping (tensor) -> (archive_name,
+    // index), such that when later writing bytecode archive, if the tensor is
+    // the same as one from jit, it will just update bytecode.pkl and won't
+    // write the tensor in bytecode folder.
     for (size_t i = 0; i < ivalue_constants.size(); i++) {
       if (ivalue_constants[i].isTensor() &&
           constants_from_jit.find(ivalue_constants[i].toTensor()) ==
-          constants_from_jit.end()) {
-        constants_from_jit[ivalue_constants[i].toTensor()] = std::make_pair("constants", i);
+              constants_from_jit.end()) {
+        constants_from_jit[ivalue_constants[i].toTensor()] =
+            std::make_pair("constants", i);
       }
     }
-    
+
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
       writeByteCode(module, save_mobile_debug_info, constants_from_jit);
@@ -440,7 +443,6 @@ class ScriptModuleSerializer {
       data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
       supportTensorsArchiveTable = true;
     }
-    data_pickle.updateArchiveName(archive_name);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
@@ -449,13 +451,15 @@ class ScriptModuleSerializer {
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
-      if(supportTensorsArchiveTable) {
+      if (supportTensorsArchiveTable) {
         const auto found = tensors_archive_table_.find(td);
-        if(found == tensors_archive_table_.end()) {
-          writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+        if (found == tensors_archive_table_.end()) {
+          writer_.writeRecord(
+              fname, writable_td.data(), writable_td.sizeInBytes());
         }
       } else {
-        writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+        writer_.writeRecord(
+            fname, writable_td.data(), writable_td.sizeInBytes());
       }
     }
 
@@ -555,7 +559,7 @@ class ScriptModuleSerializer {
   void writeByteCode(
       const Module& module,
       bool save_mobile_debug_info,
-      const std::unordered_map<at::Tensor, std::pair<std::string, int>, tensor_value_hash, tensor_value_equal>& constants_from_jit) {
+      const TensorIndexMap& constants_from_jit) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -569,7 +573,10 @@ class ScriptModuleSerializer {
     moduleMethodsTuple(
         module, elements, debug_info_elements, save_mobile_debug_info);
     auto telements = Tup(std::move(elements));
-    tensors_archive_table_.insert(constants_from_jit.begin(), constants_from_jit.end());
+
+    // tensors_archive_table_ will be passed to the bytcode's pickler later.
+    tensors_archive_table_.insert(
+        constants_from_jit.begin(), constants_from_jit.end());
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
@@ -608,7 +615,7 @@ class ScriptModuleSerializer {
 
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
-  std::unordered_map<at::Tensor, std::pair<std::string, int>, tensor_value_hash, tensor_value_equal> tensors_archive_table_;
+  TensorIndexMap tensors_archive_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
   TypeNameUniquer type_name_uniquer_;

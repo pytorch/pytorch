@@ -38,7 +38,14 @@ struct tensor_value_equal {
     return a_str == b_str;
   }
 };
-}
+
+using TensorIndexMap = std::unordered_map<
+    at::Tensor,
+    std::pair<std::string, int>,
+    tensor_value_hash,
+    tensor_value_equal>;
+
+} // namespace
 
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
@@ -175,12 +182,9 @@ class TORCH_API Pickler {
     return tensor_data_;
   }
 
-  void updateArchiveName(std::string archive_name) {
-    archive_name_ = archive_name;
-  }
-
-  void updateTensorsArchiveTable(std::unordered_map<at::Tensor, std::pair<std::string, int>, tensor_value_hash, tensor_value_equal> tensors_archive_table) {
-    tensors_archive_table_.insert(tensors_archive_table.begin(), tensors_archive_table.end());
+  void updateTensorsArchiveTable(TensorIndexMap tensors_archive_table) {
+    tensors_archive_table_.insert(
+        tensors_archive_table.begin(), tensors_archive_table.end());
   }
 
   void pushEmptyDict();
@@ -240,7 +244,6 @@ class TORCH_API Pickler {
     }
   }
 
-
   // These convert values to bytes and add them to the stack (NB: since T is to
   // the left of a '::', its type cannot be deduced by the compiler so one must
   // explicitly instantiate the template, i.e. push<int>(int) works, push(int)
@@ -294,8 +297,14 @@ class TORCH_API Pickler {
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
   std::vector<at::Tensor> tensor_data_;
-  at::optional<std::string> archive_name_;
-  std::unordered_map<at::Tensor, std::pair<std::string, int>, tensor_value_hash, tensor_value_equal> tensors_archive_table_;
+
+  // tensors_archive_table_ is a map of (tensor) => (archive_name, index)
+  // when the tensor exists in the map, it is available under the corresponding
+  // archive, and there is no need to rewrite the tensor. It will just update
+  // archive_name.pkl with the corresponding archive path, for example:
+  // constants/0. Currently, this map is only used for bytecode archive
+  // referring constant archive.
+  TensorIndexMap tensors_archive_table_;
 
   std::unordered_map<const void*, uint32_t> memoized_storage_map_;
 

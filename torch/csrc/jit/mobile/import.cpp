@@ -524,11 +524,27 @@ c10::IValue BytecodeDeserializer::readArchive(
   auto read_record = [&](const std::string& name) {
     std::size_t found = name.find(slash);
     std::stringstream ss;
-    if (found == std::string::npos){
+    // In version 4, the tensor root_key doesn't include the parent path
+    // To support backward compatibility, when the name doesn't include slash
+    // assume it's version 4 and attach the archive_name_plus_slash
+    // The example tensor format is:
+    // torch._utils._rebuild_tensor_v2(
+    //     pers.obj(('storage', torch.FloatStorage, '17', 'cpu', 22736),),
+    //     0,
+    //     (1, 464, 7, 7),
+    //     (22736, 49, 7, 1),
+    //     False,
+    //     collections.OrderedDict())
+    if (found == std::string::npos) {
       ss << archive_name << slash << name;
       return std::get<0>(reader_->getRecord(ss.str()));
     }
 
+    // In version 4+, the tensor root_key in bytecode will include the parent
+    // path. The example tensor format is: torch._utils._rebuild_tensor_v2(
+    //     pers.obj(('storage', torch.FloatStorage, 'bytecode/17', 'cpu',
+    //     22736),), 0, (1, 464, 7, 7), (22736, 49, 7, 1), False,
+    //     collections.OrderedDict())
     ss << name;
     return std::get<0>(reader_->getRecord(ss.str()));
   };
