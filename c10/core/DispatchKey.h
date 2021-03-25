@@ -270,7 +270,7 @@ enum class DispatchKey : uint8_t {
 
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
-  Math, // registered at build/aten/src/ATen/RegisterMath.cpp
+  CompositeImplicitAutograd, // registered at build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
   DefaultBackend, // registered at
                   // build/aten/src/ATen/RegisterDefaultBackend.cpp
 

@@ -165,6 +165,12 @@ Other potentially useful environment variables may be found in `setup.py`.
 
 If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to install PyTorch for Jetson Nano are [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
+If you want to compile with ROCm support, install
+- [AMD ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html) 4.0 and above installation
+- ROCm is currently supported only for Linux system.
+
+If you want to disable ROCm support, export environment variable `USE_ROCM=0`.
+Other potentially useful environment variables may be found in `setup.py`.
 
 #### Install Dependencies
 
@@ -175,7 +181,7 @@ conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_ex
 
 On Linux
 ```bash
-# Add LAPACK support for the GPU if needed
+# CUDA only: Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 ```
 
@@ -206,6 +212,11 @@ On Linux
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py install
+```
+
+Note that if you are compiling for ROCm, you must run this command first:
+```bash
+python tools/amd_build/build_amd.py
 ```
 
 Note that if you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
