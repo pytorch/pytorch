@@ -2174,8 +2174,7 @@ class TestOperatorSignatures(JitTestCase):
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
             schemas = get_signature_for_torch_op(op.op)
             if not schemas:
-                assert op.name in known_no_schema
-                return
+                raise RuntimeError('No Schemas Returned')
             for sample_input in sample_inputs_itr:
                 # Iterate through overloads until we hit a match. If we exit this
                 # loop via `else`, we haven't found a match
@@ -2191,7 +2190,7 @@ class TestOperatorSignatures(JitTestCase):
                     raise RuntimeError(f'Did not match any schemas for op {op.name}!')
 
         except Exception as e:
-            assert op.name in known_failing_tests
+            assert op.name in known_no_schema
 
 instantiate_device_type_tests(TestOperatorSignatures, globals())
 

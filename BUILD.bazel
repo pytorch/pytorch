@@ -130,7 +130,7 @@ genrule(
         "aten/src/ATen/RegisterMkldnnCPU.cpp",
         "aten/src/ATen/RegisterQuantizedCPU.cpp",
         "aten/src/ATen/RegisterSparseCPU.cpp",
-        "aten/src/ATen/RegisterMath.cpp",
+        "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
         "aten/src/ATen/RegisterMeta.cpp",
         "aten/src/ATen/RegisterDefaultBackend.cpp",
         "aten/src/ATen/RegisterSchema.cpp",
