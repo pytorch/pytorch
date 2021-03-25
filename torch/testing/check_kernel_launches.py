@@ -2,6 +2,11 @@ import os
 import re
 import sys
 
+__all__ = [
+    "check_code_for_cuda_kernel_launches",
+    "check_kernel_launches",
+]
+
 
 # Regular expression identifies a kernel launch indicator by
 # finding something approximating the pattern ">>>(arguments);"
