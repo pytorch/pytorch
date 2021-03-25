@@ -13,6 +13,8 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/core/grad_mode.h>
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <functional>
 #include <limits>
@@ -273,10 +275,16 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     return grad;
   }
 
-  const auto w = output * grad;
+  // To enable complex support.
+  // From this line on `input_conj` and output_conj`
+  // are interchangeable with `input` and `output`.
+  auto input_conj = input.conj();
+  auto output_conj = output.conj();
+
+  const auto w = output_conj * grad;
   const auto is_zero = input == 0;
   if (!(is_zero.any().item<uint8_t>())) {
-    return reversed_cumsum(w, dim).div(input);
+    return reversed_cumsum(w, dim).div(input_conj);
   }
 
   // If we are not computing a second order gradient, we can use an
@@ -309,7 +317,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     auto mask = cumsum == 0;
     // equiv to grad_input[mask] = deriv[grad]
     grad_input.masked_scatter_(mask,
-        reversed_cumsum(w.masked_fill(~mask, 0.), dim).div_(input).masked_select(mask));
+        reversed_cumsum(w.masked_fill(~mask, 0.), dim).div_(input_conj).masked_select(mask));
     // select everything from the first zero to the second zero [z1, z2)
     mask = cumsum == 1;
 
@@ -332,10 +340,10 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // relu_() necessary as gather does not support negative indices
     // finally, we do grad_input[z1] = dy_j / dx_z1
     grad_input.masked_scatter_(first_zero_mask,
-                               input.masked_fill(~mask, 1.).cumprod(dim)
+                               input_conj.masked_fill(~mask, 1.).cumprod(dim)
                                     .mul_(grad.masked_fill(cumsum != 1, 0.))
                                     .sum(dim, /*keepdim*/true)
-                                    .mul_(at::gather(output, dim, (first_zero_index - 1).relu_())
+                                    .mul_(at::gather(output_conj, dim, (first_zero_index - 1).relu_())
                                           .masked_fill_(first_zero_index == 0, 1.))
                                     .masked_select(first_zero_mask));
   } else { // GradMode::enabled()
@@ -365,16 +373,16 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     const Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
     Tensor prods_from_k_plus_1;
     Tensor omitted_products;
-    for (int k = 0; k < dim_size; ++k) {
+    for (const auto k : c10::irange(dim_size)) {
       if (k == 0) {
-        prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
+        prods_from_k_plus_1 = at::cumprod(input_conj.slice(dim, k + 1), dim);
         omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
       } else if (k == dim_size - 1) {
-        const Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+        const Tensor prods_until_k = at::prod(input_conj.slice(dim, 0, k), dim, true);
         omitted_products = prods_until_k;
       } else {
-        const Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
-        prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
+        const Tensor prods_until_k = at::prod(input_conj.slice(dim, 0, k), dim, true);
+        prods_from_k_plus_1 = at::cumprod(input_conj.slice(dim, k+1), dim);
         omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
         omitted_products = at::cat({prods_until_k, omitted_products}, dim);
       }
@@ -840,9 +848,9 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scala
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0).to<double>();
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
-              "norm only supports CPU AND CUDA device type, got: ", self.device().type());
+              "norm only supports CPU and CUDA device types, but got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
-              "norm only supports strided layout, got: ", self.layout());
+              "norm only supports strided layout, but got: ", self.layout());
 
   ScalarType in_dtype = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(

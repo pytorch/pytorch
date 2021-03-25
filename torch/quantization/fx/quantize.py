@@ -635,8 +635,8 @@ class Quantizer:
             # converting List[int] to Tensor since module attribute is
             # Union[Tensor, Module]
             model._standalone_module_input_quantized_idxs = \
-                torch.Tensor(input_quantized_idxs)
-            model._standalone_module_output_quantized_idxs = torch.Tensor(output_quantized_idxs)
+                torch.tensor(input_quantized_idxs)
+            model._standalone_module_output_quantized_idxs = torch.tensor(output_quantized_idxs)
         return model
 
     def save_state(self, observed: GraphModule) -> None:
@@ -1244,7 +1244,6 @@ class Quantizer:
             if node.name in matches:
                 root_node, matched_nodes, matched_pattern, quantize_handler, \
                     qconfig = matches[node.name]
-                # don't attach observer/fake_quant for CopyNodeQuantizeHandler
                 if root_node is node and \
                         input_output_observed(quantize_handler):
                     # matched_nodes[-1] is the first op in the sequence and
