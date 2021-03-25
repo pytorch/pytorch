@@ -108,8 +108,8 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
-  // Redirect catchAll registrations to Math.
-  auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : kernels_[DispatchKey::Math];
+  // Redirect catchAll registrations to CompositeImplicitAutograd.
+  auto& k = dispatch_key.has_value() ? kernels_[*dispatch_key] : kernels_[DispatchKey::CompositeImplicitAutograd];
 
   if (k.size() > 0) {
     TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
@@ -138,8 +138,8 @@ void OperatorEntry::deregisterKernel_(
   c10::optional<DispatchKey> dispatch_key,
   std::list<AnnotatedKernel>::iterator kernel
 ) {
-  // Redirect catchAll deregistrations to Math.
-  DispatchKey dk = dispatch_key.has_value() ? *dispatch_key : DispatchKey::Math;
+  // Redirect catchAll deregistrations to CompositeImplicitAutograd.
+  DispatchKey dk = dispatch_key.has_value() ? *dispatch_key : DispatchKey::CompositeImplicitAutograd;
   auto found = kernels_.find(dk);
   TORCH_INTERNAL_ASSERT(found != kernels_.end(), "Tried to deregister a kernel for dispatch key ", toString(dispatch_key), " but there are no kernels registered for this dispatch key. The operator is ", toString(name_));
   auto& k = found->second;
@@ -186,13 +186,13 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //    (2.1) Use kernel from DispatchKey::DefaultBackend if available.
   //          This is used to register a kernel that works for all backend in inference. But it requires
   //          separate registration for Autograd keys to support training.
-  //    (2.2) Use kernel from DispatchKey::Math if available.
-  //          For autograd keys, we only use kernel from Math when there's no direct registration
-  //          to its corresponding backend key or DefaultBackend. See Note [DefaultBackend and Math].
+  //    (2.2) Use kernel from DispatchKey::CompositeImplicitAutograd if available.
+  //          For autograd keys, we only use kernel from CompositeImplicitAutograd when there's no direct registration
+  //          to its corresponding backend key or DefaultBackend. See Note [DefaultBackend and CompositeImplicitAutograd].
   //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel_ if there's registration to any of
   //          its backends and ask backend extender to request a decicated Autograd key for the backend.
   //          See Note [Ambiguity in AutogradOther kernel] for more details.
-  //          A DefaultBackend kernel prevents Math kernel being used for Autograd keys, but it doesn't
+  //          A DefaultBackend kernel prevents CompositeImplicitAutograd kernel being used for Autograd keys, but it doesn't
   //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
   //          in this case.
   //    (2.3) Use kernel from DispatchKey::Autograd if available
@@ -201,11 +201,11 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
   //  (3) Use fallthrough kernel that are registered as fallback.
   // Alias Key Precedence:
-  //   DefaultBackend > Math > Autograd
-  // Note [DefaultBackend and Math]
-  //   When there're registrations to both DefaultBackend & Math & Autograd, from (2.2) we know DefaultBackend
-  //   and Autograd kernels will be picked up and Math is overriden.
-  //   This is fine and in practice DefaultBackend and Math shouldn't co-exist for an op.
+  //   DefaultBackend > CompositeImplicitAutograd > Autograd
+  // Note [DefaultBackend and CompositeImplicitAutograd]
+  //   When there're registrations to both DefaultBackend & CompositeImplicitAutograd & Autograd, from (2.2) we know DefaultBackend
+  //   and Autograd kernels will be picked up and CompositeImplicitAutograd is overriden.
+  //   This is fine and in practice DefaultBackend and CompositeImplicitAutograd shouldn't co-exist for an op.
   // TODO: Update alias key precedence after we add new alias keys AutogradDispatchCPUOrCUDA .
 
   // 1. Operator registration
@@ -226,13 +226,13 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   bool has_backend_kernel =
     hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key).add(DispatchKey::DefaultBackend));
 
-  // 2.2. Use Math kernel if available. For autograd keys, we only use kernel from Math
+  // 2.2. Use CompositeImplicitAutograd kernel if available. For autograd keys, we only use kernel from CompositeImplicitAutograd
   //      when there's no direct registration to its corresponding backend key or DefaultBackend.
   //      For AutogradOther, we return ambiguousAutogradOtherKernel_ if there's registration
   //      to any of its backends.
   //      See Note [Undefined in dispatchTable_] for the special handling for Undefined.
-  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::Math)) {
-    if (auto math_registration = getKernelForDispatchKey(DispatchKey::Math)) {
+  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutograd)) {
+    if (auto math_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutograd)) {
       if (dispatch_key == DispatchKey::AutogradOther
           && hasKernelForAnyDispatchKey(c10::autogradother_backends)) {
         return {ambiguousAutogradOtherKernel_, "ambiguous autogradother"};
@@ -286,9 +286,9 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   for (auto k : c10::getRuntimeDispatchKeySet(dispatch_key)) {
     updateDispatchTableEntry_(dispatcher, k);
   }
-  // Registration to DefaultBackend and Math should be populated to Undefined.
+  // Registration to DefaultBackend and CompositeImplicitAutograd should be populated to Undefined.
   // We cannot do this above since Undefined cannot be represented in DispatchKeySet.
-  if (dispatch_key == DispatchKey::Math || dispatch_key == DispatchKey::DefaultBackend) {
+  if (dispatch_key == DispatchKey::CompositeImplicitAutograd || dispatch_key == DispatchKey::DefaultBackend) {
     updateDispatchTableEntry_(dispatcher, DispatchKey::Undefined);
   }
   // Note [Refresh Runtime Autograd entries in dispatchTable_]
@@ -319,7 +319,7 @@ void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) 
   //     the error message.
   // In the old world of catchAll, the only way to "register" a kernel to Undefined is by registering it to
   // catchAll. After catchAllKernel_ is removed, Undefined now can get a kernel from either DefaultBackend
-  // or Math alias key so that we don't break the support. Ideally isIncludedInAlias(Undefined, Math)
+  // or CompositeImplicitAutograd alias key so that we don't break the support. Ideally isIncludedInAlias(Undefined, CompositeImplicitAutograd)
   // should return true, it returns false because Undefined cannot be represented in a DispatchKeySet.
   for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
     updateDispatchTable_(dispatcher, static_cast<DispatchKey>(iter));
