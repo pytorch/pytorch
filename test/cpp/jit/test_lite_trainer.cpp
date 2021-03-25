@@ -76,112 +76,114 @@ TEST(LiteTrainerTest, Params) {
 }
 
 // TODO Renable these tests after parameters are correctly loaded on mobile
-// TEST(MobileTest, NamedParameters) {
-//   Module m("m");
-//   m.register_parameter("foo", torch::ones({}), false);
-//   m.define(R"(
-//     def add_it(self, x):
-//       b = 4
-//       return self.foo + x + b
-//   )");
-//   Module child("m2");
-//   child.register_parameter("foo", 4 * torch::ones({}), false);
-//   child.register_parameter("bar", 4 * torch::ones({}), false);
-//   m.register_module("child1", child);
-//   m.register_module("child2", child.clone());
-//   std::stringstream ss;
-//   m._save_for_mobile(ss);
-//   mobile::Module bc = _load_for_mobile(ss);
+/*
+TEST(MobileTest, NamedParameters) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_it(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  Module child("m2");
+  child.register_parameter("foo", 4 * torch::ones({}), false);
+  child.register_parameter("bar", 4 * torch::ones({}), false);
+  m.register_module("child1", child);
+  m.register_module("child2", child.clone());
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
 
-//   auto full_params = m.named_parameters();
-//   auto mobile_params = bc.named_parameters();
-//   AT_ASSERT(full_params.size() == mobile_params.size());
-//   for (const auto& e : full_params) {
-//     AT_ASSERT(e.value.item().toInt() ==
-//     mobile_params[e.name].item().toInt());
-//   }
-// }
+  auto full_params = m.named_parameters();
+  auto mobile_params = bc.named_parameters();
+  AT_ASSERT(full_params.size() == mobile_params.size());
+  for (const auto& e : full_params) {
+    AT_ASSERT(e.value.item().toInt() ==
+    mobile_params[e.name].item().toInt());
+  }
+}
 
-// TEST(MobileTest, SaveLoadData) {
-//   Module m("m");
-//   m.register_parameter("foo", torch::ones({}), false);
-//   m.define(R"(
-//     def add_it(self, x):
-//       b = 4
-//       return self.foo + x + b
-//   )");
-//   Module child("m2");
-//   child.register_parameter("foo", 4 * torch::ones({}), false);
-//   child.register_parameter("bar", 3 * torch::ones({}), false);
-//   m.register_module("child1", child);
-//   m.register_module("child2", child.clone());
-//   auto full_params = m.named_parameters();
+TEST(MobileTest, SaveLoadData) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_it(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  Module child("m2");
+  child.register_parameter("foo", 4 * torch::ones({}), false);
+  child.register_parameter("bar", 3 * torch::ones({}), false);
+  m.register_module("child1", child);
+  m.register_module("child2", child.clone());
+  auto full_params = m.named_parameters();
 
-//   std::stringstream ss;
-//   std::stringstream ss_data;
-//   m._save_for_mobile(ss);
-//   mobile::Module bc = _load_for_mobile(ss);
+  std::stringstream ss;
+  std::stringstream ss_data;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
 
-//   mobile::_save_data(bc, ss_data);
-//   auto mobile_params = mobile::_load_data(ss_data).named_parameters();
-//   AT_ASSERT(full_params.size() == mobile_params.size());
-//   for (const auto& e : full_params) {
-//     AT_ASSERT(e.value.item<int>() == mobile_params[e.name].item<int>());
-//   }
-// }
+  mobile::_save_data(bc, ss_data);
+  auto mobile_params = mobile::_load_data(ss_data).named_parameters();
+  AT_ASSERT(full_params.size() == mobile_params.size());
+  for (const auto& e : full_params) {
+    AT_ASSERT(e.value.item<int>() == mobile_params[e.name].item<int>());
+  }
+}
 
-// TEST(MobileTest, SaveLoadParameters) {
-//   Module m("m");
-//   m.register_parameter("foo", torch::ones({}), false);
-//   m.define(R"(
-//     def add_it(self, x):
-//       b = 4
-//       return self.foo + x + b
-//   )");
-//   Module child("m2");
-//   child.register_parameter("foo", 4 * torch::ones({}), false);
-//   child.register_parameter("bar", 3 * torch::ones({}), false);
-//   m.register_module("child1", child);
-//   m.register_module("child2", child.clone());
-//   auto full_params = m.named_parameters();
-//   std::stringstream ss;
-//   std::stringstream ss_data;
-//   m._save_for_mobile(ss);
+TEST(MobileTest, SaveLoadParameters) {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_it(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  Module child("m2");
+  child.register_parameter("foo", 4 * torch::ones({}), false);
+  child.register_parameter("bar", 3 * torch::ones({}), false);
+  m.register_module("child1", child);
+  m.register_module("child2", child.clone());
+  auto full_params = m.named_parameters();
+  std::stringstream ss;
+  std::stringstream ss_data;
+  m._save_for_mobile(ss);
 
-//   // load mobile module, save mobile named parameters
-//   mobile::Module bc = _load_for_mobile(ss);
-//   _save_parameters(bc.named_parameters(), ss_data);
+  // load mobile module, save mobile named parameters
+  mobile::Module bc = _load_for_mobile(ss);
+  _save_parameters(bc.named_parameters(), ss_data);
 
-//   // load back the named parameters, compare to full-jit Module's
-//   auto mobile_params = _load_parameters(ss_data);
-//   AT_ASSERT(full_params.size() == mobile_params.size());
-//   for (const auto& e : full_params) {
-//     AT_ASSERT(e.value.item<int>() == mobile_params[e.name].item<int>());
-//   }
-// }
+  // load back the named parameters, compare to full-jit Module's
+  auto mobile_params = _load_parameters(ss_data);
+  AT_ASSERT(full_params.size() == mobile_params.size());
+  for (const auto& e : full_params) {
+    AT_ASSERT(e.value.item<int>() == mobile_params[e.name].item<int>());
+  }
+}
+*/
 
-// TEST(MobileTest, SaveLoadParametersEmpty) {
-//   Module m("m");
-//   m.define(R"(
-//     def add_it(self, x):
-//       b = 4
-//       return x + b
-//   )");
-//   Module child("m2");
-//   m.register_module("child1", child);
-//   m.register_module("child2", child.clone());
-//   std::stringstream ss;
-//   std::stringstream ss_data;
-//   m._save_for_mobile(ss);
+TEST(MobileTest, SaveLoadParametersEmpty) {
+  Module m("m");
+  m.define(R"(
+    def add_it(self, x):
+      b = 4
+      return x + b
+  )");
+  Module child("m2");
+  m.register_module("child1", child);
+  m.register_module("child2", child.clone());
+  std::stringstream ss;
+  std::stringstream ss_data;
+  m._save_for_mobile(ss);
 
-//   // load mobile module, save mobile named parameters
-//   mobile::Module bc = _load_for_mobile(ss);
-//   _save_parameters(bc.named_parameters(), ss_data);
+  // load mobile module, save mobile named parameters
+  mobile::Module bc = _load_for_mobile(ss);
+  _save_parameters(bc.named_parameters(), ss_data);
 
-//   // load back the named parameters, test is empty
-//   auto mobile_params = _load_parameters(ss_data);
-//   AT_ASSERT(mobile_params.size() == 0);
-// }
+  // load back the named parameters, test is empty
+  auto mobile_params = _load_parameters(ss_data);
+  AT_ASSERT(mobile_params.size() == 0);
+}
 
 TEST(LiteTrainerTest, SGD) {
   Module m("m");
