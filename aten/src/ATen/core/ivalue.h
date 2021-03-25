@@ -372,12 +372,7 @@ struct TORCH_API IValue final {
     return payload.as_tensor.unsafeGetTensorImpl();
   }
 
-  IValue(at::Storage s) : tag(Tag::Storage), is_intrusive_ptr(static_cast<bool>(s)) {
-    // Note: the undefined tensor is not refcounted, so while it
-    // is tagged as a tensor, is_intrusive_ptr is set to false.
-    // This is not an optional optimization: our incref call
-    // *will not* do the right thing when called on an
-    // undefined tensor.
+  IValue(at::Storage s) : tag(Tag::Storage), is_intrusive_ptr(true) {
     payload.u.as_intrusive_ptr = null_to_undefined_tensor(s.unsafeReleaseStorageImpl());
   }
   bool isStorage() const {
@@ -751,12 +746,7 @@ struct TORCH_API IValue final {
   }
 
   // Generator
-  IValue(at::Generator g) : tag(Tag::Generator), is_intrusive_ptr(g.defined()) {
-    // Note: the undefined generator is not refcounted, so while it
-    // is tagged as a generator, is_intrusive_ptr is set to false.
-    // This is not an optional optimization: our incref call
-    // *will not* do the right thing when called on an
-    // undefined generator.
+  IValue(at::Generator g) : tag(Tag::Generator), is_intrusive_ptr(true) {
     payload.u.as_intrusive_ptr = null_to_undefined_tensor(g.unsafeReleaseGeneratorImpl());
   }
   bool isGenerator() const {
