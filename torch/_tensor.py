@@ -414,10 +414,10 @@ class Tensor(torch._C._TensorBase):
 
         if not torch._jit_internal.is_scripting():
             if self.requires_grad:
-                if not (self.size(-2) == self.size(-1) and self.dtype.is_floating_point):
+                if not (self.size(-2) == self.size(-1) and (self.dtype.is_floating_point) or self.is_complex):
                     raise ValueError(
                         'lu.backward works only with batches of squared full-rank matrices'
-                        ' of floating types.'
+                        ' of floating or complex types.'
                     )
 
                 from torch._autograd_functions import _LU
