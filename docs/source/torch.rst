@@ -110,6 +110,8 @@ Indexing, Slicing, Joining, Mutating Ops
     tile
     transpose
     unbind
+    unsafe_chunk
+    unsafe_split
     unsqueeze
     vstack
     where
