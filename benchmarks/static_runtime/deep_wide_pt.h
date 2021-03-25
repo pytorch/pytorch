@@ -118,8 +118,8 @@ struct DeepAndWideFast : torch::nn::Module {
       at::native::_cat_out_cpu(
           prealloc_tensors[6], {prealloc_tensors[5], prealloc_tensors[2]}, 1);
       at::native::addmm_cpu_out(
-          prealloc_tensors[7], fc_b_, prealloc_tensors[6], fc_w_t_);
-      at::native::sigmoid_out(prealloc_tensors[8], prealloc_tensors[7]);
+          fc_b_, prealloc_tensors[6], fc_w_t_, 1, 1, prealloc_tensors[7]);
+      at::native::sigmoid_out(prealloc_tensors[7], prealloc_tensors[8]);
 
       return prealloc_tensors[8];
     }
