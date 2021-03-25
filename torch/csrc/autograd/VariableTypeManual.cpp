@@ -371,16 +371,16 @@ Tensor & detach_(Tensor & self) {
 }
 
 // Ops in the following registration list are registered as
-//   (1) Math kernels
+//   (1) CompositeImplicitAutograd kernels
 //   (2) Autograd kernels
 //   (3) DefaultBackend kernels and additionally Autograd kernels
 // The reason for (3) is that ops that also use dispatch (e.g. register CPU/CUDA/QuantizedCPU
-// kernels) will skip picking up Math kernels for Autograd, so we register them to both
+// kernels) will skip picking up CompositeImplicitAutograd kernels for Autograd, so we register them to both
 // DefaultBackend and Autograd instead. See
 // https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword
 // for more details.
 // Invariant:
-// - Ops registered to Math or DefaultBackend below must match `MANUAL_BACKEND` set in tools/autograd/gen_variable_type.py.
+// - Ops registered to CompositeImplicitAutograd or DefaultBackend below must match `MANUAL_BACKEND` set in tools/autograd/gen_variable_type.py.
 //   and they have manual_kernel_registration=True in native_functions.yaml.
 // - Ops registered to DispatchKey::Autograd below must be included in `MANUAL_AUTOGRAD` in tools/autograd/gen_variable_type.py
 
@@ -398,13 +398,13 @@ TORCH_LIBRARY_IMPL(aten, DefaultBackend, m) {
   m.impl("requires_grad_", torch::dispatch(DispatchKey::DefaultBackend, TORCH_FN(VariableType::requires_grad_)));
 }
 
-TORCH_LIBRARY_IMPL(aten, Math, m) {
-  m.impl("set_data", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::set_data)));
-  m.impl("data", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::data)));
-  m.impl("is_leaf", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::is_leaf)));
-  m.impl("output_nr", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::output_nr)));
-  m.impl("_version", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::_version)));
-  m.impl("retain_grad", torch::dispatch(DispatchKey::Math, TORCH_FN(VariableType::retain_grad)));
+TORCH_LIBRARY_IMPL(aten, CompositeImplicitAutograd, m) {
+  m.impl("set_data", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::set_data)));
+  m.impl("data", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::data)));
+  m.impl("is_leaf", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::is_leaf)));
+  m.impl("output_nr", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::output_nr)));
+  m.impl("_version", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::_version)));
+  m.impl("retain_grad", torch::dispatch(DispatchKey::CompositeImplicitAutograd, TORCH_FN(VariableType::retain_grad)));
 }
 
 }  // namespace

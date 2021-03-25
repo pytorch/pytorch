@@ -1747,6 +1747,20 @@ def sample_inputs_polar(op_info, device, dtype, requires_grad):
     return samples
 
 
+def sample_inputs_entr(op_info, device, dtype, requires_grad):
+    low, _ = op_info.domain
+
+    if requires_grad:
+        low = 0 + op_info._domain_eps
+
+    return (SampleInput(make_tensor((L,), device, dtype,
+                                    low=low,
+                                    requires_grad=requires_grad)),
+            SampleInput(make_tensor((), device, dtype,
+                                    low=low,
+                                    requires_grad=requires_grad)))
+
+
 def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -2727,7 +2741,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_qr',
            op=torch.linalg.qr,
            dtypes=floating_and_complex_types(),
-           supports_out=False,
+           supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_linalg_qr,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -2931,7 +2945,6 @@ op_db: List[OpInfo] = [
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
-           supports_out=False,
            sample_inputs_func=sample_inputs_linalg_qr,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -3332,7 +3345,6 @@ op_db: List[OpInfo] = [
     OpInfo('eig',
            op=torch.eig,
            dtypes=floating_and_complex_types(),
-           supports_out=False,
            sample_inputs_func=sample_inputs_eig,
            decorators=[
                skipCUDAIfNoMagma,
@@ -3542,6 +3554,21 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    safe_casts_outputs=True),
+    UnaryUfuncInfo('special.entr',
+                   ref=scipy.special.entr,
+                   aten_name='special_entr',
+                   decorators=(precisionOverride({torch.float16: 1e-1,
+                                                  torch.bfloat16: 1e-1}),),
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                dtypes=[torch.bfloat16, torch.float16]),
+                   ),
+                   supports_inplace_autograd=False,
+                   safe_casts_outputs=True,
+                   sample_inputs_func=sample_inputs_entr),
     UnaryUfuncInfo('erf',
                    ref=scipy_reference_wrapper(lambda x: scipy.special.erf(x)),
                    aliases=('special.erf', ),

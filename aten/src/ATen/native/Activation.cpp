@@ -211,7 +211,7 @@ Tensor& silu_(Tensor& self) {
   return at::silu_out(self, self);
 }
 
-Tensor& silu_out(Tensor& result, const Tensor& self) {
+Tensor& silu_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(
       result.dtype() == self.dtype(),
       "Output Tensor should have the same type as in Input Tensor.")
@@ -407,7 +407,7 @@ Tensor& threshold_(Tensor& self, const Scalar& threshold, const Scalar& value) {
   return self;
 }
 
-Tensor& threshold_out(Tensor& result, const Tensor& self, const Scalar& threshold, const Scalar& value) {
+Tensor& threshold_out(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
   threshold_out(make_optional(result), self, threshold, value, self);
   return result;
 }

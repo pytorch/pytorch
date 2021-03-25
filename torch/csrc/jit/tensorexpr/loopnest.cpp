@@ -792,11 +792,15 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
       // tensors, always inline, bc we are not duplicating any work
       // and avoiding an intermediary buffer
       if (stores.size() == 1) {
-        auto store = dynamic_cast<Store*>(stores[0].s);
-        auto input_as_load = dynamic_cast<const Load*>(store->value());
-        if (input_as_load && input_bufs.count(input_as_load->buf())) {
-          bufs_to_inline.insert(buf);
-          continue;
+        if (auto store = dynamic_cast<Store*>(stores[0].s)) {
+          auto input_as_load = dynamic_cast<const Load*>(store->value());
+          if (input_as_load && input_bufs.count(input_as_load->buf())) {
+            bufs_to_inline.insert(buf);
+            continue;
+          }
+        } else {
+          // If S is not a store, it must be an ExternalCall.
+          TORCH_INTERNAL_ASSERT(dynamic_cast<ExternalCall*>(stores[0].s));
         }
       }
 
