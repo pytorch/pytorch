@@ -1,6 +1,5 @@
-from functools import wraps
-import os
 import random
+import sys
 
 import torch
 import torch.distributed as dist
@@ -9,15 +8,16 @@ from torch.distributed.optim import DistributedOptimizer
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc import RRef
 from torch.distributed.rpc import TensorPipeRpcBackendOptions
-import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.optim as optim
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.common_distributed import (
+    TEST_SKIPS,
+)
 from torch.testing._internal.dist_utils import (
     dist_init,
-    worker_name,
 )
 
 NUM_EMBEDDINGS = 100
@@ -36,8 +36,7 @@ class HybridModel(torch.nn.Module):
 
     def __init__(self, emb_rref, device):
         super(HybridModel, self).__init__()
-        if device > 1:
-            device -= 2
+        device = _get_device(device)
         self.emb_rref = emb_rref
         self.fc = DDP(torch.nn.Linear(16, 8).cuda(device), device_ids=[device])
         self.device = device
@@ -83,8 +82,6 @@ def _run_trainer(emb_rref, rank):
     criterion = torch.nn.CrossEntropyLoss()
 
     def get_next_batch(rank):
-        if rank > 1:
-            rank -= 2
         for _ in range(10):
             num_indices = random.randint(20, 50)
             indices = torch.LongTensor(num_indices).random_(0, NUM_EMBEDDINGS)
@@ -99,7 +96,7 @@ def _run_trainer(emb_rref, rank):
                 batch_size += 1
 
             offsets_tensor = torch.LongTensor(offsets)
-            target = torch.LongTensor(batch_size).random_(8).cuda(rank)
+            target = torch.LongTensor(batch_size).random_(8).cuda(_get_device(rank))
             yield indices, offsets_tensor, target
 
     # Train for 100 epochs
@@ -121,12 +118,16 @@ def _run_trainer(emb_rref, rank):
         print("Training done for epoch {}".format(epoch))
 
 
+def _get_device(x):
+    return x % torch.cuda.device_count()
+
+
 class CombiningDDPWithRpcTest(RpcAgentTestFixture):
 
     @dist_init(setup_rpc=False)
     def test_combining_dpp_with_rpc(self):
-
-        world_size = 4
+        if torch.cuda.is_available() and torch.cuda.device_count() < 2:
+            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
 
         # We need to use different port numbers in TCP init_method for init_rpc and
         # init_process_group to avoid port conflicts.
@@ -138,7 +139,7 @@ class CombiningDDPWithRpcTest(RpcAgentTestFixture):
             rpc.init_rpc(
                 "master",
                 rank=self.rank,
-                world_size=world_size,
+                world_size=self.world_size,
                 rpc_backend_options=rpc_backend_options)
 
             # Build the embedding table on the ps.
@@ -170,7 +171,7 @@ class CombiningDDPWithRpcTest(RpcAgentTestFixture):
             rpc.init_rpc(
                 trainer_name,
                 rank=self.rank,
-                world_size=world_size,
+                world_size=self.world_size,
                 rpc_backend_options=rpc_backend_options)
 
             # Trainer just waits for RPCs from master.
@@ -178,11 +179,10 @@ class CombiningDDPWithRpcTest(RpcAgentTestFixture):
             rpc.init_rpc(
                 "ps",
                 rank=self.rank,
-                world_size=world_size,
+                world_size=self.world_size,
                 rpc_backend_options=rpc_backend_options)
             # parameter server do nothing
             pass
 
         # block until all rpcs finish
         rpc.shutdown()
-
