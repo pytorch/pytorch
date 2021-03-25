@@ -3018,7 +3018,10 @@ def linear(g, input, weight, bias):
 @parse_args('v', 'b', 'i', 'v', 'v', 'v', 'v')
 def hann_window(g, window_length, periodic=True, dtype=None, layout=None, device=None, pin_memory=None, requires_grad=False):
     if dtype is None:
-        dtype = 6   # torch.float
+        dtype = torch.get_default_dtype()
+        if sym_help._dtype_is_fp(dtype) is False:
+            dtype = torch.float
+        dtype = sym_help.scalar_type_to_pytorch_type.index(dtype)
 
     n_array = arange(g, window_length, 4, None, None, None)
     output = g.op('Cast', n_array, to_i=sym_help.cast_pytorch_to_onnx['Float'])
