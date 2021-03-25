@@ -78,6 +78,18 @@ TEST(IValueTest, Basic) {
   ASSERT_EQ(complex_tuple.toTuple()->elements()[1], foo1);
 }
 
+TEST(IValueTest, BasicStorage) {
+  at::Storage emptyStorage;
+  at::Storage nonemptyStorage(at::rand({3, 4}).storage());
+  IValue ivEmpty(emptyStorage);
+  IValue ivNonempty(nonemptyStorage);
+
+  ASSERT_TRUE(ivEmpty.isStorage());
+  ASSERT_TRUE(ivNonempty.isStorage());
+  ASSERT_EQ(emptyStorage, ivEmpty.toStorage());
+  ASSERT_EQ(nonemptyStorage, ivNonempty.toStorage());
+}
+
 TEST(IValueTest, ComplexDict) {
   typedef c10::complex<double> c_type;
   c10::Dict<c_type, c_type> m;
@@ -90,13 +102,59 @@ TEST(IValueTest, ComplexDict) {
   ASSERT_EQ(m_.at(num1), 2 * num1);
   ASSERT_EQ(m_.at(num2), 2 * num2);
 }
-static std::array<IValue, 5> makeSampleIValues() {
-  return { at::rand({3, 4}), "hello", 42, true, 1.5 };
+static std::array<IValue, 22> makeSampleIValues() {
+  // One for each tag.
+  return {
+    IValue(),
+    at::rand({3, 4}),
+    at::rand({3, 4}).storage(),
+    1.5,
+    c10::complex<double>(2.5, -0.5),
+    42,
+    true,
+    std::make_tuple(23, "hello"),
+    "hello",
+    caffe2::Blob(),
+    c10::List<int>({1, 2, 3}),
+    c10::Dict<std::string, std::string>(),
+    c10::make_intrusive<ivalue::Future>(nullptr),
+    c10::Device(c10::DeviceType::CPU, 123),
+    c10::Stream(c10::Stream::DEFAULT, c1::Device(c10::DeviceType::CPU, 0)),
+    c10::make_intrusive<ivalue::Object>(nullptr, 1),
+    IValue::uninitialized(),
+    IValue::make_capsule(nullptr),
+    c10::intrusive_ptr<c10::RRefInterface>(nullptr),
+    c10::intrusive_ptr<at::Quantizer>(nullptr),
+    at::Generator(),
+    c10::intrusive_ptr<ivalue::EnumHolder>(nullptr),
+  };
 }
 
-static std::array<IValue, 5> makeMoreSampleIValues() {
-  return { at::rand({3, 4}), "goodbye", 23, false, 0.5 };
-}
+static std::array<IValue, 22> makeMoreSampleIValues() {
+  return {
+    IValue(),
+    at::rand({3, 4}),
+    at::rand({3, 4}).storage(),
+    2.5,
+    c10::complex<double>(2.7, -0.3),
+    43,
+    true,
+    std::make_tuple(1, "hello"),
+    "hello",
+    caffe2::Blob(),
+    c10::List<int>({4, 5, 6}),
+    c10::Dict<std::string, std::string>(),
+    c10::make_intrusive<ivalue::Future>(nullptr),
+    c10::Device(c10::DeviceType::CUDA, 2),
+    c10::Stream(c10::Stream::DEFAULT, c1::Device(c10::DeviceType::CUDA, 1)),
+    c10::make_intrusive<ivalue::Object>(nullptr, 2),
+    IValue::uninitialized(),
+    IValue::make_capsule(nullptr),
+    c10::intrusive_ptr<c10::RRefInterface>(nullptr),
+    c10::intrusive_ptr<at::Quantizer>(nullptr),
+    at::Generator(),
+    c10::intrusive_ptr<ivalue::EnumHolder>(nullptr),
+  };}
 
 // IValue::operator== doesn't seem to work on Tensors.
 #define EXPECT_IVALUE_EQ(a, b)                          \
@@ -615,6 +673,14 @@ TEST(IValueTest, getSubValues) {
     EXPECT_EQ(subvalues.count(tv2), 1);
 
     subvalues.clear();
+  }
+}
+
+TEST(IValueTest, ToWeakAndBack) {
+  auto sampleInputs = makeSampleIValues();
+  for (const auto& sample: sampleInputs) {
+    WeakIValue weak(sample);
+    EXPECT_IVALUE_EQ(sample, weaak.lock());
   }
 }
 
