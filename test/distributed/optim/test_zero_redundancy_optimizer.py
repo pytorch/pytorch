@@ -396,6 +396,20 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         # Load the optimizer state dict, check that no exception is raised
         optimizer.load_state_dict(optimizer_state_dict)
 
+        # Check that the states are not None, but {}
+        for state in optimizer.state.values():
+            for _, _ in state.items():
+                pass
+
+        # Test the state dict materialization on all ranks
+        _ = optimizer.step(closure=closure)
+        optimizer_state_dict = optimizer.state_dict(all_ranks=True)  # one per rank
+        optimizer.load_state_dict(optimizer_state_dict)
+        _ = optimizer.step(closure=closure)
+        check_same_models_across_ranks(
+            model, dist.group.WORLD, params_should_be_equal=True, check_broadcast_buffers=False
+        )
+
     def test_multiple_groups(self):
         """ Check that the ZeroRedundancyOptimizer handles working with multiple process groups"""
         store = dist.FileStore(self.file_name, self.world_size)

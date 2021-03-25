@@ -237,8 +237,6 @@ class ZeroRedundancyOptimizer(Optimizer):
         # Sync lr and other attributes in case its been updated
         self._sync_param_groups(self.param_groups, self.optim.param_groups)
 
-        empty_messenger = torch.tensor([0], dtype=torch.uint8, device=self._device)
-
         # Pull the sharded state from all the other replicas
         # Store all the states in order, rank by rank
 
@@ -247,51 +245,46 @@ class ZeroRedundancyOptimizer(Optimizer):
         # a possible follow up would be to move all sharded state management to RPC RRef
 
         self._all_states = []
-        for rank in range(self.world_size):
-            global_rank = _get_global_rank(self.group, rank)
+        should_collect_state = self.rank == to or to == -1
+        should_send_state = (self.rank != to and to != -1) or to == -1
 
-            # This rank collects the whole state
-            if self.rank == to:
-                if rank == self.rank:
+        for rank in range(self.world_size):
+            if rank == self.rank:
+                if should_collect_state:
+                    logging.debug("Saving self state")
                     self._all_states.append(
                         _recursive_copy_to_device(
-                            self.local_state_dict(),
-                            non_blocking=True,
-                            device=torch.device("cpu"),
+                            self.optim.state_dict(), non_blocking=True, device=torch.device("cpu")
                         )
                     )
-                else:
-                    # Fetch the optim state from the other replicas
-                    replica_state = _broadcast_object(
-                        empty_messenger,
-                        src_rank=global_rank,
-                        group=self.group,
-                        dist_device=self._device,
-                    )
 
+                # Sync with other replicas
+                state_to_share = (
+                    self.optim.state_dict()
+                    if should_send_state
+                    else torch.tensor([0], dtype=torch.uint8, device=self._default_device)
+                )
+                _broadcast_object(
+                    state_to_share,
+                    src_rank=self.global_rank,
+                    group=self.group,
+                    dist_device=self._default_device,
+                )
+            else:
+                # Fetch the optim state from the other replicas
+                replica_state = _broadcast_object(
+                    torch.tensor([0], dtype=torch.uint8, device=self._default_device),
+                    src_rank=self._local_to_global_rank[rank],
+                    group=self.group,
+                    dist_device=self._default_device,
+                )
+
+                if should_collect_state:
                     self._all_states.append(
                         _recursive_copy_to_device(replica_state, non_blocking=True, device=torch.device("cpu"))
                     )
-            else:
-                # Acknowledge broadcasts, and send this rank's shard when needed
-                # Default to CPU space to gain some memory headroom
-                if rank == self.rank:
-                    # Send the state to the reference replica
-                    _ = _broadcast_object(
-                        self.local_state_dict(),
-                        src_rank=self.global_rank,
-                        group=self.group,
-                        dist_device=self._device,
-                    )
 
-                elif rank != to:
-                    # Discard this tensor/rank, broadcast was being use for compatibility reasons
-                    _ = _broadcast_object(
-                        empty_messenger,
-                        src_rank=global_rank,
-                        group=self.group,
-                        dist_device=self._device,
-                    )
+                logging.debug("State from rank %s received", rank)
 
     def partition_parameters(self) -> List[List[Dict]]:
         r"""
@@ -443,20 +436,39 @@ class ZeroRedundancyOptimizer(Optimizer):
                 from a call to :meth:`state_dict`
         """
 
-        for key, value in state_dict["state"].items():
-            param = self._index_to_param[key]
+        # Update the state, trusting the ordering in param_groups
+        # Apart from the removal of states not owned by this rank, the pytorch logic is kept
+        # (See torch.optim.optimizer)
+        id_map = {
+            old_id: p
+            for old_id, p in zip(
+                chain.from_iterable((g["params"] for g in state_dict["param_groups"])),
+                chain.from_iterable((g["params"] for g in self.param_groups)),
+            )
+        }
 
-            # Populate the sharded optimizer state on the fly
-            if self._param_to_rank[param] != self.rank:
-                state_dict["state"][key] = None
+        _param_list = list(chain.from_iterable((g["params"] for g in self.param_groups)))
+
+        for key, value in state_dict["state"].items():
+            if key in id_map:
+                param = id_map[key]
+
+                # Populate the sharded optimizer state on the fly,
+                # remove the params that this rank does not own
+                if self._param_to_rank[param] != self.rank:
+                    state_dict["state"][key] = {}
+                else:
+                    self.optim.state[param] = _recursive_copy_to_device(value, non_blocking=True, device=param.device)
             else:
+                # Not a param, copied as-is (backward compatibility or exotic optimizers)
+                param = _param_list[key]
                 self.optim.state[param] = _recursive_copy_to_device(value, non_blocking=True, device=param.device)
 
         super().load_state_dict(state_dict)
 
         # Sync with the optimizer param groups
-        ZeroRedundancyOptimizer._sync_param_groups(state_dict["param_groups"], self.param_groups)
-        ZeroRedundancyOptimizer._sync_param_groups(self.param_groups, self.optim.param_groups)
+        self._sync_param_groups(state_dict["param_groups"], self.param_groups)
+        self._sync_param_groups(self.param_groups, self.optim.param_groups)
 
     def local_state_dict(self) -> Dict:
         r"""
@@ -472,8 +484,13 @@ class ZeroRedundancyOptimizer(Optimizer):
         """
         return self.optim.state_dict()
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self, all_ranks: bool = False) -> Dict[str, Any]:
         r"""
+
+        Arguments:
+            all_ranks (bool): materialize the state on all ranks. In that case, `.state_dict()` needs to be called on
+            all ranks
+
         Returns:
             the last known global optimizer state, which consist of a list of
             the shards.
@@ -488,11 +505,15 @@ class ZeroRedundancyOptimizer(Optimizer):
             date, depending on when :meth:`consolidate_state_dict` was last called.
         """
 
-        if len(self._all_states) == 0:
+        if not all_ranks and len(self._all_states) == 0:
             raise RuntimeError(
                 "Optimizer state has not been consolidated on this rank. \
                 Please call `consolidate_state_dict()` on all ranks beforehand if you meant to save the global state"
             )
+
+        if all_ranks:
+            # Consolidate the state on every rank
+            self.consolidate_state_dict(to=-1)
 
         # Unify the shard states and the state that pytorch would expect, given the model.
         # Indexation needs several redirections, since each shard only knows a limited scope of the model
