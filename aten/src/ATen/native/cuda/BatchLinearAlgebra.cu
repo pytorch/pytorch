@@ -2516,14 +2516,28 @@ static void apply_gels(const Tensor& a, Tensor& b, Tensor& infos) {
 #endif
 }
 
+void gels_magma(const Tensor& a, Tensor& b, Tensor& infos) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "gels_magma", [&] {
+    apply_gels<scalar_t>(a, b, infos);
+  });
+}
+
 void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
   (void)rank;  // unused
   (void)singular_values;  // unused
   (void)rcond;  // unused
   (void)driver_name;  // unused
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "linalg_lstsq_cuda", [&] {
-    apply_gels<scalar_t>(a, b, infos);
-  });
+
+  // gels_batched_cublas is faster than gels_magma for a.size(-2) <= 128
+  if (a.size(-2) <= 128) {
+    gels_batched_cublas(a, b, infos);
+  } else {
+#ifndef USE_MAGMA
+    gels_batched_cublas(a, b, infos);
+#else
+    gels_magma(a, b, infos);
+#endif // USE_MAGMA
+  }
 }
 
 REGISTER_DISPATCH(lstsq_stub, &lstsq_kernel);

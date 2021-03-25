@@ -106,6 +106,56 @@ void triangular_solve_batched_cublas(Tensor& A, Tensor& B, Tensor& infos, bool u
   });
 }
 
+template <typename scalar_t>
+inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
+  auto trans = CUBLAS_OP_N;
+  auto m = cuda_int_cast(A.size(-2), "m");
+  auto n = cuda_int_cast(A.size(-1), "n");
+
+  // cuBLAS's requirement
+  TORCH_CHECK(
+    m >= n,
+    "torch.linalg.lstsq: only overdetermined systems (input.size(-2) >= input.size(-1)) are allowed on CUDA with cuBLAS backend.");
+
+  // cuBLAS documentation says:
+  // Matrices Aarray[i] should not overlap; otherwise, undefined behavior is expected.
+  Tensor B_broadcasted, A_broadcasted;
+  std::tie(B_broadcasted, A_broadcasted) = at::native::_linalg_broadcast_batch_dims(B, A, "cusolver_gels_batched", /*check_inputs=*/false);
+
+  // cuBLAS batched trsm requires input to be the device array of pointers to device single matrices
+  Tensor A_ptr_array = get_device_pointers<scalar_t>(A);
+  Tensor B_ptr_array = get_device_pointers<scalar_t>(B);
+  auto A_ptr_array_data = reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr());
+  auto B_ptr_array_data = reinterpret_cast<scalar_t**>(B_ptr_array.data_ptr());
+
+  auto nrhs = cuda_int_cast(B.size(-1), "nrhs");
+  auto batch_size = cuda_int_cast(batchCount(B_broadcasted), "batch_size");
+  auto lda = std::max<int>(1, m);
+  auto ldb = std::max<int>(1, m);
+
+  auto infos_data = infos.data_ptr<int>();
+  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  int info;
+
+  at::cuda::blas::gelsBatched<scalar_t>(
+    handle, trans, m, n, nrhs,
+    A_ptr_array_data, lda,
+    B_ptr_array_data, ldb,
+    &info,
+    infos_data,
+    batch_size);
+
+  // negative info indicates that an argument to gelsBatched call is invalid
+  TORCH_INTERNAL_ASSERT(info == 0);
+}
+
+// This is a type dispatching helper function for 'apply_gels_batched'
+void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "gels_batched_cublas", [&]{
+    apply_gels_batched<scalar_t>(a, b, infos);
+  });
+}
+
 #ifdef USE_CUSOLVER
 
 inline static Tensor column_major_identity_matrix_like(const Tensor& self) {

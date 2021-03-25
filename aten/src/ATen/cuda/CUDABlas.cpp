@@ -999,6 +999,46 @@ void getriBatched<c10::complex<float>>(
       batchsize));
 }
 
+template <>
+void gelsBatched<double>(CUDABLAS_GELS_BATCHED_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDgelsBatched(
+      handle, trans, m, n, nrhs, dA_array, ldda, dC_array, lddc, info, devInfoArray, batchSize));
+}
+
+template <>
+void gelsBatched<float>(CUDABLAS_GELS_BATCHED_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasSgelsBatched(
+      handle, trans, m, n, nrhs, dA_array, ldda, dC_array, lddc, info, devInfoArray, batchSize));
+}
+
+template <>
+void gelsBatched<c10::complex<double>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZgelsBatched(
+      handle, trans,
+      m, n, nrhs,
+      reinterpret_cast<cuDoubleComplex**>(dA_array),
+      ldda,
+      reinterpret_cast<cuDoubleComplex**>(dC_array),
+      lddc,
+      info,
+      devInfoArray,
+      batchSize));
+}
+
+template <>
+void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCgelsBatched(
+      handle, trans,
+      m, n, nrhs,
+      reinterpret_cast<cuComplex**>(dA_array),
+      ldda,
+      reinterpret_cast<cuComplex**>(dC_array),
+      lddc,
+      info,
+      devInfoArray,
+      batchSize));
+}
+
 #endif // CUDART_VERSION
 
 } // namespace blas
