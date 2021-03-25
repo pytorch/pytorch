@@ -721,12 +721,15 @@ void upsample_generic_Nd_kernel_impl(
     // Nearest also supports uint8 tensor, so need to handle it separately
     AT_DISPATCH_FLOATING_TYPES(
         iter.dtype(), "upsample_generic_Nd", [&] {
-        cpu_upsample_generic<scalar_t, out_ndims, interp_size>(iter);
+        // MSVC can not catch constexpr int interp_size here
+        constexpr int mode = F<float>::interp_size;
+        cpu_upsample_generic<scalar_t, out_ndims, mode>(iter);
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte,
         iter.dtype(), "upsample_generic_Nd", [&] {
-        cpu_upsample_generic<scalar_t, out_ndims, interp_size>(iter);
+        constexpr int mode = F<float>::interp_size;
+        cpu_upsample_generic<scalar_t, out_ndims, mode>(iter);
     });
   }
 }
