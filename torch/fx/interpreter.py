@@ -54,12 +54,35 @@ class Interpreter:
 
     Args:
         module (GraphModule): The module to be executed
+        garbage_collect_values (bool): Whether to delete values after their last
+            use within the Module's execution. This ensures optimal memory usage during
+            execution. This can be disabled to, for example, examine all of the intermediate
+            values in the execution by looking at the ``Interpreter.env`` attribute.
     """
-    def __init__(self, module : GraphModule):
+    def __init__(self, module : GraphModule, garbage_collect_values : bool = True):
         assert isinstance(module, GraphModule)
         self.module = module
         self.submodules = dict(self.module.named_modules())
         self.env : Dict[Node, Any] = {}
+
+        self.garbage_collect_values = garbage_collect_values
+
+        if self.garbage_collect_values:
+            # Run through reverse nodes and record the first instance of a use
+            # of a given node. This represents the *last* use of the node in the
+            # execution order of the program, which we will use to free unused
+            # values
+            node_to_last_use : Dict[Node, Node] = {}
+            self.user_to_last_uses : Dict[Node, List[Node]] = {}
+
+            def register_last_uses(n : Node, user : Node):
+                if n not in node_to_last_use:
+                    node_to_last_use[n] = user
+                    self.user_to_last_uses.setdefault(user, []).append(n)
+
+            for node in reversed(self.module.graph.nodes):
+                map_arg(node.args, lambda n: register_last_uses(n, node))
+                map_arg(node.kwargs, lambda n: register_last_uses(n, node))
 
     def run(self, *args, initial_env : Optional[Dict[Node, Any]] = None) -> Any:
         """
@@ -91,6 +114,10 @@ class Interpreter:
                 continue
 
             self.env[node] = self.run_node(node)
+
+            if self.garbage_collect_values:
+                for to_delete in self.user_to_last_uses.get(node, []):
+                    del self.env[to_delete]
 
             if node.op == 'output':
                 output_val = self.env[node]
