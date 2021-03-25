@@ -45,6 +45,34 @@ This document uses the following terminologies:
     A+ indicates a regular expression where term A is repeated at least once
     A* indicates a regular expression where term A is repeated zero or more times
 
+TorchScript Type System Definition
+==================================
+
+::
+
+    TSAllType ::= TSType | TSModuleType
+    TSType ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
+
+    TSMetaType ::= "Any"
+    TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
+
+    TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
+                        TSOptional | TSFuture | TSRRef
+    TSTuple ::= "Tuple" "[" (TSType ",")* TSType "]"
+    TSNamedTuple ::= "namedtuple" "(" (TSType ",")* TSType ")"
+    TSList ::= "List" "[" TSType "]"
+    TSOptional ::= "Optional" "[" TSType "]"
+    TSFuture ::= "Future" "[" TSType "]"
+    TSRRef ::= "RRef" "[" TSType "]"
+    TSDict ::= "Dict" "[" KeyType "," TSType "]"
+    KeyType ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
+
+    TSNominalType ::= TSBuiltinClasses | TSCustomClass | TSEnum
+    TSBuiltinClass ::= TSTensor | "torch.device" | "torch.stream"|
+                    "torch.dtype" | "torch.nn.ModuleList" |
+                    "torch.nn.ModuleDict" | ...
+    TSTensor ::= "torch.tensor" and subclasses
+
 TorchScript Types
 ^^^^^^^^^^^^^^^^^
 
@@ -204,8 +232,7 @@ where
 Compared to Python
 """"""""""""""""""
 
-* Apart from being composable with TorchScript types, these TorchScript structural types often support a common subset of
-the operators and methods of their Python counterparts.
+* Apart from being composable with TorchScript types, these TorchScript structural types often support a common subset of the operators and methods of their Python counterparts.
 
 Example:
 
@@ -587,32 +614,3 @@ The following shows an incorrect usage of module type. Specifically, this exampl
 .. testoutput::
 
     RuntimeError: Could not get name of python class object
-
-Appendix: TorchScript Type System Definition
-============================================
-
-::
-
-    TSAllType ::= TSType | TSModuleType
-    TSType ::= TSMetaType | TSPrimitiveType | TSStructuralType | TSNominalType
-
-    TSMetaType ::= "Any"
-    TSPrimitiveType ::= "int" | "float" | "double" | "complex" | "bool" | "str" | "None"
-
-    TSStructualType ::=  TSTuple | TSNamedTuple | TSList | TSDict |
-                        TSOptional | TSFuture | TSRRef
-    TSTuple ::= "Tuple" "[" (TSType ",")* TSType "]"
-    TSNamedTuple ::= "namedtuple" "(" (TSType ",")* TSType ")"
-    TSList ::= "List" "[" TSType "]"
-    TSOptional ::= "Optional" "[" TSType "]"
-    TSUnion ::= "Union" "[" (TSType ",")* TSType "]"
-    TSFuture ::= "Future" "[" TSType "]"
-    TSRRef ::= "RRef" "[" TSType "]"
-    TSDict ::= "Dict" "[" KeyType "," TSType "]"
-    KeyType ::= "str" | "int" | "float" | "bool" | TensorType | "Any"
-
-    TSNominalType ::= TSBuiltinClasses | TSCustomClass | TSEnum
-    TSBuiltinClass ::= TSTensor | "torch.device" | "torch.stream"|
-                    "torch.dtype" | "torch.nn.ModuleList" |
-                    "torch.nn.ModuleDict" | ...
-    TSTensor ::= "torch.tensor" and subclasses
