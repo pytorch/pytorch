@@ -142,6 +142,8 @@ class TORCH_API TensorExprKernel {
 
   Tensor* computeCatWoConditionals(const torch::jit::Value* v);
 
+  Tensor* computeConv2d(const torch::jit::Value* v);
+
   Tensor* computeValue(const torch::jit::Value* v);
 
   Stmt* transformLoops(BackendType backendType, Stmt* st);

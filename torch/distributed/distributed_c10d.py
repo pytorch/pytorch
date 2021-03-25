@@ -2481,14 +2481,16 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None):
     """
     Synchronizes all processes similar to torch.distributed.barrier, but takes
     a configurable timeout and is able to report ranks that did not pass this
-    barrier within that timeout. If the rank is part of the passed in group, it
-    will not return from monitored_barrier until all processes have successfully
-    synchronized, if not part of the group, will return immediately.
+    barrier within that timeout. Specifically, for non-zero ranks, will block
+    until a send/recv is processed from rank 0. Rank 0 will block until all send
+    /recv from other ranks are processed, and will report failures for ranks
+    that failed to respond in time.
 
-    This collective always blocks processes until the whole group exits this
-    function successfully. Therefore, it can have a performance penalty and
-    should only be used for debugging or scenarios that require full
-    synchronization points on the host-side.
+    This collective will block the process corresponding to rank 0 until the
+    whole group exits the function successfully, making it useful for debugging
+    and synchronizing. However, it can have a performance impact and should only
+    be used for debugging or scenarios that require full synhcronization points
+    on the host-side.
 
     .. note:: Note that this collective is only supported with the GLOO backend.
 
@@ -2499,8 +2501,16 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None):
             If None, the default process group timeout will be used.
 
     Returns:
-        ''None''.
+        ``None``.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> if dist.get_rank() != 1:
+        >>>     dist.monitored_barrier() # Raises exception indicating that
+        >>> # rank 1 did not call into barrier.
     """
+
     # Need to call rank not in group before using the group, otherwise
     # "Invalid process group" error is raised.
     if _rank_not_in_group(group):
