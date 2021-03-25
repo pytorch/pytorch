@@ -439,7 +439,7 @@ WEIGHT_PREPACK_OPS = {
 
 class Quantizer:
     def __init__(self):
-        # mapping from matched node to activation_post_process
+        # mapping from matched node to full qualified path of activation_post_process
         # must be filled before convert
         self.activation_post_process_map: Optional[
             Dict[str, List[str]]] = None
@@ -1260,8 +1260,8 @@ class Quantizer:
 
         return match_map
 
-    def _find_quants(self, graph: Graph, modules: Dict[str, torch.nn.Module], matches: Dict[str, MatchResult])
-    -> Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]]:
+    def _find_quants(self, graph: Graph, modules: Dict[str, torch.nn.Module], matches: Dict[str, MatchResult]) \
+        -> Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]]:
         """
         Takes the nodes in the input graph and pending matches, and finds and
         returns the input and output nodes which need to be quantized.
