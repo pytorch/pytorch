@@ -1969,7 +1969,7 @@ def embedding(
     Shape:
         - Input: LongTensor of arbitrary shape containing the indices to extract
         - Weight: Embedding matrix of floating point type with shape `(V, embedding_dim)`,
-                            where V = maximum index + 1 and embedding_dim = the embedding size
+            where V = maximum index + 1 and embedding_dim = the embedding size
         - Output: `(*, embedding_dim)`, where `*` is the input shape
 
     Examples::
@@ -2079,29 +2079,21 @@ def embedding_bag(
 
 
     Shape:
-
         - :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
 
-          - If :attr:`input` is 2D of shape `(B, N)`,
+            - If :attr:`input` is 2D of shape `(B, N)`, it will be treated as ``B`` bags (sequences)
+              each of fixed length ``N``, and this will return ``B`` values aggregated in a way
+              depending on the :attr:`mode`. :attr:`offsets` is ignored and required to be ``None`` in this case.
 
-            it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
-            this will return ``B`` values aggregated in a way depending on the :attr:`mode`.
-            :attr:`offsets` is ignored and required to be ``None`` in this case.
+            - If :attr:`input` is 1D of shape `(N)`, it will be treated as a concatenation of
+              multiple bags (sequences). :attr:`offsets` is required to be a 1D tensor containing
+              the starting index positions of each bag in :attr:`input`. Therefore, for :attr:`offsets`
+              of shape `(B)`, :attr:`input` will be viewed as having ``B`` bags.
+              Empty bags (i.e., having 0-length) will have returned vectors filled by zeros.
 
-          - If :attr:`input` is 1D of shape `(N)`,
+        - :attr:`weight` (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
 
-            it will be treated as a concatenation of multiple bags (sequences).
-            :attr:`offsets` is required to be a 1D tensor containing the
-            starting index positions of each bag in :attr:`input`. Therefore,
-            for :attr:`offsets` of shape `(B)`, :attr:`input` will be viewed as
-            having ``B`` bags. Empty bags (i.e., having 0-length) will have
-            returned vectors filled by zeros.
-
-        - :attr:`weight` (Tensor): the learnable weights of the module of
-          shape `(num_embeddings, embedding_dim)`
-
-        - :attr:`per_sample_weights` (Tensor, optional). Has the same shape as
-          :attr:`input`.
+        - :attr:`per_sample_weights` (Tensor, optional). Has the same shape as :attr:`input`.
 
         - :attr:`output`: aggregated embedding values of shape `(B, embedding_dim)`
 
