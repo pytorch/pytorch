@@ -309,6 +309,10 @@ class DistributedDataParallel(Module):
                    1) For single-device modules, ``device_ids`` should only
                    contain exactly one device id, which represents the only
                    CUDA device where the input module resides.
+                   Alternatively, if ``None`` is provided, the current device
+                   will be added to ``device_ids``. This requires calling
+                   ``torch.cuda.set_device`` to set the appropriate device
+                   before calling DDP constructor.
                    2) For multi-device modules and CPU modules,
                    ``device_ids`` must be ``None`` or an empty list,
                    and input data for the forward pass must be placed on the
