@@ -13,6 +13,8 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/core/grad_mode.h>
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <functional>
 #include <limits>
@@ -273,10 +275,16 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     return grad;
   }
 
-  const auto w = output * grad;
+  // To enable complex support.
+  // From this line on `input_conj` and output_conj`
+  // are interchangeable with `input` and `output`.
+  auto input_conj = input.conj();
+  auto output_conj = output.conj();
+
+  const auto w = output_conj * grad;
   const auto is_zero = input == 0;
   if (!(is_zero.any().item<uint8_t>())) {
-    return reversed_cumsum(w, dim).div(input);
+    return reversed_cumsum(w, dim).div(input_conj);
   }
 
   // If we are not computing a second order gradient, we can use an
@@ -309,7 +317,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     auto mask = cumsum == 0;
     // equiv to grad_input[mask] = deriv[grad]
     grad_input.masked_scatter_(mask,
-        reversed_cumsum(w.masked_fill(~mask, 0.), dim).div_(input).masked_select(mask));
+        reversed_cumsum(w.masked_fill(~mask, 0.), dim).div_(input_conj).masked_select(mask));
     // select everything from the first zero to the second zero [z1, z2)
     mask = cumsum == 1;
 
@@ -332,10 +340,10 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // relu_() necessary as gather does not support negative indices
     // finally, we do grad_input[z1] = dy_j / dx_z1
     grad_input.masked_scatter_(first_zero_mask,
-                               input.masked_fill(~mask, 1.).cumprod(dim)
+                               input_conj.masked_fill(~mask, 1.).cumprod(dim)
                                     .mul_(grad.masked_fill(cumsum != 1, 0.))
                                     .sum(dim, /*keepdim*/true)
-                                    .mul_(at::gather(output, dim, (first_zero_index - 1).relu_())
+                                    .mul_(at::gather(output_conj, dim, (first_zero_index - 1).relu_())
                                           .masked_fill_(first_zero_index == 0, 1.))
                                     .masked_select(first_zero_mask));
   } else { // GradMode::enabled()
@@ -365,16 +373,16 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     const Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
     Tensor prods_from_k_plus_1;
     Tensor omitted_products;
-    for (int k = 0; k < dim_size; ++k) {
+    for (const auto k : c10::irange(dim_size)) {
       if (k == 0) {
-        prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
+        prods_from_k_plus_1 = at::cumprod(input_conj.slice(dim, k + 1), dim);
         omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
       } else if (k == dim_size - 1) {
-        const Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+        const Tensor prods_until_k = at::prod(input_conj.slice(dim, 0, k), dim, true);
         omitted_products = prods_until_k;
       } else {
-        const Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
-        prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
+        const Tensor prods_until_k = at::prod(input_conj.slice(dim, 0, k), dim, true);
+        prods_from_k_plus_1 = at::cumprod(input_conj.slice(dim, k+1), dim);
         omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
         omitted_products = at::cat({prods_until_k, omitted_products}, dim);
       }
@@ -613,8 +621,8 @@ inline ScalarType get_dtype(const Tensor& self, optional<ScalarType> dtype,
   return src_type;
 }
 
-Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
-                       bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor& sum_out(const Tensor& self, IntArrayRef dim,
+                       bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   ScalarType dtype = get_dtype(result, opt_dtype);
   auto iter = make_reduction("sum", result, self, dim, keepdim, dtype);
   if (iter.numel() == 0) {
@@ -628,22 +636,23 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
 Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::native::sum(self, std::vector<int64_t>{}, false, dtype);
 }
-Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
+
+Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
   ScalarType dtype = get_dtype(self, opt_dtype, true);
   Tensor result = create_reduction_result(self, dim, keepdim, dtype);
-  return at::native::sum_out(result, self, dim, keepdim, dtype);
+  return at::native::sum_out(self, dim, keepdim, dtype, result);
 }
 Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
   return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& sum_out(Tensor& result, const Tensor& self, DimnameList dim,
-                bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor& sum_out(const Tensor& self, DimnameList dim,
+                bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
-Tensor& nansum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
-                       bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor& nansum_out(const Tensor& self, IntArrayRef dim,
+                       bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
   // For integral types, use existing sum as
   // integral types don't have `Nan`.
@@ -665,10 +674,10 @@ Tensor nansum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::native::nansum(self, std::vector<int64_t>{}, false, dtype);
 }
 
-Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
+Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
   ScalarType dtype = get_dtype(self, opt_dtype, true);
   Tensor result = create_reduction_result(self, dim, keepdim, dtype);
-  return at::native::nansum_out(result, self, dim, keepdim, dtype);
+  return at::native::nansum_out(self, dim, keepdim, dtype, result);
 }
 
 static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,
@@ -732,7 +741,7 @@ Tensor prod(const Tensor &self, c10::optional<ScalarType> opt_dtype) {
   return at::native::prod_out_impl(result, self, {}, false, dtype);
 }
 
-Tensor& prod_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor& prod_out(const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype, Tensor& result) {
   return at::native::prod_out_impl(result, self, dim, keepdim, dtype);
 }
 
@@ -740,8 +749,8 @@ Tensor prod(const Tensor& self, Dimname dim, bool keepdim, c10::optional<ScalarT
   return at::prod(self, dimname_to_position(self, dim), keepdim, dtype);
 }
 
-Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
-                 bool keepdim, optional<ScalarType> opt_dtype) {
+Tensor& prod_out(const Tensor& self, Dimname dim,
+                 bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
   return at::prod_out(result, self, dimname_to_position(self, dim), keepdim, opt_dtype);
 }
 
@@ -894,11 +903,11 @@ static inline Tensor _norm(const Tensor &self, const Scalar& p) {
   }
 }
 
-Tensor &norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, ScalarType dtype) {
+Tensor &norm_out(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, ScalarType dtype, Tensor& result) {
   return at::native::norm_out(result, self, p, dim, keepdim, optional<ScalarType>(dtype));
 }
 
-Tensor &norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim) {
+Tensor &norm_out(const Tensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, Tensor& result) {
   return at::native::norm_out(result, self, p, dim, keepdim, c10::nullopt);
 }
 
@@ -1351,10 +1360,10 @@ Tensor var(const Tensor& self, bool unbiased) {
 
 Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
-  return at::native::var_out(result, self, dim, unbiased, keepdim);
+  return at::native::var_out(self, dim, unbiased, keepdim, result);
 }
 
-Tensor& var_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+Tensor& var_out(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim, Tensor& result) {
   return std_var_out(result, self, dim, unbiased, keepdim, false);
 }
 
@@ -1383,10 +1392,10 @@ Tensor std(const Tensor& self, bool unbiased) {
 
 Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
-  return at::native::std_out(result, self, dim, unbiased, keepdim);
+  return at::native::std_out(self, dim, unbiased, keepdim, result);
 }
 
-Tensor& std_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+Tensor& std_out(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim, Tensor& result) {
   return std_var_out(result, self, dim, unbiased, keepdim, true);
 }
 
@@ -1394,7 +1403,7 @@ Tensor std(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
   return  at::std(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
-Tensor& std_out(Tensor& result, const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
+Tensor& std_out(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim, Tensor& result) {
   return at::std_out(result, self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
@@ -1402,7 +1411,7 @@ Tensor var(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
   return  at::var(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
-Tensor& var_out(Tensor& result, const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
+Tensor& var_out(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim, Tensor& result) {
   return at::std_out(result, self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
@@ -1414,11 +1423,11 @@ std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim, bool unb
   return at::std_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
-Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype) {
+Tensor& norm_out(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, ScalarType dtype, Tensor& result) {
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim) {
+Tensor& norm_out(const Tensor& self, const optional<Scalar>& p, DimnameList dim, bool keepdim, Tensor& result) {
   return at::norm_out(result, self, p, dimnames_to_positions(self, dim), keepdim);
 }
 
