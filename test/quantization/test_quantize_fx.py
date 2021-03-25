@@ -1839,6 +1839,43 @@ class TestQuantizeFx(QuantizationTestCase):
             mc = convert_fx(mp)
             mc(torch.rand(4, 1, 4, 4))
 
+    def test_fusion_pattern_unquantized(self):
+        """
+        Ensure that leaving a possible fusion pattern of multiple nodes
+        unquantized runs through the APIs without errors.
+        """
+        class Child(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = torch.add(x, 1.0)
+                x = torch.nn.functional.relu(x)
+                return x
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+                self.conv = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.child(x)
+                x = self.conv(x)
+                return x
+
+        m = Parent().eval()
+        qconfig_dict = {
+            '': torch.quantization.default_qconfig,
+            'module_name': [
+                ('child', None),
+            ],
+        }
+        mp = prepare_fx(m, qconfig_dict)
+        mp(torch.rand(1, 1, 1, 1))
+        mc = convert_fx(mp)
+
     def test_state_dict(self):
         """ Make sure packed params appear in state_dict
         """
