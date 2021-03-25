@@ -1,11 +1,11 @@
 #include <torch/csrc/autograd/python_engine.h>
 
 #include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/PtrWrapper.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -49,6 +49,10 @@ Engine& PythonEngine::get_python_engine() {
   return engine;
 }
 
+#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
+#define IS_PYTHON_3_9_PLUS
+#endif
+
 void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
   // Increment thread usage count before acquiring the GIL
   if (should_increment) {
@@ -57,7 +61,11 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
   // Create a PyThreadState, but release the GIL. This lets pybind11::gil_scoped_acquire calls
   // inside thread_main acquire the GIL without having to create a new
   // PyThreadState each time.
+#ifdef IS_PYTHON_3_9_PLUS
+  auto gil = std::make_unique<pybind11::gil_scoped_acquire>();
+#else
   pybind11::gil_scoped_acquire gil;
+#endif
   pybind11::gil_scoped_release no_gil;
   Engine::thread_init(device, ready_queue, false);
 
@@ -65,6 +73,15 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
     // Decrement the count during shutdown if we incremented earlier.
     decrement_non_reentrant_thread_count();
   }
+
+#ifdef IS_PYTHON_3_9_PLUS
+  // Do not call PyEval_RestoreThread, PyThreadState_[Clear|DeleteCurrent] if runtime is finalizing
+  if (_Py_IsFinalizing()) {
+    no_gil.disarm();
+    // TODO: call disarm rather than leak gil_scoped_acquired once PyThreadState_Clear can safely be called from finalize
+    gil.release();
+  }
+#endif
 }
 
 void PythonEngine::thread_on_exception(
@@ -221,7 +238,12 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
       THPUtils_assert(input_var->cdata.requires_grad(),
           "One of the differentiated Tensors does not require grad");
       if (!grad_fn) {
-        output_edges.emplace_back();
+        // NOTE [ Autograd Unreachable Input ]
+        // Since input has no grad_accumulator, its guaranteed to be unreachable.
+        // We initialize an edge pointing to a non-nullptr Node so nodes in the graph
+        // (e.g., mul when an operand is scalar) that have edges pointing to nullptr
+        // don't get erroneously assigned `needed = True` in exec_info.
+        output_edges.emplace_back(std::make_shared<Identity>(), 0);
       } else {
         output_edges.emplace_back(grad_fn, output_nr);
       }

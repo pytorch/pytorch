@@ -6,6 +6,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <utility>
 
@@ -223,6 +224,8 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
   TORCH_CHECK(
       k > 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
       "selected index k out of range");
+
+  at::assert_no_overlap(self, values);
 
   _reduction_with_indices_allocate_or_resize_output(
       values, indices, self, dim_, keepdim);
@@ -679,10 +682,11 @@ Tensor nanmedian_cpu(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/true);
 }
 
-std::tuple<Tensor&, Tensor&> sort_out_cpu(
+std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
+    c10::optional<bool> stable,
     int64_t dim,
     bool descending) {
   values.resize_(self.sizes()).copy_(self);
@@ -694,19 +698,53 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu(
     return std::forward_as_tuple(values, indices);
   }
 
-  sort_stub(kCPU, values, indices, dim, descending);
+  TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
+  sort_stub(kCPU, values, indices, dim, descending, stable.value());
 
   return std::forward_as_tuple(values, indices);
+}
+
+std::tuple<Tensor&, Tensor&> sort_out_cpu(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t dim,
+    bool descending) {
+  return sort_out_cpu_stable(values, indices, self, /*stable=*/false, dim, descending);
+}
+
+std::tuple<Tensor, Tensor> sort_cpu_stable(
+    const Tensor& self,
+    c10::optional<bool> stable,
+    int64_t dim,
+    bool descending) {
+  TORCH_CHECK(!self.is_complex(), "sort(): input tensor must be of non-complex type");
+  Tensor values = at::empty({0}, self.options());
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  return sort_out_cpu_stable(values, indices, self, stable, dim, descending);
 }
 
 std::tuple<Tensor, Tensor> sort_cpu(
     const Tensor& self,
     int64_t dim,
     bool descending) {
-  Tensor values = at::empty({0}, self.options());
-  Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return sort_out_cpu(values, indices, self, dim, descending);
+  return sort_cpu_stable(self, /*stable=*/false, dim, descending);
 }
+
+Tensor& msort_out(Tensor& values, const Tensor& self) {
+  Tensor indices = at::empty({0}, self.options().dtype(kLong));
+  at::sort_out(values, indices, self, 0, false);
+  return values;
+}
+
+Tensor msort(const Tensor& self) {
+  return std::get<0>(at::sort(self, 0, false));
+}
+
+Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
+  return std::get<1>(at::sort(self, dim, descending));
+}
+
 
 } // namespace native
 } // namespace at

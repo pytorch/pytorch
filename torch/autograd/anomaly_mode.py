@@ -7,9 +7,10 @@ class detect_anomaly(object):
     r"""Context-manager that enable anomaly detection for the autograd engine.
 
     This does two things:
+
     - Running the forward pass with detection enabled will allow the backward
-    pass to print the traceback of the forward operation that created the failing
-    backward function.
+      pass to print the traceback of the forward operation that created the failing
+      backward function.
     - Any backward computation that generate "nan" value will raise an error.
 
     .. warning::
@@ -89,7 +90,7 @@ class set_detect_anomaly(object):
 
     See ``detect_anomaly`` above for details of the anomaly detection behaviour.
 
-    Arguments:
+    Args:
         mode (bool): Flag whether to enable anomaly detection (``True``),
                      or disable (``False``).
 

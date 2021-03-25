@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -147,7 +148,7 @@ Kernel* GpuLower::kernel() const {
 //
 // TODO(kir): this is a interim solution for easing the Kernel IR splitting
 //
-class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
+class TORCH_CUDA_CU_API GpuLower::KernelIrMapper : private OptInConstDispatch {
  public:
   explicit KernelIrMapper(GpuLower* gpu_lower)
       : gpu_lower_(gpu_lower), ir_builder_(gpu_lower->kernel()) {}
