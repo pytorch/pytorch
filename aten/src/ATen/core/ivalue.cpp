@@ -947,17 +947,24 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
   };
 
   auto ctx = std::make_shared<Ctx>(std::move(srcs));
-  std::function<void()> func = [ctx]() {
-    if (--ctx->remaining == 0) {
-      ctx->dstFuture->markCompleted(ctx->asIvalue);
-    }
-  };
   if (ctx->srcFutures.size() == 0) {
     ctx->dstFuture->markCompleted(ctx->asIvalue);
   } else {
     auto typePtr = ctx->srcFutures.get(0)->elementType();
     for (const auto i : c10::irange(ctx->srcFutures.size())) {
-      TORCH_CHECK(i == 0 || *ctx->srcFutures.get(i)->elementType() == *typePtr);
+
+      auto fut = ctx->srcFutures.get(i);
+      std::function<void()> func = [ctx, fut]() {
+        // Set error and exit early if encountered.
+        if (fut->hasError()) {
+          ctx->dstFuture->setErrorIfNeeded(fut->exception_ptr());
+          return;
+        }
+
+        if (--ctx->remaining == 0 && !ctx->dstFuture->completed()) {
+          ctx->dstFuture->markCompleted(ctx->asIvalue);
+        }
+      };
       ctx->srcFutures.get(i)->addCallback(func);
     }
   }
