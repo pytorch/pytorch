@@ -115,12 +115,12 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
 
   int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
-  int64_t nrepeat = nbatch / nsort;
+  int64_t nsegments = nbatch / nsort;
 
   auto segment_id = at::repeat_interleave(
-    at::tensor(nsort, indices.options()).expand(nrepeat));
+    at::tensor(nsort, indices.options()).expand(nsegments));
   int64_t *segment_id_ptr = segment_id.data_ptr<int64_t>();
-  auto orig_indices = at::arange(nsort, indices.options()).repeat({nrepeat});
+  auto orig_indices = at::arange(nsort, indices.options()).repeat({nsegments});
   int64_t *orig_indices_ptr = orig_indices.data_ptr<int64_t>();
 
   auto tmp = at::empty({nbatch}, self_.options());
@@ -136,6 +136,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     int64_t remaining = numel;
     while (remaining > 0) {
       int64_t n = std::min(remaining, nbatch);
+      int64_t segment_bits = static_cast<int64_t>(std::ceil(std::log2(n / nsort)));
       at::cuda::cub::sort_pairs(
         self_ptr, tmp_ptr,
         orig_indices_ptr, orig_indices_tmp_ptr,
@@ -147,11 +148,11 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
       at::cuda::cub::sort_pairs(
         segment_id_tmp_ptr, segment_id_ptr,
         tmp_ptr, values_ptr,
-        n);
+        n, false, 0, segment_bits);
       at::cuda::cub::sort_pairs(
         segment_id_tmp_ptr, segment_id_ptr,
         orig_indices_tmp_ptr, indices_ptr,
-        n);
+        n, false, 0, segment_bits);
       remaining -= n;
       self_ptr += n;
       values_ptr += n;
