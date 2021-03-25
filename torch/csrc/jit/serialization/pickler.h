@@ -179,7 +179,7 @@ class TORCH_API Pickler {
     archive_name_ = archive_name;
   }
 
-  void updateTensorsArchiveTable(std::unordered_map<at::Tensor, std::string, tensor_value_hash, tensor_value_equal> tensors_archive_table) {
+  void updateTensorsArchiveTable(std::unordered_map<at::Tensor, std::pair<std::string, int>, tensor_value_hash, tensor_value_equal> tensors_archive_table) {
     tensors_archive_table_.insert(tensors_archive_table.begin(), tensors_archive_table.end());
   }
 
@@ -295,7 +295,7 @@ class TORCH_API Pickler {
   // similar to ivalues, they are memoized using BINPUT
   std::vector<at::Tensor> tensor_data_;
   at::optional<std::string> archive_name_;
-  std::unordered_map<at::Tensor, std::string, tensor_value_hash, tensor_value_equal> tensors_archive_table_;
+  std::unordered_map<at::Tensor, std::pair<std::string, int>, tensor_value_hash, tensor_value_equal> tensors_archive_table_;
 
   std::unordered_map<const void*, uint32_t> memoized_storage_map_;
 

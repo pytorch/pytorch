@@ -398,14 +398,14 @@ class ScriptModuleSerializer {
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
-    std::unordered_map<at::Tensor, std::string, tensor_value_hash, tensor_value_equal>
+    std::unordered_map<at::Tensor, std::pair<std::string, int>, tensor_value_hash, tensor_value_equal>
         constants_from_jit;
 
     for (size_t i = 0; i < ivalue_constants.size(); i++) {
       if (ivalue_constants[i].isTensor() &&
           constants_from_jit.find(ivalue_constants[i].toTensor()) ==
           constants_from_jit.end()) {
-        constants_from_jit[ivalue_constants[i].toTensor()] = "constants";
+        constants_from_jit[ivalue_constants[i].toTensor()] = std::make_pair("constants", i);
       }
     }
     
@@ -555,7 +555,7 @@ class ScriptModuleSerializer {
   void writeByteCode(
       const Module& module,
       bool save_mobile_debug_info,
-      const std::unordered_map<at::Tensor, std::string, tensor_value_hash, tensor_value_equal>& constants_from_jit) {
+      const std::unordered_map<at::Tensor, std::pair<std::string, int>, tensor_value_hash, tensor_value_equal>& constants_from_jit) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -608,7 +608,7 @@ class ScriptModuleSerializer {
 
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
-  std::unordered_map<at::Tensor, std::string, tensor_value_hash, tensor_value_equal> tensors_archive_table_;
+  std::unordered_map<at::Tensor, std::pair<std::string, int>, tensor_value_hash, tensor_value_equal> tensors_archive_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
   PrintDepsTable class_deps_;
   TypeNameUniquer type_name_uniquer_;

@@ -296,16 +296,15 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // root_key
 
   const auto& found = tensors_archive_table_.find(tensor);
-  at::optional<std::string> archive_name_slash;
-  if(found == tensors_archive_table_.end()) {
-    if (archive_name_.has_value()) {
-      archive_name_slash = archive_name_.value() + "/";
-    }
+  std::string root_key;
+  if(found != tensors_archive_table_.end()) {
+    std::string archive_name_slash = found->second.first + "/";
+    root_key = archive_name_slash + c10::to_string(found->second.second);
   } else {
-    archive_name_slash = found->second + "/";
+    root_key = c10::to_string(tensor_data_.size());
   }
-  const std::string root_key_path = archive_name_slash.has_value() ? archive_name_slash.value() : "";
-  const std::string root_key = root_key_path + c10::to_string(tensor_data_.size());
+//  const std::string root_key_path = archive_name_slash.has_value() ? archive_name_slash.value() : "";
+//  const std::string root_key = root_key_path + c10::to_string(tensor_data_.size());
   pushString(root_key);
   // location
   pushString(tensor.device().str());

@@ -520,10 +520,16 @@ c10::IValue BytecodeDeserializer::readArchive(
       return obj;
     }
   };
-
+  const std::string slash = "/";
   auto read_record = [&](const std::string& name) {
+    std::size_t found = name.find(slash);
     std::stringstream ss;
-    ss << archive_name << "/" << name;
+    if (found == std::string::npos){
+      ss << archive_name << slash << name;
+      return std::get<0>(reader_->getRecord(ss.str()));
+    }
+
+    ss << name;
     return std::get<0>(reader_->getRecord(ss.str()));
   };
 
