@@ -398,7 +398,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: addr
-    Math: math_addr
+    CompositeImplicitAutograd: math_addr
 
 - func: addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
@@ -408,7 +408,7 @@
 - func: addr.out(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: addr_out
-    Math: math_addr_out
+    CompositeImplicitAutograd: math_addr_out
 
 - func: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
   variants: function
@@ -1853,7 +1853,7 @@
 - func: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, int N, int C, int HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU, CUDA: native_group_norm
-    Math: math_group_norm
+    CompositeImplicitAutograd: math_group_norm
 
 - func: native_group_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int N, int C, int HxW, int group, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -2041,7 +2041,7 @@
   dispatch:
     CPU: layer_norm_cpu
     CUDA: layer_norm_cuda
-    Math: math_native_layer_norm
+    CompositeImplicitAutograd: math_native_layer_norm
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -3219,7 +3219,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: silu_backward
-    Math: math_silu_backward
+    CompositeImplicitAutograd: math_silu_backward
 
 - func: sigmoid(Tensor self) -> Tensor
   variants: function, method
@@ -3547,6 +3547,10 @@
 
 - func: square_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
+
+- func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: square_out
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   variants: function, method
@@ -4050,7 +4054,7 @@
   dispatch:
     CPU, CUDA: norm_out
 
-# These four redispatch in their implementation, so OK to be Math
+# These four redispatch in their implementation, so OK to be CompositeImplicitAutograd
 - func: norm.names_ScalarOpt_dim_dtype(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   variants: function, method
 
@@ -8599,6 +8603,18 @@
 #   "special_" underscore and be bound to the desired Python name in
 #   torch/special/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/special.h.
 #   The "special_" names should be hidden from the user and not documented.
+
+- func: special_entr(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    DefaultBackend: special_entr
+
+- func: special_entr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_entr_out
 
 - func: special_gammaln(Tensor self) -> Tensor
   python_module: special
