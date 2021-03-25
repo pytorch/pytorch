@@ -127,6 +127,9 @@ if(NOT DEFINED ENV{PYTORCH_ROCM_ARCH})
 else()
   set(PYTORCH_ROCM_ARCH $ENV{PYTORCH_ROCM_ARCH})
 endif()
+# Copy to other ROCm architecture control variables in the build
+set(GPU_TARGETS ${PYTORCH_ROCM_ARCH} CACHE STRING "GPU targets to compile for")
+set(AMDGPU_TARGETS ${PYTORCH_ROCM_ARCH} CACHE STRING "AMD GPU targets to compile for")
 
 # Add HIP to the CMAKE Module Path
 set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
