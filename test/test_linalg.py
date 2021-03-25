@@ -1476,6 +1476,7 @@ class TestLinalg(TestCase):
                 actual = torch.linalg.cond(input, p)
                 self.assertEqual(actual, expected)
 
+    @skipMeta  # https://github.com/pytorch/pytorch/issues/53739
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)

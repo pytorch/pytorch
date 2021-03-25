@@ -562,7 +562,7 @@
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   variants: function, method
   dispatch:
-    CPU, CUDA: as_strided_tensorimpl
+    CPU, CUDA, Meta: as_strided_tensorimpl
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
   device_guard: False
 
@@ -1540,10 +1540,9 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: resize_
+    CPU, Meta: resize_
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
-    Meta: resize_meta_
 
 - func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
   variants: function
@@ -1681,11 +1680,13 @@
   variants: function, method
   dispatch:
     CPU, CUDA, QuantizedCPU, QuantizedCUDA: fill_
+    Meta: fill_meta_
 
 - func: fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)
   variants: function, method
   dispatch:
     CPU, CUDA, QuantizedCPU, QuantizedCUDA: fill_
+    Meta: fill_meta_
 
 - func: floor(Tensor self) -> Tensor
   variants: function, method
@@ -4829,7 +4830,7 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU, CUDA, QuantizedCPU, QuantizedCUDA: view
+    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: view
     MkldnnCPU: mkldnn_view
 
 # Warning: If you want to change the name or overload name of this

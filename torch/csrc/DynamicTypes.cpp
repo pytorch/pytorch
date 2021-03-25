@@ -60,6 +60,10 @@ at::DeprecatedTypeProperties* get_type(at::Backend backend, at::ScalarType scala
 PyTypeObject* getPyTypeObject(
     const at::Storage& storage,
     const caffe2::TypeMeta dtype) {
+  // TODO: https://github.com/pytorch/pytorch/issues/47442
+  if (storage.device_type() == at::DeviceType::Meta) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings for meta storage objects not supported");
+  }
   at::ScalarType scalarType = at::typeMetaToScalarType(dtype);
   auto attype = &at::getDeprecatedTypeProperties(
       at::dispatchKeyToBackend(c10::computeDispatchKey(scalarType, c10::nullopt, storage.device_type())),

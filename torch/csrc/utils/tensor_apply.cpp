@@ -54,6 +54,9 @@ static void recursive_apply(IntArrayRef sizes, ScalarType scalarType, int64_t di
 }
 
 Tensor & apply_(Tensor & self, PyObject* fn) {
+  if (self.is_meta()) {
+    return self;  // Just skip
+  }
   if (!self.device().is_cpu()) {
     throw TypeError("apply_ is only implemented on CPU tensors");
   }
@@ -63,6 +66,9 @@ Tensor & apply_(Tensor & self, PyObject* fn) {
 }
 
 Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
+  if (self.is_meta()) {
+    return self;  // Just skip
+  }
   if (!self.device().is_cpu()) {
     throw TypeError("map_ is only implemented on CPU tensors");
   }
@@ -78,6 +84,9 @@ Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
 }
 
 Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn) {
+  if (self.is_meta()) {
+    return self;  // Just skip
+  }
   if (!self.device().is_cpu() || !x_.device().is_cpu() || !y_.device().is_cpu()) {
     throw TypeError("map2_ is only implemented on CPU tensors");
   }
