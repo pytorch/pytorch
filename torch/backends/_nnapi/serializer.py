@@ -623,7 +623,7 @@ class _NnapiSerializer(object):
 
     @staticmethod
     def serialize_ints(ints):
-        return struct.pack("i" * len(ints), *ints)
+        return array.array("i", ints).tobytes()
 
     ADDER_MAP = {
         "prim::GetAttr": lambda self, node:
