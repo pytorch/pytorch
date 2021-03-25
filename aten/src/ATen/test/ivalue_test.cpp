@@ -86,8 +86,8 @@ TEST(IValueTest, BasicStorage) {
 
   ASSERT_TRUE(ivEmpty.isStorage());
   ASSERT_TRUE(ivNonempty.isStorage());
-  ASSERT_EQ(emptyStorage, ivEmpty.toStorage());
-  ASSERT_EQ(nonemptyStorage, ivNonempty.toStorage());
+  ASSERT_EQ(emptyStorage.unsafeGetStorageImpl(), ivEmpty.toStorage().unsafeGetStorageImpl());
+  ASSERT_EQ(nonemptyStorage.unsafeGetStorageImpl(), ivNonempty.toStorage().unsafeGetStorageImpl());
 }
 
 TEST(IValueTest, ComplexDict) {
