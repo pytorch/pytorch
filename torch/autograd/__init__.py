@@ -19,6 +19,7 @@ from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function
 from . import functional
+from . import forward_ad
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
@@ -101,7 +102,7 @@ def backward(
         in a user-specified CUDA stream context, see
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
-    Arguments:
+    Args:
         tensors (sequence of Tensor): Tensors of which the derivative will be
             computed.
         grad_tensors (sequence of (Tensor or None)): The "vector" in the Jacobian-vector
@@ -173,7 +174,7 @@ def grad(
         in a user-specified CUDA stream context, see
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
-    Arguments:
+    Args:
         outputs (sequence of Tensor): outputs of the differentiated function.
         inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
             returned (and not accumulated into ``.grad``).
@@ -225,12 +226,11 @@ def grad(
 
 
 # This function applies in case of gradient checkpointing for memory
-# optimization. Currently, for gradient checkpointing, we only support imperative
-# backwards call i.e. torch.autograd.backward() and the torch.autograd.grad() won't
-# work. The reason being that: torch.autograd.grad() only calculates the grads
-# for the inputs that are passed by user but it doesn't calculate grad for
-# anything else e.g. model parameters like weights, bias etc. However, for
-# torch.autograd.backward(), we would actually compute the grad for the weights as well.
+# optimization. Currently, gradient checkpointing is supported only if the
+# execution engine is invoked through torch.autograd.backward() and its
+# inputs argument is not passed. It is not supported for torch.autograd.grad().
+# This is because if inputs are specified, the gradient won't be calculated for
+# anything else e.g. model parameters like weights, bias etc.
 #
 # This function returns whether the checkpointing is valid i.e. torch.autograd.backward
 # or not i.e. torch.autograd.grad. The implementation works by maintaining a thread
@@ -257,3 +257,5 @@ from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, Pro
 if kineto_available():
     from torch._C._autograd import (ProfilerResult, KinetoEvent,
                                     _prepare_profiler, _enable_profiler, _disable_profiler)
+
+from . import profiler

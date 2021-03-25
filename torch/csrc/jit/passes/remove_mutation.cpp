@@ -142,6 +142,13 @@ void MutationRemover::RemoveTensorMutation(Block* block) {
       RemoveTensorMutation(sub_block);
     }
 
+    if (mutation_filter_) {
+      const auto& mutation_filter = *mutation_filter_;
+      if (!mutation_filter(node)) {
+        continue;
+      }
+    }
+
     // TODO: out op variants
     if (!inplaceOpVariant(node)) {
       continue;
@@ -206,8 +213,10 @@ void RemoveListMutation(const std::shared_ptr<Graph>& graph) {
   mr.removeListMutation();
 }
 
-void RemoveTensorMutation(const std::shared_ptr<Graph>& graph) {
-  MutationRemover mr(graph);
+void RemoveTensorMutation(
+    const std::shared_ptr<Graph>& graph,
+    c10::optional<std::function<bool(Node*)>> mutation_filter) {
+  MutationRemover mr(graph, std::move(mutation_filter));
   mr.removeTensorMutation();
 }
 

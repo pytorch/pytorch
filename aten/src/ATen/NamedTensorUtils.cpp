@@ -264,11 +264,11 @@ static std::vector<Dimname> compute_dot_product_outnames(
   }
   std::vector<Dimname> outnames(num_outnames, Dimname::wildcard());
   int64_t index = 0;
-  for (int64_t j = 0; j < tensor_names.size(); ++j) {
+  for (size_t j = 0; j < tensor_names.size(); ++j) {
     if (j == tensor_dotted_dim) continue;
     outnames[index++] = tensor_names[j];
   }
-  for (int64_t j = 0; j < other_names.size(); ++j) {
+  for (size_t j = 0; j < other_names.size(); ++j) {
     if (j == other_dotted_dim) continue;
     outnames[index++] = other_names[j];
   }

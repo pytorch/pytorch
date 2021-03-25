@@ -147,6 +147,6 @@ __device__ T reduceBlockWithNThreadLocalReductions(T *smem,
 void THCCheckTensorDims(THCState* state, THCudaTensor* tensor, int arg);
 
 // Produces a grid with at least one point per tile
-THC_API bool THC_getGridFromTiles(ptrdiff_t gridTiles, dim3& grid);
+TORCH_CUDA_CU_API bool THC_getGridFromTiles(ptrdiff_t gridTiles, dim3& grid);
 
 #endif // THC_REDUCE_APPLY_UTILS_INC

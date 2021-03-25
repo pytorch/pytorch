@@ -16,14 +16,15 @@ import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 from torch.nn.parallel import scatter_gather
-from torch._six import inf, nan, container_abcs
+from torch.utils.checkpoint import checkpoint_sequential
+from torch._six import inf, nan
 
 from test_torch import AbstractTestCases
 
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
-from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
-    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_SANDCASTLE, IS_WINDOWS, \
+from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
+    NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
@@ -281,7 +282,6 @@ class TestCuda(TestCase):
         assert_change(0, empty_cache=True)
         assert_change(0, reset_peak=True)
 
-    @skipIfRocm
     def test_cudart_register(self):
         t = torch.ones(20)
         self.assertFalse(t.is_pinned())
@@ -386,6 +386,35 @@ class TestCuda(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate 8000000000.00 GiB"):
             torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device='cuda')
+
+        # ensure out of memory error doesn't disturb subsequent kernel
+        tensor.fill_(1)
+        self.assertTrue((tensor == 1).all())
+
+    def test_set_per_process_memory_fraction(self):
+        # test invalid fraction value.
+        with self.assertRaisesRegex(TypeError, "Invalid type"):
+            torch.cuda.set_per_process_memory_fraction(int(1))
+        with self.assertRaisesRegex(ValueError, "Invalid fraction value"):
+            torch.cuda.set_per_process_memory_fraction(-0.1)
+        with self.assertRaisesRegex(ValueError, "Invalid fraction value"):
+            torch.cuda.set_per_process_memory_fraction(2.0)
+
+        tensor = torch.zeros(1024, device='cuda')
+        torch.cuda.empty_cache()
+        total_memory = torch.cuda.get_device_properties(0).total_memory
+        torch.cuda.set_per_process_memory_fraction(0.5, 0)
+
+        # test 0.499 allocation is ok.
+        application = int(total_memory * 0.499) - torch.cuda.max_memory_reserved()
+        tmp_tensor = torch.empty(application, dtype=torch.int8, device='cuda')
+        del tmp_tensor
+        torch.cuda.empty_cache()
+
+        application = int(total_memory * 0.5)
+        # it will get OOM when try to allocate more than half memory.
+        with self.assertRaisesRegex(RuntimeError, "out of memory"):
+            torch.empty(application, dtype=torch.int8, device='cuda')
 
         # ensure out of memory error doesn't disturb subsequent kernel
         tensor.fill_(1)
@@ -735,12 +764,6 @@ class TestCuda(TestCase):
             torch.cuda.set_device(1)
         self.assertEqual(x.cuda().get_device(), 0)
 
-    def test_is_tensor(self):
-        for t in types:
-            tensor = get_gpu_type(t)()
-            self.assertTrue(torch.is_tensor(tensor))
-        self.assertTrue(torch.is_tensor(torch.cuda.HalfTensor()))
-
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()
         torch.cuda.synchronize('cuda')
@@ -819,7 +842,6 @@ class TestCuda(TestCase):
                                     "Expected a cuda device, but got: cpu"):
             torch.cuda.default_stream(torch.device('cpu'))
 
-    @skipIfRocm
     @skipCUDANonDefaultStreamIf(True)
     def test_streams(self):
         default_stream = torch.cuda.current_stream()
@@ -1080,8 +1102,6 @@ class TestCuda(TestCase):
             c2p.put(sync_func(self, TestCuda.FIFTY_MIL_CYCLES))
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    # Flaky on the ROCm CI
-    @skipIfRocm
     def test_stream_event_nogil(self):
         for sync_func in [TestCuda._stream_synchronize,
                           TestCuda._event_synchronize,
@@ -1522,7 +1542,6 @@ class TestCuda(TestCase):
         self.assertEqual(before0, after0, atol=0, rtol=0)
         self.assertEqual(before1, after1, atol=0, rtol=0)
 
-    @skipIfRocm
     def test_nvtx(self):
         # Just making sure we can see the symbols
         torch.cuda.nvtx.range_push("foo")
@@ -1789,7 +1808,7 @@ class TestCuda(TestCase):
                     self.assertEqual(b.grad, grad * a)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @unittest.skipIf(not IS_SANDCASTLE, "Does not work on Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE or IS_REMOTE_GPU, "Does not work on Sandcastle")
     def test_cuda_init_race(self):
         # See https://github.com/pytorch/pytorch/issues/16559
         import subprocess
@@ -1805,6 +1824,37 @@ t2 = threading.Thread(target=worker, args=(1,))
 t1.start()
 t2.start()
 """])
+
+    def test_cuda_assert_async(self):
+        with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
+            torch.assert_async(torch.tensor([], device="cuda"))
+        with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with more than one value is ambiguous"):
+            torch.assert_async(torch.tensor([0, 0], device="cuda"))
+
+        torch.assert_async(torch.tensor(1, device="cuda"))
+        torch.assert_async(torch.tensor(0.1, device="cuda"))
+        torch.assert_async(torch.tensor(-0.1, device="cuda"))
+        torch.assert_async(torch.tensor(True, device="cuda"))
+        torch.assert_async(torch.tensor(0 + 0.1j, device="cuda"))
+
+        fail_stmts = [
+            "torch.assert_async(torch.tensor(0, device='cuda'))",
+            "torch.assert_async(torch.tensor(0.0, device='cuda'))",
+            "torch.assert_async(torch.tensor(False, device='cuda'))",
+            "torch.assert_async(torch.tensor(0+ 0 j, device='cuda'))",
+        ]
+
+        import subprocess
+        for stmt in fail_stmts:
+            with self.subTest(stmt=stmt):
+                r = subprocess.call([sys.executable, '-c', f"""\
+import torch
+
+{stmt}
+torch.cuda.synchronize()
+"""])
+                self.assertTrue(r != 0)
+
 
     def test_grad_scaling_unscale(self, dtype=torch.float):
         inv_scale = torch.full((1,), 0.25, dtype=torch.float, device="cuda:0")
@@ -2503,7 +2553,7 @@ t2.start()
         def cast(val, to_type):
             if isinstance(val, torch.Tensor):
                 return val.to(to_type) if val.is_floating_point() else val
-            elif isinstance(val, container_abcs.Iterable):
+            elif isinstance(val, collections.abc.Iterable):
                 return type(val)(cast(v, to_type) for v in val)
             else:
                 return val
@@ -2543,7 +2593,7 @@ t2.start()
             def compare(first, second):
                 if isinstance(first, torch.Tensor):
                     return torch.equal(first, second)
-                elif isinstance(first, container_abcs.Iterable):
+                elif isinstance(first, collections.abc.Iterable):
                     return all(compare(f, s) for f, s in zip(first, second))
                 else:
                     return first == second
@@ -2854,6 +2904,17 @@ t2.start()
                     out = linear(data)
                 self.assertTrue(first_iter_mem == torch.cuda.memory_allocated())
 
+    def test_autocast_checkpointing(self):
+        model = torch.nn.Sequential(torch.nn.Linear(8, 8),
+                                    torch.nn.Linear(8, 8),
+                                    torch.nn.Linear(8, 8)).cuda()
+        input = torch.rand((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
+        with torch.cuda.amp.autocast():
+            output = checkpoint_sequential(model, 2, input)
+        self.assertTrue(output.requires_grad)
+        self.assertTrue(output.dtype is torch.float16)
+        output.sum().backward()
+
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_max_large_axis(self):
@@ -2866,6 +2927,227 @@ t2.start()
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_to_numpy(self):
         self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_capture_simple(self):
+        s1 = torch.cuda.Stream()
+
+        with torch.cuda.stream(s1):
+            a = torch.zeros((1000,), device="cuda")
+            a += 1
+            g = torch.cuda._Graph()
+            g.capture_begin()
+            a += 1
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s1)
+
+        g.replay()
+        g.replay()
+
+        self.assertTrue(a.sum().item() == 3000.)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_rng_functional(self):
+        # The caching allocator isn't yet graph-safe.
+        # In this test, graphed regions try to ensure allocator safety by
+        # stashing references to all temporaries.  This is why we use _fused_dropout
+        # instead of a public dropout API:  _fused_dropout returns the mask temporary
+        # as well as the output, so we can stash references to both.
+        #
+        # TODO:
+        # Switch to public dropout API when the allocator is made graph-safe.
+        ops_with_kwargs = ((torch._fused_dropout, {"p": 0.1}),
+                           (torch.nn.functional.rrelu, {"training": True}),)
+        size = 10000
+
+        def run(op, kwargs):
+            a = torch.randn((size,), device="cuda", dtype=torch.float)
+
+            torch.cuda.manual_seed(5)
+
+            # Control
+            eager_out = a
+            for _ in range(6):
+                out = op(eager_out, **kwargs)
+                # _fused_dropout returns a tuple, rrelu returns a bare tensor.
+                eager_out = out[0] if isinstance(out, tuple) else out
+
+            graph_in = a.clone()
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                # warms up allocator so no mallocs occur in capture
+                refs = ()
+                graph_out = graph_in
+                for _ in range(3):
+                    out = op(graph_out, **kwargs)
+                    refs += tuple(out)
+                    graph_out = out[0] if isinstance(out, tuple) else out
+                del out, refs, graph_out
+
+                torch.cuda.manual_seed(5)
+
+                refs = ()
+                g = torch.cuda._Graph()
+                g.capture_begin()
+                graph_out = graph_in
+                for _ in range(2):
+                    out = op(graph_out, **kwargs)
+                    refs += tuple(out)
+                    graph_out = out[0] if isinstance(out, tuple) else out
+                g.capture_end()
+            torch.cuda.current_stream().wait_stream(stream)
+
+            # Runs a graphed->eager->graphed sequence of RNG ops.
+            # replay() plays 2 invocations of the op, so the sequence has 6
+            # invocations total, matching Control.
+            # replay() reads from graph_in and writes to graph_out.
+            g.replay()
+            out = op(graph_out, **kwargs)
+            out = op(out[0], **kwargs)[0] if isinstance(out, tuple) else op(out, **kwargs)
+            graph_in.copy_(out)
+            g.replay()
+
+            # If replay() updated RNG state correctly, graph_out
+            # should now hold data equal to eager_out.
+            try:
+                self.assertEqual(eager_out, graph_out)
+            except Exception as e:
+                raise RuntimeError("Failed on ", op) from e
+
+            # We hold references to all tensors used across streams up til this sync,
+            # so no need to call record_stream on those tensors.
+            torch.cuda.synchronize()
+
+        for op, kwargs in ops_with_kwargs:
+            run(op, kwargs)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_graph_rng_distributions(self):
+        # The caching allocator isn't yet graph-safe.
+        # In this test, all ops maintain static references to inputs and outputs
+        # that persist across replay(), so they should be safe to test with graphs,
+        # EXCEPT for multinomial which is a complicated compound op.
+        #
+        # TODO:
+        # Uncomment multinomial when the allocator is made graph-safe.
+        size = 10000
+        input = torch.rand((size,), device="cuda", dtype=torch.float)
+        alloc = torch.empty((size,), device="cuda", dtype=torch.float)
+
+        # Torch ops to test with sample args (tuple) and kwargs (dict)
+        torch_with_args = (("bernoulli", (input.clone(),), {}),
+                           # ("multinomial", (input.clone(), size, True), {}),
+                           # ("multinomial", (input.clone(), size // 2, False), {}),
+                           ("normal", (input.clone() + 1, input.clone()), {}),
+                           ("poisson", (input.clone(),), {}),
+                           ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
+                           ("randint", (0, 3, (size,)), {"device": "cuda", "dtype": torch.float}),
+                           ("randn", (size,), {"device": "cuda", "dtype": torch.float}),)
+
+        # Tensor methods to test with sample args (tuple)
+        tensor_with_args = (("bernoulli_", (input.clone(),)),
+                            ("cauchy_", ()),
+                            ("exponential_", ()),
+                            ("geometric_", (0.3,)),
+                            ("log_normal_", ()),
+                            ("normal_", ()),
+                            ("random_", ()),
+                            ("uniform_", ()),)
+
+        def run(module, op, args, kwargs):
+            torch.cuda.manual_seed(5)
+
+            # Each path runs a dummy op to increment the state a bit before creating controls.
+            if (module == "torch"):
+                dummy = getattr(torch, op)(*args, **kwargs)
+                control1 = getattr(torch, op)(*args, **kwargs)
+                control2 = getattr(torch, op)(*args, **kwargs)
+            else:
+                dummy = alloc.clone()
+                control1 = alloc.clone()
+                control2 = alloc.clone()
+                getattr(dummy, op)(*args)
+                getattr(control1, op)(*args)
+                getattr(control2, op)(*args)
+
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                torch.cuda.manual_seed(5)
+
+                g = torch.cuda._Graph()
+                if (module == "torch"):
+                    g.capture_begin()
+                    t1 = getattr(torch, op)(*args, **kwargs)
+                    t2 = getattr(torch, op)(*args, **kwargs)
+                    g.capture_end()
+                else:
+                    t1 = alloc.clone()
+                    t2 = alloc.clone()
+                    g.capture_begin()
+                    getattr(t1, op)(*args)
+                    getattr(t2, op)(*args)
+                    g.capture_end()
+            torch.cuda.current_stream().wait_stream(stream)
+
+            try:
+                self.assertNotEqual(control1, t1)
+                self.assertNotEqual(control2, t2)
+            except Exception as e:
+                raise RuntimeError("Failed on " + module + "." + op) from e
+
+            # Runs a dummy op prelude, as for controls, to make sure replay()
+            # picks up the dummy op's state increment.
+            if module == "torch":
+                dummy = getattr(torch, op)(*args, **kwargs)
+            else:
+                dummy = alloc.clone()
+                getattr(dummy, op)(*args)
+
+            # Runs RNG ops that fill t1 and t2.
+            g.replay()
+
+            try:
+                self.assertEqual(control1, t1)
+                self.assertEqual(control2, t2)
+            except Exception as e:
+                raise RuntimeError("Failed on " + module + "." + op) from e
+
+            # We hold references to all tensors used across streams up til this sync,
+            # so no need to call record_stream on those tensors.
+            torch.cuda.synchronize()
+
+        for op_with_args in torch_with_args:
+            run("torch", *op_with_args)
+
+        for meth_with_args in tensor_with_args:
+            # Adds an empty dict for kwargs, which none of the Tensor methods use
+            run("Tensor", *(meth_with_args + ({},)))
+
+    def test_batch_norm_gather_stats(self):
+        input = torch.randn(1, 3, 3, 3, device='cuda')
+        mean, invstd = torch.batch_norm_gather_stats(
+            input, mean=torch.ones(2, 3, device='cuda'), invstd=torch.ones(2, 3, device='cuda'),
+            running_mean=None, running_var=None  , momentum=.1, eps=1e-5, count=2
+        )
+        self.assertEqual(mean, torch.ones(3, device='cuda'))
+        self.assertEqual(invstd, torch.ones(3, device='cuda'))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
+    def test_cuda_device_memory_allocated(self):
+        from torch.cuda import memory_allocated
+        device_count = torch.cuda.device_count()
+        current_alloc = [memory_allocated(idx) for idx in range(device_count)]
+        x = torch.ones(10, device="cuda:0")
+        self.assertTrue(memory_allocated(0) > current_alloc[0])
+        self.assertTrue(all(memory_allocated(torch.cuda.device(idx)) == current_alloc[idx] for idx in range(1, device_count)))
 
 
 class TestCudaComm(TestCase):
@@ -3250,6 +3532,62 @@ class TestCudaComm(TestCase):
             expected_b = b_tensors_for_gpu[i]
             self.assertEqual(expected_a, x.a)
             self.assertEqual(expected_b, x.b)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
+    def test_gather_namedtuple(self):
+        # tests ability to gather a list of namedtuples and return a namedtuple where each
+        # element is of the expected tensor type.
+        fields = ['a', 'b']
+        TestNamedTupleInput_0 = collections.namedtuple('NamedTuple', fields)
+
+        num_gpus = torch.cuda.device_count()
+        a = torch.rand(num_gpus * 2, device=0)
+        b = torch.rand(num_gpus * 2, device=1)
+        out1 = TestNamedTupleInput_0(a, b)
+
+        a = torch.rand(num_gpus * 2, device=1)
+        b = torch.rand(num_gpus * 2, device=0)
+        out2 = TestNamedTupleInput_0(a, b)
+
+        outputs = [out1, out2]
+
+        out = scatter_gather.gather(outputs, 'cpu')  # test on CPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
+            cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
+            self.assertTrue(torch.equal(x, cat))
+
+        out = scatter_gather.gather(outputs, 0)  # test on GPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
+            self.assertTrue(torch.equal(x, cat))
+
+        class TestNamedTupleInput_1(NamedTuple):
+            a: torch.tensor
+            b: torch.tensor
+
+        a = torch.rand(num_gpus * 2, device=0)
+        b = torch.rand(num_gpus * 2, device=1)
+        out1 = TestNamedTupleInput_1(a, b)
+
+        a = torch.rand(num_gpus * 2, device=1)
+        b = torch.rand(num_gpus * 2, device=0)
+        out2 = TestNamedTupleInput_1(a, b)
+
+        outputs = [out1, out2]
+
+        out = scatter_gather.gather(outputs, 0)  # test on GPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
+            self.assertTrue(torch.equal(x, cat))
+
+        out = scatter_gather.gather(outputs, 'cpu')  # test on CPU
+        for i, x in enumerate(out):
+            self.assertTrue(isinstance(x, type(out2[-1])))
+            cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
+            self.assertTrue(torch.equal(x, cat))
 
 if __name__ == '__main__':
     run_tests()

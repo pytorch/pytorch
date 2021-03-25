@@ -5,6 +5,8 @@ import tempfile
 import os
 import unittest
 
+PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
+
 # This is a very simple smoke test for the functional autograd benchmarking script.
 class TestFunctionalAutogradBenchmark(TestCase):
     def _test_runner(self, model, disable_gpu=False):
@@ -34,6 +36,7 @@ class TestFunctionalAutogradBenchmark(TestCase):
 
 
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows does not have all the features we need.")
+    @unittest.skipIf(PYTORCH_COLLECT_COVERAGE, "Can deadlocks with gcov, see https://github.com/pytorch/pytorch/issues/49656")
     def test_fast_tasks(self):
         fast_tasks = ['resnet18', 'ppl_simple_reg', 'ppl_robust_reg', 'wav2letter',
                       'transformer', 'multiheadattn']
