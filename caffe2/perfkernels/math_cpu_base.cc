@@ -9,6 +9,8 @@
 #include "common.h"
 #include "math.h"
 
+#include <c10/util/irange.h>
+
 using std::uint64_t;
 using std::uint8_t;
 
@@ -32,7 +34,7 @@ void quantize_and_compress__base(
 
   // basic info
   float minimum_element = INFINITY, maximum_element = -INFINITY;
-  for (auto i = 0; i < input_size; ++i) {
+  for (const auto i : c10::irange(input_size)) {
     minimum_element =
         input_data[i] < minimum_element ? input_data[i] : minimum_element;
     maximum_element =
@@ -48,10 +50,10 @@ void quantize_and_compress__base(
   uint8_t max_q = (1 << bitwidth) - 1;
   uint64_t bit_start = 0;
   if (random) {
-    for (int start = 0; start < input_size; start += segment_size) {
+    for (uint64_t start = 0; start < input_size; start += segment_size) {
       uint64_t stride = start + segment_size <= input_size ? segment_size
                                                            : input_size - start;
-      int i = 0;
+      uint64_t i = 0;
       for (; i < stride; ++i) {
         float fval = input_data[start + i];
         float thetimes = (fval - minimum_element) * gap_inverse;
@@ -68,10 +70,10 @@ void quantize_and_compress__base(
       bit_start += bitwidth;
     }
   } else {
-    for (int start = 0; start < input_size; start += segment_size) {
+    for (uint64_t start = 0; start < input_size; start += segment_size) {
       uint64_t stride = start + segment_size <= input_size ? segment_size
                                                            : input_size - start;
-      int i = 0;
+      uint64_t i = 0;
       for (; i < stride; ++i) {
         float fval = input_data[start + i];
         float thetimes = (fval - minimum_element) * gap_inverse;
@@ -135,11 +137,11 @@ void decompress_and_dequantize__base(
   // decoding
   uint64_t bit_start = 0;
   const uint64_t segment_size = input_size - 10;
-  for (int start = 0; start < output_size; start += segment_size) {
+  for (uint64_t start = 0; start < output_size; start += segment_size) {
     uint64_t stride = start + segment_size <= output_size ? segment_size
                                                           : output_size - start;
     uint8_t mask = (1 << bitwidth) - 1;
-    int i = 0;
+    uint64_t i = 0;
     for (; i < stride; ++i) {
       output_data[start + i] =
           ((input_data[10 + i] >> bit_start) & mask) * gap + minimum_element;
