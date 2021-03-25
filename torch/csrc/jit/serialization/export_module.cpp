@@ -138,7 +138,6 @@ std::string getModuleTypeName(const Module& module, const std::string& prefix) {
 std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     const Module& module,
     const Function& func,
-    const std::unordered_map<at::Tensor, at::Tensor, tensor_value_hash, tensor_value_equal>& constants_from_jit,
     bool save_mobile_debug_info = false) {
   auto graph = func.graph()->copy();
 
@@ -238,28 +237,28 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // that we emitted for the converted INTERFACE_CALL nodes above.
   auto constants = code.constant_table();
 
-  std::vector<IValue> deduplicated_constants;
-  for (const auto& constant : constants) {
-    if (constant.isTensor()) {
-      const auto& constant_tensor = constant.toTensor();
-      std::cout << "constant tensor name: " << constant_tensor.toString() << std::endl;
-      const auto found = constants_from_jit.find(constant_tensor);
-      if (found == constants_from_jit.end()) {
-        deduplicated_constants.emplace_back(constant);
-        std::cout << "doesn't exist" << std::endl;
-      } else {
-        at::Tensor t = found->second;
-        deduplicated_constants.emplace_back(t);
-        std::cout << "find one" << std::endl;
-      }
-    } else {
-      deduplicated_constants.emplace_back(constant);
-    }
-  }
+//  std::vector<IValue> deduplicated_constants;
+//  for (const auto& constant : constants) {
+//    if (constant.isTensor()) {
+//      const auto& constant_tensor = constant.toTensor();
+//      std::cout << "constant tensor name: " << constant_tensor.toString() << std::endl;
+//      const auto found = constants_from_jit.find(constant_tensor);
+//      if (found == constants_from_jit.end()) {
+//        deduplicated_constants.emplace_back(constant);
+//        std::cout << "doesn't exist" << std::endl;
+//      } else {
+//        at::Tensor t = found->second;
+//        deduplicated_constants.emplace_back(t);
+//        std::cout << "find one" << std::endl;
+//      }
+//    } else {
+//      deduplicated_constants.emplace_back(constant);
+//    }
+//  }
 
   for (auto& method_name : method_names) {
-//    constants.emplace_back(std::move(method_name));
-    deduplicated_constants.emplace_back(std::move(method_name));
+    constants.emplace_back(std::move(method_name));
+//    deduplicated_constants.emplace_back(std::move(method_name));
   }
 
   // types
@@ -284,19 +283,19 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // register size
   auto register_size = static_cast<int>(code.register_size());
 
-  auto codeTable = Table(
-      {{"instructions", Tup(instructions)},
-       {"operators", Tup(operators)},
-       {"constants", Tup(deduplicated_constants)},
-       {"types", Tup(types)},
-       {"register_size", register_size}});
-
 //  auto codeTable = Table(
 //      {{"instructions", Tup(instructions)},
 //       {"operators", Tup(operators)},
-//       {"constants", Tup(constants)},
+//       {"constants", Tup(deduplicated_constants)},
 //       {"types", Tup(types)},
 //       {"register_size", register_size}});
+
+  auto codeTable = Table(
+      {{"instructions", Tup(instructions)},
+       {"operators", Tup(operators)},
+       {"constants", Tup(constants)},
+       {"types", Tup(types)},
+       {"register_size", register_size}});
 
   // schema
   const auto& schema = func.getSchema();
@@ -366,10 +365,8 @@ void setstateTuple(
       return;
     }
     if (setstate.isGraphFunction()) {
-      std::unordered_map<at::Tensor, at::Tensor, tensor_value_hash, tensor_value_equal>
-          empty_map;
       auto func_tuple =
-          getFunctionTuple(module, setstate, empty_map, save_mobile_debug_info);
+          getFunctionTuple(module, setstate, save_mobile_debug_info);
       elements.push_back(func_tuple.first);
       qn_cache.emplace(qn);
       if (save_mobile_debug_info) {
@@ -394,7 +391,6 @@ void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements, // note: appended to in-place
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
-    const std::unordered_map<at::Tensor, at::Tensor, tensor_value_hash, tensor_value_equal>& constants_from_jit,
     bool save_mobile_debug_info) {
 
   auto methods = module.get_methods();
@@ -406,7 +402,7 @@ void moduleMethodsTuple(
       continue;
     }
     auto func_tuple =
-        getFunctionTuple(module, method.function(), constants_from_jit, save_mobile_debug_info);
+        getFunctionTuple(module, method.function(), save_mobile_debug_info);
     elements.push_back(func_tuple.first);
     qn_cache.emplace(qn);
     if (save_mobile_debug_info) {
@@ -457,14 +453,14 @@ class ScriptModuleSerializer {
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
-    std::unordered_map<at::Tensor, at::Tensor, tensor_value_hash, tensor_value_equal>
+    std::unordered_map<at::Tensor, std::string, tensor_value_hash, tensor_value_equal>
         constants_from_jit;
 
     for (size_t i = 0; i < ivalue_constants.size(); i++) {
       if (ivalue_constants[i].isTensor() &&
           constants_from_jit.find(ivalue_constants[i].toTensor()) ==
           constants_from_jit.end()) {
-        constants_from_jit[ivalue_constants[i].toTensor()] = ivalue_constants[i].toTensor();
+        constants_from_jit[ivalue_constants[i].toTensor()] = "constants";
       }
     }
 //    for(auto it: constants_from_jit) {
@@ -502,9 +498,15 @@ class ScriptModuleSerializer {
           return type_name_uniquer_.getUniqueName(t);
         },
         &memoizedClassTypes);
-    if (archive_name == "bytecode") {
-      std::cout << "writing bytecode" << std::endl;
+//    if (archive_name == "bytecode") {
+//      std::cout << "writing bytecode" << std::endl;
+//      data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
+//    }
+    bool supportTensorsArchiveTable = false;
+    if (!tensors_archive_table_.empty()) {
+      std::cout << "tensors_archive_table_ is not empty, updating" << std::endl;
       data_pickle.updateTensorsArchiveTable(tensors_archive_table_);
+      supportTensorsArchiveTable = true;
     }
     data_pickle.updateArchiveName(archive_name);
     data_pickle.protocol();
@@ -515,12 +517,11 @@ class ScriptModuleSerializer {
     for (const auto& td : data_pickle.tensorData()) {
       WriteableTensorData writable_td = getWriteableTensorData(td);
       std::string fname = prefix + c10::to_string(i++);
-
-      if(archive_name == "bytecode") {
+      if(supportTensorsArchiveTable) {
         const auto found = tensors_archive_table_.find(td);
-      } else if (archive_name == "constants") {
-        tensors_archive_table_[td] = archive_name;
-        writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+        if(found == tensors_archive_table_.end()) {
+          writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
+        }
       } else {
         writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
       }
@@ -528,9 +529,6 @@ class ScriptModuleSerializer {
 
     std::string fname = archive_name + ".pkl";
     writer_.writeRecord(fname, data.data(), data.size());
-//    if(fname == "bytecode.pkl") {
-//      std::cout << "bytcode.pkl data" << data.data() << std::endl;
-//    }
     // serialize all the captured run-time class types
     for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
       convertNamedType(wroteType);
@@ -625,7 +623,7 @@ class ScriptModuleSerializer {
   void writeByteCode(
       const Module& module,
       bool save_mobile_debug_info,
-      const std::unordered_map<at::Tensor, at::Tensor, tensor_value_hash, tensor_value_equal>& constants_from_jit) {
+      const std::unordered_map<at::Tensor, std::string, tensor_value_hash, tensor_value_equal>& constants_from_jit) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -637,8 +635,9 @@ class ScriptModuleSerializer {
     }
 
     moduleMethodsTuple(
-        module, elements, debug_info_elements, constants_from_jit, save_mobile_debug_info);
+        module, elements, debug_info_elements, save_mobile_debug_info);
     auto telements = Tup(std::move(elements));
+    tensors_archive_table_.insert(constants_from_jit.begin(), constants_from_jit.end());
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
@@ -728,11 +727,9 @@ namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   c10::optional<std::vector<c10::IValue>> debug_info_elements;
-  std::unordered_map<at::Tensor, at::Tensor, tensor_value_hash, tensor_value_equal>
-      empty_map;
 
   moduleMethodsTuple(
-      m, elements, debug_info_elements, empty_map, false /* save_mobile_debug_info */);
+      m, elements, debug_info_elements, false /* save_mobile_debug_info */);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
