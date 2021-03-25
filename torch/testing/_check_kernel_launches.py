@@ -4,7 +4,7 @@ import sys
 
 __all__ = [
     "check_code_for_cuda_kernel_launches",
-    "check_kernel_launches",
+    "check_cuda_kernel_launches",
 ]
 
 
