@@ -60,6 +60,7 @@ Memory management
 .. autofunction:: memory_cached
 .. autofunction:: max_memory_cached
 .. autofunction:: reset_max_memory_cached
+.. autofunction:: reset_peak_memory_stats
 
 NVIDIA Tools Extension (NVTX)
 -----------------------------
