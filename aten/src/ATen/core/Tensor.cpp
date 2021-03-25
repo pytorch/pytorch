@@ -60,8 +60,8 @@ int64_t Tensor::output_nr() const {
   return impl::GetVariableHooks()->output_nr(*this);
 }
 
-void Tensor::set_data(const Tensor & new_data) {
-  return impl::GetVariableHooks()->set_data(*this, new_data);
+void Tensor::set_data(const Tensor & new_data) const {
+  impl::GetVariableHooks()->set_data(*this, new_data);
 }
 
 Tensor Tensor::data() const {
@@ -72,8 +72,8 @@ int64_t Tensor::_version() const {
   return impl::GetVariableHooks()->_version(*this);
 }
 
-void Tensor::retain_grad() {
-  return impl::GetVariableHooks()->retain_grad(*this);
+void Tensor::retain_grad() const {
+  impl::GetVariableHooks()->retain_grad(*this);
 }
 
 // View Variables

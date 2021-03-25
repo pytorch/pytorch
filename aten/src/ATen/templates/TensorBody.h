@@ -784,24 +784,26 @@ public:
   /// Remove hook at given position
   void remove_hook(unsigned pos) const;
 
-  // View Variables
+  // Variable methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  /// Returns true if this `Variable` is a view of another `Variable`.
-  bool is_view() const;
 
   bool is_leaf() const;
 
   int64_t output_nr() const;
 
-
-  void set_data(const Tensor & new_data);
+  void set_data(const Tensor & new_data) const;
 
   Tensor data() const;
 
   int64_t _version() const;
 
-  void retain_grad();
+  void retain_grad() const;
+
+  // View Variables
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  /// Returns true if this `Variable` is a view of another `Variable`.
+  bool is_view() const;
 
   /// Returns the `Variable` that this `Variable` is a view of. If this
   /// `Variable` is not a view, throw a `std::runtime_error`.
