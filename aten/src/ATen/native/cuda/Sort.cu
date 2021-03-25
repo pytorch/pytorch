@@ -113,7 +113,10 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     return {values, indices};
   }
 
-  int64_t nrepeat = numel / self_.size(dim);
+  int64_t numel_or_intmax = std::min(numel, static_cast<int64_t>(std::numeric_limits<int>::max()));
+  int64_t nbatch = (numel_or_intmax / nsort) * nsort;
+  int64_t nrepeat = nbatch / nsort;
+
   auto segment_id = at::repeat_interleave(
     at::tensor(nsort, indices.options()).expand(nrepeat));
   int64_t *segment_id_ptr = segment_id.data_ptr<int64_t>();
@@ -130,22 +133,27 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     const scalar_t *self_ptr = self_.data_ptr<scalar_t>();
     scalar_t *tmp_ptr = tmp.data_ptr<scalar_t>();
     auto values_ptr = reinterpret_cast<scalar_t *>(values_ptr_);
-    at::cuda::cub::sort_pairs(
-      self_ptr, tmp_ptr,
-      orig_indices_ptr, orig_indices_tmp_ptr,
-      numel, descending);
-    at::cuda::cub::sort_pairs(
-      self_ptr, tmp_ptr,
-      segment_id_ptr, segment_id_tmp_ptr,
-      numel, descending);
-    at::cuda::cub::sort_pairs(
-      segment_id_tmp_ptr, segment_id_ptr,
-      tmp_ptr, values_ptr,
-      numel);
-    at::cuda::cub::sort_pairs(
-      segment_id_tmp_ptr, segment_id_ptr,
-      orig_indices_tmp_ptr, indices_ptr,
-      numel);
+    int64_t remaining = numel;
+    while (remaining > 0) {
+      int64_t n = std::min(remaining, nbatch);
+      at::cuda::cub::sort_pairs(
+        self_ptr, tmp_ptr,
+        orig_indices_ptr, orig_indices_tmp_ptr,
+        n, descending);
+      at::cuda::cub::sort_pairs(
+        self_ptr, tmp_ptr,
+        segment_id_ptr, segment_id_tmp_ptr,
+        n, descending);
+      at::cuda::cub::sort_pairs(
+        segment_id_tmp_ptr, segment_id_ptr,
+        tmp_ptr, values_ptr,
+        n);
+      at::cuda::cub::sort_pairs(
+        segment_id_tmp_ptr, segment_id_ptr,
+        orig_indices_tmp_ptr, indices_ptr,
+        n);
+      remaining -= n;
+    }
   });
 
   if (values_tmp.defined()) {
