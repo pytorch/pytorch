@@ -3639,10 +3639,12 @@
   dispatch:
     CPU, CUDA: tanh
     QuantizedCPU: tanh_quantized_cpu
+    MkldnnCPU: mkldnn_tanh
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
+    MkldnnCPU: mkldnn_tanh_
     DefaultBackend: tanh_
 
 - func: tanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)

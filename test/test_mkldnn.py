@@ -953,6 +953,18 @@ class TestMkldnn(TestCase):
         torch.sigmoid_(mkldnn_x)
         self.assertEqual(x, mkldnn_x.to_dense())
 
+    def test_tanh(self):
+        x = torch.randn(4, 5, dtype=torch.float32) * 10
+        mkldnn_x = x.to_mkldnn()
+        self.assertEqual(
+            torch.tanh(x),
+            torch.tanh(mkldnn_x).to_dense(),
+        )
+        # inplace
+        torch.tanh_(x)
+        torch.tanh_(mkldnn_x)
+        self.assertEqual(x, mkldnn_x.to_dense())
+
     def _test_serialization(self, module, inputs):
         with TemporaryFileName() as fname:
             torch.jit.save(module, fname)
