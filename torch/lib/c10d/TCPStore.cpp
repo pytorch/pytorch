@@ -70,7 +70,6 @@ void ListenThread::run() {
     if (res == 0) {
       auto rv = WaitForSingleObject(ghStopEvent_, 0);
       if (rv != WAIT_TIMEOUT) {
-          finished = true;
           break;
       }
       continue;
@@ -267,7 +266,6 @@ void TCPStoreDaemon::setHandler(int socket) {
     oldData = tcpStore_.at(key);
   }
   tcpStore_[key] = newData;
-  
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
   // Send key update to all watching clients
@@ -314,7 +312,7 @@ void TCPStoreDaemon::addHandler(int socket) {
   // On "add", wake up all clients that have been waiting
   wakeupWaitingClients(key);
   // Send key update to all watching clients
-  // sendKeyUpdatesToClients(key, oldData, newData);
+  sendKeyUpdatesToClients(key, oldData, newData);
 }
 
 void TCPStoreDaemon::getHandler(int socket) const {
