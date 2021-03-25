@@ -108,6 +108,8 @@ static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
     out << "{";
     if (scalar_tensor.isFloatingPoint()) {
       out << scalar_tensor.toDouble();
+    } else if (scalar_tensor.isComplex()) {
+      out << scalar_tensor.toComplexDouble();
     } else {
       out << scalar_tensor.toLong();
     }
@@ -157,6 +159,13 @@ static void printTypeList(
 
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   switch (kindOf(name)) {
+    case AttributeKind::c:
+      printAttribute(out, c(name));
+      break;
+    case AttributeKind::cs:
+      // TODO(@anjali411): fix this
+      AT_ASSERT(false);
+      break;
     case AttributeKind::f:
       printAttribute(out, f(name));
       break;
@@ -1266,6 +1275,27 @@ void Node::replaceAllUsesWith(Node* n) {
   }
 }
 
+Node* Node::replaceWithNewSymbol(Symbol new_symbol) {
+  WithInsertPoint insert_guard{this};
+  bool had_operator = maybeOperator() != nullptr;
+  auto graph = owningGraph();
+  auto replace_node = graph->insertNode(graph->create(new_symbol, 0));
+  for (Value* v : inputs()) {
+    replace_node->addInput(v);
+  }
+  for (Value* v : outputs()) {
+    auto new_out = replace_node->addOutput()->copyMetadata(v);
+    v->replaceAllUsesWith(new_out);
+  }
+  replace_node->copyMetadata(this);
+  TORCH_INTERNAL_ASSERT(
+      (replace_node->maybeOperator() != nullptr) == had_operator,
+      "invalid symbol replacement:",
+      new_symbol,
+      kind());
+  return replace_node;
+}
+
 Value* Node::insertInput(size_t i, Value* value) {
   AT_ASSERT(graph_ == value->owningGraph());
   op_ = nullptr;
@@ -1778,11 +1808,13 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
     elem_ty = 1;
   } else if (ptr == BoolType::get()) {
     elem_ty = 2;
+  } else if (ptr == ComplexType::get()) {
+    elem_ty = 3;
   } else {
     TORCH_CHECK(
         false,
         ptr->repr_str(),
-        " is not one of the supported element types for tolist: int, float, bool");
+        " is not one of the supported element types for tolist: int, float, complex, bool");
   }
 
   // Pass in the number of dimensions and base element type as arguments
