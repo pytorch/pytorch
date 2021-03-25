@@ -961,5 +961,14 @@ class TestIndexing(TestCase):
         self.assertIn(Tensor.__setitem__, triggered)
         self.assertEqual(t, torch.tensor([5]))
 
+
+class TestIterator(TestCase):
+    def test_iterator(self):
+        t = torch.tensor([5, 6, 7]).as_subclass(SubTensor2)
+        it = iter(t)
+        self.assertIs(type(next(it)), SubTensor2)
+        self.assertIs(type(next(it)), SubTensor2)
+        self.assertIs(type(next(it)), SubTensor2)
+
 if __name__ == '__main__':
     run_tests()
