@@ -51,16 +51,78 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
     },
 
     "Pointwise": {
-        "Math": {
-            "add": {
-                "Tensor-Scalar": GroupedStmts(
-                    r"x += 1.0",
-                    r"x += 1.0;",
-                    setup=Setup.GENERIC.value,
-                ),
-            },
-        },
+        "Math": GroupedVariants(*parse_stmts(r"""
+            Python                                   | C++
+            ---------------------------------------- | ----------------------------------------
+            # @setup                                 | // @setup
+            torch.manual_seed(138_10_23)             | torch::manual_seed(1381023);
+            x = torch.rand((4, 4))                   | auto x = torch::rand({4, 4});
+            y_float = torch.ones((4, 4))             | auto y_float = torch::ones({4, 4});
+            y_vector = torch.ones((4, 1))            | auto y_vector = torch::ones({4, 1});
+            y_int = torch.ones(                      | auto y_int = torch::ones({4, 4}, at::kInt);
+                (4, 4), dtype=torch.int32)           |
+                                                     |
+            # @add                                   | // @add
+            x += 1.0                                 | x += 1;
+            x += y_float                             | x += y_float;
+            x += y_vector                            | x += y_vector;
+            x += y_int                               | x += y_int;
+            x + y_float                              | x + y_float;
+                                                     |
+            # @multiply                              | // @multiply
+            x *= 1.0                                 | x *= 1;
+            x *= y_float                             | x *= y_float;
+            x *= y_vector                            | x *= y_vector;
+            x *= y_int                               | x *= y_int;
+            x * y_float                              | x * y_float;
+                                                     |
+            # @equality                              | // @equality
+            x == y_float                             | x == y_float;
+            x == 1.0                                 | x == 1.0;
+        """)),
+
+        "Data movement": GroupedVariants(*parse_stmts(r"""
+            Python                                   | C++
+            ---------------------------------------- | ----------------------------------------
+            # @setup                                 | // @setup
+            x = torch.ones((4, 4))                   | auto x = torch::ones({4, 4});
+            y = torch.ones((4, 4))                   | auto y = torch::ones({4, 4});
+                                                     |
+            # @contiguous (trivial)                  | // @contiguous (trivial)
+            x.contiguous()                           | x.contiguous();
+                                                     |
+            # @contiguous (non-trivial)              | // @contiguous (non-trivial)
+            x.t().contiguous()                       | x.t().contiguous();
+                                                     |
+            # @clone                                 | // @clone
+            x.clone()                                | x.clone();
+                                                     |
+            # @copy_                                 | // @copy_
+            x.copy_(y)                               | x.copy_(y);
+                                                     |
+            # @zero_                                 | // @zero_
+            x.zero_()                                | x.zero_();
+                                                     |
+            # @RNG                                   | // @RNG
+            x.uniform_()                             | x.uniform_();
+        """)),
     },
+
+    "Reduction": GroupedVariants(*parse_stmts(r"""
+        Python                                   | C++
+        ---------------------------------------- | ----------------------------------------
+        # @setup                                 | // @setup
+        x = torch.ones((4, 4))                   | auto x = torch::ones({4, 4});
+                                                 |
+        # @max                                   | // @max
+        x.max()                                  | x.max();
+                                                 |
+        # @sum                                   | // @sum
+        x.sum()                                  | x.sum();
+                                                 |
+        # @variance                              | // @variance
+        x.var(0)                                 | x.var(0);
+    """)),
 
     "Indexing": GroupedVariants(*parse_stmts(r"""
         Python                                   | C++
@@ -97,14 +159,57 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
         x[True] = y[True]                        | x.index_put_({true}, y.index({true}));
     """)),
 
+    "Metadata and views": GroupedVariants(*parse_stmts(r"""
+        Python                                   | C++
+        ---------------------------------------- | ----------------------------------------
+        # @setup                                 | // @setup
+        x = torch.ones((4, 4))                   | auto x = torch::ones({4, 4});
+                                                 |
+        # @size                                  | // @size
+        x.size()[0]                              | x.sizes()[0];
+                                                 |
+        # @stride                                | // @stride
+        x.stride(0)                              | x.stride(0);
+                                                 |
+        # @as_strided                            | // @as_strided
+        torch.as_strided(x, (2, 3), (4, 1), 2)   | torch::as_strided(x, {2, 3}, {4, 1}, 2);
+                                                 |
+        # @select                                | // @select
+        x.select(1, 1)                           | x.select(1, 1);
+                                                 |
+        # @unsqueeze                             | // @unsqueeze
+        x.unsqueeze(0)                           | x.unsqueeze(0);
+                                                 |
+        # @view                                  | // @view
+        x.view(-1, 1)                            | x.view({-1, 1});
+    """)),
+
     "nn Modules": {
-        "Linear": GroupedModules(
-            "model = torch.nn.Linear(4, 2)",
-            "auto model = torch::nn::Linear(4, 2);",
-            setup=Setup.TRIVIAL_4D.value,
+        py_constructor.split("(")[0]: GroupedModules(
+            f"model = torch.nn.{py_constructor}",
+            f"auto model = torch::nn::{cpp_constructor};",
+            setup=setup.value,
             signature="f(x) -> y",
-            torchscript=True,
-        ),
+            torchscript=torchscript,
+        )
+
+        for setup, torchscript, (py_constructor, cpp_constructor) in (
+            (Setup.TRIVIAL_4D, True, ("BatchNorm2d(4)",) * 2),
+            (Setup.TRIVIAL_4D, True, ("GroupNorm(2, 4)",) * 2),
+            (Setup.TRIVIAL_4D, True, (
+                "LayerNorm(4)",
+                "LayerNorm(torch::nn::LayerNormOptions({4}))"
+            )),
+            (Setup.TRIVIAL_3D, True, ("Conv1d(4, 4, 1)",) * 2),
+            (Setup.TRIVIAL_4D, True, ("Conv2d(4, 4, 1)",) * 2),
+            (Setup.TRIVIAL_4D, True, ("MaxPool2d(2)",) * 2),
+            (Setup.TRIVIAL_2D, True, ("ReLU()",) * 2),
+            (Setup.TRIVIAL_2D, True, ("Sigmoid()",) * 2),
+            (Setup.TRIVIAL_4D, True, ("Linear(4, 2)",) * 2),
+
+            # TODO: LSTM can't be TorchScript'd
+            (Setup.TRIVIAL_3D, False, ("LSTM(4, 2)",) * 2),
+        )
     },
 
     "training": {
