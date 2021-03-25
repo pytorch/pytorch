@@ -345,14 +345,14 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   const std::string& name(const Tensor&) const override;
   bool is_leaf(const Tensor&) const override;
   int64_t output_nr(const Tensor&) const override;
-  void set_data(Tensor & self, const Tensor & new_data) const override;
+  void set_data(const Tensor & self, const Tensor & new_data) const override;
   Tensor data(const Tensor & self) const override;
   int64_t _version(const Tensor & self) const override;
-  void retain_grad(Tensor & self) const override;
+  void retain_grad(const Tensor & self) const override;
   void _backward(const Tensor& self, at::TensorList inputs,
     const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph,
     bool create_graph) const override;
-  Tensor& requires_grad_(Tensor& self, bool _requires_grad) const override;
+  Tensor& requires_grad_(const Tensor& self, bool _requires_grad) const override;
 };
 
 VariableHooks variableHooks;
@@ -391,7 +391,7 @@ int64_t VariableHooks::output_nr(const Tensor & self) const {
   }
 }
 
-void VariableHooks::set_data(Tensor & self, const Tensor & new_data) const {
+void VariableHooks::set_data(const Tensor & self, const Tensor & new_data) const {
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
   // tensor type.
@@ -433,7 +433,7 @@ int64_t VariableHooks::_version(const Tensor & self) const {
   return self.unsafeGetTensorImpl()->version_counter().current_version();
 }
 
-void VariableHooks::retain_grad(Tensor & self) const {
+void VariableHooks::retain_grad(const Tensor & self) const {
   TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
   if (self.is_leaf()) {  // no-op for leaves
     return;
@@ -477,13 +477,13 @@ void VariableHooks::_backward(
   torch::autograd::backward({self}, {_gradient}, keep_graph, create_graph, input_vars);
 }
 
-Tensor& VariableHooks::requires_grad_(Tensor& self, bool _requires_grad) const {
+Tensor& VariableHooks::requires_grad_(const Tensor& self, bool _requires_grad) const {
   if (!self.is_leaf() && !_requires_grad) {
     throw std::runtime_error(
       autograd::utils::requires_grad_leaf_error(_requires_grad)
     );
   }
-  return self.set_requires_grad(_requires_grad);
+  return const_cast<Tensor&>(self).set_requires_grad(_requires_grad);
 }
 
 // Backward View Variables

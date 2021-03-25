@@ -9,35 +9,35 @@ namespace at {
 namespace native {
 
 void _backward(const Tensor& self, TensorList inputs, const c10::optional<Tensor>& gradient_opt, c10::optional<bool> keep_graph, bool create_graph) {
-  return self._backward(inputs, gradient_opt, keep_graph, create_graph);
+  AT_ERROR("backward is not implemented for Tensor");
 }
 
 void set_data(Tensor& self, const Tensor& new_data) {
-  return self.set_data(new_data);
+  AT_ERROR("set_data is not implemented for Tensor");
 }
 
 Tensor data(const Tensor& self) {
-  return self.data();
+  AT_ERROR("data is not implemented for Tensor");
 }
 
 bool is_leaf(const Tensor& self) {
-  return self.is_leaf();
+  AT_ERROR("is_leaf is not implemented for Tensor");
 }
 
 int64_t output_nr(const Tensor& self) {
-  return self.output_nr();
+  AT_ERROR("output_nr is not implemented for Tensor");
 }
 
 int64_t _version(const Tensor& self) {
-  return self._version();
+  AT_ERROR("version is not implemented for Tensor");
 }
 
 Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
-  return self.requires_grad_(_requires_grad);
+  AT_ERROR("requires_grad_ is not implemented for Tensor");
 }
 
 void retain_grad(Tensor& self) {
-  return self.retain_grad();
+  AT_ERROR("retain_grad is not implemented for Tensor");
 }
 
 Tensor _fw_primal(const Tensor& self, int64_t level) {

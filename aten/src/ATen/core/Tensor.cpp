@@ -60,8 +60,8 @@ int64_t Tensor::output_nr() const {
   return impl::GetVariableHooks()->output_nr(*this);
 }
 
-void Tensor::set_data(const Tensor & new_data) {
-  return impl::GetVariableHooks()->set_data(*this, new_data);
+void Tensor::set_data(const Tensor & new_data) const {
+  impl::GetVariableHooks()->set_data(*this, new_data);
 }
 
 Tensor Tensor::data() const {
@@ -72,8 +72,8 @@ int64_t Tensor::_version() const {
   return impl::GetVariableHooks()->_version(*this);
 }
 
-void Tensor::retain_grad() {
-  return impl::GetVariableHooks()->retain_grad(*this);
+void Tensor::retain_grad() const {
+  impl::GetVariableHooks()->retain_grad(*this);
 }
 
 void Tensor::_backward(TensorList inputs,
@@ -83,7 +83,7 @@ void Tensor::_backward(TensorList inputs,
   return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
 }
 
-Tensor& Tensor::requires_grad_(bool _requires_grad) {
+Tensor& Tensor::requires_grad_(bool _requires_grad) const {
   return impl::GetVariableHooks()->requires_grad_(*this, _requires_grad);
 }
 
