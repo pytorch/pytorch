@@ -2475,13 +2475,13 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   TORCH_CHECK(info == 0, "MAGMA lu_solve : invalid argument: ", -info);
   return self_working_copy;
 }
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cuda(
-    const Tensor& a, const Tensor& b, double cond, c10::optional<std::string> driver_name) {
+
+Tensor& _lstsq_helper_cuda(
+  Tensor& b, Tensor& rank, Tensor& singular_values, const Tensor& a, double cond, std::string driver_name) {
 #ifndef USE_MAGMA
-AT_ERROR("torch.linalg.lstsq: MAGMA library not found in "
+TORCH_CHECK(false, "torch.linalg.lstsq: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "torch.linalg.lstsq_cuda", [&] {
@@ -2507,12 +2507,9 @@ AT_ERROR("torch.linalg.lstsq: MAGMA library not found in "
       }
     );
   });
-
-  Tensor rank, singular_values;
-  return std::make_tuple(b, rank, singular_values);
+  return b;
 #endif
 }
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 }}  // namespace at::native
 

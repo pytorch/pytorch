@@ -2394,8 +2394,9 @@ std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tenso
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 #ifdef USE_LAPACK
-template<class scalar_t, class value_t, class func_t>
+template <class scalar_t, class value_t, class func_t>
 struct LapackLstsqHelper {
   using self_type = LapackLstsqHelper;
 
@@ -2431,13 +2432,13 @@ struct LapackLstsqHelper {
   Tensor jpvt;
   int* jpvt_ptr = nullptr;
   value_t rcond;
-  Tensor rank, rank_1d;
   int rank_opt;
+  int64_t* rank_data = nullptr;
   int64_t* rank_working_ptr = nullptr;
   Tensor rwork;
   value_t rwork_opt; // used to decide the opt `rwork` size with lwork=-1
   value_t* rwork_ptr = &rwork_opt;
-  Tensor s, s_2d;
+  value_t* s_data = nullptr;
   value_t* s_working_ptr = nullptr;
   Tensor iwork;
   int iwork_opt; // used to decide the opt `iwork` size with lwork=-1
@@ -2468,7 +2469,7 @@ struct LapackLstsqHelper {
   }
   self_type& set_ldb(int ldb) { this->ldb = ldb; return *this; }
   self_type& set_work() {
-    lwork = static_cast<int>(real_impl<scalar_t, value_t>(work_opt));
+    lwork = std::max<int>(1, real_impl<scalar_t, value_t>(work_opt));
     work = at::empty({lwork}, scalar_type);
     work_ptr = work.data_ptr<scalar_t>();
     return *this;
@@ -2483,17 +2484,12 @@ struct LapackLstsqHelper {
     return *this;
   }
   self_type& set_rcond(double cond) { this->rcond = static_cast<value_t>(cond); return *this; }
-  self_type& set_rank() {
+  self_type& set_rank(Tensor& rank) {
     // only `?gels` is not rank-revealing
     if (LapackLstsqDriverType::Gels != driver_type) {
-      if (!batch_shape.size()) {
-        rank = at::empty({}, at::kLong);
-      }
-      else {
-        rank = at::empty(batch_shape, at::kLong);
-      }
-      rank_1d = rank.view({-1});
-      rank_working_ptr = rank.data_ptr<int64_t>();
+      TORCH_INTERNAL_ASSERT(rank.sizes().equals(batch_shape));
+      rank_data = rank.data_ptr<int64_t>();
+      rank_working_ptr = rank_data;
     }
     return *this;
   }
@@ -2514,30 +2510,30 @@ struct LapackLstsqHelper {
         break;
       // case LapackLstsqDriverType::Gelsd:
       default:
-        rwork_len = static_cast<int64_t>(rwork_opt);
+        rwork_len = std::max<int64_t>(1, rwork_opt);
     }
     rwork = at::empty({rwork_len}, c10::toValueType(scalar_type));
     rwork_ptr = rwork.data_ptr<value_t>();
     return *this;
   }
-  self_type& set_s() {
+  self_type& set_s(Tensor& singular_values) {
     // `?gelsd` and `?gelss` are SVD-based
     // so we can extract singular values from them.
     if (LapackLstsqDriverType::Gelsd == driver_type
       || LapackLstsqDriverType::Gelss == driver_type) {
       auto s_shape = batch_shape.vec();
       s_shape.push_back(std::min(m, n));
-      s = at::empty(s_shape, c10::toValueType(scalar_type));
-      s_working_ptr = s.data_ptr<value_t>();
-      s_stride = s.size(-1);
-      s_2d = s.view({-1, std::min(m, n)});
+      TORCH_INTERNAL_ASSERT(singular_values.sizes().equals(s_shape));
+      s_data = singular_values.data_ptr<value_t>();
+      s_working_ptr = s_data;
+      s_stride = singular_values.size(-1);
     }
     return *this;
   }
   self_type& set_iwork() {
     // handle `iwork` workspace array (relevant only for `?gelsd`)
     if (LapackLstsqDriverType::Gelsd == driver_type) {
-      iwork = at::empty({iwork_opt}, at::kInt);
+      iwork = at::empty({std::max<int>(1, iwork_opt)}, at::kInt);
       iwork_ptr = iwork.data_ptr<int>();
     }
     return *this;
@@ -2581,12 +2577,8 @@ struct LapackLstsqHelper {
     // Designed to be used with the `batch_iterator_with_broadcasting` method.
     this->a_working_ptr = a_working_ptr;
     this->b_working_ptr = b_working_ptr;
-    rank_working_ptr = rank_working_ptr
-      ? rank_1d.select(0, a_linear_batch_idx).template data_ptr<int64_t>()
-      : nullptr;
-    s_working_ptr = s_working_ptr
-      ? s_2d.select(0, a_linear_batch_idx).template data_ptr<value_t>()
-      : nullptr;
+    rank_working_ptr = rank_working_ptr ? &rank_data[a_linear_batch_idx] : nullptr;
+    s_working_ptr = s_working_ptr ? &s_data[a_linear_batch_idx * s_stride] : nullptr;
     return *this;
   }
 };
@@ -2601,10 +2593,10 @@ struct LapackLstsqDriverTypeHash {
 };
 #endif
 
-std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cpu(
-    const Tensor& a, const Tensor& b, double cond, c10::optional<std::string> driver_name) {
+Tensor& _lstsq_helper_cpu(
+    Tensor& b, Tensor& rank, Tensor& singular_values, const Tensor& a, double cond, std::string driver_name) {
 #ifndef USE_LAPACK
-  AT_ERROR("torch.linalg.lstsq: LAPACK library not found in compilation");
+  TORCH_CHECK(false, "torch.linalg.lstsq: LAPACK library not found in compilation");
 #else
 
   static auto driver_string_to_type = std::unordered_map<std::string, LapackLstsqDriverType>({
@@ -2613,12 +2605,7 @@ std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cpu(
     {"gelsd", LapackLstsqDriverType::Gelsd},
     {"gelss", LapackLstsqDriverType::Gelss}
   });
-  // driver_name is never nullopt for CPU
-  auto driver_str = driver_name.value();
-  auto driver_type = driver_string_to_type[driver_str];
-
-  Tensor rank;
-  Tensor singular_values;
+  auto driver_type = driver_string_to_type[driver_name];
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "torch.linalg.lstsq_cpu", [&] {
     using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -2647,8 +2634,8 @@ std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cpu(
       .set_ldb(std::max<int64_t>(1, std::max(m, n)))
       .set_jpvt()
       .set_rcond(cond)
-      .set_rank()
-      .set_s()
+      .set_rank(rank)
+      .set_s(singular_values)
       .call_driver() // initial call to deduce optimal sizes for workspace arrays
       .set_work()
       .set_rwork()
@@ -2673,12 +2660,8 @@ std::tuple<Tensor, Tensor, Tensor> _lstsq_helper_cpu(
         singleCheckErrors(driver_helper.info, "torch.linalg.lstsq_cpu");
       }
     );
-
-    rank = driver_helper.rank;
-    singular_values = driver_helper.s;
   });
-
-  return std::make_tuple(b, rank, singular_values);
+  return b;
 #endif
 }
 
@@ -2785,11 +2768,19 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     ? cond.value()
     : _get_epsilon(c10::toValueType(self.scalar_type()));
 
-  Tensor x, residuals, rank, singular_values;
+  auto batch_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend() - 2);
+  Tensor rank = at::empty(batch_shape, self.options().dtype(at::kLong));
+
+  auto singular_values_shape = batch_shape.vec();
+  singular_values_shape.push_back(std::min(m, n));
+  auto real_dtype = c10::toValueType(self.scalar_type());
+  Tensor singular_values = at::empty(singular_values_shape, self.options().dtype(real_dtype));
+
+  Tensor x, residuals;
+
   // path if neither `self` nor `b` is empty
   if (self.numel() && b.numel()) {
-    std::tie(x, rank, singular_values) =
-      at::_lstsq_helper(self_working_copy, b_working_copy, rcond, driver_opt);
+    x = at::_lstsq_helper(b_working_copy, rank, singular_values, self_working_copy, rcond, driver_opt.value());
     if (m > n && driver_opt.value() != "gelsy") {
       residuals = x.narrow(-2, n, std::max(m, n) - n).abs().pow_(2).sum(-2);
     }
@@ -2829,12 +2820,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
 
   // Numpy and Scipy always return ranks for empty matrices,
   // even for drivers which are not rank-revealing.
-  auto batch_sizes = IntArrayRef(self.sizes().data(), self.dim() - 2);
   if (self.numel()) {
     rank = return_empty_if_undefined(rank, at::kLong);
   }
   else {
-    rank = at::zeros(batch_sizes, self.options().dtype(at::kLong));
+    rank = at::zeros(batch_shape, self.options().dtype(at::kLong));
   }
 
   // undefined residuals could only be an empty Tensor of shape (0)
@@ -2844,7 +2834,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     && (driver_opt.value() == "gelss" || driver_opt.value() == "gelsd")) {
     // when `self` is empty, return singular_values of shape
     // (*self.shape[:-2], 0) only if driver is in ('gelss', 'gelsd')
-    auto singular_values_empty_shape = batch_sizes.vec();
+    auto singular_values_empty_shape = batch_shape.vec();
     singular_values_empty_shape.push_back(0);
     singular_values = return_empty_if_undefined(
       singular_values,
