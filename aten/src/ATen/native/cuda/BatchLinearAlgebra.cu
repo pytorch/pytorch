@@ -1741,7 +1741,11 @@ Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) 
   // result should be in column major order and contain matrices to invert
   // the content of result is overwritten by 'apply_cholesky_inverse'
 #ifdef USE_CUSOLVER
-  return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
+  if (batchCount(result) == 1 || !use_magma_) {
+    return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
+  } else {
+    return cholesky_inverse_kernel_impl_magma(result, infos, upper);
+  }
 #else
   return cholesky_inverse_kernel_impl_magma(result, infos, upper);
 #endif
