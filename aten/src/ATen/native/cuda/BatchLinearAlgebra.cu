@@ -2478,46 +2478,55 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor& _lstsq_helper_cuda(
-  Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, const Tensor& a, double rcond, std::string driver_name) {
+template <typename scalar_t>
+static void apply_gels(const Tensor& a, Tensor& b, Tensor& infos) {
 #ifndef USE_MAGMA
-TORCH_CHECK(false, "torch.linalg.lstsq: MAGMA library not found in "
+  TORCH_CHECK(false, "torch.linalg.lstsq: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "torch.linalg.lstsq_cuda", [&] {
-    auto trans = MagmaNoTrans;
-    auto m = magma_int_cast(a.size(-2), "m");
-    auto n = magma_int_cast(a.size(-1), "n");
+  auto trans = MagmaNoTrans;
+  auto m = magma_int_cast(a.size(-2), "m");
+  auto n = magma_int_cast(a.size(-1), "n");
 
-    TORCH_CHECK(
-      m >= n,
-      "torch.linalg.lstsq: only overdetermined systems (input.size(-2) >= input.size(-1)) are allowed on CUDA");
+  TORCH_CHECK(
+    m >= n,
+    "torch.linalg.lstsq: only overdetermined systems (input.size(-2) >= input.size(-1)) are allowed on CUDA");
 
-    auto nrhs = magma_int_cast(b.size(-1), "nrhs");
-    auto ldda = std::max<magma_int_t>(1, m);
-    auto lddb = std::max<magma_int_t>(1, std::max(m, n));
-    auto nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
-    auto lwork = (m - n + nb) * (nrhs + nb) + nrhs * nb;
-    Tensor hwork = at::empty({static_cast<int64_t>(lwork)}, a.scalar_type());
-    auto* hwork_ptr = hwork.data_ptr<scalar_t>();
+  auto nrhs = magma_int_cast(b.size(-1), "nrhs");
+  auto ldda = std::max<magma_int_t>(1, m);
+  auto lddb = std::max<magma_int_t>(1, std::max(m, n));
+  auto nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
+  auto lwork = (m - n + nb) * (nrhs + nb) + nrhs * nb;
+  Tensor hwork = at::empty({static_cast<int64_t>(lwork)}, a.scalar_type());
+  auto* hwork_ptr = hwork.data_ptr<scalar_t>();
 
-    // MAGMA requires infos tensor to live on CPU
-    infos = infos.to(at::kCPU);
-    auto infos_data = infos.data_ptr<magma_int_t>();
+  // MAGMA requires infos tensor to live on CPU
+  infos = infos.to(at::kCPU);
+  auto infos_data = infos.data_ptr<magma_int_t>();
 
-    batch_iterator_with_broadcasting<scalar_t>(a, b,
-      [&](scalar_t* a_working_ptr, scalar_t* b_working_ptr,
-        int64_t a_linear_batch_idx) {
-        magma_int_t* infos_working_ptr = &infos_data[a_linear_batch_idx];
-        magmaGels<scalar_t>(trans, m, n, nrhs,
-          a_working_ptr, ldda, b_working_ptr, lddb,
-          hwork_ptr, lwork, infos_working_ptr);
-      }
-    );
-  });
-  return b;
+  batch_iterator_with_broadcasting<scalar_t>(a, b,
+    [&](scalar_t* a_working_ptr, scalar_t* b_working_ptr,
+      int64_t a_linear_batch_idx) {
+      magma_int_t* infos_working_ptr = &infos_data[a_linear_batch_idx];
+      magmaGels<scalar_t>(trans, m, n, nrhs,
+        a_working_ptr, ldda, b_working_ptr, lddb,
+        hwork_ptr, lwork, infos_working_ptr);
+    }
+  );
 #endif
 }
+
+void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
+  (void)rank;  // unused
+  (void)singular_values;  // unused
+  (void)rcond;  // unused
+  (void)driver_name;  // unused
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(a.scalar_type(), "linalg_lstsq_cuda", [&] {
+    apply_gels<scalar_t>(a, b, infos);
+  });
+}
+
+REGISTER_DISPATCH(lstsq_stub, &lstsq_kernel);
 
 }}  // namespace at::native
 

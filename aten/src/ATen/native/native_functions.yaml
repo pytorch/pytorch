@@ -8758,12 +8758,6 @@
   dispatch:
     DefaultBackend: linalg_lstsq_out
 
-- func: _lstsq_helper(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float rcond, str driver_name) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CPU: _lstsq_helper_cpu
-    CUDA: _lstsq_helper_cuda
-
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
   variants: function
