@@ -21,7 +21,6 @@ jobs:
       - name: Fetch PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # deep clone, to allow us to use git merge-base
       - name: Run clang-format
         run: |

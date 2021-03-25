@@ -23,8 +23,6 @@ jobs:
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Ensure consistent CircleCI YAML config
         run: |
           pip install -r requirements.txt
@@ -72,8 +70,6 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Get HEAD commit SHA
         run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
         id: get-commit-sha
@@ -108,7 +104,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # deep clone, to allow us to use git merge-base
       - name: Get HEAD commit SHA
         run: echo ::set-output name=commit-sha::$(git rev-parse HEAD)
@@ -209,8 +204,6 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Run cmakelint
         run: |
           set -eux
@@ -230,8 +223,6 @@ jobs:
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@v2
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - name: Install dependencies
         run: |
           set -eux
