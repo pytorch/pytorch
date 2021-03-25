@@ -169,7 +169,10 @@ void THCTensor_(topk)(THCState* state,
       // allocated tensors to receive the results.
       THCTensor* sortedTopK = THCTensor_(new)(state);
       THCudaLongTensor* sortedIndices = THCudaLongTensor_new(state);
-      THCTensor_(sort)(state, sortedTopK, sortedIndices, topK, dim, dir);
+
+      auto sortedTopK_tensor = THTensor_wrap(sortedTopK);
+      auto sortedIndices_tensor = THTensor_wrap(sortedIndices);
+      at::native::sort_out_cuda(sortedTopK_tensor, sortedIndices_tensor, THTensor_wrap(topK), dim, dir);
 
       THCudaLongTensor* sortedTopKIndices = THCudaLongTensor_new(state);
 

@@ -2,19 +2,37 @@
 
 #include <ATen/ATen.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/LegacyTHFunctionsCUDA.h>
 
 #include <thrust/sort.h>
 #include <ATen/cuda/cub.cuh>
 
+
 namespace at { namespace native {
 
+bool should_use_th_sort(const Tensor &self, int64_t dim) {
+  int64_t ndim = self.dim();
+  dim = maybe_wrap_dim(dim, ndim);
+  int64_t nsort = self.sizes()[dim];
+  int64_t threshold;
+  if (self.scalar_type() == kLong || self.scalar_type() == kDouble) {
+    threshold = 1024;
+  } else {
+    threshold = 2048;
+  }
+  return nsort <= threshold;
+}
+
 std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & indices, const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
+  if (should_use_th_sort(self, dim)) {
+    return legacy::cuda::_th_sort_out_stable(values, indices, self, stable, dim, descending);
+  }
   // this algorithm is always stable
   TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
   bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
+  int64_t numel = self.numel();
   int64_t ndim = self.dim();
   dim = maybe_wrap_dim(dim, ndim);
-  int64_t numel = self.numel();
   int64_t nsort = self.sizes()[dim];
 
   TORCH_CHECK(nsort <= std::numeric_limits<int>::max(),
@@ -170,15 +188,24 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
 }
 
 std::tuple<Tensor &,Tensor &> sort_out_cuda(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
+  if (should_use_th_sort(self, dim)) {
+    return legacy::cuda::_th_sort_out(values, indices, self, dim, descending);
+  }
   return sort_out_stable_cuda(values, indices, self, /*stable=*/false, dim, descending);
 }
 
 std::tuple<Tensor,Tensor> sort_stable_cuda(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
+  if (should_use_th_sort(self, dim)) {
+    return legacy::cuda::_th_sort_stable(self, stable, dim, descending);
+  }
   Tensor values, indices;
   return sort_out_stable_cuda(values, indices, self, stable, dim, descending);
 }
 
-std::tuple<Tensor,Tensor> sort_cuda(const Tensor & self, int64_t dim, bool descending) {
+std::tuple<Tensor,Tensor> sort_cuda(const Tensor & self, int64_t dim, bool descending) {  int64_t threshold;
+  if (should_use_th_sort(self, dim)) {
+    return legacy::cuda::_th_sort(self, dim, descending);
+  }
   return sort_stable_cuda(self, /*stable=*/false, dim, descending);
 }
 

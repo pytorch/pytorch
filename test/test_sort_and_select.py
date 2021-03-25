@@ -139,8 +139,8 @@ class TestSortAndSelect(TestCase):
     @dtypes(torch.uint8)
     @largeTensorTest('30GB')
     def test_sort_large(self, device, dtype):
-        t0 = torch.randperm(256, device=device).to(dtype)
-        t = t0.view(1, 256).expand(2 ** 23 + 1, -1).contiguous()
+        t0 = torch.randperm(8192, device=device).to(dtype)
+        t = t0.view(1, 8192).expand(2 ** 18 + 1, -1).contiguous()
         v, i = t.sort()
         del t
         iv, im = i.var_mean(dim=0)
