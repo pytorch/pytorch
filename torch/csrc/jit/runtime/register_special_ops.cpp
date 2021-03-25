@@ -301,6 +301,13 @@ RegisterOperators reg({
                 bool,
                 bool,
                 at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
+                DEFINE_TORCH_TENSOR_OP(
+                    complex,
+                    c10::complex<double>,
+                    at::native::scalar_tensor(
+                        scalar_val,
+                        at::device(at::kCPU).dtype(
+                            c10::get_default_complex_dtype())))
 
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp
