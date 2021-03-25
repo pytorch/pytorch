@@ -32,24 +32,28 @@ class TestNNAPI(TestCase):
         else:
             self.can_run_nnapi = False
 
-    def check(self, module, arg_or_args, *, atol_rtol=None, limit=None):
+    def check(
+            self,
+            module,
+            arg_or_args,
+            *,
+            trace_args=None,
+            convert_args=None,
+            atol_rtol=None,
+            limit=None,
+            ):
         with torch.no_grad():
             if isinstance(arg_or_args, torch.Tensor):
                 args = [arg_or_args]
             else:
                 args = arg_or_args
             module.eval()
-            traced = torch.jit.trace(module, args)
-            nnapi_module = convert_model_to_nnapi(traced, args)
+            traced = torch.jit.trace(module, trace_args or args)
+            nnapi_module = convert_model_to_nnapi(traced, convert_args or args)
             if not self.can_run_nnapi:
                 # Only test that the model was converted successfully.
                 return
             eager_output = module(*args)
-            # TODO: Find a cleaner way to force init
-            if hasattr(nnapi_module, "mod"):
-                nnapi_module.mod.nnapi_module.init()
-            else:
-                nnapi_module.nnapi_module.init()
             nnapi_output = nnapi_module(*args)
             kwargs = {}
             if atol_rtol is not None:
@@ -83,6 +87,14 @@ class TestNNAPI(TestCase):
         with torch.no_grad():
             multi_a.weight.copy_(torch.tensor([.1, .2, .3, .4]))
         self.check(multi_a, nhwc(arg))
+
+        # Test flexible size
+        self.check(
+                multi_a,
+                arg,
+                trace_args=[torch.zeros(1, 4, 3, 3)],
+                convert_args=[nhwc(torch.zeros(1, 4, 0, 0))],
+                )
 
     def test_quantize(self):
         self.check(

@@ -67,8 +67,14 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
     }
 
     TORCH_CHECK(serialized_model_tensor.is_contiguous());
+    // This is currently always int32_t, but support uint8_t for old models
+    // and possible future changes to the generator.
+    uint8_t* ser_model_ptr =
+      serialized_model_tensor.scalar_type() == at::ScalarType::Byte
+        ? serialized_model_tensor.data_ptr<uint8_t>()
+        : reinterpret_cast<uint8_t*>(serialized_model_tensor.data_ptr<int32_t>());
     c10::ArrayRef<uint8_t> ser_model = {
-      serialized_model_tensor.data_ptr<uint8_t>(),
+      ser_model_ptr,
       serialized_model_tensor.nbytes()
     };
     TORCH_CHECK(ser_model.size() > 0);
