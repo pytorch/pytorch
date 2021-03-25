@@ -89,51 +89,6 @@ class NnapiInitWrapper(torch.nn.Module):
         self.nnapi_module.init()
 
 
-class ListWrapper(torch.nn.Module):
-    """NNAPI list-ifying wrapper.
-
-    NNAPI always expects a list of inputs.  This module provides a
-    single-tensor input interface for models that want it.
-    """
-    def __init__(self, mod):
-        super().__init__()
-        self.mod = mod
-
-    def forward(self, t: torch.Tensor) -> List[torch.Tensor]:
-        return self.mod([t])
-
-class DelistWrapper(torch.nn.Module):
-    """NNAPI de-list-ifying wrapper.
-
-    NNAPI always provides a list of outputs.  This module provides a
-    single-tensor output interface for models that want it.
-    """
-    def __init__(self, mod):
-        super().__init__()
-        self.mod = mod
-
-    def forward(self, ts: List[torch.Tensor]) -> torch.Tensor:
-        outs = self.mod(ts)
-        assert len(outs) == 1
-        return outs[0]
-
-class ListDelistWrapper(torch.nn.Module):
-    """NNAPI list-ifying and de-list-ifying wrapper.
-
-    NNAPI always expects a list of inputs and provides a list of outputs.
-    This module provides a single-tensor input/output interface
-    for models that want it.
-    """
-    def __init__(self, mod):
-        super().__init__()
-        self.mod = mod
-
-    def forward(self, t: torch.Tensor) -> torch.Tensor:
-        outs = self.mod([t])
-        assert len(outs) == 1
-        return outs[0]
-
-
 def _condensed_zeros_like(t):
     """Get a small-storage deterministic tensor with the same shape and dtype as t
 
@@ -155,19 +110,13 @@ def convert_model_to_nnapi(model, inputs):
 
     if isinstance(inputs, torch.Tensor):
         inputs = [inputs]
-        list_inputs = True
-    else:
-        list_inputs = False
 
     outputs = model(*inputs)
 
     if isinstance(outputs, torch.Tensor):
         outputs = [outputs]
-        delist_outputs = True
-    else:
-        delist_outputs = False
 
-    ser_model, used_weights, inp_mem_fmts, out_mem_fmts = serialize_model(model, inputs)
+    ser_model, used_weights, inp_mem_fmts, out_mem_fmts, retval_count = serialize_model(model, inputs)
     ser_model_tensor = torch.tensor(list(ser_model), dtype=torch.uint8)
 
     out_templates = [_condensed_zeros_like(out) for out in outputs]
@@ -178,11 +127,29 @@ def convert_model_to_nnapi(model, inputs):
         out_mem_fmts,
         out_templates))
 
-    if list_inputs and delist_outputs:
-        nnapi_model = ListDelistWrapper(nnapi_model)
-    elif list_inputs:
-        nnapi_model = ListWrapper(nnapi_model)
-    elif delist_outputs:
-        nnapi_model = DelistWrapper(nnapi_model)
+    class NnapiInterfaceWrapper(torch.nn.Module):
+        """NNAPI list-ifying and de-list-ifying wrapper.
 
-    return torch.jit.script(nnapi_model)
+        NNAPI always expects a list of inputs and provides a list of outputs.
+        This module allows us to accept inputs as separate arguments.
+        It returns results as either a single tensor or tuple,
+        matching the original module.
+        """
+        def __init__(self, mod):
+            super().__init__()
+            self.mod = mod
+
+    wrapper_model_py = NnapiInterfaceWrapper(nnapi_model)
+    wrapper_model = torch.jit.script(wrapper_model_py)
+    # TODO: Maybe make these names match the original.
+    arg_list = ", ".join(f"arg_{idx}" for idx in range(len(inputs)))
+    if retval_count < 0:
+        ret_expr = "retvals[0]"
+    else:
+        ret_expr = "".join(f"retvals[{idx}], " for idx in range(retval_count))
+    wrapper_model.define(
+            f"def forward(self, {arg_list}):\n"
+            f"    retvals = self.mod([{arg_list}])\n"
+            f"    return {ret_expr}\n"
+            )
+    return wrapper_model

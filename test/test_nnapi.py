@@ -50,7 +50,7 @@ class TestNNAPI(TestCase):
                 nnapi_module.mod.nnapi_module.init()
             else:
                 nnapi_module.nnapi_module.init()
-            nnapi_output = nnapi_module(args)
+            nnapi_output = nnapi_module(*args)
             kwargs = {}
             if atol_rtol is not None:
                 kwargs["atol"] = atol_rtol[0]

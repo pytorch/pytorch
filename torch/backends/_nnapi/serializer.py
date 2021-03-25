@@ -567,15 +567,18 @@ class _NnapiSerializer(object):
         assert retn.outputsSize() == 0
         retn_input = retn.inputsAt(0)
         if retn_input.type().kind() == "TensorType":
-            op_id = self.jitval_operand_map[retn_input]
-            # TODO: Make outputs a local variable?
+            return_values = [retn_input]
+            retval_count = -1
+        elif retn_input.type().kind() == "TupleType":
+            return_values = self.tensor_sequences[retn_input]
+            retval_count = len(return_values)
+        else:
+            raise Exception(f"Unsupported return type: {retn_input.type()}")
+
+        for v in return_values:
+            op_id = self.jitval_operand_map[v]
             self.outputs.append(op_id)
             out_dim_orders.append(self.operands[op_id].dim_order.value)
-        elif retn_input.type().kind() == "TupleType":
-            for v in self.tensor_sequences[retn_input]:
-                op_id = self.jitval_operand_map[v]
-                self.outputs.append(op_id)
-                out_dim_orders.append(self.operands[op_id].dim_order.value)
 
         model = []
 
@@ -602,8 +605,7 @@ class _NnapiSerializer(object):
         model.append(self.serialize_ints(self.inputs))
         model.append(self.serialize_ints(self.outputs))
 
-        # return (b"".join(model), self.used_weight_tensor_names)
-        return (b"".join(model), self.used_weights, inp_dim_orders, out_dim_orders)
+        return (b"".join(model), self.used_weights, inp_dim_orders, out_dim_orders, retval_count)
 
     def serialize_values(self):
         serialized_values = []
