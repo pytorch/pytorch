@@ -203,6 +203,9 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
     case TK_NONE: {
       return "None";
     }
+    case TK_NONE_TYPE: {
+      return "NoneType";
+    }
     case '.': {
       auto select = Select(expr);
       const std::string& name = select.selector().name();
