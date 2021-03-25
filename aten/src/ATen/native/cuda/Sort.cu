@@ -11,6 +11,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
   TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
   bool is_non_overlapping_and_dense = self.is_non_overlapping_and_dense();
   int64_t ndim = self.dim();
+  int64_t numel = self.numel();
 
   if (ndim == 0) {
     if (!values.defined()) {
@@ -102,8 +103,12 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     indices_ptr = indices.data_ptr<int64_t>();
   }
 
+  if (numel == 0) {
+    return {values, indices};
+  }
+
   int64_t nrange = self_.size(dim);
-  int64_t nrepeat = self_.numel() / self_.size(dim);
+  int64_t nrepeat = numel / self_.size(dim);
   auto segment_id = at::repeat_interleave(
     at::tensor(nrange, indices.options()).expand(nrepeat));
   int64_t *segment_id_ptr = segment_id.data_ptr<int64_t>();
@@ -123,19 +128,19 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     at::cuda::cub::sort_pairs(
       self_ptr, tmp_ptr,
       orig_indices_ptr, orig_indices_tmp_ptr,
-      self_.numel(), descending);
+      numel, descending);
     at::cuda::cub::sort_pairs(
       self_ptr, tmp_ptr,
       segment_id_ptr, segment_id_tmp_ptr,
-      self_.numel(), descending);
+      numel, descending);
     at::cuda::cub::sort_pairs(
       segment_id_tmp_ptr, segment_id_ptr,
       tmp_ptr, values_ptr,
-      self_.numel());
+      numel);
     at::cuda::cub::sort_pairs(
       segment_id_tmp_ptr, segment_id_ptr,
       orig_indices_tmp_ptr, indices_ptr,
-      self_.numel());
+      numel);
   });
 
   if (values_tmp.defined()) {
