@@ -427,7 +427,7 @@ Examples::
 """)
 
 lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
-torch.linalg.lstsq(input, b, cond=None, *, driver=None)
+torch.linalg.lstsq(input, b, rcond=None, *, driver=None)
     -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
 
 Computes the least squares solution to the system with a batch of matrices :math:`a` (represented by :attr:`input`)
@@ -451,11 +451,12 @@ Args:
         of shape :math:`(..., m, n)` with :math:`m > 0, n > 0`
     b (Tensor): the batch of righ-hand side vectors or matrices :math:`b`
         of shape :math:`(..., m)` or :math:`(..., m, k)` with :math:`m > 0, k > 0`
-    cond (float, optional): used to determine the effective rank of :math:`a`
+    rcond (float, optional): used to determine the effective rank of :math:`a`
         for the rank-revealing drivers (see :attr:`driver`).
-        Singular values :math:`s[i] \le cond * s[0]` are treated as zero.
-        If :attr:`cond` is ``None`` or is smaller than zero,
+        If :attr:`rcond` is smaller than zero,
         the machine precision based on :attr:`input`'s dtype is used.
+        If :attr:`rcond` is ``None``,
+        the machine precision times :math:`\text{max}(m, n)` is used.
         Default: ``None``
     driver (str, optional): the name of the LAPACK/MAGMA driver that is used
         to compute the solution.
@@ -472,7 +473,7 @@ Args:
     ``'gelsy'`` is the fastest among the rank-revealing algorithms that also handles rank-deficient inputs.
 
 .. warning::
-    The default value for :attr:`cond` is subject to a potential change.
+    The default value for :attr:`rcond` is subject to a potential change.
     It is therefore recommended to use some fixed value to avoid potential
     issues upon the library update.
 

@@ -675,7 +675,7 @@
   self: not_implemented("lstsq")
   A: not_implemented("lstsq")
 
-- name: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
+- name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   self: not_implemented("linalg_lstsq")
   b: not_implemented("linalg_lstsq")
   output_differentiability: [True, True]

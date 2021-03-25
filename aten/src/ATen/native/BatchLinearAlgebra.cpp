@@ -2482,7 +2482,10 @@ struct LapackLstsqHelper {
     }
     return *this;
   }
-  self_type& set_rcond(double cond) { this->rcond = static_cast<value_t>(cond); return *this; }
+  self_type& set_rcond(double rcond) {
+    this->rcond = static_cast<value_t>(rcond);
+    return *this;
+  }
   self_type& set_rank(Tensor& rank) {
     // only `?gels` is not rank-revealing
     if (LapackLstsqDriverType::Gels != driver_type) {
@@ -2599,7 +2602,7 @@ struct LapackLstsqDriverTypeHash {
 #endif
 
 Tensor& _lstsq_helper_cpu(
-    Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, const Tensor& a, double cond, std::string driver_name) {
+    Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, const Tensor& a, double rcond, std::string driver_name) {
 #ifndef USE_LAPACK
   TORCH_CHECK(false, "torch.linalg.lstsq: LAPACK library not found in compilation");
 #else
@@ -2638,7 +2641,7 @@ Tensor& _lstsq_helper_cpu(
       .set_b(b)
       .set_ldb(std::max<int64_t>(1, std::max(m, n)))
       .set_jpvt()
-      .set_rcond(cond)
+      .set_rcond(rcond)
       .set_rank(rank)
       .set_s(singular_values)
       .set_infos(infos)
@@ -2935,10 +2938,9 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
   std::string driver_name = get_default_lstsq_driver(driver, input);
 
   // set default rcond value
-  // TODO: Change this to match non-legacy NumPy behaviour
-  double rcond_value = rcond.has_value() && (rcond.value() > 0)
+  double rcond_value = rcond.has_value()
     ? rcond.value()
-    : _get_epsilon(c10::toValueType(input.scalar_type()));
+    : _get_epsilon(c10::toValueType(input.scalar_type())) * std::max<int64_t>(input.size(-2), input.size(-1));
 
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
 
