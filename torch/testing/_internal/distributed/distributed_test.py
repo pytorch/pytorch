@@ -5175,7 +5175,9 @@ class DistributedTest:
             nccl_pg.allreduce(tensors).wait()
             # All ranks besides 0 call into allreduce. This is to simulate a
             # desync across the world, where some ranks call into
-            # monitored_barrier() and others are stuck in collective comm.
+            # monitored_barrier() and others are stuck in collective comm. In
+            # practice, we don't need NCCL_BLOCKING_WAIT, but we use it in this
+            # test to ensure it exits cleanly.
             if self.rank != 0:
                 with self.assertRaisesRegex(RuntimeError, "Caught collective operation timeout"):
                     nccl_pg.allreduce(tensors).wait(timedelta(seconds=0.1))
@@ -5187,6 +5189,10 @@ class DistributedTest:
             if world_size == 2:
                 err_regex = "Rank 1"
             else:
+                # monitored_barrier() does not enforce an order it waits on for
+                # the ranks, so accept any rank that should be caught.
+                # TODO: provide an option in monitored_barrier() to collect all
+                # hanging ranks.
                 err_regex = f"Rank [1-{world_size - 1}]"
 
             with self.assertRaisesRegex(RuntimeError, err_regex):
