@@ -2,7 +2,7 @@ import inspect
 from functools import wraps
 from typing import Any, Callable, Optional, Type, Union, get_type_hints
 from torch.utils.data import IterDataPipe
-from torch.utils.data.typing import _DataPipeMeta
+from torch.utils.data._typing import _DataPipeMeta
 
 
 ######################################################
