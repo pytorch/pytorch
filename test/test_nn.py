@@ -9247,6 +9247,13 @@ class TestNN(NNTestCase):
             gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
             gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
+            # Assert that cpu and cuda handle channels_last memory format in the same way
+            # https://github.com/pytorch/pytorch/issues/54590
+            a = torch.arange(48).reshape(2, 2, 3, 4).contiguous(memory_format=torch.channels_last).float()
+            out_cpu = torch.nn.functional.interpolate(a, scale_factor=2, mode='nearest')
+            out_cuda = torch.nn.functional.interpolate(a.to('cuda'), scale_factor=2, mode='nearest')
+            self.assertEqual(out_cpu, out_cuda.to('cpu'))
+
     def test_upsamplingBilinear2d(self):
         for align_corners in [True, False]:
             kwargs = dict(mode='bilinear', align_corners=align_corners)
@@ -9375,6 +9382,13 @@ class TestNN(NNTestCase):
 
             input = torch.randn(1, 2, 2, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
             gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
+
+            # Assert that cpu and cuda handle channels_last memory format in the same way
+            # https://github.com/pytorch/pytorch/issues/54590
+            a = torch.arange(96).reshape(2, 2, 2, 3, 4).contiguous(memory_format=torch.channels_last_3d).float()
+            out_cpu = torch.nn.functional.interpolate(a, scale_factor=3, mode='nearest')
+            out_cuda = torch.nn.functional.interpolate(a.to('cuda'), scale_factor=3, mode='nearest')
+            self.assertEqual(out_cpu, out_cuda.to('cpu'))
 
     def test_upsamplingTrilinear3d(self):
         for align_corners in [True, False]:
