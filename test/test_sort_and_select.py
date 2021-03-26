@@ -163,6 +163,11 @@ class TestSortAndSelect(TestCase):
                     r1 = t.sort(dim=dim)
                     r2 = t.contiguous().sort(dim=dim)
                     self.assertEqual(r1, r2)
+                    if self.device_type == 'cuda' and t.size(dim) > 2048:
+                        # FIXME: this behavior should be true for all cases, not
+                        # just the one specified in if condition
+                        self.assertEqual(r1.values.stride(), t.stride())
+                        self.assertEqual(r1.indices.stride(), t.stride())
 
     @onlyCPU
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
