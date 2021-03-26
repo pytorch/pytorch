@@ -172,7 +172,7 @@ Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, c10::optional<
   return result;
 }
 
-Tensor& range_cuda_out(Tensor& result, const Scalar& start, const Scalar& end, const Scalar& step) {
+Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "range_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
