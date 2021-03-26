@@ -164,7 +164,15 @@ class TestSortAndSelect(TestCase):
                     r2 = t.contiguous().sort(dim=dim)
                     self.assertEqual(r1, r2)
                     n = t.size(dim)
+
+                    # assert ordered
                     self.assertTrue((r1.values.narrow(dim, 1, n - 1) >= r1.values.narrow(dim, 0, n - 1)).all())
+
+                    # assert that different segments does not mix, which can easily happen
+                    # if the stride is not handled correctly
+                    self.assertTrue((t.unsqueeze(-1).transpose(dim, -1) == r1.values.unsqueeze(-1)).any(dim=dim).any(dim=-1).all())
+
+                    # assert stride is preserved
                     if self.device_type == 'cuda' and n > 2048:
                         # FIXME: this behavior should be true for all cases, not
                         # just the one specified in if condition
