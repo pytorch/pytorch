@@ -343,6 +343,10 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def("static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor");
   m.def(
       "static_runtime::to_copy(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+  m.def(
+      "static_runtime::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)");
+  m.def(
+      "static_runtime::flatten_copy.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)");
 }
 
 void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -365,10 +369,16 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
   fake_input->node()->destroy();
 
   const std::map<c10::Symbol, c10::Symbol> supported = {
+#ifdef FBCODE_CAFFE2
       {c10::Symbol::fromQualString("aten::permute"),
        c10::Symbol::fromQualString("static_runtime::permute_copy")},
+#endif
       {c10::Symbol::fromQualString("aten::narrow"),
        c10::Symbol::fromQualString("aten::narrow_copy")},
+      {c10::Symbol::fromQualString("aten::reshape"),
+       c10::Symbol::fromQualString("static_runtime::reshape_copy")},
+      {c10::Symbol::fromQualString("aten::flatten"),
+       c10::Symbol::fromQualString("static_runtime::flatten_copy")},
       {c10::Symbol::fromQualString("aten::to"),
        c10::Symbol::fromQualString("static_runtime::to_copy")}};
   std::vector<std::pair<Node*, Node*>> replacement;

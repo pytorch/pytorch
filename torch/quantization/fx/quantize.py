@@ -588,8 +588,8 @@ class Quantizer:
             # converting List[int] to Tensor since module attribute is
             # Union[Tensor, Module]
             model._standalone_module_input_quantized_idxs = \
-                torch.Tensor(input_quantized_idxs)
-            model._standalone_module_output_quantized_idxs = torch.Tensor(output_quantized_idxs)
+                torch.tensor(input_quantized_idxs)
+            model._standalone_module_output_quantized_idxs = torch.tensor(output_quantized_idxs)
         return model
 
     def save_state(self, observed: GraphModule) -> None:
