@@ -80,6 +80,14 @@ inline Tensor& vector_norm_out(Tensor& result, const Tensor& self, optional<Scal
   return torch::linalg_vector_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
+inline Tensor matrix_power(const Tensor& self, int64_t n) {
+  return torch::linalg_matrix_power(self, n);
+}
+
+inline Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
+  return torch::linalg_matrix_power_out(result, self, n);
+}
+
 inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermitian) {
   return torch::linalg_matrix_rank(input, tol, hermitian);
 }
@@ -217,6 +225,15 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optiona
 
 inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_power
+inline Tensor matrix_power(const Tensor& self, int64_t n) {
+  return torch::linalg_matrix_power(self, n);
+}
+
+inline Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
+  return torch::linalg_matrix_power_out(result, self, n);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_rank

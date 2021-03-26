@@ -58,7 +58,7 @@ namespace jit {
 
 void clear_registered_instances(void* ptr);
 
-IValue toIValue(
+TORCH_API IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N = c10::nullopt);
@@ -195,12 +195,12 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
               PyErr_Clear();
             }
             // Log and ignore exceptions raised through the callback
-            LOG(INFO) << "Got the following error when running the callback: "
+            LOG(ERROR) << "Got the following error when running the callback: "
                       << e.what();
 
           } catch (const std::exception& e) {
             // Log and ignore exceptions raised through the callback
-            LOG(INFO) << "Got the following error when running the callback: "
+            LOG(ERROR) << "Got the following error when running the callback: "
                       << e.what();
           }
         },

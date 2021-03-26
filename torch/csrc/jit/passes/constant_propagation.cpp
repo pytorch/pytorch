@@ -52,7 +52,9 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     } break;
     case prim::DictConstruct: {
       dictConstruct(
-          stack, n->output()->type()->expect<DictType>(), n->inputs().size());
+          stack,
+          n->output()->type()->expectRef<DictType>(),
+          n->inputs().size());
     } break;
     case prim::CreateObject: {
       createObject(stack, n->output()->type()->expect<ClassType>());

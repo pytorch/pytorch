@@ -56,13 +56,12 @@ c10::intrusive_ptr<T, NullType> IValue::moveToIntrusivePtr() {
 }
 template <typename T, class NullType>
 c10::intrusive_ptr<T, NullType> IValue::toIntrusivePtr() const {
-  auto r = c10::intrusive_ptr<T, NullType>::reclaim(
-      payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()
-      ? NullType::singleton()
-      : static_cast<T*>(payload.u.as_intrusive_ptr));
-  auto p = r;
-  r.release();
-  return p;
+  if (payload.u.as_intrusive_ptr == c10::UndefinedTensorImpl::singleton()) {
+    return c10::intrusive_ptr<T, NullType>();
+  }
+  c10::raw::intrusive_ptr::incref(payload.u.as_intrusive_ptr);
+  return c10::intrusive_ptr<T, NullType>::reclaim(
+      static_cast<T*>(payload.u.as_intrusive_ptr));
 }
 
 template <class T, class U>
@@ -382,10 +381,12 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
         !completed(),
         "Attempting to mark a completed Future as complete again. Note that "
         "a Future can only be marked completed once.");
-    completed_ = true;
     value_ = std::move(value);
 
     postMarkCompletedHook(value_, std::move(data_ptrs));
+    // Only set completed_ flag once postMarkCompletedHook has
+    // returned successfully to allow for proper error propagation.
+    completed_ = true;
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
@@ -468,20 +469,10 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     auto fut = createInstance(std::move(type));
     addCallback(
         [fut, cb = std::move(callback)]() {
-          // Get the true stacktrace if call to markCompleted() fails. We cannot
-          // simply call fut->markCompleted(cb()) since if markCompleted fails
-          // after setting completed_ flag, setError will report error that
-          // completed_ is set, instead of the true error.
-          at::IValue cbValue;
-          bool hasException = false;
           try {
-            cbValue= cb();
+            fut->markCompleted(cb());
           } catch (std::exception&) {
-            hasException = true;
             fut->setError(std::current_exception());
-          }
-          if (!hasException) {
-            fut->markCompleted(std::move(cbValue));
           }
         });
     return fut;
