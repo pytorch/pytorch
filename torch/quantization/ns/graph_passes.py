@@ -151,11 +151,14 @@ def _insert_dtype_cast_after_node(
     will insert a dequant.
     """
     dtype_cast_op = None
+    dtype_cast_mod_cls = None
     node_input_type_a = get_node_input_type(node_a, gm_a)
     node_input_type_c = get_node_input_type(node_c, gm_b)
 
     if node_input_type_a == NodeInputType.FP32 and node_input_type_c == NodeInputType.INT8:
         dtype_cast_op = torch.dequantize
+    elif node_input_type_a == NodeInputType.FP32 and node_input_type_c == NodeInputType.FP32:
+        dtype_cast_mod_cls = torch.nn.Identity
     else:
         raise AssertionError(
             f"dtype cast from {node_input_type_c} to {node_input_type_a} needs to be implemented")
@@ -163,20 +166,35 @@ def _insert_dtype_cast_after_node(
     if isinstance(prev_node_c, Node):
         new_dtype_cast_name = \
             get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
-
-        return graph_c.create_node(
-            'call_function', dtype_cast_op, (prev_node_c,), {},
-            new_dtype_cast_name)
+        if dtype_cast_op:
+            return graph_c.create_node(
+                'call_function', dtype_cast_op, (prev_node_c,), {},
+                new_dtype_cast_name)
+        else:
+            assert dtype_cast_mod_cls
+            dtype_cast_mod = dtype_cast_mod_cls()
+            setattr(gm_b, new_dtype_cast_name, dtype_cast_mod)
+            return graph_c.create_node(
+                'call_module', new_dtype_cast_name, (prev_node_c,), {},
+                new_dtype_cast_name)
     elif isinstance(prev_node_c, list):
         results = []
         for prev_node_c_inner in prev_node_c:
             new_dtype_cast_name = \
                 get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
-
-            new_dtype_cast_node = graph_c.create_node(
-                'call_function', dtype_cast_op, (prev_node_c_inner,), {},
-                new_dtype_cast_name)
-            results.append(new_dtype_cast_node)
+            if dtype_cast_op:
+                new_dtype_cast_node = graph_c.create_node(
+                    'call_function', dtype_cast_op, (prev_node_c_inner,), {},
+                    new_dtype_cast_name)
+                results.append(new_dtype_cast_node)
+            else:
+                assert dtype_cast_mod_cls
+                dtype_cast_mod = dtype_cast_mod_cls()
+                setattr(gm_b, new_dtype_cast_name, dtype_cast_mod)
+                new_dtype_cast_node = graph_c.create_node(
+                    'call_module', new_dtype_cast_name, (prev_node_c,), {},
+                    new_dtype_cast_name)
+                results.append(new_dtype_cast_node)
         return results
     else:
         raise AssertionError(f"type f{type(prev_node_c)} is not handled")
