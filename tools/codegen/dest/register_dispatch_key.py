@@ -50,16 +50,19 @@ class RegisterDispatchKey:
     rocm: bool
 
     @method_with_native_function
-    def __call__(self, f: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
-        if isinstance(f, StructuredNativeFunctions):
-            return self.gen_structured(f)
+    def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
+        if isinstance(f, NativeFunctionsGroup):
+            if f.structured:
+                return self.gen_structured(f)
+            else:
+                return list(mapMaybe(self.gen_unstructured, f.functions()))
         elif isinstance(f, NativeFunction):
             r = self.gen_unstructured(f)
             return [] if r is None else [r]
         else:
             assert_never(f)
 
-    def gen_structured(self, g: StructuredNativeFunctions) -> List[str]:
+    def gen_structured(self, g: NativeFunctionsGroup) -> List[str]:
         if self.dispatch_key == DispatchKey.Meta:
             assert self.dispatch_key not in g.out.dispatch, \
                 "Do not explicitly specify Meta dispatch key on structured " \
@@ -211,7 +214,7 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
 
 @dataclass(frozen=True)
 class StructuredRegisterDispatchKey(RegisterDispatchKey):
-    g: StructuredNativeFunctions
+    g: NativeFunctionsGroup
 
     def gen_class_set_output(self, k: SchemaKind, parent_class: str, generate_super: bool) -> str:
         if generate_super:
