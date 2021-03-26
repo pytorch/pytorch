@@ -585,6 +585,8 @@ class Tensor(torch._C._TensorBase):
         # (e.g., if you zip(*hiddens), the eager map will force all the
         # indexes of hiddens[0] before hiddens[1], while the generator
         # map will interleave them.)
+        # NB: We have intentionally skipped __torch_function__ dispatch here.
+        # See gh-54457
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
         if torch._C._get_tracing_state():
