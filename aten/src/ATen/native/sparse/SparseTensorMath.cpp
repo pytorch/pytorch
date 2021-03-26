@@ -117,7 +117,7 @@ SparseTensor& log1p_sparse_(SparseTensor& t) {
 // neg(SparseTensor)
 // --------------------------------------------------------------------
 
-SparseTensor& neg_out_sparse(SparseTensor& r, const SparseTensor& t) {
+SparseTensor& neg_out_sparse(const SparseTensor& t, SparseTensor& r) {
   TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
 
@@ -172,7 +172,7 @@ SparseTensor& asin_sparse_(SparseTensor& t) {
 
 // TODO: add in-place variant
 
-SparseTensor& sqrt_out_sparse(SparseTensor& r, const SparseTensor& t_) {
+SparseTensor& sqrt_out_sparse(const SparseTensor& t_, SparseTensor& r) {
   TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
   TORCH_CHECK(t_.is_sparse(), "Tensor should be sparse");
 
@@ -191,7 +191,7 @@ SparseTensor& sqrt_out_sparse(SparseTensor& r, const SparseTensor& t_) {
 
 SparseTensor sqrt_sparse(const SparseTensor& t) {
   SparseTensor r = get_result_tensor_for_unary_op(t);
-  sqrt_out_sparse(r, t);
+  sqrt_out_sparse(t, r);
   return r;
 }
 // --------------------------------------------------------------------
@@ -910,13 +910,12 @@ Tensor& s_addmm_out_sparse_dense_cpu(
 }
 
 Tensor& addmm_out_sparse_dense_cpu(
-    Tensor& result,
     const Tensor& self,
     const SparseTensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
-    const Scalar& alpha
-) {
+    const Scalar& alpha,
+    Tensor& result) {
   Tensor b_self;
   std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
   return s_addmm_out_sparse_dense_cpu(result, b_self, mat1, mat2, beta, alpha);
@@ -994,7 +993,7 @@ SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
 // hspmm(SparseTensor mat1, Tensor mat2)
 // --------------------------------------------------------------------
 
-SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
+SparseTensor& hspmm_out_sparse_cpu(const SparseTensor& sparse_, const Tensor& dense, SparseTensor& r) {
   // TODO: Make this a real argument
   Scalar alpha = 1;
 
@@ -1065,7 +1064,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
 
 SparseTensor hspmm_sparse_cpu(const SparseTensor& sparse, const Tensor& dense) {
   SparseTensor r = at::empty({0}, sparse.options());
-  hspmm_out_sparse_cpu(r, sparse, dense);
+  hspmm_out_sparse_cpu(sparse, dense, r);
   return r;
 }
 
@@ -1076,13 +1075,12 @@ SparseTensor hspmm_sparse_cpu(const SparseTensor& sparse, const Tensor& dense) {
 // --------------------------------------------------------------------
 
 SparseTensor& _sspaddmm_out_cpu(
-    SparseTensor& r,
     const SparseTensor& t,
     const SparseTensor& sparse_,
     const Tensor& dense,
     const Scalar& beta,
-    const Scalar& alpha
-) {
+    const Scalar& alpha,
+    SparseTensor& r) {
   AT_ASSERT(!t.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "sspaddmm: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!sparse_.is_cuda(), "sspaddmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
@@ -1187,8 +1185,8 @@ SparseTensor& _sspaddmm_out_cpu(
 }
 
 // sparse, sparse, sparse, dense, real, real -> sparse
-Tensor& _sspaddmm_out_only_sparse(Tensor& result, const Tensor& self,
-    const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
+Tensor& _sspaddmm_out_only_sparse(const Tensor& self,
+    const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Tensor& result) {
   AT_ERROR("tensor.sspaddmm(...) can only be called on sparse tensors");
 }
 

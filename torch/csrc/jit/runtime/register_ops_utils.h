@@ -430,33 +430,36 @@ void listCopyAndSort<at::Tensor>(Stack* stack);
 
 void listSetItem(Stack* stack);
 
-#define DEFINE_GENERIC_BINARY_OP(aten_op, op, int_float_result, complex_result)        \
-  OperatorGenerator(                                                         \
-      TORCH_SELECTIVE_SCHEMA(#aten_op ".int_int(int a, int b) -> " #int_float_result), \
-      [](Stack* stack) {                                                     \
-        int64_t a, b;                                                        \
-        pop(stack, a, b);                                                    \
-        push(stack, op);                                                     \
-      },                                                                     \
-      aliasAnalysisFromSchema()),                                            \
-      OperatorGenerator(                                                     \
-          TORCH_SELECTIVE_SCHEMA(                                            \
-              #aten_op ".float_float(float a, float b) -> " #int_float_result),        \
-          [](Stack* stack) {                                                 \
-            double a, b;                                                     \
-            pop(stack, a, b);                                                \
-            push(stack, op);                                                 \
-          },                                                                 \
-          aliasAnalysisFromSchema()),                                        \
-      OperatorGenerator(                                                     \
-          TORCH_SELECTIVE_SCHEMA(                                            \
-              #aten_op                                                       \
-              ".complex_complex(complex a, complex b) -> " #complex_result), \
-          [](Stack* stack) {                                                 \
-            c10::complex<double> a, b;                                       \
-            pop(stack, a, b);                                                \
-            push(stack, op);                                                 \
-          },                                                                 \
+#define DEFINE_GENERIC_BINARY_OP(                                             \
+    aten_op, op, int_float_result, complex_result)                            \
+  OperatorGenerator(                                                          \
+      TORCH_SELECTIVE_SCHEMA(#aten_op                                         \
+                             ".int_int(int a, int b) -> " #int_float_result), \
+      [](Stack* stack) {                                                      \
+        int64_t a, b;                                                         \
+        pop(stack, a, b);                                                     \
+        push(stack, op);                                                      \
+      },                                                                      \
+      aliasAnalysisFromSchema()),                                             \
+      OperatorGenerator(                                                      \
+          TORCH_SELECTIVE_SCHEMA(                                             \
+              #aten_op                                                        \
+              ".float_float(float a, float b) -> " #int_float_result),        \
+          [](Stack* stack) {                                                  \
+            double a, b;                                                      \
+            pop(stack, a, b);                                                 \
+            push(stack, op);                                                  \
+          },                                                                  \
+          aliasAnalysisFromSchema()),                                         \
+      OperatorGenerator(                                                      \
+          TORCH_SELECTIVE_SCHEMA(                                             \
+              #aten_op                                                        \
+              ".complex_complex(complex a, complex b) -> " #complex_result),  \
+          [](Stack* stack) {                                                  \
+            c10::complex<double> a, b;                                        \
+            pop(stack, a, b);                                                 \
+            push(stack, op);                                                  \
+          },                                                                  \
           aliasAnalysisFromSchema())
 
 // define implementations for primitive number ops
