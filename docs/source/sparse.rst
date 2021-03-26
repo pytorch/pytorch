@@ -392,7 +392,7 @@ and ``values``:
    being with MKL LP64, which uses 32 bit integer indexing.
 
 Construction of CSR tensors
-------------
+---------------------------
 
 Sparse CSR matrices can be directly constructed by using the :func:`torch.sparse_csr_tensor`
 method. The user must supply the row and column indices and values tensors separately.
