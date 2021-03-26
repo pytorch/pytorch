@@ -6,7 +6,7 @@ import torch
 from ._core import _unravel_index
 from ._internal.common_utils import get_comparison_dtype as _get_comparison_dtype, TestCase as _TestCase
 
-__all__ = ["assert_tensors_equal", "assert_tensors_allclose"]
+__all__ = ["assert_tensors_equal", "assert_tensors_close"]
 
 
 # The UsageError should be raised in case the test function is not used correctly. With this the user is able to
@@ -206,7 +206,7 @@ def _check_values_equal(a: torch.Tensor, b: torch.Tensor) -> Tuple[bool, Optiona
     return False, msg
 
 
-def _assert_values_allclose(
+def _assert_values_close(
     a: torch.Tensor,
     b: torch.Tensor,
     *,
@@ -276,7 +276,7 @@ def assert_tensors_equal(
     .. seealso::
 
         To assert that the values in two tensors are are close but are not required to be bitwise equal, use
-        :func:`assert_tensors_allclose` instead.
+        :func:`assert_tensors_close` instead.
     """
     ok, msg = _check_are_tensors(a, b)
     if not ok:
@@ -298,7 +298,7 @@ def assert_tensors_equal(
         raise AssertionError(msg)
 
 
-def assert_tensors_allclose(
+def assert_tensors_close(
     a: torch.Tensor,
     b: torch.Tensor,
     *,
@@ -395,6 +395,6 @@ def assert_tensors_allclose(
     if (rtol == 0.0) and (atol == 0.0):
         ok, msg = _check_values_equal(a, b)
     else:
-        ok, msg = _assert_values_allclose(a, b, rtol=rtol, atol=atol)
+        ok, msg = _assert_values_close(a, b, rtol=rtol, atol=atol)
     if not ok:
         raise AssertionError(msg)
