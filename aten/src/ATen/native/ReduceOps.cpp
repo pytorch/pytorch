@@ -7,6 +7,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorDimApply.h>
@@ -448,8 +449,8 @@ std::tuple<Tensor&, Tensor&> cummax_out(const Tensor& self, int64_t dim, Tensor&
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
     NoNamesGuard guard;
-    values.resize_(self.sizes());
-    indices.resize_(self.sizes());
+    resize_output(values, self.sizes());
+    resize_output(indices, self.sizes());
     if(self.dim() == 0) {
       values.fill_(self);
       indices.fill_(0);
@@ -483,8 +484,8 @@ std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, int64_t dim, Tensor&
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
     NoNamesGuard guard;
-    values.resize_(self.sizes());
-    indices.resize_(self.sizes());
+    resize_output(values, self.sizes());
+    resize_output(indices, self.sizes());
     if(self.dim() == 0) {
       values.fill_(self);
       indices.fill_(0);
