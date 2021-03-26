@@ -20,8 +20,8 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-if (Test-Path "{env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe") {
-    $existingPath = & "{env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products "Microsoft.VisualStudio.Product.BuildTools" -version "[16, 17)" -property installationPath
+if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe") {
+    $existingPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products "Microsoft.VisualStudio.Product.BuildTools" -version "[16, 17)" -property installationPath
     if ($existingPath -ne $null) {
         $VS_UNINSTALL_ARGS = @("uninstall", "--installPath", "`"$existingPath`"", "--quiet","--wait")
         Start-Process "${PWD}\vs_installer.exe" -ArgumentList $VS_UNINSTALL_ARGS -NoNewWindow -Wait -PassThru
