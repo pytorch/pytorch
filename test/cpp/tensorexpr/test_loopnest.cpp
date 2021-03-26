@@ -1948,7 +1948,7 @@ TEST(LoopNest, Reduce2dComputeAt) {
     LoopNest l(orig_loopnest);
     auto loops = l.getLoopStmtsFor(c);
     l.computeAt(l.getLoopBodyFor(p), loops[0]);
-    // Calling simplify here breaks the IR:
+    // FIXME: Calling simplify here breaks the IR:
     // MALFORMED INPUT: could not find base node in Load - temp[...]
     // l.simplify();
     l.eliminateDeadStores();
