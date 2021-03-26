@@ -59,7 +59,6 @@ Tensor empty_strided_meta(
   c10::optional<Device> device_opt,
   c10::optional<bool> pin_memory_opt
 ) {
-  check_size_nonnegative(size);
   auto t = at::native::empty_meta({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   // Amazingly the CPU implementation will work for us, because most of resize
   // is generic except the memcpy, but the memcpy will be skipped if the source

@@ -33,6 +33,7 @@ struct Obj {
   at::IValue toIValue() const;
   Obj operator()(at::ArrayRef<Obj> args);
   Obj operator()(at::ArrayRef<at::IValue> args);
+  Obj call_kwargs(std::vector<std::tuple<std::string, at::IValue>> kwargs);
   Obj attr(const char* attr);
 
  private:
@@ -64,7 +65,11 @@ struct InterpreterSessionImpl {
 
   virtual Obj call(Obj obj, at::ArrayRef<Obj> args) = 0;
   virtual Obj call(Obj obj, at::ArrayRef<at::IValue> args) = 0;
+  virtual Obj call_kwargs(
+      Obj obj,
+      std::vector<std::tuple<std::string, at::IValue>> kwargs) = 0;
   virtual Obj attr(Obj obj, const char* attr) = 0;
+
 
  protected:
   int64_t ID(Obj obj) const {
@@ -77,7 +82,7 @@ struct InterpreterImpl {
   virtual ~InterpreterImpl() = default; // this will uninitialize python
 };
 
-// inline definitions for PythonObject are necessary to avoid introducing a
+// inline definitions for Objs are necessary to avoid introducing a
 // source file that would need to exist it both the libinterpreter.so and then
 // the libtorchpy library.
 inline at::IValue Obj::toIValue() const {
@@ -92,6 +97,9 @@ inline Obj Obj::operator()(at::ArrayRef<at::IValue> args) {
   return interaction_->call(*this, args);
 }
 
+inline Obj Obj::call_kwargs(std::vector<std::tuple<std::string, at::IValue>> kwargs) {
+  return interaction_->call_kwargs(*this, std::move(kwargs));
+}
 inline Obj Obj::attr(const char* attr) {
   return interaction_->attr(*this, attr);
 }
