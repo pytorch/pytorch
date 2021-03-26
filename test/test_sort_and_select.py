@@ -163,7 +163,9 @@ class TestSortAndSelect(TestCase):
                     r1 = t.sort(dim=dim)
                     r2 = t.contiguous().sort(dim=dim)
                     self.assertEqual(r1, r2)
-                    if self.device_type == 'cuda' and t.size(dim) > 2048:
+                    n = t.size(dim)
+                    self.assertTrue((r1.values.narrow(dim, 1, n - 1) >= r1.values.narrow(dim, 0, n - 1)).all())
+                    if self.device_type == 'cuda' and n > 2048:
                         # FIXME: this behavior should be true for all cases, not
                         # just the one specified in if condition
                         self.assertEqual(r1.values.stride(), t.stride())
