@@ -255,9 +255,7 @@ void kthvalue_cuda_template(
     bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   int64_t slicesize = self.dim() == 0 ? 1 : self.size(dim);
-  if (self.ndimension() != 0) {
-    TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
-  }
+  zero_numel_check_dims(self, dim);
 
   TORCH_CHECK(k >= 1 && k <= slicesize, "selected number k out of range");
 

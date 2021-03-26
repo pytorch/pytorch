@@ -2204,6 +2204,17 @@ class TestReductions(TestCase):
             # Check if function raises error on specified zero'd dimension as reduction dim.
             self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input, dim=1))
 
+    def test_tensor_compare_ops_optional_dim_empty(self, device):
+        shape = (2, 0, 4)
+        master_input = torch.randn(shape, device=device)
+        test_functions = [
+            ('argmax', torch.argmax),
+            ('argmin', torch.argmin),
+        ]
+
+        for name, fn in test_functions:
+            self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input))
+
     def test_tensor_reduce_ops_empty(self, device):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)

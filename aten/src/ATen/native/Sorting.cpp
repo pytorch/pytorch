@@ -278,9 +278,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   dim = at::maybe_wrap_dim(dim, self.dim());
 
   int64_t size = self.dim() > 0 ? self.size(dim) : 1;
-  if (self.ndimension() != 0) {
-    TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero");
-  }
+  zero_numel_check_dims(self, dim);
 
   checkDeviceType("median", {values, indices}, self.device().type());
   checkScalarType("median", {indices, "indices", 1}, kLong);
