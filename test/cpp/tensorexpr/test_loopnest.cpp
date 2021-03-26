@@ -1892,6 +1892,136 @@ TEST(LoopNest, LoopNestComputeAt_3) {
   }
 }
 
+using Axis = const VarHandle&;
+
+void checkIR(Stmt* s, const std::string& pattern) {
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(pattern, oss.str());
+}
+
+TEST(LoopNest, Reduce2dComputeAt) {
+  KernelScope kernel_scope;
+
+  const int kW = 16, kH = 16;
+  VarHandle W("W", kInt);
+  VarHandle H("H", kInt);
+
+  Tensor* p =
+      Compute("prod", {{H + 1, "py"}, {W + 1, "px"}}, [&](Axis py, Axis px) {
+        return px * py;
+      });
+  Tensor* c = Reduce(
+      "cons",
+      {{H, "cy"}, {W, "cx"}},
+      Sum(),
+      [&](Axis y, Axis x, Axis r, Axis s) { return p->call(y + r, x + s); },
+      {{2, "r"}, {2, "s"}});
+
+  std::vector<int> c_ref(kW * kH, 0);
+  for (int y = 0; y < kH; y++) {
+    for (int x = 0; x < kW; x++) {
+      c_ref[y * kW + x] = y * x + (y + 1) * x + y * (x + 1) + (y + 1) * (x + 1);
+    }
+  }
+  LoopNest orig_loopnest({c});
+  checkIR(orig_loopnest.root_stmt(), R"IR(
+# CHECK: for (int py = 0; py < H + 1; py++) {
+# CHECK:   for (int px = 0; px < W + 1; px++) {
+# CHECK:     prod[py, px] = px * py;
+# CHECK:   }
+# CHECK: }
+# CHECK: for (int cy = 0; cy < H; cy++) {
+# CHECK:   for (int cx = 0; cx < W; cx++) {
+# CHECK:     cons[cy, cx] = int(0);
+# CHECK:     for (int r = 0; r < 2; r++) {
+# CHECK:       for (int s = 0; s < 2; s++) {
+# CHECK:         cons[cy, cx] = ReduceOp((cons[cy, cx]) + (prod(cy + r, cx + s)), reduce_args={r, s});
+# CHECK:       }
+# CHECK:     }
+# CHECK:   }
+# CHECK: }
+)IR");
+
+  {
+    // First let's try to compute P at axis cy (the outer loop)
+    LoopNest l(orig_loopnest);
+    auto loops = l.getLoopStmtsFor(c);
+    l.computeAt(l.getLoopBodyFor(p), loops[0]);
+    checkIR(l.root_stmt(), R"IR(
+# CHECK: for (int py = 0; py < H + 1; py++) {
+# CHECK:   for (int px = 0; px < W + 1; px++) {
+# CHECK:     prod[py, px] = px * py;
+# CHECK:   }
+# CHECK: }
+# CHECK: for (int cy = 0; cy < H; cy++) {
+# CHECK:   for (int idx0 = 0; idx0 < 2; idx0++) {
+# CHECK:     for (int idx1 = 0; idx1 < W + 1; idx1++) {
+# CHECK:       temp[idx0, idx1] = (idx0 + cy) * (idx1 + 0);
+# CHECK:     }
+# CHECK:   }
+# CHECK:   for (int cx = 0; cx < W; cx++) {
+# CHECK:     cons[cy, cx] = int(0);
+# CHECK:     for (int r = 0; r < 2; r++) {
+# CHECK:       for (int s = 0; s < 2; s++) {
+# CHECK:         cons[cy, cx] = ReduceOp((cons[cy, cx]) + (temp[r, s + cx]), reduce_args={r, s});
+# CHECK:       }
+# CHECK:     }
+# CHECK:   }
+# CHECK: }
+)IR");
+    l.prepareForCodegen();
+    Stmt* s = l.root_stmt();
+
+    // Now check that the loop still produces the correct result.
+    std::vector<int> c_data(kW * kH, 0);
+    SimpleIREvaluator cg(s, {c, W, H});
+    cg.call({c_data, kW, kH});
+    assertAllEqual(c_data, c_ref);
+  }
+  {
+    // Now let's try to compute P at axis cx (the inner loop)
+    LoopNest l(orig_loopnest);
+    std::vector<For*> loops = l.getLoopStmtsFor(c);
+    l.computeAt(l.getLoopBodyFor(p), loops[1]);
+    l.prepareForCodegen();
+    l.simplify();
+    checkIR(l.root_stmt(), R"IR(
+# CHECK: for (int py = 0; py < H + 1; py++) {
+# CHECK:   for (int px = 0; px < W + 1; px++) {
+# CHECK:     Allocate(prod); // dtype=int, dims=[H + 1, W + 1]
+# CHECK:     prod[(px + py * W) + 1] = px * py;
+# CHECK:     Free(prod);
+# CHECK:   }
+# CHECK: }
+# CHECK: for (int cy = 0; cy < H; cy++) {
+# CHECK:   for (int cx = 0; cx < W; cx++) {
+# CHECK:     Allocate(temp); // dtype=int, dims=[2, 2]
+# CHECK:     for (int idx0 = 0; idx0 < 2; idx0++) {
+# CHECK:       for (int idx1 = 0; idx1 < 2; idx1++) {
+# CHECK:         temp[2 * idx0 + idx1] = (cy + idx0) * (cx + idx1);
+# CHECK:       }
+# CHECK:     }
+# CHECK:     cons[cx + cy * W] = 0;
+# CHECK:     for (int r = 0; r < 2; r++) {
+# CHECK:       for (int s = 0; s < 2; s++) {
+# CHECK:         cons[cx + cy * W] = (cons[cx + cy * W]) + (temp[s + 2 * r]);
+# CHECK:       }
+# CHECK:     }
+# CHECK:     Free(temp);
+# CHECK:   }
+# CHECK: }
+)IR");
+    Stmt* s = l.root_stmt();
+
+    // Now check that the loop still produces the correct result.
+    std::vector<int> c_data(kW * kH, 0);
+    SimpleIREvaluator cg(s, {c, W, H});
+    cg.call({c_data, kW, kH});
+    assertAllEqual(c_data, c_ref);
+  }
+}
+
 class LoopOrderHelper : public IRVisitor {
   std::stringstream ordering;
 
