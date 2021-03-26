@@ -373,6 +373,9 @@ class TORCH_API Tensor {
   /// Returns a `Tensor`'s device index.
   int64_t get_device() const;
 
+  /// Returns if a `Tensor` has CPU backend.
+  bool is_cpu() const;
+
   /// Returns if a `Tensor` has CUDA backend.
   bool is_cuda() const;
 

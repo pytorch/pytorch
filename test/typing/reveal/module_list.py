@@ -9,3 +9,4 @@ class BarModule(torch.nn.Module):
 
 ml: torch.nn.ModuleList = torch.nn.ModuleList([FooModule(), BarModule()])
 ml[0].children() == []  # noqa: B015
+reveal_type(ml)  # E: {ModuleList}
