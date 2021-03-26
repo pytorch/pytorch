@@ -2195,7 +2195,7 @@ class TestReductions(TestCase):
         ]
 
         for name, fn, dtype in test_functions:
-            Check if reduction happens along the specified dim with and without keepdim.
+            # Check if reduction happens along the specified dim with and without keepdim.
             error_msg = f"test function: {name}"
             self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=2), msg=error_msg)
             self.assertEqual(torch.empty((2, 0), device=device, **dtype), fn(master_input, dim=-1), msg=error_msg)

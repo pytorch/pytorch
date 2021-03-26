@@ -6,6 +6,7 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <THC/THCDeviceUtils.cuh> // only for THCRoundUp?
 #include <THC/THCNumerics.cuh>
