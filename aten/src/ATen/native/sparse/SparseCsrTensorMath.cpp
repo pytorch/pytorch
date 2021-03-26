@@ -27,12 +27,12 @@ bool is_msvc() {
 }
 
 Tensor& addmm_out_sparse_csr_dense_cpu(
-    Tensor& out,
     const Tensor& self,
     const SparseTensor& op1,
     const Tensor& op2,
     const Scalar& beta,
-    const Scalar& alpha) {
+    const Scalar& alpha,
+    Tensor& out) {
   Tensor expand_self;
   AT_ASSERT(op1.is_sparse_csr());
   std::tie(expand_self) =

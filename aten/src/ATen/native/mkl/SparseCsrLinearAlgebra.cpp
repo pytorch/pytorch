@@ -1,10 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseCsrTensorUtils.h>
 
-// Don't compile with MKL for VS code since linking the sparse MKL routines
+// Don't compile with MKL for MSVC/macos since linking the sparse MKL routines
 // needs some build fixes.
 // https://github.com/pytorch/pytorch/pull/50937#issuecomment-778732740
-#if !AT_MKL_ENABLED() || _MSC_VER
+#if !AT_MKL_ENABLED() || _MSC_VER || __APPLE__
 
 namespace at {
 namespace native {
@@ -18,6 +18,8 @@ Tensor& _sparse_mm_mkl_(
     const Scalar& beta) {
 #if _MSC_VER
   AT_ERROR("sparse_mm_mkl: MKL support is disabled on Windows");
+#elif __APPLE__
+  AT_ERROR("sparse_mm_mkl: MKL support is disabled on macos.");
 #else
   AT_ERROR("sparse_mm_mkl: ATen not compiled with MKL support");
 #endif
