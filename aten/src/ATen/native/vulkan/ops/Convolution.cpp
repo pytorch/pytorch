@@ -593,7 +593,6 @@ bool usable(const Tensor& input) {
 
 void conv2d_dw(
     api::Context* const context,
-    api::Command::Buffer& command_buffer,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -605,7 +604,12 @@ void conv2d_dw(
     const IntArrayRef dilation,
     const float output_min,
     const float output_max) {
-  if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image());
+  TORCH_CHECK(valid, "Not Implemented!")
+
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
+  {
     const struct Block final {
       uvec3 extents;
       int32_t src_filter_width;
@@ -678,14 +682,11 @@ void conv2d_dw(
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
   }
-  else {
-    TORCH_CHECK(false, "Not implemented!");
-  }
+  command_pool.submit(context->gpu().queue, command_buffer);
 }
 
 void conv2d_pw(
     api::Context* const context,
-    api::Command::Buffer& command_buffer,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -697,7 +698,12 @@ void conv2d_pw(
     const IntArrayRef dilation,
     const float output_min,
     const float output_max) {
-  if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image());
+  TORCH_CHECK(valid, "Not Implemented!")
+
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
+  {
     const struct Block final {
       uvec3 extents;
       int32_t ic;
@@ -758,14 +764,11 @@ void conv2d_pw(
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
   }
-  else {
-    TORCH_CHECK(false, "Not implemented!");
-  }
+  command_pool.submit(context->gpu().queue, command_buffer);
 }
 
 void conv2d(
     api::Context* const context,
-    api::Command::Buffer& command_buffer,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -777,7 +780,12 @@ void conv2d(
     const IntArrayRef dilation,
     const float output_min,
     const float output_max) {
-  if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image());
+  TORCH_CHECK(valid, "Not Implemented!")
+
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
+  {
     const struct Block final {
       uvec3 extents;
       int32_t ic4;
@@ -856,14 +864,11 @@ void conv2d(
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
   }
-  else {
-    TORCH_CHECK(false, "Not implemented!");
-  }
+  command_pool.submit(context->gpu().queue, command_buffer);
 }
 
 void conv2d_winograd_2_3(
     api::Context* const context,
-    api::Command::Buffer& command_buffer,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -878,6 +883,10 @@ void conv2d_winograd_2_3(
   // Winograd(2x2, 3x3) calculates 2x2 tile of output for every subprogram
   const int64_t out_w_units = div_up(v_output.sizes()[Layout::Activation4D::width], INT64_C(2));
   const int64_t out_h_units = div_up(v_output.sizes()[Layout::Activation4D::height], INT64_C(2));
+
+  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image());
+  TORCH_CHECK(valid, "Not Implemented!")
+
   vTensor v_input_winograd{
     context,
     {
@@ -889,8 +898,8 @@ void conv2d_winograd_2_3(
     v_input.options(),
   };
 
-  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image());
-  TORCH_CHECK(valid, "Not Implemented!")
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& trans_buffer = command_pool.stream();
   {
     const struct TransformBlock final {
       uvec3 extents;
@@ -911,7 +920,7 @@ void conv2d_winograd_2_3(
     };
 
     context->dispatch(
-        command_buffer,
+        trans_buffer,
         {
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -925,21 +934,23 @@ void conv2d_winograd_2_3(
         },
         context->gpu().adapter->local_work_group_size(),
         v_input_winograd.image(
-            command_buffer,
+            trans_buffer,
             vTensor::Stage::Compute,
             vTensor::Access::Write),
         v_input.image(
-            command_buffer,
+            trans_buffer,
             vTensor::Stage::Compute),
         context->resource().pool.uniform(transform_block).object);
 
   }
+  command_pool.submit(context->gpu().queue, trans_buffer);
+
+  api::Command::Buffer& conv_buffer = command_pool.stream();
   {
     const struct Block final {
       uvec3 extents;
       int32_t ic4;
       vec2 clamp;
-      ivec4 src_filter;
     } block {
       v_output.extents(),
       safe_downcast<int32_t>(filter[Layout::Filter::input] / 4),
@@ -949,7 +960,7 @@ void conv2d_winograd_2_3(
       },
     };
     context->dispatch(
-        command_buffer,
+        conv_buffer,
         {
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -965,25 +976,25 @@ void conv2d_winograd_2_3(
         },
         context->gpu().adapter->local_work_group_size(),
         v_output.image(
-            command_buffer,
+            conv_buffer,
             vTensor::Stage::Compute,
             vTensor::Access::Write),
         v_input_winograd.image(
-            command_buffer,
+            conv_buffer,
             vTensor::Stage::Compute),
         v_weight.image(
-            command_buffer,
+            conv_buffer,
             vTensor::Stage::Compute),
         v_bias.buffer(
-            command_buffer,
+            conv_buffer,
             vTensor::Stage::Compute),
         context->resource().pool.uniform(block).object);
   }
+  command_pool.submit(context->gpu().queue, conv_buffer);
 }
 
 void conv2d_old(
     api::Context* const context,
-    api::Command::Buffer& command_buffer,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& v_weight,
@@ -996,8 +1007,12 @@ void conv2d_old(
     const float output_min,
     const float output_max) {
   using namespace api::utils;
+  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image());
+  TORCH_CHECK(valid, "Not Implemented!")
 
-  if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
+  {
     const int32_t W = v_input.extents().data[0];
     const int32_t H = v_input.extents().data[1];
     const int32_t C_4 = v_input.extents().data[2];
@@ -1069,9 +1084,7 @@ void conv2d_old(
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
   }
-  else {
-    TORCH_CHECK(false, "Not implemented!");
-  }
+  command_pool.submit(context->gpu().queue, command_buffer);
 }
 
 Tensor convolution(
@@ -1225,12 +1238,9 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
     input.options(),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
   {
     void (*conv_func) (
       api::Context* const,
-      api::Command::Buffer&,
       vTensor&,
       const vTensor&,
       const vTensor&,
@@ -1262,7 +1272,6 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
     }
     conv_func(
       context,
-      command_buffer,
       v_output,
       v_input,
       packed_.v_weight,
@@ -1275,7 +1284,6 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
       packed_.output_min,
       packed_.output_max);
   }
-  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }
