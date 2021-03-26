@@ -11563,12 +11563,6 @@ dedent """
                     return x
             ''')
 
-    def test_empty_tuple_str(self):
-        empty_tuple_type = torch._C.TupleType([])
-        g = {'Tuple' : typing.Tuple}
-        python_type = eval(empty_tuple_type.annotation_str, g)
-        assert python_type is typing.Tuple[()]
-
     def test_parse_none_type_annotation(self):
         cu = torch.jit.CompilationUnit('''
             def foo(x : NoneType) -> NoneType:
@@ -11577,6 +11571,12 @@ dedent """
 
         foo_code = cu.find_function('foo').code
         FileCheck().check(": NoneType").check("-> NoneType").run(foo_code)
+
+    def test_empty_tuple_str(self):
+        empty_tuple_type = torch._C.TupleType([])
+        g = {'Tuple' : typing.Tuple}
+        python_type = eval(empty_tuple_type.annotation_str, g)
+        assert python_type is typing.Tuple[()]
 
     def test_none_type_str(self):
         none_type = torch._C.NoneType.get()
