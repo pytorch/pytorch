@@ -242,6 +242,11 @@ static void upsample_trilinear3d_out_cuda_template(
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_trilinear3d_out_cuda", {input_arg, output_arg});
 
+  // TODO: remove this when the cuda kernel is updated to support the channels_last memory format.
+  // This is a temporary hack to prevent a silence correctness issue when calling this kernel
+  // with tensors in channels_last format.
+  auto output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
+
   int output_depth = output_size[0];
   int output_height = output_size[1];
   int output_width = output_size[2];
@@ -262,7 +267,7 @@ static void upsample_trilinear3d_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = input.packed_accessor64<scalar_t, 5>();
-        auto odata = output.packed_accessor64<scalar_t, 5>();
+        auto odata = output_c.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
             input_depth, output_depth, align_corners, scales_d);
@@ -285,6 +290,10 @@ static void upsample_trilinear3d_out_cuda_template(
                 odata);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
+
+  if (!output.is_contiguous()) {
+      output.copy_(output_c);
+  }
 }
 
 static void upsample_trilinear3d_backward_out_cuda_template(
