@@ -160,7 +160,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
   int64_t nsegments = nbatch / nsort;
 
-  auto segment_id = at::arange(nsort, indices.options()).view({nsort, 1}).expand({nsort, nsegments}).contiguous();
+  auto segment_id = at::arange(nsegments, indices.options()).view({nsegments, 1}).expand({nsegments, nsort}).contiguous();
   int64_t *segment_id_ptr = segment_id.data_ptr<int64_t>();
   auto orig_indices = at::arange(nsort, indices.options()).repeat({nsegments});
   int64_t *orig_indices_ptr = orig_indices.data_ptr<int64_t>();
@@ -178,19 +178,24 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     int64_t remaining = numel;
     while (remaining > 0) {
       int64_t n = std::min(remaining, nbatch);
+      // std::cout << "n = " << n << std::endl;
       int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(n / nsort))));
       at::cuda::cub::sort_pairs(
         self_ptr, tmp_ptr,
         orig_indices_ptr, orig_indices_tmp_ptr,
         n, descending);
+      // std::cout << "tmp = " << tmp << std::endl;
       at::cuda::cub::sort_pairs(
         self_ptr, tmp_ptr,
         segment_id_ptr, segment_id_tmp_ptr,
         n, descending);
+      // std::cout << "tmp = " << tmp << std::endl;
+      // std::cout << "segment_id_tmp = " << segment_id_tmp << std::endl;
       at::cuda::cub::sort_pairs(
         segment_id_tmp_ptr, segment_id_ptr,
         tmp_ptr, values_ptr,
         n, false, 0, segment_bits);
+      // std::cout << "values = " << values << std::endl;
       at::cuda::cub::sort_pairs(
         segment_id_tmp_ptr, segment_id_ptr,
         orig_indices_tmp_ptr, indices_ptr,
