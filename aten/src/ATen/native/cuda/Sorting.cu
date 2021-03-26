@@ -337,8 +337,9 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
       " dimensions");
 
   std::vector<int64_t> out_shape = self.sizes().vec();
+  zero_numel_check_dims(self, dim);
+  
   if (self.dim() > 0) {
-    TORCH_CHECK(self.size(dim) != 0, "Expected reduction dim ", dim, " to be non-zero.");
     if (keepdim) {
       out_shape[dim] = 1;
     } else {

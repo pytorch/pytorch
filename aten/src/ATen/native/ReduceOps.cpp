@@ -1192,7 +1192,7 @@ Tensor& argmin_out(const Tensor& self, c10::optional<int64_t> dim, bool keepdim,
   }
   auto itr = make_reduction("argmin", result, in, dim.value_or(0), keepdim,
       self.scalar_type(), at::kLong);
-  if (self.numel() != 0) {
+  if (itr.numel() != 0) {
     argmin_stub(itr.device_type(), itr);
   }
   return result;
