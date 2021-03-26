@@ -1081,10 +1081,9 @@ RegisterOperators reg2({
     Operator(
         "aten::sum.complex(complex[] self) -> complex",
         [](Stack* stack) {
-          c10::List<c10::complex<double>> l =
-          pop(stack).toComplexDoubleList();
+          c10::List<c10::complex<double>> l = pop(stack).toComplexDoubleList();
           c10::complex<double> sum = 0.0;
-          for (int i=0; i<l.size(); i++) {
+          for (int i = 0; i < l.size(); i++) {
             sum = sum + l.extract(i);
           }
           push(stack, sum);
