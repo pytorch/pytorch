@@ -93,7 +93,8 @@ factory_like_common_args = parse_kwargs("""
 
 factory_data_common_args = parse_kwargs("""
     data (array_like): Initial data for the tensor. Can be a list, tuple,
-        NumPy ``ndarray``, scalar, and other types.
+        NumPy ``ndarray``, scalar, and other types or objects that implement CPU/CUDA
+        Array Interface protocols.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if ``None``, infers data type from :attr:`data`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
@@ -790,8 +791,18 @@ as_tensor(data, dtype=None, device=None) -> Tensor
 
 Convert the data into a `torch.Tensor`. If the data is already a `Tensor` with the same `dtype` and `device`,
 no copy will be performed, otherwise a new `Tensor` will be returned with computational graph retained if data
-`Tensor` has ``requires_grad=True``. Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and
-the `device` is the cpu, no copy will be performed.
+`Tensor` has ``requires_grad=True``. Similarly, no copy will be performed, if the data is an object that
+
+* implements the `CPU Array Interface
+  <https://numpy.org/doc/stable/reference/arrays.interface.html>`_
+  (``__array_interface__`` attribute or ``__array__()`` method) and
+  uses the corresponding `dtype`, and the `device` is the cpu. For
+  example, data can be NumPy ``ndarray`` object.
+
+* implements the `CUDA Array Interface
+  <https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html>`_
+  (``__cuda_array_interface__`` attribute), and uses the corresponding
+  `dtype`, and the `device` is the cuda,
 
 Args:
     {data}
@@ -7298,7 +7309,8 @@ Constructs a tensor with :attr:`data`.
     :func:`torch.tensor` always copies :attr:`data`. If you have a Tensor
     ``data`` and want to avoid a copy, use :func:`torch.Tensor.requires_grad_`
     or :func:`torch.Tensor.detach`.
-    If you have a NumPy ``ndarray`` and want to avoid a copy, use
+    If you have a NumPy ``ndarray`` or an object that implements
+    CPU/CUDA Array Interface protocols, and want to avoid a copy, use
     :func:`torch.as_tensor`.
 
 .. warning::
