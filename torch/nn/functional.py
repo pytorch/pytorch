@@ -2490,43 +2490,7 @@ def nll_loss(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    dim = input.dim()
-    if dim < 2:
-        raise ValueError("Expected 2 or more dimensions (got {})".format(dim))
-
-    if input.size(0) != target.size(0):
-        raise ValueError(
-            "Expected input batch_size ({}) to match target batch_size ({}).".format(input.size(0), target.size(0))
-        )
-    if dim == 2:
-        ret = torch._C._nn.nll_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-    elif dim == 4:
-        ret = torch._C._nn.nll_loss2d(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
-    else:
-        # dim == 3 or dim > 4
-        n = input.size(0)
-        c = input.size(1)
-        out_size = (n,) + input.size()[2:]
-        if target.size()[1:] != input.size()[2:]:
-            raise ValueError("Expected target size {}, got {}".format(out_size, target.size()))
-        input = input.contiguous()
-        target = target.contiguous()
-        # support empty batches, see #15870
-        if input.numel() > 0:
-            input = input.view(n, c, 1, -1)
-        else:
-            input = input.view(n, c, 0, 0)
-        if target.numel() > 0:
-            target = target.view(n, 1, -1)
-        else:
-            target = target.view(n, 0, 0)
-        reduction_enum = _Reduction.get_enum(reduction)
-        if reduction != "none":
-            ret = torch._C._nn.nll_loss2d(input, target, weight, reduction_enum, ignore_index)
-        else:
-            out = torch._C._nn.nll_loss2d(input, target, weight, reduction_enum, ignore_index)
-            ret = out.view(out_size)
-    return ret
+    return torch._C._nn.nll_loss_nd(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
 
 
 def poisson_nll_loss(
@@ -2804,7 +2768,7 @@ def cross_entropy(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)
+    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
 
 
 def binary_cross_entropy(
