@@ -1109,6 +1109,11 @@ jobs:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
     - run:
+        name: _HACK_ Install CUDA compatible cmath
+        no_output_timeout: 1m
+        command: |
+            powershell .circleci/scripts/vs_install_cmath.ps1
+    - run:
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
@@ -9117,32 +9122,6 @@ workflows:
           vc_product: Community
           vc_version: ""
           vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.2"
-          executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py36_cuda11.2_test1
-          python_version: "3.6"
-          requires:
-            - pytorch_windows_vs2019_py36_cuda11.2_build
-          test_name: pytorch-windows-test1
-          use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
-          vc_year: "2019"
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.2"
-          executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py36_cuda11.2_test2
-          python_version: "3.6"
-          requires:
-            - pytorch_windows_vs2019_py36_cuda11.2_build
-          test_name: pytorch-windows-test2
-          use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
-          vc_year: "2019"
 
   # The following allows these jobs to run on ci-all and release branches
   debuggable-scheduled-ci:
@@ -9195,42 +9174,6 @@ workflows:
           cuda_version: "11.2"
           name: pytorch_windows_vs2019_py36_cuda11.2_build
           python_version: "3.6"
-          use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
-          vc_year: "2019"
-          filters:
-            branches:
-              only:
-                - /ci-all\/.*/
-                - /release\/.*/
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.2"
-          executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py36_cuda11.2_test1
-          python_version: "3.6"
-          requires:
-            - pytorch_windows_vs2019_py36_cuda11.2_build
-          test_name: pytorch-windows-test1
-          use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
-          vc_year: "2019"
-          filters:
-            branches:
-              only:
-                - /ci-all\/.*/
-                - /release\/.*/
-      - pytorch_windows_test:
-          build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.2"
-          executor: windows-with-nvidia-gpu
-          name: pytorch_windows_vs2019_py36_cuda11.2_test2
-          python_version: "3.6"
-          requires:
-            - pytorch_windows_vs2019_py36_cuda11.2_build
-          test_name: pytorch-windows-test2
           use_cuda: "1"
           vc_product: Community
           vc_version: ""

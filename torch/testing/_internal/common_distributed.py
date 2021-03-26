@@ -302,6 +302,7 @@ class MultiProcessTestCase(TestCase):
 
     def setUp(self):
         super().setUp()
+        self.faulthandler_files = []
         self.skip_return_code_checks = []
         self.processes = []
         self.rank = self.MAIN_PROCESS_RANK
@@ -337,7 +338,6 @@ class MultiProcessTestCase(TestCase):
         TEST_SKIPS = test_skips
 
         self.processes = []
-        self.faulthandler_files = []
         for rank in range(int(self.world_size)):
             parent_conn, child_conn = torch.multiprocessing.Pipe()
             faulthandler_file = tempfile.NamedTemporaryFile()
