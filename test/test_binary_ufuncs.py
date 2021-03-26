@@ -657,8 +657,8 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(actual, expected.to(actual))
             self.assertEqual(actual2, expected.to(actual))
 
-    # Tests pow() for integral, floating-type tensors, with ntegral, floating-type
-    # exponents (tensor or scalar exponents), respectively.
+    # Tests pow() for integral, floating-type tensors, with integral, floating-type
+    # exponents (tensor or scalar), respectively. Discontiguous tensors are also tested.
     def test_int_and_float_pow(self, device):
 
         def _test_int_and_float_pow(dt, low, high, dev):
