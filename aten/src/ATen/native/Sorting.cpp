@@ -7,6 +7,7 @@
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/native/ReduceOpsUtils.h>
 
 #include <utility>
 
