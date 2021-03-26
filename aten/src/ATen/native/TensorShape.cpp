@@ -1445,7 +1445,7 @@ Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
 }
 
 // TODO(msubkhankulov): refactor to use _stack_out
-Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
+Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
@@ -1462,7 +1462,7 @@ Tensor hstack(TensorList tensors) {
   return at::cat(rep, 1);
 }
 
-Tensor& hstack_out(Tensor& result, TensorList tensors) {
+Tensor& hstack_out(TensorList tensors, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "hstack expects a non-empty TensorList");
   auto rep = at::atleast_1d(tensors);
@@ -1479,7 +1479,7 @@ Tensor vstack(TensorList tensors) {
   return at::cat(rep, 0);
 }
 
-Tensor& vstack_out(Tensor& result, TensorList tensors) {
+Tensor& vstack_out(TensorList tensors, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "vstack expects a non-empty TensorList");
   auto rep = at::atleast_2d(tensors);
@@ -1492,7 +1492,7 @@ Tensor dstack(TensorList tensors) {
   auto rep = at::atleast_3d(tensors);
   return at::cat(rep, 2);
 }
-Tensor& dstack_out(Tensor& result, TensorList tensors) {
+Tensor& dstack_out(TensorList tensors, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "dstack expects a non-empty TensorList");
   auto rep = at::atleast_3d(tensors);
@@ -2165,7 +2165,7 @@ Tensor diag(const Tensor& self, int64_t dimension) {
   return result;
 }
 
-Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
+Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, self.scalar_type(), "diag", [&] {
     apply_diag<scalar_t>(result, self, dimension);
   });
