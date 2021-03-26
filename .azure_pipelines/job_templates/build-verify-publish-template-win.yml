@@ -1,4 +1,9 @@
 # PyTorch build steps template with Windows images Azure DevOps Instances
+#
+# This build depends on 3 parameters set as environment variables in the pipeline:
+#   - AZURE_DEVOPS_CLI_PAT: Secret var for authenticating to Azure DevOps
+#   - AZURE_DEVOPS_ARTIFACTS_ORGANIZATION: Azure Artifacts Organization name to publish artifacts
+#   - AZURE_DEVOPS_ARTIFACTS_PROJECT: Azure Artifacts Project name to publish artifacts
 
 parameters:
   name: ''
@@ -58,7 +63,7 @@ jobs:
 
       - ${{ if eq(parameters.is_daily_build, 'True') }}:
         # Run all unit tests to demonstrate successful PyTorch build
-        - script: call activate $(configuration) && python test/run_test.py --continue-through-error --exclude-jit-executor --shard 2 2 --verbose
+        - script: call activate $(configuration) && python test/run_test.py --continue-through-error --exclude-jit-executor --verbose
           displayName: Run all unit tests
 
       # Run ComponentGovernance
@@ -128,17 +133,18 @@ jobs:
       displayName: Set up Azure Artifacts download on Windows
 
     # Publish wheel to Azure Artifacts
+    # The flag continueOnError=true is needed as the artifact to be published
+    # may already exist, because the artifact is differentiated based on the
+    # last commit date.
     - script: |
         set /p TORCH_VERSION= < version.txt
         cd $(Build.SourcesDirectory)\publish
-        set YYYY=%DATE:~10,4%
-        set MM=%DATE:~4,2%
-        set DD=%DATE:~7,2%
-        set BUILD_DATE=%YYYY%%MM%%DD%
         git rev-parse --short HEAD > last_commit.txt && set /p LAST_COMMIT= < last_commit.txt
+        git log -1 --pretty=%ad --date=format:%Y%m%d > last_commit_date.txt && set /p LAST_COMMIT_DATE= < last_commit_date.txt
         dir torch*win*.whl /b > whl.txt && set /p TORCH_WHEEL= < whl.txt
         echo %ADOTOKEN% | az devops login
-        az artifacts universal publish --organization "https://aiinfra.visualstudio.com/" --project "0628bce4-2d33-499e-bac5-530e12db160f" --scope project --feed "PyTorch" --name %TORCH_WHEEL% --description "PyTorch Official Build Artifact" --version %TORCH_VERSION:~0,5%-%BUILD_DATE%-%LAST_COMMIT% --path .
+        az artifacts universal publish --organization %AZURE_DEVOPS_ARTIFACTS_ORGANIZATION% --project %AZURE_DEVOPS_ARTIFACTS_PROJECT% --scope project --feed "PyTorch" --name %TORCH_WHEEL% --description "PyTorch Official Build Artifact" --version %TORCH_VERSION:~0,5%-%LAST_COMMIT_DATE%-%LAST_COMMIT% --path .
       env:
         ADOTOKEN: $(AZURE_DEVOPS_CLI_PAT)
+      continueOnError: true
       displayName: Upload PyTorch nigthly package to Azure Artifacts

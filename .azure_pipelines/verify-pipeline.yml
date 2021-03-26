@@ -4,7 +4,7 @@
 #   1) builds PyTorch on all available configurations
 #   2) verifies PyTorch artifacts by installing them in a clean environment
 #      and checking torch.__version_
-#   3) publishes official PyTorch artifacts to Azure DevOps Artifacts for consumption 
+#   3) publishes official PyTorch artifacts to Azure DevOps Artifacts for consumption
 
 stages:
 - stage: 'Build'
