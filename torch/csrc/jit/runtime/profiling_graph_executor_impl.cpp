@@ -129,6 +129,13 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
+// `prim::RequiresGradCheck` guarantees that requires_grad properties
+// of input tensors will match the profiled, otherwise a fallback path
+// will be triggered. This allow us to prune off gradients in backward
+// graph for inputs that don't need gradients. We transfer requires_grad
+// properties from inputs to the `prim::DifferentiableGraph` onto inputs to the
+// differentiable graph. Autodiff will inspect these properties and prune
+// off gradients that aren't required
 static void setRequiresGradOnDiffGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   for (size_t i = 0; i < dnode->inputs().size(); i++) {
