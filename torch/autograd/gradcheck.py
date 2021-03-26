@@ -165,6 +165,19 @@ def prepped_input(input, input_idx, entry, entry_idx):
         return input
 
 
+def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, idx, delta):
+    # Check that the returned outputs don't have different dtype or shape when you
+    # perturb the input
+    assert output1.shape == output2.shape, \
+        (f"Expected `func` to return outputs with the same shape"
+        f" when inputs are perturbed on index {idx} by {delta}, but got:"
+        f" shapes {output1.shape} and {output2.shape}.")
+    assert output1.dtype == output2.dtype, \
+        (f"Expected `func` to return outputs with the same dtype"
+        f" when inputs are perturbed on index {idx} by {delta}, but got:"
+        f" dtypes {output1.dtype} and {output2.dtype}.")
+
+
 def compute_gradient(fn, inputs, input_idx, x, idx, delta, eps, layout):
     # Perturbs inputs in-place by delta as to obtain the gradient
     # of each of the outputs wrt to x at idx.
@@ -184,6 +197,7 @@ def compute_gradient(fn, inputs, input_idx, x, idx, delta, eps, layout):
     x[idx] = orig
 
     def compute(a, b):
+        check_outputs_same_dtype_and_shape_in_neighborhood(a, b, idx, delta)
         ret = (b - a) / (2 * eps)
         return ret.detach().reshape(-1)
 
