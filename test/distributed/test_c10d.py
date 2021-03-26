@@ -2223,6 +2223,12 @@ class SparseGradientModule(nn.Module):
     def forward(self, x):
         return F.softmax(self.embedding(x), dim=1)
 
+class MixedDenseSparseModule(nn.Module):
+    def __init__(self):
+        super(MixedDenseSparseModule, self).__init__()
+
+    def forward(self, x):
+        pass
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
