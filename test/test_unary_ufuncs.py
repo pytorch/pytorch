@@ -1020,6 +1020,17 @@ class TestUnaryUfuncs(TestCase):
         out.backward(torch.ones_like(inputTensor))
         self.assertEqual(inputTensor.grad, expetedTensor)
 
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16)
+    @dtypes(torch.float, torch.double)
+    def test_sinc_backward(self, device, dtype):
+        inputValues = [-1.0, 0.0, 1.0]
+        expectedValues = [1.0, 0.0, -1.0]
+        inputTensor = torch.tensor(inputValues, dtype=dtype, device=device).requires_grad_()
+        expectedTensor = torch.tensor(expectedValues, dtype=dtype, device=device)
+        out = torch.sinc(inputTensor)
+        out.backward(torch.ones_like(inputTensor))
+        self.assertEqual(inputTensor.grad, expectedTensor)
+
     @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
     def test_silu(self, device, dtype):
