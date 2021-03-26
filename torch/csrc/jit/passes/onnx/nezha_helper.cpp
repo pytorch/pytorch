@@ -41,60 +41,63 @@ torch::jit::Module NeZha_ConvertModule(Module& module, torch::Tensor input) {
     generic_graph_node_list_iterator<Node> keyNode;
 
     // Construct the first ONNX.
-    // for (auto it = temporary_nodes.rbegin(); it != temporary_nodes.rend();
-    //         it++) {
+    for (auto it = temporary_nodes.rbegin(); it != temporary_nodes.rend();
+            it++) {
         
-    //     auto current_kind = it->kind().toQualString();
-    //     // if (std::strcmp(current_kind, "onnx_ops::dummy_ops") == 0){
-    //     //     // insert a new node before this to return a tuple, which contains inputs of dummy_ops.
-    //     //     auto selectedNode = *it;
-    //     //     WithInsertPoint guard(selectedNode);
-    //     //     auto* new_output = selectedNode->owningGraph()->insertBefore(selectedNode->owningGraph()->create(
-    //     //                 Symbol::fromQualString("onnx_ops::fake_ops"),
-    //     //                 selectedNode->inputs(),
-    //     //                 selectedNode->outputs().size()));
+        auto current_kind = it->kind().toQualString();
+        // if (std::strcmp(current_kind, "onnx_ops::dummy_ops") == 0){
+        //     // insert a new node before this to return a tuple, which contains inputs of dummy_ops.
+        //     auto selectedNode = *it;
+        //     WithInsertPoint guard(selectedNode);
+        //     auto* new_output = selectedNode->owningGraph()->insertBefore(selectedNode->owningGraph()->create(
+        //                 Symbol::fromQualString("onnx_ops::fake_ops"),
+        //                 selectedNode->inputs(),
+        //                 selectedNode->outputs().size()));
 
-    //     //     for (size_t i = 0; i < it->outputs().size(); ++i) {
-    //     //         it->output(i)->replaceAllUsesWith(new_output->output(i));
-    //     //     }
-    //     // }
+        //     for (size_t i = 0; i < it->outputs().size(); ++i) {
+        //         it->output(i)->replaceAllUsesWith(new_output->output(i));
+        //     }
+        // }
 
         
-    //     keyNode = it;
-    //     keyNode++;
+        keyNode = it;
+        keyNode++;
 
-    //     it->output()->replaceAllUsesWith(keyNode->outputs()[0]);
-    //     it.destroyCurrent();
+        it->output()->replaceAllUsesWith(keyNode->outputs()[0]);
+        it.destroyCurrent();
 
-    //     if (std::strcmp(current_kind, "onnx_ops::dummy_ops") == 0) {
-    //         break;
-    //     }
+        if (std::strcmp(current_kind, "onnx_ops::dummy_ops") == 0) {
+            break;
+        }
 
-    //     printf("\n------ check graph: ------\n");
-    //     graph->dump();        
-    // }
+        printf("\n------ check graph: ------\n");
+        graph->dump();        
+    }
 
-    // for (auto it = temporary_nodes.rbegin(); it != temporary_nodes.rend();
-    //             it++) {
-    //     if (std::strcmp(it->kind().toQualString(), "prim::GetAttr") == 0){
-    //         if (!it->output()->hasUses()){
-    //             it.destroyCurrent();
-    //         }
-    //     }
-    // }
+    for (auto it = temporary_nodes.rbegin(); it != temporary_nodes.rend();
+                it++) {
+        if (std::strcmp(it->kind().toQualString(), "prim::GetAttr") == 0){
+            if (!it->output()->hasUses()){
+                it.destroyCurrent();
+            }
+        }
+    }
 
     printf("\n------ check final graph: ------\n");
     graph->dump();
 
-    // auto method_name = QualifiedName(*new_module.type()->name(), "forward");
-    // new_module.type()->unsafeRemoveMethod("forward");
-    // new_module._ivalue()->compilation_unit()->unsafeRemoveMethod(method_name);
-    // auto fn = new_module._ivalue()->compilation_unit()->create_function(method_name, graph);
-    // new_module.type()->addMethod(fn);
+    auto first_method_name = QualifiedName(*new_module.type()->name(), "forward");
+    new_module.type()->unsafeRemoveMethod("forward");
+    new_module._ivalue()->compilation_unit()->unsafeRemoveMethod(first_method_name);
+    auto first_fn = new_module._ivalue()->compilation_unit()->create_function(first_method_name, graph);
+    new_module.type()->addMethod(first_fn);
 
-    // printf("------ ready to export: ------\n");
-    // // Export current new_module to ONNX file
-    // export_to_onnx(new_module, "first_part.onnx", input);
+    printf("\n------ check module for export - 1st part: ------\n");
+    new_module.dump(true, false, false);
+
+    printf("------ ready to export: ------\n");
+    // Export current new_module to ONNX file
+    export_to_onnx(new_module, "first_part.onnx", input);
 
     // Now, let's update the module code to the operator which handles the onnx file.
     // Remove all operators before the given dummy ops
@@ -123,10 +126,8 @@ torch::jit::Module NeZha_ConvertModule(Module& module, torch::Tensor input) {
                     Symbol::fromQualString("onnx_ops::ort_inference_ops"),
                     selectedNode->owningGraph()->inputs(),
                     selectedNode->inputs().size());
-            printf("\n------ Create Node: ------\n");
 
             new_node->insertBefore(selectedNode);
-            printf("\n------ Insert Node: ------\n");
             selectedNode->replaceInput(0, new_node->outputs()[0]);
 
             // Construct a new string Constant for onnx file name and update it to input of ort_inference_ops
@@ -142,17 +143,121 @@ torch::jit::Module NeZha_ConvertModule(Module& module, torch::Tensor input) {
             break;
         }
 
-        printf("\n------ check fina graph during iteration: ------\n");
-        new_final_graph->dump();
+        // printf("\n------ check fina graph during iteration: ------\n");
+        // new_final_graph->dump();
     }
 
-    printf("\n------ check fina graph: ------\n");
+    printf("\n------ check fina graph after insert the ort_inference_ops: ------\n");
     new_final_graph->dump();
 
-    auto method_name = QualifiedName(*new_final_module.type()->name(), "forward");
+    // Now change the graph after dummy_ops operator to ort_inference_ops
+    new_module = module.clone();
+    graph = new_module.get_method("forward").graph()->copy();
+    temporary_nodes = graph->block()->nodes();
+    for (auto it = temporary_nodes.begin(); it != temporary_nodes.end();
+                it++) {
+
+        if (std::strcmp(it->kind().toQualString(), "prim::GetAttr") == 0){
+            continue;
+        }
+
+        if (std::strcmp(it->kind().toQualString(), "onnx_ops::dummy_ops") != 0) {
+            it->output()->replaceAllUsesWith(graph->inputs()[1]);
+            it.destroyCurrent();
+        } else {
+            // Update the inputs to the output of dummy_ops
+            it->outputs()[0]->replaceAllUsesWith(graph->inputs()[1]);
+            graph->inputs()[1]->copyMetadata(it->outputs()[0]);
+
+            it->output()->replaceAllUsesWith(graph->inputs()[1]);
+            it.destroyCurrent();
+            break;
+        }
+
+        // printf("\n------ check graph during iteration: ------\n");
+        // graph->dump();
+    }
+
+    for (auto it = temporary_nodes.rbegin(); it != temporary_nodes.rend();
+                it++) {
+        if (std::strcmp(it->kind().toQualString(), "prim::GetAttr") == 0){
+            if (!it->output()->hasUses()){
+                it.destroyCurrent();
+            }
+        }
+    }
+
+    printf("\n------ check graph for export - 2nd part: ------\n");
+    graph->dump();
+
+    // All remainded nodes are necessary, export to ONNX.
+    auto second_method_name = QualifiedName(*new_module.type()->name(), "forward");
+    new_module.type()->unsafeRemoveMethod("forward");
+    new_module._ivalue()->compilation_unit()->unsafeRemoveMethod(second_method_name);
+    auto second_fn = new_module._ivalue()->compilation_unit()->create_function(second_method_name, graph);
+    new_module.type()->addMethod(second_fn);
+
+    printf("\n------ check module for export - 2nd part: ------\n");
+    new_module.dump(true, false, false);
+
+    printf("------ ready to export - 2nd: ------\n");
+    export_to_onnx(new_module, "second_part.onnx", input);
+
+    // Update the final graph to replace those nodes to ort_inference_ops operator
+    temporary_nodes = new_final_graph->block()->nodes();
+    for (auto it = temporary_nodes.rbegin(); it != temporary_nodes.rend();
+            it++) {
+
+        if (std::strcmp(it->kind().toQualString(), "prim::GetAttr") == 0){
+            continue;
+        }
+
+        if (std::strcmp(it->kind().toQualString(), "onnx_ops::dummy_ops") != 0) {
+            it->output()->replaceAllUsesWith(new_final_graph->inputs()[1]);
+            it.destroyCurrent();
+        } else {
+            // Insert the new operator for ort inferencing
+            Node* selectedNode = *it;
+            WithInsertPoint guard(selectedNode);
+
+            // Construct a new string Constant for onnx file name and update it to input of ort_inference_ops
+            auto* new_str = new_final_graph->create(
+                    Symbol::prim("Constant"),
+                    1);
+            new_str->s_(Symbol::attr("value"), "second_part.onnx");
+            new_str->outputs()[0]->setType(jit::StringType::get());
+            new_str->insertAfter(selectedNode);
+
+            auto* new_node = new_final_graph->create(
+                    Symbol::fromQualString("onnx_ops::ort_inference_ops"),
+                    new_str->outputs()[0],
+                    // ,
+                    selectedNode->owningGraph()->outputs().size());
+            new_node->addInput(selectedNode->outputs()[0]);
+            new_node->insertAfter(new_str);
+            selectedNode->owningGraph()->block()->replaceOutput(0, new_node->outputs()[0]);
+
+            break;
+        }
+    }
+
+    for (auto it = temporary_nodes.rbegin(); it != temporary_nodes.rend();
+                it++) {
+        if (std::strcmp(it->kind().toQualString(), "prim::GetAttr") == 0){
+            if (!it->output()->hasUses()){
+                it.destroyCurrent();
+            }
+        }
+    }
+
+    printf("\n------ check fina graph before return: ------\n");
+    new_final_graph->dump();
+
+    // Create a new node after dummy_ops and change the output
+    auto final_method_name = QualifiedName(*new_final_module.type()->name(), "forward");
     new_final_module.type()->unsafeRemoveMethod("forward");
-    new_final_module._ivalue()->compilation_unit()->unsafeRemoveMethod(method_name);
-    auto fn = new_final_module._ivalue()->compilation_unit()->create_function(method_name, new_final_graph);
+    new_final_module._ivalue()->compilation_unit()->unsafeRemoveMethod(final_method_name);
+    auto fn = new_final_module._ivalue()->compilation_unit()->create_function(final_method_name, new_final_graph);
     new_final_module.type()->addMethod(fn);
 
     return new_final_module;

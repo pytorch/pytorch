@@ -36,15 +36,29 @@ def to_numpy(tensor):
     else:
         return tensor.cpu().numpy()
 
+history_outputs = None
+history_count = 0
+
 class DummyModule(torch.nn.Module):
     def forward(self, x):
         return x
 
 def export_c_module(m, file_name, inputs):
+    global history_outputs
+    global history_count
+
+    history_count+=1
+    if history_outputs is None:
+        history_outputs = inputs
+
     local_module = torch.jit.trace(DummyModule(), torch.ones(1))
     local_module._c = m
-    outputs = local_module(inputs)
-    torch.onnx.export(local_module, inputs, file_name, example_outputs=outputs)
+    outputs = local_module._c.forward(history_outputs)
+    print("====== history_outputs (" + str(history_count) + "): ")
+    print(history_outputs.shape)
+    torch.onnx.export(local_module, history_outputs, file_name, example_outputs=outputs, verbose=False)
+    history_outputs = outputs
+    print("====== export is done.")
 
 def try_ort_inference(file_name, inputs):
     ort_sess = ort.InferenceSession(file_name)

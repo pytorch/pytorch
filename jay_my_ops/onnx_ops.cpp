@@ -12,9 +12,9 @@
 
 torch::Tensor dummyOps(torch::Tensor testData) {
     printf(" ===== from dummyOps =====\n");
-    auto tempValue = torch::ones_like(testData);
-    auto output = torch::add(testData, tempValue);
-    return output.clone();
+    // auto tempValue = torch::ones_like(testData);
+    // auto output = torch::add(testData, tempValue);
+    return testData.clone();
 }
 
 torch::Tensor fake_ops(torch::Tensor testData, int64_t value) {
@@ -26,9 +26,24 @@ torch::Tensor fake_ops(torch::Tensor testData, int64_t value) {
 
 torch::Tensor ort_inference_ops(std::string file_name, torch::Tensor inputs) {
 // torch::Tensor ort_inference_ops(torch::Tensor test, torch::Tensor inputs) {    
-    PyObject *jit_module = PyImport_ImportModule("torch.onnx");
+    // Py_InitializeEx(1);
+    Py_Initialize();
+    printf("Check Python initial state\n");
+	if(!Py_IsInitialized()){
+		printf("Python initial failed\n");
+		Py_Finalize();
+	}
+    
+    PyObject *sysmodule = PyImport_ImportModule("sys");
+    printf(" ===== from ort_inference_ops:finish importing sys =====\n");
+
+    PyObject *syspath = PyObject_GetAttrString(sysmodule, "path");
+
     printf(" ===== from ort_inference_ops:start =====\n");
-    Py_InitializeEx(0);
+    PyRun_SimpleString("import torch");
+
+    printf(" ===== Execute import torch =====\n");
+    PyObject *jit_module = PyImport_ImportModule("torch.onnx");
 
     printf(" ===== from ort_inference_ops:init 0 =====\n");
     try{
