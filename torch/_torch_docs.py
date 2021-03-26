@@ -8019,11 +8019,20 @@ add_docstr(torch.sparse_csr_tensor,
            r"""
 sparse_csr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
 
+Constructs a :ref:`sparse tensor in CSR (Compressed Sparse Row) <sparse-csr-docs>` with specified
+values at the given :attr:`crow_indices` and :attr:`col_indices`. Sparse matrix multiplication operations
+in CSR format are typically faster than that for sparse tensors in COO format. Make you have a look
+at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
+
 Args:
-    crow_indices (array_like):
-    col_indices (array_like):
-    values (array_list):
-    size (list, tuple, :class:`torch.Size`, optional):
+    crow_indices (array_like): One-dimensional array of size :ref:`size(0)` + 1. The last element
+        is the number of non-zeros.
+    col_indices (array_like): Column co-ordinates of each element in :attr:`values`. Strictly one
+        dimensional tensor with the same length as :ref:`values`.
+    values (array_list): Initial values for the tensor. Can be a list, tuple, NumPy ``ndarray``, scalar,
+        and other types.
+    size (list, tuple, :class:`torch.Size`, optional): Size of the sparse tensor. If not provided, the
+        size will be inferred as the minimum size big enough to hold all non-zero elements.
 
 Keyword args:
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -8035,6 +8044,16 @@ Keyword args:
     {requires_grad}
 
 Example ::
+    >>> crow_indices = [0, 2, 4]
+    >>> col_indices = [0, 1, 0, 1]
+    >>> values = [1, 2, 3, 4]
+    >>> torch.sparse_csr_tensor(torch.tensor(crow_indices, dtype=torch.int64),
+    ...                         torch.tensor(col_indices, dtype=torch.int64),
+    ...                         torch.tensor(values), dtype=torch.double)
+    tensor(crow_indices=tensor([0, 2, 4]),
+           col_indices=tensor([0, 1, 0, 1]),
+           values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+           dtype=torch.float64)
 """.format(**factory_common_args))
 
 add_docstr(torch.sparse_coo_tensor,

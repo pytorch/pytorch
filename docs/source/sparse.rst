@@ -378,7 +378,7 @@ A CSR sparse tensor consists of three 1-D tensors: ``crow_indices``, ``col_indic
 and ``values``:
 
   - The ``crow_indices`` tensor consists of compressed row indices. This is a 1-D tensor
-    of size ``size[0] + 1``.
+    of size ``size[0] + 1``. The last element is the number of non-zeros.
   - The ``col_indices`` tensor contains the column indices of each value. This is a 1-D
     tensor of size ``nnz``.
   - The ``values`` tensor  contains the values of the CSR tensor. This is a 1-D tensor
@@ -391,7 +391,7 @@ and ``values``:
    operations, use ``torch.int32``. This is as a result of the default linking of pytorch
    being with MKL LP64, which uses 32 bit integer indexing.
 
-Construction
+Construction of CSR tensors
 ------------
 
 Sparse CSR matrices can be directly constructed by using the :func:`torch.sparse_csr_tensor`
@@ -412,8 +412,8 @@ and ``col_indices`` if it is not present.
     tensor([[1., 2.],
             [3., 4.]], dtype=torch.float64)
 
-Operations on sparse CSR tensors
---------------------------------
+CSR Tensor Operations
+---------------------
 
 The simplest way of constructing a sparse CSR tensor from a strided or sparse COO
 tensor is to use :meth:`tensor.to_sparse_csr`. Any zeros in the (strided) tensor will
