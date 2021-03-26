@@ -5350,7 +5350,7 @@ a")
                 print(typed_nones())
 
         graph_str = str(test.graph)
-        self.assertTrue(graph_str.count("None = prim::Constant") == 1)
+        self.assertTrue(graph_str.count("NoneType = prim::Constant") == 1)
 
     def test_constant_pooling_same_identity(self):
         def foo():
@@ -11569,6 +11569,21 @@ dedent """
         python_type = eval(empty_tuple_type.annotation_str, g)
         assert python_type is typing.Tuple[()]
 
+    def test_parse_none_type_annotation(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x : NoneType) -> NoneType:
+                return x
+        ''')
+
+        foo_code = cu.find_function('foo').code
+        FileCheck().check(": NoneType").check("-> NoneType").run(foo_code)
+
+    def test_none_type_str(self):
+        none_type = torch._C.NoneType.get()
+        g = {'NoneType' : type(None)}
+        python_type = eval(none_type.annotation_str, g)
+        assert python_type is type(None)
+
     def test_zip_enumerate_modulelist(self):
         class Sub(torch.nn.Module):
             def __init__(self):
@@ -13191,7 +13206,7 @@ dedent """
 
         # function that has no declared type but always throws set to None
         output_type = next(foo_no_decl_always_throws.graph.outputs()).type()
-        self.assertTrue(str(output_type) == "None")
+        self.assertTrue(str(output_type) == "NoneType")
 
         @torch.jit.script
         def foo_decl_always_throws():
@@ -13949,7 +13964,7 @@ dedent """
         ''')
         cu = torch.jit.CompilationUnit(code)
         g = cu.tanh.graph
-        FileCheck().check_count("prim::Closure_0", 2).check("None = prim::Constant") \
+        FileCheck().check_count("prim::Closure_0", 2).check("NoneType = prim::Constant") \
                    .check_next("return").run(g)
 
         code = dedent('''
@@ -13980,7 +13995,7 @@ dedent """
         ''')
         cu = torch.jit.CompilationUnit(code)
         fc = FileCheck()
-        fc.check("prim::Closure").check("(Tensor, None) = prim::TupleConstruct")
+        fc.check("prim::Closure").check("(Tensor, NoneType) = prim::TupleConstruct")
         # Loop then two if's added in exit transform
         fc.check("prim::Closure").check("prim::Loop").check_count("prim::If", 2)
         fc.run(cu.loop_in_closure.graph)

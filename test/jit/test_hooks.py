@@ -330,7 +330,7 @@ class TestHooks(JitTestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             "has the wrong inner types for the input tuple"
-            r" argument. Received type: 'Tuple\[None\]'",
+            r" argument. Received type: 'Tuple\[NoneType\]'",
         ):
             torch.jit.script(m)
 
