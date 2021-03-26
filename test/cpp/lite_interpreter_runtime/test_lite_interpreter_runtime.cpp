@@ -50,6 +50,18 @@ TEST(RunTimeTest, LoadAndForward) {
   ASSERT_EQ(result, expected_result);
 }
 
+TEST(RunTimeTest, Delegate) {
+  std::string filePath(__FILE__);
+  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  testModelFile.append("delegate_test.ptl");
+  auto mlm = _load_for_mobile(testModelFile);
+  std::vector<IValue> inputs;
+  inputs.emplace_back(2.0 * at::ones({}));
+  inputs.emplace_back(1.0 * at::ones({}));
+
+  auto mres = mlm.forward(inputs);
+  AT_ASSERT(mres.toTensor().equal(3 * at::ones({})));
+}
 } // namespace mobile
 } // namespace jit
 } // namespace torch

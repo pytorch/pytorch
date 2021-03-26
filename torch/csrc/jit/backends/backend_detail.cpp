@@ -10,6 +10,39 @@
 namespace torch {
 namespace jit {
 namespace detail {
+namespace {
+std::unordered_map<std::string, BackendPreprocessFunction>&
+backendPreprocessFunctions() {
+  static std::unordered_map<std::string, BackendPreprocessFunction>
+      preprocess_functions;
+  return preprocess_functions;
+}
+} // namespace
+
+bool hasBackendPreprocessFunction(const std::string& name) {
+  return backendPreprocessFunctions().count(name);
+}
+
+void registerBackendPreprocessFunction(
+    const std::string& name,
+    const BackendPreprocessFunction& preprocess) {
+  TORCH_CHECK(
+      !detail::hasBackendPreprocessFunction(name),
+      "Preprocessing function for backend ",
+      name,
+      " is already registered. Ensure that registration is only called once.");
+  detail::backendPreprocessFunctions()[name] = preprocess;
+}
+
+BackendPreprocessFunction getBackendPreprocessFunction(
+    const std::string& name) {
+  TORCH_CHECK(
+      hasBackendPreprocessFunction(name),
+      "Preprocessing function for backend ",
+      name,
+      " is not registered.");
+  return backendPreprocessFunctions()[name];
+}
 
 Module codegen_backend_module(
     const std::string& backend_name,
