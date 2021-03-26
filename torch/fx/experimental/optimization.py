@@ -266,6 +266,9 @@ def prepare_for_inference(
         supports_mkldnn = MklSupport.NO
         if node.op == 'call_module':
             cur_module = modules[node.target]
+            sample_parameter = next(cur_module.parameters())
+            assert(sample_parameter.dtype == torch.float), "this pass is only for torch.float modules"
+            assert(sample_parameter.device == torch.device('cpu')), "this pass is only for CPU modules"
             if type(cur_module) in mkldnn_supported:
                 supports_mkldnn = MklSupport.YES
         elif node.op == 'call_function':
@@ -310,9 +313,9 @@ def prepare_for_inference(
     uf = UnionFind(num_nodes)
 
     def get_color(n):
-        if hasattr(n, 'color'):
+        if hasattr(n, 'color'):  # Current node is part of a MKL subgraph
             return uf.find(n.color)
-        if hasattr(n, 'start_color'):
+        if hasattr(n, 'start_color'):  # Current node is input to MKL subgraph
             return uf.find(n.start_color)
         return None
 
