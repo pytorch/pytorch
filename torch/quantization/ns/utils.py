@@ -56,8 +56,11 @@ def get_node_input_type(node: Node, gm: GraphModule) -> NodeInputType:
         if mod.__module__.startswith('torch.nn.modules'):
             return NodeInputType.FP32
         else:
-            assert mod.__module__.startswith('torch.nn.q'), \
-                'unknown node target %s' % mod
+            is_known_int8_module = (
+                mod.__module__.startswith('torch.nn.quantized') or
+                mod.__module__.startswith('torch.nn.intrinsic.quantized')
+            )
+            assert is_known_int8_module, 'unknown node target %s' % mod
             return NodeInputType.INT8
 
 def return_first_non_observer_node(
