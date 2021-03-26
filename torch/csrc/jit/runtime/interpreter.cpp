@@ -1616,7 +1616,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     format_stack_trace(out, callstack());
   }
 
-  void handleError(const ExceptionMessage& msg, bool is_jit_exception, c10::NotImplementedError* not_implemented_error) {
+  void handleError(
+      const ExceptionMessage& msg,
+      bool is_jit_exception,
+      c10::NotImplementedError* not_implemented_error) {
     std::ostringstream ss;
     ss << "The following operation failed in the TorchScript interpreter.\n";
     formatStackTrace(ss);
@@ -1626,7 +1629,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     } else if (is_jit_exception) {
       throw JITException(ss.str());
     } else if (not_implemented_error) {
-      throw c10::NotImplementedError(ss.str(), not_implemented_error->backtrace(), not_implemented_error->caller());
+      throw c10::NotImplementedError(
+          ss.str(),
+          not_implemented_error->backtrace(),
+          not_implemented_error->caller());
     } else {
       throw std::runtime_error(ss.str());
     }
