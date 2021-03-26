@@ -513,7 +513,6 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     } else if (creation_meta == CreationMeta::INFERENCE_MODE) {
       msg = c10::str("A view was created in inference mode and ", modified_obj, " modified inplace in normal mode.");
     } else {
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(creation_meta == CreationMeta::NO_GRAD_MODE);
       msg = c10::str("A view was created in no_grad mode and ", modified_obj, " modified inplace with grad mode enabled.");
     }
 

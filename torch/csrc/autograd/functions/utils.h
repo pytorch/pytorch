@@ -60,7 +60,7 @@ struct AssertNoInferenceTensor : IterArgs<AssertNoInferenceTensor> {
   void operator()(const at::Tensor& tensor) {
     const auto& var = static_cast<const Variable&>(tensor);
      TORCH_CHECK(!var.unsafeGetTensorImpl()->is_inference_tensor(),
-         "Inference tensor cannot participate in autograd. make a feature request");
+         "Inference tensor cannot participate in autograd. Make a feature request");
   }
   void operator()(const c10::optional<at::Tensor>& tensor) {
     if (tensor.has_value()) {

@@ -104,4 +104,7 @@ bool tls_is_dispatch_keyset_excluded(DispatchKeySet ks) {
   return raw_local_dispatch_key_set.excluded().isSupersetOf(ks);
 }
 
+bool tls_is_dispatch_keyset_included(DispatchKeySet ks) {
+  return raw_local_dispatch_key_set.included().isSupersetOf(ks);
+}
 }} // namespace c10::impl
