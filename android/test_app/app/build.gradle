@@ -52,6 +52,11 @@ android {
             minifyEnabled false
         }
     }
+    sourceSets {
+        main {
+            manifest.srcFile 'src/main/AndroidManifest.xml'
+        }
+    }
     // Commented due to dependency on local copy of pytorch_android aar to aars folder
     //externalNativeBuild {
     //    cmake {
@@ -105,13 +110,14 @@ android {
             sourceSets {
                 main {
                     java {
-                        exclude 'org/pytorch/testapp/CameraActivity.java'
+                        //exclude 'org/pytorch/testapp/CameraActivity.java'
                     }
                 }
             }
         }
     }
     packagingOptions {
+        pickFirst '**/*.so'
         doNotStrip '**.so'
     }
 
@@ -120,7 +126,7 @@ android {
         variantFilter { variant ->
             def names = variant.flavors*.name
             if (names.contains("nightly")
-                || names.contains("camera")
+                //|| names.contains("camera")
                 || names.contains("aar")
                 || names.contains("nativeBuild")) {
                 setIgnore(true)
@@ -155,7 +161,7 @@ dependencies {
     aarImplementation(name:'pytorch_android', ext:'aar')
     aarImplementation(name:'pytorch_android_torchvision', ext:'aar')
     aarImplementation 'com.facebook.soloader:nativeloader:0.8.0'
-    aarImplementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
+    aarImplementation 'com.facebook.fbjni:fbjni-java-only:0.2.2'
 
     def camerax_version = "1.0.0-alpha05"
     cameraImplementation "androidx.camera:camera-core:$camerax_version"
