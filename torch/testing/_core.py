@@ -23,6 +23,7 @@ __all__ = [
     "floating_and_complex_types_and",
     "floating_types",
     "floating_types_and",
+    "double_types",
     "get_all_complex_dtypes",
     "get_all_dtypes",
     "get_all_device_types",
@@ -330,6 +331,10 @@ def floating_and_complex_types():
 
 def floating_and_complex_types_and(*dtypes):
     return _floating_and_complex_types + _validate_dtypes(*dtypes)
+
+_double_types = _dispatch_dtypes((torch.float64, torch.complex128))
+def double_types():
+    return _double_types
 
 _integral_types = _dispatch_dtypes((torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64))
 def integral_types():

@@ -2497,56 +2497,92 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
   }
 }
 
-// Invertible case is derived from Jacobi's formula, and also can be found at:
-// http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor linalg_det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
-  auto singular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
-    Tensor u, sigma, v;
-    std::tie(u, sigma, v) = self.svd();
-    auto gsigma = prod_backward(grad.unsqueeze(-1), sigma, det.unsqueeze(-1));
-    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
+  if (self.numel() == 0) {
+    return at::empty_like(self);
+  }
+  auto det_backward_nonsingular = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
+    // Derived from Jacobi's formula for partial derivative, which can be found
+    // at https://en.wikipedia.org/wiki/Jacobi%27s_formula
+
+    // Expand each scalar determinant into a diagonal matrix whose size matches
+    // the matrices in `self`. This is required for at::solve
+    auto det_sizes = det.sizes().vec();
+    auto det_strides = det.strides().vec();
+    det_sizes.push_back(self.size(-1));
+    det_strides.push_back(0);
+    auto det_vecs = det.as_strided(det_sizes, det_strides);
+    auto det_diag = det_vecs.diag_embed();
+    auto det_grad = at::linalg_solve(self.transpose(-1, -2), det_diag).conj();
+
+    return unsqueeze_multiple(grad, {-1, -2}, self.dim()) * det_grad;
   };
 
-  auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
-    return unsqueeze_multiple(grad * det, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
+  auto det_backward_singular = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
+    // Derived from the gradient formula that would be used if `self`'s
+    // determinant is calculated using SVD, like so:
+    //    u, s, v = svd(self)
+    //    det(self) = det(u) * prod(s) * det(v).conj()
+    //
+    // This formula should be correct even if `self` is nonsingular.
+    Tensor u, s, v;
+    std::tie(u, s, v) = self.svd();
+    auto u_det = u.det();
+    auto s_prod = s.prod(-1);
+    auto v_det = v.det();
+
+    auto v_det_grad = grad.conj() * (u_det * s_prod);
+    auto v_grad = det_backward_nonsingular(v_det_grad, v, v_det);
+
+    auto u_det_times_s_prod_grad = grad * v_det;
+
+    auto u_det_grad = u_det_times_s_prod_grad * s_prod.conj();
+    auto u_grad = det_backward_nonsingular(u_det_grad, u, u_det);
+
+    auto s_prod_grad = handle_r_to_c(s_prod.scalar_type(), u_det_times_s_prod_grad * u_det.conj());
+    auto s_grad = prod_backward(s_prod_grad, s, s_prod, -1, false);
+
+    return svd_backward({u_grad, s_grad, v_grad}, self, true, true, u, s, v);
   };
+
+  double singular_det_cutoff = 1e-8;
 
   if (self.dim() == 2) {
-    if (det.item<double>() == 0) {
-      return singular_case_backward(grad, self, det);
+    if (det.abs().lt(singular_det_cutoff).item<bool>()) {
+      return det_backward_singular(grad, self, det);
     } else {
-      return nonsingular_case_backward(grad, self, det);
+      return det_backward_nonsingular(grad, self, det);
     }
   } else {
-    auto nonzero_det_indices = at::native::toListOfOptionalTensors(at::where(det));
-    c10::optional<Tensor> first_nonzero_det_index = nonzero_det_indices[0];
-
-    if (first_nonzero_det_index->size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
-      return nonsingular_case_backward(grad, self, det);
+    auto nonzero_det_mask = det.abs().ge(singular_det_cutoff);
+    if (nonzero_det_mask.all().item<bool>()) {
+      return det_backward_nonsingular(grad, self, det);
     }
 
-    auto zero_det_indices = at::native::toListOfOptionalTensors(at::where(det == 0));
-    c10::optional<Tensor> first_zero_det_index = zero_det_indices[0];
-
-    if (first_zero_det_index->size(0) == det.numel()) {  // all determinants are zero (singular)
-      return singular_case_backward(grad, self, det);
+    auto zero_det_mask = nonzero_det_mask.logical_not();
+    if (zero_det_mask.all().item<bool>()) {
+      return det_backward_singular(grad, self, det);
     }
 
-    Tensor grad_det = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    Tensor grad_det = grad.new_empty(self.sizes(), self.options());
 
-    // invertible case
-    grad_det.index_put_(/*indices=*/nonzero_det_indices,
-                        // NOLINTNEXTLINE(bugprone-argument-comment)
-                        /*value=*/nonsingular_case_backward(grad.index(nonzero_det_indices),
-                                                            self.index(nonzero_det_indices),
-                                                            det.index(nonzero_det_indices)));
+    auto nonzero_det_list = at::native::toListOfOptionalTensors(nonzero_det_mask);
+    grad_det.index_put_(
+        /*indices=*/nonzero_det_list,
+        // NOLINTNEXTLINE(bugprone-argument-comment)
+        /*value=*/det_backward_nonsingular(
+          grad.index(nonzero_det_list),
+          self.index(nonzero_det_list),
+          det.index(nonzero_det_list)));
 
-    // non-invertible case, uses SVD
-    grad_det.index_put_(/*indices=*/zero_det_indices,
-                        // NOLINTNEXTLINE(bugprone-argument-comment)
-                        /*value=*/singular_case_backward(grad.index(zero_det_indices),
-                                                         self.index(zero_det_indices),
-                                                         det.index(zero_det_indices)));
+    auto zero_det_list = at::native::toListOfOptionalTensors(zero_det_mask);
+    grad_det.index_put_(
+        /*indices=*/zero_det_list,
+        // NOLINTNEXTLINE(bugprone-argument-comment)
+        /*value=*/det_backward_singular(
+          grad.index(zero_det_list),
+          self.index(zero_det_list),
+          det.index(zero_det_list)));
 
     return grad_det;
   }
