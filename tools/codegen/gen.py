@@ -124,8 +124,8 @@ def static_dispatch_extra_headers(backend: Optional[DispatchKey]) -> str:
         return ''
     return f"""
 #include <ATen/{backend}Functions.h>
-#include <ATen/DefaultBackendFunctions.h>
-#include <ATen/MathFunctions.h>
+#include <ATen/CompositeExplicitAutogradFunctions.h>
+#include <ATen/CompositeImplicitAutogradFunctions.h>
 """
 
 def static_dispatch(
@@ -147,7 +147,7 @@ def static_dispatch(
         # migrate math/default_backend ops to use structured delegate.
         return f'return at::{backend.lower()}::{name}({exprs_str});'
 
-    for dispatch_key in (backend, DispatchKey.DefaultBackend, DispatchKey.Math):
+    for dispatch_key in (backend, DispatchKey.CompositeExplicitAutograd, DispatchKey.CompositeImplicitAutograd):
         if dispatch_key in f.dispatch:
             return f'return at::{dispatch_key.lower()}::{name}({exprs_str});'
 
@@ -634,7 +634,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
-        ('has_math_kernel', DispatchKey.Math in f.dispatch),
+        ('has_math_kernel', DispatchKey.CompositeImplicitAutograd in f.dispatch),
     ])
 
 @with_native_function
@@ -646,7 +646,7 @@ def compute_registration_declarations(f: NativeFunction) -> str:
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         # TODO: What exactly is the semantics of the 'dispatch' field?
-        'dispatch': str(f.dispatch.keys() != {DispatchKey.Math}),
+        'dispatch': str(f.dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}),
         'default': str(any(is_generic_dispatch_key(k) for k in f.dispatch))
     }
     return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
@@ -862,8 +862,8 @@ def main() -> None:
         DispatchKey.SparseCUDA,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
-        DispatchKey.Math,
-        DispatchKey.DefaultBackend,
+        DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.CompositeExplicitAutograd,
         # Meta is a magic key: it is automatically generated for structured
         # kernels
         DispatchKey.Meta,
@@ -873,8 +873,8 @@ def main() -> None:
     functions_keys = {
         DispatchKey.CPU,
         DispatchKey.CUDA,
-        DispatchKey.Math,
-        DispatchKey.DefaultBackend,
+        DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.CompositeExplicitAutograd,
     }
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist]

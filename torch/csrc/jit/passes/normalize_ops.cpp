@@ -45,6 +45,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::clip, aten::clamp},
       {aten::clip_, aten::clamp_},
       {aten::linalg_det, aten::det},
+      {aten::matrix_power, aten::linalg_matrix_power},
       {aten::ger, aten::outer},
       {aten::arccos, aten::acos},
       {aten::arccos_, aten::acos_},
