@@ -79,7 +79,7 @@ __host__ __device__ static inline c10::complex<T> rsqrt_wrapper(c10::complex<T> 
 }
 
 void rsqrt_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "rsqrt_cuda", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "rsqrt_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       // In CUDA, ::rsqrt is overloaded for float and at::Half here is implicitly cast to float.
       return rsqrt_wrapper(a);
