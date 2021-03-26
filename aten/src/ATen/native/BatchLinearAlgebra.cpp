@@ -1721,7 +1721,11 @@ std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, std::string mode) {
 
 std::tuple<Tensor&,Tensor&> linalg_qr_out(Tensor& Q, Tensor& R, const Tensor& self, std::string mode) {
   TORCH_CHECK(self.dim() >= 2,
-              "qr input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+              "torch.linalg.qr: input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  checkSameDevice("torch.linalg.qr", Q, self, "Q");
+  checkSameDevice("torch.linalg.qr", R, self, "R");
+  checkLinalgCompatibleDtype("torch.linalg.qr", Q, self, "Q");
+  checkLinalgCompatibleDtype("torch.linalg.qr", R, self, "R");
   Tensor Q_tmp, R_tmp;
   std::tie(Q_tmp, R_tmp) = at::_linalg_qr_helper(self, mode);
   at::native::resize_output(Q, Q_tmp.sizes());
@@ -2166,9 +2170,12 @@ std::tuple<Tensor&, Tensor&> eig_out(Tensor& e, Tensor& v, const Tensor& self, b
   TORCH_CHECK(self.dim() == 2, "input should be 2 dimensional");
   TORCH_CHECK(self.size(0) == self.size(1), "input should be square");
   TORCH_CHECK(self.isfinite().all().item<bool>(), "input should not contain infs or NaNs");
-  TORCH_CHECK(e.dtype() == self.dtype(), "Expected 'e' to have dtype ", self.dtype(), " but got ", e.dtype());
-  if (eigenvectors)
-      TORCH_CHECK(v.dtype() == self.dtype(), "Expected 'v' to have dtype ", self.dtype(), " but got ", v.dtype());
+  checkSameDevice("torch.eig", e, self, "eigenvalues");
+  checkLinalgCompatibleDtype("torch.eig", e, self, "eigenvalues");
+  if (eigenvectors) {
+    checkSameDevice("torch.eig", v, self, "eigenvectors");
+    checkLinalgCompatibleDtype("torch.eig", v, self, "eigenvectors");
+  }
   int64_t n = self.size(-1);
 
   if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
@@ -2461,7 +2468,7 @@ struct LapackLstsqHelper {
   }
   self_type& set_ldb(int ldb) { this->ldb = ldb; return *this; }
   self_type& set_work() {
-    lwork = std::max<int>(1, real_impl<scalar_t, value_t>(work_opt));
+    lwork = static_cast<int>(real_impl<scalar_t, value_t>(work_opt));
     work = at::empty({lwork}, scalar_type);
     work_ptr = work.data_ptr<scalar_t>();
     return *this;
@@ -2507,7 +2514,7 @@ struct LapackLstsqHelper {
         break;
       // case LapackLstsqDriverType::Gelsd:
       default:
-        rwork_len = std::max<int64_t>(1, rwork_opt);
+        rwork_len = static_cast<int64_t>(rwork_opt);
     }
     rwork = at::empty({rwork_len}, c10::toValueType(scalar_type));
     rwork_ptr = rwork.data_ptr<value_t>();
@@ -2530,7 +2537,7 @@ struct LapackLstsqHelper {
   self_type& set_iwork() {
     // handle `iwork` workspace array (relevant only for `?gelsd`)
     if (LapackLstsqDriverType::Gelsd == driver_type) {
-      iwork = at::empty({std::max<int>(1, iwork_opt)}, at::kInt);
+      iwork = at::empty({iwork_opt}, at::kInt);
       iwork_ptr = iwork.data_ptr<int>();
     }
     return *this;

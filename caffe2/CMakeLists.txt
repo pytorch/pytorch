@@ -920,7 +920,7 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
     "${PYTHON_EXECUTABLE}"
     ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
     --yaml_file_path "${SELECTED_OP_LIST}"
-    --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h"
+    --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
   add_custom_target(
