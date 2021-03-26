@@ -3,7 +3,7 @@ import numpy as np
 
 import random
 from torch._six import nan
-from itertools import product
+from itertools import permutations, product
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, make_tensor)
@@ -151,6 +151,18 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(iv, torch.zeros_like(iv))
         self.assertEqual(vm, torch.arange(255, dtype=dtype, device=device))
         self.assertEqual(im, t0.sort().indices)
+
+    @dtypes(torch.float32)
+    def test_sort_discontiguous(self, device, dtype):
+        # on CUDA 2048 vs >2048 have different code path for the dim being sorted
+        sizes = (5, 7, 2049)
+        for shape in permutations(sizes):
+            for perm in permutations((0, 1, 2)):
+                for dim in range(3):
+                    t = torch.randn(shape, device=device, dtype=dtype).permute(perm)
+                    r1 = t.sort(dim=dim)
+                    r2 = t.contiguous().sort(dim=dim)
+                    self.assertEqual(r1, r2)
 
     @onlyCPU
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
