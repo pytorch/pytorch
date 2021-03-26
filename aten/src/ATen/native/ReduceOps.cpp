@@ -1100,10 +1100,9 @@ Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& resu
 
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
   auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
-  if (iter.numel() == 0) {
-    return result;
+  if (iter.numel() != 0) {
+    min_values_stub(iter.device_type(), iter);
   }
-  min_values_stub(iter.device_type(), iter);
   return result;
 }
 
@@ -1117,10 +1116,9 @@ Tensor &amax_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& resu
   zero_numel_check_dims(self, dim);
 
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
-  if (iter.numel() == 0) {
-    return result;
+  if (iter.numel() != 0) {
+    max_values_stub(iter.device_type(), iter); 
   }
-  max_values_stub(iter.device_type(), iter);
   return result;
 }
 
