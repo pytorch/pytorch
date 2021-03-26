@@ -101,7 +101,7 @@ results_type={self.results_type}, index_within_arg={self.index_within_arg})"""
 #       # one of NSSingleResultValuesType
 #       'type': 'weight',
 #       # the values of type specified above
-#       'values': [torch.Tensor(...), ...],
+#       'values': [torch.tensor(...), ...],
 #       # name of the node directly before the logger
 #       'prev_node_name': 'linear1',
 #       # type of the underlying function or module

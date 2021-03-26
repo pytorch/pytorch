@@ -343,6 +343,10 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def("static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor");
   m.def(
       "static_runtime::to_copy(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor");
+  m.def(
+      "static_runtime::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)");
+  m.def(
+      "static_runtime::flatten_copy.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)");
 }
 
 void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -365,10 +369,16 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
   fake_input->node()->destroy();
 
   const std::map<c10::Symbol, c10::Symbol> supported = {
+#ifdef FBCODE_CAFFE2
       {c10::Symbol::fromQualString("aten::permute"),
        c10::Symbol::fromQualString("static_runtime::permute_copy")},
+#endif
       {c10::Symbol::fromQualString("aten::narrow"),
        c10::Symbol::fromQualString("aten::narrow_copy")},
+      {c10::Symbol::fromQualString("aten::reshape"),
+       c10::Symbol::fromQualString("static_runtime::reshape_copy")},
+      {c10::Symbol::fromQualString("aten::flatten"),
+       c10::Symbol::fromQualString("static_runtime::flatten_copy")},
       {c10::Symbol::fromQualString("aten::to"),
        c10::Symbol::fromQualString("static_runtime::to_copy")}};
   std::vector<std::pair<Node*, Node*>> replacement;
@@ -377,10 +387,30 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
       continue;
     }
     DCHECK(n->outputs().size() == 1);
-    auto* out = n->output();
-    if (out->uses().size() > 1) {
+
+    // In cases of having in-place ops in the graph, only replace the op with
+    // the copy version for ops with input with number of use == 1. Example:
+    //
+    // def forward(self, inp: Tensor, shape: List[int]):
+    //   a = inp + inp
+    //   b = a.reshape(shape)
+    //   c = b.sigmoid_()
+    //   d = c + c
+    //   e = a + a
+    //   f = b + b
+    //   return (d, e, f)
+    //
+    // b and c are aliases of a, sigmoid_ changes b, c, as well as a. e should
+    // equal to d in this case. If we replace reshape with the copy version, b
+    // and c are no longer aliases of a, the value of e would change as a
+    // result. To keep static runtime consistent with the jit interpreter, here
+    // we choose not to replace reshape with the copy version
+    auto* in = n->input(0);
+    if (in->uses().size() > 1) {
       continue;
     }
+
+    auto* out = n->output();
     if (db.mayContainAlias({out}, graph->outputs())) {
       continue;
     }

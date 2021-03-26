@@ -3,6 +3,7 @@ import sys
 
 import torch
 from torch.testing import FileCheck
+from typing import List
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -192,6 +193,23 @@ class TestRemoveMutation(JitTestCase):
         # it is possible to remove the append here but don't currently have the logic for it
         FileCheck().check_not("append").run(graph)
         self.assertEqual(intermediary_use(), fn())
+
+    def test_lists_insert(self):
+        def successful_remove():
+            a : List[int] = []
+            a.insert(0, 1)
+            a.insert(0, 2)
+            a.insert(-10, 3)
+            a.insert(-9, 4)
+            a.insert(10, 5)
+            return a
+
+        fn = torch.jit.script(successful_remove)
+        graph = fn.graph
+        torch._C._jit_pass_remove_mutation(graph)
+        torch._C._jit_pass_constant_propagation(graph)
+        FileCheck().check("graph").check_next("Constant").check_next("return").run(graph)
+        self.assertEqual(successful_remove(), fn())
 
     def test_common_pytorch_list_ops(self):
         for op in ["cat", "stack", "vstack", "hstack", "dstack"]:
