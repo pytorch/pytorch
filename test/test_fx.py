@@ -1165,6 +1165,15 @@ class TestFX(JitTestCase):
         inp = torch.randn(5, 3, 224, 224)
         self.assertEqual(transformed(inp), rn18(inp))
 
+    @skipIfNoTorchVision
+    def test_interpreter_gc_values(self):
+        rn18 = resnet18()
+        interp = Interpreter(symbolic_trace(rn18))
+        inp = torch.rand(5, 3, 224, 224)
+        out = interp.run(inp)
+        env_key_names = set(n.name for n in interp.env.keys())
+        self.assertEqual(env_key_names, set(['output']))
+
     def test_transformer_noop(self):
         class MyModule(torch.nn.Module):
             def __init__(self):

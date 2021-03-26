@@ -610,7 +610,7 @@ class TestTyping(TestCase):
 
     # Static checking annotation
     def test_compile_time(self):
-        with self.assertRaisesRegex(TypeError, r"Expected Iterator as the return"):
+        with self.assertRaisesRegex(TypeError, r"Expected 'Iterator' as the return"):
             class InvalidDP1(IterDataPipe[int]):
                 def __iter__(self) -> str:  # type: ignore
                     yield 0
@@ -679,7 +679,7 @@ class TestTyping(TestCase):
         self.assertTrue(issubclass(DP4, IterDataPipe))
         dp = DP4()
         self.assertTrue(dp.type.param == tuple)
-        self.assertEqual(id(DP4.type), id(dp.type))
+        self.assertNotEqual(id(DP4.type), id(dp.type))
 
         class DP5(IterDataPipe):
             r""" DataPipe with plain Iterator"""
