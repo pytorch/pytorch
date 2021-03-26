@@ -77,13 +77,14 @@ static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
 // kMinSupportedBytecodeVersion <= model_version <= kMaxSupportedBytecodeVersion (in loader),
 // we should support this model_version. For example, we provide a wrapper to
 // handle an updated operator.
-// It is possible that kMaxSupportedBytecodeVersion is larger than kProducedBytecodeVersion
-// for a short amount of time, to better support forward compatibility. When the bytecode
-// format is updated and the version need to be bumped, kMaxSupportedBytecodeVersion can be
-// bumped first and deployed, such that runtime can support the upcoming new format. After
-// all runtime in client updates to new runtime, for example, two weeks, the new runtime can
-// support both old models and new models, then kProducedBytecodeVersion can be bumped to the same
-// kMaxSupportedBytecodeVersion.
+// kMaxSupportedBytecodeVersion is introduced to better support forward compatibility.
+// Most of the time, kMaxSupportedBytecodeVersion should be the same as kProducedBytecodeVersion.
+// When a new model format needs to roll out, for example, update the model format from v4 to v5,
+// the process is:
+// 1. update the code to let it read model v4 and v5, bump kMaxSupportedBytecodeVersion from 4 to 5
+// 2. wait until the new code is rolling to all client device
+// 3. update the code to let it generate the new model format v5 from now on, bump kProducedBytecodeVersion
+// from 4 to 5
 constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
 constexpr uint64_t kMaxSupportedBytecodeVersion = 0x4L;
 } // namespace serialize
