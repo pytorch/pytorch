@@ -149,8 +149,8 @@ def runtime_validation(f):
         it = f(self)
         for d in it:
             if not self.type.issubtype_of_instance(d):
-                raise TypeError("Expected an instance of subtype {}, but found {}"
-                                .format(self.type, d))
+                raise RuntimeError("Expected an instance of subtype {}, but found {}"
+                                   .format(self.type, d))
             yield d
 
     return wrapper
