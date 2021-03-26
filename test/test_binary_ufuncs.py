@@ -639,7 +639,8 @@ class TestBinaryUfuncs(TestCase):
                 actual = base.clone()
                 # When base is a 0-dim cpu tensor and exp is a cuda tensor, we exp `pow` to work but `pow_` to fail, since
                 # `pow` will try to create the output tensor on a cuda device, but `pow_` needs to use the cpu tensor as the output
-                if isinstance(exponent, torch.Tensor) and base.dim() == 0 and base.device.type == 'cpu' and exponent.device.type == 'cuda':
+                if (isinstance(exponent, torch.Tensor) and base.dim() == 0 and base.device.type == 'cpu' and
+                        exponent.device.type == 'cuda'):
                     regex = 'Expected all tensors to be on the same device, but found at least two devices, cuda.* and cpu!'
                     self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent)
                 elif torch.can_cast(torch.result_type(base, exponent), base.dtype):
@@ -655,7 +656,6 @@ class TestBinaryUfuncs(TestCase):
             actual2 = torch.pow(base, exponent, out=actual)
             self.assertEqual(actual, expected.to(actual))
             self.assertEqual(actual2, expected.to(actual))
-
 
     # Tests pow() for integral, floating-type tensors, with ntegral, floating-type
     # exponents (tensor or scalar exponents), respectively.
@@ -703,7 +703,6 @@ class TestBinaryUfuncs(TestCase):
         # pow's output would have some NaNs as well
         _test_int_and_float_pow(torch.float32, -10., 10., device)
         _test_int_and_float_pow(torch.float64, -10., 10., device)
-
 
     # Tests that a Runtime error occurs when a base tensor cannot be resized
     # by pow's inplace variant due to PyTorch's broadcasting semantics.
