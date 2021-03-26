@@ -23,10 +23,11 @@ if ($LASTEXITCODE -ne 0) {
 if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe") {
     $existingPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -products "Microsoft.VisualStudio.Product.BuildTools" -version "[16, 17)" -property installationPath
     if ($existingPath -ne $null) {
+        echo "Found existing BuildTools installation in $existingPath"
         $VS_UNINSTALL_ARGS = @("uninstall", "--installPath", "`"$existingPath`"", "--quiet","--wait")
         Start-Process "${PWD}\vs_installer.exe" -ArgumentList $VS_UNINSTALL_ARGS -NoNewWindow -Wait -PassThru
         if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
-            echo "Original BuildTools uninstall failed"
+            echo "Original BuildTools uninstall failed with code $exitCode"
             exit 1
         }
         echo "Original BuildTools uninstalled"
