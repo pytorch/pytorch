@@ -829,68 +829,69 @@ svd = _add_docstr(_linalg.linalg_svd, r"""
 linalg.svd(input, full_matrices=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition of either a matrix or batch of
-matrices :attr:`input`." The singular value decomposition is represented as a
-namedtuple ``(U, S, Vh)``, such that ``input = U diag(S) Vh``.
-If :attr:`input` is a batch of matrices, then ``U``, ``S``, and ``Vh`` are
+matrices :attr:`input`. The singular value decomposition is represented as a
+namedtuple `(U, S, Vh)`, such that :attr:`input` `= U diag(S) Vh`.
+If :attr:`input` is a batch of matrices, then `U`, `S`, and `Vh` are
 also batched with the same batch dimensions as :attr:`input`.
 
-If :attr:`full_matrices` is ``False``, the method returns the reduced singular
+If :attr:`full_matrices` is `False`, the method returns the reduced singular
 value decomposition. In this case, if the last two dimensions of :attr:`input` are
-``m`` and ``n``, then the returned ``U`` and ``Vh`` matrices will contain only
-``min(n, m)`` orthonormal columns.
+`m` and `n`, then the returned `U` and `Vh` matrices will contain only
+`min(n, m)` orthonormal columns.
 
-If :attr:`compute_uv` is ``False``, the returned ``U`` and ``Vh`` will be empty
+If :attr:`compute_uv` is `False`, the returned `U` and `Vh` will be empty
 tensors with no elements and the same device as :attr:`input`. The
 :attr:`full_matrices` argument has no effect when :attr:`compute_uv` is False.
 
-The dtypes of ``U`` and ``Vh`` are the same as :attr:`input`'s. ``S`` will
+The dtypes of `U` and `Vh` are the same as :attr:`input`'s. `S` will
 always be real-valued, even if :attr:`input` is complex.
 
-.. note:: Unlike NumPy's ``linalg.svd``, this always returns a namedtuple of
-          three tensors, even when :attr:`compute_uv` is ``False``. This behavior may
+.. note:: Unlike NumPy's `linalg.svd`, :func:`torch.linalg.svd` always returns a namedtuple
+          of three tensors, even when :attr:`compute_uv` is `False`. This behavior may
           change in a future PyTorch release.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch are returned in descending order.
 
-.. note:: The implementation of :func:`torch.linalg.svd` on CPU uses the LAPACK routine ``?gesdd``
-          (a divide-and-conquer algorithm) instead of ``?gesvd`` for speed. Analogously,
-          :func:`torch.linalg.svd` on GPU uses the cuSOLVER routines ``gesvdj`` and ``gesvdjBatched``
-          on CUDA 10.1.243 and later, and uses the MAGMA routine ``gesdd`` on earlier versions of CUDA.
+.. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is `True`.
 
-.. note:: The returned matrix ``U`` will not be contiguous. It will be represented as a
-          column-major matrix (i.e. Fortran-contiguous).
+.. note:: When :attr:`full_matrices` is `True`, the gradients on `U[..., :, min(m, n):]`
+          and `V[..., :, min(m, n):]` will be ignored in the backwards pass, as those vectors
+          can be arbitrary bases of the corresponding subspaces.
 
-.. note:: Gradients computed using ``U`` and ``V`` may be unstable if :attr:`input` has
-          repeated non-unique singular values, e.g., when it is not full-rank.
-          See also the note below on complex gradients.
+.. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `?gesdd`
+          (a divide-and-conquer algorithm) instead of `?gesvd` for speed. Analogously,
+          on GPU, it uses cuSOLVER's routines `gesvdj` and `gesvdjBatched` on CUDA 10.1.243
+          and later, and MAGMA's routine `gesdd` on earlier versions of CUDA.
 
-.. note:: When :attr:`full_matrices` is ``True``, the gradients on ``U[..., :, min(m, n):]``
-          and ``V[..., :, min(m, n):]`` will be ignored in backward as those vectors
-          can be arbitrary bases of the subspaces.
+.. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
+          be represented as a column-major matrix (i.e. Fortran-contiguous).
 
-.. note:: The ``S`` tensor can only be used to compute gradients if :attr:`compute_uv` is ``True``.
+.. warning:: Extra care needs to be taken when differentiating with respect to `U` and `V`. Such
+             operation is only well-defined when all singular values are distinct. The backwards
+             pass becomes less stable as it depends on :math:`\frac{1}{\min_{i \neq j} |\sigma_i - \sigma_j|}`.
+             When there are repeated singular values, the gradient with respect to `U` and `V`
+             will be infinity in some directions.
 
-.. note:: For complex-valued :attr:`input` the singular value decomposition is not unique,
-          as ``U`` and ``V`` may be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.
-          The same happens when :attr:`input` has repeated singular values, where one may multiply
-          the columns of the spanning subspace in ``U`` and ``V`` by a rotation matrix
-          and the resulting vectors will span the same subspace.
-          Different platforms, like NumPy, or inputs on different device types,
-          may produce different ``U`` and ``V`` tensors.
-          In these cases, the gradient is only well-defined when the cost-function
-          is invariant under these transformations, i.e., when it just depends on the spanned
-          subspaces and not on the particular basis.
+.. warning:: For complex-valued :attr:`input` the singular value decomposition is not unique,
+             as `U` and `V` may be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.
+             The same happens when :attr:`input` has repeated singular values, where one may multiply
+             the columns of the spanning subspace in `U` and `V` by a rotation matrix
+             and `the resulting vectors will span the same subspace <https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD>`_.
+             Different platforms, like NumPy, or inputs on different device types,
+             may produce different `U` and `V` tensors.
+
 
 Args:
-    input (Tensor): the input tensor of size ``(*, m, n)`` where ``*`` is zero or more
-                    batch dimensions consisting of ``(m, n)`` matrices.
-    full_matrices (bool, optional): controls whether to compute the full or reduced decomposition, and
-                                    consequently the shape of returned ``U`` and ``Vh``. Default: ``True``.
-    compute_uv (bool, optional): whether to compute ``U`` and ``Vh`` or not. Default: ``True``.
-    out (tuple, optional): a tuple of three tensors to use for the outputs. If ``compute_uv=False``,
-                           the 1st and 3rd arguments must be tensors, but they are ignored.
-                           For example, you can pass ``(torch.tensor([]), out_S, torch.tensor([]))``
+    input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
+                    batch dimensions consisting of `(m, n)` matrices.
+    full_matrices (bool, optional): controls whether to compute the full or reduced decomposition. and
+                                    consequently the shape of returned `U` and `Vh`. Default: `True`.
+    compute_uv (bool, optional): whether to compute `U` and `Vh` or not. Default: `True`.
+    out (tuple, optional): a tuple of three tensors to use for the outputs.
+                           If :attr`compute_uv` is `False`, the 1st and 3rd arguments must be tensors,
+                           but they are ignored.  For example, you can pass
+                           ``(torch.tensor([]), out_S, torch.tensor([]))``
 
 Example::
 
