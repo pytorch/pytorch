@@ -23,6 +23,31 @@ bool should_use_th_sort(const Tensor &self, int64_t dim) {
   return nsort <= threshold;
 }
 
+// We perform a vectorized segmented sort in cub.
+// Say we are sorting a (2, 3) tensor. We have in flattened form:
+// values       0.4 1.2 5.3 6.2 1.3 2.3
+// indices        0   1   2   0   1   2
+// segment_id     0   0   0   1   1   1
+
+// First we sort by values, globally:
+// values       6.2 5.3 2.3 1.2 1.3 0.4
+// indices        0   2   2   1   1   0
+// segment_id     1   0   1   0   1   0
+
+// Then we stable sort by segment id:
+// values       5.3 1.2 0.4 6.2 2.3 1.3
+// indices        2   1   0   0   2   1
+// segment_id     0   0   0   1   1   1
+
+// This method can only work if the slice we are sorting (`dim`) is
+// innermost, and both values and indices are contiguous. We do this
+// by re-arranging the input into this form as needed, which will
+// unfortunately allocate memory if the request is not in this form.
+// Vectorized sort is slower than iterated sort if the number of
+// slices is small (since we're sorting twice, instead of invoking a
+// smaller sort `numSlices` times), but the cub sort
+// implementation here is a catch-all, so we're not looking for
+// efficiency, but instead correctness.
 std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & indices, const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
   if (should_use_th_sort(self, dim)) {
     return legacy::cuda::_th_sort_out_stable(values, indices, self, stable, dim, descending);
