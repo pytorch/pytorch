@@ -1513,65 +1513,55 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad):
                                                      high=1, low=0,
                                                      requires_grad=requires_grad) + 0.1,))
                        for base_size, exp_size in arg_tuples)
-        samples.append(SampleInput(make_tensor((), low=1e-3, high=1e-3 + 1, requires_grad=True,
-                                               device=device, dtype=dtype),
-                                   args=(make_tensor((), low=0.1, high=1.1,
-                                                     device=device, dtype=dtype),)))
-        samples.append(SampleInput(make_tensor((2, 2), dtype=dtype, device=device,
-                                               high=5, low=0,
-                                               requires_grad=requires_grad) + 1e-3,
-                                   args=(make_tensor((), low=0.1, high=1.1,
-                                                     device=device, dtype=dtype),)))
-        samples.append(SampleInput(make_tensor((), low=1e-3, high=1e-3 + 1, requires_grad=True,
-                                               device=device, dtype=dtype),
-                                   args=(make_tensor((1, S, 1), dtype=dtype, device=device,
-                                                     high=1, low=0,
-                                                     requires_grad=requires_grad) + 0.1,)))
-        samples.append(SampleInput(make_tensor((2, 2), dtype=dtype, device=device,
-                                               high=5, low=0,
-                                               requires_grad=requires_grad) + 1e-3,
-                                   args=(3.14,)))
-        samples.append(SampleInput(make_tensor((), low=1e-3, high=1e-3 + 1, requires_grad=True,
-                                               device=device, dtype=dtype),
-                                   args=(3.14,)))
+        inputs_tuple = (
+            ((), 1e-3, 1e-3 + 1, 0, True, (), 0.1, 1.1, 0, False),
+            ((2, 2), 0, 5, 1e-3, requires_grad, (), 0.1, 1.1, 1, False),
+            ((), 1e-3, 1e-3 + 1, 0, True, (1, S, 1), 0, 1, 0.1, requires_grad),
+        )
+        more_samples = list(SampleInput(make_tensor(shape_b, low=low_b, high=high_b,
+                                                    requires_grad=b_grad, device=device,
+                                                    dtype=dtype) + additive_b,
+                                        args=(make_tensor(shape_e, low=low_e, high=high_e,
+                                                          requires_grad=e_grad, device=device, 
+                                                          dtype=dtype) + additive_e,))
+                            for shape_b, low_b, high_b, additive_b, b_grad, shape_e, low_e,
+                            high_e, additive_e, e_grad in inputs_tuple)              
+        samples = [*samples, *more_samples]
+        tensor_scalar_inputs = (
+            ((2, 2), 0, 5, 1e-3, requires_grad, (3.14,)),
+            ((), 1e-3, 1e-3 + 1, 0, True, (3.14,))
+        )
+        more_samples = list(SampleInput(make_tensor(shape, dtype=dtype, device=device,
+                                                    high=high, low=low,
+                                                    requires_grad=b_grad) + additive,
+                                        args=exp)
+                            for shape, low, high, additive, b_grad, exp in tensor_scalar_inputs)     
+        samples = [*samples, *more_samples]
     elif dtype in [torch.complex64, torch.complex128]:
-        samples.append(SampleInput(make_tensor((2, 2), dtype=dtype, device=device,
-                                               high=5, low=0,
-                                               requires_grad=requires_grad) + 1e-3 * (1 + 1j),
-                                   args=(3.14,)))
-        samples.append(SampleInput(make_tensor((), low=0, high=1, dtype=dtype, device=device,
-                                               requires_grad=True) + 1e-3 * (1 + 1j),
-                                   args=(3.14,)))
-        samples.append(SampleInput(make_tensor((), device=device, dtype=dtype, low=0, high=1,
-                                               requires_grad=True) + 1e-3 * (1 + 1j),
-                                   args=(3.14j,)))
+        args_tuple = (
+            ((2, 2), 0, 5, requires_grad, (3.14,)),
+            ((), 0, 1, True, (3.14,)),
+            ((), 0, 1, True, (3.14j))
+        )
+        samples = list(SampleInput(make_tensor(shape, dtype=dtype, device=device,
+                                               high=high, low=low,
+                                               requires_grad=b_grad) + 1e-3 * (1 + 1j),
+                                   args=arg)
+                       for shape, low, high, b_grad, arg in args_tuple)
     elif dtype == torch.bool:
         arg_tuple = (0, 1, 1., 2.3)
         samples = list(SampleInput(make_tensor((2, 2), device, dtype,
                                                requires_grad=requires_grad),
                                    args=(arg,))
                        for arg in arg_tuple)
-        samples.append(SampleInput(make_tensor((2, 2), device, dtype,
-                                               requires_grad=requires_grad),
-                                   args=(make_tensor((2, 2), device, dtype=torch.float64,
-                                                     requires_grad=requires_grad),)))
-        samples.append(SampleInput(make_tensor((2, 2), device, dtype,
-                                               requires_grad=requires_grad),
-                                   args=(make_tensor((2, 1), device, dtype=torch.float32,
-                                                     requires_grad=requires_grad),)))
-        samples.append(SampleInput(make_tensor((2, 2), device, dtype,
-                                               requires_grad=requires_grad),
-                                   args=(make_tensor((2, 2), device, dtype=torch.int64,
-                                                     requires_grad=requires_grad),)))
-        samples.append(SampleInput(make_tensor((2, 2), device, dtype,
-                                               requires_grad=requires_grad),
-                                   args=(make_tensor((2, 1), device, dtype=torch.int32,
-                                                     requires_grad=requires_grad),)))
+        dtypes_list = [torch.float64, torch.float32, torch.int64, torch.int32]
+        more_samples = list(SampleInput(make_tensor((2, 2), device, dtype,
+                                                    requires_grad=requires_grad),
+                                        args=(make_tensor((2, 2), device, dtype=dtype,
+                                                          requires_grad=requires_grad),))
+                            for dtype in dtypes_list)
+        samples = [*samples, *more_samples]
         samples.append(SampleInput(make_tensor((2, 2, 2), device, dtype,
-                                               requires_grad=requires_grad),
-                                   args=(make_tensor((2, 1), device, dtype=torch.float64,
-                                                     requires_grad=requires_grad),)))
-        samples.append(SampleInput(make_tensor((2, 2), device, dtype,
                                                requires_grad=requires_grad),
                                    args=(make_tensor((2, 1), device, dtype=torch.float64,
                                                      requires_grad=requires_grad),)))
@@ -3405,7 +3395,7 @@ op_db: List[OpInfo] = [
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
                        # Reference: https://github.com/pytorch/pytorch/pull/52551#issuecomment-782596181
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                device_type='cuda', dtypes=[torch.bfloat16]),
+                                dtypes=[torch.bfloat16]),
                    ),),
     OpInfo('lerp',
            dtypes=floating_and_complex_types(),
