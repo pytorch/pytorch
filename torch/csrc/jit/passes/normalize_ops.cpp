@@ -90,6 +90,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::special_erf, aten::erf},
       {aten::special_erfc, aten::erfc},
       {aten::special_erfinv, aten::erfinv},
+      {aten::special_expit, aten::sigmoid},
       {aten::orgqr, aten::linalg_householder_product},
       {aten::special_gammaln, aten::lgamma}};
   return alias_map;

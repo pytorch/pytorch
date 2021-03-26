@@ -73,7 +73,7 @@ Keyword args:
 
 Example::
 
-    >>> torch.erf(torch.tensor([0, -1., 10.]))
+    >>> torch.special.erf(torch.tensor([0, -1., 10.]))
     tensor([ 0.0000, -0.8427,  1.0000])
 """.format(**common_args))
 
@@ -95,7 +95,7 @@ Keyword args:
 
 Example::
 
-    >>> torch.erfc(torch.tensor([0, -1., 10.]))
+    >>> torch.special.erfc(torch.tensor([0, -1., 10.]))
     tensor([ 1.0000, 1.8427,  0.0000])
 """.format(**common_args))
 
@@ -118,6 +118,60 @@ Keyword args:
 
 Example::
 
-    >>> torch.erfinv(torch.tensor([0, 0.5, -1.]))
+    >>> torch.special.erfinv(torch.tensor([0, 0.5, -1.]))
     tensor([ 0.0000,  0.4769,    -inf])
+""".format(**common_args))
+
+logit = _add_docstr(_special.special_logit,
+                     r"""
+logit(input, *, out=None) -> Tensor
+
+Computes the logit (defined below) of the elements of :attr:`input`.
+
+.. math::
+    y_{i} = \ln(\frac{z_{i}}{1 - z_{i}}) \\
+    z_{i} = \begin{cases}
+        x_{i} & \text{if eps is None} \\
+        \text{eps} & \text{if } x_{i} < \text{eps} \\
+        x_{i} & \text{if } \text{eps} \leq x_{i} \leq 1 - \text{eps} \\
+        1 - \text{eps} & \text{if } x_{i} > 1 - \text{eps}
+    \end{cases}
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> t = torch.rand(5)
+    >>> t
+    tensor([0.7411, 0.8805, 0.4773, 0.8986, 0.0326])
+    >>> torch.special.logit(t)
+    tensor([ 1.0519,  1.9973, -0.0907,  2.1813, -3.3914])
+""".format(**common_args))
+
+expit = _add_docstr(_special.special_expit,
+                     r"""
+expit(input, *, out=None) -> Tensor
+
+Computes the expit (also known as the logistic sigmoid function) of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \frac{1}{1 + e^{-\text{input}_{i}}}
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> t = torch.randn(4)
+    >>> t
+    tensor([ 0.9213,  1.0887, -0.8858, -1.7683])
+    >>> torch.special.expit(t)
+    tensor([ 0.7153,  0.7481,  0.2920,  0.1458])
 """.format(**common_args))

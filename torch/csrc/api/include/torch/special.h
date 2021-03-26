@@ -65,4 +65,28 @@ inline Tensor erfinv(const Tensor& self) {
   return torch::special_erfinv(self);
 }
 
+/// Computes the logit of input, elementwise.
+/// See https://pytorch.org/docs/master/special.html#torch.special.logit.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::logit(t);
+/// ```
+inline Tensor logit(const Tensor& self) {
+  return torch::special_logit(self);
+}
+
+/// Computes the expit (also known as the logistic sigmoid function) of input, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.expit.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::expit(t);
+/// ```
+inline Tensor expit(const Tensor& self) {
+  return torch::special_expit(self);
+}
+
 }} // torch::special

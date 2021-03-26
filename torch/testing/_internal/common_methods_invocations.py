@@ -3562,6 +3562,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_trace),
     UnaryUfuncInfo('sigmoid',
                    ref=scipy_reference_wrapper(reference_sigmoid),
+                   aliases=('special.expit', ),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
                    skips=(
@@ -3684,6 +3685,16 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    sample_inputs_func=sample_inputs_logit,
+                   safe_casts_outputs=True),
+    UnaryUfuncInfo('special.logit',
+                   aten_name='special_logit',
+                   ref=scipy_reference_wrapper(lambda x: scipy.special.logit(x)),
+                   domain=(0, 1),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                                                  torch.float16: 5e-1}),),
+                   dtypes=all_types_and(torch.half),
+                   dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True),
 ]
 

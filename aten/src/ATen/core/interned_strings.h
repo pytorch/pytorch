@@ -319,6 +319,10 @@ namespace c10 {
   _(aten, special_erfc)              \
   _(aten, erfinv)                    \
   _(aten, special_erfinv)            \
+  _(aten, logit)                     \
+  _(aten, special_logit)             \
+  _(aten, sigmoid)                   \
+  _(aten, special_expit)             \
   _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
