@@ -102,8 +102,6 @@ def iter_tensor(x_tensor):
                 d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
                 yield x_value, x_idx, d_idx
     elif x_tensor.layout == torch._mkldnn:  # type: ignore
-        # Use .data here to get around the version check
-        x_tensor = x_tensor.data
         for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
             # this is really inefficient, but without indexing implemented, there's
             # not really a better way than converting back and forth
@@ -131,7 +129,7 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
         grad_out: grad output value used to calculate gradients.
 
     Returns:
-        M lists of N tuples of jacobians
+        M lists of N-tuples of jacobians
 
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
@@ -210,9 +208,7 @@ def combine_jacobian_cols(jacobians_cols, outputs, input, dim):
 
 
 def prepped_input(input, input_idx, entry, entry_idx):
-    # perform *almost* the inverse of what we do below in iter_tensors or
-    # get_fast_numerical_jacobian_for_input, i.e., change the tensors back to their
-    # original layout
+    # Prepares the inputs to be passed into the function while including the new modified input.
     if input.layout == torch._mkldnn:  # type: ignore # no attr _mkldnn
         # Convert back to mkldnn
         if input_idx == entry_idx:
@@ -220,9 +216,11 @@ def prepped_input(input, input_idx, entry, entry_idx):
         else:
             return input
     elif input.layout == torch.sparse_coo:
-        # entry is already a "cloned" version of the original tensor so we are
-        # safe to pass directly in this case
-        return input.clone()
+        # modifications to entry are reflected in input so we could've just returned `input` here
+        # but due to an issue with coalesce, we need to do an extra clone here.
+        # TODO: get rid of this extra clone once https://github.com/pytorch/pytorch/pull/52874 is landed
+        # Make this new tensor require again in case the function has hooks
+        return torch.sparse_coo_tensor(input._indices(), input._values(), input.size()).requires_grad_(True)
     else:
         # We cannot use entry (input.data) if we want gradgrad to work because
         # fn (in the gradgrad case) needs to compute grad wrt input
@@ -292,7 +290,7 @@ def check_analytical_jacobian_attributes(inputs, output, nondet_tol, grad_out_sc
     vjp_fn = custom_vjp_fn if custom_vjp_fn is not None else backward_fn
     jacobians_rows = compute_analytical_jacobian_rows(vjp_fn, output.clone(), grad_out_scale)
     jacobians_rows_reentrant = compute_analytical_jacobian_rows(vjp_fn, output.clone(), grad_out_scale)
-    
+
     dim = output.numel()
     jacobians, correct_grad_types, correct_grad_sizes = combine_jacobian_rows(jacobians_rows, inputs, dim)
     jacobians_reentrant, _, _ = combine_jacobian_rows(jacobians_rows_reentrant, inputs, dim)
@@ -386,9 +384,9 @@ def check_outputs(outputs) -> None:
 def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> bool:
     # When there are no differentiable outputs, numerical gradient for a function is
     # expected to be zero.
-    jacobians_inputs_outputs = get_numerical_jacobian(func, inputs, func_out, eps=eps)
-    for jacobian_inputs in jacobians_inputs_outputs:
-        for jacobian in jacobian_inputs:
+    jacobians_all_inputs_outputs = get_numerical_jacobian(func, inputs, func_out, eps=eps)
+    for jacobians_all_outputs_and_fixed_input in jacobians_all_inputs_outputs:
+        for jacobian in jacobians_all_outputs_and_fixed_input:
             if torch.ne(jacobian, 0).sum() > 0:
                 return fail_test('Numerical gradient for function expected to be zero')
     return True
