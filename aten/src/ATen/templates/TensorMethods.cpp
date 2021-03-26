@@ -57,23 +57,6 @@ TensorOptions Tensor::options() const {
 
 ${tensor_method_definitions}
 
-caffe2::TypeMeta Tensor::dtype() const noexcept {
-  return impl_->dtype();
-}
-
-Layout Tensor::layout() const noexcept {
-  return impl_->layout();
-}
-
-int64_t Tensor::get_device() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->get_device();
-}
-
-int64_t get_device(Tensor self) {
-  return self.get_device();
-}
-
 NamedTensorMeta* Tensor::get_named_tensor_meta() {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
