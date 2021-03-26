@@ -20,11 +20,11 @@ import etcd  # type: ignore[import]
 # pyre-ignore[21]: Could not find name `Store` in `torch.distributed`.
 from torch.distributed import Store
 from torch.distributed.elastic.rendezvous import (
-    RendezvousClosedException,
+    RendezvousClosedError,
+    RendezvousError,
     RendezvousHandler,
-    RendezvousNonRetryableError,
     RendezvousParameters,
-    RendezvousTimeoutException,
+    RendezvousTimeoutError,
 )
 
 from .utils import _parse_hostname_and_port
@@ -267,16 +267,15 @@ class EtcdRendezvous(object):
              ``(rdzv_version, rank, world_size)``
 
         Raises:
-            RendezvousTimeoutException - timeout waiting for rendezvous
-            RendezvousNonRetryableError - other persistent errors that
+            RendezvousTimeoutError - timeout waiting for rendezvous
+            RendezvousClosedError - rendezvous is or was closed while waiting
+            RendezvousError - other persistent errors that
              render the rendezvous non-retryable
-            RendezvousClosedException - rendezvous is or was closed while
-             waiting
         """
         self._rendezvous_deadline = time.time() + self._timeout
         while True:
             if time.time() > self._rendezvous_deadline:
-                raise RendezvousTimeoutException()
+                raise RendezvousTimeoutError()
 
             log.info("Attempting to join next rendezvous")
             try:
@@ -295,17 +294,17 @@ class EtcdRendezvous(object):
                 # to avoid spamming etcd
                 time.sleep(1)
 
-            except RendezvousTimeoutException:
+            except RendezvousTimeoutError:
                 log.info("Rendezvous timeout occured in EtcdRendezvousHandler")
                 raise
 
-            except RendezvousClosedException:
+            except RendezvousClosedError:
                 log.info(
                     f"Rendezvous for run_id={self._run_id} was observed to be closed"
                 )
                 raise
 
-            except RendezvousNonRetryableError:
+            except RendezvousError:
                 raise
 
             except Exception as e:
@@ -331,7 +330,7 @@ class EtcdRendezvous(object):
             ``(rdzv_version, rank, world_size)``
 
         Raises:
-            RendezvousClosedException - current rendezvous was/is closed
+            RendezvousClosedError - current rendezvous was/is closed
             EtcdRendezvousRetryableFailure - observed some intermediate
              state, which is best handled by retrying later
         """
@@ -346,7 +345,7 @@ class EtcdRendezvous(object):
             log.info("Observed existing rendezvous state: " + str(state))
 
         if state["status"] == "closed":
-            raise RendezvousClosedException()
+            raise RendezvousClosedError()
 
         if state["status"] == "joinable":
             return self.join_phase(state["version"])
@@ -450,7 +449,7 @@ class EtcdRendezvous(object):
         an unexpected state (e.g. already exists)
 
         Raises:
-             RendezvousNonRetryableError - on unexpected state
+             RendezvousError - on unexpected state
         """
 
         # Initially active_version is ephemeral - this is to handle the
@@ -468,7 +467,7 @@ class EtcdRendezvous(object):
             version_counter.value = str(int(version_counter.value) + 1)
             self.client.update(version_counter)
         except (etcd.EtcdKeyNotFound, etcd.EtcdCompareFailed):
-            raise RendezvousNonRetryableError(
+            raise RendezvousError(
                 "Unexpected state of EtcdRendezvousHandler, worker needs to die."
             )
 
@@ -740,7 +739,7 @@ class EtcdRendezvous(object):
                 pass
 
             if time.time() > self._rendezvous_deadline:
-                raise RendezvousTimeoutException()
+                raise RendezvousTimeoutError()
             active_version, state = self.get_rdzv_state()
 
     def handle_join_last_call(self, expected_version, deadline):
@@ -859,7 +858,7 @@ class EtcdRendezvous(object):
             pass
 
         if time.time() > self._rendezvous_deadline:
-            raise RendezvousTimeoutException()
+            raise RendezvousTimeoutError()
 
         # Unfortunately, we have to do another fetch in order to get last etcd_index.
         return self.get_rdzv_state()
@@ -1230,7 +1229,7 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
         max_nodes - max number of workers allowed to join the rendezvous,
                         defaults to min_workers is not specified.
         timeout - total timeout within which next_rendezvous is expected to
-                      succeed; a RendezvousTimeoutException is raised otherwise;
+                      succeed; a RendezvousTimeoutError is raised otherwise;
                       Defaults is 600 (10 minutes).
         last_call_timeout - additional wait amount ("last call") after
                             min number of workers has been reached.
