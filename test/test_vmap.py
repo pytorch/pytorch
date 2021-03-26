@@ -5,7 +5,8 @@ from torch import Tensor, vmap
 import functools
 import itertools
 import warnings
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
+    skipCUDAIfNoMagma
 import types
 
 
@@ -2409,6 +2410,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(Tensor.trace, (x,))
 
+    @skipCUDAIfNoMagma
     @allowVmapFallbackUsage
     def test_symeig(self, device):
         def op(x):
