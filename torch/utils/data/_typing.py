@@ -184,11 +184,13 @@ def issubinstance(data, data_type):
 # In order to keep compatibility for Python 3.6, use Meta for the typing.
 # TODO: When PyTorch drops the support for Python 3.6, it can be converted
 # into the Alias system and using `__class_getiterm__` for DataPipe. The
-# typing system will gain benefit of performance and metaclass conflicts,
-# as elaborated in https://www.python.org/dev/peps/pep-0560/
+# typing system will gain benefit of performance and resolving metaclass
+# conflicts as elaborated in https://www.python.org/dev/peps/pep-0560/
 
 
 def _fixed_type(param) -> bool:
+    param = TYPE2ABC.get(param, param)
+
     if isinstance(param, TypeVar) or param in (Any, ...):  # type: ignore
         return False
     if hasattr(param, '__args__'):
@@ -215,7 +217,7 @@ class _DataPipeType:
 
     def __eq__(self, other):
         if isinstance(other, _DataPipeType):
-            return self.param == other.param
+            return self.issubtype(other) and other.issubtype(self)
         return NotImplemented
 
     def __hash__(self):
@@ -252,7 +254,7 @@ def _mro_subclass_init(obj, fixed):
                 if hasattr(b.__init_subclass__, '__func__') and \
                         b.__init_subclass__.__func__ == fixed_type_init:  # type: ignore
                     return True
-            if not fixed:
+            else:
                 if b.__init_subclass__ == nonfixed_type_init:
                     return True
                 if hasattr(b.__init_subclass__, '__func__') and \
@@ -346,8 +348,8 @@ def _validate_iter(sub_cls):
             if not (hasattr(return_hint, '__origin__') and
                     (return_hint.__origin__ == Iterator or
                      return_hint.__origin__ == collections.abc.Iterator)):
-                raise TypeError('Expected Iterator as the return annotation for `__iter__` of {}'
-                                ', but found {}'.format(sub_cls.__name__, hints['return']))
+                raise TypeError("Expected 'Iterator' as the return annotation for `__iter__` of {}"
+                                ", but found {}".format(sub_cls.__name__, _type_repr(hints['return'])))
             data_type = return_hint.__args__[0]
             # Double-side subtype checking to make sure type matched
             # e.g. T_co == Any, T_co == S_co
