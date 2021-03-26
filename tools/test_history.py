@@ -29,7 +29,7 @@ def make_column(
     data: Optional[Report],
     filename: Optional[str],
     suite_name: Optional[str],
-    test_name: Optional[str],
+    test_name: str,
     digits: int,
 ) -> Tuple[str, int]:
     decimals = 3
@@ -62,7 +62,7 @@ def make_columns(
     omitted: Dict[str, int],
     filename: Optional[str],
     suite_name: Optional[str],
-    test_name: Optional[str],
+    test_name: str,
     digits: int,
 ) -> str:
     columns = []
@@ -95,7 +95,7 @@ def make_lines(
     omitted: Dict[str, int],
     filename: Optional[str],
     suite_name: Optional[str],
-    test_name: Optional[str],
+    test_name: str,
 ) -> List[str]:
     lines = []
     for job, data in jsons.items():
@@ -128,7 +128,7 @@ def history_lines(
     jobs: Optional[List[str]],
     filename: Optional[str],
     suite_name: Optional[str],
-    test_name: Optional[str],
+    test_name: str,
     delta: int,
     sha_length: int,
     mode: str,
@@ -196,7 +196,7 @@ followed by the time of the specified test in that job at that commit.
 Example:
 
     $ tools/test_history.py --mode=multiline --ref=594a66 --sha-length=8 --test=test_set_dir \
-      --jobs=pytorch_linux_xenial_py3_6_gcc5_4_test,pytorch_linux_xenial_py3_6_gcc7_test
+      --job pytorch_linux_xenial_py3_6_gcc5_4_test --job pytorch_linux_xenial_py3_6_gcc7_test
     2021-02-10 11:13:34Z 594a66d7 pytorch_linux_xenial_py3_6_gcc5_4_test 0.36s
     2021-02-10 11:13:34Z 594a66d7 pytorch_linux_xenial_py3_6_gcc7_test 0.573s errored
     2021-02-10 10:13:25Z 9c0caf03 pytorch_linux_xenial_py3_6_gcc5_4_test 0.819s
@@ -227,7 +227,7 @@ columns is guaranteed to match the order of the jobs passed on the
 command line. Example:
 
     $ tools/test_history.py --mode=columns --ref=3cf783 --sha-length=8 --test=test_set_dir \
-      --jobs=pytorch_linux_xenial_py3_6_gcc5_4_test,pytorch_linux_xenial_py3_6_gcc7_test
+      --job pytorch_linux_xenial_py3_6_gcc5_4_test --job pytorch_linux_xenial_py3_6_gcc7_test
     2021-02-10 12:18:50Z 3cf78395    0.644s    0.312s
     2021-02-10 11:13:34Z 594a66d7    0.360s  errored
     2021-02-10 10:13:25Z 9c0caf03    0.819s    0.449s
@@ -300,17 +300,19 @@ def parse_args(raw: List[str]) -> argparse.Namespace:
     parser.add_argument(
         '--test',
         help='name of the test',
+        required=True
     )
     parser.add_argument(
-        '--jobs',
+        '--job',
         help='names of jobs to display columns for, in order',
-        default='',
+        action='append',
+        default=[],
     )
     args = parser.parse_args(raw)
 
-    args.jobs = None if args.all else args.jobs.split(',')
+    args.jobs = None if args.all else args.job
     # We dont allow implicit or empty "--jobs", unless "--all" is specified.
-    if args.jobs and (args.jobs == [] or args.jobs[0] == ''):  
+    if args.jobs == []:
         parser.error('No jobs specified.')
 
     return args

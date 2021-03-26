@@ -127,8 +127,8 @@ def get_cases(
                 if fname == filename or not filename:
                     for sname, v2suite in v2file['suites'].items():
                         if sname == suite_name or not suite_name:
-                            for v2case in v2suite['cases']:
-                                if not test_name or v2case['name'] == test_name:
+                            for cname, v2case in v2suite['cases'].items():
+                                if not test_name or cname == test_name:
                                     cases.append(v2case)
         else:
             raise RuntimeError(f'Unknown format version: {version}')
