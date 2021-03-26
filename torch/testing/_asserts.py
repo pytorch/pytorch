@@ -39,7 +39,7 @@ def _check_are_tensors(a: Any, b: Any) -> Tuple[bool, Optional[str]]:
     Returns:
         (bool, Optional[str]): Flag if check passed with optional error message.
     """
-    if not (isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor)):
+    if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor):
         return True, None
 
     msg = f"Both inputs have to be tensors, but got {type(a)} and {type(b)} instead."
