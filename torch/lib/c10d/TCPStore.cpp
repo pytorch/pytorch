@@ -588,31 +588,29 @@ TCPStore::TCPStore(
       }
 
       // socket to handle requests from server
-      // listenSocket_ = tcputil::connect(
-      //     tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-      // watchListener_ = std::make_unique<ListenThread>(listenSocket_);
-
+      listenSocket_ = tcputil::connect(
+          tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
+      watchListener_ = std::make_unique<ListenThread>(listenSocket_);
   } catch (const std::exception&) {
     if (isServer_) {
         tcpStoreDaemon_ = nullptr;
         tcputil::closeSocket(masterListenSocket_);
     }
-    // watchListener_ = nullptr;
-    // tcputil::closeSocket(listenSocket_);
+    watchListener_ = nullptr;
     throw;
   }
 }
 
 TCPStore::~TCPStore() {
-  tcputil::closeSocket(storeSocket_);
-  watchListener_ = nullptr;
-  tcputil::closeSocket(listenSocket_);
   if (isServer_) {
     // Store daemon should end because of closed connection.
     // daemon destructor should join the thread
     tcpStoreDaemon_ = nullptr;
     tcputil::closeSocket(masterListenSocket_);
   }
+  watchListener_ = nullptr;
+  tcputil::closeSocket(listenSocket_);
+  tcputil::closeSocket(storeSocket_);
 }
 
 void TCPStore::waitForWorkers() {
