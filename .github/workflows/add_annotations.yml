@@ -10,6 +10,7 @@ on:
 jobs:
   annotate:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: flake8-py3
