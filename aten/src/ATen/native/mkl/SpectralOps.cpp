@@ -23,18 +23,18 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-Tensor& _fft_r2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool onesided) {
+Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool onesided, Tensor& out) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-Tensor& _fft_c2r_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         int64_t last_dim_size) {
+Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         int64_t last_dim_size, Tensor& out) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
-Tensor& _fft_c2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool forward) {
+Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool forward, Tensor& out) {
   AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
@@ -398,8 +398,8 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return _exec_fft(out, input, out_sizes, dim, normalization, /*forward=*/false);
 }
 
-Tensor& _fft_c2r_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         int64_t last_dim_size) {
+Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         int64_t last_dim_size, Tensor& out) {
   auto result = _fft_c2r_mkl(self, dim, normalization, last_dim_size);
   resize_output(out, result.sizes());
   return out.copy_(result);
@@ -426,8 +426,8 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return out;
 }
 
-Tensor& _fft_r2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool onesided) {
+Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool onesided, Tensor& out) {
   auto result = _fft_r2c_mkl(self, dim, normalization, /*onesided=*/true);
   if (onesided) {
     resize_output(out, result.sizes());
@@ -452,8 +452,8 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return _exec_fft(out, self, self.sizes(), sorted_dims, normalization, forward);
 }
 
-Tensor& _fft_c2c_mkl_out(Tensor& out, const Tensor& self, IntArrayRef dim, int64_t normalization,
-                         bool forward) {
+Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
+                         bool forward, Tensor& out) {
   auto result = _fft_c2c_mkl(self, dim, normalization, forward);
   resize_output(out, result.sizes());
   return out.copy_(result);

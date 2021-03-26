@@ -32,8 +32,8 @@ struct IndexRangeGenerator {
 };
 
 bool isFwGradDefined(const c10::optional<Tensor>& t);
-Tensor toLegacyFwGrad(const c10::optional<Tensor>& t);
-Tensor toLegacyPrimal(const c10::optional<Tensor>& t);
+Tensor toNonOptFwGrad(const c10::optional<Tensor>& t);
+Tensor toNonOptPrimal(const c10::optional<Tensor>& t);
 
 bool any_variable_defined(variable_list& variables);
 void copy_range(variable_list& out, IndexRange range, const at::Tensor & t);
@@ -48,6 +48,7 @@ Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool keepdim
 Tensor scale_grad_by_count(const Tensor &grad, const Tensor &mask, IntArrayRef dims);
 at::Tensor norm_backward(const at::Tensor & grad, const at::Tensor & self, const optional<at::Scalar> & p_, const at::Tensor & norm);
 at::Tensor norm_backward(at::Tensor grad, const at::Tensor & self, const optional<at::Scalar> & p_, at::Tensor norm, at::IntArrayRef dim, bool keepdim);
+at::Tensor linalg_vector_norm_backward(at::Tensor grad, const at::Tensor & self, const optional<at::Scalar> & opt_ord, at::Tensor norm, const c10::optional<at::IntArrayRef> & opt_dim, bool keepdim);
 at::Tensor pow_backward(at::Tensor grad, const at::Tensor & self, const at::Scalar & exponent_);
 at::Tensor pow_backward_self(at::Tensor grad, const at::Tensor & self, const at::Tensor & exponent);
 at::Tensor pow_backward_exponent(at::Tensor grad, const at::Tensor& self, const at::Tensor& exponent, at::Tensor result);
@@ -72,7 +73,7 @@ at::Tensor prod_backward(const at::Tensor& grad, const at::Tensor& input, const 
 at::Tensor prod_backward(at::Tensor grad, const at::Tensor& input, at::Tensor result, int64_t dim, bool keepdim);
 at::Tensor solve_backward_self(const at::Tensor & grad, const at::Tensor & self, const at::Tensor & A);
 at::Tensor solve_backward_A(const at::Tensor & grad, const at::Tensor & self, const at::Tensor & A, const at::Tensor & solution);
-at::Tensor cumsum_backward(const at::Tensor & x, int64_t dim);
+at::Tensor cumsum_backward(const at::Tensor & grad, int64_t dim);
 at::Tensor logsumexp_backward(at::Tensor grad, const at::Tensor & self, at::Tensor result, at::IntArrayRef dim, bool keepdim);
 at::Tensor logcumsumexp_backward(at::Tensor grad, const at::Tensor & self, at::Tensor result, int64_t dim);
 at::Tensor unbind_backward(const variable_list& grads, int64_t dim);
@@ -223,6 +224,7 @@ infinitely_differentiable_native_layer_norm_backward(
     IntArrayRef normalized_shape,
     double eps,
     std::array<bool, 3> grad_input_mask);
+std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, const Tensor& input, const Tensor& tau);
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);
