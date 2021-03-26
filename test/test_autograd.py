@@ -6875,38 +6875,18 @@ class TestAutogradForwardMode(TestCase):
 
             dual = fwAD.make_dual(foo, tangent[1:])
 
-    def test_level_and_packing(self):
-        foo = torch.rand(2)
-        bar = torch.rand(2)
+    # The following test functions want to ensure all the following behaviors:
+    #   - Ensure that default level system in the python binding works
+    #   - Ensure that only level 0 exists and nesting is properly disabled
+    #   - Ensure that printing works fine
+    #   - Ensure that basic packing/unpacking works
+    #   - Ensure that advanced packing/unpacking works
+    #     - For memory / version counter share
+    #     - For backward AD (regular ops)
+    #   - Ensure that view + inplace for both modes work fine
+    #   - Ensure we do proper cleanup on exit of a level
 
-        level = fwAD.enter_dual_level()
-        # For now only level 0 exists
-        self.assertEqual(level, 0)
-
-        # Check that packing works
-        baz = fwAD.make_dual(foo, bar, level=level)
-        baz_primal, baz_tangent = fwAD.unpack_dual(baz, level=level)
-        self.assertEqual(baz_primal, foo)
-        self.assertEqual(baz_tangent, bar)
-
-        # Check that packing does not change the input
-        foo_primal, foo_tangent = fwAD.unpack_dual(foo, level=level)
-        self.assertEqual(foo_primal, foo)
-        self.assertIsNone(foo_tangent)
-
-        # Check that default level works
-        baz = fwAD.make_dual(foo, bar)
-        baz_primal, baz_tangent = fwAD.unpack_dual(baz)
-        self.assertEqual(baz_primal, foo)
-        self.assertEqual(baz_tangent, bar)
-
-        # Check that nesting is properly disabled
-        with self.assertRaisesRegex(RuntimeError, "Nested forward mode AD is not supported at the moment"):
-            nest_level = fwAD.enter_dual_level()
-
-        fwAD.exit_dual_level()
-
-    def test_level_context_manager(self):
+    def test_default_level(self):
         foo = torch.rand(2)
         bar = torch.rand(2)
 
@@ -6914,11 +6894,20 @@ class TestAutogradForwardMode(TestCase):
             baz = fwAD.make_dual(foo, bar)
             baz_primal, baz_tangent = fwAD.unpack_dual(baz)
         self.assertEqual(baz_primal, foo)
-        self.assertEqual(baz_tangent, bar)
+        self.assertIs(baz_tangent, bar)
 
         baz_primal, baz_tangent = fwAD.unpack_dual(baz)
         self.assertEqual(baz_primal, foo)
         self.assertEqual(baz_tangent, None)
+
+    def test_nested_level(self):
+        with fwAD.dual_level() as level:
+            # For now only level 0 exists
+            self.assertEqual(level, 0)
+
+        with fwAD.dual_level():
+            with self.assertRaisesRegex(RuntimeError, "Nested forward mode AD is not supported at the moment"):
+                nest_level = fwAD.enter_dual_level()
 
     def test_print(self):
         with fwAD.dual_level() as level:
@@ -6933,38 +6922,33 @@ class TestAutogradForwardMode(TestCase):
             self.assertFalse("tangent=" in str(b_primal))
             self.assertFalse("tangent=" in str(b_tangent))
 
-    def test_grad_cleanup(self):
+    def test_basic_packing_unpacking(self):
         foo = torch.rand(2)
         bar = torch.rand(2)
-        baz = torch.rand(2)
 
         with fwAD.dual_level():
-            dual = fwAD.make_dual(foo, bar)
-            self.assertTrue("tangent=" in str(dual))
+            baz = fwAD.make_dual(foo, bar)
+            baz_primal, baz_tangent = fwAD.unpack_dual(baz)
+            self.assertEqual(baz_primal, foo)
+            self.assertIs(baz_tangent, bar)
 
-        self.assertFalse("tangent=" in str(dual))
+            # Check that packing/unpacking did not change the input
+            foo_primal, foo_tangent = fwAD.unpack_dual(foo)
+            self.assertEqual(foo_primal, foo)
+            self.assertIsNone(foo_tangent)
 
-        with fwAD.dual_level():
-            self.assertFalse("tangent=" in str(dual))
-            new_dual = fwAD.make_dual(foo, baz)
-
-            dual_primal, dual_tangent = fwAD.unpack_dual(dual)
-            new_dual_primal, new_dual_tangent = fwAD.unpack_dual(new_dual)
-            self.assertEqual(dual_primal, new_dual_primal)
-            self.assertIsNone(dual_tangent)
-            self.assertEqual(new_dual_tangent, baz)
-
-    def test_make_unpack_dual(self):
+    def test_advanced_packing_unpacking(self):
         foo = torch.rand(2)
         bar = torch.ones(2)
 
+        # Memory and version counter check
         with fwAD.dual_level():
             dual = fwAD.make_dual(foo, bar)
 
-            # dual should only be an alias to foo
+            # Ensure that they are sharing memory and version counter
             self.assertEqual(dual.storage().data_ptr(), foo.storage().data_ptr())
 
-            # Make sure we don't break inplace checks for backward mode
+            # Ensure we properly share the version counter
             self.assertEqual(foo._version, dual._version)
             foo.add_(1)
             self.assertEqual(foo._version, dual._version)
@@ -6973,8 +6957,10 @@ class TestAutogradForwardMode(TestCase):
             dual_primal, dual_tangent = fwAD.unpack_dual(dual)
             self.assertEqual(dual_primal.storage().data_ptr(), foo.storage().data_ptr())
             self.assertEqual(dual_tangent.storage().data_ptr(), bar.storage().data_ptr())
+            # And the tangent is actually re-used as-is so it is still the same Tensor
+            self.assertIs(dual_tangent, bar)
 
-            # Make sure we don't break inplace checks for backward mode
+            # Ensure we properly share the version counter
             self.assertEqual(foo._version, dual_primal._version)
             foo.add_(1)
             self.assertEqual(foo._version, dual_primal._version)
@@ -6982,21 +6968,11 @@ class TestAutogradForwardMode(TestCase):
             bar.add_(1)
             self.assertEqual(bar._version, dual_tangent._version)
 
-            # We don't modify foo when making the dual Tensor
-            dual = fwAD.make_dual(foo, bar)
-            self.assertIsNone(fwAD.unpack_dual(foo)[1])
-            self.assertTrue(fwAD.unpack_dual(dual)[1].eq(2).all())
-
-            # Out of place op
-            double_dual = dual * 2
-            self.assertTrue(fwAD.unpack_dual(double_dual)[1].eq(4).all())
-            self.assertIsNone(fwAD.unpack_dual(foo)[1])
-
-    def test_backward_mode(self):
-        foo = torch.rand(2, requires_grad=True)
-        bar = torch.rand(2, requires_grad=True)
-
+        # backward mode check
         with fwAD.dual_level():
+            foo.requires_grad_()
+            bar.requires_grad_()
+
             # Check that backward gradients properly propagates through packing/unpacking
             dual = fwAD.make_dual(foo, bar)
             p, t = fwAD.unpack_dual(dual)
@@ -7037,22 +7013,6 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(p, foo * 2)
             self.assertEqual(t, bar * 2)
 
-    def test_view_detach(self):
-        foo = torch.rand(1)
-        bar = torch.ones(1)
-        baz = torch.rand(2)
-
-        with fwAD.dual_level():
-            dual = fwAD.make_dual(foo, bar)
-
-            baz_detach = baz.detach()
-            baz_view = baz_detach.narrow(0, 0, 1)
-            baz_view *= dual
-
-            self.assertIsNotNone(fwAD.unpack_dual(baz)[1])
-            self.assertIsNotNone(fwAD.unpack_dual(baz_detach)[1])
-            self.assertIsNotNone(fwAD.unpack_dual(baz_view)[1])
-
     def test_view_inplace(self):
         foo = torch.rand(2)
         bar = torch.ones(2)
@@ -7061,6 +7021,8 @@ class TestAutogradForwardMode(TestCase):
             # Note that in this test, we use "update" to mean computing the right tangent for the dual
             # All the inplace operations here are expected to update the primal value of the Tensors but
             # not always their tangents.
+            # Also all mentions of "non differentiable view" here means non forward differentiable view
+            # unless specified otherwise.
 
             # Check that inplace ops do not update non-differentiable views
             cloned_foo = foo.clone()
@@ -7103,7 +7065,6 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(fwAD.unpack_dual(view)[1], torch.tensor([2.]))
 
             # Check that we track differentiable view even for Tensors that are not dual
-            # Basic inplace should update baz
             baz = torch.rand(2)
             baz += dual
             self.assertEqual(fwAD.unpack_dual(baz)[1], fwAD.unpack_dual(dual)[1])
@@ -7119,6 +7080,28 @@ class TestAutogradForwardMode(TestCase):
             view = baz.detach()
             view += dual
             self.assertEqual(fwAD.unpack_dual(baz)[1], fwAD.unpack_dual(dual)[1])
+
+    def test_grad_cleanup(self):
+        foo = torch.rand(2)
+        bar = torch.rand(2)
+        baz = torch.rand(2)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(foo, bar)
+            self.assertIsNone(fwAD.unpack_dual(foo)[1])
+            self.assertIs(fwAD.unpack_dual(dual)[1], bar)
+
+        self.assertIsNone(fwAD.unpack_dual(dual)[1])
+
+        with fwAD.dual_level():
+            self.assertIsNone(fwAD.unpack_dual(foo)[1])
+            new_dual = fwAD.make_dual(foo, baz)
+
+            dual_primal, dual_tangent = fwAD.unpack_dual(dual)
+            new_dual_primal, new_dual_tangent = fwAD.unpack_dual(new_dual)
+            self.assertEqual(dual_primal, new_dual_primal)
+            self.assertIsNone(dual_tangent)
+            self.assertEqual(new_dual_tangent, baz)
 
 
 # Generic device type autograd tests.
