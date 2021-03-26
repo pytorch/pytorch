@@ -225,7 +225,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
   std::string genInline(const kir::Node* node) {
     const bool saved_inline = print_inline_;
     print_inline_ = true;
-    const auto result = gen(node);
+    auto result = gen(node);
     print_inline_ = saved_inline;
     return result;
   }
@@ -926,7 +926,6 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
 
     const auto tv = node->buffer()->as<kir::TensorView>();
-    TORCH_INTERNAL_ASSERT(tv->domain()->nDims() > 0);
 
     const auto size = node->size();
     TORCH_INTERNAL_ASSERT(size != nullptr);

@@ -39,8 +39,10 @@ bool scheduleFusion(Fusion* fusion) {
   // Run through outputs, grab all inputs of outputs
   // squeeze with computeAt to set overall structure.
   for (auto output : fusion->outputs()) {
-    if (output->getValType() != ValType::TensorView)
+    if (output->getValType() != ValType::TensorView ||
+        output->as<TensorView>()->nDims() == 0) {
       continue;
+    }
     TensorView* out_tv = output->as<TensorView>();
 
     // Split into 128 which will be bockDim.x
@@ -51,12 +53,16 @@ bool scheduleFusion(Fusion* fusion) {
   }
 
   for (auto output : fusion->outputs()) {
-    if (output->getValType() != ValType::TensorView)
+    if (output->getValType() != ValType::TensorView) {
       continue;
+    }
     TensorView* out_tv = output->as<TensorView>();
     for (Val* inp : fusion->inputsOf(output)) {
       if (inp->getValType().value() == ValType::TensorView)
         inp->as<TensorView>()->computeAt(out_tv, -1);
+    }
+    if (output->as<TensorView>()->nDims() == 0) {
+      continue;
     }
     out_tv->axis(0)->parallelize(ParallelType::BIDx);
     out_tv->axis(1)->parallelize(ParallelType::Unroll);

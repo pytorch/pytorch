@@ -51,6 +51,9 @@ size_t mergeReduction(TensorView* tv) {
 size_t mergeNonReduction(TensorView* tv) {
   int prev_i = -1;
   size_t num_merged = 0;
+  if (tv->nDims() == 0) {
+    return 0;
+  }
   for (int i = static_cast<int>(tv->nDims()) - 1; i >= 0; i--) {
     if (tv->axis(i)->isReduction()) {
       continue;

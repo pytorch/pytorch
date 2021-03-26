@@ -14013,6 +14013,35 @@ TEST(NVFuserTest, FusionPredicatedBlockBroadcast_CUDA) {
   testValidate(&fusion, outputs, inputs, {t4}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionSingleElement_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(0);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(2.5));
+
+  auto tv2 = add(tv1, new Double(3.5));
+  fusion.addOutput(tv2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::randn({}, options);
+
+  at::Tensor cg_output = at::empty({}, options);
+
+  scheduleFusion(&fusion, {input});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({input}, {cg_output});
+
+  auto aten_output = input.add(2.5).add(3.5);
+
+  testValidate(
+      &fusion, {cg_output}, {input}, {aten_output}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

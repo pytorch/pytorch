@@ -1976,6 +1976,27 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_scalar_tensor(self):
+        x = torch.empty([], device="cuda", dtype=torch.float32)
+
+        def t(x: torch.Tensor):
+            o = x + 1.0
+            o = torch.nn.functional.relu(o)
+            return o
+
+        # bias set to true.
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x)
+        jit_o = t_jit(x)
+        o = t(x)
+        self.assertEqual(o, jit_o)
+        # since the output value is not used at all, the fusion operator should
+        # have been optimized away
+        self.assertGraphContainsExactly(t_jit.graph_for(x), FUSION_GUARD, 1)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_graph_rng(self):
         self.assertTrue(torch._C._jit_nvfuser_enabled())
         size = 10000
