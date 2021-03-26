@@ -233,8 +233,8 @@ def _extract_weights_impl(
     nodes_and_names_to_instrument_b: List[Tuple[Node, str]] = []
     for match_name, match in matched_subgraph_pairs.items():
         subgraph_a, subgraph_b = match
-        nodes_and_names_to_instrument_a.append((subgraph_a.start_node, match_name))
-        nodes_and_names_to_instrument_b.append((subgraph_b.start_node, match_name))
+        nodes_and_names_to_instrument_a.append((subgraph_a.base_op_node, match_name))
+        nodes_and_names_to_instrument_b.append((subgraph_b.base_op_node, match_name))
 
     # populate the results, one model at a time
     results: NSResultsType = {}
