@@ -135,8 +135,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
   int64_t nsegments = nbatch / nsort;
 
-  auto segment_id = at::repeat_interleave(
-    at::tensor(nsort, indices.options()).expand(nsegments));
+  auto segment_id = at::arange(nsort, indices.options()).view({nsort, 1}).expand({nsort, nsegments}).contiguous();
   int64_t *segment_id_ptr = segment_id.data_ptr<int64_t>();
   auto orig_indices = at::arange(nsort, indices.options()).repeat({nsegments});
   int64_t *orig_indices_ptr = orig_indices.data_ptr<int64_t>();
