@@ -145,7 +145,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
       at::cuda::cub::sort_pairs<uint8_t, scalar_t>(
         keys.data_ptr<uint8_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
-        n, 0, bits);
+        n, false, 0, bits);
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   } else if (bits <= 16) {
@@ -158,7 +158,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
       at::cuda::cub::sort_pairs<int16_t, scalar_t>(
         keys.data_ptr<int16_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
-        n, 0, bits);
+        n, false, 0, bits);
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   } else if (bits <= 32) {
@@ -171,7 +171,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
       at::cuda::cub::sort_pairs<int, scalar_t>(
         keys.data_ptr<int>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
-        n, 0, bits);
+        n, false, 0, bits);
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   } else {
@@ -184,7 +184,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
       at::cuda::cub::sort_pairs<int64_t, scalar_t>(
         keys.data_ptr<int64_t>(), keys_out,
         range.data_ptr<scalar_t>(), shuffled_data_,
-        n, 0, bits);
+        n, false, 0, bits);
       randperm_handle_duplicate_keys(keys_out, shuffled_data_, bits, n, generator);
     });
   }
