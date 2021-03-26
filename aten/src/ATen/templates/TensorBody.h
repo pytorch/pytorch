@@ -360,10 +360,14 @@ class TORCH_API Tensor {
   }
 
   /// Returns a `Tensor`'s layout. Defined in Type.h
-  Layout layout() const noexcept;
+  Layout layout() const noexcept {
+    return impl_->layout();
+  }
 
   /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.cpp
-  caffe2::TypeMeta dtype() const noexcept;
+  caffe2::TypeMeta dtype() const noexcept {
+    return impl_->dtype();
+  }
 
   /// Returns a `Tensor`'s device.
   inline Device device() const {
