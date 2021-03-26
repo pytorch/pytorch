@@ -386,6 +386,91 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
+
+// Todo: cusolverDnXpotrfBatched has some numerical issue and is not used here.
+//     A loop of cusolverDnXpotrf is used in case MAGMA is not linked in the pytorch build.
+//     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
+//     See https://github.com/pytorch/pytorch/issues/53879.
+template<typename scalar_t>
+inline static void apply_cholesky_cusolver_potrf(Tensor& self_working_copy, bool upper, Tensor& infos) {
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
+  const int64_t n = self_working_copy.size(-1);
+  const int64_t lda = std::max<int64_t>(1, n);
+  const int64_t batch_size = batchCount(self_working_copy);
+  const int64_t matrix_stride = matrixStride(self_working_copy);
+
+  scalar_t* self_working_copy_ptr = self_working_copy.data_ptr<scalar_t>();
+  int* infos_ptr = infos.data_ptr<int>();
+
+#ifdef USE_CUSOLVER_64_BIT
+  size_t worksize_device;
+  size_t worksize_host;
+  cusolverDnParams_t params;
+  cudaDataType datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
+  TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
+  at::cuda::solver::xpotrf_buffersize(handle, params, uplo, n, datatype, nullptr, lda, datatype, &worksize_device, &worksize_host);
+
+  // allocate workspace storage
+  auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
+  auto workdata_device = device_allocator.allocate(worksize_device * batch_size);
+  void* workdata_device_ptr = workdata_device.get();
+
+  auto& host_allocator = *at::getCPUAllocator();
+  auto workdata_host = host_allocator.allocate(worksize_host * batch_size);
+  void* workdata_host_ptr = workdata_host.get();
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    at::cuda::solver::xpotrf(
+      handle, params, uplo, n, datatype,
+      self_working_copy_ptr + i * matrix_stride,
+      lda, datatype,
+      (char*)workdata_device_ptr + i * worksize_device, worksize_device,
+      (char*)workdata_host_ptr + i * worksize_host, worksize_host,
+      infos_ptr + i
+    );
+  }
+
+  TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
+#else // USE_CUSOLVER_64_BIT
+  int n_32 = cuda_int_cast(n, "n");
+  int lda_32 = cuda_int_cast(lda, "lda");
+  int lwork;
+  at::cuda::solver::potrf_buffersize<scalar_t>(
+    handle, uplo, n_32, nullptr, lda_32, &lwork);
+
+   // allocate workspace storage
+  auto& allocator = *at::cuda::getCUDADeviceAllocator();
+  auto work_data = allocator.allocate(sizeof(scalar_t)*lwork * batch_size);
+  scalar_t* work_data_ptr = static_cast<scalar_t*>(work_data.get());
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    at::cuda::solver::potrf<scalar_t>(
+      handle, uplo, n_32,
+      self_working_copy_ptr + i * matrix_stride,
+      lda_32,
+      work_data_ptr + i * lwork,
+      lwork,
+      infos_ptr + i
+    );
+  }
+#endif // USE_CUSOLVER_64_BIT
+}
+
+Tensor _cholesky_helper_cuda_cusolver(const Tensor& self, bool upper) {
+  const int64_t batch_size = batchCount(self);
+  at::Tensor infos = at::zeros({batch_size}, self.options().dtype(at::kInt));
+  at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda_potrf", [&] {
+    apply_cholesky_cusolver_potrf<scalar_t>(self_working_copy, upper, infos);
+  });
+
+  batchCheckErrors(infos, "cholesky_cuda");
+
+  return self_working_copy;
+}
+
 /*
   The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
   from a sequence of elementary reflectors, such as produced by the geqrf function.
@@ -416,6 +501,14 @@ inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos,
   // LAPACK's requirement
   TORCH_INTERNAL_ASSERT(m >= n);
   TORCH_INTERNAL_ASSERT(n >= k);
+
+  // cuSOLVER doesn't compute anything for this case, which is wrong
+  // the result should be a matrix with 1 on the diagonal
+  if (k == 0) {
+    self.fill_(0);
+    self.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+    return;
+  }
 
   // get the optimal work size and allocate workspace tensor
   int lwork;
