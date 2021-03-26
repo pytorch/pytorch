@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
+#include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -957,6 +958,75 @@ struct CudaGraphFuser {
   }
 };
 
+void removeCudaFusionPathForGuardNode(Node* n) {
+  auto uses = n->output()->uses();
+  TORCH_INTERNAL_ASSERT(
+      uses.size() == 1,
+      "CudaFusionGuard should only be used by a single prim::If");
+  Node* if_node = uses[0].user;
+  TORCH_INTERNAL_ASSERT(
+      if_node->kind() == prim::If,
+      "CudaFusionGuard should only be used by prim::If");
+  auto fall_back_graph = if_node->blocks()[1];
+  Node* fallback_node = nullptr;
+  for (auto fb_n : fall_back_graph->nodes()) {
+    TORCH_INTERNAL_ASSERT(
+        fb_n->kind() == prim::FallbackGraph,
+        "CudaFusionGuard fallback path should only have single fallback node");
+    TORCH_INTERNAL_ASSERT(
+        fallback_node == nullptr,
+        "CudaFusionGuard fallback path should only have single fallback node");
+    fallback_node = fb_n;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      fallback_node != nullptr,
+      "CudaFusionGuard fallback path found no fallback node");
+  fallback_node->moveBefore(n);
+
+  TORCH_INTERNAL_ASSERT(
+      fallback_node->outputs().size() == if_node->outputs().size(),
+      "CudaFusionGuard fallback should have same number of outputs as with nesting if block");
+
+  if_node->replaceAllUsesWith(fallback_node);
+  if_node->destroy();
+  n->destroy();
+}
+
+bool missingCompleteTypes(const std::vector<TypePtr>& types) {
+  for (const auto& type : types) {
+    if (auto tensor_type = type->cast<TensorType>()) {
+      // if we found one missing value, we know that we are not going to able to
+      // generate a kernel, so we bail out;
+      if (!tensor_type->device().has_value() ||
+          !tensor_type->dim().has_value() ||
+          !tensor_type->scalarType().has_value()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void removeFusionWithMissingProfilingInformation(Block* block) {
+  FUSER_PERF_SCOPE("compileFusionRecursive");
+  std::vector<Node*> removeCudaFusionNodes;
+
+  for (auto node : block->nodes()) {
+    if (node->kind() == prim::CudaFusionGuard &&
+        missingCompleteTypes(node->tys(attr::types))) {
+      removeCudaFusionNodes.push_back(node);
+    }
+    for (auto sub_block : node->blocks()) {
+      removeFusionWithMissingProfilingInformation(sub_block);
+    }
+  }
+
+  for (auto node : removeCudaFusionNodes) {
+    removeCudaFusionPathForGuardNode(node);
+  }
+}
+
 void compileFusionRecursive(Block* block) {
   FUSER_PERF_SCOPE("compileFusionRecursive");
 
@@ -1345,6 +1415,7 @@ void decomposeLinearOps(Block* block) {
     auto mat0_size = input_tensor_type->sizes().concrete_sizes();
     auto mat1_size =
         n->input(1)->type()->cast<c10::TensorType>()->sizes().concrete_sizes();
+
     // TODO: The assert is not necessary when we can handle matmul, right now we
     // are splitting the linear between matmul & bias_add. Our fuser can only
     // take the second half and we would need the size information.
@@ -1359,6 +1430,7 @@ void decomposeLinearOps(Block* block) {
     // safe.
     auto bias = graph->insertNode(
         graph->create(prim::add_optional, {matmul->output(0), n->input(2)}, 1));
+    bias->output()->setType(matmul->output(0)->type());
 
     n->output()->replaceAllUsesWith(bias->output());
     n->destroy();
@@ -1422,6 +1494,10 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After Guard Fusion: ", graph);
 
   traverseProfileIValues(graph->block(), RemoveProfileIValue);
+
+  GRAPH_DUMP("Before remove missing profiling: ", graph);
+  removeFusionWithMissingProfilingInformation(graph->block());
+  GRAPH_DUMP("After remove missing profiling: ", graph);
 
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);

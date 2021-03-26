@@ -1976,6 +1976,36 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_branches(self):
+        in_feature = 2
+        out_feature = 4
+        x = torch.randn(4, in_feature, dtype=torch.float32, device='cuda')
+        weight = torch.randn(out_feature, in_feature, dtype=torch.float32, device='cuda')
+        bias = torch.randn(out_feature, dtype=torch.float32, device='cuda')
+
+        def t(x: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, flag: bool):
+            if flag:
+                o = torch.nn.functional.linear(x, weight, bias)
+                o = o + 1.0
+                o = torch.relu(o)
+            else:
+                o = x.sum()
+                o = o + 2.0
+                o = torch.relu(o)
+            return o
+
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, weight, bias, True)
+        jit_o = t_jit(x, weight, bias, True)
+        o = t(x, weight, bias, True)
+        self.assertEqual(o, jit_o)
+        # since the output value is not used at all, the fusion operator should
+        # have been optimized away
+        self.assertGraphContainsExactly(t_jit.graph_for(x, weight, bias, True), FUSION_GUARD, 1)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_scalar_tensor(self):
         x = torch.empty([], device="cuda", dtype=torch.float32)
 
