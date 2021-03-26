@@ -18,8 +18,10 @@ struct MutationRemover {
     mutation_filter_ = mutation_filter;
   }
 
+  // return true if graph is modified
   bool removeListMutation();
 
+  // return true if graph is modified
   bool removeTensorMutation();
 
   bool isSpecialMappedOp(Node* n) {
@@ -81,7 +83,9 @@ struct MutationRemover {
   bool tryMakeUnaliasedIfOutputAndMutationAtomic(
       Value* mutated_value,
       Node* mutating_op);
+  // return true if graph is modified
   bool RemoveListMutation(Block* block);
+  // return true if graph is modified
   bool RemoveTensorMutation(Block* block);
 
   c10::optional<std::function<bool(Node*)>> mutation_filter_;
@@ -90,12 +94,14 @@ struct MutationRemover {
 };
 
 // Removes list mutation with functional equivalents
+// return true if graph is modified
 TORCH_API bool RemoveListMutation(const std::shared_ptr<Graph>& graph);
 
 // Replaces in-place aten ops with their functional equivalents
 // when it can be proven that this does not change graph semantics
 // if `mutation_filter` is present, the pass will only attempt to
 // remove mutation on nodes which return true for the filter
+// return true if graph is modified
 TORCH_API bool RemoveTensorMutation(
     const std::shared_ptr<Graph>& graph,
     c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt);

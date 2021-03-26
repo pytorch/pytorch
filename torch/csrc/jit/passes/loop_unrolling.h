@@ -5,10 +5,12 @@
 namespace torch {
 namespace jit {
 
+// return true if graph is modified
 TORCH_API bool UnrollLoops(std::shared_ptr<Graph>& graph);
 
 TORCH_API Node* PeelLoop(Node* n, size_t times);
 
+// return true if graph is modified
 TORCH_API bool PeelProfilingLoops(const std::shared_ptr<Graph>& graph);
 
 struct TORCH_API LoopsPeeler {
