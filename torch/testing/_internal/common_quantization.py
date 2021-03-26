@@ -27,7 +27,7 @@ try:
         prepare_qat_fx,
         convert_fx,
     )
-    from torch.quantization.ns.ns_types import NSSingleResultValuesType
+    from torch.quantization.ns.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
     from torch.fx import GraphModule
     HAS_FX = True
@@ -611,7 +611,7 @@ class QuantizationTestCase(TestCase):
 
         def assert_types_for_matched_subgraph_pairs(
             self,
-            matched_subgraph_pairs: Dict[str, Tuple[Tuple[Node, Node], Tuple[Node, Node]]],
+            matched_subgraph_pairs: Dict[str, Tuple[NSSubgraph, NSSubgraph]],
             expected_types: Dict[str, Tuple[Tuple[Callable, Callable], Tuple[Callable, Callable]]],
             gm_a: GraphModule,
             gm_b: GraphModule,
@@ -646,14 +646,12 @@ class QuantizationTestCase(TestCase):
                 expected_types_a, expected_types_b = v
                 exp_type_start_a, exp_type_end_a = expected_types_a
                 exp_type_start_b, exp_type_end_b = expected_types_b
-                nodes_a, nodes_b = matched_subgraph_pairs[k]
-                node_start_a, node_end_a = nodes_a
-                node_start_b, node_end_b = nodes_b
+                subgraph_a, subgraph_b = matched_subgraph_pairs[k]
 
-                act_type_start_a = _get_underlying_op_type(node_start_a, gm_a)
-                act_type_start_b = _get_underlying_op_type(node_start_b, gm_b)
-                act_type_end_a = _get_underlying_op_type(node_end_a, gm_a)
-                act_type_end_b = _get_underlying_op_type(node_end_b, gm_b)
+                act_type_start_a = _get_underlying_op_type(subgraph_a.start_node, gm_a)
+                act_type_start_b = _get_underlying_op_type(subgraph_b.start_node, gm_b)
+                act_type_end_a = _get_underlying_op_type(subgraph_a.end_node, gm_a)
+                act_type_end_b = _get_underlying_op_type(subgraph_b.end_node, gm_b)
                 types_match = (exp_type_start_a is act_type_start_a) and \
                     (exp_type_end_a is act_type_end_a) and \
                     (exp_type_start_b is act_type_start_b) and \

@@ -15,6 +15,7 @@ from .utils import (
 
 from .ns_types import (
     NSSingleResultValuesType,
+    NSSubgraph,
 )
 
 from typing import Dict, Tuple, Callable, List, Any, Union, Optional
@@ -203,8 +204,7 @@ def _insert_dtype_cast_after_node(
 def _insert_copy_of_subgraph_a_after_input_node_c(
     input_node_c: Union[Node, List[Node]],
     input_node_c_2: Optional[Union[Node, List[Node]]],
-    node_start_a: Node,
-    node_end_a: Node,
+    subgraph_a: NSSubgraph,
     gm_a: GraphModule,
     gm_b: GraphModule,
     node_name_prefix: str,
@@ -219,9 +219,9 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
 
     # create a sequential list of the subgraphs' nodes from start to end,
     # because we need to add the nodes to graph C in non-reverse order
-    nodes_of_a = [node_end_a]
-    cur_node = node_end_a
-    while cur_node != node_start_a:
+    nodes_of_a = [subgraph_a.end_node]
+    cur_node = subgraph_a.end_node
+    while cur_node != subgraph_a.start_node:
         cur_node = cur_node.args[0]  # type: ignore
         nodes_of_a.insert(0, cur_node)
 
@@ -370,7 +370,7 @@ def create_a_shadows_b(
     gm_a: GraphModule,
     name_b: str,
     gm_b: GraphModule,
-    matched_subgraph_pairs: Dict[str, Tuple[Tuple[Node, Node], Tuple[Node, Node]]],
+    matched_subgraph_pairs: Dict[str, Tuple[NSSubgraph, NSSubgraph]],
     logger_cls: Callable,
     should_log_inputs: bool,
 ) -> GraphModule:
@@ -411,11 +411,11 @@ def create_a_shadows_b(
 
     node_b_to_matched_subgraph_a_and_name = {}
     for match_name, match in matched_subgraph_pairs.items():
-        (node_start_a, node_end_a), (node_start_b, node_end_b) = match
-        assert node_start_b is node_end_b, \
+        subgraph_a, subgraph_b = match
+        assert subgraph_b.start_node is subgraph_b.end_node, \
             "Shadowing subgraphs of B with multiple nodes is not yet handled."
-        node_b_to_matched_subgraph_a_and_name[node_end_b] = \
-            ((node_start_a, node_end_a), match_name)
+        node_b_to_matched_subgraph_a_and_name[subgraph_b.end_node] = \
+            (subgraph_a, match_name)
 
     for node_b in gm_b.graph.nodes:
         if node_b.op == 'output':
@@ -427,14 +427,14 @@ def create_a_shadows_b(
             env_c[node_b.name] = env_c[node_b.args[0].name]  # type: ignore
 
         elif node_b in node_b_to_matched_subgraph_a_and_name:
-            (node_start_a, node_end_a), ref_name = \
+            subgraph_a, ref_name = \
                 node_b_to_matched_subgraph_a_and_name[node_b]
             if False:
                 print('b')
                 print_node(node_b)
                 print('a')
-                print_node(node_start_a)
-                print_node(node_end_a)
+                print_node(subgraph_a.start_node)
+                print_node(subgraph_a.end_node)
 
             # if necessary, log the input of node_c
             if should_log_inputs:
@@ -482,7 +482,7 @@ def create_a_shadows_b(
             # cast dtype from the dtype of node_c's input to the dtype of
             # node_a's input (dequant, etc)
             dtype_cast_node = _insert_dtype_cast_after_node(
-                node_start_a, node_c, node_c.args[0], gm_a, gm_b, graph_c,
+                subgraph_a.start_node, node_c, node_c.args[0], gm_a, gm_b, graph_c,
                 node_b.name + '_dtype_cast_')
             # note: not inserting to env_c because all nodes which use the dtype
             #   casts are copied from graph_a
@@ -529,12 +529,12 @@ def create_a_shadows_b(
             # for the second param is not implemented yet, it can be added
             # later if there is a use case.
             node_c_second_non_param_arg = None
-            num_non_param_args_node_a = get_number_of_non_param_args(node_start_a, gm_a)
+            num_non_param_args_node_a = get_number_of_non_param_args(subgraph_a.start_node, gm_a)
             if num_non_param_args_node_a == 2:
                 node_c_second_non_param_arg = node_c.args[1]
             node_a_shadows_c = _insert_copy_of_subgraph_a_after_input_node_c(
                 dtype_cast_node, node_c_second_non_param_arg,
-                node_start_a, node_end_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
+                subgraph_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
             env_c[node_a_shadows_c.name] = node_a_shadows_c
             # subgraph so far:
             #

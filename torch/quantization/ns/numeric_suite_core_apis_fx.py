@@ -232,9 +232,9 @@ def _extract_weights_impl(
     nodes_and_names_to_instrument_a: List[Tuple[Node, str]] = []
     nodes_and_names_to_instrument_b: List[Tuple[Node, str]] = []
     for match_name, match in matched_subgraph_pairs.items():
-        (node_start_a, node_end_a), (node_start_b, node_end_b) = match
-        nodes_and_names_to_instrument_a.append((node_start_a, match_name))
-        nodes_and_names_to_instrument_b.append((node_start_b, match_name))
+        subgraph_a, subgraph_b = match
+        nodes_and_names_to_instrument_a.append((subgraph_a.start_node, match_name))
+        nodes_and_names_to_instrument_b.append((subgraph_b.start_node, match_name))
 
     # populate the results, one model at a time
     results: NSResultsType = {}
@@ -294,12 +294,10 @@ def _add_loggers_impl(
     nodes_and_names_to_instrument_a = []
     nodes_and_names_to_instrument_b = []
     for match_name, (subgraph_a, subgraph_b) in matched_subgraph_pairs.items():
-        node_start_a, node_end_a = subgraph_a
-        node_start_b, node_end_b = subgraph_b
         # Note: for matching activations we always use the end nodes,
         # such as observing the output of relu in linear-relu
-        nodes_and_names_to_instrument_a.append((node_end_a, match_name))
-        nodes_and_names_to_instrument_b.append((node_end_b, match_name))
+        nodes_and_names_to_instrument_a.append((subgraph_a.end_node, match_name))
+        nodes_and_names_to_instrument_b.append((subgraph_b.end_node, match_name))
 
     new_model_a = _add_loggers_one_model(
         name_a, gm_a, nodes_and_names_to_instrument_a, logger_cls,
