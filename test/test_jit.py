@@ -11132,6 +11132,15 @@ dedent """
                 for i in range(.5):
                     print(i)
 
+    def test_parse_none_type_annotation(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x : NoneType) -> NoneType:
+                return x
+        ''')
+
+        foo_code = cu.find_function('foo').code
+        FileCheck().check(": None").check("-> None").run(foo_code)
+
     def test_zip_enumerate_modulelist(self):
         class Sub(torch.nn.Module):
             def __init__(self):
