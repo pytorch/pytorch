@@ -10,13 +10,14 @@ from .utils import (
     print_node,
     NodeInputType,
     return_first_non_observer_node,
+    get_number_of_non_param_args,
 )
 
 from .ns_types import (
     NSSingleResultValuesType,
 )
 
-from typing import Dict, Tuple, Callable, List, Any, Union
+from typing import Dict, Tuple, Callable, List, Any, Union, Optional
 
 def _insert_logger_after_node(
     node: Node,
@@ -201,6 +202,7 @@ def _insert_dtype_cast_after_node(
 
 def _insert_copy_of_subgraph_a_after_input_node_c(
     input_node_c: Union[Node, List[Node]],
+    input_node_c_2: Optional[Union[Node, List[Node]]],
     node_start_a: Node,
     node_end_a: Node,
     gm_a: GraphModule,
@@ -228,6 +230,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     cur_node_a = nodes_of_a[0]
     cur_node_c = _insert_copy_of_node_a_after_input_node_c(
         input_node_c,
+        input_node_c_2,
         cur_node_a,
         gm_a,
         gm_b,
@@ -237,6 +240,8 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
         prev_node_c = cur_node_c  # previous added node is the input to next node
         cur_node_c = _insert_copy_of_node_a_after_input_node_c(
             prev_node_c,
+            # TODO(future PR): enable multiple inputs for nodes which are not at start of subgraph
+            None,
             cur_node_a,
             gm_a,
             gm_b,
@@ -247,6 +252,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
 
 def _insert_copy_of_node_a_after_input_node_c(
     input_node_c: Union[Node, List[Node]],
+    input_node_c_2: Optional[Union[Node, List[Node]]],
     node_a: Node,
     gm_a: GraphModule,
     gm_b: GraphModule,
@@ -254,8 +260,12 @@ def _insert_copy_of_node_a_after_input_node_c(
 ) -> Node:
     """
     Assume that node_a from graph_a has
-      args (input, arg1, ...), and
+      args (input, (input2)?, arg1, ...), and
       kwargs {kw0: kwarg0, ...}
+
+    Note: input2 is optional. If it equals to None, we assume that the op
+    has a single non-param input.  If it is specified, we assume that the op
+    has two non-param inputs.
 
     Copies the underlying values of arg1..argn and kwarg0..kwargn into gm_b,
     and creates the corresponding nodes in graph_c. Note: observers are ignored,
@@ -273,6 +283,8 @@ def _insert_copy_of_node_a_after_input_node_c(
     ========
 
     input -------------> node_a
+                         / / /
+    (input_2)?----------/ / /
                          / /
     weight -> weight_obs  /
                          /
@@ -282,6 +294,8 @@ def _insert_copy_of_node_a_after_input_node_c(
     =========================
 
     input_node_c --> node_a_copy
+                     / / /
+    (input_node_c_2)? / /
                      / /
     weight_copy ----/ /
                      /
@@ -296,7 +310,8 @@ def _insert_copy_of_node_a_after_input_node_c(
     # Note: this hasn't been tested with many ops, logic may change.
     new_args = []
     # assumes that the first arg is the input
-    for node_a_arg in node_a.args[1:]:
+    num_non_param_args = 1 if input_node_c_2 is None else 2
+    for node_a_arg in node_a.args[num_non_param_args:]:
         if isinstance(node_a_arg, Node):
             arg_a = return_first_non_observer_node(node_a_arg, gm_a)
             arg_a_copy_name = \
@@ -326,6 +341,11 @@ def _insert_copy_of_node_a_after_input_node_c(
     node_a_shadows_c_name = \
         get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
 
+    if input_node_c_2:
+        input_node_c_args = [input_node_c, input_node_c_2]
+    else:
+        input_node_c_args = [input_node_c]
+
     if node_a.op == 'call_module':
         # if target is a module, we point to the module from gm_b
         new_mod_copy_name = \
@@ -335,13 +355,13 @@ def _insert_copy_of_node_a_after_input_node_c(
         mod_a = getattr_from_fqn(gm_a, node_a.target)
         setattr(gm_b, new_mod_copy_name, mod_a)
         node_a_shadows_c = graph_c.create_node(
-            node_a.op, new_mod_copy_name, (input_node_c, *new_args),
+            node_a.op, new_mod_copy_name, (*input_node_c_args, *new_args),
             new_kwargs, node_a_shadows_c_name)  # type: ignore
         return node_a_shadows_c
     else:
         assert node_a.op == 'call_function'
         node_a_shadows_c = graph_c.create_node(
-            node_a.op, node_a.target, (input_node_c, *new_args),
+            node_a.op, node_a.target, (*input_node_c_args, *new_args),
             new_kwargs, node_a_shadows_c_name)  # type: ignore
         return node_a_shadows_c
 
@@ -504,8 +524,16 @@ def create_a_shadows_b(
 
             # hook up the new mod_a copy to be in the graph, receiving the
             # same inputs as mod_b does, with dtype cast to match a
+            # Some ops, such as LSTMs, have two non-param inputs. If we have
+            # such an op, pass the second param as well. Note: dtype casting
+            # for the second param is not implemented yet, it can be added
+            # later if there is a use case.
+            node_c_second_non_param_arg = None
+            num_non_param_args_node_a = get_number_of_non_param_args(node_start_a, gm_a)
+            if num_non_param_args_node_a == 2:
+                node_c_second_non_param_arg = node_c.args[1]
             node_a_shadows_c = _insert_copy_of_subgraph_a_after_input_node_c(
-                dtype_cast_node,
+                dtype_cast_node, node_c_second_non_param_arg,
                 node_start_a, node_end_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
             env_c[node_a_shadows_c.name] = node_a_shadows_c
             # subgraph so far:
