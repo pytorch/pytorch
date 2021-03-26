@@ -37,7 +37,7 @@ enum class WatchResponseType : uint8_t { KEY_UPDATED };
 } // anonymous namespace
 
 // Background thread parent class methods
-BackgroundThread::BackgroundThread(int storeListenSocket) 
+BackgroundThread::BackgroundThread(int storeListenSocket)
     : storeListenSocket_(storeListenSocket) {
   // Signal instance destruction to the daemon thread.
   initStopSignal();
@@ -68,7 +68,7 @@ void BackgroundThread::initStopSignal() {
   if (ghStopEvent_ == NULL) {
       throw std::runtime_error(
           "Failed to create the control pipe to start the "
-          "TCPStoreDaemon run");
+          "BackgroundThread run");
   }
 }
 
@@ -84,7 +84,7 @@ void BackgroundThread::initStopSignal() {
   if (pipe(controlPipeFd_.data()) == -1) {
     throw std::runtime_error(
         "Failed to create the control pipe to start the "
-        "TCPStoreDaemon run");
+        "BackgroundThread run");
   }
 }
 
@@ -115,11 +115,11 @@ void ListenThread::addCallback(std::string key, std::function<void(std::string, 
   keyToCallbacks_[key] = cb;
 }
 
-void ListenThread::callbackHandler() {
-  auto watchResponse = tcputil::recvValue<WatchResponseType>(storeListenSocket_);
-  std::string key = tcputil::recvString(storeListenSocket_);
-  std::vector<uint8_t> currentValueVec = tcputil::recvVector<uint8_t>(storeListenSocket_);
-  std::vector<uint8_t> newValueVec = tcputil::recvVector<uint8_t>(storeListenSocket_);
+void ListenThread::callbackHandler(int socket) {
+  auto watchResponse = tcputil::recvValue<WatchResponseType>(socket);
+  std::string key = tcputil::recvString(socket);
+  std::vector<uint8_t> currentValueVec = tcputil::recvVector<uint8_t>(socket);
+  std::vector<uint8_t> newValueVec = tcputil::recvVector<uint8_t>(socket);
   std::string currentValue = std::string(currentValueVec.begin(), currentValueVec.end());
   std::string newValue = std::string(newValueVec.begin(), newValueVec.end());
   if (watchResponse != WatchResponseType::KEY_UPDATED) {
@@ -148,8 +148,16 @@ void ListenThread::run() {
       continue;
     }
 
+    if (fds[0].revents == 0) {
+      continue;
+    }
     // otherwise perform callback logic
-    callbackHandler();
+    try {
+      callbackHandler(fds[0].fd);
+    }
+    catch(...) {
+      tcputil::closeSocket(fds[0].fd);
+    }
   }
 }
 #else
@@ -171,14 +179,22 @@ void ListenThread::run() {
             ECONNABORTED,
             std::system_category(),
             "Unexpected poll revent on the control pipe's reading fd: " +
-                std::to_string(fds[1].revents));
+                std::to_string(fds[0].revents));
       }
       finished = true;
       break;
     }
 
+    if (fds[1].revents == 0) {
+      continue;
+    }
     // otherwise perform callback logic
-    callbackHandler();
+    try {
+      callbackHandler(fds[1].fd);
+    }
+    catch(...) {
+      tcputil::closeSocket(fds[1].fd);
+    }
   }
 }
 #endif
@@ -223,6 +239,20 @@ void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {
         }
         if (it->second.size() == 0) {
           it = waitingSockets_.erase(it);
+        } else {
+          ++it;
+        }
+      }
+      for (auto it = watchedSockets_.begin(); it != watchedSockets_.end();) {
+        for (auto vecIt = it->second.begin(); vecIt != it->second.end();) {
+          if (*vecIt == fds[fdIdx].fd) {
+            vecIt = it->second.erase(vecIt);
+          } else {
+            ++vecIt;
+          }
+        }
+        if (it->second.size() == 0) {
+          it = watchedSockets_.erase(it);
         } else {
           ++it;
         }
@@ -299,12 +329,12 @@ void TCPStoreDaemon::wakeupWaitingClients(const std::string& key) {
 void TCPStoreDaemon::sendKeyUpdatesToClients(const std::string& key,
     std::vector<uint8_t>& oldData,
     std::vector<uint8_t>& newData) {
-  for (int listenSocket : watchedSockets_[key]) {
+  for (int socket : watchedSockets_[key]) {
     tcputil::sendValue<WatchResponseType>(
-        listenSocket, WatchResponseType::KEY_UPDATED);
-    tcputil::sendString(listenSocket, key);
-    tcputil::sendVector<uint8_t>(listenSocket, oldData);
-    tcputil::sendVector<uint8_t>(listenSocket, newData);
+        socket, WatchResponseType::KEY_UPDATED);
+    tcputil::sendString(socket, key, true);
+    tcputil::sendVector<uint8_t>(socket, oldData);
+    tcputil::sendVector<uint8_t>(socket, newData);
   }
 }
 
@@ -567,6 +597,7 @@ TCPStore::TCPStore(
         tcpStoreDaemon_ = nullptr;
         tcputil::closeSocket(masterListenSocket_);
     }
+    watchListener_ = nullptr;
     tcputil::closeSocket(listenSocket_);
     throw;
   }
@@ -574,8 +605,8 @@ TCPStore::TCPStore(
 
 TCPStore::~TCPStore() {
   tcputil::closeSocket(storeSocket_);
-  tcputil::closeSocket(listenSocket_);
   watchListener_ = nullptr;
+  tcputil::closeSocket(listenSocket_);
   if (isServer_) {
     // Store daemon should end because of closed connection.
     // daemon destructor should join the thread
@@ -659,7 +690,7 @@ void TCPStore::watchKey(const std::string& key, std::function<void(std::string, 
   watchListener_->addCallback(regKey, callback);
 
   tcputil::sendValue<QueryType>(listenSocket_, QueryType::WATCH_KEY);
-  tcputil::sendString(listenSocket_, regKey, true);
+  tcputil::sendString(listenSocket_, regKey);
 }
 
 int64_t TCPStore::addHelper_(const std::string& key, int64_t value) {
