@@ -317,6 +317,8 @@ TEST(IValueTest, FutureSetError) {
     FAIL() << "Expected to throw";
   } catch (std::exception& e) {
     EXPECT_THAT(e.what(), ::testing::HasSubstr("Error already set"));
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("foo"));
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("bar"));
   }
 }
 

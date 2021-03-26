@@ -169,6 +169,35 @@ class TORCH_API LoopNest {
   // S7:      B[i] = B[i] +
   static std::vector<For*> distributeLoopOverInnerLoops(For* loop);
 
+  // This method performs loop fusion.
+  // For example, consider the following code.
+  //
+  // S1:  for m
+  // S2:    A[m] = 0
+  // S3:    for j
+  // S4:      A[m] = A[m] +
+  // S5:  for n
+  // S5:    B[n] = A[n]
+  // S6:    for k
+  // S7:      B[n] = B[n] +
+  //
+  // fuseLoops({S1, S5}), will return the following loop:
+  // S1:  for m
+  // S2:    A[m] = 0
+  // S3:    for j
+  // S4:      A[m] = A[m] +
+  // S5:    B[m] = A[m]
+  // S6:    for k
+  // S7:      B[m] = B[m] +
+  //
+  // Loop fusion is done only when all the conditions below are satisfied.
+  //  * All the loops have the same parent.
+  //  * There are no statements between these loops in their parent body.
+  //  * The start bounds are the same for all loops.
+  //  * The stop bounds are the same for all loops.
+  //  * Fusing the loops does not violate or add any dependencies.
+  static For* fuseLoops(const std::vector<For*>& loops);
+
   void reorderAxis(For* a, For* b);
 
   static void unroll(For* f, Stmt** unrolled);
