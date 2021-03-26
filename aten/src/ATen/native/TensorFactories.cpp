@@ -77,7 +77,7 @@ Tensor arange(
   return at::arange_out(result, start, end, step);
 }
 
-Tensor& arange_out(Tensor& result, const Scalar& end) {
+Tensor& arange_out(const Scalar& end, Tensor& result) {
   return at::arange_out(result, /*start=*/0, end);
 }
 
@@ -112,7 +112,7 @@ void complex_check_dtype(
               " for argument 'out'");
 }
 
-Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
+Tensor& complex_out(const Tensor& real, const Tensor& imag, Tensor& result) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
       .add_output(result)
@@ -132,7 +132,7 @@ Tensor complex(const Tensor& real, const Tensor& imag) {
   return at::complex_out(result, real, imag);
 }
 
-Tensor& polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
+Tensor& polar_out(const Tensor& abs, const Tensor& angle, Tensor& result) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
       .add_output(result)
@@ -183,10 +183,9 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<Sca
   return t;
 }
 
-Tensor& empty_out(
-    Tensor& result,
-    IntArrayRef size,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor& empty_out(IntArrayRef size,
+    c10::optional<c10::MemoryFormat> optional_memory_format,
+    Tensor& result) {
   // Preferably, this argument would not be accepted by _out, but the code
   // generator requires the out and non-out overloads to match exactly
   TORCH_CHECK(
@@ -359,12 +358,12 @@ Tensor eye(int64_t n, int64_t m, const TensorOptions& options) {
   return at::eye_out(tensor, n, m);
 }
 
-Tensor& eye_out_cpu(Tensor& result, int64_t n) {
+Tensor& eye_out_cpu(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
-  return native::eye_out_cpu(result, n, n);
+  return native::eye_out_cpu(n, n, result);
 }
 
-Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
+Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
@@ -420,7 +419,7 @@ Tensor full(IntArrayRef size, const Scalar& fill_value, const TensorOptions& opt
   return result.fill_(fill_value);
 }
 
-Tensor& full_out(Tensor& result, IntArrayRef size, const Scalar& fill_value) {
+Tensor& full_out(IntArrayRef size, const Scalar& fill_value, Tensor& result) {
   TORCH_CHECK(!result.is_sparse(),
     "full(...) is not implemented for sparse layout");
 
@@ -507,8 +506,8 @@ Tensor ones(IntArrayRef size, const TensorOptions& options) {
   return native::full(size, /*fill_value=*/1., options);
 }
 
-Tensor& ones_out(Tensor& result, IntArrayRef size) {
-  return native::full_out(result, size, /*fill_value=*/1.);
+Tensor& ones_out(IntArrayRef size, Tensor& result) {
+  return native::full_out(size, /*fill_value=*/1., result);
 }
 
 Tensor ones_like(
@@ -549,11 +548,11 @@ Tensor rand(IntArrayRef size, c10::optional<Generator> generator, const TensorOp
   return result.uniform_(0, 1, generator);
 }
 
-Tensor& rand_out(Tensor& result, IntArrayRef size) {
-  return native::rand_out(result, size, c10::nullopt);
+Tensor& rand_out(IntArrayRef size, Tensor& result) {
+  return native::rand_out(size, c10::nullopt, result);
 }
 
-Tensor& rand_out(Tensor& result, IntArrayRef size, c10::optional<Generator> generator) {
+Tensor& rand_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
   return result.uniform_(0, 1, generator);
 }
@@ -598,29 +597,27 @@ Tensor randint(
   return result.random_(low, high, generator);
 }
 
-Tensor& randint_out(Tensor& result, int64_t high, IntArrayRef size) {
-  return native::randint_out(result, high, size, c10::nullopt);
+Tensor& randint_out(int64_t high, IntArrayRef size, Tensor& result) {
+  return native::randint_out(high, size, c10::nullopt, result);
 }
 
-Tensor& randint_out(
-    Tensor& result,
-    int64_t high,
+Tensor& randint_out(int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator) {
+    c10::optional<Generator> generator,
+    Tensor& result) {
   result.resize_(size);
   return result.random_(0, high, generator);
 }
 
-Tensor& randint_out(Tensor& result, int64_t low, int64_t high, IntArrayRef size) {
-  return native::randint_out(result, low, high, size, c10::nullopt);
+Tensor& randint_out(int64_t low, int64_t high, IntArrayRef size, Tensor& result) {
+  return native::randint_out(low, high, size, c10::nullopt, result);
 }
 
-Tensor& randint_out(
-    Tensor& result,
-    int64_t low,
+Tensor& randint_out(int64_t low,
     int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator) {
+    c10::optional<Generator> generator,
+    Tensor& result) {
   result.resize_(size);
   return result.random_(low, high, generator);
 }
@@ -655,11 +652,11 @@ Tensor randn(IntArrayRef size, c10::optional<Generator> generator, const TensorO
   return result.normal_(0, 1, generator);
 }
 
-Tensor& randn_out(Tensor& result, IntArrayRef size) {
-  return native::randn_out(result, size, c10::nullopt);
+Tensor& randn_out(IntArrayRef size, Tensor& result) {
+  return native::randn_out(size, c10::nullopt, result);
 }
 
-Tensor& randn_out(Tensor& result, IntArrayRef size, c10::optional<Generator> generator) {
+Tensor& randn_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(0, 1, generator);
 }
@@ -719,11 +716,11 @@ Tensor randperm(int64_t n, c10::optional<Generator> generator, const TensorOptio
   return at::randperm_out(tensor, n, generator);
 }
 
-Tensor& randperm_out(Tensor& result, int64_t n) {
+Tensor& randperm_out(int64_t n, Tensor& result) {
   return at::randperm_out(result, n, c10::nullopt);
 }
 
-Tensor& randperm_out_cpu(Tensor& result, int64_t n, c10::optional<Generator> generator) {
+Tensor& randperm_out_cpu(int64_t n, c10::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
   check_supported_max_int_with_precision(n, result);
@@ -848,7 +845,7 @@ Tensor zeros(IntArrayRef size, const TensorOptions& options) {
   return result.zero_();
 }
 
-Tensor& zeros_out(Tensor& result, IntArrayRef size) {
+Tensor& zeros_out(IntArrayRef size, Tensor& result) {
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0.);
     return result;

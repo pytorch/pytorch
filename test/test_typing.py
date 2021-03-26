@@ -89,6 +89,16 @@ def get_test_cases(directory):
                     id=relpath,
                 )
 
+def _construct_format_dict():
+    dct = {
+        'ModuleList': 'torch.nn.modules.container.ModuleList',
+        'AdaptiveAvgPool2d': 'torch.nn.modules.pooling.AdaptiveAvgPool2d',
+        'AdaptiveMaxPool2d': 'torch.nn.modules.pooling.AdaptiveMaxPool2d',
+        'Tensor': 'torch.tensor.Tensor',
+        'Adagrad': 'torch.optim.adagrad.Adagrad',
+        'Adam': 'torch.optim.adam.Adam',
+    }
+    return dct
 
 @pytest.mark.skipif(NO_MYPY, reason="Mypy is not installed")
 @pytest.mark.parametrize("path", get_test_cases(PASS_DIR))
@@ -171,7 +181,7 @@ def _parse_reveals(file: IO[str]) -> List[str]:
     """Extract and parse all ``"  # E: "`` comments from the passed file-like object.
 
     All format keys will be substituted for their respective value from `FORMAT_DICT`,
-    *e.g.* ``"{float64}"`` becomes ``"numpy.floating[numpy.typing._64Bit]"``.
+    *e.g.* ``"{Tensor}"`` becomes ``"torch.tensor.Tensor"``.
     """
     string = file.read().replace("*", "")
 

@@ -6,6 +6,7 @@ from torch.fx.node import Argument, Target
 from torch._jit_internal import boolean_dispatched
 
 from torch.fx import Transformer
+from torch.fx.operator_schemas import get_signature_for_torch_op
 
 class NormalizeArgs(Transformer):
     """
@@ -30,6 +31,8 @@ class NormalizeArgs(Transformer):
         self.normalize_modules = normalize_modules
 
     def call_function(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
+        new_kwargs = None
+
         if self.normalize_functionals and target.__module__ == 'torch.nn.functional':
             target_for_analysis = target
             if target in boolean_dispatched:
@@ -44,14 +47,29 @@ class NormalizeArgs(Transformer):
                     return super().call_function(target, args, kwargs)
                 target_for_analysis = if_true
 
-            new_kwargs = self._args_kwargs_to_normalized_kwargs(target_for_analysis, args, kwargs)
-
-            if new_kwargs:
-                # FIXME: `target(**kwargs)` doesn't keep things specified as kwargs
-                # in kwargs
-                return self.tracer.create_proxy('call_function', target, (), new_kwargs)
-
-        return super().call_function(target, args, kwargs)
+            assert callable(target_for_analysis)
+            sig = inspect.signature(inspect.unwrap(target_for_analysis))
+            new_kwargs = self._args_kwargs_to_normalized_kwargs(sig, args, kwargs)
+        else:
+            assert callable(target)
+            torch_op_schemas = get_signature_for_torch_op(target)
+            if torch_op_schemas:
+                # Iterate through all of the schema until we find one that matches
+                # If one matches, populate `new_kwargs` with the combined args/kwargs
+                # values. If none matches, `new_kwargs` will be None
+                for candidate_signature in torch_op_schemas:
+                    try:
+                        candidate_signature.bind(args, kwargs)
+                        new_kwargs = self._args_kwargs_to_normalized_kwargs(candidate_signature, args, kwargs)
+                        break
+                    except TypeError:
+                        continue
+        if new_kwargs:
+            # FIXME: `target(**kwargs)` doesn't keep things specified as kwargs
+            # in kwargs
+            return self.tracer.create_proxy('call_function', target, (), new_kwargs)
+        else:
+            return super().call_function(target, args, kwargs)
 
     def call_module(self, target : Target, args : Tuple[Argument, ...], kwargs : Dict[str, Any]):
         assert isinstance(target, str)
@@ -59,12 +77,13 @@ class NormalizeArgs(Transformer):
         if self.normalize_modules and hasattr(submod.__class__, '__name__'):
             classname = submod.__class__.__name__
             if getattr(torch.nn, classname, None) == submod.__class__:
-                new_kwargs = self._args_kwargs_to_normalized_kwargs(submod.forward, args, kwargs)
+                sig = inspect.signature(inspect.unwrap(submod.forward))
+                new_kwargs = self._args_kwargs_to_normalized_kwargs(sig, args, kwargs)
                 if new_kwargs:
                     return super().call_module(target, (), new_kwargs)
         return super().call_module(target, args, kwargs)
 
-    def _args_kwargs_to_normalized_kwargs(self, target : Target, args : Tuple[Argument, ...],
+    def _args_kwargs_to_normalized_kwargs(self, sig : inspect.Signature, args : Tuple[Argument, ...],
                                           kwargs : Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Given a call target, args, and kwargs, return the arguments normalized into
@@ -73,7 +92,7 @@ class NormalizeArgs(Transformer):
 
         Args:
 
-            target (Callable): Python callable to normalize arguments for
+            target (inspect.Signature): Signature object for the target
             args (Tuple): Arguments that appear at the callsite for `target`
             kwargs (Dict): Keyword arugments that appear at the callsite for `target`
 
@@ -82,8 +101,7 @@ class NormalizeArgs(Transformer):
             Optional[Dict]: Normalized kwargs for `target`, or `None` if this target is not
                 supported
         """
-        assert not isinstance(target, str)
-        sig = inspect.signature(inspect.unwrap(target))
+
         # Don't currently support positional-only
         # or varargs (*args, **kwargs) signatures
         supported_parameter_types = {

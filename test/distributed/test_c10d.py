@@ -761,16 +761,16 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.devices = [create_device(interface=LOOPBACK)]
         opts.timeout = 5.0
-        opts.threads = threads
+        opts._devices = [create_device(interface=LOOPBACK)]
+        opts._threads = threads
         return opts
 
     def test_multi_device_constructor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         opts = c10d.ProcessGroupGloo.Options()
         opts.timeout = 5.0
-        opts.devices = [
+        opts._devices = [
             create_device(interface=LOOPBACK),
             create_device(interface=LOOPBACK),
         ]
@@ -1717,7 +1717,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_barrier_implies_wait(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         # Kick off allreduce operations
         size = (100, 100)
@@ -1740,7 +1740,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         pg = c10d._round_robin_process_groups(
             [
                 c10d.ProcessGroupGloo(
-                    c10d.PrefixStore(str(i), store), self.rank, self.world_size
+                    c10d.PrefixStore(str(i), store), self.rank, self.world_size, self.opts()
                 )
                 for i in range(num_process_groups)
             ]
@@ -1763,6 +1763,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         c10d.PrefixStore("%s/%d" % (prefix, i), store),
                         self.rank,
                         self.world_size,
+                        self.opts()
                     )
                     for i in range(num)
                 ]
@@ -2387,7 +2388,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     ):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [create_device(interface=LOOPBACK)]
+        options._devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(
             store, self.rank, self.world_size, options
         )
@@ -4789,7 +4790,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_gloo_cuda(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [create_device(interface=LOOPBACK)]
+        options._devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(
             store, self.rank, self.world_size, options
         )
@@ -4802,7 +4803,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_gloo_cpu(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
-        options.devices = [create_device(interface=LOOPBACK)]
+        options._devices = [create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(
             store, self.rank, self.world_size, options
         )
@@ -4810,6 +4811,90 @@ class CommTest(MultiProcessTestCase):
         ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
+
+    @requires_gloo()
+    def test_pass_gloo_options(self):
+        pg_opts = c10d.ProcessGroupGloo.Options()
+        pg_opts.timeout = timedelta(seconds=10)
+        pg_opts._devices = [create_device(interface=LOOPBACK)]
+        pg_opts._threads = 2
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+
+        dist.init_process_group(
+            "gloo",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            pg_options=pg_opts
+        )
+
+        default_pg = c10d.distributed_c10d._get_default_group()
+
+        # Test properly set devices on options if user don't set devices
+        no_device_thread_pg_opts = c10d.ProcessGroupGloo.Options(timeout=timedelta(seconds=10))
+        no_device_thread_pg = dist.new_group([0, 1], pg_options=no_device_thread_pg_opts)
+        self.assertTrue(len(no_device_thread_pg.options._devices) != 0)
+        # ensure created pg have the correct timeout set instead of default time out
+        self.assertEqual(no_device_thread_pg.options.timeout, timedelta(seconds=10))
+
+        # Test if user pass in Options, set threads, but not set devices, should error out
+        no_device_pg_opts = c10d.ProcessGroupGloo.Options(timeout=timedelta(seconds=10))
+        no_device_pg_opts._threads = 4
+
+        with self.assertRaisesRegex(
+            RuntimeError, "threads and devices must be passed in together"
+        ):
+            no_device_pg = dist.new_group([0, 1], pg_options=no_device_pg_opts)
+
+        dist.destroy_process_group(default_pg)
+        self.assertFalse(dist.is_initialized())
+
+
+    @requires_gloo()
+    def test_pass_gloo_options_and_timeout(self):
+        pg_opts = c10d.ProcessGroupGloo.Options()
+        pg_opts.timeout = timedelta(seconds=10)
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        # Test timeout and pg_options both set, should error out
+        with self.assertRaisesRegex(
+            RuntimeError, "timeout value defined in pg_options are conflicting"
+        ):
+            dist.init_process_group(
+                "gloo",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=store,
+                timeout=timedelta(20),
+                pg_options=pg_opts
+            )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_high_priority_stream(self):
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        pg_opts.is_high_priority_stream = True
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        # Test init_process_group accepts options
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            pg_options=pg_opts
+        )
+
+        # Test with new_group
+        pg = c10d.new_group([0, 1], pg_options=pg_opts)
+        # test if the process group constructed with high priority stream
+        self.assertTrue(pg.options.is_high_priority_stream)
+        # test the process group works as expected
+        t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
+        pg.allreduce(t)
+        expected_tensor = torch.tensor([3] * 10).cuda(self.rank)
+        self.assertEqual(expected_tensor, t)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
