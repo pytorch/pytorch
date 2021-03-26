@@ -856,7 +856,7 @@ always be real-valued, even if :attr:`input` is complex.
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is `True`.
 
 .. note:: When :attr:`full_matrices` is `True`, the gradients on `U[..., :, min(m, n):]`
-          and `V[..., :, min(m, n):]` will be ignored in the backwards pass, as those vectors
+          and `Vh[..., min(m, n):, :]` will be ignored in the backwards pass, as those vectors
           can be arbitrary bases of the corresponding subspaces.
 
 .. note:: The implementation of :func:`torch.linalg.svd` on CPU uses LAPACK's routine `?gesdd`
@@ -867,10 +867,10 @@ always be real-valued, even if :attr:`input` is complex.
 .. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
           be represented as a column-major matrix (i.e. Fortran-contiguous).
 
-.. warning:: Extra care needs to be taken when differentiating with respect to `U` and `V`. Such
+.. warning:: Extra care needs to be taken when differentiating with respect to `U` and `Vh`. Such
              operation is only well-defined when all singular values are distinct. The backwards
              pass becomes less stable as it depends on :math:`\frac{1}{\min_{i \neq j} |\sigma_i - \sigma_j|}`.
-             When there are repeated singular values, the gradient with respect to `U` and `V`
+             When there are repeated singular values, the gradient with respect to `U` and `Vh`
              will be infinity in some directions.
 
 .. warning:: For complex-valued :attr:`input` the singular value decomposition is not unique,
@@ -879,7 +879,7 @@ always be real-valued, even if :attr:`input` is complex.
              the columns of the spanning subspace in `U` and `V` by a rotation matrix
              and `the resulting vectors will span the same subspace <https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD>`_.
              Different platforms, like NumPy, or inputs on different device types,
-             may produce different `U` and `V` tensors.
+             may produce different `U` and `Vh` tensors.
 
 
 Args:

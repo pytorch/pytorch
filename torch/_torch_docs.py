@@ -8483,7 +8483,9 @@ always be real-valued, even if :attr:`input` is complex.
 
 .. warning:: Extra care needs to be taken when differentiating with respect to `U` and `V`. Such
              operation is only well-defined when all singular values are distinct. The backwards
-             pass becomes less stable the smaller :math:`\min_{i \neq j} |\sigma_i - \sigma_j|` is.
+             pass becomes less stable as it depends on :math:`\frac{1}{\min_{i \neq j} |\sigma_i - \sigma_j|}`r
+             When there are repeated singular values, the gradient with respect to `U` and `V`
+             will be infinity in some directions.
 
 .. warning:: For complex-valued :attr:`input` the singular value decomposition is not unique,
              as `U` and `V` may be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.
@@ -8492,8 +8494,6 @@ always be real-valued, even if :attr:`input` is complex.
              and `the resulting vectors will span the same subspace <https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD>`_.
              Different platforms, like NumPy, or inputs on different device types,
              may produce different `U` and `V` tensors.
-             In these cases, the gradient with respect to `U` and `V` will be infinity in some
-             directions.
 
 Args:
     input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
