@@ -3376,8 +3376,8 @@ op_db: List[OpInfo] = [
                    handles_complex_extremals=False),
     UnaryUfuncInfo('square',
                    ref=np.square,
-                   dtypes=all_types_and_complex_and(torch.bool),
-                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.complex64: 3e-4, torch.bfloat16: 3e-1}),),
                    skips=(
