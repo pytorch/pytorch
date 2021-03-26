@@ -8025,10 +8025,10 @@ in CSR format are typically faster than that for sparse tensors in COO format. M
 at :ref:`the note on the data type of the indices <sparse-csr-docs>`.
 
 Args:
-    crow_indices (array_like): One-dimensional array of size size(0) + 1. The last element
+    crow_indices (array_like): One-dimensional array of size size[0] + 1. The last element
         is the number of non-zeros.
-    col_indices (array_like): Column co-ordinates of each element in :attr:`values`. Strictly one
-        dimensional tensor with the same length as :attr:`values`.
+    col_indices (array_like): Column co-ordinates of each element in values. Strictly one
+        dimensional tensor with the same length as values.
     values (array_list): Initial values for the tensor. Can be a list, tuple, NumPy ``ndarray``, scalar,
         and other types.
     size (list, tuple, :class:`torch.Size`, optional): Size of the sparse tensor. If not provided, the
