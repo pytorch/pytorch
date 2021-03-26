@@ -208,7 +208,7 @@ def sample_inputs_tensor(op_info, device, dtype, requires_grad, pin_memory=False
                 obj = r.detach().to(dtype=obj_dtype, device='cpu').numpy()
                 if pin_memory:
                     if r_index == obj_dtype_index == 0:
-                        yield SampleInput(obj, ref=RuntimeError("Can't pin tensor constructed from numpy"), kwargs=kwargs)                    
+                        yield SampleInput(obj, ref=RuntimeError("Can't pin tensor constructed from numpy"), kwargs=kwargs)
                 else:
                     yield SampleInput(obj, ref=r, kwargs=kwargs, extra=extra)
 

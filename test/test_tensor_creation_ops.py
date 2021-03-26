@@ -3251,57 +3251,9 @@ class TestLikeTensorCreation(TestCase):
         self.assertEqual(torch.full_like(like, 1., dtype=torch.complex64).dtype,
                          torch.complex64)
 
-# Class for testing as_tensor(obj) where obj implements the Array Interface
-class TestArrayInterfaceTensorCreation(TestCase):
-
-    def _generate_data(self, device='cpu'):
-        for size in [(3,), (2, 3), (2, 3, 4)]:
-            for dtype in torch.testing.get_all_dtypes(include_half=False,
-                                                      include_bfloat16=False,
-                                                      include_complex32=False):
-                data = torch.testing._internal.common_utils.make_tensor(size,
-                                                                        device=device,
-                                                                        dtype=dtype)
-                assert data.is_contiguous()
-                yield data
-                data = torch.testing.make_non_contiguous(data)
-                assert not data.is_contiguous()
-                yield data
-
-    @onlyCPU
-    def test_array_interface(self, device):
-
-        class Base:
-            def __init__(self, data: torch.Tensor):
-                self.data = data.__array__()  # numpy ndarray view of data
-
-        class A(Base):
-            @property
-            def __array_interface__(self):
-                return self.data.__array_interface__
-
-        class B(Base):
-            def __array__(self):
-                return self.data
-
-        for data in self._generate_data(device=device):
-            for cls in [A, B]:
-                x = torch.as_tensor(cls(data))
-
-                self.assertEqual(x, data)
-
-                # check zero-copy of array interface protocol
-                if x.dtype == torch.bool:
-                    x[:] = ~x
-                else:
-                    x += x.sum()
-                self.assertEqual(x, data)
-
-
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
 instantiate_device_type_tests(TestLikeTensorCreation, globals())
-instantiate_device_type_tests(TestArrayInterfaceTensorCreation, globals())
 
 if __name__ == '__main__':
     run_tests()
