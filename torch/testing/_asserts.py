@@ -3,8 +3,8 @@ from collections import namedtuple
 from typing import Any, Optional, Tuple
 
 import torch
-from torch.testing import _unravel_index
-from torch.testing._internal.common_utils import get_comparison_dtype as _get_comparison_dtype, TestCase as _TestCase
+from ._core import _unravel_index
+from ._internal.common_utils import get_comparison_dtype as _get_comparison_dtype, TestCase as _TestCase
 
 __all__ = ["assert_tensors_equal", "assert_tensors_allclose"]
 
