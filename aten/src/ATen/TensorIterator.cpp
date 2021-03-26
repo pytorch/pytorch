@@ -922,6 +922,12 @@ void TensorIteratorBase::mark_resize_outputs(const TensorIteratorConfig& config)
   if (config.static_shape_.has_value()) {
     return;
   }
+  // Optimization: if all_ops_same_shape_, the
+  // `!output.sizes().equals(shape_)` condition below will never be
+  // true, so just skip the loop entirely.
+  if (all_ops_same_shape_) {
+    return;
+  }
   for (int i = 0; i < num_outputs_; i++) {
     const auto& output = operands_[i].tensor;
     if (output.defined() && !output.sizes().equals(shape_)) {
