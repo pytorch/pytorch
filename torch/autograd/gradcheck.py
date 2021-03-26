@@ -148,7 +148,7 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
     return jacobians
 
 
-def compute_gradient(fn, entry, v, norm_v):
+def compute_gradient(fn, entry, v, norm_v, do_checks):
     # Performs finite differencing by perturbing `entry` in-place by `v` and
     # returns the gradient of each of the outputs wrt to x at idx.
     # we currently assume that the norm of delta equals eps
@@ -163,6 +163,7 @@ def compute_gradient(fn, entry, v, norm_v):
     entry.copy_(orig)
 
     def compute(a, b):
+        do_checks(a, b)
         ret = (b - a) / (2 * norm_v)
         return ret.detach().reshape(-1)
 
@@ -235,6 +236,20 @@ def prepped_input(input, input_idx, entry, entry_idx, fast_mode=False):
         return input
 
 
+def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, idx, delta):
+    # Check that the returned outputs don't have different dtype or shape when you
+    # perturb the input
+    on_location = "on index {idx}" if idx is not None else " "
+    assert output1.shape == output2.shape, \
+        (f"Expected `func` to return outputs with the same shape"
+        f" when inputs are perturbed {on_location}by {delta}, but got:"
+        f" shapes {output1.shape} and {output2.shape}.")
+    assert output1.dtype == output2.dtype, \
+        (f"Expected `func` to return outputs with the same dtype"
+        f" when inputs are perturbed {on_location}by {delta}, but got:"
+        f" dtypes {output1.dtype} and {output2.dtype}.")
+
+
 def get_numerical_jacobian_for_input(fn, input, input_idx, inputs, outputs, delta, eps, grad_out):
     # Computes the numerical jacobians wrt to a single input. Returns N jacobian
     # tensors, where N is the number of outputs. Input must require grad.
@@ -249,9 +264,10 @@ def get_numerical_jacobian_for_input(fn, input, input_idx, inputs, outputs, delt
             return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
         entry = x[idx]
+        do_checks = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, idx=idx, delta=delta)
 
         def jvp_fn(delta):
-            return compute_gradient(wrapped_fn, entry, delta, eps)
+            return compute_gradient(wrapped_fn, entry, delta, eps, do_checks)
         jacobian_cols[d_idx] = []
         compute_numerical_jacobian_cols(jacobian_cols[d_idx], delta, jvp_fn, x.is_complex(), grad_out)
 
@@ -278,8 +294,10 @@ def get_fast_numerical_jacobian_for_input(fn, input_idx, input, inputs, outputs,
                     for i, a in enumerate(_as_tuple(inputs)))
         return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
+    do_checks = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, idx=None, delta=delta)
+
     def jvp_fn(delta):
-        return compute_gradient(wrapped_fn, entry, delta, eps)
+        return compute_gradient(wrapped_fn, entry, delta, eps, do_checks)
 
     compute_numerical_jacobian_cols(jacobian_cols, delta, jvp_fn, input.is_complex(), grad_out)
     jacobians = allocate_jacobians_with_outputs(outputs, dtype=input.dtype, device=input.device)

@@ -4218,6 +4218,23 @@ class TestAutograd(TestCase):
         c = torch.rand(10, dtype=torch.float32).to_mkldnn().requires_grad_(True)
         self.assertTrue(gradcheck(fn, (a, c), atol=1e-1, check_batched_grad=False))
 
+    def test_gradcheck_output_shape_or_dtype_depend_on_values(self):
+        def fn(x):
+            if torch.all(x >= 1):
+                return torch.cat([x, x])
+            else:
+                return x
+        a = torch.ones(1, requires_grad=True)
+        with self.assertRaisesRegex(AssertionError, 'return outputs with the same shape when inputs are perturbed'):
+            self.assertTrue(gradcheck(fn, (a,)))
+        def fn2(x):
+            if torch.all(x >= 1):
+                return x.to(torch.float32)
+            else:
+                return x
+        with self.assertRaisesRegex(AssertionError, 'return outputs with the same dtype when inputs are perturbed'):
+            self.assertTrue(gradcheck(fn2, (a,)))
+
     def test_version_counter(self):
         x = torch.randn(1, 2)
 
