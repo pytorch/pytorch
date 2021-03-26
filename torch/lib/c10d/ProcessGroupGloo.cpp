@@ -37,6 +37,7 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
+#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
 #include <gloo/config.h>
@@ -341,10 +342,10 @@ void initializeStreamsEvents(
     std::vector<at::cuda::CUDAEvent>& events) {
   // Ensure that the tensors in the nested tensor vectors are on the same
   // device.
-  for (size_t i = 0; i < tensors.size(); i++) {
-    auto device_id = tensors[i][0].device().index();
-    for (size_t j = 1; j < tensors[i].size(); j++) {
-      if (tensors[i][j].device().index() != device_id) {
+  for (const auto & tensorgroup : tensors) {
+    const auto device_id = tensorgroup[0].device().index();
+    for (const auto & tensor: tensorgroup) {
+      if (tensor.device().index() != device_id) {
         throw std::runtime_error(
             "tensors in the nested tensor vectors need to "
             "be on the same device");
@@ -456,8 +457,8 @@ void ProcessGroupGloo::RecvWork::abort() {
   buffer_->abortWaitRecv();
 }
 
-ProcessGroupGloo::Options::Options()
-    : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
+ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
+    : ProcessGroup::Options(timeout, GLOO_BACKEND_NAME), threads(2) {}
 
 namespace {
 
@@ -579,12 +580,13 @@ ProcessGroupGloo::ProcessGroupGloo(
     const c10::intrusive_ptr<Store>& store,
     int rank,
     int size,
-    Options options)
+    c10::intrusive_ptr<Options> options)
     : ProcessGroup(rank, size),
       store_(new GlooStore(store)),
+      options_(options),
       stop_(false),
       collectiveCounter_(0) {
-  auto& devices = options.devices;
+  auto& devices = options->devices;
   if (devices.empty()) {
     throw std::runtime_error("No device(s) specified");
   }
@@ -601,12 +603,12 @@ ProcessGroupGloo::ProcessGroupGloo(
   // option is needed if you have a fast NIC that cannot be saturated
   // by a single I/O thread.
   //
-  contexts_.reserve(options.devices.size());
-  for (size_t i = 0; i < options.devices.size(); i++) {
+  contexts_.reserve(options->devices.size());
+  for (size_t i = 0; i < options->devices.size(); i++) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
     auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
-    context->setTimeout(options.timeout);
-    context->connectFullMesh(store, options.devices[i]);
+    context->setTimeout(options->timeout);
+    context->connectFullMesh(store, options->devices[i]);
     contexts_.push_back(std::move(context));
   }
 
@@ -614,9 +616,9 @@ ProcessGroupGloo::ProcessGroupGloo(
   // working on in the workInProgress_ vector. It must have size equal
   // to the number of workers such that they can simply index into it
   // using the worker index they are started with.
-  workInProgress_.resize(options.threads);
+  workInProgress_.resize(options->threads);
 
-  threads_.resize(options.threads);
+  threads_.resize(options->threads);
   for (size_t i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
@@ -1070,8 +1072,8 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Copy back to input tensors.
     outputs.reserve(inputs.size());
-    for (size_t i = 0; i < inputs.size(); i++) {
-      inputs[i].copy_(output);
+    for (auto & input : inputs) {
+      input.copy_(output);
       if (output.is_sparse()) {
         outputs.push_back(output.clone());
       } else {
@@ -1138,8 +1140,8 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<at::Tensor> indices;
     indices.reserve(metadata.size());
     size_t offset = 0;
-    for (size_t i = 0; i < metadata.size(); i++) {
-      const auto nnz = metadata[i].nnz();
+    for (const auto & i : metadata) {
+      const auto nnz = i.nnz();
       const auto numel = sparseDim * nnz;
       indices.push_back(
           output.narrow(0, offset, numel).reshape({sparseDim, nnz}));
@@ -1183,8 +1185,8 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     std::vector<at::Tensor> values;
     values.reserve(metadata.size());
     size_t offset = 0;
-    for (size_t i = 0; i < metadata.size(); i++) {
-      const auto nnz = metadata[i].nnz();
+    for (const auto & i : metadata) {
+      const auto nnz = i.nnz();
       const auto numel = denseNumel * nnz;
       auto tensorShape = std::vector<int64_t>({(int64_t)nnz});
       std::copy(
@@ -1648,9 +1650,9 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     gloo::allgather(opts);
 
     // Unflatten into output tensors.
-    for (size_t i = 0; i < outputs.size(); i++) {
-      for (size_t j = 0; j < outputs[i].size(); j++) {
-        outputs[i][j].copy_(flatOutputTensor[j]);
+    for (auto & outputgroup : outputs) {
+      for (const auto j : c10::irange(outputgroup.size())) {
+        outputgroup[j].copy_(flatOutputTensor[j]);
       }
     }
   }
@@ -1777,8 +1779,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   const auto& options = inputs[0].options();
   const auto& sizes = inputs[0].sizes();
   assertTypeAndSizesMatch(invalidArgument, inputs, options, sizes);
-  for (size_t i = 0; i < outputs.size(); i++) {
-    assertTypeAndSizesMatch(invalidArgument, outputs[i], options, sizes);
+  for (const auto & output : outputs) {
+    assertTypeAndSizesMatch(invalidArgument, output, options, sizes);
   }
 
   const auto& device = inputs[0].device();
@@ -2221,8 +2223,8 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
     }
 
     tmpOutputs.reserve(outputs.size());
-    for (size_t i = 0; i < outputs.size(); i++) {
-      tmpOutputs.push_back(pinnedLike(outputs[i]));
+    for (auto & output : outputs) {
+      tmpOutputs.push_back(pinnedLike(output));
     }
   }
 

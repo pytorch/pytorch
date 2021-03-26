@@ -60,11 +60,6 @@ class PytorchVersion:
         self.no_build_suffix = no_build_suffix
 
     def get_post_build_suffix(self):
-        # CUDA 10.2 is the version to be uploaded to PyPI so it doesn't have a
-        # version suffix
-        if ((self.gpu_arch_type == "cuda" and self.gpu_arch_version == "10.2")
-                or self.no_build_suffix):
-            return ""
         if self.gpu_arch_type == "cuda":
             return f"+cu{self.gpu_arch_version.replace('.', '')}"
         return f"+{self.gpu_arch_type}{self.gpu_arch_version}"

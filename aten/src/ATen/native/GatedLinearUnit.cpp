@@ -51,7 +51,7 @@ Tensor& glu_backward_out(Tensor& grad_input,
   Tensor secondHalf = input.narrow(wrap_dim, inputSize, inputSize);
   Tensor gradInputfirstHalf = grad_input.narrow(wrap_dim, 0, inputSize);
   Tensor gradInputsecondHalf = grad_input.narrow(wrap_dim, inputSize, inputSize);
-  
+
   at::sigmoid_out(gradInputfirstHalf, secondHalf);
   // for second gradinput half, can get a better performance by fusion
   auto iter = at::TensorIteratorConfig()

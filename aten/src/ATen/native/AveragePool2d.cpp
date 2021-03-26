@@ -96,7 +96,7 @@ void avg_pool2d_out_cpu_template(
           Tensor &output,
           const Tensor &input_,
           IntArrayRef kernel_size,
-          IntArrayRef stride, 
+          IntArrayRef stride,
           IntArrayRef padding,
           bool ceil_mode,
           bool count_include_pad,

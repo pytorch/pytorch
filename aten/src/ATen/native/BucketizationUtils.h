@@ -55,7 +55,7 @@ inline bool searchsorted_dims_matched_before_last_dim(const Tensor& boundaries, 
   return true;
 }
 
-inline Tensor searchsorted_scalar_tensor(Scalar scalar, const c10::Device& device) {
+inline Tensor searchsorted_scalar_tensor(const Scalar& scalar, const c10::Device& device) {
   auto tensor = c10::scalar_to_tensor(scalar, device);
   // This is to adopt the scalar promotion rules defined in native/TypeProperties.h
   // So we have the same type promotion rules as binary operations.

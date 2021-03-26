@@ -1,7 +1,9 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/NumericLimits.cuh>
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/NumericUtils.h>
 #include <c10/util/accumulate.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
@@ -540,7 +542,7 @@ void scan_dim(const Tensor& self, Tensor& result,
   }
 }
 
-Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
   result.resize_(self.sizes());
   if (self.dim() == 0) {
     result.fill_(self);
@@ -558,10 +560,18 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
 
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half,
     self.scalar_type(), "logcumsumexp_cuda", [&]() {
+    using accscalar_t = acc_type<scalar_t, true>;
     scalar_t init = -std::numeric_limits<scalar_t>::infinity();
     auto log_add_exp = [] C10_HOST_DEVICE (const scalar_t x, const scalar_t y) -> scalar_t {
-      return ::log1p(std::exp(std::min(x, y) - std::max(x, y))) +
-          std::max(x, y);
+      scalar_t min = at::_isnan(y) ? y : std::min<scalar_t>(x,y); //std::min returns first arg if one of the args is nan
+      scalar_t max = at::_isnan(y) ? y : std::max<scalar_t>(x,y); //std::max returns first arg if one of the args is nan
+      if (min != max || ::isfinite(static_cast<accscalar_t>(min))) {
+      // nan will be propagated here
+          return ::log1p(std::exp(min - max)) + max;
+      } else {
+      // special case to correctly handle infinite inputs
+         return x;
+      }
     };
     scan_dim<scalar_t>(self, result, wrap_dim, init, log_add_exp);
   });
@@ -571,7 +581,7 @@ Tensor& _logcumsumexp_out_cuda(Tensor& result, const Tensor& self, int64_t dim) 
 
 Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _logcumsumexp_out_cuda(result, self, dim);
+  return _logcumsumexp_out_cuda(self, dim, result);
 }
 
 Tensor& _cumsum_out_cuda(Tensor& result, const Tensor& self, int64_t dim) {

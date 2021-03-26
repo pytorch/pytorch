@@ -216,5 +216,5 @@ def merge_matmul(in_mod: torch.nn.Module):
         legalize_graph(gm)
 
     gm.recompile()
-    gm.graph.lint(in_mod)
+    gm.graph.lint()
     return gm

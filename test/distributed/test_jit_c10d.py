@@ -1,6 +1,6 @@
 import unittest
 import tempfile
-from sys import platform
+import sys
 import torch
 import torch.distributed as c10d
 import time
@@ -20,7 +20,7 @@ if not c10d.is_available():
     print('c10d not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
-if platform == 'darwin':
+if sys.platform == 'darwin':
     LOOPBACK = 'lo0'
 else:
     LOOPBACK = 'lo'

@@ -19,7 +19,7 @@ from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
-from jit.test_freezing import TestFreezing, TestFrozenOptimizations  # noqa: F401
+from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_module_containers import TestModuleContainers  # noqa: F401
@@ -1085,6 +1085,197 @@ class TestJit(JitTestCase):
                 self.assertFalse(fn.has_trace_for(*unk_config))
         self.assertEqual(fn.hits, 0)
 
+    def test_torch_complex(self):
+        def fn(real, img):
+            return torch.complex(real, img)
+
+        def fn_out(real, img, out):
+            return torch.complex(real, img, out=out)
+        self.checkScript(fn, (torch.rand(3, 4), torch.rand(3, 4), ))
+        self.checkScript(fn, (torch.ones(5, 1, 4), torch.ones(5, 1, 4), ))
+        self.checkScript(fn, (torch.zeros(1, 6), torch.ones(6, 1), ))
+        self.checkScript(fn, (torch.zeros(1, 6), torch.zeros(6, 1), ))
+        self.checkScript(fn, (torch.empty(3, 4), torch.empty(3, 4), ))
+
+        real = torch.tensor([1, 2], dtype=torch.float32)
+        img = torch.tensor([3, 4], dtype=torch.float32)
+        out = torch.empty([3, 4], dtype=torch.complex64)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.tensor([5, 2], dtype=torch.float64)
+        img = torch.tensor([3, 4], dtype=torch.float64)
+        out = torch.empty([5, 2], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.ones([1, 2])
+        img = torch.ones([1, 2])
+        out = torch.empty([1, 2], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.ones([3, 8, 7])
+        img = torch.ones([3, 8, 7])
+        out = torch.empty([3, 8, 7], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.empty([3, 2, 6])
+        img = torch.empty([3, 2, 6])
+        out = torch.empty([3, 2, 6], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.zeros([1, 3])
+        img = torch.empty([3, 1])
+        out = torch.empty([3, 3], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.ones([2, 5])
+        img = torch.empty([2, 1])
+        out = torch.empty([2, 5], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+        real = torch.ones([2, 5])
+        img = torch.zeros([2, 1])
+        out = torch.empty([2, 5], dtype=torch.complex128)
+        self.checkScript(fn_out, (real, img, out, ))
+
+    def test_complex_constructor(self):
+        # Test all scalar types
+        def fn_int(real: int, img: int):
+            return complex(real, img)
+
+        self.checkScript(fn_int, (0, 0, ))
+        self.checkScript(fn_int, (-1234, 0, ))
+        self.checkScript(fn_int, (0, -1256, ))
+        self.checkScript(fn_int, (-167, -1256, ))
+
+        def fn_float(real: float, img: float):
+            return complex(real, img)
+
+        self.checkScript(fn_float, (0.0, 0.0, ))
+        self.checkScript(fn_float, (-1234.78, 0, ))
+        self.checkScript(fn_float, (0, 56.18, ))
+        self.checkScript(fn_float, (-1.9, -19.8, ))
+
+        def fn_bool(real: bool, img: bool):
+            return complex(real, img)
+
+        self.checkScript(fn_bool, (True, True, ))
+        self.checkScript(fn_bool, (False, False, ))
+        self.checkScript(fn_bool, (False, True, ))
+        self.checkScript(fn_bool, (True, False, ))
+
+        def fn_bool_int(real: bool, img: int):
+            return complex(real, img)
+
+        self.checkScript(fn_bool_int, (True, 0, ))
+        self.checkScript(fn_bool_int, (False, 0, ))
+        self.checkScript(fn_bool_int, (False, -1, ))
+        self.checkScript(fn_bool_int, (True, 3, ))
+
+        def fn_int_bool(real: int, img: bool):
+            return complex(real, img)
+
+        self.checkScript(fn_int_bool, (0, True, ))
+        self.checkScript(fn_int_bool, (0, False, ))
+        self.checkScript(fn_int_bool, (-3, True, ))
+        self.checkScript(fn_int_bool, (6, False, ))
+
+        def fn_bool_float(real: bool, img: float):
+            return complex(real, img)
+
+        self.checkScript(fn_bool_float, (True, 0.0, ))
+        self.checkScript(fn_bool_float, (False, 0.0, ))
+        self.checkScript(fn_bool_float, (False, -1.0, ))
+        self.checkScript(fn_bool_float, (True, 3.0, ))
+
+        def fn_float_bool(real: float, img: bool):
+            return complex(real, img)
+
+        self.checkScript(fn_float_bool, (0.0, True, ))
+        self.checkScript(fn_float_bool, (0.0, False, ))
+        self.checkScript(fn_float_bool, (-3.0, True, ))
+        self.checkScript(fn_float_bool, (6.0, False, ))
+
+        def fn_float_int(real: float, img: int):
+            return complex(real, img)
+
+        self.checkScript(fn_float_int, (0.0, 1, ))
+        self.checkScript(fn_float_int, (0.0, -1, ))
+        self.checkScript(fn_float_int, (1.8, -3, ))
+        self.checkScript(fn_float_int, (2.7, 8, ))
+
+        def fn_int_float(real: int, img: float):
+            return complex(real, img)
+
+        self.checkScript(fn_int_float, (1, 0.0, ))
+        self.checkScript(fn_int_float, (-1, 1.7, ))
+        self.checkScript(fn_int_float, (-3, 0.0, ))
+        self.checkScript(fn_int_float, (2, -8.9, ))
+
+    def test_torch_complex_constructor_with_tensor(self):
+        tensors = ([torch.rand(1), torch.randint(-5, 5, (1, )), torch.tensor([False])])
+
+        def fn_tensor_float(real, img: float):
+            return complex(real, img)
+
+        def fn_tensor_int(real, img: int):
+            return complex(real, img)
+
+        def fn_tensor_bool(real, img: bool):
+            return complex(real, img)
+
+        def fn_float_tensor(real: float, img):
+            return complex(real, img)
+
+        def fn_int_tensor(real: int, img):
+            return complex(real, img)
+
+        def fn_bool_tensor(real: bool, img):
+            return complex(real, img)
+
+        for tensor in tensors:
+            self.checkScript(fn_tensor_float, (tensor, 1.2))
+            self.checkScript(fn_tensor_int, (tensor, 3))
+            self.checkScript(fn_tensor_bool, (tensor, True))
+
+            self.checkScript(fn_float_tensor, (1.2, tensor))
+            self.checkScript(fn_int_tensor, (3, tensor))
+            self.checkScript(fn_bool_tensor, (True, tensor))
+
+        def fn_tensor_tensor(real, img):
+            return complex(real, img) + complex(2)
+
+        for x, y in product(tensors, tensors):
+            self.checkScript(fn_tensor_tensor, (x, y, ))
+
+    def test_torch_sum(self):
+        def fn(x):
+            return torch.sum(x)
+
+        def fn1(x, dim: int):
+            return torch.sum(x, dim)
+
+        x = torch.randn(3, 4)
+        self.checkScript(fn, (x, ))
+        self.checkScript(fn1, (x, 1, ))
+        self.checkScript(fn1, (x, 0, ))
+
+    def test_list_sum(self):
+        def fn(x: List[int]) -> int:
+            return sum(x)
+
+        def fn1(x: List[float]):
+            return sum(x)
+
+        def fn2(x: List[bool]):
+            return sum(x)
+
+        self.checkScript(fn, ([1, 2, 3], ))
+        self.checkScript(fn1, ([1.0, 2.0, 3.0], ))
+        self.checkScript(fn1, ([1, 2.8, 3], ))
+        self.checkScript(fn2, ([True, False, False], ))
+        self.checkScript(fn2, ([False, False, False], ))
+        self.checkScript(fn2, ([0, 1, 1, 0], ))
+
     def test_cse(self):
         x = torch.tensor([0.4, 0.3], requires_grad=True)
         y = torch.tensor([0.7, 0.5], requires_grad=True)
@@ -1658,6 +1849,18 @@ graph(%Ra, %Rb):
 
         self.checkScript(test_sparse_addmm, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
         self.checkScript(test_sparse_addmm_alpha_beta, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_device_not_equal(self):
+
+        def compare_device(x: torch.device):
+            return x != torch.device("cuda:0")
+
+        def compare_two_device(x: torch.device, y: torch.device):
+            return x != y
+
+        self.checkScript(compare_device, (torch.device("cuda:0"),))
+        self.checkScript(compare_two_device, (torch.device("cuda:0"), torch.device("cuda:1"), ))
 
     def test_tuple_specialization(self):
         @torch.jit.script
@@ -2537,6 +2740,19 @@ graph(%Ra, %Rb):
             self.assertTrue(other_fn_events[thread] >= mul_time)
 
         torch._C._set_graph_executor_optimize(prev_opt)
+
+    def test_hide_source_ranges_context_manager(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.add(x, x)
+
+        graph = foo.graph
+        source_range_regex = "# .*\\.py"
+        self.assertRegex(graph.__repr__(), source_range_regex)
+        with torch.jit._hide_source_ranges():
+            self.assertNotRegex(graph.__repr__(), source_range_regex)
+            self.assertRegex(graph.str(print_source_ranges=True), source_range_regex)
+        self.assertRegex(graph.__repr__(), source_range_regex)
 
 
 class TestFrontend(JitTestCase):
@@ -7154,7 +7370,7 @@ a")
 
         for op, tensor, const, swap_args in product(ops, tensors, consts, [True, False]):
             # FIXME: things like 2 / long_tensor are not implemented correctly
-            # Look in torch/tensor.py to see how pytorch implements it.
+            # Look in torch/_tensor.py to see how pytorch implements it.
             if op == '/' and tensor.data_ptr() == long_tensor.data_ptr():
                 continue
 
@@ -7309,7 +7525,8 @@ a")
 
         dtypes = ["", ", dtype=torch.float", ", dtype=torch.double", ", dtype=torch.half",
                   ", dtype=torch.uint8", ", dtype=torch.int8", ", dtype=torch.short",
-                  ", dtype=torch.int", ", dtype=torch.long"]
+                  ", dtype=torch.int", ", dtype=torch.long", ", dtype=torch.cfloat",
+                  ", dtype=torch.cdouble"]
 
         ops = ['tensor', 'as_tensor']
         devices = ['', ", device='cpu'"]
@@ -7337,10 +7554,11 @@ a")
                     self.assertEqual(t1.device, t2.device)
 
         def test_as_tensor_tensor_input(input):
-            # type: (Tensor) -> Tuple[Tensor, Tensor]
-            return torch.as_tensor(input, dtype=torch.float), torch.as_tensor(input, dtype=torch.int32)
+            # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
+            return torch.as_tensor(input, dtype=torch.cfloat), torch.as_tensor(input, dtype=torch.float), \
+                torch.as_tensor(input, dtype=torch.int32)
 
-        inp = torch.randn(3, 4)
+        inp = torch.randn(3, 4, dtype=torch.cfloat)
         self.checkScript(test_as_tensor_tensor_input, (inp,))
 
     def test_torch_tensor_dtype(self):
@@ -9063,6 +9281,47 @@ dedent """
         self.checkScript(torch_unique_consecutive, (None,))
         self.checkScript(torch_unique_consecutive, (0,))
 
+    def test_torch_functional_tensordot_int(self):
+        def tensordot_dims_int(a: torch.Tensor, b: torch.Tensor, dims: int):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(120.).reshape(2, 3, 4, 5)
+        b = torch.arange(840.).reshape(4, 5, 6, 7)
+        dims = 2
+        self.checkScript(tensordot_dims_int, (a, b, dims))
+
+    def test_torch_functional_tensordot_tensor(self):
+        def tensordot_dims_tensor(a: torch.Tensor, b: torch.Tensor, dims: torch.Tensor):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(120.).reshape(2, 3, 4, 5)
+        b = torch.arange(840.).reshape(4, 5, 6, 7)
+        dims = torch.Tensor([2])
+        self.checkScript(tensordot_dims_tensor, (a, b, dims))
+
+        a = torch.arange(60.).reshape(3, 4, 5)
+        b = torch.arange(24.).reshape(4, 3, 2)
+        dims = torch.tensor([[1, 0], [0, 1]], dtype=torch.long)
+        self.checkScript(tensordot_dims_tensor, (a, b, dims))
+
+    def test_torch_functional_tensordot_list(self):
+        def tensordot_dims_list(a: torch.Tensor, b: torch.Tensor, dims: List[List[int]]):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(60.).reshape(3, 4, 5)
+        b = torch.arange(24.).reshape(4, 3, 2)
+        dims = [[1, 0], [0, 1]]
+        self.checkScript(tensordot_dims_list, (a, b, dims))
+
+    def test_torch_functional_tensordot_tuple(self):
+        def tensordot_dims_tuple(a: torch.Tensor, b: torch.Tensor, dims: Tuple[List[int], List[int]]):
+            return torch.tensordot(a, b, dims=dims)
+
+        a = torch.arange(60.).reshape(3, 4, 5)
+        b = torch.arange(24.).reshape(4, 3, 2)
+        dims = ([1, 0], [0, 1])
+        self.checkScript(tensordot_dims_tuple, (a, b, dims))
+
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -10536,6 +10795,36 @@ dedent """
 
         self.checkModule(C(), (torch.tensor(1),))
 
+    def test_ellipsis_const_mid(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, Ellipsis, 0:4, 4:8].size()  # noqa T484
+
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_const_mid_select(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[2, Ellipsis, 4, 4, 4:8, 2].size()  # noqa T484
+
+        dummy = torch.zeros(8, 8, 8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_const_start(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[Ellipsis, 0:4, 4:8].size()  # noqa T484
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
+    def test_ellipsis_const_end(self):
+        def ellipsize(x):
+            # type: (Tensor) -> List[int]
+            return x[0:4, 2, Ellipsis].size()  # noqa T484
+        dummy = torch.zeros(8, 8, 8, 8, 8)
+        self.checkScript(ellipsize, (dummy,), optimize=True)
+
     def test_ellipsis_mid(self):
         def ellipsize(x):
             # type: (Tensor) -> List[int]
@@ -10634,11 +10923,6 @@ dedent """
 
     def test_builtin_args_fails(self):
 
-        with self.assertRaisesRegex(RuntimeError, 'xpected at most'):
-            @torch.jit.script
-            def f0(a):
-                torch.sum(a, a, a, a)
-
         with self.assertRaisesRegex(RuntimeError, 'Argument self not provided'):
             @torch.jit.script
             def f1(a):
@@ -10668,11 +10952,6 @@ dedent """
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
-
-        with self.assertRaisesRegex(RuntimeError, 'xpected a value of type \'Tensor\' for argument \'self\''):
-            @torch.jit.script
-            def f7(a):
-                torch.sum([4])
 
     def test_builtin_args(self):
 
@@ -11265,6 +11544,32 @@ dedent """
             def range_non_float():
                 for i in range(.5):
                     print(i)
+
+    def test_parse_empty_tuple_annotation(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x : Tuple[()]) -> Tuple[()]:
+                return x
+        ''')
+
+        foo_code = cu.find_function('foo').code
+        FileCheck().check("Tuple[]").check("Tuple[]").run(foo_code)
+
+    def test_parse_empty_tuple_annotation_element_error(self):
+        with self.assertRaisesRegex(
+                RuntimeError, 'Tuple literal in Tuple type annotation must not have any elements'):
+            cu = torch.jit.CompilationUnit('''
+                def foo(x : Tuple[(int,)]) -> Tuple[(int,)]:
+                    return x
+            ''')
+
+    def test_parse_none_type_annotation(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x : NoneType) -> NoneType:
+                return x
+        ''')
+
+        foo_code = cu.find_function('foo').code
+        FileCheck().check(": None").check("-> None").run(foo_code)
 
     def test_zip_enumerate_modulelist(self):
         class Sub(torch.nn.Module):
@@ -12110,7 +12415,7 @@ dedent """
                 cu = torch.jit.CompilationUnit(funcs_str)
                 f_script = cu.fn
                 f = scope['fn']
-                with self.maybeWarnsRegex(UserWarning, "floor_divide"):
+                with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
                     self.assertEqual(f_script(), f())
 
     def test_call_python_fn_from_script_fn(self):
@@ -13110,6 +13415,31 @@ dedent """
             a *= b
             return a, b
         self.checkScript(foo, (torch.rand(3), torch.rand(3)))
+
+    def test_ignored_props(self):
+        class A(nn.Module):
+            __jit_ignored_attributes__ = ["ignored", "ignored_return_val"]
+
+            def __init__(self):
+                super().__init__()
+
+            @property
+            def ignored(self):
+                raise ValueError("shouldn't be called")
+
+            @property
+            def ignored_return_val(self):
+                return 1
+
+            @torch.jit.ignore
+            def call(self):
+                return self.ignored_return_val
+
+        f = torch.jit.script(A())
+        # jank way to test if there is no error
+        self.assertTrue(isinstance(f, torch.jit.ScriptModule))
+        self.assertTrue(isinstance(f.call(), property))
+
 
     def test_pass(self):
         def foo(x):
@@ -16277,7 +16607,7 @@ for test in autograd_method_tests():
 # NB: There isn't much utility in running these tests for CUDA, as the kernels
 # are exercised in test_autograd.py, and the JIT tests intention is to test the
 # JIT infrastructure around it, not the kernels themselves
-instantiate_device_type_tests(TestJitGeneratedAutograd, globals(), except_for='cuda')
+instantiate_device_type_tests(TestJitGeneratedAutograd, globals(), only_for='cpu')
 
 for test in nn_functional_tests:
     add_nn_functional_test(*test)

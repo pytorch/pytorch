@@ -293,7 +293,7 @@ void avg_pool2d_out_cuda_template(
   bool use_divisor = divisor_override.has_value();
   const auto divisor_override_value = use_divisor ? divisor_override.value() : 0;
 
-  if (count != 0) {  
+  if (count != 0) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "avg_pool2d_out_cuda_frame",
       [&] {
@@ -319,6 +319,7 @@ void avg_pool2d_out_cuda_template(
                   output_data,
                   divisor_override_value,
                   count_include_pad, use_divisor);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
             break;
           }
           case MemoryFormat::Contiguous: {
@@ -336,7 +337,8 @@ void avg_pool2d_out_cuda_template(
                 output_data,
                 divisor_override_value,
                 count_include_pad, use_divisor);
-            break; 
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+            break;
           }
           default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
         }
@@ -413,7 +415,7 @@ Tensor& avg_pool2d_backward_out_cuda_template(
   if (count == 0) {
     return gradInput;
   }
-  
+
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
 

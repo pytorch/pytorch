@@ -40,7 +40,7 @@ inline scalar_t multilabel_margin_loss_forward_inner_sum_cpu(
       }
     }
   }
-  
+
   return sum;
 }
 
@@ -103,7 +103,7 @@ static void multilabel_margin_loss_forward_out_cpu_template(
     int64_t reduction) {
   auto target_arg = TensorArg(target, "target", 2);
   int64_t nframe, dim;
-  const int64_t ndims = input.dim();  
+  const int64_t ndims = input.dim();
   if (ndims <= 1) {
     nframe = 1;
     dim = ndims == 0 ? 1 : input.size(0);
@@ -113,7 +113,7 @@ static void multilabel_margin_loss_forward_out_cpu_template(
     dim = input.size(1);
   }
   multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
-  
+
   // special case target.dim() <= 1: produce scalar output for scalar inputs
   // even if reduction == Reduction::None
   if (reduction != Reduction::None || target.dim() <= 1) {
@@ -228,12 +228,12 @@ static void multilabel_margin_loss_backward_out_cpu_template(
 
   multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
   checkSameSize(c, target_arg, is_target_arg);
-  
+
   grad_input.resize_as_(input);
   if (grad_input.numel() == 0) {
     return;
   }
-  
+
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   grad_input.zero_();
 

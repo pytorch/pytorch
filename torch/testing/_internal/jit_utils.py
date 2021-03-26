@@ -427,6 +427,7 @@ class JitTestCase(JitCommonTestCase):
                     rtol=None):
         with torch.jit.optimized_execution(optimize):
             with enable_profiling_mode_for_profiling_tests():
+                extra_profile_runs = any(isinstance(x, torch.Tensor) and x.requires_grad for x in inputs)
                 if isinstance(script, str):
                     # Compile the string to a Script function
                     # with enable_profiling_mode():
@@ -478,6 +479,8 @@ class JitTestCase(JitCommonTestCase):
                 else:
                     # profiling run
                     script_outputs = scripted_fn(*recording_inputs)
+                    if inputs_requires_grad or extra_profile_runs:
+                        opt_script_outputs = scripted_fn(*recording_inputs)
                     # optimized run
                     opt_script_outputs = scripted_fn(*recording_inputs)
                     if TEST_BAILOUTS:
@@ -695,7 +698,7 @@ def attrs_with_prefix(module, prefix):
             if x.startswith(prefix)]
 
 def warmup_backward(f, *args):
-    profiling_count = 2
+    profiling_count = 3
     results = []
     for i in range(profiling_count):
         if len(args) > 0:
