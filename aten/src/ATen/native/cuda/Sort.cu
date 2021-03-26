@@ -178,24 +178,19 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     int64_t remaining = numel;
     while (remaining > 0) {
       int64_t n = std::min(remaining, nbatch);
-      // std::cout << "n = " << n << std::endl;
       int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(n / nsort))));
       at::cuda::cub::sort_pairs(
         self_ptr, tmp_ptr,
         orig_indices_ptr, orig_indices_tmp_ptr,
         n, descending);
-      // std::cout << "tmp = " << tmp << std::endl;
       at::cuda::cub::sort_pairs(
         self_ptr, tmp_ptr,
         segment_id_ptr, segment_id_tmp_ptr,
         n, descending);
-      // std::cout << "tmp = " << tmp << std::endl;
-      // std::cout << "segment_id_tmp = " << segment_id_tmp << std::endl;
       at::cuda::cub::sort_pairs(
         segment_id_tmp_ptr, segment_id_ptr,
         tmp_ptr, values_ptr,
         n, false, 0, segment_bits);
-      // std::cout << "values = " << values << std::endl;
       at::cuda::cub::sort_pairs(
         segment_id_tmp_ptr, segment_id_ptr,
         orig_indices_tmp_ptr, indices_ptr,
