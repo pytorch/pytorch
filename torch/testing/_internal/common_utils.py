@@ -858,7 +858,7 @@ def get_comparison_dtype(a, b):
 # 2010, seems low risk to inherit from.
 class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesContext):
     def __exit__(self, exc_type, exc_value, tb):
-        if issubclass(exc_type, NotImplementedError):
+        if exc_type is not None and issubclass(exc_type, NotImplementedError):
             self.test_case.skipTest("not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
 
@@ -1643,12 +1643,6 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         result = result[..., ::2]
 
     return result
-
-def prod_single_zero(dim_size):
-    result = torch.randn(dim_size, dim_size)
-    result[0, 1] = 0
-    return result
-
 
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l

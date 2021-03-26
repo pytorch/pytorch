@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Anywhere except $ROOT_DIR should work. This is so the python import doesn't

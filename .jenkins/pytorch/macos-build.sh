@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # shellcheck disable=SC2034
+# shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/

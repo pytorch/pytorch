@@ -2,6 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 
+#include <c10/util/irange.h>
+
 #include <tuple>
 #include <vector>
 
@@ -20,7 +22,7 @@ static std::vector<int> generate_intervals(
     scalar_t alpha = static_cast<scalar_t>(inputSize - poolSize) /
       static_cast<scalar_t>(outputSize - 1);
 
-    for (int i = 0; i < outputSize - 1; ++i) {
+    for (const auto i : c10::irange(outputSize - 1)) {
       sequence[i] =
         static_cast<int>((i + sample) * alpha) - static_cast<int>(sample * alpha);
     }
