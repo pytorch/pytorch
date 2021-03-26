@@ -2691,7 +2691,6 @@ op_db: List[OpInfo] = [
            aten_name='linalg_eig',
            op=torch.linalg.eig,
            dtypes=floating_and_complex_types(),
-           test_inplace_grad=False,
            supports_autograd=False,
            sample_inputs_func=sample_inputs_linalg_invertible,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
