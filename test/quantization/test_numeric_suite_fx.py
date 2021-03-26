@@ -4,7 +4,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.quantization import get_default_qconfig, default_dynamic_qconfig
+from torch.quantization import default_dynamic_qconfig
 import torch.nn.quantized as nnq
 toq = torch.ops.quantized
 from torch.quantization._numeric_suite_fx import (
@@ -26,7 +26,6 @@ from torch.testing._internal.common_quantization import (
     LSTMwithHiddenDynamicModel,
     SparseNNModel,
     skip_if_no_torchvision,
-    test_only_eval_fn,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import override_qengines
@@ -66,66 +65,6 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
             for i, val in enumerate(v["quantized"]):
                 self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
-
-    @override_qengines
-    def test_compare_model_stub_linear_static_fx(self):
-        r"""Compare the output of static quantized linear layer and its float shadow module"""
-
-        qengine = torch.backends.quantized.engine
-        qconfig = get_default_qconfig(qengine)
-        qconfig_dict = {"": qconfig}
-
-        float_model = SingleLayerLinearModel()
-        float_model.eval()
-
-        prepared_model = prepare_fx(float_model, qconfig_dict)
-
-        prepared_float_model = copy.deepcopy(prepared_model)
-
-        # Run calibration
-        test_only_eval_fn(prepared_model, self.calib_data)
-        q_model = convert_fx(prepared_model)
-
-        linear_data = self.calib_data[0][0]
-        module_swap_list = [nn.Linear]
-
-        expected_ob_dict_keys = {"fc1.stats"}
-
-        self.compare_and_validate_model_stub_results_fx(
-            prepared_float_model,
-            q_model,
-            module_swap_list,
-            expected_ob_dict_keys,
-            linear_data,
-        )
-
-    @override_qengines
-    def test_compare_model_stub_linear_dynamic_fx(self):
-        r"""Compare the output of dynamic quantized linear layer and its float shadow module"""
-
-        qconfig_dict = {"object_type": [(nn.Linear, default_dynamic_qconfig)]}
-
-        float_model = SingleLayerLinearDynamicModel()
-        float_model.eval()
-
-        prepared_model = prepare_fx(float_model, qconfig_dict)
-
-        prepared_float_model = copy.deepcopy(prepared_model)
-        prepared_float_model.eval()
-
-        q_model = convert_fx(prepared_model)
-
-        linear_data = self.calib_data[0][0]
-        module_swap_list = [nn.Linear]
-
-        expected_ob_dict_keys = {"fc1.stats"}
-        self.compare_and_validate_model_stub_results_fx(
-            prepared_float_model,
-            q_model,
-            module_swap_list,
-            expected_ob_dict_keys,
-            linear_data,
-        )
 
     @override_qengines
     def test_compare_model_stub_lstm_dynamic_fx(self):
@@ -477,9 +416,11 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
 
     def _test_match_shadow_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
-        should_log_inputs=False,
+        should_log_inputs=False, qconfig_dict=None,
     ):
-        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        if qconfig_dict is None:
+            qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
         mp(*data)
         # TODO(future PR): prevent the need for copying here, we can copy the
         # modules but should reuse the underlying tensors
@@ -742,6 +683,20 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             m.eval()
             res = self._test_match_shadow_activations(
                 m, (torch.randn(1, 3, 4, 4),), results_len=1)
+
+    @skipIfNoFBGEMM
+    def test_compare_shadow_activations_linear(self):
+        test_cases = (
+            (SingleLayerLinearModel(), None),
+            (
+                SingleLayerLinearDynamicModel(),
+                {"object_type": [(nn.Linear, default_dynamic_qconfig)]},
+            ),
+        )
+        for m, qconfig_dict in test_cases:
+            m.eval()
+            res = self._test_match_shadow_activations(
+                m, (torch.randn(5, 5),), results_len=1, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
     def test_sparsenn_compare_activations(self):
