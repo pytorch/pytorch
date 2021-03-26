@@ -292,8 +292,8 @@ struct TORCH_API IValue final {
     if (this->isTensor()) {
       const auto& thisTensor = this->toTensor();
       const auto& rhsTensor = rhs.toTensor();
-      // mkldnn tensors dont have views or storage, we can compare them based on
-      // tensor impl
+      // mkldnn tensors dont have views or storage, so we compare
+      // based on tensor impl. //TODO: find a way to use mkldnn storage
       if (thisTensor.is_mkldnn() || rhsTensor.is_mkldnn()) {
         return thisTensor.unsafeGetTensorImpl() ==
             rhsTensor.unsafeGetTensorImpl();
@@ -858,7 +858,8 @@ struct TORCH_API IValue final {
       if (val.isTensor()) {
         if (val.toTensor().is_mkldnn()) {
           // MKLDNN tensors dont have storage and dont create views
-          // or aliasing so we can just use Tensor pointer
+          // or aliasing so we can just use Tensor pointer, TODO: find way
+          // to use mkldnn storage
           return reinterpret_cast<size_t>(val.toTensor().unsafeGetTensorImpl());
         } else {
           return reinterpret_cast<size_t>(
