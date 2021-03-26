@@ -1138,7 +1138,8 @@ class TestNormalizeOperators(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
-        known_no_good = {'stack', 'hstack', 'vstack', 'dstack', 'repeat'}
+        known_no_good = {'stack', 'hstack', 'vstack', 'dstack', 'repeat',
+                         'lu'}
 
         try:
             sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)

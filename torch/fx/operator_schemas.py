@@ -115,7 +115,7 @@ def type_matches(signature_type : Any, argument_type : Any):
         return True
 
     def is_homogeneous_int_tuple(t):
-        if not getattr(t, '__origin__', None) is tuple:
+        if not getattr(t, '__origin__', None) in {tuple, Tuple}:
             return False
 
         contained = t.__args__
