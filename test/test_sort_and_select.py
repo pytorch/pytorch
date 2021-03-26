@@ -183,7 +183,7 @@ class TestSortAndSelect(TestCase):
     def test_sort_discontiguous_cuda(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
 
-    @slowTest
+    @slowTest  # this test is slow on CPU, but not on CUDA
     @onlyCPU
     @dtypes(torch.float32)
     def test_sort_discontiguous_cpu(self, device, dtype):
