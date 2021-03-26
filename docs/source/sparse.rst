@@ -378,18 +378,18 @@ A CSR sparse tensor consists of three 1-D tensors: ``crow_indices``, ``col_indic
 and ``values``:
 
   - The ``crow_indices`` tensor consists of compressed row indices. This is a 1-D tensor
-  of size ``size[0] + 1``.
+    of size ``size[0] + 1``.
   - The ``col_indices`` tensor contains the column indices of each value. This is a 1-D
-  tensor of size ``nnz``.
+    tensor of size ``nnz``.
   - The ``values`` tensor  contains the values of the CSR tensor. This is a 1-D tensor
-  of size ``nnz``.
+    of size ``nnz``.
 
 .. note::
 
-The index tensors ``crow_indices`` and ``col_indices`` should have element type either
-``torch.int64`` (default) or ``torch.int32``. If you want to use MKL-enabled matrix
-operations, use ``torch.int32``. This is as a result of the default linking of pytorch
-being with MKL LP64, which uses 32 bit integer indexing.
+   The index tensors ``crow_indices`` and ``col_indices`` should have element type either
+   ``torch.int64`` (default) or ``torch.int32``. If you want to use MKL-enabled matrix
+   operations, use ``torch.int32``. This is as a result of the default linking of pytorch
+   being with MKL LP64, which uses 32 bit integer indexing.
 
 Construction
 ------------
