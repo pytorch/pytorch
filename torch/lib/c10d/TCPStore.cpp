@@ -588,17 +588,17 @@ TCPStore::TCPStore(
       }
 
       // socket to handle requests from server
-      listenSocket_ = tcputil::connect(
-          tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
-      watchListener_ = std::make_unique<ListenThread>(listenSocket_);
+      // listenSocket_ = tcputil::connect(
+      //     tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
+      // watchListener_ = std::make_unique<ListenThread>(listenSocket_);
 
   } catch (const std::exception&) {
     if (isServer_) {
         tcpStoreDaemon_ = nullptr;
         tcputil::closeSocket(masterListenSocket_);
     }
-    watchListener_ = nullptr;
-    tcputil::closeSocket(listenSocket_);
+    // watchListener_ = nullptr;
+    // tcputil::closeSocket(listenSocket_);
     throw;
   }
 }
