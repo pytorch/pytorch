@@ -379,7 +379,7 @@ static void trigamma_kernel(TensorIterator& iter) {
 static void exp2_kernel(TensorIterator& iter) {
   // Supports only floating types as std::exp2 doesn't have
   // complex overloads.
-  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "exp2", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "exp2", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::exp2(a); });
