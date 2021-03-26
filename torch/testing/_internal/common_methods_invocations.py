@@ -1541,7 +1541,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad):
         args_tuple = (
             ((2, 2), 0, 5, requires_grad, (3.14,)),
             ((), 0, 1, True, (3.14,)),
-            ((), 0, 1, True, (3.14j))
+            ((), 0, 1, True, (3.14j,))
         )
         samples = list(SampleInput(make_tensor(shape, dtype=dtype, device=device,
                                                high=high, low=low,
