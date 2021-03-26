@@ -391,6 +391,8 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 
   // Sort input tensor to efficiently query for median element
   Tensor sorted = std::get<0>(self.flatten().sort());
+  std::cout << self.flatten() << std::endl;
+  std::cout << sorted << std::endl;
 
   if (!ignore_nan) {
     // For torch.median return either the middle element or nan (sorted as
