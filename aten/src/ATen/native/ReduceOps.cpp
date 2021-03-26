@@ -1117,7 +1117,7 @@ Tensor &amax_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& resu
 
   auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {
-    max_values_stub(iter.device_type(), iter); 
+    max_values_stub(iter.device_type(), iter);
   }
   return result;
 }

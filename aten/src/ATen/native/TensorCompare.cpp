@@ -361,7 +361,7 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
   }
   else if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
     // case where self.numel() == 1. The result does not need to be reshaped
-    // as a case of reduction in this case.  
+    // as a case of reduction in this case.
     TORCH_CHECK(!self.is_complex(), "max does not support complex inputs.");
     AT_ASSERT(max.dim() == 0);
     max_indices.resize_({}).fill_(0);
