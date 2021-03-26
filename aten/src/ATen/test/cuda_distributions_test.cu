@@ -174,7 +174,8 @@ TEST(RandomPermutationTest, TestIslandShuffle) {
   bool shuffled2 = false;
   for (int i = 0; i < 100; i++) {
     cudaDeviceSynchronize();
-    randperm_handle_duplicate_keys(keys, values, 8, 5, c10::nullopt);
+    c10::optional<at::Generator> gen = c10::nullopt;
+    randperm_handle_duplicate_keys(keys, values, 8, 5, gen);
     cudaDeviceSynchronize();
     std::vector<int> slice1 = {values[0], values[1], values[2]};
     std::vector<int> slice2 = {values[3], values[4]};
