@@ -904,6 +904,13 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           requires_grad=requires_grad),))
     return inputs
 
+def sample_inputs_outer(op_info, device, dtype, requires_grad):
+    inputs = []
+    arg_a = make_tensor((S,), device, dtype, requires_grad=requires_grad)
+    arg_b = make_tensor((M,), device, dtype, requires_grad=requires_grad)
+    inputs.append(SampleInput(arg_a, args=(arg_b,)))
+    return inputs
+
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
 def sample_inputs_index_copy(op_info, device, dtype, requires_grad):
@@ -2943,6 +2950,11 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,),
+    OpInfo('outer',
+           op=torch.outer,
+           aliases=('ger', ),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_outer,),
     OpInfo('prod',
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
