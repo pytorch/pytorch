@@ -36,12 +36,83 @@ enum class WatchResponseType : uint8_t { KEY_UPDATED };
 
 } // anonymous namespace
 
+// Background thread parent class methods
+BackgroundThread::BackgroundThread(int storeListenSocket) 
+    : storeListenSocket_(storeListenSocket) {
+  // Signal instance destruction to the daemon thread.
+  initStopSignal();
+}
+
+BackgroundThread::~BackgroundThread() {
+  // Stop the run
+  stop();
+  // Join the thread
+  join();
+  // Close unclosed sockets
+  for (auto socket : sockets_) {
+    if (socket != -1) {
+      tcputil::closeSocket(socket);
+    }
+  }
+  // Now close the rest control pipe
+  closeStopSignal();
+}
+
+void BackgroundThread::join() {
+  daemonThread_.join();
+}
+
+#ifdef _WIN32
+void BackgroundThread::initStopSignal() {
+  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
+  if (ghStopEvent_ == NULL) {
+      throw std::runtime_error(
+          "Failed to create the control pipe to start the "
+          "TCPStoreDaemon run");
+  }
+}
+
+void BackgroundThread::closeStopSignal() {
+  CloseHandle(ghStopEvent_);
+}
+
+void BackgroundThread::stop() {
+  SetEvent(ghStopEvent_);
+}
+#else
+void BackgroundThread::initStopSignal() {
+  if (pipe(controlPipeFd_.data()) == -1) {
+    throw std::runtime_error(
+        "Failed to create the control pipe to start the "
+        "TCPStoreDaemon run");
+  }
+}
+
+void BackgroundThread::closeStopSignal() {
+  for (auto fd : controlPipeFd_) {
+    if (fd != -1) {
+      ::close(fd);
+    }
+  }
+}
+
+void BackgroundThread::stop() {
+  if (controlPipeFd_[1] != -1) {
+    // close the write end of the pipe
+    ::close(controlPipeFd_[1]);
+    controlPipeFd_[1] = -1;
+  }
+}
+#endif
+
 // TCPStoreListener class methods
 ListenThread::ListenThread(int listenSocket)
-  : storeListenSocket_(listenSocket) {
-  // Use control pipe to signal instance destruction to the daemon thread.
-  initStopSignal();
+  : BackgroundThread(listenSocket) {
   daemonThread_ = std::thread(&ListenThread::run, this);
+}
+
+void ListenThread::addCallback(std::string key, std::function<void(std::string, std::string)> cb) {
+  keyToCallbacks_[key] = cb;
 }
 
 void ListenThread::callbackHandler() {
@@ -62,7 +133,8 @@ void ListenThread::run() {
   std::vector<struct pollfd> fds;
   tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
 
-  while (1) {
+  bool finished = false;
+  while (!finished) {
     // Check control and exit early if triggered
     int res;
     SYSCHECK_ERR_RETURN_NEG1(
@@ -70,6 +142,7 @@ void ListenThread::run() {
     if (res == 0) {
       auto rv = WaitForSingleObject(ghStopEvent_, 0);
       if (rv != WAIT_TIMEOUT) {
+          finished = true;
           break;
       }
       continue;
@@ -85,7 +158,8 @@ void ListenThread::run() {
   tcputil::addPollfd(fds, controlPipeFd_[0], POLLHUP);
   tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
 
-  while (1) {
+  bool finished = false;
+  while (!finished) {
     SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
 
     // Check control and exit early if triggered
@@ -99,6 +173,7 @@ void ListenThread::run() {
             "Unexpected poll revent on the control pipe's reading fd: " +
                 std::to_string(fds[1].revents));
       }
+      finished = true;
       break;
     }
 
@@ -108,36 +183,11 @@ void ListenThread::run() {
 }
 #endif
 
-void ListenThread::addCallback(std::string key, std::function<void(std::string, std::string)> cb) {
-  keyToCallbacks_[key] = cb;
-}
-
 // TCPStoreDaemon class methods
 // Simply start the daemon thread
 TCPStoreDaemon::TCPStoreDaemon(int storeListenSocket)
-    : storeListenSocket_(storeListenSocket) {
-  // Use control pipe to signal instance destruction to the daemon thread.
-  initStopSignal();
+    : BackgroundThread(storeListenSocket) {
   daemonThread_ = std::thread(&TCPStoreDaemon::run, this);
-}
-
-TCPStoreDaemon::~TCPStoreDaemon() {
-  // Stop the run
-  stop();
-  // Join the thread
-  join();
-  // Close unclosed sockets
-  for (auto socket : sockets_) {
-    if (socket != -1) {
-      tcputil::closeSocket(socket);
-    }
-  }
-  // Now close the rest control pipe
-  closeStopSignal();
-}
-
-void TCPStoreDaemon::join() {
-  daemonThread_.join();
 }
 
 void TCPStoreDaemon::queryFds(std::vector<struct pollfd>& fds) {
@@ -385,23 +435,6 @@ bool TCPStoreDaemon::checkKeys(const std::vector<std::string>& keys) const {
 }
 
 #ifdef _WIN32
-void TCPStoreDaemon::initStopSignal() {
-  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
-  if (ghStopEvent_ == NULL) {
-      throw std::runtime_error(
-          "Failed to create the control pipe to start the "
-          "TCPStoreDaemon run");
-  }
-}
-
-void TCPStoreDaemon::closeStopSignal() {
-  CloseHandle(ghStopEvent_);
-}
-
-void TCPStoreDaemon::stop() {
-  SetEvent(ghStopEvent_);
-}
-
 void TCPStoreDaemon::run() {
   std::vector<struct pollfd> fds;
   tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
@@ -443,29 +476,6 @@ void TCPStoreDaemon::run() {
   }
 }
 #else
-void TCPStoreDaemon::initStopSignal() {
-  if (pipe(controlPipeFd_.data()) == -1) {
-    throw std::runtime_error(
-        "Failed to create the control pipe to start the "
-        "TCPStoreDaemon run");
-  }
-}
-
-void TCPStoreDaemon::closeStopSignal() {
-  for (auto fd : controlPipeFd_) {
-    if (fd != -1) {
-      ::close(fd);
-    }
-  }
-}
-
-void TCPStoreDaemon::stop() {
-  if (controlPipeFd_[1] != -1) {
-    // close the write end of the pipe
-    ::close(controlPipeFd_[1]);
-    controlPipeFd_[1] = -1;
-  }
-}
 
 void TCPStoreDaemon::run() {
   std::vector<struct pollfd> fds;

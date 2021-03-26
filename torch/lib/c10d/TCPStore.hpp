@@ -14,20 +14,35 @@
 
 namespace c10d {
 
-// Background thread that runs on the master process
-class TCPStoreDaemon {
+class BackgroundThread {
+  public:
+    explicit BackgroundThread(int storeListenSocket);
+    ~BackgroundThread();
+    void join();
+  protected:
+    void stop();
+    void initStopSignal();
+    void closeStopSignal();
+    std::thread daemonThread_;
+    int storeListenSocket_;
+    std::vector<int> sockets_;
+#ifdef _WIN32
+    const std::chrono::milliseconds checkTimeout_
+        = std::chrono::milliseconds(10);
+    HANDLE ghStopEvent_;
+#else
+    std::vector<int> controlPipeFd_{-1, -1};
+#endif
+};
+
+// Run on master process
+class TCPStoreDaemon : public BackgroundThread {
  public:
   // Empty constructor used for derived classes
-  explicit TCPStoreDaemon() {}
   explicit TCPStoreDaemon(int storeListenSocket);
-  ~TCPStoreDaemon();
-
-  void join();
 
  protected:
   void run();
-  void stop();
-
   void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
 
@@ -47,10 +62,6 @@ class TCPStoreDaemon {
       std::vector<uint8_t>& oldData,
       std::vector<uint8_t>& newData);
 
-  void initStopSignal();
-  void closeStopSignal();
-
-  std::thread daemonThread_;
   std::unordered_map<std::string, std::vector<uint8_t>> tcpStore_;
   // From key -> the list of sockets waiting on it
   std::unordered_map<std::string, std::vector<int>> waitingSockets_;
@@ -58,20 +69,11 @@ class TCPStoreDaemon {
   std::unordered_map<int, size_t> keysAwaited_;
   // From key -> the list of sockets waiting on it
   std::unordered_map<std::string, std::vector<int>> watchedSockets_;
-  std::vector<int> sockets_;
-  int storeListenSocket_;
-#ifdef _WIN32
-  const std::chrono::milliseconds checkTimeout_
-      = std::chrono::milliseconds(10);
-  HANDLE ghStopEvent_;
-#else
-  std::vector<int> controlPipeFd_{-1, -1};
-#endif
 };
 
 // Listener thread runs on all processes
 // Right now only handles callbacks registered from watchKey()
-class ListenThread : public TCPStoreDaemon {
+class ListenThread : public BackgroundThread {
   public:
     explicit ListenThread(int listenSocket);
     // Adds a callback to run key change
@@ -80,7 +82,6 @@ class ListenThread : public TCPStoreDaemon {
   protected:
     void run();
     void callbackHandler();
-    int storeListenSocket_;
     // List of callbacks map each watched key
     std::unordered_map<std::string, std::function<void(std::string, std::string)>> keyToCallbacks_;
 };
@@ -110,7 +111,8 @@ class TCPStore : public Store {
 
   bool deleteKey(const std::string& key) override;
 
-  void watchKey(const std::string& key, std::function<void(std::string, std::string)> callback);
+  // callback function takes arguments (string oldValue, string newValue)
+  void watchKey(const std::string& key, std::function<void(std::string, std::string)> callback) override;
 
   bool check(const std::vector<std::string>& keys) override;
 
