@@ -25,6 +25,7 @@ __all__ = [
     "floating_types_and",
     "get_all_complex_dtypes",
     "get_all_dtypes",
+    "get_all_device_types",
     "get_all_fp_dtypes",
     "get_all_int_dtypes",
     "get_all_math_dtypes",
