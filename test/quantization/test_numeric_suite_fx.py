@@ -552,8 +552,11 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 x = F.linear(x, self.w1, self.b1)
                 x = F.relu(x)
                 return x
-
         qconfig_dict = {'': torch.quantization.float16_static_qconfig}
+
+        m = M().eval()
+        self._test_extract_weights(m, results_len=1, qconfig_dict=qconfig_dict)
+
         m = M().eval()
         expected_occurrence = {
             ns.call_module(OutputLogger): 1,
