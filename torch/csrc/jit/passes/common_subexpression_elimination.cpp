@@ -12,8 +12,8 @@ namespace jit {
 namespace {
 
 struct CommonSubexpressionEliminator {
-  CommonSubexpressionEliminator(const std::shared_ptr<Graph>& graph)
-      : graph_(graph) {}
+  CommonSubexpressionEliminator(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)) {}
 
   bool run(std::function<Node*(Node*)> parent_lookup_fn) {
     return run(graph_->block(), std::move(parent_lookup_fn));
