@@ -15,7 +15,5 @@ bool is_numpy_available();
 bool is_numpy_int(PyObject* obj);
 bool is_numpy_scalar(PyObject* obj);
 
-at::Tensor tensor_from_cuda_array_interface(PyObject* obj);
-at::Tensor tensor_from_cpu_array_interface(PyObject* obj);
-
+at::Tensor tensor_from_generic_array_interface(PyObject* obj, THPObjectPtr& ai_dict, DeviceType device_type);
 }} // namespace torch::utils

@@ -25,7 +25,7 @@ bool is_numpy_scalar(PyObject* obj) {
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
-at::Tensor tensor_from_cpu_array_interface(PyObject* obj) {
+at::Tensor tensor_from_generic_array_interface(PyObject* obj, THPObjectPtr& ai_dict, DeviceType device_type) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 }}
@@ -292,29 +292,31 @@ bool is_numpy_scalar(PyObject* obj) {
          PyArray_IsScalar(obj, Floating) || PyArray_IsScalar(obj, ComplexFloating));
 }
 
-static at::Tensor tensor_from_generic_array_interface(PyObject* obj, THPObjectPtr& ai_dict, DeviceType device_type) {
+at::Tensor tensor_from_generic_array_interface(PyObject* obj, THPObjectPtr& ai_dict, DeviceType device_type) {
   if (!is_numpy_available()) {
     // numpy is required for parsing type descriptor string
     throw std::runtime_error("Numpy is not available");
   }
-
-  // Extract the `ai_dict['shape']` attribute
-  std::vector<int64_t> sizes;
-  {
-    PyObject *py_shape = PyDict_GetItemString(ai_dict, "shape");
-    if (py_shape == nullptr) {
-      throw TypeError("attribute `shape` must exist");
+  if (!PyDict_Check(ai_dict)) {
+    // numpy compatible exception:
+    switch(device_type) {
+    case kCPU: throw ValueError("Invalid __array_interface__ value, must be a dict");
+    case kCUDA: throw ValueError("Invalid __cuda_array_interface__ value, must be a dict");
+    default: throw std::runtime_error("Unsupported device type");
     }
-    sizes = seq_to_aten_shape(py_shape);
   }
-
   // Extract the `ai_dict['typestr']` attribute
   ScalarType dtype;
   int dtype_size_in_bytes;
   {
     PyObject *py_typestr = PyDict_GetItemString(ai_dict, "typestr");
     if (py_typestr == nullptr) {
-      throw TypeError("attribute `typestr` must exist");
+      // numpy compatible exception
+      switch(device_type) {
+      case kCPU: throw ValueError("Missing __array_interface__ typestr");
+      case kCUDA: throw ValueError("Missing __cuda_array_interface__ typestr");
+      default: throw std::runtime_error("Unsupported device type");
+      }
     }
     PyArray_Descr *descr;
     if(!PyArray_DescrConverter(py_typestr, &descr)) {
@@ -325,12 +327,32 @@ static at::Tensor tensor_from_generic_array_interface(PyObject* obj, THPObjectPt
     TORCH_INTERNAL_ASSERT(dtype_size_in_bytes > 0);
   }
 
+  // Extract the `ai_dict['shape']` attribute
+  std::vector<int64_t> sizes;
+  {
+    PyObject *py_shape = PyDict_GetItemString(ai_dict, "shape");
+    if (py_shape == nullptr) {
+      // numpy compatible exception
+      switch(device_type) {
+      case kCPU: throw ValueError("Missing __array_interface__ shape");
+      case kCUDA: throw ValueError("Missing __cuda_array_interface__ shape");
+      default: throw std::runtime_error("Unsupported device type");
+      }
+    }
+    sizes = seq_to_aten_shape(py_shape);
+  }
+
   // Extract the `ai_dict['data']` attribute
   void *data_ptr;
   {
     PyObject *py_data = PyDict_GetItemString(ai_dict, "data");
     if (py_data == nullptr) {
-      throw TypeError("attribute `shape` data exist");
+      // numpy compatible exception
+      switch(device_type) {
+      case kCPU: throw ValueError("Missing __array_interface__ data");
+      case kCUDA: throw ValueError("Missing __cuda_array_interface__ data");
+      default: throw std::runtime_error("Unsupported device type");
+      }
     }
     if(!PyTuple_Check(py_data) || PyTuple_GET_SIZE(py_data) != 2) {
       throw TypeError("`data` must be a 2-tuple of (int, bool)");
@@ -383,26 +405,6 @@ static at::Tensor tensor_from_generic_array_interface(PyObject* obj, THPObjectPt
       },
       at::device(device_type).dtype(dtype)
   );
-}
-
-at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
-  PyObject *dict = PyObject_GetAttrString(obj, "__cuda_array_interface__");
-  auto ai_dict = THPObjectPtr(dict);
-  TORCH_INTERNAL_ASSERT(ai_dict);
-  if (!PyDict_Check(ai_dict)) {
-    throw TypeError("`__cuda_array_interface__` must be a dict");
-  }
-  return tensor_from_generic_array_interface(obj, ai_dict, kCUDA);
-}
-
-at::Tensor tensor_from_cpu_array_interface(PyObject* obj) {
-  PyObject *dict = PyObject_GetAttrString(obj, "__array_interface__");
-  auto ai_dict = THPObjectPtr(dict);
-  TORCH_INTERNAL_ASSERT(ai_dict);
-  if (!PyDict_Check(ai_dict)) {
-    throw TypeError("`__array_interface__` must be a dict");
-  }
-  return tensor_from_generic_array_interface(obj, ai_dict, kCPU);
 }
 
 }} // namespace torch::utils
