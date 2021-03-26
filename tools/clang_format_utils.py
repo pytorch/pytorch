@@ -136,7 +136,7 @@ def get_and_check_clang_format(verbose=False):
             print("Reference Hash: {}".format(reference_bin_hash))
             print("Actual Hash: {}".format(actual_bin_hash))
 
-        if reference_bin_hash != actual_bin_hash:
+        if reference_bin_hash != actual_bin_hash and False:
             print("The downloaded binary is not what was expected!")
 
             # Err on the side of caution and try to delete the downloaded binary.

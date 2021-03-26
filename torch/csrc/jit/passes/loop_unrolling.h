@@ -7,6 +7,9 @@ namespace jit {
 
 TORCH_API void UnrollLoops(std::shared_ptr<Graph>& graph);
 
+// Only unrolls constant loops. Will unroll them regardless of loop block size
+TORCH_API void UnrollConstantLoops(std::shared_ptr<Graph>& graph);
+
 TORCH_API Node* PeelLoop(Node* n, size_t times);
 
 TORCH_API void PeelProfilingLoops(const std::shared_ptr<Graph>& graph);

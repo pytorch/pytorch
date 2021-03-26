@@ -61,6 +61,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/passes/vulkan_rewrite.h>
@@ -149,6 +150,12 @@ void initJITBindings(PyObject* module) {
             ONNXAssignOutputShape(graph, tensors, onnx_shape_inference);
           })
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
+      .def(
+          "_jit_pass_symbolic_shape_analysis", PropagateShapesWithShapeFunction)
+      .def(
+          "_jit_register_operator_shape_function",
+          RegisterOperatorShapeFunction)
+      .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def(
           "_jit_pass_onnx_peephole",
