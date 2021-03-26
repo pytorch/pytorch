@@ -562,6 +562,7 @@ Sparse tensor functions
 +++++++++++++++++++++++
 
 .. autofunction:: torch.sparse_coo_tensor
+   :noindex:
 .. autofunction:: torch.sparse_csr_tensor
    :noindex:
 .. autofunction:: torch.sparse.sum
