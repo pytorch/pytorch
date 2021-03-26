@@ -137,7 +137,7 @@ class TestSortAndSelect(TestCase):
 
     @onlyCUDA
     @dtypes(torch.uint8)
-    @largeTensorTest('30GB')
+    @largeTensorTest('200GB')  # Unfortunately 80GB A100 is not large enough
     def test_sort_large(self, device, dtype):
         t0 = torch.randperm(8192, device=device).to(dtype)
         t = t0.view(1, 8192).expand(2 ** 18 + 1, -1).contiguous()
