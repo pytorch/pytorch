@@ -1525,7 +1525,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad):
                                                           requires_grad=e_grad, device=device,
                                                           dtype=dtype) + additive_e,))
                             for shape_b, low_b, high_b, additive_b, b_grad, shape_e, low_e,
-                            high_e, additive_e, e_grad in inputs_tuple)  
+                            high_e, additive_e, e_grad in inputs_tuple)
         samples = [*samples, *more_samples]
         tensor_scalar_inputs = (
             ((2, 2), 0, 5, 1e-3, requires_grad, (3.14,)),
@@ -1535,7 +1535,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad):
                                                     high=high, low=low,
                                                     requires_grad=b_grad) + additive,
                                         args=exp)
-                            for shape, low, high, additive, b_grad, exp in tensor_scalar_inputs)    
+                            for shape, low, high, additive, b_grad, exp in tensor_scalar_inputs)
         samples = [*samples, *more_samples]
     elif dtype in [torch.complex64, torch.complex128]:
         args_tuple = (
