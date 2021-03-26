@@ -12,9 +12,8 @@ namespace jit {
 namespace {
 
 struct CommonSubexpressionEliminator {
-
-  CommonSubexpressionEliminator(const std::shared_ptr<Graph>& graph):
-    graph_(graph) {}
+  CommonSubexpressionEliminator(const std::shared_ptr<Graph>& graph)
+      : graph_(graph) {}
 
   bool run(std::function<Node*(Node*)> parent_lookup_fn) {
     return run(graph_->block(), std::move(parent_lookup_fn));
@@ -104,12 +103,11 @@ struct CommonSubexpressionEliminator {
 
     return *alias_db_;
   }
-  private:
-    std::unique_ptr<AliasDb> alias_db_;
-    std::shared_ptr<Graph> graph_;
+
+ private:
+  std::unique_ptr<AliasDb> alias_db_;
+  std::shared_ptr<Graph> graph_;
 };
-
-
 
 } // namespace
 
