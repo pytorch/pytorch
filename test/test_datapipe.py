@@ -802,7 +802,7 @@ class TestTyping(TestCase):
                [1, '1', 2, '2'])
         for ds in dss:
             dp = DP(ds)
-            with self.assertRaisesRegex(TypeError, r"Expected an instance of subtype"):
+            with self.assertRaisesRegex(RuntimeError, r"Expected an instance of subtype"):
                 list(d for d in dp)
 
 
