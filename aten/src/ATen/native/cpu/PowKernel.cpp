@@ -100,12 +100,12 @@ void pow_tensor_scalar_kernel(
   const auto dtype = iter.common_dtype();
   if (dtype == ScalarType::Float || dtype == ScalarType::Double) {
     AT_DISPATCH_FLOATING_TYPES(dtype, "pow", [&]() {
-      pow_tensor_scalar_optimized_kernel<scalar_t, double, double>(
+      pow_tensor_scalar_optimized_kernel<scalar_t, double>(
           iter, exp_scalar.to<double>());
     });
   } else if (isComplexType(dtype)) {
     AT_DISPATCH_COMPLEX_TYPES(dtype, "pow", [&]() {
-      pow_tensor_scalar_optimized_kernel<scalar_t, scalar_t, c10::complex<double>>(
+      pow_tensor_scalar_optimized_kernel<scalar_t, scalar_t>(
           iter, exp_scalar.to<c10::complex<double>>());
     });
   } else if (dtype == ScalarType::Half) {
@@ -125,7 +125,7 @@ void pow_tensor_scalar_kernel(
       using scalar_t =
           decltype(c10::impl::ScalarTypeToCPPType<ScalarType::BFloat16>::t);
       AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, dtype, "pow", [&]() {
-        pow_tensor_scalar_optimized_kernel<scalar_t, scalar_t, scalar_t>(
+        pow_tensor_scalar_optimized_kernel<scalar_t, scalar_t>(
             iter, exp_scalar.to<scalar_t>());
       });
   } else {
