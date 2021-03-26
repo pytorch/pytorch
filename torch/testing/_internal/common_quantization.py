@@ -692,10 +692,20 @@ class QuantizationTestCase(TestCase):
                             len(layer_data_1['values']),
                             f"Layer {layer_name}, {model_name_0} and {model_name_1} do not have the same number of seen Tensors.")
                         for idx in range(len(layer_data_0['values'])):
-                            self.assertTrue(
-                                layer_data_0['values'][idx].shape ==
-                                layer_data_1['values'][idx].shape,
-                                f"Layer {layer_name}, {model_name_0} and {model_name_1} have a shape mismatch at idx {idx}.")
+                            values_0 = layer_data_0['values'][idx]
+                            values_1 = layer_data_1['values'][idx]
+                            if isinstance(values_0, torch.Tensor):
+                                self.assertTrue(
+                                    values_0.shape == values_1.shape,
+                                    f"Layer {layer_name}, {model_name_0} and {model_name_1} have a shape mismatch at idx {idx}.")
+                            else:
+                                assert isinstance(values_0, tuple), \
+                                    f"unhandled type {type(values_0)}"
+                                assert len(values_0) == 2
+                                assert len(values_0[1]) == 2
+                                assert values_0[0].shape == values_1[0].shape
+                                assert values_0[1][0].shape == values_1[1][0].shape
+                                assert values_0[1][1].shape == values_1[1][1].shape
 
                         # verify that ref_node_name is valid
                         ref_node_name_0 = layer_data_0['ref_node_name']
