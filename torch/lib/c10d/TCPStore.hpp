@@ -34,7 +34,6 @@ class BackgroundThread {
     void stop();
     void initStopSignal();
     void closeStopSignal();
-    bool isServer_;
 };
 
 // Run on master process
