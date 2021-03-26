@@ -154,7 +154,7 @@ std::tuple<Tensor &,Tensor &> sort_out_stable_cuda(Tensor & values, Tensor & ind
     int64_t remaining = numel;
     while (remaining > 0) {
       int64_t n = std::min(remaining, nbatch);
-      int64_t segment_bits = std::max(1L, static_cast<int64_t>(std::ceil(std::log2(n / nsort))));
+      int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(n / nsort))));
       at::cuda::cub::sort_pairs(
         self_ptr, tmp_ptr,
         orig_indices_ptr, orig_indices_tmp_ptr,
