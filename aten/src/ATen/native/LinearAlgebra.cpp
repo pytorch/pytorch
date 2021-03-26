@@ -999,7 +999,11 @@ Tensor& addbmm_out(const Tensor& self, const Tensor& batch1, const Tensor& batch
   auto b_self = expand_size(self, {batch1.size(1), batch2.size(2)}, "addbmm_out");
   {
     at::NoNamesGuard guard;
+    if (checkOneDnnBf16GemmUsable(/*inputs=*/{self, batch1, batch2}, /*output=*/result, /*alpha=*/alpha)){
+      at::native::mkldnn_addbmm_out(*b_self, batch1, batch2, beta, alpha, result);
+    } else {
     addbmm_impl_(result, *b_self, batch1, batch2, beta, alpha);
+    }
   }
   at::namedinference::propagate_names_for_addmm(result, batch1, batch2, self);
   return result;
@@ -1020,7 +1024,11 @@ Tensor& addmm_cpu_out(const Tensor& self, const Tensor& mat1, const Tensor& mat2
   auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
   {
     at::NoNamesGuard guard;
-    addmm_impl_cpu_(result, *b_self, mat1, mat2, beta, alpha);
+    if (checkOneDnnBf16GemmUsable(/*inputs=*/{self, mat1, mat2}, /*output=*/result, /*alpha=*/alpha)){
+      at::native::mkldnn_addmm_out(*b_self, mat1, mat2, beta, alpha, result);
+    } else {
+      addmm_impl_cpu_(result, *b_self, mat1, mat2, beta, alpha);
+    }
   }
   at::namedinference::propagate_names_for_addmm(result, mat1, mat2, self);
   return result;
@@ -1205,7 +1213,11 @@ Tensor& baddbmm_out_cpu(const Tensor& self_, const Tensor& batch1, const Tensor&
 }
 
 Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha) {
-  return bmm_out_or_baddbmm_(self, batch1, batch2, beta, alpha, false);
+  if (checkOneDnnBf16GemmUsable(/*inputs=*/{batch1, batch2}, /*output=*/self, /*alpha=*/alpha)){
+    return at::native::mkldnn_baddbmm_(self, batch1, batch2, beta, alpha);
+  } else {
+    return bmm_out_or_baddbmm_(self, batch1, batch2, beta, alpha, false);
+  }
 }
 
 Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
@@ -1217,8 +1229,12 @@ Tensor& bmm_out_cpu(const Tensor& batch1, const Tensor& batch2, Tensor &result) 
   Scalar beta(0.0);
   Scalar alpha(1.0);
   {
-  NoNamesGuard guard;
-  bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
+    NoNamesGuard guard;
+    if (checkOneDnnBf16GemmUsable(/*inputs=*/{batch1, batch2}, /*output=*/result)){
+      at::native::mkldnn_bmm_out(batch1, batch2, result);
+    } else {
+      bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
+    }
   }
   namedinference::propagate_names_if_nonempty(
       result,

@@ -4,7 +4,9 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/Config.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <limits>
 #include <sstream>
 #include <cstring>
@@ -512,6 +514,30 @@ static inline void checkLinalgCompatibleDtype(const std::string& fn_name, Scalar
       fn_name,
       ": Expected ", out_name, " to be safely castable from ", result_type, " dtype, but got ",
       out_name, " with dtype ", out_type);
+}
+
+// check if can run with oneDNN bf16 gemm path
+static inline bool checkOneDnnBf16GemmUsable(const TensorList& input_args, const Tensor& result=Tensor()) {
+#if !AT_MKLDNN_ENABLED()
+  return false;
+#endif // AT_MKLDNN_EBABLED
+  bool bf16_device_support = mkldnn_bf16_device_check();
+  if (!bf16_device_support) return false;
+  if (result.defined() && result.scalar_type() != at::kBFloat16)
+    return false;
+  for (auto t : input_args){
+    if (t.scalar_type() != at::kBFloat16 || t.numel() == 0){
+      return false;
+    }
+  }
+  return true;
+}
+
+static inline bool checkOneDnnBf16GemmUsable(const TensorList& input_args, const Tensor& result, const Scalar& alpha) {
+  // If alpha = 0, no OneDnn gemm need to be executed
+  if ((alpha.isFloatingPoint() || alpha.isIntegral()) && alpha.to<float>() == 0.0f)
+    return false;
+  return checkOneDnnBf16GemmUsable(input_args, result);
 }
 
 }}  // namespace at::native

@@ -649,6 +649,7 @@
   dispatch:
     CPU: baddbmm__cpu
     CUDA: baddbmm__cuda
+    MkldnnCPU: mkldnn_baddbmm_
 
 - func: _baddbmm_mkl_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: function
@@ -844,6 +845,7 @@
   dispatch:
     CPU: bmm_out_cpu
     CUDA: bmm_out_cuda
+    MkldnnCPU: mkldnn_bmm_out
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
 
@@ -2555,12 +2557,14 @@
   dispatch:
     CPU: mm_cpu
     CUDA: mm_cuda
+    MkldnnCPU: mkldnn_mm
     SparseCPU, SparseCUDA, SparseCsrCPU: _sparse_mm
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: mm_cpu_out
     CUDA: mm_out_cuda
+    MkldnnCPU: mkldnn_mm_out
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU: _sparse_csr_mm_out
 
@@ -4097,6 +4101,7 @@
   dispatch:
     CPU: addmm_cpu_out
     CUDA: addmm_out_cuda
+    MkldnnCPU: mkldnn_addmm_out
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
     SparseCsrCPU: addmm_out_sparse_csr_dense_cpu
@@ -5076,6 +5081,7 @@
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: addbmm_out
+    MkldnnCPU: mkldnn_addbmm_out
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method, function

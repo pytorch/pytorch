@@ -1068,6 +1068,66 @@ class TestMkldnn(TestCase):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
 
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_mm_bf16(self):
+        m = torch.randint(3, 10, (1,)).item()
+        n = torch.randint(3, 100, (1,)).item()
+        k = torch.randint(3, 100, (1,)).item()
+        mat1 = torch.randn(m, n)
+        mat2 = torch.randn(n, k)
+        fp32_ref = torch.mm(mat1, mat2).bfloat16().float()
+        bf16_res = torch.mm(mat1.bfloat16(), mat2.bfloat16()).float()
+        self.assertEqual(fp32_ref, bf16_res, atol=1.5e-1, rtol=1e-5)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_bmm_bf16(self):
+        b = torch.randint(3, 10, (1,)).item()
+        m = torch.randint(3, 10, (1,)).item()
+        n = torch.randint(3, 100, (1,)).item()
+        k = torch.randint(3, 100, (1,)).item()
+        mat1 = torch.randn(b, m, n)
+        mat2 = torch.randn(b, n, k)
+        fp32_ref = torch.bmm(mat1, mat2).bfloat16().float()
+        bf16_res = torch.bmm(mat1.bfloat16(), mat2.bfloat16()).float()
+        self.assertEqual(fp32_ref, bf16_res, atol=1.5e-1, rtol=1e-5)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_addmm_bf16(self):
+        m = torch.randint(3, 10, (1,)).item()
+        n = torch.randint(3, 100, (1,)).item()
+        k = torch.randint(3, 100, (1,)).item()
+        mat1 = torch.randn(m, n)
+        mat2 = torch.randn(n, k)
+        bias = torch.randn(1, 1)
+        fp32_ref = torch.addmm(bias, mat1, mat2).bfloat16().float()
+        bf16_res = torch.addmm(bias.bfloat16(), mat1.bfloat16(), mat2.bfloat16()).float()
+        self.assertEqual(fp32_ref, bf16_res, atol=1.5e-1, rtol=1e-5)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_addbmm_bf16(self):
+        b = torch.randint(3, 10, (1,)).item()
+        m = torch.randint(3, 10, (1,)).item()
+        n = torch.randint(3, 100, (1,)).item()
+        k = torch.randint(3, 100, (1,)).item()
+        mat1 = torch.randn(b, m, n)
+        mat2 = torch.randn(b, n, k)
+        bias = torch.randn(1, 1)
+        fp32_ref = torch.addbmm(bias, mat1, mat2).bfloat16().float()
+        bf16_res = torch.addbmm(bias.bfloat16(), mat1.bfloat16(), mat2.bfloat16()).float()
+        self.assertEqual(fp32_ref, bf16_res, atol=5e-1, rtol=1e-5)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_baddbmm_bf16(self):
+        b = torch.randint(3, 10, (1,)).item()
+        m = torch.randint(3, 10, (1,)).item()
+        n = torch.randint(3, 100, (1,)).item()
+        k = torch.randint(3, 100, (1,)).item()
+        mat1 = torch.randn(b, m, n)
+        mat2 = torch.randn(b, n, k)
+        bias = torch.randn(1, 1)
+        fp32_ref = torch.addbmm(bias, mat1, mat2).bfloat16().float()
+        bf16_res = torch.addbmm(bias.bfloat16(), mat1.bfloat16(), mat2.bfloat16()).float()
+        self.assertEqual(fp32_ref, bf16_res, atol=5e-1, rtol=1e-5)
 
 if __name__ == '__main__':
     run_tests()
