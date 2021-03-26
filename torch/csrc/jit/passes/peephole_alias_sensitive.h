@@ -7,7 +7,7 @@ namespace jit {
 
 // Peephole Optimizes alias sensitive peepholes
 // Currently this is invoked as part of PeepholeOptimize
-TORCH_API void PeepholeOptimizeAliasSensitive(
+TORCH_API bool PeepholeOptimizeAliasSensitive(
     const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
