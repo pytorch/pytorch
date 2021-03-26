@@ -35,8 +35,6 @@ class TensorCreationOpInfo(OpInfo):
             dtypes = self.all_dtypes if dtypes is None else dtypes
         super().__init__(name,
                          dtypes=dtypes,
-                         test_inplace_grad=False,
-                         test_complex_grad=False,
                          supports_autograd=supports_autograd,
                          check_batched_grad=False,
                          check_batched_gradgrad=False,
@@ -343,7 +341,7 @@ class TestTensorCreationOps(TestCase):
             # TODO: check for strides
         return False
 
-    def _apply_samples(self, device, dtype, op, test):
+    def _apply_samples(self, device, dtype, op, test_func):
         samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
         exceptions = []
         count = 0
@@ -352,6 +350,8 @@ class TestTensorCreationOps(TestCase):
             ref = sample.ref
             args = sample.args if sample.input is sample.unspecified else (sample.input,) + sample.args
             assert sample.ref is not sample.unspecified
+            if callable(ref):
+                ref = ref(*args, **sample.kwargs)
             try:
                 if isinstance(ref, Exception):
                     assert len(ref.args) == 1
@@ -361,12 +361,8 @@ class TestTensorCreationOps(TestCase):
                     except Exception as exc:
                         assert ref == exc
                 else:
-                    if callable(ref):
-                        expected = ref(*args, **sample.kwargs)
-                    else:
-                        expected = ref
                     result = op(*args, **sample.kwargs)
-                    test(sample, result, expected)
+                    test_func(sample, result, ref)
             except Exception as exc:
                 exceptions.append(f'{type(exc).__name__}:{exc} [{sample}]')
                 if count > 10 and len(exceptions) == count:
