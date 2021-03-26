@@ -885,9 +885,9 @@ always be real-valued, even if :attr:`input` is complex.
 Args:
     input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
                     batch dimensions consisting of `(m, n)` matrices.
-    full_matrices (bool, optional): controls whether to compute the full or reduced decomposition. and
-                                    consequently the shape of returned `U` and `Vh`. Default: `True`.
-    compute_uv (bool, optional): whether to compute `U` and `Vh` or not. Default: `True`.
+    full_matrices (bool, optional): controls whether to compute the full or reduced decomposition, and
+                                    consequently, the shape of returned `U` and `Vh`. Default: `True`.
+    compute_uv (bool, optional): controls whether to compute `U` and `Vh`. Default: `True`.
     out (tuple, optional): a tuple of three tensors to use for the outputs.
                            If :attr`compute_uv` is `False`, the 1st and 3rd arguments must be tensors,
                            but they are ignored.  For example, you can pass

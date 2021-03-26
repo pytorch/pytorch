@@ -8499,8 +8499,8 @@ Args:
     input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
                     batch dimensions consisting of `(m, n)` matrices.
     some (bool, optional): controls whether to compute the reduced or full decomposition, and
-                           consequently the shape of returned `U` and `V`. Default: `True`.
-    compute_uv (bool, optional): option whether to compute `U` and `V` or not. Default: `True`.
+                           consequently, the shape of returned `U` and `V`. Default: `True`.
+    compute_uv (bool, optional): controls whether to compute `U` and `V`. Default: `True`.
 
 Keyword args:
     out (tuple, optional): the output tuple of tensors
