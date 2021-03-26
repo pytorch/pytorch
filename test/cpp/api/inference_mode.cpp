@@ -133,8 +133,8 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeFunctionalOp) {
       inference_tensor = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
     }
 
-    // This might run slower compared to InferenceMode since intermediate
-    // tensors are normal tensors, and they might dispatch to VariableType
+    // Due to issue #54614, this might run slower compared to InferenceMode since
+    // intermediate tensors are normal tensors, and they might dispatch to VariableType
     // kernels. This is fine since users can easily fix it by moving
     // it inside InferenceMode block.
     torch::Tensor tmp = functional_op(inference_tensor); // go through kernels: InplaceOrView(fallthrough), CPU
@@ -150,9 +150,8 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeInplaceOp) {
       InferenceMode guard;
       inference_tensor = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
     }
-    inplace_op(inference_tensor); // go through kernels: InplaceOrView, CPU
-    ASSERT_TRUE(is_inference_tensor(inference_tensor));
-    ASSERT_EQ(inference_tensor.requires_grad(), requires_grad);
+    ASSERT_THROWS_WITH(inplace_op(inference_tensor), // go through kernels: InplaceOrView, CPU
+      "Inplace update to inference tensor in normal mode is not allowed");
   }
 }
 
@@ -166,6 +165,8 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeViewOp) {
     torch::Tensor out = view_op(inference_tensor); // go through kernels: InplaceOrView, CPU
     ASSERT_TRUE(is_inference_tensor(out));
     ASSERT_EQ(out.requires_grad(), requires_grad);
+    ASSERT_TRUE(out.is_view());
+    ASSERT_TRUE(out.is_leaf());
   }
 }
 
@@ -310,6 +311,11 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
     torch::Tensor out = c.add(s);  // go through kernels: VariableType, InplaceOrView(fallthrough), CPU
     ASSERT_FALSE(is_inference_tensor(out));
     ASSERT_EQ(out.requires_grad(), requires_grad);
+    if (requires_grad) {
+      // leaf inference tensor with requires_grad=true can still have gradient.
+      out.backward(torch::ones_like(out));
+      assert_tensor_equal(c.grad(), torch::ones_like(c));
+    }
 
     if (requires_grad) {
       // mul(self, other) saves variable when requires_grad=true
@@ -327,7 +333,7 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
 TEST(InferenceModeTest, TestMixInferenceAndNormalTensorInplaceOp) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
-    torch::Tensor a = s + 2;
+    torch::Tensor a = s.clone();
     torch::Tensor c;
     {
       InferenceMode guard;
@@ -343,10 +349,8 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorInplaceOp) {
     } else {
       a.mul_(c);
 
-      // out=... doesn't save any variable and works as long as none of inputs requires_grad=true
-      torch::mul_out(c, s, s);
-      ASSERT_TRUE(is_inference_tensor(c));
-      ASSERT_EQ(c.requires_grad(), requires_grad);
+      ASSERT_THROWS_WITH(torch::mul_out(c, s, s), // go through kernels: VariableType, InplaceOrView(ERROR!), CPU
+        "Inplace update to inference tensor in normal mode is not allowed");
     }
   }
 }
@@ -426,4 +430,21 @@ TEST(InferenceModeTest, TestCreationMetaPropagation) {
   }
   ASSERT_THROWS_WITH(c.add_(1),
     "A view was created in inference mode and is being modified inplace");
+}
+
+TEST(InferenceModeTest, TestInplaceCopyOnInferenceTensor) {
+  for (bool requires_grad: {true, false}) {
+    torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
+    torch::Tensor t;
+    {
+      InferenceMode guard;
+      t = torch::ones({1, 2, 3});
+      t.copy_(s);
+      ASSERT_TRUE(is_inference_tensor(t));
+      ASSERT_FALSE(t.requires_grad());
+    }
+
+    ASSERT_THROWS_WITH(t.copy_(s),
+      "Inplace update to inference tensor in normal mode is not allowed");
+  }
 }

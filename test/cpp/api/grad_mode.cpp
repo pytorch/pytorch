@@ -53,6 +53,11 @@ TEST(GradModeTest, TestRequiresGradViewOpExiting) {
 
     tmp = view_out * view_out;
     ASSERT_EQ(tmp.requires_grad(), requires_grad);
+    if (requires_grad) {
+      tmp.backward(torch::ones_like(tmp));
+      // TODO: this behavior is a side effect of issue #11390.
+      ASSERT_FALSE(view_out.grad().defined());
+    }
 
     if (requires_grad) {
       ASSERT_THROWS_WITH(view_out.mul_(2),  // go through kernels: VariableType, InplaceOrView, CPU

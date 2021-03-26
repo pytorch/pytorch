@@ -112,7 +112,25 @@ inline void rebase_history(std::vector<Variable>&& vars, std::shared_ptr<Node> g
   }
 }
 
+// Note [Inplace update inference tensor]
+// Inplace update to inference tensor in normal mode is forbidden.
+// For example:
+//   inference_tensor.copy_(normal_tensor_requires_grad)
+// This inplace makes inference_tensor have requires_grad=True and
+// have a grad_fn.  This is bad because views of `inference_tensor`
+// created in InferenceMode won't be able to know the grad_fn since
+// their ViewMeta were not recorded. To match NoGradMode behavior
+// that "inplace update to a view created in NoGradMode raise an error",
+// we just ban inplace update to inference tensor since we can't tell
+// if an inference tensor is a view created in InferenceMode.
+//
+// Note that views of `inference_tensor` created in InferenceMode has proper
+// ViewMeta so that they're aware of the grad_fn correctly.
+//
 inline void increment_version(Tensor & t) {
+  TORCH_CHECK(!t.unsafeGetTensorImpl()->is_inference_tensor() || InferenceMode::is_enabled(),
+    "Inplace update to inference tensor in normal mode is not allowed. You can make "
+    "a clone to get a normal tensor before doing inplace update.");
   impl::bump_version(t);
 }
 
