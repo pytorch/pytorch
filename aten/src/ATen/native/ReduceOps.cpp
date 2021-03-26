@@ -79,7 +79,7 @@ Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
   return result;
 }
 
-Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _cumsum_out_cpu(const Tensor& self, int64_t dim, Tensor& result) {
   cumsum_stub(self.device().type(), result, self, dim);
   return result;
 }
@@ -128,7 +128,7 @@ Tensor _cumprod_cpu(const Tensor& self, int64_t dim) {
   return result;
 }
 
-Tensor& _cumprod_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _cumprod_out_cpu(const Tensor& self, int64_t dim, Tensor& result) {
   cumprod_stub(self.device().type(), result, self, dim);
   return result;
 }

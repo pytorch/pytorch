@@ -302,7 +302,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::_cat_out_cpu(out_t, in0_tl, in1_i);
+    at::native::_cat_out_cpu(in0_tl, in1_i, out_t);
   };
 });
 
@@ -335,7 +335,7 @@ REGISTER_OPERATOR_FUNCTOR(
             p_node->Output(0) = create_empty_from(in0_t);
           }
           auto& out_t = p_node->Output(0).toTensor();
-          at::native::leaky_relu_out(out_t, in0_t, in1_s);
+          at::native::leaky_relu_out(in0_t, in1_s, out_t);
         };
       } else {
         return [](ProcessedNode* p_node) {
@@ -345,7 +345,7 @@ REGISTER_OPERATOR_FUNCTOR(
             p_node->Output(0) = create_empty_from(in0_t);
           }
           auto& out_t = p_node->Output(0).toTensor();
-          at::native::leaky_relu_out(out_t, in0_t, in1_s);
+          at::native::leaky_relu_out(in0_t, in1_s, out_t);
         };
       }
     });

@@ -820,8 +820,8 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
 }
 } // anonymous namespace
 
-Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, int64_t dim,
-                              const Tensor& index) {
+Tensor& index_select_out_cuda(const Tensor& self, int64_t dim,
+                              const Tensor& index, Tensor& out) {
   static constexpr string_view DIM_WARNING =
     "Tensor too large or too many (> 25) dimensions";
 
@@ -845,7 +845,7 @@ Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, int64_t dim,
 
 Tensor index_select_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
   Tensor out = at::empty({0}, self.options());
-  index_select_out_cuda(out, self, dim, index);
+  at::native::index_select_out_cuda(self, dim, index, out);
   return out;
 }
 
@@ -918,7 +918,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   }
 }
 
-Tensor& nonzero_out_cuda(Tensor& out, const Tensor& self){
+Tensor& nonzero_out_cuda(const Tensor& self, Tensor& out){
   TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(), "nonzero is not supported for tensors with more than INT_MAX elements, \
   file a support request");
   TORCH_CHECK(out.dtype() == at::kLong, "Expected object of scalar type ", at::kLong, " as out, but got ", out.dtype());
@@ -932,7 +932,7 @@ Tensor& nonzero_out_cuda(Tensor& out, const Tensor& self){
 
 Tensor nonzero_cuda(const Tensor& self){
   Tensor out = at::native::empty_cuda({0}, kLong, self.options().layout_opt(), self.options().device_opt(), self.options().pinned_memory_opt());
-  return nonzero_out_cuda(out, self);
+  return at::native::nonzero_out_cuda(self, out);
 }
 
 namespace {
