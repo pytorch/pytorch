@@ -1065,8 +1065,8 @@ Tensor matmul(
     tensor2_bmm_view.insert(tensor2_bmm_view.end(), {m2, p});
 
     // flatten expanded batches
-    Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size).contiguous().view(tensor1_bmm_view);
-    Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size).contiguous().view(tensor2_bmm_view);
+    Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape(tensor1_bmm_view);
+    Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size).reshape(tensor2_bmm_view);
 
     // reshape batches back into result
     std::vector<int64_t> output_shape(expand_batch_portion);

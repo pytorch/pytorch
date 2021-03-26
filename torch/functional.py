@@ -1586,10 +1586,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     """
     if not torch._jit_internal.is_scripting():
         if A.requires_grad:
-            if not (A.size(-2) == A.size(-1) and A.dtype.is_floating_point):
+            if not (A.size(-2) == A.size(-1) and (A.dtype.is_floating_point or A.is_complex)):
                 raise ValueError(
                     'lu.backward works only with batches of squared full-rank matrices'
-                    ' of floating types.'
+                    ' of floating or complex types.'
                 )
 
             return _LU.apply(A, pivot, get_infos)
