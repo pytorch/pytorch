@@ -172,6 +172,26 @@ class TestComplex(JitTestCase):
         self.assertEqual(loaded(2, 3), 2 + cmath.infj)
         self.assertEqual(loaded(3, 4), 4 + cmath.nanj)
 
+    def test_comparison_ops(self):
+        def fn1(a: complex, b: complex):
+            return a == b
+
+        def fn2(a: complex, b: complex):
+            return a != b
+
+        x, y = 2 - 3j, 4j
+        self.checkScript(fn1, (x, x))
+        self.checkScript(fn1, (x, y))
+        self.checkScript(fn2, (x, x))
+        self.checkScript(fn1, (x, y))
+
+    def test_div(self):
+        def fn1(a: complex, b: complex):
+            return a / b
+
+        x, y = 2 - 3j, 4j
+        self.checkScript(fn1, (x, y))
+
     def test_tensor_attributes(self):
         def tensor_real(x):
             return x.real

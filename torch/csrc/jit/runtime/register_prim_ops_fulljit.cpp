@@ -932,12 +932,13 @@ RegisterOperators reg2({
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_COMPLEX_OP(aten::log, std::log(a) / std::log(b), complex),
     DEFINE_FLOAT_COMPLEX_OP(aten::log, std::log(a) / std::log(b), complex),
-    DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX(
+    DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_AVOID_COLLISION(
         aten::log,
         std::log(a) / std::log(b),
         std::log(a) / std::log(b),
         std::log(a) / std::log(b),
-        float),
+        float,
+        "Scalar_Scalar"),
     DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
     DEFINE_UNARY_OP_WITH_COMPLEX(aten::log10, std::log10(a), float, float),
     DEFINE_UNARY_OP_WITH_COMPLEX(aten::sqrt, std::sqrt(a), float, float),
@@ -951,11 +952,12 @@ RegisterOperators reg2({
         float,
         float),
     DEFINE_INT_FLOAT_OP(aten::atan2, std::atan2(a, b), float),
-    DEFINE_SCALAR_SCALAR_BINARY_OP(
+    DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(
         aten::atan2,
         std::atan2(a, b),
         std::atan2(a, b),
-        float),
+        float,
+        "Scalar_Scalar"),
     DEFINE_UNARY_OP_WITH_COMPLEX(aten::cos, std::cos(a), float, float),
     DEFINE_UNARY_OP_WITH_COMPLEX(aten::sin, std::sin(a), float, float),
     DEFINE_UNARY_OP_WITH_COMPLEX(aten::tan, std::tan(a), float, float),
@@ -1076,18 +1078,18 @@ RegisterOperators reg2({
           push(stack, sum);
         },
         aliasAnalysisFromSchema()),
-    // Operator(
-    //     "aten::sum.complex(complex[] self) -> complex",
-    //     [](Stack* stack) {
-    //       c10::List<c10::complex<double>> l =
-    //       pop(stack).toComplexDoubleList();
-    //       c10::complex<double> sum = 0.0;
-    //       for (int i=0; i<l.size(); i++) {
-    //         sum += l[i];
-    //       }
-    //       push(stack, sum);
-    //     },
-    //     aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sum.complex(complex[] self) -> complex",
+        [](Stack* stack) {
+          c10::List<c10::complex<double>> l =
+          pop(stack).toComplexDoubleList();
+          c10::complex<double> sum = 0.0;
+          for (int i=0; i<l.size(); i++) {
+            sum = sum + l.extract(i);
+          }
+          push(stack, sum);
+        },
+        aliasAnalysisFromSchema()),
     Operator(
         "aten::sum.bool(bool[] self) -> int",
         [](Stack* stack) {

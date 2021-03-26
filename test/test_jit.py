@@ -1269,12 +1269,16 @@ class TestJit(JitTestCase):
         def fn2(x: List[bool]):
             return sum(x)
 
+        def fn3(x: List[complex]):
+            return sum(x)
+
         self.checkScript(fn, ([1, 2, 3], ))
         self.checkScript(fn1, ([1.0, 2.0, 3.0], ))
         self.checkScript(fn1, ([1, 2.8, 3], ))
         self.checkScript(fn2, ([True, False, False], ))
         self.checkScript(fn2, ([False, False, False], ))
         self.checkScript(fn2, ([0, 1, 1, 0], ))
+        self.checkScript(fn3, (torch.randn(4, dtype=torch.cdouble).tolist(), ))
 
     def test_cse(self):
         x = torch.tensor([0.4, 0.3], requires_grad=True)
