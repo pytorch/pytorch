@@ -4,6 +4,8 @@
 #include "caffe2/perfkernels/common.h"
 #include "caffe2/utils/cpuid.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 /**
@@ -31,7 +33,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlowIdx(
   const auto scale_bias_offset = 8 / sizeof(InType);
   const int64_t fused_block_size = block_size + scale_bias_offset;
   int64_t current = 0;
-  for (int m = 0; m < output_size; ++m) {
+  for (const auto m : c10::irange(output_size)) {
     memset(out, 0, sizeof(OutType) * block_size);
     if (current != offsets[m] - offsets[0]) {
       return false;
@@ -39,7 +41,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlowIdx(
     int64_t start_offset = offsets[m];
     int64_t end_offset = offsets[m + 1];
     int64_t length = end_offset - start_offset;
-    for (int i = start_offset; i < end_offset; ++i) {
+    for (const auto i : c10::irange(start_offset, end_offset)) {
       int64_t idx = indices[current];
       if (idx < 0 || idx >= data_size) {
         return false;
@@ -61,7 +63,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlowIdx(
       const float scale = weight * scale_bias[0];
       const float bias = weight * scale_bias[1];
 
-      for (int j = 0; j < block_size; ++j) {
+      for (const auto j : c10::irange(block_size)) {
         out[j] += scale * input[fused_block_size * indices[current] + j] + bias;
       }
 
@@ -69,7 +71,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlowIdx(
     }
     if (normalize_by_lengths && length) {
       float scale = 1.f / length;
-      for (int j = 0; j < block_size; ++j) {
+      for (const auto j : c10::irange(block_size)) {
         out[j] *= scale;
       }
     }
