@@ -1970,7 +1970,7 @@ foreach_unary_op_db: List[OpInfo] = [
                          dtypesIfCUDA=floating_types_and(torch.half)),
 
     ForeachUnaryFuncInfo('round',
-                         dtypes=floating_types(),
+                         dtypes=floating_types_and(torch.bfloat16),
                          dtypesIfCPU=floating_types_and(torch.bfloat16),
                          dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16)),
 
@@ -3238,7 +3238,7 @@ op_db: List[OpInfo] = [
                    ref=lambda x: np.reciprocal(np.sqrt(x)),
                    domain=(0, float('inf')),
                    dtypes=all_types_and_complex_and(torch.bool),
-                   dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.half: 5e-2}),),
                    safe_casts_outputs=True,
