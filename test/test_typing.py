@@ -52,8 +52,8 @@ def run_mypy() -> None:
     The mypy results are cached in `OUTPUT_MYPY` for further use.
 
     """
-    # if os.path.isdir(CACHE_DIR):
-    #     shutil.rmtree(CACHE_DIR)
+    if os.path.isdir(CACHE_DIR):
+        shutil.rmtree(CACHE_DIR)
 
     for directory in (REVEAL_DIR, PASS_DIR, FAIL_DIR):
         # Run mypy
@@ -89,16 +89,6 @@ def get_test_cases(directory):
                     id=relpath,
                 )
 
-def _construct_format_dict():
-    dct = {
-        'ModuleList': 'torch.nn.modules.container.ModuleList',
-        'AdaptiveAvgPool2d': 'torch.nn.modules.pooling.AdaptiveAvgPool2d',
-        'AdaptiveMaxPool2d': 'torch.nn.modules.pooling.AdaptiveMaxPool2d',
-        'Tensor': 'torch.tensor.Tensor',
-        'Adagrad': 'torch.optim.adagrad.Adagrad',
-        'Adam': 'torch.optim.adam.Adam',
-    }
-    return dct
 
 @pytest.mark.skipif(NO_MYPY, reason="Mypy is not installed")
 @pytest.mark.parametrize("path", get_test_cases(PASS_DIR))
@@ -167,7 +157,12 @@ def _test_fail(path: str, error: str, expected_error: Optional[str], lineno: int
 
 def _construct_format_dict():
     dct = {
+        'ModuleList': 'torch.nn.modules.container.ModuleList',
+        'AdaptiveAvgPool2d': 'torch.nn.modules.pooling.AdaptiveAvgPool2d',
+        'AdaptiveMaxPool2d': 'torch.nn.modules.pooling.AdaptiveMaxPool2d',
         'Tensor': 'torch._tensor.Tensor',
+        'Adagrad': 'torch.optim.adagrad.Adagrad',
+        'Adam': 'torch.optim.adam.Adam',
     }
     return dct
 
