@@ -1,6 +1,5 @@
 import functools
 import torch
-import numpy as np
 
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, make_tensor, suppress_warnings)
@@ -22,13 +21,14 @@ class TensorCreationOpInfo(OpInfo):
         include_bfloat16=False,
         include_complex32=False))
     all_dtypes_grad = torch.testing._dispatch_dtypes(torch.testing.floating_and_complex_types())
+
     def __init__(self,
                  name,
                  *,
                  dtypes=None,
                  supports_autograd=None,
                  **kwargs):
-        supports_autograd=False if supports_autograd is None else supports_autograd
+        supports_autograd = False if supports_autograd is None else supports_autograd
         if supports_autograd:
             dtypes = self.all_dtypes_grad if dtypes is None else dtypes
         else:
@@ -40,8 +40,7 @@ class TensorCreationOpInfo(OpInfo):
                          supports_autograd=supports_autograd,
                          check_batched_grad=False,
                          check_batched_gradgrad=False,
-                         **kwargs
-        )
+                         **kwargs)
 
     def get_devices(self, skip_device=None, max_device_indices=2):
         """Generator of existing device instances except skip_device.
@@ -144,14 +143,16 @@ def sample_inputs_tensor(op_info, device, dtype, requires_grad, pin_memory=False
 
         # create from list, not checking for shared memory as it is
         # not possible in between a Tensor and a Python list
-        yield SampleInput(r.tolist(), ref=r, kwargs=kwargs, extra=dict(enable_pin_test=pin_memory and device.type=='cpu'))
+        yield SampleInput(r.tolist(), ref=r, kwargs=kwargs, extra=dict(enable_pin_test=(pin_memory and device.type == 'cpu')))
 
         # create from an object that implements sequence protocol
         class Sequence:
             def __init__(self, tensor):
                 self.tensor = tensor
+
             def __len__(self):
                 return len(self.tensor)
+
             def __getitem__(self, key):
                 if self.tensor.ndim > 1:
                     return type(self)(self.tensor[key])
@@ -168,6 +169,7 @@ def sample_inputs_tensor(op_info, device, dtype, requires_grad, pin_memory=False
             class ArrayInterfaceProperty:
                 def __init__(self, tensor):
                     self.tensor = tensor
+
                 @property
                 def __array_interface__(self):
                     return self.tensor.__array__().__array_interface__
@@ -175,6 +177,7 @@ def sample_inputs_tensor(op_info, device, dtype, requires_grad, pin_memory=False
             class ArrayInterfaceMethod:
                 def __init__(self, tensor):
                     self.tensor = tensor
+
                 def __array__(self):
                     return self.tensor.__array__()
 
@@ -185,6 +188,7 @@ def sample_inputs_tensor(op_info, device, dtype, requires_grad, pin_memory=False
             class CudaArrayInterfaceProperty:
                 def __init__(self, tensor):
                     self.tensor = tensor
+
                 @property
                 def __cuda_array_interface__(self):
                     return self.tensor.__cuda_array_interface__
@@ -196,9 +200,9 @@ def sample_inputs_tensor(op_info, device, dtype, requires_grad, pin_memory=False
                 # skip equality test when conversion dtype->obj_dtype->dtype looses information
                 skip_equal_test = obj_dtype not in convertible_types
 
-                may_share_memory = r.device.type=='cpu' and obj_dtype == dtype
-                extra=dict(may_share_memory=may_share_memory and not always_copies,
-                           skip_equal_test=skip_equal_test)
+                may_share_memory = r.device.type == 'cpu' and obj_dtype == dtype
+                extra = dict(may_share_memory=may_share_memory and not always_copies,
+                             skip_equal_test=skip_equal_test)
 
                 # create from NumPy ndarray
                 obj = r.detach().to(dtype=obj_dtype, device='cpu').numpy()
@@ -230,10 +234,10 @@ def sample_inputs_tensor(op_info, device, dtype, requires_grad, pin_memory=False
                     yield SampleInput(ArrayInterfaceMethod(obj), ref=r, kwargs=kwargs, extra=extra)
 
                 # create from object implementing CUDA Array Interface
-                if r.device.type=='cuda' and torch.bool not in [obj_dtype, dtype]:
+                if r.device.type == 'cuda' and torch.bool not in [obj_dtype, dtype]:
                     obj = r.detach().to(dtype=obj_dtype)
                     may_share_memory = obj_dtype == dtype
-                    extra=dict(may_share_memory=may_share_memory and not always_copies, skip_equal_test=skip_equal_test)
+                    extra = dict(may_share_memory=may_share_memory and not always_copies, skip_equal_test=skip_equal_test)
                     if pin_memory:
                         if r_index == obj_dtype_index == 0:
                             yield SampleInput(CudaArrayInterfaceAttribute(obj),
@@ -303,28 +307,27 @@ def sample_inputs_tensor(op_info, device, dtype, requires_grad, pin_memory=False
 
 
 tensor_op_db = [TensorCreationOpInfo('as_tensor',
-                                     op = torch.as_tensor,
+                                     op=torch.as_tensor,
                                      sample_inputs_func=sample_inputs_tensor,
                                      supports_out=False),
                 TensorCreationOpInfo('tensor',
-                                     op = torch.tensor,
+                                     op=torch.tensor,
                                      sample_inputs_func=sample_inputs_tensor,
                                      supports_out=False),
                 TensorCreationOpInfo('tensor_pinning',
-                                     op = torch.tensor,
+                                     op=torch.tensor,
                                      sample_inputs_func=functools.partial(sample_inputs_tensor, pin_memory=True),
                                      supports_out=False),
                 TensorCreationOpInfo('tensor_grad',
-                                     op = torch.tensor,
+                                     op=torch.tensor,
                                      sample_inputs_func=sample_inputs_tensor,
                                      supports_autograd=True,
                                      supports_out=False),
                 TensorCreationOpInfo('tensor_grad_pinning',
-                                     op = torch.tensor,
+                                     op=torch.tensor,
                                      sample_inputs_func=functools.partial(sample_inputs_tensor, pin_memory=True),
                                      supports_autograd=True,
-                                     supports_out=False),
-]
+                                     supports_out=False)]
 
 
 class TestTensorCreationOps(TestCase):
@@ -381,7 +384,7 @@ class TestTensorCreationOps(TestCase):
     @ops(tensor_op_db)
     def test_constructor(self, device, dtype, op):
         # torch.tensor, torch.as_tensor
-        
+
         def test(sample, result, expected):
 
             self.assertEqual(result.device, expected.device)
