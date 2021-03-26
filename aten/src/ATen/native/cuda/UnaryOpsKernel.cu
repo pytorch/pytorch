@@ -42,7 +42,7 @@ void exp_kernel_cuda(TensorIterator& iter) {
 }
 
 void exp2_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "exp2_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "exp2_cuda", [&]() {
     gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::exp2(a);
     });
