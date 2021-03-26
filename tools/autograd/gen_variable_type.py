@@ -32,7 +32,6 @@ from .gen_inplace_or_view_type import (
     ASSIGN_RETURN_VALUE, gen_formals,
 )
 import warnings
-import re
 
 from tools.codegen.api.types import *
 from tools.codegen.api.autograd import *
@@ -42,7 +41,7 @@ from tools.codegen.context import with_native_function
 from tools.codegen.gen import FileManager
 from tools.codegen.utils import mapMaybe
 from tools.codegen.model import *
-from typing import Callable, List, Match, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Union
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -758,8 +757,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             else:
                 raise RuntimeError("Unsupported output type for forward derivative")
             # View ops create fw_grad that already is a view of the base's fw_grad so just use that
-            content.append(FW_DERIVATIVE_TEMPLATE.substitute(requires_fw_grad=requires_fw_grad, formula=derivative.formula, out_arg=res,
-                                                             unpacked_arguments=unpacked_arguments, fw_grad_setter=fw_grad_setter))
+            content.append(FW_DERIVATIVE_TEMPLATE.substitute(
+                requires_fw_grad=requires_fw_grad, formula=derivative.formula, out_arg=res,
+                unpacked_arguments=unpacked_arguments, fw_grad_setter=fw_grad_setter))
         return content
 
     def emit_forbid_fw_derivatives(is_inplace: bool = False) -> str:
