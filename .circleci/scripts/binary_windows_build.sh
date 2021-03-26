@@ -24,6 +24,13 @@ export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
 export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
 set -x
 
+if [[ "$CIRCLECI" == 'true' && -d "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages\\_Instances" ]]; then
+  mv "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages\\_Instances" .
+  rm -rf "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
+  mkdir -p "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
+  mv _Instances "C:\\ProgramData\\Microsoft\\VisualStudio\\Packages"
+fi
+
 if [[ "$CIRCLECI" == 'true' && -d "C:\\Microsoft" ]]; then
   rm -rf "C:\\Microsoft\\Android*"
 fi
