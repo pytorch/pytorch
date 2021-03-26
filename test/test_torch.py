@@ -4351,6 +4351,85 @@ else:
         x = torch.empty(50000000, device=device, dtype=dtype).exponential_()
         self.assertTrue(x.min() > 0)
 
+	@dtypes(torch.float)
+    def test_cov(self, device, dtype):
+        shapes = [(1,), (4,), (10,)] # single dim inps
+        nums = [1, 2, 5, 10, 20, 50]
+        shapes = shapes + list(product(nums, nums)) # concat 2 dim inps
+        biases = [True, False]
+        rowvars = [True, False]
+        ddofs = [None, 0, 1]            
+
+        # special cases
+        t_list = []
+        t_list.append(torch.empty(0, dtype=dtype, device=device))
+        t_list.append(torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device))
+        for t in t_list:
+            actual = torch.cov(t)
+            expected = torch.from_numpy(np.cov(t.cpu().numpy())).to(actual.dtype)
+            if t.size(0) == 0: 
+                self.assertEqual(actual, t)
+            else:
+                self.assertEqual(actual, expected)
+
+        # single input
+        for shape in shapes:
+            t = make_tensor(shape, device, dtype, low=-50, high=50)
+            actual = torch.cov(t)
+            expected = torch.from_numpy(np.cov(t.cpu().numpy())).to(actual.dtype)
+            self.assertEqual(actual, expected)
+
+        # two inputs
+            t1 = make_tensor(shape, device, dtype, low=-50, high=50)
+            t2 = t1 + 0.5 * make_tensor(shape, device, dtype, low=-50, high=50)
+            actual = torch.cov(t1, t2)
+            expected = torch.from_numpy(np.cov(t1.cpu().numpy(), t2.cpu().numpy())).to(actual.dtype)
+            self.assertEqual(actual, expected)
+
+        # inputs with other args
+            for rowvar in rowvars:
+                if np.size(shape) == 1:
+                    t_size = shape[0]
+                elif rowvar or shape[0] == 1:
+                    t_size = shape[1]
+                else:
+                    t_size = shape[0]
+                for bias in biases:
+                    for ddof in ddofs:
+                        fwt = torch.randint(1, 10, (t_size,), device=device) * 2
+                        awt = torch.randint(1, 10, (t_size,), device=device)**2
+                        actual = torch.cov(t1, t2, rowvar, bias, ddof, fwt, awt)
+                        expected = np.cov(t1.cpu().numpy(), t2.cpu().numpy(), 
+                                          rowvar, bias, ddof, fwt.cpu().numpy(), awt.cpu().numpy())
+                        expected = torch.from_numpy(expected).to(actual.dtype)
+                        self.assertEqual(actual, expected)
+
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False))
+    def test_cov_error(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, "cov: expected Input1 to have two or fewer dimensions, but got 3!"):
+            invalid = make_tensor((5, 10, 20), device, dtype, low=-50, high=50)
+            torch.cov(invalid)
+
+        with self.assertRaisesRegex(RuntimeError, "fweights must be integer."):
+            fwt = torch.randn((10, 1), dtype=dtype, device=device)
+            invalid = make_tensor((10, 1), device, dtype, low=-50, high=50)   
+            torch.cov(invalid, fweights=fwt)
+
+
+        with self.assertRaisesRegex(RuntimeError, "fweights cannot be negative."):
+            fwt = make_tensor((10,), device, dtype=torch.int64, low=-10, high=10) * -1
+            invalid = make_tensor((10,), device, dtype, low=-50, high=50) 
+            torch.cov(invalid, fweights=fwt)
+
+        with self.assertRaises(RuntimeError):
+            fwt = make_tensor((2,), device, dtype=torch.int64, low=-10, high=10) 
+            invalid = make_tensor((10,), device, dtype, low=-50, high=50) 
+            torch.cov(invalid, fweights=fwt)
+
+        with self.assertRaisesRegex(RuntimeError, "cov: expected fweights to have one or fewer dimensions, but got 2!"):
+            fwt = make_tensor((1, 2), device, dtype=torch.int64, low=-10, high=10) 
+            invalid = make_tensor((10,), device, dtype, low=-50, high=50) 
+            torch.cov(invalid, fweights=fwt)
 
     @skipIfNoSciPy
     @dtypes(*torch.testing.get_all_fp_dtypes())

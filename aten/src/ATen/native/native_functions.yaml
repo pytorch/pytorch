@@ -1091,6 +1091,9 @@
   dispatch:
     CompositeExplicitAutograd: count_nonzero
 
+- func: cov(Tensor self, Tensor? other=None, bool? rowvar=True, bool? bias=None, int? ddof=None, Tensor? fweights=None, Tensor? aweights=None) -> Tensor
+  variants: function, method
+
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
   dispatch:
     CUDA: cudnn_affine_grid_generator_forward

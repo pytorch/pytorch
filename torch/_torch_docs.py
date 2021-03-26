@@ -1501,6 +1501,58 @@ Example::
     False
 """)
 
+add_docstr(torch.cov,
+           r"""
+cov(input1, input2=None, rowvar=True, bias=None, ddof=None, fweights=None, aweights=None) -> Tensor
+
+Estimates a covariance matrix, given input tensor data and weights (optional).
+
+Args:
+    input1 (Tensor): A 1-D or 2-D tensor containing multiple variables and observations. 
+        Each row of :attr:`input1` represents a variable, and each column a 
+        single observation of all those variables. Also see :attr:`rowvar` below.
+    input2 (Tensor, optional): An additional set of variables and observations. 
+        :attr:`input2` has the same form as that of :attr:`input1`.
+    rowvar (bool, optional): If :attr:`rowvar` is `True` (default), then each row represents a variable, 
+        with observations in the columns. 
+        Otherwise, the relationship is transposed: each column represents a variable, 
+        while the rows contain observations.
+    bias (bool, optional): Default normalization (`False`) is by :math:`(N - 1)`, 
+        where :math:`N` is the number of observations given (unbiased estimate). 
+        If :attr:`bias` is `True`, then normalization is by :math:`N`. 
+        These values can be overridden by using the keyword :attr:`ddof`.
+    ddof (int, optional): If not `None` the default value implied by :attr:`bias` is overridden.
+        Note that :attr:`ddof`:math:`=1` will return the unbiased estimate, 
+        even if both :attr:`fweights` and :attr:`aweights` are specified, 
+        and :math:`ddof`:math:`=0` will return the simple average.
+    fweights (tensor, optional): 1-D tensor of integer frequency weights; 
+        the number of times each observation vector should be repeated.
+    aweights (tensor, optional): 1-D array of observation vector weights. 
+        These relative weights are typically large for observations considered “important” and smaller for 
+        observations considered less “important”. If :attr:`ddof`:math:`=0` the tensor of weights can be used to
+        assign probabilities to observation vectors.
+
+Example::
+    >>> x =  torch.tensor([[0, 2], [1, 1], [2, 0]]).T
+    >>> x
+    tensor([[0, 1, 2],
+            [2, 1, 0]])
+    >>> torch.cov(x)
+    tensor([[ 1., -1.],
+            [-1.,  1.]], dtype=torch.float64)
+    >>> x = torch.tensor([-2.1, -1,  4.3])
+    >>> y = torch.tensor([3,  1.1,  0.12])
+    >>> X = torch.stack ((x, y), 0)
+    >>> torch.cov(X)
+    tensor([[11.7100, -4.2860],
+            [-4.2860,  2.1441]])
+    >>> torch.cov(x, y)
+    tensor([[11.7100, -4.2860],
+            [-4.2860,  2.1441]])
+    >>> torch.cov(x)
+    tensor(11.7100)
+""")
+
 add_docstr(torch.cat,
            r"""
 cat(tensors, dim=0, *, out=None) -> Tensor
