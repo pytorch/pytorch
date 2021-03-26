@@ -40,6 +40,7 @@ class TestComplex(JitTestCase):
                 self.b = [2 + 3j, 3 + 4j, 0 - 3j, -4 + 0j]
                 self.c = {2 + 3j : 2 - 3j, -4.3 - 2j: 3j}
 
+            @torch.jit.script_method
             def forward(self, b: int):
                 return b + 2j
 
@@ -47,6 +48,7 @@ class TestComplex(JitTestCase):
         self.assertEqual(loaded.a, 3 + 5j)
         self.assertEqual(loaded.b, [2 + 3j, 3 + 4j, -3j, -4])
         self.assertEqual(loaded.c, {2 + 3j : 2 - 3j, -4.3 - 2j: 3j})
+        self.assertEqual(loaded(2), 2 + 2j)
 
     def test_complex_parse(self):
         def fn(a: int, b: torch.Tensor, dim: int):
@@ -62,7 +64,7 @@ class TestComplex(JitTestCase):
     def test_complex_constants_and_ops(self):
         vals = ([0.0, 1.0, 2.2, -1.0, -0.0, -2.2, 1, 0, 2]
                 + [10.0 ** i for i in range(2)] + [-(10.0 ** i) for i in range(2)])
-        complex_vals = tuple(complex(x, y) for x, y in product(vals, vals))
+        complex_vals = tuple((x + y * 1j) for x, y in product(vals, vals))
 
         funcs_template = dedent('''
             def func(a: complex):
@@ -118,3 +120,21 @@ class TestComplex(JitTestCase):
         complex_consts = ['infj', 'nanj']
         for x in (float_consts + complex_consts):
             checkCmath(x, funcs_template=func_constants_template)
+
+
+    def test_infj_nanj_pickle(self):
+        class ComplexModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super().__init__()
+                self.a = 3 + 5j
+
+            @torch.jit.script_method
+            def forward(self, infj: int, nanj: int):
+                if infj == 2:
+                    return infj + cmath.infj
+                else:
+                    return nanj + cmath.nanj
+
+        loaded = self.getExportImportCopy(ComplexModule())
+        self.assertEqual(loaded(2, 3), 2 + cmath.infj)
+        self.assertEqual(loaded(3, 4), 4 + cmath.nanj)
