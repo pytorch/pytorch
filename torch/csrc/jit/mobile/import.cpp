@@ -220,12 +220,12 @@ void BytecodeDeserializer::parseMethods(
   }
   TORCH_CHECK(
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
-          model_version <= caffe2::serialize::kProducedBytecodeVersion,
+          model_version <= caffe2::serialize::kMaxSupportedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
       "The model version must be between ",
       caffe2::serialize::kMinSupportedBytecodeVersion,
       " and ",
-      caffe2::serialize::kProducedBytecodeVersion,
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
       "But the model version is ",
       model_version);
 
