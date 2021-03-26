@@ -1,3 +1,4 @@
+import inspect
 from functools import reduce, wraps, partial
 from itertools import product
 from operator import mul, itemgetter
@@ -74,30 +75,69 @@ class SkipInfo(DecorateInfo):
                          test_name=test_name, device_type=device_type, dtypes=dtypes,
                          active_if=active_if)
 
+
 class SampleInput(object):
     """Represents sample inputs to a function."""
 
-    # output_process_fn_grad is a function that modifies the output of op compatible with input
-    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad']
+    __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad', 'ref', 'extra']
 
-    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None):
-        # input must be a single tensor, and will be the first argument to the op
-        #   this follows the typical pattern where op(t, ...) = t.op(...)
-        assert isinstance(input, torch.Tensor)
+    unspecified = object()
+
+    def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None, ref=unspecified, extra=None):
+        """Parameters
+        ----------
+        input : object
+          Input is typically a single tensor that is used as the first
+          argument to op so that
+            op(input, *args, **kwargs) = input.op(*args, **kwargs) = output
+          holds. However, there exists operations that can take
+          non-Tensor objects as first arguments (e.g. many tensor
+          creation operations, torch.cat, etc) and for these cases we
+          have:
+            op(input, *args, **kwargs) = output
+        args, kwargs: tuple, dict
+          Arguments to op.
+        output_process_fn_grad: {callable, None}
+          A function that modifies the output of op compatible with input.
+        ref: {object, callable, Exception, unspecified}
+          When specified, ref determines the expected output of op for the given inputs:
+          If object, then
+            output = ref
+          If callable, then
+            output = ref(*args, **kwargs) if input is unspecified else ref(input, *args, **kwargs)
+          If Exception, then
+            try:
+                op(...)
+            except Exception as exc:
+                assert exc == ref
+        extra: {dict, None}
+          When specified, extra contains test-developer-specified information about the sample.
+
+        """
         self.input = input
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
+        self.ref = ref
+        self.extra = extra if extra is not None else {}
+        caller = inspect.getframeinfo(inspect.stack()[1][0])
+        self.extra['sample-origin'] = f'{caller.filename}#{caller.lineno}'
 
     def __repr__(self):
+        if isinstance(self.input, torch.Tensor):
+            input_str = f'input[{len(self.input)}]'
+        else:
+            input_str = f'input=<{type(self.input).__name__} instance>'
         arguments = [
-            f'input[{len(self.input)}]',
+            input_str,
             f'args={self.args}' if len(self.args) > 0 else None,
             f'kwargs={self.kwargs}' if len(self.kwargs) > 0 else None,
             (f'output_process_fn_grad={self.output_process_fn_grad}'
-             if self.output_process_fn_grad is not None else None)]
+             if self.output_process_fn_grad is not None else None),
+            f'ref={self.ref}' if self.ref is not self.unspecified else None,
+            f'extra={self.extra}' if self.extra else None]
+        return f'{type(self).__name__}({", ".join(a for a in arguments if a is not None)})'
 
-        return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
 
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
@@ -272,7 +312,6 @@ class OpInfo(object):
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
         else:
             return self.dtypes
-
 
     def supports_dtype(self, dtype, device_type):
         return dtype in self.supported_dtypes(device_type)
