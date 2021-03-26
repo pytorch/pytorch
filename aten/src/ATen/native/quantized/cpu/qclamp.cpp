@@ -139,7 +139,7 @@ Tensor hardtanh_quantized_cpu(
 
 Tensor& hardtanh_out_quantized_cpu(const Tensor& qx,
     const Scalar& min,
-    const Scalar& max, 
+    const Scalar& max,
     Tensor& result) {
   result = quantized_clamp_impl(qx, min, max);
   return result;

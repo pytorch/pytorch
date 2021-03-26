@@ -438,7 +438,7 @@ Tensor& avg_pool3d_out_cpu(const Tensor& input,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override, 
+  c10::optional<int64_t> divisor_override,
   Tensor& output)
 {
   avg_pool3d_out_cpu_template(
@@ -482,7 +482,7 @@ Tensor& avg_pool3d_backward_out_cpu(const Tensor& gradOutput_,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override, 
+  c10::optional<int64_t> divisor_override,
   Tensor& gradInput)
 {
   avg_pool3d_backward_out_cpu_template(

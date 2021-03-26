@@ -48,7 +48,7 @@ Tensor& mkldnn_avg_pool2d_out(const Tensor& self,
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override, 
+    c10::optional<int64_t> divisor_override,
     Tensor& output) {
   TORCH_CHECK(false, "mkldnn_avg_pool2d_out: ATen not compiled with MKLDNN support");
 }
@@ -70,7 +70,7 @@ Tensor& mkldnn_avg_pool3d_out(const Tensor& self,
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override, 
+    c10::optional<int64_t> divisor_override,
     Tensor& output) {
   TORCH_CHECK(false, "mkldnn_avg_pool3d_out: ATen not compiled with MKLDNN support");
 }
@@ -80,7 +80,7 @@ Tensor mkldnn_adaptive_avg_pool2d(Tensor const& input, IntArrayRef output_size) 
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out(const Tensor& input,
-    IntArrayRef output_size, 
+    IntArrayRef output_size,
     Tensor& output) {
   TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out: ATen not compiled with MKLDNN support");
 }
@@ -116,7 +116,7 @@ Tensor& mkldnn_avg_pool2d_backward_out(const Tensor & grad_output,
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override, 
+    c10::optional<int64_t> divisor_override,
     Tensor & grad_input) {
   TORCH_CHECK(false, "mkldnn_avg_pool2d_backward_out: ATen not compiled with MKLDNN support");
 }
@@ -140,7 +140,7 @@ Tensor& mkldnn_avg_pool3d_backward_out(const Tensor & grad_output,
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override, 
+    c10::optional<int64_t> divisor_override,
     Tensor & grad_input) {
   TORCH_CHECK(false, "mkldnn_avg_pool3d_backward_out: ATen not compiled with MKLDNN support");
 }
@@ -424,7 +424,7 @@ Tensor& mkldnn_avg_pool2d_out(const Tensor& input,
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override, 
+    c10::optional<int64_t> divisor_override,
     Tensor& output) {
   TORCH_CHECK(false, "mkldnn_avg_pool2d_out: in-place mkldnn operations are not supported yet");
 }
@@ -460,7 +460,7 @@ Tensor& mkldnn_avg_pool3d_out(const Tensor& input,
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override, 
+    c10::optional<int64_t> divisor_override,
     Tensor& output) {
   TORCH_CHECK(false, "mkldnn_avg_pool3d_out: in-place mkldnn operations are not supported yet");
 }
@@ -496,7 +496,7 @@ Tensor mkldnn_adaptive_avg_pool2d(
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out(const Tensor& input,
-    IntArrayRef output_size, 
+    IntArrayRef output_size,
     Tensor& output) {
   TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out: in-place mkldnn operations are not supported yet");
 }
@@ -572,7 +572,7 @@ Tensor& mkldnn_avg_pool2d_backward_out(const Tensor & grad_output,
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override, 
+    c10::optional<int64_t> divisor_override,
     Tensor & grad_input) {
   TORCH_CHECK(false, "mkldnn_avg_pool2d_backward_out: in-place mkldnn operations are not supported yet");
 }
@@ -606,7 +606,7 @@ Tensor& mkldnn_avg_pool3d_backward_out(const Tensor & grad_output,
     IntArrayRef padding,
     bool ceil_mode,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override, 
+    c10::optional<int64_t> divisor_override,
     Tensor & grad_input) {
   TORCH_CHECK(false, "mkldnn_avg_pool3d_backward_out: in-place mkldnn operations are not supported yet");
 }

@@ -31,7 +31,7 @@ Tensor& addcmul_(
 Tensor& addcmul_out(const Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
-    const Scalar& value, 
+    const Scalar& value,
     Tensor& result) {
   checkBackend("addcmul_cpu", result, self.options().backend());
   auto iter = at::TensorIteratorConfig()

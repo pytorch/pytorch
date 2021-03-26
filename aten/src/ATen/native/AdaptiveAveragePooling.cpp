@@ -73,7 +73,7 @@ namespace {
 } // namespace
 
   Tensor& adaptive_avg_pool2d_out_cpu(const Tensor& input,
-    IntArrayRef output_size, 
+    IntArrayRef output_size,
     Tensor& output)
   {
     adaptive_avg_pool2d_out_cpu_template(

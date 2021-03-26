@@ -360,7 +360,7 @@ void fractional_max_pool3d_backward_out_cpu_template(
 std::tuple<Tensor&, Tensor&> fractional_max_pool3d_out_cpu(const at::Tensor& input,
   IntArrayRef pool_size,
   IntArrayRef output_size,
-  const at::Tensor& randomSamples, 
+  const at::Tensor& randomSamples,
   at::Tensor& output,
   at::Tensor& indices) {
   fractional_max_pool3d_out_cpu_template(

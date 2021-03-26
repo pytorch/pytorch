@@ -410,7 +410,7 @@ void adaptive_max_pool2d_backward_out_cuda_template(
 } // namespace
 
 std::tuple<Tensor&, Tensor&> adaptive_max_pool2d_out_cuda(const Tensor& input,
-  IntArrayRef output_size, 
+  IntArrayRef output_size,
   Tensor& output,
   Tensor& indices)
 {
@@ -438,7 +438,7 @@ std::tuple<Tensor, Tensor> adaptive_max_pool2d_cuda(
 
 Tensor& adaptive_max_pool2d_backward_out_cuda(const Tensor& gradOutput_,
   const Tensor& input,
-  const Tensor& indices, 
+  const Tensor& indices,
   Tensor& gradInput)
 {
   // See Note [Writing Nondeterministic Operations]
