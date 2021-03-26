@@ -60,7 +60,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         bias = torch.randn(8, requires_grad=False)    # bias does NOT require grad
         NUM_PROFILED_RUNS = 1
         with num_profiled_runs(NUM_PROFILED_RUNS):
-            WARMUP = 3 #  2 runs to reach backward + 1 to optimize it
+            WARMUP = 3    # 2 runs to reach backward + 1 to optimize it
             for x in range(WARMUP):
                 o = t(input, bias)
                 o.sum().backward()
