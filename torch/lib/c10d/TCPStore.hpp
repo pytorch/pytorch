@@ -18,11 +18,7 @@ class BackgroundThread {
   public:
     explicit BackgroundThread(int storeListenSocket);
     ~BackgroundThread();
-    void join();
   protected:
-    void stop();
-    void initStopSignal();
-    void closeStopSignal();
     std::thread daemonThread_;
     int storeListenSocket_;
     std::vector<int> sockets_;
@@ -33,6 +29,12 @@ class BackgroundThread {
 #else
     std::vector<int> controlPipeFd_{-1, -1};
 #endif
+  private:
+    void join();
+    void stop();
+    void initStopSignal();
+    void closeStopSignal();
+    bool isServer_;
 };
 
 // Run on master process
@@ -81,7 +83,7 @@ class ListenThread : public BackgroundThread {
 
   protected:
     void run();
-    void callbackHandler();
+    void callbackHandler(int socket);
     // List of callbacks map each watched key
     std::unordered_map<std::string, std::function<void(std::string, std::string)>> keyToCallbacks_;
 };
