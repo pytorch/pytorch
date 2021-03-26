@@ -90,8 +90,6 @@ def iter_tensor(x_tensor):
                 d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
                 yield x_value, x_idx, d_idx
     elif x_tensor.layout == torch._mkldnn:  # type: ignore
-        # Use .data here to get around the version check
-        x_tensor = x_tensor.data
         for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
             # this is really inefficient, but without indexing implemented, there's
             # not really a better way than converting back and forth
