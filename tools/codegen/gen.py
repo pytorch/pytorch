@@ -124,7 +124,7 @@ def static_dispatch_extra_headers(backend: Optional[DispatchKey]) -> str:
         return ''
     return f"""
 #include <ATen/{backend}Functions.h>
-#include <ATen/DefaultBackendFunctions.h>
+#include <ATen/CompositeExplicitAutogradFunctions.h>
 #include <ATen/CompositeImplicitAutogradFunctions.h>
 """
 
@@ -147,7 +147,7 @@ def static_dispatch(
         # migrate math/default_backend ops to use structured delegate.
         return f'return at::{backend.lower()}::{name}({exprs_str});'
 
-    for dispatch_key in (backend, DispatchKey.DefaultBackend, DispatchKey.CompositeImplicitAutograd):
+    for dispatch_key in (backend, DispatchKey.CompositeExplicitAutograd, DispatchKey.CompositeImplicitAutograd):
         if dispatch_key in f.dispatch:
             return f'return at::{dispatch_key.lower()}::{name}({exprs_str});'
 
@@ -352,12 +352,9 @@ def decorate_type(type: str) -> str:
     return type
 
 @with_native_function
-def compute_out_convention_refactor(g: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
-    if (isinstance(g, NativeFunctionsGroup) and g.structured) or local.use_c10_dispatcher() is UseC10Dispatcher.full:
+def compute_out_convention_refactor_for_native_function(g: NativeFunction) -> List[str]:
+    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
         return []
-
-    if isinstance(g, NativeFunctionsGroup):
-        g = g.out
 
     returns_type = native.returns_type(g.func.returns)
     args = native.arguments(g.func)
@@ -378,8 +375,6 @@ def compute_out_convention_refactor(g: Union[NativeFunctionsGroup, NativeFunctio
             print('quit because of ', arg.argument)
             return []
 
-
-
     to_move = 0
     for i in range(len(args)):
         if args[i].argument.type.is_tensor_like() and args[i].argument.is_write:
@@ -392,11 +387,11 @@ def compute_out_convention_refactor(g: Union[NativeFunctionsGroup, NativeFunctio
 
     global refactor_count
     refactor_count += 1
-    if refactor_count > 100:
+    if refactor_count > 10000:
         return []
+    print(refactor_count)
 
-    f = g
-    ns = list(f.dispatch.values())
+    ns = list(g.dispatch.values())
 
     rs = []
     # Sometimes a function name shows up multiple times; only generate
@@ -438,12 +433,26 @@ def compute_out_convention_refactor(g: Union[NativeFunctionsGroup, NativeFunctio
 
         rs.append(f"""\
 
-  {g.loc}
-  fastmod '{current_signature}' '${{1}}${{3}}, ${{2}})${{4}}' aten/src/ATen/native/
-""")
-
+    {g.loc}
+    fastmod '{current_signature}' '${{1}}${{3}}, ${{2}})${{4}}' aten/src/ATen/native/
+    """)
 
     return rs
+
+
+
+@with_native_function
+def compute_out_convention_refactor(g: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
+    if (isinstance(g, NativeFunctionsGroup) and g.structured) or local.use_c10_dispatcher() is UseC10Dispatcher.full:
+        return []
+
+    if isinstance(g, NativeFunctionsGroup):
+        if g.structured:
+            return []
+        else:
+            return list(concatMap(compute_out_convention_refactor_for_native_function, g.functions()))
+    else:
+        return compute_out_convention_refactor_for_native_function(g)
 
 # Generates RegisterBackendSelect.cpp, a series of kernels which provide
 # specialized computation of dispatch key for operator signatures which cannot
@@ -972,7 +981,7 @@ def main() -> None:
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
         DispatchKey.CompositeImplicitAutograd,
-        DispatchKey.DefaultBackend,
+        DispatchKey.CompositeExplicitAutograd,
         # Meta is a magic key: it is automatically generated for structured
         # kernels
         DispatchKey.Meta,
@@ -983,7 +992,7 @@ def main() -> None:
         DispatchKey.CPU,
         DispatchKey.CUDA,
         DispatchKey.CompositeImplicitAutograd,
-        DispatchKey.DefaultBackend,
+        DispatchKey.CompositeExplicitAutograd,
     }
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist]
