@@ -263,7 +263,7 @@ isFwGradDefined(${req_inp})\
 
 FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE = CodeTemplate("""\
 auto ${inp}_t_raw = toNonOptFwGrad(${inp});
-auto ${inp}_t = ${inp}_t_raw.defined() ? ${inp}_t_raw : at::zeros_like(${inp});
+auto ${inp}_t = ${inp}_t_raw.defined() ? ${inp}_t_raw : at::zeros_like(toNonOptTensor(${inp}));
 """)
 
 FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE = CodeTemplate("""\
@@ -389,7 +389,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     assert dispatch_strategy(fn) == 'use_derived'
     f = fn.func
     info = fn.info
-    fw_derivatives = info.forward_derivatives if info else []
+    fw_derivatives = fn.fw_derivatives
 
     name = cpp.name(f.func)
     inplace = f.func.kind() == SchemaKind.inplace
@@ -738,9 +738,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             unpacked_arguments = ""
             for inp in differentiable_inputs:
                 if inp.name in derivative.required_inputs_fw_grad:
-                    if inp.cpp_type == 'Tensor &':
-                        warnings.warn(f'The formula for "{name}" might be using the original value of {inp.name} that is being '
-                                      'modified inplace. This can lead to wrong forward gradients.')
                     unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp=inp.name)
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp=inp.name)
