@@ -92,7 +92,7 @@
 - func: _fw_primal(Tensor(a) self, int level) -> Tensor(a)
   variants: method
   dispatch:
-    DefaultBackend: _fw_primal
+    CompositeExplicitAutograd: _fw_primal
 
 - func: _make_dual(Tensor(a) primal, Tensor tangent, int level) -> Tensor(a)
   variants: function
@@ -151,7 +151,6 @@
     CUDA: _cudnn_rnn_backward
 
 - func: _cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CUDA: _cudnn_init_dropout_state
 
@@ -199,12 +198,12 @@
 - func: abs(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: abs
+    CompositeExplicitAutograd: abs
 
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: abs_
+    CompositeExplicitAutograd: abs_
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -267,12 +266,12 @@
 - func: sgn(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: sgn
+    CompositeExplicitAutograd: sgn
 
 - func: sgn_(Tensor(a!) self) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: sgn_
+    CompositeExplicitAutograd: sgn_
 
 - func: sgn.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -294,7 +293,7 @@
 - func: _conj(Tensor self) -> Tensor
   variants: function
   dispatch:
-    DefaultBackend: _conj
+    CompositeExplicitAutograd: _conj
 
 - func: acos(Tensor self) -> Tensor
   variants: function, method
@@ -304,7 +303,7 @@
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: acos_
+    CompositeExplicitAutograd: acos_
 
 - func: acos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -368,12 +367,12 @@
 - func: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: add
+    CompositeExplicitAutograd: add
 
 - func: add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: add_
+    CompositeExplicitAutograd: add_
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -403,7 +402,7 @@
 - func: addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: addr_
+    CompositeExplicitAutograd: addr_
 
 - func: addr.out(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -413,7 +412,7 @@
 - func: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
   variants: function
   dispatch:
-    DefaultBackend: affine_grid_generator
+    CompositeExplicitAutograd: affine_grid_generator
 
 - func: affine_grid_generator_backward(Tensor grad, int[] size, bool align_corners) -> Tensor
   variants: function
@@ -450,13 +449,10 @@
 - func: any.dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: arange(Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: arange.start(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: arange.out(Scalar end, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -498,7 +494,7 @@
 - func: acosh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: acosh_
+    CompositeExplicitAutograd: acosh_
 
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -521,7 +517,7 @@
 - func: asinh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: asinh_
+    CompositeExplicitAutograd: asinh_
 
 - func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -544,7 +540,7 @@
 - func: atanh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: atanh_
+    CompositeExplicitAutograd: atanh_
 
 - func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -571,7 +567,7 @@
   variants: function, method
   device_guard: False
   dispatch:
-    DefaultBackend: as_strided_
+    CompositeExplicitAutograd: as_strided_
 
 - func: asin(Tensor self) -> Tensor
   variants: function, method
@@ -607,7 +603,7 @@
 - func: atan_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: atan_
+    CompositeExplicitAutograd: atan_
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -661,10 +657,8 @@
     CUDA: baddbmm_out_cuda
 
 - func: bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: bartlett_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
 
@@ -680,7 +674,7 @@
 - func: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: bernoulli
+    CompositeExplicitAutograd: bernoulli
 
 - func: bernoulli.out(Tensor self, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -738,7 +732,7 @@
 - func: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   variants: function
   dispatch:
-    DefaultBackend: binary_cross_entropy_with_logits
+    CompositeExplicitAutograd: binary_cross_entropy_with_logits
 
 - func: binary_cross_entropy_with_logits_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   variants: function
@@ -824,10 +818,8 @@
     CPU, CUDA: logical_or_out
 
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: blackman_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: bmm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
@@ -863,11 +855,11 @@
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
-    DefaultBackend: cat
+    CompositeExplicitAutograd: cat
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    DefaultBackend: cat_out
+    CompositeExplicitAutograd: cat_out
 
 - func: cat.names(Tensor[] tensors, Dimname dim) -> Tensor
 
@@ -879,12 +871,12 @@
 - func: ceil(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: ceil
+    CompositeExplicitAutograd: ceil
 
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: ceil_
+    CompositeExplicitAutograd: ceil_
 
 - func: ceil.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -919,7 +911,7 @@
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: clamp_
+    CompositeExplicitAutograd: clamp_
 
 - func: clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -928,12 +920,12 @@
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: clamp_max
+    CompositeExplicitAutograd: clamp_max
 
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: clamp_max_
+    CompositeExplicitAutograd: clamp_max_
 
 - func: clamp_max.out(Tensor self, Scalar max, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -942,12 +934,12 @@
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: clamp_min
+    CompositeExplicitAutograd: clamp_min
 
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: clamp_min_
+    CompositeExplicitAutograd: clamp_min_
 
 - func: clamp_min.out(Tensor self, Scalar min, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -969,7 +961,7 @@
 - func: complex(Tensor real, Tensor imag) -> Tensor
   variants: function
   dispatch:
-    DefaultBackend: complex
+    CompositeExplicitAutograd: complex
 
 - func: complex.out(Tensor real, Tensor imag, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -978,7 +970,7 @@
 - func: polar(Tensor abs, Tensor angle) -> Tensor
   variants: function
   dispatch:
-    DefaultBackend: polar
+    CompositeExplicitAutograd: polar
 
 - func: polar.out(Tensor abs, Tensor angle, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -987,7 +979,7 @@
 - func: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
   variants: function
   dispatch:
-    DefaultBackend: constant_pad_nd
+    CompositeExplicitAutograd: constant_pad_nd
 
 - func: contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)
   variants: method
@@ -997,11 +989,11 @@
 
 - func: convolution_overrideable(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
   dispatch:
-    DefaultBackend: convolution_overrideable
+    CompositeExplicitAutograd: convolution_overrideable
 
 - func: convolution_backward_overrideable(Tensor grad_output, Tensor input, Tensor weight, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
   dispatch:
-    DefaultBackend: convolution_backward_overrideable
+    CompositeExplicitAutograd: convolution_backward_overrideable
 
 - func: _convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor
 
@@ -1031,7 +1023,7 @@
 
 - func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int pad=0) -> Tensor
   dispatch:
-    DefaultBackend: conv_tbc
+    CompositeExplicitAutograd: conv_tbc
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int pad) -> (Tensor, Tensor, Tensor)
 
@@ -1046,7 +1038,7 @@
   variants: method
   device_guard: False
   dispatch:
-    DefaultBackend: copy_
+    CompositeExplicitAutograd: copy_
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
   dispatch: {}
@@ -1059,7 +1051,7 @@
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: cos_
+    CompositeExplicitAutograd: cos_
 
 - func: cos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1073,7 +1065,7 @@
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: cosh_
+    CompositeExplicitAutograd: cosh_
 
 - func: cosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1089,7 +1081,7 @@
 - func: count_nonzero(Tensor self, int? dim=None) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: count_nonzero
+    CompositeExplicitAutograd: count_nonzero
 
 - func: cudnn_affine_grid_generator(Tensor theta, int N, int C, int H, int W) -> Tensor grid
   dispatch:
@@ -1179,11 +1171,11 @@
 - func: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
-    DefaultBackend: cummax
+    CompositeExplicitAutograd: cummax
 
 - func: cummax.out(Tensor self, int dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
-    DefaultBackend: cummax_out
+    CompositeExplicitAutograd: cummax_out
 
 - func: cummax.dimname(Tensor self, Dimname dim) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -1200,11 +1192,11 @@
 - func: cummin(Tensor self, int dim) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
-    DefaultBackend: cummin
+    CompositeExplicitAutograd: cummin
 
 - func: cummin.out(Tensor self, int dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
-    DefaultBackend: cummin_out
+    CompositeExplicitAutograd: cummin_out
 
 - func: cummin.dimname(Tensor self, Dimname dim) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -1225,16 +1217,16 @@
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: cumprod
+    CompositeExplicitAutograd: cumprod
 
 - func: cumprod_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: cumprod_
+    CompositeExplicitAutograd: cumprod_
 
 - func: cumprod.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    DefaultBackend: cumprod_out
+    CompositeExplicitAutograd: cumprod_out
 
 - func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
@@ -1251,16 +1243,16 @@
 - func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: cumsum
+    CompositeExplicitAutograd: cumsum
 
 - func: cumsum_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: cumsum_
+    CompositeExplicitAutograd: cumsum_
 
 - func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    DefaultBackend: cumsum_out
+    CompositeExplicitAutograd: cumsum_out
 
 - func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
@@ -1294,7 +1286,7 @@
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   variants: function, method
   dispatch:
-    DefaultBackend: diagonal
+    CompositeExplicitAutograd: diagonal
 
 - func: diagonal.Dimname(Tensor(a) self, *, Dimname outdim, Dimname dim1, Dimname dim2, int offset=0) -> Tensor(a)
   variants: function, method
@@ -1349,22 +1341,22 @@
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: div
+    CompositeExplicitAutograd: div
 
 - func: div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: div_
+    CompositeExplicitAutograd: div_
 
 - func: div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: div
+    CompositeExplicitAutograd: div
 
 - func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: div_
+    CompositeExplicitAutograd: div_
 
 # divide, alias for div
 - func: divide.Tensor(Tensor self, Tensor other) -> Tensor
@@ -1418,7 +1410,7 @@
 
 - func: dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    DefaultBackend: dot_out
+    CompositeExplicitAutograd: dot_out
 
 - func: vdot(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -1428,13 +1420,13 @@
 
 - func: vdot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    DefaultBackend: vdot_out
+    CompositeExplicitAutograd: vdot_out
 
 - func: einsum(str equation, Tensor[] tensors) -> Tensor
 
 - func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   dispatch:
-    DefaultBackend: embedding
+    CompositeExplicitAutograd: embedding
 
 - func: embedding_backward(Tensor grad, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
 
@@ -1494,7 +1486,6 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
 - func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
@@ -1509,20 +1500,16 @@
   variants: method
 
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 - func: new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 # other overrides are to provide a more helpful error message that dtype is required
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: empty_affine_quantized_other_backends_stub
     QuantizedCPU, QuantizedCUDA: empty_affine_quantized
@@ -1530,7 +1517,6 @@
 # it's a factory function receiving a tensor argument, thus overriding explicitly
 # other overrides are to provide a more helpful error message that dtype is required
 - func: _empty_per_channel_affine_quantized(int[] size, *, Tensor scales, Tensor zero_points, int axis, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   category_override: factory
   dispatch:
     CPU: empty_per_channel_affine_quantized_other_backends_stub
@@ -1554,7 +1540,6 @@
   device_guard: False
 
 - func: empty_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: empty_strided(int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1571,7 +1556,7 @@
 - func: erf_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: erf_
+    CompositeExplicitAutograd: erf_
 
 - func: erf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1585,7 +1570,7 @@
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: erfc_
+    CompositeExplicitAutograd: erfc_
 
 - func: erfc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1599,7 +1584,7 @@
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: exp_
+    CompositeExplicitAutograd: exp_
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1613,7 +1598,7 @@
 - func: exp2_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: exp2_
+    CompositeExplicitAutograd: exp2_
 
 - func: exp2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1627,7 +1612,7 @@
 - func: expm1_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: expm1_
+    CompositeExplicitAutograd: expm1_
 
 - func: expm1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1637,17 +1622,15 @@
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_guard: False
   dispatch:
-    DefaultBackend: expand
+    CompositeExplicitAutograd: expand
 
 - func: expand_as(Tensor(a) self, Tensor other) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_guard: False
 
 - func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1690,12 +1673,12 @@
 - func: floor(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: floor
+    CompositeExplicitAutograd: floor
 
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: floor_
+    CompositeExplicitAutograd: floor_
 
 - func: floor.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -1727,31 +1710,27 @@
 - func: frac(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: frac
+    CompositeExplicitAutograd: frac
 
 - func: frac_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: frac_
+    CompositeExplicitAutograd: frac_
 
 - func: frac.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: frac_out
 
 - func: full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: full_like(Tensor self, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: from_file
 
@@ -1805,7 +1784,7 @@
 # See NOTE [ grid_sample CPU fallback ]
 - func: _grid_sampler_2d_cpu_fallback(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   dispatch:
-    DefaultBackend: _grid_sampler_2d_cpu_fallback
+    CompositeExplicitAutograd: _grid_sampler_2d_cpu_fallback
 
 - func: _grid_sampler_2d_cpu_fallback_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
 
@@ -1820,31 +1799,22 @@
     CUDA: grid_sampler_3d_backward_cuda
 
 - func: hann_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: hann_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: hamming_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: hamming_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: hamming_window.periodic_alpha(int window_length, bool periodic, float alpha, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: hamming_window.periodic_alpha_beta(int window_length, bool periodic, float alpha, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: kaiser_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: kaiser_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: kaiser_window.beta(int window_length, bool periodic, float beta, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
 
@@ -1919,7 +1889,7 @@
 - func: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: index_copy_
+    CompositeExplicitAutograd: index_copy_
 
 - func: index_copy(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
   variants: function, method
@@ -1933,7 +1903,7 @@
 - func: index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: index_put_
+    CompositeExplicitAutograd: index_put_
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Tensor const & rhs)
   # - Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Scalar v)
@@ -1954,11 +1924,11 @@
 - func: inverse(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: inverse
+    CompositeExplicitAutograd: inverse
 
 - func: inverse.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    DefaultBackend: inverse_out
+    CompositeExplicitAutograd: inverse_out
 
 - func: _inverse_helper(Tensor self) -> Tensor
   variants: function
@@ -2008,7 +1978,7 @@
 
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   dispatch:
-    DefaultBackend: kl_div
+    CompositeExplicitAutograd: kl_div
 
 - func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   dispatch:
@@ -2023,7 +1993,7 @@
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
-    DefaultBackend: kthvalue
+    CompositeExplicitAutograd: kthvalue
 
 - func: kthvalue.values(Tensor self, int k, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
@@ -2051,16 +2021,16 @@
 - func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: nan_to_num
+    CompositeExplicitAutograd: nan_to_num
 
 - func: nan_to_num_(Tensor(a!) self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: nan_to_num_
+    CompositeExplicitAutograd: nan_to_num_
 
 - func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    DefaultBackend: nan_to_num_out
+    CompositeExplicitAutograd: nan_to_num_out
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -2110,7 +2080,6 @@
 - func: ldexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: linspace.out(Scalar start, Scalar end, int? steps=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2125,7 +2094,7 @@
 - func: log_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: log_
+    CompositeExplicitAutograd: log_
 
 - func: log.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2139,7 +2108,7 @@
 - func: log10_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: log10_
+    CompositeExplicitAutograd: log10_
 
 - func: log10.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2170,7 +2139,7 @@
 - func: log2_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: log2_
+    CompositeExplicitAutograd: log2_
 
 - func: log2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2183,7 +2152,7 @@
 - func: logaddexp(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: logaddexp
+    CompositeExplicitAutograd: logaddexp
 
 - func: logaddexp2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2192,7 +2161,7 @@
 - func: logaddexp2(Tensor self, Tensor other) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: logaddexp2
+    CompositeExplicitAutograd: logaddexp2
 
 - func: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -2239,10 +2208,9 @@
 - func: logdet(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: logdet
+    CompositeExplicitAutograd: logdet
 
 - func: logspace(Scalar start, Scalar end, int? steps=None, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: logspace.out(Scalar start, Scalar end, int? steps=None, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2279,11 +2247,11 @@
 - func: logcumsumexp(Tensor self, int dim) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: logcumsumexp
+    CompositeExplicitAutograd: logcumsumexp
 
 - func: logcumsumexp.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    DefaultBackend: logcumsumexp_out
+    CompositeExplicitAutograd: logcumsumexp_out
 
 - func: logcumsumexp.dimname(Tensor self, Dimname dim) -> Tensor
   variants: function, method
@@ -2293,11 +2261,11 @@
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: logsumexp
+    CompositeExplicitAutograd: logsumexp
 
 - func: logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    DefaultBackend: logsumexp_out
+    CompositeExplicitAutograd: logsumexp_out
 
 - func: logsumexp.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
   variants: function, method
@@ -2368,7 +2336,7 @@
 - func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: amax
+    CompositeExplicitAutograd: amax
 
 - func: amax.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2440,7 +2408,7 @@
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
-    DefaultBackend: median
+    CompositeExplicitAutograd: median
 
 - func: median.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
@@ -2461,7 +2429,7 @@
 - func: nanmedian.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:
-    DefaultBackend: nanmedian
+    CompositeExplicitAutograd: nanmedian
 
 - func: nanmedian.dim_values(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
@@ -2490,7 +2458,7 @@
 - func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: amin
+    CompositeExplicitAutograd: amin
 
 - func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2498,7 +2466,7 @@
 
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   dispatch:
-    DefaultBackend: mkldnn_convolution
+    CompositeExplicitAutograd: mkldnn_convolution
 
 - func: mkldnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> Tensor
 
@@ -2506,7 +2474,7 @@
 
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
-    DefaultBackend: mkldnn_convolution_backward
+    CompositeExplicitAutograd: mkldnn_convolution_backward
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -2610,7 +2578,7 @@
 
 - func: mode.values(Tensor self, int dim=-1, bool keepdim=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   dispatch:
-    DefaultBackend: mode_out
+    CompositeExplicitAutograd: mode_out
 
 - func: mode.dimname(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
@@ -2644,12 +2612,12 @@
 - func: mul.Scalar(Tensor self, Scalar other) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: mul
+    CompositeExplicitAutograd: mul
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: mul_
+    CompositeExplicitAutograd: mul_
 
 # multiply, alias for mul
 - func: multiply.Tensor(Tensor self, Tensor other) -> Tensor
@@ -2659,7 +2627,6 @@
   variants: method
 
 - func: multiply.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: multiply.Scalar(Tensor self, Scalar other) -> Tensor
   variants: function, method
@@ -2674,26 +2641,25 @@
     SparseCPU, SparseCUDA: mv_sparse
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: mv_out
+    CompositeExplicitAutograd: mv_out
 
 - func: mvlgamma(Tensor self, int p) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: mvlgamma
+    CompositeExplicitAutograd: mvlgamma
 
 - func: mvlgamma_(Tensor(a!) self, int p) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: mvlgamma_
+    CompositeExplicitAutograd: mvlgamma_
 
 - func: narrow_copy(Tensor self, int dim, int start, int length) -> Tensor
   variants: function, method
   dispatch:
     CPU: narrow_copy_dense_cpu
     SparseCPU, SparseCUDA: narrow_copy_sparse
-    DefaultBackend: narrow_copy_dense
+    CompositeExplicitAutograd: narrow_copy_dense
 
 - func: narrow_copy.out(Tensor self, int dim, int start, int length, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2766,7 +2732,7 @@
 - func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] padding, int[2] stride=1) -> Tensor
   variants: function
   dispatch:
-    DefaultBackend: _nnpack_spatial_convolution
+    CompositeExplicitAutograd: _nnpack_spatial_convolution
 
 - func: _nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, int[2] padding, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   variants: function
@@ -2778,17 +2744,13 @@
   variants: function
 
 - func: ones.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: ones_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
 
@@ -2796,7 +2758,7 @@
 
 - func: _euclidean_dist(Tensor x1, Tensor x2) -> Tensor
   dispatch:
-    DefaultBackend: _euclidean_dist
+    CompositeExplicitAutograd: _euclidean_dist
 
 - func: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   dispatch:
@@ -2822,7 +2784,7 @@
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   dispatch:
-    DefaultBackend: permute
+    CompositeExplicitAutograd: permute
 
 - func: movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
   variants: function, method
@@ -2871,135 +2833,101 @@
 - func: rad2deg(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: rad2deg
+    CompositeExplicitAutograd: rad2deg
 
 - func: rad2deg_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: rad2deg_
+    CompositeExplicitAutograd: rad2deg_
 
 - func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: rad2deg_out
+    CompositeExplicitAutograd: rad2deg_out
 
 - func: deg2rad(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: deg2rad
+    CompositeExplicitAutograd: deg2rad
 
 - func: deg2rad_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: deg2rad_
+    CompositeExplicitAutograd: deg2rad_
 
 - func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: deg2rad_out
+    CompositeExplicitAutograd: deg2rad_out
 
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rand.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: rand.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: rand(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rand.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rand.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rand.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.generator(int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.low(int low, int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.low_generator(int low, int high, int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.out(int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.generator_out(int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.low_out(int low, int high, int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint.low_generator_out(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint_like(Tensor self, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randn.generator(int[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randn.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: randn.generator_with_names(int[] size, *, Generator? generator, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: randn.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randn.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randn_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randperm.generator(int n, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randperm.out(int n, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: randperm.generator_out(int n, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
 
 - func: range.step(Scalar start, Scalar end, Scalar step=1, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: range(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: range.out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: range_cpu_out
     CUDA: range_cuda_out
@@ -3015,10 +2943,9 @@
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: reciprocal_
+    CompositeExplicitAutograd: reciprocal_
 
 - func: reciprocal.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: reciprocal_out
 
@@ -3034,7 +2961,6 @@
     SparseCPU, SparseCUDA: neg_sparse_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: neg_out
     SparseCPU, SparseCUDA: neg_out_sparse
@@ -3047,12 +2973,11 @@
   variants: function, method
 
 - func: negative.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   dispatch:
-    DefaultBackend: repeat
+    CompositeExplicitAutograd: repeat
 
 - func: repeat_interleave.Tensor(Tensor repeats) -> Tensor
   variants: function
@@ -3082,15 +3007,14 @@
 - func: round(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: round
+    CompositeExplicitAutograd: round
 
 - func: round_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: round_
+    CompositeExplicitAutograd: round_
 
 - func: round.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: round_out
     CUDA: round_out
@@ -3166,10 +3090,9 @@
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: rsqrt_
+    CompositeExplicitAutograd: rsqrt_
 
 - func: rsqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: rsqrt_out
 
@@ -3181,7 +3104,7 @@
   variants: function, method
   device_guard: False
   dispatch:
-    DefaultBackend: select
+    CompositeExplicitAutograd: select
 
 - func: select_backward(Tensor grad, int[] input_sizes, int dim, int index) -> Tensor
   variants: function
@@ -3193,24 +3116,23 @@
 
 - func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
   dispatch:
-    DefaultBackend: celu
+    CompositeExplicitAutograd: celu
 
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
   dispatch:
-    DefaultBackend: celu_
+    CompositeExplicitAutograd: celu_
 
 - func: silu(Tensor self) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: silu
+    CompositeExplicitAutograd: silu
 
 - func: silu_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
   dispatch:
-    DefaultBackend: silu_
+    CompositeExplicitAutograd: silu_
 
 - func: silu.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CPU, CUDA: silu_out
@@ -3235,7 +3157,6 @@
     MkldnnCPU: mkldnn_sigmoid_
 
 - func: sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sigmoid_out
 
@@ -3250,7 +3171,6 @@
     CPU, CUDA: logit_
 
 - func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: logit_out
 
@@ -3269,16 +3189,16 @@
     CPU, CUDA: sin_out
 
 - func: sinc(Tensor self) -> Tensor
+  structured_delegate: sinc.out
   variants: function, method
-  dispatch:
-    CPU, CUDA: sinc
 
 - func: sinc_(Tensor(a!) self) -> Tensor(a!)
+  structured_delegate: sinc.out
   variants: function, method
-  dispatch:
-    DefaultBackend: sinc_
 
 - func: sinc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sinc_out
 
@@ -3290,7 +3210,7 @@
 - func: sinh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: sinh_
+    CompositeExplicitAutograd: sinh_
 
 - func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3310,7 +3230,7 @@
 - func: detach(Tensor(a) self) -> Tensor(a)
   variants: function, method
   dispatch:
-    DefaultBackend: detach
+    CompositeExplicitAutograd: detach
 
 # Like `detach()`, but modifies this `Variable` in-place. This method may
 # only be called on non-view `Variable`s. You can use `is_view()` to check
@@ -3318,7 +3238,7 @@
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: detach_
+    CompositeExplicitAutograd: detach_
 
 - func: size.int(Tensor self, int dim) -> int
   variants: function
@@ -3333,7 +3253,7 @@
   variants: function, method
   device_guard: False
   dispatch:
-    DefaultBackend: slice
+    CompositeExplicitAutograd: slice
 
 - func: slice_backward(Tensor grad, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
   variants: function
@@ -3342,7 +3262,7 @@
 - func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   variants: function, method
   dispatch:
-    DefaultBackend: slogdet
+    CompositeExplicitAutograd: slogdet
 
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
@@ -3369,37 +3289,37 @@
   variants: function, method
   device_guard: False
   dispatch:
-    DefaultBackend: unsafe_split
+    CompositeExplicitAutograd: unsafe_split
 
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_guard: False
   dispatch:
-    DefaultBackend: split
+    CompositeExplicitAutograd: split
 
 - func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
   variants: function, method
   device_guard: False
   dispatch:
-    DefaultBackend: unsafe_split_with_sizes
+    CompositeExplicitAutograd: unsafe_split_with_sizes
 
 - func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_guard: False
   dispatch:
-    DefaultBackend: split_with_sizes
+    CompositeExplicitAutograd: split_with_sizes
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
   variants: function, method
   device_guard: False
   dispatch:
-    DefaultBackend: squeeze
+    CompositeExplicitAutograd: squeeze
 
 - func: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
   variants: function, method
   device_guard: False
   dispatch:
-    DefaultBackend: squeeze
+    CompositeExplicitAutograd: squeeze
 
 - func: squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)
   variants: function, method
@@ -3409,13 +3329,13 @@
   variants: method
   device_guard: False
   dispatch:
-    DefaultBackend: squeeze_
+    CompositeExplicitAutograd: squeeze_
 
 - func: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
   variants: method
   device_guard: False
   dispatch:
-    DefaultBackend: squeeze_
+    CompositeExplicitAutograd: squeeze_
 
 - func: squeeze_.dimname(Tensor(a!) self, Dimname dim) -> Tensor(a!)
   variants: method
@@ -3425,7 +3345,6 @@
   variants: function, method
 
 - func: sspaddmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: _sspaddmm_out_only_sparse
     CUDA: _sspaddmm_out_only_sparse_cuda
@@ -3434,37 +3353,33 @@
 
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
-    DefaultBackend: stack
+    CompositeExplicitAutograd: stack
 
 - func: stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: stack_out
+    CompositeExplicitAutograd: stack_out
 
 - func: _stack(Tensor[] tensors, int dim=0) -> Tensor
   dispatch: # match the backends supported by _cat
     CPU: _stack_cpu
-    DefaultBackend: _stack
+    CompositeExplicitAutograd: _stack
 
 - func: _stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch: # match the backends supported by _cat_out
     CPU: _stack_out_cpu
-    DefaultBackend: _stack_out
+    CompositeExplicitAutograd: _stack_out
 
 - func: hstack(Tensor[] tensors) -> Tensor
 
 - func: hstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: vstack(Tensor[] tensors) -> Tensor
 
 - func: vstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: dstack(Tensor[] tensors) -> Tensor
 
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 # The signature is designed to be consistent with librosa except that it is
 # missing the `pad_mode` and `center` arguments, which are taken care of at
@@ -3499,12 +3414,10 @@
   variants: function, method
 
 - func: sum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sum_out
 
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
@@ -3517,7 +3430,6 @@
     CPU, CUDA: nansum
 
 - func: nansum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: nansum_out
 
@@ -3537,7 +3449,6 @@
     CPU, CUDA: sqrt_
 
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sqrt_out
     SparseCPU, SparseCUDA: sqrt_out_sparse
@@ -3576,7 +3487,6 @@
   variants: function
 
 - func: std.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: std_out
 
@@ -3584,7 +3494,6 @@
   variants: function, method
 
 - func: std.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
@@ -3597,7 +3506,6 @@
     CPU, CUDA: prod
 
 - func: prod.int_out(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: prod_out
 
@@ -3605,19 +3513,18 @@
   variants: function, method
 
 - func: prod.Dimname_out(Tensor self, Dimname dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: t(Tensor(a) self) -> Tensor(a)
   device_guard: False
   variants: function, method
   dispatch:
-    DefaultBackend: t
+    CompositeExplicitAutograd: t
 
 - func: t_(Tensor(a!) self) -> Tensor(a!)
   device_guard: False
   variants: method
   dispatch:
-    DefaultBackend: t_
+    CompositeExplicitAutograd: t_
 
 - func: tan(Tensor self) -> Tensor
   variants: function, method
@@ -3627,10 +3534,9 @@
 - func: tan_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: tan_
+    CompositeExplicitAutograd: tan_
 
 - func: tan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: tan_out
 
@@ -3643,10 +3549,9 @@
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: tanh_
+    CompositeExplicitAutograd: tanh_
 
 - func: tanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: tanh_out
 
@@ -3654,7 +3559,6 @@
   variants: function
 
 - func: tensordot.out(Tensor self, Tensor other, int[] dims_self, int[] dims_other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: tensordot_out
@@ -3674,7 +3578,6 @@
     CUDA: threshold__cuda
 
 - func: threshold.out(Tensor self, Scalar threshold, Scalar value, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: threshold_out
     CUDA: threshold_out_cuda
@@ -3693,7 +3596,7 @@
   variants: function, method
   device_guard: False
   dispatch:
-    DefaultBackend: transpose
+    CompositeExplicitAutograd: transpose
 
 - func: transpose.Dimname(Tensor(a) self, Dimname dim0, Dimname dim1) -> Tensor(a)
   variants: function, method
@@ -3708,7 +3611,7 @@
   variants: method
   device_guard: False
   dispatch:
-    DefaultBackend: transpose_
+    CompositeExplicitAutograd: transpose_
 
 - func: _mkldnn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   device_guard: False
@@ -3742,7 +3645,7 @@
 - func: rot90(Tensor self, int k=1, int[] dims=[0,1]) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: rot90
+    CompositeExplicitAutograd: rot90
 
 - func: trapz.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
 
@@ -3750,22 +3653,21 @@
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
-    DefaultBackend: _trilinear
+    CompositeExplicitAutograd: _trilinear
 
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor
 
 - func: trunc(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: trunc
+    CompositeExplicitAutograd: trunc
 
 - func: trunc_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: trunc_
+    CompositeExplicitAutograd: trunc_
 
 - func: trunc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: trunc_out
 
@@ -3777,7 +3679,6 @@
   variants: function, method
 
 - func: fix.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -3821,19 +3722,19 @@
 
 - func: _unsafe_view(Tensor self, int[] size) -> Tensor
   dispatch:
-    DefaultBackend: _unsafe_view
+    CompositeExplicitAutograd: _unsafe_view
 
 - func: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
   variants: function, method
   device_guard: False
   dispatch:
-    DefaultBackend: unsqueeze
+    CompositeExplicitAutograd: unsqueeze
 
 - func: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
   variants: method
   device_guard: False
   dispatch:
-    DefaultBackend: unsqueeze_
+    CompositeExplicitAutograd: unsqueeze_
 
 - func: vander(Tensor x, int? N=None, bool increasing=False) -> Tensor
 
@@ -3848,7 +3749,6 @@
     CPU, CUDA: var
 
 - func: var.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: var_out
 
@@ -3856,7 +3756,6 @@
   variants: function, method
 
 - func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   variants: function
@@ -3920,17 +3819,13 @@
   variants: function
 
 - func: zeros.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   device_guard: False
 
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: zeros_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   variants: function
@@ -3983,7 +3878,7 @@
 
 - func: _sparse_sum.dim(Tensor self, int[1] dim) -> Tensor
   dispatch:
-    DefaultBackend: _sparse_sum
+    CompositeExplicitAutograd: _sparse_sum
 
 - func: _sparse_sum.dim_dtype(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
 
@@ -4045,12 +3940,10 @@
     CPU, CUDA, SparseCPU, SparseCUDA: norm
 
 - func: norm.dtype_out(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: norm_out
 
 - func: norm.out(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: norm_out
 
@@ -4062,19 +3955,17 @@
   variants: function, method
 
 - func: norm.names_dtype_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: norm.names_out(Tensor self, Scalar? p, Dimname[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: frexp.Tensor(Tensor self) -> (Tensor mantissa, Tensor exponent)
   variants: method, function
   dispatch:
-    DefaultBackend: frexp
+    CompositeExplicitAutograd: frexp
 
 - func: frexp.Tensor_out(Tensor self, *, Tensor(a!) mantissa, Tensor(b!) exponent) -> (Tensor(a!) mantissa, Tensor(b!) exponent)
   dispatch:
-    DefaultBackend: frexp_out
+    CompositeExplicitAutograd: frexp_out
 
 - func: frobenius_norm(Tensor self) -> Tensor
   variants: function
@@ -4083,21 +3974,18 @@
   variants: function
 
 - func: frobenius_norm.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
 
 - func: nuclear_norm(Tensor self, bool keepdim=False) -> Tensor
   variants: function
 
 - func: nuclear_norm.out(Tensor self, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
 
 - func: nuclear_norm.dim(Tensor self, int[2] dim, bool keepdim=False) -> Tensor
   variants: function
 
 - func: nuclear_norm.dim_out(Tensor self, int[2] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
 
 - func: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
@@ -4111,7 +3999,7 @@
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: resize_as_
+    CompositeExplicitAutograd: resize_as_
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   variants: method, function
@@ -4143,16 +4031,15 @@
 - func: sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: sub
+    CompositeExplicitAutograd: sub
 
 - func: sub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: sub_
+    CompositeExplicitAutograd: sub_
 
 # subtract, alias for sub
 - func: subtract.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: subtract.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -4173,7 +4060,6 @@
     CPU, CUDA: rsub
 
 - func: heaviside.out(Tensor self, Tensor values, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: heaviside_out
 
@@ -4188,16 +4074,15 @@
 - func: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:
-    DefaultBackend: rsub
+    CompositeExplicitAutograd: rsub
 
 # Functionally the same as addmm, but we give it a different derivative formula
 # that doesn't propagate gradients to non-present entries on sparse.
 - func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
-    DefaultBackend: _sparse_addmm
+    CompositeExplicitAutograd: _sparse_addmm
 
 - func: addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: addmm_cpu_out
     CUDA: addmm_out_cuda
@@ -4334,16 +4219,12 @@
 # FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
 # the default would never make sense.
 - func: sparse_coo_tensor.size(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: sparse_coo_tensor.indices(Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: sparse_coo_tensor.indices_size(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _sparse_coo_tensor_unsafe(Tensor indices, Tensor values, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: _validate_sparse_coo_tensor_args(Tensor indices, Tensor values, int[] size) -> ()
 
@@ -4457,7 +4338,6 @@
   device_guard: False
 
 - func: hspmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     SparseCPU: hspmm_out_sparse_cpu
     SparseCUDA: hspmm_out_sparse_cuda
@@ -4475,7 +4355,7 @@
 - func: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
   variants: function, method
   dispatch:
-    DefaultBackend: unbind
+    CompositeExplicitAutograd: unbind
 
 - func: unbind.Dimname(Tensor(a) self, Dimname dim) -> Tensor(a)[]
   variants: function, method
@@ -4631,7 +4511,6 @@
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
 - func: to.dtype_layout(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   device_guard: False
 
@@ -4757,7 +4636,7 @@
 # PackedSequence utilities
 - func: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
   dispatch:
-    DefaultBackend: _pack_padded_sequence
+    CompositeExplicitAutograd: _pack_padded_sequence
 
 - func: _pack_padded_sequence_backward(Tensor grad, int[] input_size, Tensor batch_sizes, bool batch_first) -> Tensor
 
@@ -4841,7 +4720,7 @@
   variants: method
   device_guard: False
   dispatch:
-    DefaultBackend: view_dtype
+    CompositeExplicitAutograd: view_dtype
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
   variants: method
@@ -4936,21 +4815,19 @@
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: eq_
+    CompositeExplicitAutograd: eq_
 
 - func: eq_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: eq_
+    CompositeExplicitAutograd: eq_
 
 - func: bitwise_and.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_and_out
 
 - func: bitwise_and.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_and_out
@@ -4980,13 +4857,11 @@
   variants: method
 
 - func: bitwise_or.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_or_out
 
 - func: bitwise_or.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_or_out
@@ -5016,13 +4891,11 @@
   variants: method
 
 - func: bitwise_xor.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_xor_out
 
 - func: bitwise_xor.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU, CUDA: bitwise_xor_out
@@ -5160,7 +5033,6 @@
     CPU, CUDA: addbmm_
 
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: addbmm_out
 
@@ -5172,7 +5044,7 @@
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: addcdiv_
+    CompositeExplicitAutograd: addcdiv_
 
 - func: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
@@ -5217,7 +5089,6 @@
 # wrappers for TH functions
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: diag_cpu_out
     CUDA: diag_cuda_out
@@ -5225,14 +5096,13 @@
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: diag
+    CompositeExplicitAutograd: diag
 
 - func: diag_backward(Tensor grad, int[] input_sizes, int diagonal) -> Tensor
   variants: function
   device_guard: False
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: cross_out
 
@@ -5242,7 +5112,6 @@
     CPU, CUDA: cross
 
 - func: triu.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: triu_cpu_out
     CUDA: triu_cuda_out
@@ -5250,10 +5119,9 @@
 - func: triu(Tensor self, int diagonal=0) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: triu
+    CompositeExplicitAutograd: triu
 
 - func: tril.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: tril_cpu_out
     CUDA: tril_cuda_out
@@ -5261,7 +5129,7 @@
 - func: tril(Tensor self, int diagonal=0) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: tril
+    CompositeExplicitAutograd: tril
 
 - func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -5284,7 +5152,6 @@
   device_guard: False
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: ne_out
     QuantizedCPU: ne_out_quantized_cpu
@@ -5296,7 +5163,6 @@
     QuantizedCPU: ne_quantized_cpu
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: ne_out
     QuantizedCPU: ne_out_quantized_cpu
@@ -5310,22 +5176,20 @@
 - func: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: ne_
+    CompositeExplicitAutograd: ne_
 
 - func: ne_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: ne_
+    CompositeExplicitAutograd: ne_
 
 # not_equal, alias for torch.ne
 - func: not_equal.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: not_equal.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
 
 - func: not_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: not_equal.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -5337,7 +5201,6 @@
   variants: method
 
 - func: eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: eq_out
     QuantizedCPU: eq_out_quantized_cpu
@@ -5349,7 +5212,6 @@
     QuantizedCPU: eq_quantized_cpu
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: eq_out
     QuantizedCPU: eq_out_quantized_cpu
@@ -5361,7 +5223,6 @@
     QuantizedCPU: eq_quantized_cpu
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: ge_out
     QuantizedCPU: ge_out_quantized_cpu
@@ -5373,7 +5234,6 @@
     QuantizedCPU: ge_quantized_cpu
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: ge_out
     QuantizedCPU: ge_out_quantized_cpu
@@ -5387,22 +5247,20 @@
 - func: ge_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: ge_
+    CompositeExplicitAutograd: ge_
 
 - func: ge_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: ge_
+    CompositeExplicitAutograd: ge_
 
 # greater_equal, alias for torch.ge
 - func: greater_equal.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: greater_equal.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
 
 - func: greater_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: greater_equal.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -5414,7 +5272,6 @@
   variants: method
 
 - func: le.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: le_out
     QuantizedCPU: le_out_quantized_cpu
@@ -5426,7 +5283,6 @@
     QuantizedCPU: le_quantized_cpu
 
 - func: le.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: le_out
     QuantizedCPU: le_out_quantized_cpu
@@ -5440,22 +5296,20 @@
 - func: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: le_
+    CompositeExplicitAutograd: le_
 
 - func: le_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: le_
+    CompositeExplicitAutograd: le_
 
 # less_equal, alias for torch.le
 - func: less_equal.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: less_equal.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
 
 - func: less_equal.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: less_equal.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -5467,7 +5321,6 @@
   variants: method
 
 - func: gt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: gt_out
     QuantizedCPU: gt_out_quantized_cpu
@@ -5479,7 +5332,6 @@
     QuantizedCPU: gt_quantized_cpu
 
 - func: gt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: gt_out
     QuantizedCPU: gt_out_quantized_cpu
@@ -5493,22 +5345,20 @@
 - func: gt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: gt_
+    CompositeExplicitAutograd: gt_
 
 - func: gt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: gt_
+    CompositeExplicitAutograd: gt_
 
 #  greater, alias for torch.gt
 - func: greater.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: greater.Scalar(Tensor self, Scalar other) -> Tensor
   variants: method, function
 
 - func: greater.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: greater.Tensor(Tensor self, Tensor other) -> Tensor
   variants: method, function
@@ -5520,7 +5370,6 @@
   variants: method
 
 - func: lt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
@@ -5532,7 +5381,6 @@
     QuantizedCPU: lt_quantized_cpu
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
@@ -5546,12 +5394,12 @@
 - func: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: lt_
+    CompositeExplicitAutograd: lt_
 
 - func: lt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: lt_
+    CompositeExplicitAutograd: lt_
 
 #  less, alias for torch.lt
 - func: less.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
@@ -5674,22 +5522,24 @@
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: addcmul
+    CompositeExplicitAutograd: addcmul
 
 - func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: addcmul_
+    CompositeExplicitAutograd: addcmul_
 
 - func: addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: addcdiv_out
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: addcdiv
+    CompositeExplicitAutograd: addcdiv
+
+- func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
+  python_module: nn
 
 - func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -5715,12 +5565,12 @@
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: symeig_out
+    CompositeExplicitAutograd: symeig_out
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   variants: method, function
   dispatch:
-    DefaultBackend: symeig
+    CompositeExplicitAutograd: symeig
 
 - func: _symeig_helper(Tensor self, bool eigenvectors, bool upper) -> (Tensor, Tensor)
   variants: function
@@ -5731,12 +5581,12 @@
 - func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: eig_out
+    CompositeExplicitAutograd: eig_out
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   variants: method, function
   dispatch:
-    DefaultBackend: eig
+    CompositeExplicitAutograd: eig
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -5771,12 +5621,12 @@
 - func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: cholesky_out
+    CompositeExplicitAutograd: cholesky_out
 
 - func: cholesky(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: cholesky
+    CompositeExplicitAutograd: cholesky
 
 - func: _cholesky_helper(Tensor self, bool upper) -> Tensor
   variants: function
@@ -5787,12 +5637,12 @@
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: cholesky_solve_out
+    CompositeExplicitAutograd: cholesky_solve_out
 
 - func: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: cholesky_solve
+    CompositeExplicitAutograd: cholesky_solve
 
 - func: _cholesky_solve_helper(Tensor self, Tensor A, bool upper) -> Tensor
   variants: function
@@ -5803,12 +5653,12 @@
 - func: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
   variants: function, method
   dispatch:
-    DefaultBackend: solve
+    CompositeExplicitAutograd: solve
 
 - func: solve.solution(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!) solution, Tensor(b!) LU)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: solve_out
+    CompositeExplicitAutograd: solve_out
 
 - func: _solve_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
   variants: function
@@ -5868,12 +5718,12 @@
 - func: lu_solve.out(Tensor self, Tensor LU_data, Tensor LU_pivots, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: lu_solve_out
+    CompositeExplicitAutograd: lu_solve_out
 
 - func: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: lu_solve
+    CompositeExplicitAutograd: lu_solve
 
 - func: _lu_solve_helper(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
   variants: function
@@ -5908,7 +5758,6 @@
     CPU, CUDA: lgamma
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: digamma_out
 
@@ -5925,7 +5774,7 @@
 - func: polygamma(int n, Tensor self) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: polygamma
+    CompositeExplicitAutograd: polygamma
 
 - func: erfinv(Tensor self) -> Tensor
   variants: method, function
@@ -5945,12 +5794,12 @@
 - func: i0(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: i0
+    CompositeExplicitAutograd: i0
 
 - func: i0_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: i0_
+    CompositeExplicitAutograd: i0_
 
 - func: i0.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -5960,12 +5809,12 @@
 - func: sign(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: sign
+    CompositeExplicitAutograd: sign
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
   variants: method
   dispatch:
-    DefaultBackend: sign_
+    CompositeExplicitAutograd: sign_
 
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -5982,10 +5831,9 @@
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: dist
+    CompositeExplicitAutograd: dist
 
 - func: atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: atan2_out
 
@@ -5995,13 +5843,11 @@
     CPU, CUDA: atan2
 
 - func: lerp.Scalar_out(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: lerp_cpu_scalar_out
     CUDA: lerp_cuda_scalar_out
 
 - func: lerp.Tensor_out(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: lerp_cpu_tensor_out
     CUDA: lerp_cuda_tensor_out
@@ -6031,7 +5877,6 @@
     CUDA: _histc_cuda
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: fmod_out
 
@@ -6041,7 +5886,6 @@
     CPU, CUDA: fmod
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: fmod_out
 
@@ -6064,7 +5908,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
-    DefaultBackend: hypot_
+    CompositeExplicitAutograd: hypot_
 
 - func: igamma.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -6111,10 +5955,9 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
-    DefaultBackend: nextafter_
+    CompositeExplicitAutograd: nextafter_
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: remainder_out
 
@@ -6124,7 +5967,6 @@
     CPU, CUDA: remainder
 
 - func: remainder.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: remainder_out
 
@@ -6422,7 +6264,6 @@
     CPU, CUDA: normal
 
 - func: normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: normal.float_float_out(float mean, float std, int[] size, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -6430,7 +6271,7 @@
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
   dispatch:
-    DefaultBackend: alias
+    CompositeExplicitAutograd: alias
 
 - func: _index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   dispatch:
@@ -7107,12 +6948,12 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
-    DefaultBackend: l1_loss_out
+    CompositeExplicitAutograd: l1_loss_out
 
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: l1_loss
+    CompositeExplicitAutograd: l1_loss
 
 - func: l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -7123,7 +6964,7 @@
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: l1_loss_backward
+    CompositeExplicitAutograd: l1_loss_backward
 
 - func: multi_margin_loss.out(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -7186,6 +7027,9 @@
 
 - func: nll_loss.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  python_module: nn
+
+- func: nll_loss_nd(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
   python_module: nn
 
 - func: nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
@@ -7272,7 +7116,7 @@
 - func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: smooth_l1_loss_backward
+    CompositeExplicitAutograd: smooth_l1_loss_backward
 
 - func: huber_loss.out(Tensor self, Tensor target, int reduction=Mean, float delta=1.0, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -7292,29 +7136,29 @@
 - func: huber_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float delta) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: huber_loss_backward
+    CompositeExplicitAutograd: huber_loss_backward
 
 - func: soft_margin_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
-    DefaultBackend: soft_margin_loss_out
+    CompositeExplicitAutograd: soft_margin_loss_out
 
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: soft_margin_loss
+    CompositeExplicitAutograd: soft_margin_loss
 
 - func: soft_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
-    DefaultBackend: soft_margin_loss_backward_out
+    CompositeExplicitAutograd: soft_margin_loss_backward_out
 
 - func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: soft_margin_loss_backward
+    CompositeExplicitAutograd: soft_margin_loss_backward
 
 - func: elu.out(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -7335,7 +7179,7 @@
 - func: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
   python_module: nn
   dispatch:
-    DefaultBackend: elu_
+    CompositeExplicitAutograd: elu_
 
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -7509,7 +7353,7 @@
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, bool self_is_result) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: rrelu_with_noise_backward
+    CompositeExplicitAutograd: rrelu_with_noise_backward
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   python_module: nn
@@ -8034,62 +7878,62 @@
 - func: upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_linear1d
+    CompositeExplicitAutograd: upsample_linear1d
 
 - func: upsample_linear1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_linear1d_backward
+    CompositeExplicitAutograd: upsample_linear1d_backward
 
 - func: upsample_bilinear2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_bilinear2d
+    CompositeExplicitAutograd: upsample_bilinear2d
 
 - func: upsample_bilinear2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_bilinear2d_backward
+    CompositeExplicitAutograd: upsample_bilinear2d_backward
 
 - func: upsample_trilinear3d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_trilinear3d
+    CompositeExplicitAutograd: upsample_trilinear3d
 
 - func: upsample_trilinear3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_trilinear3d_backward
+    CompositeExplicitAutograd: upsample_trilinear3d_backward
 
 - func: upsample_bicubic2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_bicubic2d
+    CompositeExplicitAutograd: upsample_bicubic2d
 
 - func: upsample_bicubic2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_bicubic2d_backward
+    CompositeExplicitAutograd: upsample_bicubic2d_backward
 
 - func: upsample_nearest1d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_nearest1d
+    CompositeExplicitAutograd: upsample_nearest1d
 
 - func: upsample_nearest1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_nearest1d_backward
+    CompositeExplicitAutograd: upsample_nearest1d_backward
 
 - func: upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_nearest2d
+    CompositeExplicitAutograd: upsample_nearest2d
 
 - func: upsample_nearest2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
-    DefaultBackend: upsample_nearest2d_backward
+    CompositeExplicitAutograd: upsample_nearest2d_backward
 
 - func: upsample_nearest3d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
   python_module: nn
@@ -8608,7 +8452,7 @@
   python_module: special
   variants: function
   dispatch:
-    DefaultBackend: special_entr
+    CompositeExplicitAutograd: special_entr
 
 - func: special_entr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
@@ -8784,7 +8628,6 @@
   variants: function
 
 - func: fft_fftfreq(int n, float d=1.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -8794,7 +8637,6 @@
   variants: function
 
 - func: fft_rfftfreq(int n, float d=1.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: fft
   variants: function
 
@@ -8824,14 +8666,14 @@
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_cholesky
+    CompositeExplicitAutograd: linalg_cholesky
 
 - func: linalg_cholesky.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_cholesky_out
+    CompositeExplicitAutograd: linalg_cholesky_out
 
 # torch.linalg.det, alias for torch.det
 - func: linalg_det(Tensor self) -> Tensor
@@ -8841,13 +8683,13 @@
 - func: det(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: det
+    CompositeExplicitAutograd: det
 
 - func: linalg_lstsq(Tensor self, Tensor b, float? cond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_lstsq
+    CompositeExplicitAutograd: linalg_lstsq
 
 - func: _lstsq_helper(Tensor a, Tensor b, float cond, str? driver_name) -> (Tensor, Tensor, Tensor)
   variants: function
@@ -8876,25 +8718,25 @@
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_eigh
+    CompositeExplicitAutograd: linalg_eigh
 
 - func: linalg_eigh.eigvals(Tensor self, str UPLO="L", *, Tensor(a!) eigvals, Tensor(b!) eigvecs) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   dispatch:
-    DefaultBackend: linalg_eigh_out
+    CompositeExplicitAutograd: linalg_eigh_out
 
 - func: linalg_eigvalsh(Tensor self, str UPLO="L") -> Tensor
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_eigvalsh
+    CompositeExplicitAutograd: linalg_eigvalsh
 
 - func: linalg_eigvalsh.out(Tensor self, str UPLO='L', *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   dispatch:
-    DefaultBackend: linalg_eigvalsh_out
+    CompositeExplicitAutograd: linalg_eigvalsh_out
 
 - func: linalg_householder_product(Tensor input, Tensor tau) -> Tensor
   python_module: linalg
@@ -8917,14 +8759,14 @@
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_inv
+    CompositeExplicitAutograd: linalg_inv
 
 - func: linalg_inv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
-    DefaultBackend: linalg_inv_out
+    CompositeExplicitAutograd: linalg_inv_out
 
 - func: inner(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -8942,12 +8784,12 @@
 - func: ger(Tensor self, Tensor vec2) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: ger
+    CompositeExplicitAutograd: ger
 
 - func: ger.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: ger_out
+    CompositeExplicitAutograd: ger_out
 
 - func: linalg_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
@@ -8971,12 +8813,12 @@
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_vector_norm
+    CompositeExplicitAutograd: linalg_vector_norm
 
 - func: linalg_vector_norm.out(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:
-    DefaultBackend: linalg_vector_norm_out
+    CompositeExplicitAutograd: linalg_vector_norm_out
 
 - func: linalg_svd.U(Tensor self, bool full_matrices=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -9032,13 +8874,13 @@
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_solve
+    CompositeExplicitAutograd: linalg_solve
 
 - func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: linalg_solve_out
+    CompositeExplicitAutograd: linalg_solve_out
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -9063,14 +8905,14 @@
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_qr
+    CompositeExplicitAutograd: linalg_qr
 
 - func: linalg_qr.out(Tensor self, str mode='reduced', *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_qr_out
+    CompositeExplicitAutograd: linalg_qr_out
 
 - func: _linalg_qr_helper(Tensor self, str mode) -> (Tensor, Tensor)
   variants: function

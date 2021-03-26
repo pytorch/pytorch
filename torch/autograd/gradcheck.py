@@ -233,12 +233,12 @@ def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, idx, de
     # perturb the input
     assert output1.shape == output2.shape, \
         (f"Expected `func` to return outputs with the same shape"
-        f" when inputs are perturbed on index {idx} by {delta}, but got:"
-        f" shapes {output1.shape} and {output2.shape}.")
+         f" when inputs are perturbed on index {idx} by {delta}, but got:"
+         f" shapes {output1.shape} and {output2.shape}.")
     assert output1.dtype == output2.dtype, \
         (f"Expected `func` to return outputs with the same dtype"
-        f" when inputs are perturbed on index {idx} by {delta}, but got:"
-        f" dtypes {output1.dtype} and {output2.dtype}.")
+         f" when inputs are perturbed on index {idx} by {delta}, but got:"
+         f" dtypes {output1.dtype} and {output2.dtype}.")
 
 
 def get_numerical_jacobian_for_input(fn, input, input_idx, inputs, outputs, delta, eps, grad_out):
