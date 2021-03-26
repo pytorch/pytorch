@@ -15,6 +15,8 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 
+#include <c10/util/irange.h>
+
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmFP16.h>
@@ -134,7 +136,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
 
     // This is the end of the pipeline, pass the resulting matrix through
     fbgemm::DoNothing<float, float> kDoNothingObj{};
-    for (int task_id = begin; task_id < end; ++task_id) {
+    for (const auto task_id : c10::irange(begin, end)) {
       // After the uint8 * int8 matrix multiplication is performed, this
       // operation does:
       //  1) Add in row and column offsets to the rows and columns, respectively

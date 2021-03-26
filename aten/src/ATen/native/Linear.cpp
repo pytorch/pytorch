@@ -14,7 +14,10 @@
 
 namespace at { namespace native {
 
-Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
+Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, bias);
   }
@@ -544,7 +547,10 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   return output;
 }
 
-Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias) {
+Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   TORCH_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
   for (const auto i : c10::irange(input1.dim() - 1)) {
     TORCH_CHECK(input1.size(i) == input2.size(i),
@@ -631,7 +637,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   return at::mm(t1, t2).reshape(rsizes);
 }
 
-Tensor &tensordot_out(Tensor& result, const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
+Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
   result.copy_(at::native::tensordot(input1, input2, dims1, dims2));
   return result;
 }
