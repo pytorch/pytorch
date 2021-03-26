@@ -49,10 +49,21 @@ def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_
 
 def iter_tensor(x_tensor):
     # Enumerates over a tensor and provides a corresponding flat index that translates
-    # to a given rol/col in the jacobian matrix. iter_tensor also returns a
-    # strided version of the original tensor that is able to be modified inplace.
-    # If the input tensor is strided or sparse, the returned tensor will share storage with
-    # the original. Otherwise, for opaque tensor types like mkldnn, a copy is returned.
+    # to a given rol/col in the jacobian matrix. The order is the same as as if we flatten
+    # a contiguous tensor. iter_tensor also returns a strided version of the original
+    # tensor that is able to be modified inplace. If the input tensor is strided or sparse,
+    # the returned tensor will share storage with the original. Otherwise, for opaque tensor
+    # types like mkldnn, a copy is returned.
+    #
+    # Example:
+    #   for a tensor t with size (2, 2), it will yield:
+    #     `x, (0, 0), 0`, `x, (0, 1), 1`, `x, (1, 0), 2`, `x, (1, 1), 3`
+    #
+    #   where x is the t.data of the original tensor. Since input t has numel 4, the
+    #   Jacobian should have 4 columns. So having a d_idx of 3 and idx of (1, 1)
+    #   indicates that perturbing t[(1, 1)] allows us to updating the third (last)
+    #   column of any jacobian corresponding to this particular input.
+    #
     if x_tensor.is_sparse:
         def get_stride(size):
             dim = len(size)
@@ -140,7 +151,7 @@ def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
     for x_tensor, d in zip(x_tensors, j_tensors):
         is_mkldnn = x_tensor.layout == torch._mkldnn  # type: ignore # no attr _mkldnn
         for x, idx, d_idx in iter_tensor(x_tensor):
-            # compute_jacobian only works for pure real or pure imaginary delta
+            # Computing the jacobian only works for pure real or pure imaginary delta
             # for details on the algorithm used here, refer:
             # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
             # s = fn(z) where z = x for real valued input
