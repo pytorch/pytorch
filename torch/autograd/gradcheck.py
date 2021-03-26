@@ -23,7 +23,7 @@ def is_float_or_complex_tensor(obj):
     return is_tensor_like(obj) and (obj.is_floating_point() or obj.is_complex())
 
 
-def make_jacobians_with_inputs(input_tensors: Tuple, dim=None):
+def allocate_jacobians_with_inputs(input_tensors: Tuple, dim):
     # Makes zero-filled tensors from inputs. If `dim` is not None, for each tensor in
     # `input_tensors`, returns a new zero-filled tensor with height of `t.numel` and width
     # of `dim`. Otherwise, for each tensor, returns a 1-d tensor with size `(t.numel,)`.
@@ -32,14 +32,11 @@ def make_jacobians_with_inputs(input_tensors: Tuple, dim=None):
     out: List[torch.Tensor] = []
     for t in input_tensors:
         if is_float_or_complex_tensor(t) and t.requires_grad:
-            if dim is None:
-                out.append(t.new_zeros((t.nelement(),), layout=torch.strided))
-            else:
-                out.append(t.new_zeros((t.nelement(), dim), layout=torch.strided))
+            out.append(t.new_zeros((t.numel(), dim), layout=torch.strided))
     return tuple(out)
 
 
-def make_jacobians_with_outputs(output_tensors: Tuple, dtype=None, device=None, dim=None):
+def allocate_jacobians_with_outputs(output_tensors: Tuple, dim, dtype=None, device=None):
     # Makes zero-filled tensors from outputs. If `dim` is not None, for each tensor in
     # `output_tensors`, returns a new zero-filled tensor with height of `dim` and width of
     # `t.numel`. Otherwise, for each tensor, returns a 1-d tensor with size (t.numel,).
@@ -47,10 +44,7 @@ def make_jacobians_with_outputs(output_tensors: Tuple, dtype=None, device=None, 
     options = {"dtype": dtype, "device": device, "layout": torch.strided}
     for t in output_tensors:
         if is_float_or_complex_tensor(t):
-            if dim is None:
-                out.append(t.new_zeros((t.nelement(),), **options))
-            else:
-                out.append(t.new_zeros((dim, t.nelement()), **options))
+            out.append(t.new_zeros((dim, t.numel()), **options))
     return tuple(out)
 
 
@@ -67,10 +61,21 @@ def iter_tensors(x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_
 
 def iter_tensor(x_tensor):
     # Enumerates over a tensor and provides a corresponding flat index that translates
-    # to a given rol/col in the jacobian matrix. iter_tensor also returns a
-    # strided version of the original tensor that is able to be modified inplace.
-    # If the input tensor is strided or sparse, the returned tensor will share storage with
-    # the original. Otherwise, for opaque tensor types like mkldnn, a copy is returned.
+    # to a given rol/col in the jacobian matrix. The order is the same as as if we flatten
+    # a contiguous tensor. iter_tensor also returns a strided version of the original
+    # tensor that is able to be modified inplace. If the input tensor is strided or sparse,
+    # the returned tensor will share storage with the original. Otherwise, for opaque tensor
+    # types like mkldnn, a copy is returned.
+    #
+    # Example:
+    #   for a tensor t with size (2, 2), it will yield:
+    #     `x, (0, 0), 0`, `x, (0, 1), 1`, `x, (1, 0), 2`, `x, (1, 1), 3`
+    #
+    #   where x is the t.data of the original tensor. Since input t has numel 4, the
+    #   Jacobian should have 4 columns. So having a d_idx of 3 and idx of (1, 1)
+    #   indicates that perturbing t[(1, 1)] allows us to updating the third (last)
+    #   column of any jacobian corresponding to this particular input.
+    #
     if x_tensor.is_sparse:
         def get_stride(size):
             dim = len(size)
@@ -111,7 +116,8 @@ def iter_tensor(x_tensor):
             yield x_tensor, x_idx, d_idx
 
 
-def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3, grad_out=1.0):
+def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3,
+                           grad_out=1.0) -> List[Tuple[torch.Tensor]]:
     """Computes the numerical jacobian for a given fn and inputs. Returns M * N jacobians
     where M is the number of input tensors that require grad, and N is the number of output
     float/complex tensors.
@@ -123,6 +129,9 @@ def get_numerical_jacobian(fn, inputs, outputs=None, target=None, eps=1e-3, grad
         target: the Tensors wrt whom Jacobians are calculated (default=`inputs`)
         eps: the magnitude of the perturbation during finite differencing (default=`1e-3`)
         grad_out: grad output value used to calculate gradients.
+
+    Returns:
+        M lists of N tuples of jacobians
 
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
@@ -160,7 +169,7 @@ def compute_gradient(fn, entry, v, norm_v):
 
 
 def compute_numerical_jacobian_cols(jacobians_cols, delta, jvp_fn, input_is_complex, grad_out):
-    # compute gradient only works for pure real or pure imaginary delta
+    # Computing the jacobian only works for pure real or pure imaginary delta
     # for details on the algorithm used here, refer:
     # Section 3.5.3 https://arxiv.org/pdf/1701.00392.pdf
     # s = fn(z) where z = x for real valued input
@@ -192,8 +201,8 @@ def compute_numerical_jacobian_cols(jacobians_cols, delta, jvp_fn, input_is_comp
                     jacobians_cols.append(None)
 
 
-def combine_jacobian_cols(jacobians_cols, outputs, input, dim=None):
-    jacobians = make_jacobians_with_outputs(outputs, input.dtype, input.device, dim=dim)
+def combine_jacobian_cols(jacobians_cols, outputs, input, dim):
+    jacobians = allocate_jacobians_with_outputs(outputs, dim, input.dtype, input.device)
     for i, jacobian in enumerate(jacobians):
         for k, v in jacobians_cols.items():
             jacobian[k] = v[i]
@@ -240,7 +249,7 @@ def get_numerical_jacobian_for_input(fn, input, input_idx, inputs, outputs, delt
         jacobian_cols[d_idx] = []
         compute_numerical_jacobian_cols(jacobian_cols[d_idx], delta, jvp_fn, x.is_complex(), grad_out)
 
-    return combine_jacobian_cols(jacobian_cols, outputs, input, dim=input.numel())
+    return combine_jacobian_cols(jacobian_cols, outputs, input, input.numel())
 
 
 def check_jacobians_equal(j1, j2, atol):
@@ -252,7 +261,7 @@ def check_jacobians_equal(j1, j2, atol):
 
 
 def combine_jacobian_rows(jacobians_rows, inputs, dim):
-    out_jacobians = make_jacobians_with_inputs(inputs, dim)
+    out_jacobians = allocate_jacobians_with_inputs(inputs, dim)
     diff_input_list = list(iter_tensors(inputs, True))
     correct_grad_sizes = True
     correct_grad_types = True
@@ -570,13 +579,9 @@ def get_notallclose_msg(analytical, numerical, output_idx, input_idx, error_str=
     return error_str + 'Jacobian mismatch for output %d with respect to input %d,\n' \
         'numerical:%s\nanalytical:%s\n' % (output_idx, input_idx, numerical, analytical)
 
-def transpose(m):
-    out: List[List[torch.Tensor]] = []
-    for j in range(len(m[0])):
-        out.append([])
-        for i in range(len(m)):
-            out[j].append(m[i][j])
-    return out
+def transpose(matrix_of_tensors):
+    # returns list of tuples
+    return list(zip(*matrix_of_tensors))
 
 
 # Note [VarArg of Tensors]
