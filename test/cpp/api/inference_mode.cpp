@@ -18,16 +18,26 @@ namespace {
     return x.view({2, 3});
   }
 
+  /*
+    Only the following combos of Autograd & InplaceOrView keys on tensors are valid:
+      - Autograd=true, InplaceOrView=true (normal tensor)
+      - Autograd=false, InplaceOrView=false (inference tensor)
+    Tensors created in InferenceMode are mostly inference tensors. The only exception
+    is that view of normal tensors created in InferenceMode still produce normal tensor.
+  */
   bool is_inference_tensor(torch::Tensor& x) {
-    return x.unsafeGetTensorImpl()->is_inference_tensor();
-  }
-
-  void assert_tensor_creation_meta(torch::Tensor& x, torch::autograd::CreationMeta creation_meta) {
-    ASSERT_EQ(static_cast<torch::autograd::DifferentiableViewMeta*>(x.unsafeGetTensorImpl()->autograd_meta())->get_creation_meta(), creation_meta);
+    c10::DispatchKeySet ks = x.key_set();
+    bool has_Autograd = ks.has(c10::DispatchKey::AutogradCPU);
+    bool has_InplaceOrView = ks.has(c10::DispatchKey::InplaceOrView);
+    // They must be either both true or false.
+    bool is_inference_tensor = !has_Autograd && !has_InplaceOrView && x.is_leaf();
+    return is_inference_tensor;
   }
 
   void assert_TLS_states(bool inference_mode) {
     ASSERT_EQ(InferenceMode::is_enabled(), inference_mode);
+    ASSERT_FALSE(c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::InplaceOrView));
+    ASSERT_FALSE(c10::impl::tls_is_dispatch_keyset_included(c10::autograd_dispatch_keyset));
     ASSERT_EQ(c10::impl::tls_is_dispatch_keyset_excluded(c10::autograd_dispatch_keyset), inference_mode);
     ASSERT_EQ(c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::InplaceOrView), !inference_mode);
   }
@@ -68,7 +78,7 @@ TEST(InferenceModeTest, TestInferenceTensorCreation) {
 
 TEST(InferenceModeTest, TestExistingAutogradSession) {
   torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(true);
-  torch::Tensor a = s + 2;
+  torch::Tensor a = s.clone();
 
   // Save `a` in an existing autograd session
   torch::Tensor out = a * a;
@@ -148,7 +158,7 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeInplaceOp) {
 
 TEST(InferenceModeTest, TestInferenceTensorInNormalModeViewOp) {
   torch::Tensor inference_tensor;
-  for (bool requires_grad: {true/*, false*/}) {
+  for (bool requires_grad: {true, false}) {
     {
       InferenceMode guard;
       inference_tensor = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
@@ -162,7 +172,7 @@ TEST(InferenceModeTest, TestInferenceTensorInNormalModeViewOp) {
 TEST(InferenceModeTest, TestNormalTensorInplaceOutputInInferenceMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
-    torch::Tensor a = s + 2;
+    torch::Tensor a = s.clone();
 
     {
       c10::InferenceMode guard;
@@ -187,7 +197,7 @@ TEST(InferenceModeTest, TestNormalTensorInplaceOutputInInferenceMode) {
 TEST(InferenceModeTest, TestNormalTensorInplaceOutputInNormalMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
-    torch::Tensor a = s + 2;
+    torch::Tensor a = s.clone();
 
     {
       c10::InferenceMode guard;
@@ -214,16 +224,23 @@ TEST(InferenceModeTest, TestNormalTensorInplaceOutputInNormalMode) {
 TEST(InferenceModeTest, TestNormalTensorViewOutputInInferenceMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
-    torch::Tensor a = s + 2;
+    torch::Tensor a = s.clone();
     torch::Tensor view_out, tmp;
 
     {
       c10::InferenceMode guard;
       // View ops on normal tensor produce normal tensors as output.
-      // In addition, these view output tensors although are normal in the sense
-      // that it has both Autograd and InplaceOrView keys, they're still special
-      // since they have CreationMeta::INFERENCE_MODE. These tensors behave
-      // exactly the same as a view tensor created in no_grad mode.
+      // - For view ops it has both dispatch keys since due to the way we create
+      //   view Tensors in alias_with_sizes_and_strides:
+      //   ```
+      //     auto impl = c10::make_intrusive<TensorImpl>(
+      //     Storage(self.storage()), self.key_set(), self.dtype());
+      //   ```
+      //   In addition, these view output tensors are normal in the sense they
+      //   have both Autograd and InplaceOrView keys. But they're still special
+      //   since they'll have CreationMeta::INFERENCE_MODE. In other words they behave
+      //   exactly the same as a view tensor created in no_grad mode.
+
       view_out = view_op(a);  // go through kernels: InplaceOrView, CPU
       ASSERT_FALSE(is_inference_tensor(view_out));
       assert_tensor_creation_meta(view_out, CreationMeta::INFERENCE_MODE);
@@ -243,6 +260,7 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInInferenceMode) {
       ASSERT_FALSE(is_inference_tensor(tmp));
       ASSERT_EQ(tmp.requires_grad(), requires_grad);
       ASSERT_TRUE(tmp.is_leaf());
+      ASSERT_EQ(a._version(), tmp._version());
     }
   }
 }
@@ -250,7 +268,7 @@ TEST(InferenceModeTest, TestNormalTensorViewOutputInInferenceMode) {
 TEST(InferenceModeTest, TestNormalTensorViewOutputInNormalMode) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
-    torch::Tensor a = s + 2;
+    torch::Tensor a = s.clone();
     torch::Tensor view_out, tmp;
 
     {
@@ -293,10 +311,15 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
     ASSERT_FALSE(is_inference_tensor(out));
     ASSERT_EQ(out.requires_grad(), requires_grad);
 
-    // mul(self, other) saves variable when requires_grad=true
     if (requires_grad) {
+      // mul(self, other) saves variable when requires_grad=true
       ASSERT_THROWS_WITH(c.mul(s),
         "Inference tensors cannot be saved for backward.");
+
+      // Inference tensor in TensorList input
+      std::vector<torch::Tensor> inputs = {s, c};
+      ASSERT_THROWS_WITH(torch::stack(inputs), // go through kernels: VariableType(ERROR)!, InplaceOrView(fallthrough), CPU
+        "Inference tensors cannot be saved for backward.")
     }
   }
 }
@@ -354,7 +377,7 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorViewOp) {
 TEST(InferenceModeTest, TestHandleDirectViewOnRebase) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
-    torch::Tensor a = s + 2;
+    torch::Tensor a = s.clone();
     torch::Tensor view_out;
     {
       InferenceMode guard;
@@ -372,7 +395,7 @@ TEST(InferenceModeTest, TestHandleDirectViewOnRebase) {
 TEST(InferenceModeTest, TestHandleInDirectViewOnRebase) {
   for (bool requires_grad: {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
-    torch::Tensor a = s + 2;
+    torch::Tensor a = s.clone();
     torch::Tensor view_out;
     {
       InferenceMode guard;
@@ -386,4 +409,21 @@ TEST(InferenceModeTest, TestHandleInDirectViewOnRebase) {
       view_out.grad_fn();
     }
   }
+}
+
+TEST(InferenceModeTest, TestCreationMetaPropagation) {
+  torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(true);
+  torch::Tensor b, c;
+  {
+    InferenceMode guard;
+    b = s.view_as(s);
+  }
+  ASSERT_THROWS_WITH(b.add_(1),
+    "A view was created in inference mode and is being modified inplace");
+  {
+    AutoGradMode mode(false);
+    c = b.view_as(b);
+  }
+  ASSERT_THROWS_WITH(c.add_(1),
+    "A view was created in inference mode and is being modified inplace");
 }

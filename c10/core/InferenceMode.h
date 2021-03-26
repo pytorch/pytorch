@@ -13,8 +13,11 @@ struct TORCH_API InferenceMode {
     //   InferenceMode: InplaceOrView not in included, Autograd in excluded
     //   NormalMode: InplaceOrView in included, Autograd not in excluded
     //
-    // 1. When InferenceMode is enabled, Autograd dispatch keys are excluded
-    //    but not InplaceOrView key.
+    // Invariant:
+    // - InplaceOrView is never in the excluded set
+    // - Autograd is never in the included set
+    //
+    // 1. Why not put InplaceOrView in the excluded set inside InferenceMode?
     //
     //    For example:
     //    torch::Tensor a = torch::ones({1, 2, 3}).set_requires_grad(true);
@@ -25,8 +28,7 @@ struct TORCH_API InferenceMode {
     //    }
     //    `k.add_(2)` still need to go through InplaceOrView kernel so that it's
     //    prepared for future autograd.
-    //  2. When InferenceMode is disabled, InplaceOrView must be added
-    //     to included set.
+    //  2. Why do we need InplaceOrView in included set outside InferenceMode?
     //
     //     For example:
     //     torch::Tensor a;
@@ -42,6 +44,7 @@ struct TORCH_API InferenceMode {
     //     By going through InplaceOrView kernel, we can throw an error since it
     //     broke our invariant: "Autograd keys must be in excluded set before
     //     reaching InplaceOrView kernel".
+    //     FIXME
 
     DispatchKeySet included = enabled ? prev_keyset.included_.remove(c10::DispatchKey::InplaceOrView)
          : prev_keyset.included_.add(c10::DispatchKey::InplaceOrView);
