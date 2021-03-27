@@ -10,42 +10,24 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from torch.distributed import Store
 
 
-class RendezvousException(Exception):
-    """
-    Represents the base type for rendezvous exceptions.
-    """
-
-    pass
+class RendezvousError(Exception):
+    """Represents the base type for rendezvous errors."""
 
 
-class RendezvousClosedException(RendezvousException):
-    """
-    Raised when a rendezvous is closed.
-
-    This is used to signal completion to nodes that arrive late.
-    """
-
-    pass
+class RendezvousClosedError(RendezvousError):
+    """Raised when a rendezvous is closed."""
 
 
-class RendezvousTimeoutException(RendezvousException):
-    """
-    Raised to signal that a rendezvous did not succeed within the allocated
-    time.
-
-    This is a non-retryable type of failure.
-    """
-
-    pass
+class RendezvousTimeoutError(RendezvousError):
+    """Raised when a rendezvous did not complete on time."""
 
 
-class RendezvousNonRetryableError(RendezvousException):
-    """
-    Raised when a failure occured that should not be retried within the same
-    worker process.
-    """
+class RendezvousConnectionError(RendezvousError):
+    """Raised when the connection to a rendezvous backend has failed."""
 
-    pass
+
+class RendezvousStateError(RendezvousError):
+    """Raised when the state of a rendezvous is corrupt."""
 
 
 class RendezvousHandler(abc.ABC):
@@ -81,9 +63,8 @@ class RendezvousHandler(abc.ABC):
         Returns: a tuple of (``c10d Store``, ``rank``, ``world size``)
 
         Raises:
-            RendezvousClosedException - if rendezvous for the current
-               job is closed.
-            RendezvousTimeoutException - on timeout
+            RendezvousClosedError - if rendezvous for the current job is closed.
+            RendezvousTimeoutError - on timeout
         """
         pass
 
