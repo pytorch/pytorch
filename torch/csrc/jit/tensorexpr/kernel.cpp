@@ -426,9 +426,9 @@ ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
   if (v->node()->kind() == prim::Constant) {
     const auto val = toIValue(v).value();
     if (val.isDouble()) {
-      return FloatImm::make(static_cast<float>(val.toDouble()));
+      return DoubleImm::make(val.toDouble());
     } else if (val.isInt()) {
-      return IntImm::make(val.toInt());
+      return LongImm::make(val.toInt());
     } else if (val.isBool()) {
       return BoolImm::make(val.toBool());
     } else if (val.isNone()) {
