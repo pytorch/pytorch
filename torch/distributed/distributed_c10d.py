@@ -2490,7 +2490,9 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None):
     whole group exits the function successfully, making it useful for debugging
     and synchronizing. However, it can have a performance impact and should only
     be used for debugging or scenarios that require full synhcronization points
-    on the host-side.
+    on the host-side. For debugging purposees, this barrier can be inserted
+    before the application's collective calls to check if any ranks are
+    desynchronized.
 
     .. note:: Note that this collective is only supported with the GLOO backend.
 
