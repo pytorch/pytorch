@@ -50,16 +50,16 @@
 # where Variables *are* Tensors (as opposed to them containing tensors, which
 # is what the previous interpretation was.)
 - func: set_data(Tensor(a!) self, Tensor new_data) -> ()
-  manual_kernel_registration: True
+  manual_cpp_binding: True
   variants: method
 
 - func: data(Tensor self) -> Tensor
-  manual_kernel_registration: True
+  manual_cpp_binding: True
   variants: method
 
 # True if this `Variable` is a leaf and thus does not have a `grad_fn`.
 - func: is_leaf(Tensor self) -> bool
-  manual_kernel_registration: True
+  manual_cpp_binding: True
   variants: method
 
 # Returns the output index of this variable from the forward operation that
@@ -73,11 +73,11 @@
 #   assert y2.output_nr == 2
 #
 - func: output_nr(Tensor self) -> int
-  manual_kernel_registration: True
+  manual_cpp_binding: True
   variants: method
 
 - func: _version(Tensor self) -> int
-  manual_kernel_registration: True
+  manual_cpp_binding: True
   variants: method
 
 - func: requires_grad_(Tensor(a!) self, bool requires_grad=True) -> Tensor(a!)
@@ -86,7 +86,7 @@
 
 # Enables .grad attribute for non-leaf Tensors.
 - func: retain_grad(Tensor(a!) self) -> ()
-  manual_kernel_registration: True
+  manual_cpp_binding: True
   variants: method
 
 - func: _fw_primal(Tensor(a) self, int level) -> Tensor(a)

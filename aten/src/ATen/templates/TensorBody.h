@@ -784,6 +784,21 @@ public:
   /// Remove hook at given position
   void remove_hook(unsigned pos) const;
 
+  // Variable methods
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  bool is_leaf() const;
+
+  int64_t output_nr() const;
+
+  void set_data(const Tensor & new_data) const;
+
+  Tensor data() const;
+
+  int64_t _version() const;
+
+  void retain_grad() const;
+
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
