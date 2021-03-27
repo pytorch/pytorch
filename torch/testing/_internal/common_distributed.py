@@ -1,10 +1,11 @@
-
-from multiprocessing import Manager
+from enum import Enum
 from contextlib import contextmanager
+from multiprocessing import Manager
 from io import StringIO
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import logging
@@ -359,9 +360,32 @@ class MultiProcessTestCase(TestCase):
         proc = torch.multiprocessing.get_context("spawn").Process
         self._start_processes(proc)
 
+    class Event(Enum):
+        GET_TRACEBACK = 1
+
+    @staticmethod
+    def _event_listener(pipe):
+        while True:
+            event = pipe.recv()
+            if event == MultiProcessTestCase.Event.GET_TRACEBACK:
+                # Return traceback to the parent process.
+                with tempfile.NamedTemporaryFile(mode='r+') as tmp_file:
+                    faulthandler.dump_traceback(tmp_file)
+                    # Flush buffers and seek to read from the beginning
+                    tmp_file.flush()
+                    tmp_file.seek(0)
+                    pipe.send(tmp_file.read())
+
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe, faulthandler_file_name):
         self = cls(test_name)
+
+        # Start event listener thread.
+        threading.Thread(
+            target=MultiProcessTestCase._event_listener,
+            args=(pipe,),
+            daemon=True).start()
+
         self._register_fault_handler(faulthandler_file_name)
         self.rank = rank
         self.file_name = file_name
@@ -394,6 +418,18 @@ class MultiProcessTestCase(TestCase):
             pipe.close()
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
 
+    def _get_timedout_process_traceback(self):
+        for i, process in enumerate(self.processes):
+            if process.exitcode is None:
+                pipe = self.pid_to_pipe[process.pid]
+                pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
+                # Wait for traceback
+                if pipe.poll(5):
+                    traceback = pipe.recv()
+                    logger.error(f'Process {i} timed out with traceback: \n\n{traceback}')
+                else:
+                    logger.error(f'Could not retrieve traceback for timed out process: {i}')
+
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())
         start_time = time.time()
@@ -419,6 +455,7 @@ class MultiProcessTestCase(TestCase):
                 # Check if we should time out the test. If so, we terminate each process.
                 elapsed = time.time() - start_time
                 if elapsed > timeout:
+                    self._get_timedout_process_traceback()
                     print(f'Timing out after {timeout} seconds and killing subprocesses.')
                     for p in self.processes:
                         p.terminate()
