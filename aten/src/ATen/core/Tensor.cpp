@@ -52,6 +52,41 @@ Tensor Tensor::tensor_data() const {
   return impl::GetVariableHooks()->tensor_data(*this);
 }
 
+bool Tensor::is_leaf() const {
+  return impl::GetVariableHooks()->is_leaf(*this);
+}
+
+int64_t Tensor::output_nr() const {
+  return impl::GetVariableHooks()->output_nr(*this);
+}
+
+void Tensor::set_data(const Tensor & new_data) const {
+  impl::GetVariableHooks()->set_data(*this, new_data);
+}
+
+Tensor Tensor::data() const {
+  return impl::GetVariableHooks()->data(*this);
+}
+
+int64_t Tensor::_version() const {
+  return impl::GetVariableHooks()->_version(*this);
+}
+
+void Tensor::retain_grad() const {
+  impl::GetVariableHooks()->retain_grad(*this);
+}
+
+void Tensor::_backward(TensorList inputs,
+        const c10::optional<Tensor>& gradient,
+        c10::optional<bool> keep_graph,
+        bool create_graph) const {
+  return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
+}
+
+Tensor& Tensor::requires_grad_(bool _requires_grad) const {
+  return impl::GetVariableHooks()->requires_grad_(*this, _requires_grad);
+}
+
 // View Variables
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

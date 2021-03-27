@@ -3,10 +3,7 @@ import time
 import torch
 import torch.distributed.autograd as autograd
 import torch.distributed.rpc as rpc
-import torch.multiprocessing as mp
 import torch.nn as nn
-
-from torch.distributed.rpc import TensorPipeRpcBackendOptions
 
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -14,7 +11,6 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 from torch.testing._internal.dist_utils import (
     dist_init,
 )
-
 
 
 class MyModule(nn.Module):
@@ -52,14 +48,15 @@ def measure(comm_mode):
     tok = time.time()
     print(f"{comm_mode} RPC total execution time: {tok - tik}")
 
-class CudaRpcDistributedTest(RpcAgentTestFixture):
+
+class CudaDistributedRPCTest(RpcAgentTestFixture):
 
     @property
     def world_size(self):
         return 2
 
     @dist_init(setup_rpc=False)
-    def test_cuda_rpc_distributed(self):
+    def test_cuda_distributed_rpc(self):
 
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '29500'
