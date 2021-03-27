@@ -51,7 +51,7 @@ c10::IValue preprocess(
   return compiled;
 }
 
-const std::string backend_name = "backend_with_compiler_demo";
+constexpr auto backend_name = "backend_with_compiler_demo";
 static auto pre_reg = preprocess_register(backend_name, preprocess);
 } // namespace
 

@@ -107,7 +107,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
 };
 
 namespace {
-const std::string backend_name = "backend_with_compiler_demo";
+constexpr auto backend_name = "backend_with_compiler_demo";
 static auto cls = torch::jit::backend<BackendWithCompiler>(backend_name);
 } // namespace
 

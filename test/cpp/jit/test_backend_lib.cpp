@@ -74,12 +74,12 @@ c10::IValue preprocess(
   return mod._ivalue();
 }
 
-const std::string backend_name = "test_backend";
+constexpr auto backend_name = "test_backend";
 static auto cls_available =
     torch::jit::backend<TestBackend<true>>(backend_name);
 static auto pre_reg = preprocess_register(backend_name, preprocess);
 
-const std::string backend_unavailable_name = "test_backend_unavailable";
+constexpr auto backend_unavailable_name = "test_backend_unavailable";
 static auto cls_unavailable =
     torch::jit::backend<TestBackend<false>>(backend_unavailable_name);
 static auto pre_reg_unavailable =
