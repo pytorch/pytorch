@@ -13030,6 +13030,17 @@ dedent """
         def bar(x):  # type: ignore[no-redef]
             return x
 
+    def test_eval_or(self):
+        def fn():
+            b: int = 4 or 5
+            return b
+        self.checkScript(fn, ())
+
+        def fn_2():
+            b: int = 0 or 5 or 2
+            return b
+        self.checkScript(fn_2, ())
+
     def test_method_casts_script(self):
         cast_types = [
             'byte', 'char', 'double', 'float', 'int', 'long', 'short'

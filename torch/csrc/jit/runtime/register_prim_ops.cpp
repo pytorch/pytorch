@@ -854,6 +854,21 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::__or__.any(Any inp1, Any inp2) -> Any"),
+         [](Stack* stack) {
+           IValue inp2 = pop(stack);
+           IValue inp1 = pop(stack);
+           if (inp1.type() != inp2.type()) {
+             AT_ERROR("Different types inside or expression");
+           }
+           if (inp1.isScalar() && inp1.toScalar().equal(0)) {
+             push(stack, inp2);
+           } else {
+             push(stack, inp1);
+           }
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::lower(str self) -> str"),
          [](Stack* stack) {
            auto string = pop(stack).toStringRef();

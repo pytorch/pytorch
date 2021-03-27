@@ -397,6 +397,7 @@ struct Environment {
     }
     if (as_simple_value) {
       if (annotated_type &&
+          (as_simple_value->type()->kind() != TypeKind::AnyType) &&
           !as_simple_value->type()->isSubtypeOf(annotated_type)) {
         throw ErrorReport(loc)
             << "Variable '" << name << "' is annotated with type "
@@ -3529,7 +3530,15 @@ struct to_ir {
       case TK_IS:
       case TK_ISNOT:
       case TK_AND:
-      case TK_OR:
+      case TK_OR: {
+        auto lhs = emitSugaredExpr(Expr(tree->tree(0)), 0)
+                       ->asValue(tree->tree(0)->range(), method);
+        auto rhs = emitSugaredExpr(Expr(tree->tree(1)), 0)
+                       ->asValue(tree->tree(1)->range(), method);
+
+        return emitBuiltinCall(
+            tree->range(), *method.graph(), aten::__or__, {lhs, rhs}, {});
+      }
       case TK_NOT: {
         return emitCondExpr(Expr(tree)).value();
       }
