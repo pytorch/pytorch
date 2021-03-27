@@ -2510,7 +2510,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 model, output_device=gpus[1], process_group=process_group
             )
 
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
+        with self.assertRaisesRegex(ValueError, "device_ids can only be None or contain a single element."):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group
             )
@@ -2522,7 +2522,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             ddp_model = DistributedDataParallel(model, process_group=process_group)
 
         model = model.cpu()
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
+        with self.assertRaisesRegex(ValueError, "device_ids can only be None or contain a single element."):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group
             )
