@@ -2504,7 +2504,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         model = DoubleGpuNet(gpus)
 
         with self.assertRaisesRegex(
-            AssertionError, "output_device .* single-device GPU"
+            ValueError, "output_device .* single-device GPU"
         ):
             ddp_model = DistributedDataParallel(
                 model, output_device=gpus[1], process_group=process_group
@@ -2516,7 +2516,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             )
 
         with self.assertRaisesRegex(
-            AssertionError, "input module must be on the same type of devices"
+            ValueError, "input module must be on the same type of devices"
         ):
             model.fc1 = model.fc1.cpu()
             ddp_model = DistributedDataParallel(model, process_group=process_group)
