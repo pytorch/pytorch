@@ -2477,7 +2477,6 @@ def barrier(group=GroupMember.WORLD,
         work.wait()
 
 def monitored_barrier(group=GroupMember.WORLD, timeout=None):
-
     """
     Synchronizes all processes similar to torch.distributed.barrier, but takes
     a configurable timeout and is able to report ranks that did not pass this
