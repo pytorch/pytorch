@@ -382,9 +382,7 @@ class TestDistBackend(MultiProcessTestCase):
         # Skip return code checking for following tests as they are expected to
         # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
         self.skip_return_code_checks = [
-            self.test_ddp_model_diff_across_ranks_no_debug_mode.__wrapped__,
-            self.test_ddp_model_diff_across_ranks_debug_mode_detail.__wrapped__,
-            self.test_ddp_model_diff_across_ranks_debug_mode_info.__wrapped__,
+            self.test_ddp_model_diff_across_ranks.__wrapped__,
         ]
 
     def tearDown(self):
@@ -5034,73 +5032,32 @@ class DistributedTest:
             ):
                 dist.scatter_object_list([], scatter_list, src=src_rank)
 
-        def _test_ddp_model_diff_across_ranks(self, debug_mode: dist._DistributedDebugLevel):
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_model_diff_across_ranks(self):
             torch.cuda.set_device(self.rank)
             # Creates network with different sized embedding table on different
-            # ranks. This should throw error during DDP init.
+            # ranks. This should throw an error during DDP init.
             net = EmbeddingNet(self.rank)
-            # Patch monitored barrier timeout in DDP to make test run faster.
-            torch.nn.parallel.distributed._MONITORED_BARRIER_TIMEOUT = timedelta(seconds=2)
-            if self.rank == 0:
-                rank_0_ctx = None
-                if debug_mode == dist._DistributedDebugLevel.OFF:
-                    rank_0_ctx = (
-                        suppress()
-                        if dist.get_backend() == dist.Backend.NCCL
-                        else self.assertRaisesRegex(RuntimeError, "Connection closed by peer")
-                    )
-                else:
-                    max_rank = dist.get_world_size() - 1
-                    regex = "Rank 1" if max_rank == 1 else f"Rank [1-{max_rank}]"
-                    rank_0_ctx = self.assertRaisesRegex(RuntimeError, regex)
-                with rank_0_ctx:
-                    net = torch.nn.parallel.DistributedDataParallel(
-                        net.to(self.rank),
-                        device_ids=[self.rank],
-                    )
-                    dist.barrier()
-            else:
-                with self.assertRaisesRegex(RuntimeError, "appears not to match"):
-                    net = torch.nn.parallel.DistributedDataParallel(
-                        net.to(self.rank),
-                        device_ids=[self.rank],
-                    )
-                    dist.barrier()
-
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
-        @skip_if_lt_x_gpu(2)
-        def test_ddp_model_diff_across_ranks_no_debug_mode(self):
-            # Clear TORCH_DISTRIBUTED_DEBUG in case it was set by another test.
-            if "TORCH_DISTRIBUTED_DEBUG" in os.environ.keys():
-                del os.environ["TORCH_DISTRIBUTED_DEBUG"]
-
-            debug_mode = dist._get_debug_mode()
-            self._test_ddp_model_diff_across_ranks(debug_mode=dist._get_debug_mode())
-
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
-        @skip_if_lt_x_gpu(2)
-        def test_ddp_model_diff_across_ranks_debug_mode_detail(self):
-            # Clear TORCH_DISTRIBUTED_DEBUG in case it was set by another test.
-            if "TORCH_DISTRIBUTED_DEBUG" in os.environ.keys():
-                del os.environ["TORCH_DISTRIBUTED_DEBUG"]
-
-            os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
-            debug_mode = dist._get_debug_mode()
-            self._test_ddp_model_diff_across_ranks(debug_mode=dist._get_debug_mode())
-
-        @require_backend({"gloo", "nccl"})
-        @require_backends_available({"gloo", "nccl"})
-        @skip_if_lt_x_gpu(2)
-        def test_ddp_model_diff_across_ranks_debug_mode_info(self):
-            # Clear TORCH_DISTRIBUTED_DEBUG in case it was set by another test.
-            if "TORCH_DISTRIBUTED_DEBUG" in os.environ.keys():
-                del os.environ["TORCH_DISTRIBUTED_DEBUG"]
-
-            os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
-            debug_mode = dist._get_debug_mode()
-            self._test_ddp_model_diff_across_ranks(debug_mode=dist._get_debug_mode())
+            # When running with NCCL backend, we don't expect an error on rank 0,
+            # rather, it will be taken down by NCCL_ASYNC_ERROR_HANDLING. When
+            # running with Gloo, we expect the error to be caught inline.
+            rank_0_ctx = (
+                suppress()
+                if dist.get_backend() == dist.Backend.NCCL
+                else self.assertRaisesRegex(RuntimeError, "Connection closed by peer")
+            )
+            ctx = (
+                rank_0_ctx
+                if self.rank == 0
+                else self.assertRaisesRegex(RuntimeError, "appears not to match")
+            )
+            with ctx:
+                net = torch.nn.parallel.DistributedDataParallel(
+                    net.to(self.rank), device_ids=[self.rank]
+                )
+                dist.barrier()
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
@@ -5215,6 +5172,7 @@ class DistributedTest:
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
         @skip_if_rocm
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_monitored_barrier_allreduce_hang(self):
             # tests expected behavior when nonzero rank hangs.
             if "NCCL_ASYNC_ERROR_HANDLING" in os.environ:

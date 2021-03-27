@@ -2776,14 +2776,12 @@ void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
   }
 
   auto remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
-  // If there was no remaining time but rank 0 successfully processed all other
-  // ranks, adjust back to 0 to get accurate time information when logging below
-  // message.
-  if (remainingTime.count() < 0) {
-    remainingTime = std::chrono::milliseconds(0);
-  }
   LOG(INFO) << "All ranks passed monitoredBarrier in "
-            << (monitoredBarrierTimeout - remainingTime).count() << " ms.";
+            << (remainingTime.count() > 0
+                    ? (monitoredBarrierTimeout - remainingTime)
+                    : monitoredBarrierTimeout)
+                   .count()
+            << " ms.";
 }
 
 } // namespace c10d
