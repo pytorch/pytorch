@@ -771,7 +771,7 @@ class Quantizer:
 
         self.modules = dict(model.named_modules())
         matches, quants = self._match(model, observed_graph, standalone_module_names, standalone_module_classes, custom_module_classes)
-        observed_graph = handle_copy_nodes(observed_graph, matches, quants, self.activation_post_process_map, self.modules)
+        observed_graph = handle_copy_nodes(observed_graph, matches, quants, self.qconfig_map, self.activation_post_process_map, self.modules)
 
         self.modules = dict(model.named_modules())
         matches, quants = self._match(model, observed_graph, standalone_module_names, standalone_module_classes, custom_module_classes)
@@ -1120,6 +1120,18 @@ class Quantizer:
                     env[node.name] = result
                 continue
             elif root_node is not None:
+                if qconfig is None:
+                    # This branch is hit if all of these conditions are met:
+                    # 1. we are in a fusion pattern of multiple nodes (i.e. add-relu)
+                    # 2. the current node is not the "root_node" of the pattern
+                    # 3. quantization for this pattern is disabled
+                    #
+                    # In this case, we need to make sure to populate the env with
+                    # intermediate nodes manually, because the QuantizeHandler.convert
+                    # function will not be called.
+                    result = self.quantized_graph.node_copy(
+                        node, load_non_quantized)
+                    env[node.name] = result
                 continue
 
             # handle activation post process calls

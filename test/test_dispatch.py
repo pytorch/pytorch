@@ -562,8 +562,8 @@ QuantizedCPU: fn_quantizedcpu [kernel]
             lambda m: m.def_("foo(Tensor x) -> Tensor"),
             # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
-            # m.impl("foo", torch::kDefaultBackend, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "DefaultBackend", debug="fn_defaultbackend"),
+            # m.impl("foo", torch::kCompositeExplicitAutograd, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "CompositeExplicitAutograd", debug="fn_defaultbackend"),
         ])
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
@@ -572,7 +572,7 @@ schema: test::foo(Tensor x) -> (Tensor)
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-DefaultBackend[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -597,8 +597,8 @@ AutogradXLA: fallthrough registered in pytorch framework [backend fallback]
             lambda m: m.impl_t_t("foo", "CPU", debug="fn_cpu"),
             # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
-            # m.impl("foo", torch::kDefaultBackend, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "DefaultBackend", debug="fn_defaultbackend"),
+            # m.impl("foo", torch::kCompositeExplicitAutograd, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "CompositeExplicitAutograd", debug="fn_defaultbackend"),
         ])
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
@@ -608,7 +608,7 @@ debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-DefaultBackend[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -636,8 +636,8 @@ QuantizedCPU: fn_defaultbackend [default backend kernel]
             lambda m: m.impl_t_t("foo", "Autograd", debug="fn_autograd"),
             # m.impl("foo", torch::kCompositeImplicitAutograd, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "CompositeImplicitAutograd", debug="fn_math"),
-            # m.impl("foo", torch::kDefaultBackend, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "DefaultBackend", debug="fn_defaultbackend"),
+            # m.impl("foo", torch::kCompositeExplicitAutograd, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "CompositeExplicitAutograd", debug="fn_defaultbackend"),
         ])
         state, table = result.state, result.table
         self.assertExpectedInline(state, '''\
@@ -648,7 +648,7 @@ alias analysis kind: FROM_SCHEMA
 CPU: fn_cpu :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 Autograd[alias]: fn_autograd :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 CompositeImplicitAutograd[alias]: fn_math :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-DefaultBackend[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+CompositeExplicitAutograd[alias]: fn_defaultbackend :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
         # computed dispatch table is too big, so we only check on a few entries we're interested in.
@@ -809,7 +809,7 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
 
     def test_defaultbackend_autogradcpu(self):
         dispatcher = PythonDispatcher()
-        dispatcher.register(["CPU", "XLA", "DefaultBackend", "AutogradCPU"])
+        dispatcher.register(["CPU", "XLA", "CompositeExplicitAutograd", "AutogradCPU"])
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
             '''\
@@ -819,7 +819,7 @@ key             kernel
 ---------------------------
 CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
-QuantizedCPU    fn_DefaultBackend [default backend kernel]
+QuantizedCPU    fn_CompositeExplicitAutograd [default backend kernel]
 AutogradOther   fallthrough [backend fallback]
 AutogradCPU     fn_AutogradCPU [kernel]
 AutogradXLA     fallthrough [backend fallback]
@@ -836,7 +836,7 @@ key             kernel
 CPU             fn_CPU
 XLA             fn_XLA
 AutogradCPU     fn_AutogradCPU
-DefaultBackend[alias] fn_DefaultBackend
+CompositeExplicitAutograd[alias] fn_CompositeExplicitAutograd
 '''
         )
 
@@ -883,8 +883,8 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
 
         with self.assertRaisesRegex(
                 RuntimeError,
-                r"Registration to both CompositeImplicitAutograd and DefaultBackend is not allowed"):
-            dispatcher.register(["DefaultBackend", "CompositeImplicitAutograd"])
+                r"Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed"):
+            dispatcher.register(["CompositeExplicitAutograd", "CompositeImplicitAutograd"])
 
 
 if __name__ == '__main__':
