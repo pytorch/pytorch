@@ -329,6 +329,7 @@ def insert_observer_for_input_arg_of_observed_node(
 def handle_copy_nodes(
         observed_graph: Graph, matches: Dict[str, MatchResult],
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
+        qconfig_map: Dict[str, QConfigAny],
         activation_post_process_map: Dict[str, List[str]],
         modules: Dict[str, torch.nn.Module]):
     # map from node name to whether it is observed or not
@@ -380,11 +381,13 @@ def handle_copy_nodes(
             ("call_function", operator.getitem),
         ]
         if (node.op, node.target) in special_nodes:
-            if in_nodes(node.args[0], observed_nodes) and not in_nodes(node.args[0].args[0], observed_nodes):
-                app_to_remove.add(node.args[0])
-                # remove node from copy nodes
-                if node in copy_nodes:
-                    copy_nodes.remove(node)
+            if in_nodes(node.args[0], observed_nodes):
+                prev_node = node.args[0].args[0]
+                if prev_node.name not in qconfig_map or qconfig_map[prev_node.name] is None:
+                    app_to_remove.add(node.args[0])
+                    # if the previous node is not quantized, remove node from copy nodes
+                    if node in copy_nodes:
+                        copy_nodes.remove(node)
 
     for node in observed_graph.nodes:
         if node.op == "output":
@@ -687,7 +690,6 @@ class Quantizer:
                 self.activation_post_process_indexes,
                 env,
                 observed_graph, load_arg)
-
 
         self.modules = dict(model.named_modules())
 
