@@ -649,9 +649,12 @@ static Tensor convolution_same(
 }
 
 Tensor _convolution_mode(
-    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, std::string padding, IntArrayRef dilation,
     int64_t groups) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   if (padding == "same") {
     return at::native::convolution_same(
         input, weight, bias, stride, dilation, groups);

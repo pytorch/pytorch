@@ -122,10 +122,14 @@ Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const
   const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
 
     Tensor loss = at::empty_like(input);
-    return at::native::binary_cross_entropy_out_cpu(loss, input, target, weight, reduction);
+    return at::native::binary_cross_entropy_out_cpu(
+        input, target, weight, reduction, loss);
 }
 
-Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor& loss) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     Tensor loss_squeezed = at::squeeze(loss);
 
     auto iter = TensorIteratorConfig()
@@ -166,10 +170,14 @@ Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input
   const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
 
     Tensor grad_input = at::empty_like(input);
-    return at::native::binary_cross_entropy_backward_out_cpu(grad_input, grad, input, target, weight, reduction);
+    return at::native::binary_cross_entropy_backward_out_cpu(
+        grad, input, target, weight, reduction, grad_input);
 }
 
-Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction, Tensor& grad_input) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     Tensor grad_input_squeezed = at::squeeze(grad_input);
 
     auto iter = TensorIteratorConfig()
