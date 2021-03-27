@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import torch
 import torch.distributed.autograd as autograd
@@ -12,7 +13,9 @@ from torch.testing._internal.dist_utils import (
     dist_init,
 )
 
-from torch.testing._internal.common_distributed import skip_if_not_multigpu
+from torch.testing._internal.common_distributed import (
+    TEST_SKIPS,
+)
 
 
 class MyModule(nn.Module):
@@ -57,9 +60,14 @@ class CudaDistributedRPCTest(RpcAgentTestFixture):
     def world_size(self):
         return 2
 
-    @skip_if_not_multigpu
     @dist_init(setup_rpc=False)
     def test_cuda_distributed_rpc(self):
+
+        if not torch.cuda.is_available():
+            sys.exit(TEST_SKIPS['no_cuda'].exit_code)
+
+        if torch.cuda.is_available() and torch.cuda.device_count() < 2:
+            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
 
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '29500'
