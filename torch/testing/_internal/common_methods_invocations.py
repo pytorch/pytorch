@@ -2179,6 +2179,10 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and(torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                device_type='cpu', dtypes=[torch.bfloat16]),
+                   ),
                    sample_kwargs=sample_kwargs_clamp,
                    sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('conj',
