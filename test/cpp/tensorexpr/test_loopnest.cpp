@@ -2017,6 +2017,86 @@ TEST(LoopNest, Reduce2dComputeAt) {
   }
 }
 
+TEST(LoopNest, DISABLED_Conv1d_NH) {
+  // Lots of stuff is broken here.  The computeAt swaps the axes for some odd
+  // reason.  Even without that, the index flattener fails due to "dimensions
+  // mismatch in flatten index".
+  KernelScope kernel_scope;
+
+  int N = 4;
+  int H = 256;
+  int R = 3;
+  int Pad = 1;
+  Placeholder IP("input", kFloat, {H});
+
+  Tensor* A =
+      Compute("A", {{N, "np"}, {H + 2 * Pad, "hp"}}, [&](Axis n, Axis h) {
+        auto cond = CompareSelect::make(h, Pad, 1, 0, kLT);
+        cond = CompareSelect::make(h, H + Pad, 1, cond, kGE);
+        return ifThenElse(cond, 0.f, IP.load(n, h - Pad));
+      });
+  Tensor* B = Reduce(
+      "B",
+      {{N, "n"}, {H, "h"}},
+      Sum(),
+      [&](Axis n, Axis h, Axis r) { return A->call(n, h + r); },
+      {{R, "r"}});
+  LoopNest l({B});
+  checkIR(l.root_stmt(), R"IR(
+# CHECK: for (int np = 0; np < 4; np++) {
+# CHECK:   for (int hp = 0; hp < 258; hp++) {
+# CHECK:     A[np, hp] = IfThenElse(hp>=257 ? 1 : (hp<1 ? 1 : 0), 0.f, input[np, hp - 1]);
+# CHECK:   }
+# CHECK: }
+# CHECK: for (int n = 0; n < 4; n++) {
+# CHECK:   for (int h = 0; h < 256; h++) {
+# CHECK:     B[n, h] = float(0);
+# CHECK:     for (int r = 0; r < 3; r++) {
+# CHECK:       B[n, h] = ReduceOp((B[n, h]) + (A(n, h + r)), reduce_args={r});
+# CHECK:     }
+# CHECK:   }
+# CHECK: }
+)IR");
+  std::vector<For*> loops = l.getLoopStmtsFor(B);
+  l.computeAt(l.getLoopBodyFor(A), loops[0]);
+  // FIXME: The current IR is totally broken.  The body of the inlined loop is:
+
+  // temp[idx0, idx1] = IfThenElse(idx0 + n>=257 ? 1 : (idx0 + n<1 ? 1 : 0),
+  // 0.f, input[idx1 + 0, (idx0 + n) - 1]);
+
+  // Which seems to mix up the axes.  The CHECK below is my best guess at what
+  // the input "should" look like
+
+  checkIR(l.root_stmt(), R"IR(
+# CHECK: for (int n = 0; n < 4; n++) {
+# CHECK:   for (int idx0 = 0; idx0 < 1; idx0++) {
+# CHECK:     for (int idx1 = 0; idx1 < 258; idx1++) {
+        temp[idx0, idx1] = IfThenElse(idx1>=257 ? 1 : (idx1<1 ? 1 : 0), 0.f, input[n, idx1 - 1]);
+# CHECK:     }
+# CHECK:   }
+# CHECK:   for (int h = 0; h < 256; h++) {
+# CHECK:     B[n, h] = float(0);
+# CHECK:     for (int r = 0; r < 3; r++) {
+# CHECK:       B[n, h] = ReduceOp((B[n, h]) + (temp[0, r + h]), reduce_args={r});
+# CHECK:     }
+# CHECK:   }
+# CHECK: }
+)IR");
+
+  l.simplify();
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+
+  SimpleIREvaluator cg(s, {IP, B});
+  // auto At = at::ones({N, H}, at::kFloat);
+  auto At = at::arange(N * H, at::kFloat).reshape({N, H});
+  auto Rt = at::conv1d(
+      At, at::ones({1, 1, 3}), at::Tensor(), /*stride=*/1, /*padding=*/3);
+  auto Bt = at::empty_like(Rt);
+  cg.call({At.data_ptr<float>(), Bt.data_ptr<float>()});
+  ASSERT_TRUE(at::allclose(Rt, Bt));
+}
+
 class LoopOrderHelper : public IRVisitor {
   std::stringstream ordering;
 
