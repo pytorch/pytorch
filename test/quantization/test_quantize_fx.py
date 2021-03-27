@@ -2665,7 +2665,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             prepare_custom_config_dict=prepare_custom_config_dict)
 
     @skipIfNoFBGEMM
-    def test_quantized_cat(self):
+    def test_cat(self):
         """ quantization of the output of cat will be depend on the
         input of cat. we only quantize the output of cat when its inputs are quantized.
         """
@@ -2691,8 +2691,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 torch.randn(1, 2, 5, 5, dtype=torch.float))
         quantized_node = ns.call_function(torch.ops.quantized.cat)
         for quant_type in self.static_quant_types:
-            self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node)
-            self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node)
+            self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node, print_debug_info=True)
+            self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node, print_debug_info=True)
 
 
     @skipIfNoFBGEMM

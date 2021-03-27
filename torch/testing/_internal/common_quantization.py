@@ -543,12 +543,13 @@ class QuantizationTestCase(TestCase):
         """
         nodes_in_graph = dict()
         node_list = []
-        modules = dict(graph_module.named_modules())
+        modules = dict(graph_module.named_modules(allow_duplicate=True))
         for node in graph_module.graph.nodes:
             n = None
             if node.op == 'call_function' or node.op == 'call_method':
                 n = NodeSpec(node.op, node.target)
             elif node.op == 'call_module':
+                print("modules:", modules)
                 n = NodeSpec(node.op, type(modules[node.target]))
 
             if n is not None:
