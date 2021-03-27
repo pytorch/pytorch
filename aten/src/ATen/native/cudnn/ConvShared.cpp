@@ -518,8 +518,14 @@ Tensor cudnn_convolution_relu(
       weight_t,
       output_t, // use output_t as z to satisfy CUDNN API
       0, // alpha
-      bias_t.has_value() ? bias_t.value()
-                         : zeros({output_t.size(1)}, output_t.options()),
+      bias_t.has_value()
+          ? bias_t.value()
+          : at::native::zeros(
+                {output_t.size(1)},
+                optTypeMetaToScalarType(output_t.options().dtype_opt()),
+                output_t.options().layout_opt(),
+                output_t.options().device_opt(),
+                output_t.options().pinned_memory_opt()),
       stride,
       padding,
       dilation,
@@ -561,8 +567,14 @@ Tensor cudnn_convolution_add_relu(
       weight_t,
       z_t,
       alpha.has_value() ? alpha.value().to<float>() : 1.0,
-      bias_t.has_value() ? bias_t.value()
-                         : zeros({output_t.size(1)}, output_t.options()),
+      bias_t.has_value()
+          ? bias_t.value()
+          : at::native::zeros(
+                {output_t.size(1)},
+                optTypeMetaToScalarType(output_t.options().dtype_opt()),
+                output_t.options().layout_opt(),
+                output_t.options().device_opt(),
+                output_t.options().pinned_memory_opt()),
       stride,
       padding,
       dilation,
