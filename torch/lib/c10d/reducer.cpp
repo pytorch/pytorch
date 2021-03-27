@@ -579,8 +579,13 @@ void Reducer::mark_variable_ready(VariableIndex index) {
           // blocking work between now and the re-zeroing, so the danger is real.
           //
           // Defensively ensures local_used_maps_tmp is distinct from local_used_maps_[i]
-          auto local_used_maps_tmp = at::native::empty_like(local_used_maps_[i],
-                                                            local_used_maps_[i].options().pinned_memory(true));
+          auto local_used_maps_tmp = at::native::empty_like(
+              local_used_maps_[i],
+              optTypeMetaToScalarType(
+                  local_used_maps_[i].options().dtype_opt()),
+              local_used_maps_[i].options().layout_opt(),
+              local_used_maps_[i].options().device_opt(),
+              true /* pinned_memory */);
           // Paranoid asserts here because in some workloads, the pinned allocator behaves in a way we
           // don't understand, and may be bugged. See https://github.com/pytorch/pytorch/pull/54474
           TORCH_INTERNAL_ASSERT(local_used_maps_tmp.is_pinned());
