@@ -7,7 +7,6 @@ namespace jit {
 
 namespace {
 
-
 // having multiple ops in our IR that do the same thing makes the IR more
 // difficult to consumer for downstream user of the IR, such as our own
 // optimization passes here, we convert op aliases into a standard form
@@ -46,6 +45,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::clip, aten::clamp},
       {aten::clip_, aten::clamp_},
       {aten::linalg_det, aten::det},
+      {aten::matrix_power, aten::linalg_matrix_power},
       {aten::ger, aten::outer},
       {aten::arccos, aten::acos},
       {aten::arccos_, aten::acos_},
