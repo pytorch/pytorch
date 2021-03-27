@@ -6,6 +6,15 @@ using namespace c10;
 const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
   static std::unordered_map<std::string, TypePtr> map = {
       {"Tensor", TensorType::get()},
+      {"LongTensor", TensorType::get()},
+      {"DoubleTensor", TensorType::get()},
+      {"FloatTensor", TensorType::get()},
+      {"IntTensor", TensorType::get()},
+      {"ShortTensor", TensorType::get()},
+      {"HalfTensor", TensorType::get()},
+      {"CharTensor", TensorType::get()},
+      {"ByteTensor", TensorType::get()},
+      {"BoolTensor", TensorType::get()},
       {"int", IntType::get()},
       {"float", FloatType::get()},
       {"bool", BoolType::get()},

@@ -975,7 +975,6 @@ class Tensor(torch._C._TensorBase):
 
     __module__ = 'torch'
 
-
 def _convert(ret, cls):
     if cls is Tensor:
         return ret
