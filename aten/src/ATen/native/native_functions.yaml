@@ -563,7 +563,6 @@
   device_guard: False
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   device_guard: False
   dispatch:
@@ -950,7 +949,6 @@
   variants: function, method
 
 - func: clip_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
 
 - func: clip.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
@@ -1183,7 +1181,6 @@
 - func: cummax.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: _cummax_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: cummax_helper_cpu
@@ -1204,7 +1201,6 @@
 - func: cummin.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: _cummin_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     CPU: cummin_helper_cpu
@@ -2041,17 +2037,14 @@
     MkldnnCPU: mkldnn_linear
 
 - func: mkldnn_linear_backward_input(int[] input_size, Tensor grad_output, Tensor weight) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
       MkldnnCPU: mkldnn_linear_backward_input
 
 - func: mkldnn_linear_backward_weights(Tensor grad_output, Tensor input, Tensor weight, bool bias_defined) -> (Tensor, Tensor)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     MkldnnCPU: mkldnn_linear_backward_weights
 
 - func: mkldnn_linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     MkldnnCPU: mkldnn_linear_backward
 
@@ -4067,7 +4060,6 @@
   variants: function, method
 
 - func: heaviside_(Tensor(a!) self, Tensor values) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -5905,7 +5897,6 @@
     CPU, CUDA: hypot
 
 - func: hypot_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CompositeExplicitAutograd: hypot_
@@ -5921,7 +5912,6 @@
     CPU, CUDA: igamma
 
 - func: igamma_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CPU, CUDA: igamma_
@@ -5952,7 +5942,6 @@
     CPU, CUDA: nextafter
 
 - func: nextafter_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: method
   dispatch:
     CompositeExplicitAutograd: nextafter_
@@ -8286,7 +8275,6 @@
     CUDA: conv_depthwise3d_backward_cuda_out
 
 - func: conv_depthwise3d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: nn
   dispatch:
     CUDA: conv_depthwise3d_backward_cuda
@@ -8883,7 +8871,6 @@
     CompositeExplicitAutograd: linalg_solve_out
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   python_module: linalg
   variants: function
 
