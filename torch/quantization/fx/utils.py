@@ -352,7 +352,7 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
     elif node.op == 'placeholder':
         return False
     elif node.op == 'call_module' and is_activation_post_process(modules[node.target]):
-        return all_node_args_have_no_tensors(node.args[0], modules)
+        return all_node_args_have_no_tensors(node.args[0], modules)  # type: ignore
     elif node.op == 'call_module':
         return False
     elif node.op == 'get_attr':
