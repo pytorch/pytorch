@@ -48,6 +48,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 #include <string.h>
 #include <array>
 #include <algorithm>
+#include <utility>
 
 using namespace at;
 using namespace torch::autograd;
@@ -397,30 +398,6 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   );
 }
 
-
-template <typename T>
-std::string get_vector_str(std::vector<T> & vec, int64_t start, int64_t end=-1) {
-  /*
-  A utility function for returning a string representation of a std::vector containing ints/floats.
-  Useful for printing the shape of an N-dimensional tensor. This is used in the error message creation
-  part in the _extract_ndarrays function below.
-  */
-  std::ostringstream output;
-  output << "(";
-
-  if (end < 0) {
-    end = vec.size();
-  }
-  for (int64_t i = start; i < end; ++i) {
-    if (i != end - 1) {
-      output << vec[i] << ", ";        
-    } else {
-      output << vec[i] << ")";
-    }
-  }
-  return output.str();
-}  
-
 template <typename T>
 std::string get_buffer_str(void* buffer, int64_t start, int64_t end) {
   /*
@@ -440,20 +417,33 @@ std::string get_buffer_str(void* buffer, int64_t start, int64_t end) {
   return output.str();
 }  
 
-inline bool _shape_match_ndarray(std::vector<int64_t> & shape, PyArrayObject* array, int64_t start) {
+template <typename T>
+std::string get_vector_str(std::vector<T> & vec, int64_t start, int64_t end=-1) {
   /*
-  A utility function that returns true only if shape[start:] == array.shape where array is a numpy array.
+  A utility function for returning a string representation of a std::vector containing ints/floats.
+  Useful for printing the shape of an N-dimensional tensor. This is used in the error message creation
+  part in the _extract_ndarrays function below.
+  */
+  if (end < 0) {
+    end = vec.size();
+  }
+  return get_buffer_str<T>(vec.data(), start, end);
+}  
+
+inline bool _shape_match_ndarray(std::vector<int64_t> & shape, PyArrayObject* array) {
+  /*
+  A utility function that returns true only if shape[:] == array.shape where array is a numpy array.
   Else returns false. This is used in _extract_ndarrays() below for checking whether an embedded numpy array
   has the target shape.
   */
   int64_t ndim = PyArray_NDIM(array);
-  if ((shape.size() - start) != ndim) {
+  if (shape.size() != ndim) {
     return false;
   }
 
   npy_intp* array_shape = PyArray_DIMS(array);
   for (int64_t i = 0; i < ndim; ++i) {
-    if (array_shape[i] != shape[i+start]) {
+    if (array_shape[i] != shape[i]) {
       return false;
     }
   }
@@ -461,7 +451,7 @@ inline bool _shape_match_ndarray(std::vector<int64_t> & shape, PyArrayObject* ar
 }
 
 
-inline int _validate_ndarray(PyObject* obj, std::vector<int64_t> & shape, std::vector<int64_t> & ndarray_shape, int64_t depth) {
+inline int _validate_ndarray(PyObject* obj, std::pair<int64_t, std::vector<int64_t>> & ndarray_info, int64_t depth) {
   /*
   This returns -1 if obj is a scalar array, 0 if obj is not array else if 1 given no exception is raised.
   A ValueError will be raised if the depth of obj within the input iterable, as given to _extract_ndarrays,
@@ -480,32 +470,32 @@ inline int _validate_ndarray(PyObject* obj, std::vector<int64_t> & shape, std::v
     return -1;
   }
 
-  if (ndarray_shape.size() == 0) {
+  if (ndarray_info.first == -1) {
     /*
-    If ndarray_shape is an empty vector, then ndarray_shape[0] is set to the depth of the array in the iterable and
-    ndarray_shape[1:] is set to the shape of array.
+    If ndarray_info.first is not set, then set it to the depth of the array in the iterable and
+    ndarray_info.second[:] is set to the shape of array.
     */
-    ndarray_shape.emplace_back(depth);
+    ndarray_info.first = depth;
     int64_t ndim = PyArray_NDIM(array);
     npy_intp* array_shape = PyArray_DIMS(array);
-    ndarray_shape.insert(ndarray_shape.end(), array_shape, array_shape + ndim);
+    ndarray_info.second.insert(ndarray_info.second.end(), array_shape, array_shape + ndim);
   }
-  else if ((ndarray_shape[0] != depth) || !_shape_match_ndarray(ndarray_shape, array, 1)) {
-    /*
-    If the depth of 'array' in the iterable is not the same as any other array's depth OR if the shape of 'array' does not
-    match with any other array's shape in the iterable, we raise a ValueError.
-    */
-    auto true_shape_str = get_buffer_str<npy_intp> (static_cast<void*>(PyArray_DIMS(array)), 0, PyArray_NDIM(array));
-    auto expected_shape_str = get_vector_str(ndarray_shape, 1);
-    std::ostringstream err;
-    err << "expected numpy array of shape " << expected_shape_str <<" at dim " << ndarray_shape[0] << " (got " << true_shape_str << " at dim " << depth << ")";
-    throw ValueError(err.str());  
-  }
+
+  TORCH_CHECK_VALUE((ndarray_info.first == depth) && _shape_match_ndarray(ndarray_info.second, array),
+                    "expected numpy array of shape ",
+                    get_vector_str(ndarray_info.second, 0),
+                    " at dim ",
+                    ndarray_info.first,
+                    " (got ",
+                    get_buffer_str<npy_intp> (static_cast<void*>(PyArray_DIMS(array)), 0, PyArray_NDIM(array)),
+                    " at dim ",
+                    depth,
+                    ")" );
 
   return 1;
 }
 
-bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<int64_t> & ndarray_shape, int64_t depth, std::vector<PyArrayObject*> & array_ptr_storage) {
+bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::pair<int64_t, std::vector<int64_t>> & ndarray_info, int64_t depth, std::vector<PyArrayObject*> & array_ptr_storage) {
   /*
   This is a helper function for extracting all the numpy arrays embedded within PySequences (recursively) representd by obj. This is done recursively in a 
   depth first search style. It puts the numpy array pointers in the array_ptr_storage for later use. In case there is a non numpy array type within obj, 
@@ -513,7 +503,7 @@ bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<
   of a dimension and/or depth mismatch (See _validate_ndarray for more info). This function is used in extract_ndarrays() function below.
   */
 
-  int validation_flag = _validate_ndarray(obj, shape, ndarray_shape, depth);
+  int validation_flag = _validate_ndarray(obj, ndarray_info, depth);
   if (validation_flag != 0) {
     if (validation_flag == -1) { // If obj is a scalar array, fall back to the slower path.
       return false;
@@ -526,13 +516,10 @@ bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<
       throw python_error();
     }
     Py_ssize_t seq_len = PySequence_Fast_GET_SIZE(seq.get());
-    if (seq_len != shape[depth]) {
-      throw ValueError("expected sequence of length %lld at dim %lld (got %lld)",
-        (long long)shape[depth], (long long)depth, (long long)seq_len);
-    }
+    TORCH_CHECK_VALUE(seq_len == shape[depth], "expected sequence of length ", shape[depth], " at dim ", depth, "(got ", seq_len, ")");
     PyObject** items = PySequence_Fast_ITEMS(seq.get());
     for (Py_ssize_t i = 0; i < seq_len; ++i) {
-      if (!_extract_ndarrays(items[i], shape, ndarray_shape, depth+1, array_ptr_storage)) {
+      if (!_extract_ndarrays(items[i], shape, ndarray_info, depth+1, array_ptr_storage)) {
         return false;
       }
     }
@@ -557,8 +544,9 @@ bool extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<P
     return false;
   }
 
-  std::vector<int64_t> ndarray_shape;
-  return _extract_ndarrays(obj, shape, ndarray_shape, 0, array_ptr_storage);
+  std::pair<int64_t, std::vector<int64_t>> ndarray_info;
+  ndarray_info.first = -1;
+  return _extract_ndarrays(obj, shape, ndarray_info, 0, array_ptr_storage);
 }
 
 

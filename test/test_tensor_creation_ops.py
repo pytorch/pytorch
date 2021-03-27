@@ -1942,6 +1942,10 @@ class TestTensorCreation(TestCase):
         k = torch.tensor((1e323, -1e323, float('inf'), -float('inf')), dtype=torch.bool)
         self.assertEqual(j, k)
 
+        with self.assertRaisesRegex(ValueError, r"expected sequence of length 3 at dim 1 \(got 2\)"):
+            x, y = [1, 2, 3], [2, 4]
+            torch.tensor([x, y])
+
     # TODO: this test should be updated
     @suppress_warnings
     @onlyCPU
@@ -2004,96 +2008,98 @@ class TestTensorCreation(TestCase):
 
     @suppress_warnings
     @onlyCPU
-    def test_tensor_factory_ndarrays(self, device):
+    @dtypes(*list(torch_to_numpy_dtype_dict.keys()))
+    def test_tensor_factory_ndarrays(self, device, torch_dtype):
         """
         Tests torch.tensor for multiple numpy arrays that are embedded (recursively) within list(s). 
         """
 
+        dtype = torch_to_numpy_dtype_dict[torch_dtype]
         repeats = 10
-        np_types = list(torch_to_numpy_dtype_dict.values())
 
         # Simple tests
-        for dtype in np_types:
-            for _ in range(repeats):
-                stack = []
-                stack.append([np.array(1).astype(dtype)])
-                stack.append([np.array(1).astype(dtype), np.array(2).astype(dtype), np.array(3).astype(dtype)])
-                stack.append([np.random.randn(1).astype(dtype)])
-                stack.append([np.random.randn(100).astype(dtype) for _ in range(repeats)])
-                stack.append([np.random.randn(10, 10).astype(dtype) for _ in range(repeats)])
-                stack.append([np.random.randn(100, 1).astype(dtype) for _ in range(repeats)])
-                stack.append([np.random.randn(10, 8, 7).astype(dtype) for _ in range(repeats)])
+        tests = []
+        tests.append([np.array(1).astype(dtype)])
+        tests.append([np.array(1).astype(dtype), np.array(2).astype(dtype), np.array(3).astype(dtype)])
+        tests.append([np.random.randn(1).astype(dtype)])
+        tests.append([np.random.randn(100).astype(dtype) for _ in range(repeats)])
+        tests.append([np.random.randn(10, 10).astype(dtype) for _ in range(repeats)])
+        tests.append([np.random.randn(100, 1).astype(dtype) for _ in range(repeats)])
+        tests.append([np.random.randn(10, 8, 7).astype(dtype) for _ in range(repeats)])
 
-                for arrays in stack:
-                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
-                                     exact_dtype=True, rtol=1e-05, atol=1e-08)
-
-
-        # Extended tests
-        for dtype in np_types:
-            for _ in range(repeats):
-                stack = []
-                A = np.random.randn(100).astype(dtype)
-                stack.append([[A, 2 * A], [A, A]])
-                A = np.random.randn(10, 5).astype(dtype)
-                stack.append([[A, 2 * A], [A, A]])
-                A = np.random.randn(10, 10).astype(dtype)
-                stack.append([[A.T, A], [A, A.T]])
-                A = np.random.randn(20, 20).astype(dtype)
-                stack.append([[A[5:10, :], A.T[11:16, :]], [A[:5, :], A[15:20, :]]])
-                A = np.random.randn(20, 20, 20).astype(dtype)
-                stack.append([[A[5:10, :, :], A.T[11:16, :, :]], [A[:5, :, :], A[15:20, :, :]]])
-                stack.append([[[[A]]]])
-
-                for arrays in stack:
-                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
-                                     exact_dtype=True, rtol=1e-05, atol=1e-08)
-
-
-        # Extended tests including fortran layout arrays
-        for dtype in np_types:
-            for _ in range(repeats):
-                stack = []
-                A = np.asfortranarray(np.random.randn(100).astype(dtype))
-                stack.append([[A, 2 * A], [A, A]])
-                A = np.asfortranarray(np.random.randn(10, 5).astype(dtype))
-                stack.append([[A, 2 * A], [A, A]])
-                A = np.asfortranarray(np.random.randn(10, 10).astype(dtype))
-                stack.append([[A.T, A], [A, A.T]])
-                A = np.asfortranarray(np.random.randn(20, 20).astype(dtype))
-                stack.append([[A[5:10, :], A.T[11:16, :]], [A[:5, :], A[15:20, :]]])
-                A = np.asfortranarray(np.random.randn(20, 20, 20).astype(dtype))
-                stack.append([[A[5:10, :, :], A.T[11:16, :, :]], [A[:5, :, :], A[15:20, :, :]]])
-                stack.append([[[[A]]]])
-
-                for arrays in stack:
-                    self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
-                                     exact_dtype=True, rtol=1e-05, atol=1e-08)
-
-        # Based on Natalia Gimelshein's test case
-        stack = []
-        A = np.random.rand(2, 3, 4)[:, :, 0]
-        stack.append([A for _ in range(10)])
-        A = np.random.rand(2, 3, 4)[:, 0, 0]
-        stack.append([A for _ in range(10)])
-        A = np.random.rand(2, 3, 4)[:, 0, :]
-        stack.append([A for _ in range(10)])
-
-        # An example where the list contains C-contiguous, F-contiguous and discontiguous arrays. 
-        A = np.random.rand(4, 5)
-        A2 = np.asfortranarray(A)
-        A3 = np.random.rand(4, 3, 5)[:, 0, :]
-        stack.append([[A, A2, A3], [A, A, A], [A2, A2, A2], [A3, A3, A3]])
-
-        for arrays in stack:
+        for arrays in tests:
             self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
                              exact_dtype=True, rtol=1e-05, atol=1e-08)
 
-        self.assertEqual(torch.tensor(np.array([]), device=device), torch.from_numpy(np.array([])), 
+
+        # Extended tests
+        tests = []
+        A = np.random.randn(100).astype(dtype)
+        tests.append([[A, 2 * A], [A, A]])
+        A = np.random.randn(10, 5).astype(dtype)
+        tests.append([[A, 2 * A], [A, A]])
+        A = np.random.randn(10, 10).astype(dtype)
+        tests.append([[A.T, A], [A, A.T]])
+        A = np.random.randn(20, 20).astype(dtype)
+        tests.append([[A[5:10, :], A.T[11:16, :]], [A[:5, :], A[15:20, :]]])
+        A = np.random.randn(20, 20, 20).astype(dtype)
+        tests.append([[A[5:10, :, :], A.T[11:16, :, :]], [A[:5, :, :], A[15:20, :, :]]])
+        tests.append([[[[A]]]])
+
+        for arrays in tests:
+            self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
+                             exact_dtype=True, rtol=1e-05, atol=1e-08)
+
+
+        # Extended tests including fortran layout arrays
+        tests = []
+        A = np.asfortranarray(np.random.randn(100).astype(dtype))
+        tests.append([[A, 2 * A], [A, A]])
+        A = np.asfortranarray(np.random.randn(10, 5).astype(dtype))
+        tests.append([[A, 2 * A], [A, A]])
+        A = np.asfortranarray(np.random.randn(10, 10).astype(dtype))
+        tests.append([[A.T, A], [A, A.T]]) # Fortran Layout and C layout arrays
+        A = np.asfortranarray(np.random.randn(20, 20).astype(dtype))
+        tests.append([[A[5:10, :], A.T[11:16, :]], [A[:5, :], A[15:20, :]]]) # Fortran Layout and C layout arrays
+        A = np.asfortranarray(np.random.randn(20, 20, 20).astype(dtype))
+        tests.append([[A[5:10, :, :], A.T[11:16, :, :]], [A[:5, :, :], A[15:20, :, :]]]) # Fortran Layout and C layout arrays
+        tests.append([[[[A]]]])
+
+        for arrays in tests:
+            self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
+                             exact_dtype=True, rtol=1e-05, atol=1e-08)
+
+        # Based on Natalia Gimelshein's test case that tests on non-contiguous arrays
+        tests = []
+        A = np.random.rand(2, 3, 4).astype(dtype)[:, :, 0]
+        tests.append([A for _ in range(10)])
+        A = np.random.rand(2, 3, 4).astype(dtype)[:, 0, 0]
+        tests.append([A for _ in range(10)])
+        A = np.random.rand(2, 3, 4).astype(dtype)[:, 0, :]
+        tests.append([A for _ in range(10)])
+
+        A = np.random.rand(4, 5).astype(dtype)
+        A2 = np.asfortranarray(A)
+        A3 = np.random.rand(4, 3, 5).astype(dtype)[:, 0, :]
+        tests.append([[A, A2, A3], [A, A, A], [A2, A2, A2], [A3, A3, A3]]) # An example where the list contains C-contiguous, F-contiguous and discontiguous arrays. 
+
+        for arrays in tests:
+            self.assertEqual(torch.tensor(arrays, device=device), torch.from_numpy(np.stack(arrays)),
+                             exact_dtype=True, rtol=1e-05, atol=1e-08)
+
+        self.assertEqual(torch.tensor(np.array([]), device=device), torch.from_numpy(np.array([])),  # Empty array test
                          exact_dtype=True, rtol=1e-05, atol=1e-08)
-        # An example which shows that by default torch.tensor will produce contiguous tensors from iterables of numpy arrays.
-        self.assertTrue(torch.tensor([A.T, A.T], as_contiguous=True).stride() == torch.tensor([A.T, A.T]).stride()
-                         == torch.from_numpy(np.ascontiguousarray(np.stack([A.T, A.T]))).stride())
+
+        with self.assertRaisesRegex(ValueError, r"expected numpy array of shape \(3, 3\) at dim 1 \(got \(4, 4\) at dim 1\)"):
+            x = np.random.rand(3,3)
+            y = np.random.rand(4,4)
+            torch.tensor([x,y])
+
+        with self.assertRaisesRegex(ValueError, r"expected sequence of length 4 at dim 1\(got 1\)"):
+            x = np.random.rand(3,3)
+            y = np.random.rand(4,4)
+            torch.tensor([y,[x]])
+
 
     # TODO: this test should be updated
     @suppress_warnings
