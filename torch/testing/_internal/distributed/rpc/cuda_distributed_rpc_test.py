@@ -12,6 +12,8 @@ from torch.testing._internal.dist_utils import (
     dist_init,
 )
 
+from torch.testing._internal.common_distributed import skip_if_not_multigpu
+
 
 class MyModule(nn.Module):
     def __init__(self, device, comm_mode):
@@ -55,6 +57,7 @@ class CudaDistributedRPCTest(RpcAgentTestFixture):
     def world_size(self):
         return 2
 
+    @skip_if_not_multigpu
     @dist_init(setup_rpc=False)
     def test_cuda_distributed_rpc(self):
 
