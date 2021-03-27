@@ -31,11 +31,11 @@ class EtcdRendezvousTest(unittest.TestCase):
         params
         """
         rdzv_params = RendezvousParameters(
-            backend="etcd",
+            backend_name="etcd",
             endpoint=f"{self._etcd_server.get_endpoint()}",
             run_id=f"{uuid.uuid4()}",
-            min_nodes=1,
-            max_nodes=1,
+            min_num_nodes=1,
+            max_num_nodes=1,
         )
         etcd_rdzv = create_rdzv_handler(rdzv_params)
         self.assertIsNotNone(etcd_rdzv)
@@ -43,11 +43,11 @@ class EtcdRendezvousTest(unittest.TestCase):
     def test_etcd_rdzv_additional_params(self):
         run_id = str(uuid.uuid4())
         rdzv_params = RendezvousParameters(
-            backend="etcd",
+            backend_name="etcd",
             endpoint=f"{self._etcd_server.get_endpoint()}",
             run_id=run_id,
-            min_nodes=1,
-            max_nodes=1,
+            min_num_nodes=1,
+            max_num_nodes=1,
             timeout=60,
             last_call_timeout=30,
             protocol="http",
@@ -61,11 +61,11 @@ class EtcdRendezvousTest(unittest.TestCase):
     def test_get_backend(self):
         run_id = str(uuid.uuid4())
         rdzv_params = RendezvousParameters(
-            backend="etcd",
+            backend_name="etcd",
             endpoint=f"{self._etcd_server.get_endpoint()}",
             run_id=run_id,
-            min_nodes=1,
-            max_nodes=1,
+            min_num_nodes=1,
+            max_num_nodes=1,
             timeout=60,
             last_call_timeout=30,
             protocol="http",

@@ -195,11 +195,11 @@ class LocalElasticAgentTest(unittest.TestCase):
         monitor_interval=0.01,
     ):
         rdzv_params = RendezvousParameters(
-            backend="etcd",
+            backend_name="etcd",
             endpoint=self._etcd_server.get_endpoint(),
             run_id=self._run_id,
-            min_nodes=min_nodes,
-            max_nodes=max_nodes,
+            min_num_nodes=min_nodes,
+            max_num_nodes=max_nodes,
         )
         rdzv_handler = rdzv_registry.get_rendezvous_handler(rdzv_params)
         return WorkerSpec(

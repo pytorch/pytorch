@@ -171,7 +171,7 @@ class SimpleElasticAgentTest(unittest.TestCase):
         endpoint = self._etcd_server.get_endpoint()
 
         rdzv_params = RendezvousParameters(
-            backend="etcd", endpoint=endpoint, run_id=run_id, min_nodes=1, max_nodes=1
+            backend_name="etcd", endpoint=endpoint, run_id=run_id, min_num_nodes=1, max_num_nodes=1
         )
         rdzv_handler = rdzv_registry.get_rendezvous_handler(rdzv_params)
         spec = WorkerSpec(

@@ -54,6 +54,13 @@ class EtcdRendezvousRetryImmediately(Exception):
     pass
 
 
+# Default timeout for the rendezvous.
+_DEFAULT_TIMEOUT: int = 600  # 10 minutes
+
+# Additional waiting time after reaching the minimum number of nodes
+# in case the rendezvous is elastic (min != max).
+_DEFAULT_LAST_CALL_TIMEOUT: int = 30  # 30 seconds
+
 # Various constants used internally in EtcdRendezvous
 CONST_ETCD_SETUP_TTL = 5
 CONST_ETCD_FROZEN_TTL = 10
@@ -1200,11 +1207,11 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
     ::
 
     rdzv_params = RendezvousParameters(
-                        backend="etcd",
+                        backend_name="etcd",
                         endpoint="192.168.0.42:2379",
                         run_id="123",
-                        min_nodes=4,
-                        max_nodes=8,
+                        min_num_nodes=4,
+                        max_num_nodes=8,
                         timeout=300,
                         last_call_timeout=30,
                         etcd_prefix="custom_prefix",
@@ -1214,11 +1221,11 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
                         key="/etc/kubernetes/certs/client.key")
     # -- or --
     rdzv_params = RendezvousParameters(
-                        backend="etcd",
+                        backend_name="etcd",
                         endpoint="192.168.0.42:2379",
                         run_id="123",
-                        min_nodes=4,
-                        max_nodes=8)
+                        min_num_nodes=4,
+                        max_num_nodes=8)
 
     etcd_rdzv_handler = create_etcd_rendezvous_handler(rdzv_params)
 
@@ -1250,9 +1257,9 @@ def create_rdzv_handler(params: RendezvousParameters) -> RendezvousHandler:
         client=client,
         prefix=etcd_prefix,
         run_id=params.run_id,
-        num_min_workers=params.min_nodes,
-        num_max_workers=params.max_nodes,
-        timeout=params.timeout,
-        last_call_timeout=params.last_call_timeout,
+        num_min_workers=params.min_num_nodes,
+        num_max_workers=params.max_num_nodes,
+        timeout=params.get_as_int("timeout", _DEFAULT_TIMEOUT),
+        last_call_timeout=params.get_as_int("last_call_timeout", _DEFAULT_LAST_CALL_TIMEOUT),
     )
     return EtcdRendezvousHandler(rdzv_impl=rdzv)
