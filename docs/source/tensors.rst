@@ -343,6 +343,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: fmod_
    .. automethod:: frac
    .. automethod:: frac_
+   .. automethod:: frexp
    .. automethod:: gather
    .. automethod:: gcd
    .. automethod:: gcd_

@@ -69,7 +69,6 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ]]; then
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset7" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset8" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_IRv4_old_jit_API" \
     "$top_dir/test/onnx/test_custom_ops.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" \
     "$top_dir/test/onnx/test_utility_funs.py" \
@@ -82,8 +81,6 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test2* ]]; then
     pytest "${args[@]}" \
       "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
   done
-  pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset12_IRv4_old_jit_API"
 fi
 
 # Our CI expects both coverage.xml and .coverage to be within test/

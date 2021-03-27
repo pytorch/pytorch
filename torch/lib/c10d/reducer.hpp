@@ -117,6 +117,12 @@ class Reducer {
   // Saves thread local state to be used by autograd engine callbacks.
   void save_thread_local_state();
 
+  // An function for users to set sample_rate of collecting
+  // runtime stats. The time stats will be recorded for the
+  // first 10 iterations, after 10 iteratons time stats will be
+  // recorded once every "sample_rate" training iterations.
+  void set_ddp_runtime_logging_sample_rate(int sample_rate);
+
  protected:
   // Forward declaration.
   struct Bucket;
@@ -142,8 +148,8 @@ class Reducer {
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
-  std::unordered_map<torch::autograd::Node*, std::vector<VariableIndex>>
-      gradAccToVariablesMap_;
+  std::unordered_map<torch::autograd::Node*, VariableIndex>
+      gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
@@ -374,6 +380,9 @@ class Reducer {
   void record_backward_compute_end_time();
   void record_backward_comm_start_time();
   void record_backward_comm_end_time();
+
+  int get_ddp_runtime_logging_sample_rate();
+  int ddp_runtime_logging_sample_rate_ = kDDPRuntimeLoggingSampleRate;
 
   bool is_multi_device_module_ = false;
 

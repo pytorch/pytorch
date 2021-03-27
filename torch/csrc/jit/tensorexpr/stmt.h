@@ -538,17 +538,28 @@ class TORCH_API LoopOptions {
     gpu_thread_index_ = index;
   }
 
+  void set_parallel() {
+    is_parallel_ = true;
+  }
+
+  bool is_parallel() const {
+    return is_parallel_;
+  }
+
   std::string ToString() const {
     if (is_gpu_block_index()) {
       return gpu_block_index_str();
     } else if (is_gpu_thread_index()) {
       return gpu_thread_index_str();
+    } else if (is_parallel()) {
+      return "parallel";
     }
     return "";
   }
 
   bool isDefault() const {
-    return gpu_block_index_ == IDX_UNSET && gpu_thread_index_ == IDX_UNSET;
+    return gpu_block_index_ == IDX_UNSET && gpu_thread_index_ == IDX_UNSET &&
+        !is_parallel_;
   }
 
   void set_buffer_mapping(
@@ -563,6 +574,7 @@ class TORCH_API LoopOptions {
  private:
   int gpu_block_index_{IDX_UNSET};
   int gpu_thread_index_{IDX_UNSET};
+  bool is_parallel_{false};
   std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
 
@@ -645,6 +657,14 @@ class TORCH_API For : public StmtNode<For> {
 
   void set_gpu_thread_index(int thread_index) {
     loop_options_.set_gpu_thread_index(thread_index);
+  }
+
+  void set_parallel() {
+    loop_options_.set_parallel();
+  }
+
+  bool is_parallel() const {
+    return loop_options_.is_parallel();
   }
 
   void set_buffer_map(const std::unordered_map<std::string, const Buf*>& map) {

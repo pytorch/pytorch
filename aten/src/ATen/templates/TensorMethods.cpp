@@ -74,6 +74,11 @@ int64_t get_device(Tensor self) {
   return self.get_device();
 }
 
+bool Tensor::is_cpu() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_cpu();
+}
+
 bool Tensor::is_cuda() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_cuda();
@@ -195,7 +200,7 @@ bool is_quantized(Tensor self) {
         #name                                                       \
         " but found ",                                              \
         scalar_type());                                             \
-    return static_cast<T*>(this->unsafeGetTensorImpl()->data());    \
+    return this->unsafeGetTensorImpl()->data_ptr_impl<T>();         \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)

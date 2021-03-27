@@ -1,7 +1,7 @@
 from tools.codegen.model import *
 
 from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api import cpp
 
 from typing import Union, List
 
@@ -21,6 +21,8 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             return ConstRefCType(BaseCType('Tensor', binds))
+        elif t.name == BaseTy.Scalar:
+            return ConstRefCType(BaseCType('Scalar', binds))
         else:
             raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
@@ -28,6 +30,10 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
             raise AssertionError(
                 "optional tensor not supported by structured yet; to implement this "
                 "add OptionalTensor c.f. https://github.com/pytorch/pytorch/issues/51456"
+            )
+        elif t.elem == BaseType(BaseTy.Scalar):
+            raise AssertionError(
+                "optional scalar not supported by structured yet"
             )
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return OptionalCType(elem)
@@ -74,18 +80,18 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[B
     else:
         assert_never(a)
 
-def impl_arguments(g: StructuredNativeFunctions) -> List[Binding]:
+def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     args.extend(g.out.func.arguments.non_out)
     args.extend(g.out.func.arguments.out)
     return [r for arg in args for r in argument(arg)]
 
-def meta_arguments(g: StructuredNativeFunctions) -> List[Binding]:
+def meta_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     args.extend(g.functional.func.arguments.non_out)
     return [r for arg in args for r in argument(arg)]
 
-def out_arguments(g: StructuredNativeFunctions) -> List[Binding]:
+def out_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     args.extend(g.out.func.arguments.out)
     return [r for arg in args for r in argument(arg)]

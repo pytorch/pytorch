@@ -506,6 +506,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::Meta);
   }
 
+  bool is_cpu() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    return key_set_.has(DispatchKey::CPU) ||
+        key_set_.has(DispatchKey::SparseCPU) ||
+        key_set_.has(DispatchKey::QuantizedCPU) ||
+        key_set_.has(DispatchKey::MkldnnCPU);
+  }
+
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::CUDA) ||
@@ -674,7 +682,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "self" should represent the Tensor whose forward grad is accessed. It is
    *     required when dealing with view.
    */
-  const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const;
+  const at::Tensor& _fw_grad(uint64_t level, const at::Tensor& self) const;
 
   /**
    * Sets the forward gradient for this Tensor.
@@ -694,7 +702,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "is_inplace_op" is a boolean flag that tells if this gradient was generated
    *     by an inplace operation or an out of place one. This allows better error checking.
    */
-  void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
+  void _set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
@@ -711,13 +719,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T * data() const {
-    TORCH_CHECK(has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
-    TORCH_CHECK(
-        storage_initialized(),
-        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
-        "mutable_data() or raw_mutable_data() to actually allocate memory.");
     TORCH_CHECK(
         data_type_.Match<T>(),
         "Tensor type mismatch, caller expects elements to be ",
@@ -725,7 +726,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         ", while tensor contains ",
         data_type_.name(),
         ". ");
-    // We managed the type check ourselves
+    return data_ptr_impl<T>();
+  }
+
+  /**
+   * More efficient helper for Tensor::data_ptr(). Like data<T>(), but
+   * does not do a type check. Unlike the untemplated data(), does
+   * check has_storage() and storage_initialized().
+   */
+  template <typename T>
+  inline T * data_ptr_impl() const {
+    TORCH_CHECK(has_storage(),
+        "Cannot access data pointer of Tensor that doesn't have storage");
+    TORCH_CHECK(
+        storage_initialized(),
+        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
+        "Caffe2 uses a lazy allocation, so you will need to call "
+        "mutable_data() or raw_mutable_data() to actually allocate memory.");
+    // Caller does the type check.
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
@@ -1692,10 +1710,12 @@ protected:
   // See NOTE [ Metadata Change for a Detached Tensor ] for details.
   static const char * const err_msg_tensor_metadata_change_not_allowed;
 
+public:
   void set_storage_access_should_throw() {
     storage_access_should_throw_ = true;
   }
 
+protected:
   Storage storage_;
 
 private:

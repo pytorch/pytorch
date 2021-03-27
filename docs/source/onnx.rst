@@ -252,6 +252,9 @@ E.g.: ::
 Write PyTorch model in Torch way
 --------------------------------
 
+Avoid using numpy
+~~~~~~~~~~~~~~~~~
+
 PyTorch models can be written using numpy manipulations, but this is not proper when we convert to the ONNX model.
 For the trace-based exporter, tracing treats the numpy values as the constant node,
 therefore it calculates the wrong result if we change the input.
@@ -273,6 +276,13 @@ In addition, Dropout layer need defined in init function so that inferencing can
 
         def forward(self, x):
             x = self.dropout(x)
+
+Avoid using .data field
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The .data field is an old field that is kept for backward compatibility and should be avoided when writing models.
+It's usage is dangerous and can make computations wrong, furthermore it can produce an incorrect trace graph and
+therefore an incorrect ONNX graph. A safer alternative is to use .detach() instead.
 
 Using dictionaries to handle Named Arguments as model inputs
 ------------------------------------------------------------

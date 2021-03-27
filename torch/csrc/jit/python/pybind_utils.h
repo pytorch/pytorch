@@ -58,7 +58,7 @@ namespace jit {
 
 void clear_registered_instances(void* ptr);
 
-IValue toIValue(
+TORCH_API IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N = c10::nullopt);

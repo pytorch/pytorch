@@ -1439,6 +1439,13 @@ frac_() -> Tensor
 In-place version of :meth:`~Tensor.frac`
 """)
 
+add_docstr_all('frexp',
+               r"""
+frexp(input) -> (Tensor mantissa, Tensor exponent)
+
+See :func:`torch.frexp`
+""")
+
 add_docstr_all('flatten',
                r"""
 flatten(input, start_dim=0, end_dim=-1) -> Tensor
@@ -2263,11 +2270,12 @@ masked_select(mask) -> Tensor
 See :func:`torch.masked_select`
 """)
 
-add_docstr_all('matrix_power',
-               r"""
+add_docstr_all('matrix_power', r"""
 matrix_power(n) -> Tensor
 
-See :func:`torch.matrix_power`
+.. note:: :meth:`~Tensor.matrix_power` is deprecated, use :func:`torch.linalg.matrix_power` instead.
+
+Alias for :func:`torch.linalg.matrix_power`
 """)
 
 add_docstr_all('matrix_exp',
