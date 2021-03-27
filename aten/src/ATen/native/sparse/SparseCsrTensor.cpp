@@ -135,7 +135,7 @@ SparseTensor& resize_as_sparse_csr_(
       self.layout(),
       src.layout());
   if (!_is_same_size_as_sparse_csr(self, src)) {
-    get_sparse_csr_impl(self)->resize_as_(src);
+    get_sparse_csr_impl(self)->resize_as_sparse_csr_tensor_(src);
   }
   return self;
 }

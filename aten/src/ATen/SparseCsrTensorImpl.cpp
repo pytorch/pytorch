@@ -71,7 +71,7 @@ void SparseCsrTensorImpl::resize_and_clear_(
   sizes_and_strides_.set_sizes(size);
 }
 
-void SparseCsrTensorImpl::resize_as_(const Tensor& src) {
+void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
   crow_indices_ = at::empty_like(
       src.crow_indices(),
       src.crow_indices().options(),
