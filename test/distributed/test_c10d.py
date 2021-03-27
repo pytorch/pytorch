@@ -2258,7 +2258,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = torch.cuda.current_device() if devices is None else devices[0]
+        device = devices[0] if devices else torch.device("cuda:%d" % self.rank)
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -2399,11 +2399,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     def test_gloo_backend_cpu_module(self):
-        self._test_gloo_backend([torch.device("cpu")], [])
+        self._test_gloo_backend([torch.device("cpu")], None)
 
     @requires_gloo()
     def test_gloo_backend_cpu_module_grad_is_view(self):
-        self._test_gloo_backend([torch.device("cpu")], [], gradient_as_bucket_view=True)
+        self._test_gloo_backend([torch.device("cpu")], None, gradient_as_bucket_view=True)
 
     @requires_gloo()
     @skip_if_not_multigpu
@@ -2424,14 +2424,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_gloo_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_gloo_backend(devices, [], multi_device=True)
+        self._test_gloo_backend(devices, None, multi_device=True)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(8)
     def test_gloo_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_gloo_backend(devices, [], multi_device=True)
+        self._test_gloo_backend(devices, None, multi_device=True)
 
     def _test_nccl_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
@@ -2447,13 +2447,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_nccl_backend_multi_device_ids_not_allowed(self):
         int_devices = list(range(torch.cuda.device_count()))
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(ValueError, "device_ids can only be None or contain a single element."):
             self._test_nccl_backend(devices, int_devices)
 
     @requires_nccl()
     @skip_if_not_multigpu
     def test_nccl_backend_single_device_module_device_ids_None(self):
-        torch.cuda.set_device(self.rank)
         self._test_nccl_backend(None, None)
 
     @requires_nccl()
@@ -2482,14 +2481,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_nccl_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_nccl_backend(devices, [], multi_device=True)
+        self._test_nccl_backend(devices, None, multi_device=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(8)
     def test_nccl_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_nccl_backend(devices, [], multi_device=True)
+        self._test_nccl_backend(devices, None, multi_device=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -4914,7 +4913,7 @@ class CommTest(MultiProcessTestCase):
         self.assertTrue(pg.options.is_high_priority_stream)
         # test the process group works as expected
         t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
-        pg.allreduce(t)
+        pg.allreduce(t).wait()
         expected_tensor = torch.tensor([3] * 10).cuda(self.rank)
         self.assertEqual(expected_tensor, t)
 

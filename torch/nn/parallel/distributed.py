@@ -19,7 +19,7 @@ if dist.is_available():
 if torch.distributed.rpc.is_available():
     RPC_AVAILABLE = True
     from torch.distributed.rpc import RRef
-from torch._utils import _get_device_index, _get_current_device_index
+from torch._utils import _get_device_index
 
 from ..modules import Module
 from ._functions import _get_stream
@@ -309,14 +309,11 @@ class DistributedDataParallel(Module):
                    1) For single-device modules, ``device_ids`` should only
                    contain exactly one device id, which represents the only
                    CUDA device where the input module resides.
-                   Alternatively, if ``None`` is provided, the current device
-                   will be added to ``device_ids``. This requires calling
-                   ``torch.cuda.set_device`` to set the appropriate device
-                   before calling DDP constructor.
+                   Alternatively, ``device_ids`` can also be ``None``.
                    2) For multi-device modules and CPU modules,
-                   ``device_ids`` must be ``None`` or an empty list,
-                   and input data for the forward pass must be placed on the
-                   correct device.
+                   ``device_ids`` must be ``None``.
+                   When ``device_ids`` is ``None`` for both cases,
+                   input data for the forward pass must be placed on the correct device.
                    (default: all visible devices for single-device modules)
         output_device (int or torch.device): Device location of output for
                       single-device CUDA modules. For multi-device modules and
@@ -393,13 +390,8 @@ class DistributedDataParallel(Module):
             "doesn't have any parameter that requires a gradient."
         )
 
-        assert (
-            device_ids is None or len(device_ids) <= 1
-        ), "device_ids can only be 1) None or an empty list,"
-        " which corresponds to multi-device model mode"
-        " (used for model parallelism);"
-        " 2) a list that has a single device id, "
-        "which corresponds to single-process single-device mode."
+        if device_ids is not None and len(device_ids) > 1:
+            raise ValueError("device_ids can only be None or contain a single element.")
 
         self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
         distinct_device_types = {p.device.type for p in module.parameters()}
@@ -409,7 +401,7 @@ class DistributedDataParallel(Module):
         ).format(distinct_device_types)
         self.device_type = list(distinct_device_types)[0]
 
-        if self.device_type == "cpu" or self.is_multi_device_module:
+        if device_ids is None or self.device_type == "cpu" or self.is_multi_device_module:
             assert not device_ids and not output_device, (
                 "DistributedDataParallel device_ids and output_device arguments "
                 "only work with single-device GPU modules, but got "
@@ -419,10 +411,6 @@ class DistributedDataParallel(Module):
             self.device_ids = None
             self.output_device = None
         else:
-            # Use the current device by default for single-device GPU modules
-            if device_ids is None:
-                device_ids = [_get_current_device_index()]
-
             self.device_ids = [_get_device_index(x, True) for x in device_ids]
 
             if output_device is None:
