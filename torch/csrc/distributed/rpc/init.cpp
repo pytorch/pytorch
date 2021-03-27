@@ -757,14 +757,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
          std::vector<torch::Tensor>& tensors,
          const float rpcTimeoutSeconds,
          const bool isAsyncExecution) {
-        return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcPythonUdf(
-                dst,
-                pickledPythonUDF,
-                tensors,
-                rpcTimeoutSeconds,
-                isAsyncExecution)
-            );
+        return std::make_shared<jit::PythonFutureWrapper>(pyRpcPythonUdf(
+            dst,
+            pickledPythonUDF,
+            tensors,
+            rpcTimeoutSeconds,
+            isAsyncExecution));
       },
       py::call_guard<py::gil_scoped_release>());
 
