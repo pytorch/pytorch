@@ -706,8 +706,6 @@ class TestBinaryUfuncs(TestCase):
 
     # Tests that a Runtime error occurs when a base tensor cannot be resized
     # by pow's inplace variant due to PyTorch's broadcasting semantics.
-    # pow's inplace variant for bool tensors is unsupported, so bool isn't tested.
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
     def test_pow_inplace_resizing_exception(self, device, dtype):
         test_cases = (
             ((), (3,)),
@@ -715,10 +713,10 @@ class TestBinaryUfuncs(TestCase):
             ((2, 1), (2, 2)),
             ((2, 2), (2, 1, 1)),
         )
-        test_inputs = list((make_tensor(base_size, dtype=dtype, device=device,
-                                        high=5, low=0),
-                            make_tensor(exp_size, dtype=dtype, device=device,
-                                        high=2, low=0))
+        test_inputs = list((make_tensor(base_size, dtype=torch.float64, device=device,
+                                        high=10., low=0.),
+                            make_tensor(exp_size, dtype=torch.float64, device=device,
+                                        high=10., low=0.))
                            for base_size, exp_size in test_cases)
         for base, exponent in test_inputs:
             regex = "doesn't match the broadcast shape"
