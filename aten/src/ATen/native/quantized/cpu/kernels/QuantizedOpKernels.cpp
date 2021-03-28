@@ -284,7 +284,6 @@ int64_t hsum_sq(const uint8_t* A, int len) {
 
   int overflow_max_num = 262144;
   if( (len / 16) > overflow_max_num){
-    TORCH_WARN("----------hit");
       __m256i sum_v_epu32[2];
     // = _mm256_setzero_si256();
     alignas(64) int32_t temp_0[8];
@@ -361,7 +360,8 @@ int64_t hsum_sq(const int8_t* A, int len) {
 
 #ifdef CPU_CAPABILITY_AVX2
 
-  int overflow_max_num = 1048576;
+  //int overflow_max_num = 1048576;
+  int overflow_max_num = 262144;
 
   if( (len / 16) > overflow_max_num){
     __m256i sum_v_epi32[2]; // = _mm256_setzero_si256();
@@ -374,23 +374,24 @@ int64_t hsum_sq(const int8_t* A, int len) {
       sum_v_epi32[1] = _mm256_setzero_si256();
       for (; i < overflow_max_num * j; i += 16) {
         // (i15, ..., i0)
-        __m128i src_epu8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
-        __m256i src_epu16 = _mm256_cvtepu8_epi16(src_epu8);
+        __m128i src_epi8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
+        __m256i src_epi16 = _mm256_cvtepi8_epi16(src_epi8);
         // (i15 ^ 2, ..., i0 ^ 2)
-        __m256i sq_epu16 = _mm256_mullo_epi16(src_epu16, src_epu16);
+        __m256i sq_epi16 = _mm256_mullo_epi16(src_epi16, src_epi16);
         // (i7 ^ 2, ..., i0 ^ 2)
-        __m128i sq_lo_epu16 = _mm256_castsi256_si128(sq_epu16);
+        __m128i sq_lo_epi16 = _mm256_castsi256_si128(sq_epi16);
         // (i15 ^ 2, ..., i8 ^ 2)
-        __m128i sq_hi_epu16 = _mm256_extractf128_si256(sq_epu16, 1);
-        // widen to epu32
-        __m256i sq_lo_epu32 = _mm256_cvtepu16_epi32(sq_lo_epu16);
-        __m256i sq_hi_epu32 = _mm256_cvtepu16_epi32(sq_hi_epu16);
+        __m128i sq_hi_epi16 = _mm256_extractf128_si256(sq_epi16, 1);
+        // widen to epi32
+        __m256i sq_lo_epi32 = _mm256_cvtepi16_epi32(sq_lo_epi16);
+        __m256i sq_hi_epi32 = _mm256_cvtepi16_epi32(sq_hi_epi16);
         // add to running sum
-        sum_v_epi32[0] = _mm256_add_epi32(sum_v_epi32[0], sq_lo_epu32);
-        sum_v_epi32[1] = _mm256_add_epi32(sum_v_epi32[1], sq_hi_epu32);
+        sum_v_epi32[0] = _mm256_add_epi32(sum_v_epi32[0], sq_lo_epi32);
+        sum_v_epi32[1] = _mm256_add_epi32(sum_v_epi32[1], sq_hi_epi32);
       }
       _mm256_store_si256(reinterpret_cast<__m256i*>(temp_0), sum_v_epi32[0]);
       _mm256_store_si256(reinterpret_cast<__m256i*>(temp_1), sum_v_epi32[1]);
+
       for (int k = 0; k < 8; ++k) {
         row_sum += temp_0[k];
         row_sum += temp_1[k];
