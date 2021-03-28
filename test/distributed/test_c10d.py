@@ -2227,12 +2227,19 @@ class SparseGradientModule(nn.Module):
 class MixedDenseSparseGradientModule(nn.Module):
     def __init__(self):
         super(MixedDenseSparseGradientModule, self).__init__()
-        self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
         self.fc = nn.Linear(10, 10)
+        self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
 
     def forward(self, x):
-        x = self.embedding(x)
-        return self.fc(x)
+        x = self.fc(x)
+
+        def normalize_01(x):
+            x -= x.min(1, keepdim=True)[0]
+            x /= x.max(1, keepdim=True)[0]
+            return x
+
+        x = normalize_01(x).to(torch.long)
+        return self.embedding(x)
 
 
 @unittest.skipIf(
