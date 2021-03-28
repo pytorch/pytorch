@@ -1217,7 +1217,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
   Tensor gI;
   if (input.numel() != 0) {
     if (ggW.defined()) {
-      std::cout << "ggW defined\n";
       ConvParams gi_conv_params(params);
       gi_conv_params.transposed = !params.transposed;
 
@@ -1267,6 +1266,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
             auto expected_input_shape = (kernel_size[i] - 1) * gi_conv_params.stride[i]
               - 2 * gi_conv_params.padding[i]
               + (gi_conv_params.dilation[i] * (grad_output_shape[i] - 1) + 1);
+            std::cout << input_shape[i] - expected_input_shape << "\n";
             if (expected_input_shape != input_shape[i]) {
               gi_conv_params.output_padding[i] = input_shape[i] - expected_input_shape;
             }
