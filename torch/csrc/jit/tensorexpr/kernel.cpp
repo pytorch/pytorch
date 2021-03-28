@@ -2261,7 +2261,7 @@ std::vector<int64_t> TensorExprKernel::getReductionAxes(
   // We need to handle both of them.
   if (axesNode->kind() == prim::ListConstruct) {
     for (auto axisNode : axesNode->inputs()) {
-      axes.push_back(constant(axisNode).AsNode<IntImm>()->value());
+      axes.push_back(toIValue(axisNode)->toInt());
     }
     return axes;
   }
