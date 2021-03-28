@@ -1877,6 +1877,13 @@ def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tens
         - output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
           and all but the last dimension are the same shape as the input.
     """
+    if has_torch_function_variadic(input1, input2, weight):
+        return handle_torch_function(
+            bilinear,
+            (input1, input2, weight),
+            input1, input2, weight,
+            bias=bias
+        )
     return torch.bilinear(input1, input2, weight, bias)
 
 
@@ -2418,6 +2425,13 @@ def ctc_loss(
         >>> loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
     """
+    if has_torch_function_variadic(log_probs, targets, input_lengths, target_lengths):
+        return handle_torch_function(
+            ctc_loss,
+            (log_probs, targets, input_lengths, target_lengths),
+            log_probs, targets, input_lengths, target_lengths,
+            blank=blank, reduction=reduction, zero_infinity=zero_infinity
+        )
     return torch.ctc_loss(
         log_probs, targets, input_lengths, target_lengths, blank, _Reduction.get_enum(reduction), zero_infinity
     )
@@ -4148,6 +4162,8 @@ def pairwise_distance(x1: Tensor, x2: Tensor, p: float = 2.0, eps: float = 1e-6,
     r"""
     See :class:`torch.nn.PairwiseDistance` for details
     """
+    if has_torch_function_variadic(x1, x2):
+        return handle_torch_function(pairwise_distance, (x1, x2), x1, x2, p=p, eps=eps, keepdim=keepdim)
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
