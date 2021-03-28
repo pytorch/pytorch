@@ -36,7 +36,14 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   }
 }
 
-// Floating and complex types (minus Half) allow for optimized kernels
+// The source-code of kernels for float, double and complex types are similar,
+// except a small distinction - even if the output dtype is float, a double
+// exponent can be used. But Complex types' computation doesn't allow standard
+// & double-precision to be mixed. In order to provide a common path for float,
+// double & complex types, template parameter cast_scalar_t is being used to
+// resolve the aforementioned distinction. This approach also allows BFloat16 to
+// use this common-path. Half can't use it, as AVX2 support for sqrt & rsqrt
+// doesn't exist for it yet.
 template <typename scalar_t, typename cast_scalar_t, typename exp_scalar_t>
 void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scalar_t exp) {
   using Vec = Vec256<scalar_t>;
@@ -64,21 +71,21 @@ void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scal
   } else if (exp == -0.5) {
     cpu_kernel_vec(iter,
         [](scalar_t base) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return static_cast<scalar_t>(1.0) / std::sqrt(base);
+          return static_cast<cast_scalar_t>(1.0) / std::sqrt(base);
         },
         [](Vec base) -> Vec { return base.rsqrt(); }
     );
   } else if (exp == -1.0) {
     cpu_kernel_vec(iter,
         [](scalar_t base) -> scalar_t {
-          return static_cast<scalar_t>(1.0) / base;
+          return static_cast<cast_scalar_t>(1.0) / base;
         },
         [](Vec base) -> Vec { return base.reciprocal(); }
     );
   } else if (exp == -2.0) {
     cpu_kernel_vec(iter,
         [](scalar_t base) -> scalar_t {
-          return static_cast<scalar_t>(1.0) / (base * base); },
+          return static_cast<cast_scalar_t>(1.0) / (base * base); },
         [](Vec base) -> Vec { return (base * base).reciprocal(); }
     );
   } else {
