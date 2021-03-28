@@ -34,7 +34,7 @@ c10::optional<c10::DispatchKey> parseDispatchKey(const std::string& k) {
     {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
     {"CompositeImplicitAutograd", c10::DispatchKey::CompositeImplicitAutograd},
     {"Autograd", c10::DispatchKey::Autograd},
-    {"DefaultBackend", c10::DispatchKey::DefaultBackend},
+    {"CompositeExplicitAutograd", c10::DispatchKey::CompositeExplicitAutograd},
     {"AutogradCPU", c10::DispatchKey::AutogradCPU},
     {"", c10::DispatchKey::Undefined},
   };
