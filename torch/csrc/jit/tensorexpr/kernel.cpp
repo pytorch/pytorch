@@ -357,7 +357,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
       auto const& n = v->node();
       auto shape = sizesForValue(n->input(0));
 
-      int64_t dim = constant(n->input(1)).AsNode<IntImm>()->value();
+      int64_t dim = toIValue(n->input(1))->toInt();
       // From the documentation
       // (https://pytorch.org/docs/master/generated/torch.unsqueeze.html):
       //
@@ -1551,7 +1551,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           dimsFromSizes(sizesForValue(v)),
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
-            int dim = constant(n->inputs()[1]).AsNode<IntImm>()->value();
+            int64_t dim = toIValue(n->inputs()[1])->toInt();
             ExprHandle start = constant(n->inputs()[2]);
             ExprHandle stride = constant(n->inputs()[4]);
 
@@ -1567,7 +1567,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           dimsFromSizes(sizesForValue(v)),
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
-            int64_t dim = constant(n->inputs()[1]).AsNode<IntImm>()->value();
+            int64_t dim = toIValue(n->inputs()[1])->toInt();
             if (dim < 0) {
               if (axes.size() == 0) {
                 throw malformed_input("axes are zero handling unsqueeze");
