@@ -1,9 +1,5 @@
 import torch
 
-# TODO: remove this global setting
-# Sparse tests use double as the default dtype
-torch.set_default_dtype(torch.double)
-
 import itertools
 import functools
 import operator

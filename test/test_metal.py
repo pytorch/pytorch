@@ -4,6 +4,9 @@ from torch.nn import functional as F
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing import FileCheck
 import io
+import pytest
+
+pytestmark = pytest.mark.skip
 
 class TestMetalRewritePass(TestCase):
     @staticmethod

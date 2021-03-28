@@ -17,10 +17,6 @@ from functools import reduce, partial
 import torch
 import json
 
-# TODO: remove this global setting
-# Autograd tests use double as the default dtype
-torch.set_default_dtype(torch.double)
-
 from torch import nn
 from torch._six import inf, nan
 from torch.autograd.function import once_differentiable

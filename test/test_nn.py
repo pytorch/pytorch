@@ -16,10 +16,6 @@ from collections import OrderedDict
 
 import torch
 
-# TODO: remove this global setting
-# NN tests use double as the default dtype
-torch.set_default_dtype(torch.double)
-
 from torch._six import inf, nan
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
