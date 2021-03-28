@@ -478,7 +478,8 @@ Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source);
 }
 
-Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+
+Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   auto numel = index.numel();
@@ -526,7 +527,7 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
           iter.unsafe_replace_operand(0, self_data);
           iter.unsafe_replace_operand(1, self_data);
           iter.unsafe_replace_operand(2, source_data);
-          add_stub(iter.device_type(), iter, 1);
+          add_stub(iter.device_type(), iter, alpha);
       }
     });
   }
@@ -536,25 +537,34 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-      self.scalar_type(), "index_add_", [&self, &source, &dim, &index_contig, &numel] {
+      self.scalar_type(), "index_add_", [&self, &source, &dim, &index_contig, &numel, &alpha] {
+      auto alpha_value = alpha.to<scalar_t>();
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
       // TODO: Maybe TensorAccessor can beused here?
       auto* self_ptr = self.data_ptr<scalar_t>();
       auto* source_ptr = source.data_ptr<scalar_t>();
       AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_add_cpu_",
-        [&index_contig, &numel, &self, &self_ptr, &self_stride, &source_ptr, &source_stride] {
+        [&index_contig, &numel, &self, &self_ptr, &self_stride, &source_ptr, &source_stride, alpha_value] {
         auto index_data = index_contig.data_ptr<index_t>();
         for (auto i = 0; i < numel; i++) {
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
             scalar_t *self_ip = self_ptr + self_i * self_stride;
-            *self_ip += *(source_ptr + i * source_stride);
+            *self_ip += *(source_ptr + i * source_stride) * alpha_value;
         }
       });
     });
   }
   return self;
+}
+
+Tensor& index_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.index_add_(dim, index, source, 1);
+}
+
+Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
+  return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source, alpha);
 }
 
 Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
