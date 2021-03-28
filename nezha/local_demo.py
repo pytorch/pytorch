@@ -96,6 +96,8 @@ dummy_input = torch.randn(32, 5)
 
 with torch.no_grad():
 
+    # torch.onnx.try_ort_inference("first_part.onnx", dummy_input)
+
     # new_module = TestModule("my_onnx.onnx")
     # new_module.eval()
     # new_output = new_module(dummy_input, '5')
@@ -113,7 +115,9 @@ with torch.no_grad():
 
     # all_C_modules = nezha_helper.split_modules(new_script_module._c)
 
-    # fake_results = torch.ops.onnx_ops.ort_inference_ops("first_example.onnx", dummy_input)
+    # fake_results = torch.ops.onnx_ops.ort_inference_ops("/home/jay/repos/first_part.onnx", dummy_input)
+    # fake_results = torch.ops.onnx_ops.ort_inference_ops("/home/jay/repos/first_part.onnx", dummy_input)
+    # fake_results = torch.ops.onnx_ops.ort_inference_ops("/home/jay/repos/first_part.onnx", dummy_input)
 
     my_model = NeuralNet_All(total_input_size, total_hidden_size, total_num_classes)
     my_model.eval()
@@ -124,8 +128,8 @@ with torch.no_grad():
     # new_dummy_input = torch.randn(32, 5, 5)
     # torch.onnx.export(my_model, new_dummy_input, "good_example_02.onnx")
 
-    # script_module = torch.jit.trace(my_model, dummy_input)
-    script_module = torch.jit.script(my_model)
+    script_module = torch.jit.trace(my_model, dummy_input)
+    # script_module = torch.jit.script(my_model)
     script_module.eval()
 
     # script_module._c = torch._C._jit_nezha_update_ops(script_module._c)
@@ -133,6 +137,9 @@ with torch.no_grad():
 
     new_output=script_module._c.forward(dummy_input)
     print(new_output)
+
+    is_same = torch.allclose(output, new_output, rtol=1e-05, atol=1e-08, equal_nan=False)
+    pritn(is_same)
     # export_c_module(script_module._c, dummy_input, output, "my_nezha_test.onnx")
 
     # torch.onnx.export(script_module, dummy_input, "good_example.onnx", example_outputs=output)
