@@ -14,7 +14,7 @@ from io import StringIO, BytesIO
 import pickle
 
 try:
-    from torchvision.models import resnet18
+    from torchvision.models import resnet18, alexnet
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
@@ -784,6 +784,298 @@ class TestImporter(TestCase):
         ordered_importer_package_first = OrderedImporter(importer, sys_importer)
         self.assertIs(ordered_importer_package_first.import_module('package_a'), importer.import_module('package_a'))
 
+class PackagingTsSerTest(TestCase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._temporary_files = []
+
+    def temp(self):
+        t = NamedTemporaryFile()
+        name = t.name
+        if IS_WINDOWS:
+            t.close()  # can't read an open file in windows
+        else:
+            self._temporary_files.append(t)
+        return name
+
+    def tearDown(self):
+        for t in self._temporary_files:
+            t.close()
+        self._temporary_files = []
+
+    def test_save_ts(self):
+        # Test basic saving of TS module
+        class ModB(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+                self.tvmod = alexnet()
+
+            def forward(self, input: str):
+                input = input + "_modB:" + self.name
+                return input
+
+        class ModA(torch.nn.Module):
+            def __init__(self, name: str, submodule_name: str):
+                super().__init__()
+                self.name = name
+                self.modB = ModB(submodule_name)
+                self.tvmod = resnet18()
+
+            def forward(self, input: str):
+                input = input + "_modA:" + self.name
+                return self.modB(input)
+
+        scripted_mod = torch.jit.script(ModA("a", "b"))
+        
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as e:
+            e.save_pickle("res", "mod.pkl", scripted_mod)
+
+        importer = PackageImporter(filename)
+        loaded_mod = importer.load_pickle("res", "mod.pkl")
+        self.assertEqual(loaded_mod("input"), scripted_mod("input"))
+
+    def test_save_ts_modules_shared_code(self):
+        #  Test to verify saving multiple modules with same top module
+        #  but different submodules works
+        class ModD(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+                self.tvmod = alexnet()
+
+            def forward(self, input: str):
+                input = input + "_modB:" + self.name
+                return input
+
+        class ModC(torch.nn.Module):
+            def __init__(self, name: str, submodule_name: str):
+                super().__init__()
+                self.name = name
+                self.modB = ModD(submodule_name)
+                self.tvmod = resnet18()
+
+            def forward(self, input: str):
+                input = input + "_modA:" + self.name
+                return self.modB(input)
+
+        scripted_mod_0 = torch.jit.script(ModC("a", "b"))
+
+        class ModD(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+                self.tvmod = alexnet()
+
+            def forward(self, input: str):
+                input = input + "_modB(changed):" + self.name
+                return input
+
+        scripted_mod_1 = torch.jit.script(ModC("a", "b"))
+
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as e:
+            e.save_pickle("res", "mod1.pkl", scripted_mod_0)
+            e.save_pickle("res", "mod2.pkl", scripted_mod_1)
+
+        importer = PackageImporter(filename)
+        loaded_mod_0 = importer.load_pickle("res", "mod1.pkl")
+        loaded_mod_1 = importer.load_pickle("res", "mod2.pkl")
+        self.assertEqual(loaded_mod_0("input"), scripted_mod_0("input"))
+        self.assertEqual(loaded_mod_1("input"), scripted_mod_1("input"))
+        self.assertNotEqual(loaded_mod_0("input"), loaded_mod_1("input"))
+
+    def test_save_ts_independent_modules(self):
+        # Test to verify saving multiple modules
+        # who share submodules works
+        class ModD(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+                self.tvmod = alexnet()
+
+            def forward(self, input: str):
+                input = input + "_modB:" + self.name
+                return input
+
+        class ModC(torch.nn.Module):
+            def __init__(self, name: str, submodule_name: str):
+                super().__init__()
+                self.name = name
+                self.modB = ModD(submodule_name)
+                self.tvmod = resnet18()
+
+            def forward(self, input: str):
+                input = input + "_modA:" + self.name
+                return self.modB(input)
+
+        scripted_mod = torch.jit.script(ModC("a", "b"))
+
+        class ModFoo(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+                self.tvmod = alexnet()
+
+            def forward(self, input: str):
+                input = input + "_modFoo:" + self.name
+                return input
+
+        scripted_mod_foo = torch.jit.script(ModFoo("foo"))
+
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as e:
+            e.save_pickle("res", "mod1.pkl", scripted_mod)
+            e.save_pickle("res", "mod2.pkl", scripted_mod_foo)
+
+        importer = PackageImporter(filename)
+        loaded_mod_0 = importer.load_pickle("res", "mod1.pkl")
+        loaded_mod_1 = importer.load_pickle("res", "mod2.pkl")
+        self.assertEqual(loaded_mod_0("input"), scripted_mod("input"))
+        self.assertEqual(loaded_mod_1("input"), scripted_mod_foo("input"))
+
+    def test_save_ts_repeat_saving_mod(self):
+        #  Test to verify saving multiple modules in same
+        #  package works
+        class ModD(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+                self.tvmod = alexnet()
+
+            def forward(self, input: str):
+                input = input + "_modB:" + self.name
+                return input
+
+        class ModC(torch.nn.Module):
+            def __init__(self, name: str, submodule_name: str):
+                super().__init__()
+                self.name = name
+                self.modB = ModD(submodule_name)
+                self.tvmod = resnet18()
+
+            def forward(self, input: str):
+                input = input + "_modA:" + self.name
+                return self.modB(input)
+
+        scripted_mod_c = torch.jit.script(ModC("a", "b"))
+        scripted_mod_d = torch.jit.script(ModD("b"))
+
+        class ModFoo(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+                self.tvmod = alexnet()
+
+            def forward(self, input: str):
+                input = input + "_modFoo:" + self.name
+                return input
+
+        scripted_mod_foo = torch.jit.script(ModFoo("foo"))
+        
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as e:
+            e.save_pickle("res", "mod1.pkl", scripted_mod_c)
+            e.save_pickle("res", "mod2.pkl", scripted_mod_foo)
+            e.save_pickle("res", "mod3.pkl", scripted_mod_d)
+            e.save_pickle("res", "mod4.pkl", scripted_mod_foo)
+            e.save_pickle("res", "mod5.pkl", scripted_mod_d)
+            e.save_pickle("res", "mod6.pkl", scripted_mod_foo)
+
+        importer = PackageImporter(filename)
+        loaded_mod_0 = importer.load_pickle("res", "mod1.pkl")
+        loaded_mod_1 = importer.load_pickle("res", "mod3.pkl")
+        loaded_mod_2 = importer.load_pickle("res", "mod6.pkl")
+        self.assertEqual(loaded_mod_0("input"), scripted_mod_c("input"))
+        self.assertEqual(loaded_mod_1("input"), scripted_mod_d("input"))
+        self.assertEqual(loaded_mod_2("input"), scripted_mod_foo("input"))
+
+    def test_save_ts_repeat_save(self):
+        # Test to verify saving and loading same TS object works
+
+        class ModFoo(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+                self.tvmod = resnet18()
+
+            def forward(self, input: str):
+                input = input + "_modFoo:" + self.name
+                return input
+        
+        class ModBar(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+
+            def forward(self, input: str):
+                input = input + "_modBar:" + self.name
+                return input
+
+        scripted_mod_foo = torch.jit.script(ModFoo("foo"))
+        scripted_mod_bar = torch.jit.script(ModBar("bar"))
+
+        filename_0 = self.temp()
+        with PackageExporter(filename_0, verbose=False) as e:
+            e.save_pickle("res", "mod1.pkl", scripted_mod_foo)
+
+        importer_0 = PackageImporter(filename_0) 
+        loaded_module_0 = importer_0.load_pickle("res", "mod1.pkl") 
+
+        filename_1 = self.temp()
+        with PackageExporter(filename_1, verbose=False) as e:
+            e.save_pickle("res", "mod1.pkl", scripted_mod_bar)
+            e.save_pickle("res", "mod2.pkl", loaded_module_0)
+
+        importer_1 = PackageImporter(filename_1)
+        loaded_module_1 = importer_1.load_pickle("res", "mod1.pkl")
+        reloaded_module_0 = importer_1.load_pickle("res", "mod2.pkl") 
+
+        self.assertEqual(loaded_module_0("input"), scripted_mod_foo("input"))
+        self.assertEqual(loaded_module_0("input"), reloaded_module_0("input"))
+        self.assertEqual(loaded_module_1("input"), scripted_mod_bar("input"))
+
+    def test_save_ts_multiple_packages(self):
+        # Test to verify when saving multiple packages with same CU
+        # that packages don't include unnecessary ts code files
+
+        class ModFoo(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+                self.tvmod = resnet18()
+
+            def forward(self, input: str):
+                input = input + "_modFoo:" + self.name
+                return input
+        
+        class ModBar(torch.nn.Module):
+            def __init__(self, name: str):
+                super().__init__()
+                self.name = name
+
+            def forward(self, input: str):
+                input = input + "_modBar:" + self.name
+                return input
+
+        scripted_mod_foo = torch.jit.script(ModFoo("foo"))
+        scripted_mod_bar = torch.jit.script(ModBar("bar"))
+
+        filename_0 = self.temp()
+        with PackageExporter(filename_0, verbose=False) as e:
+            e.save_pickle("res", "mod1.pkl", scripted_mod_foo)
+
+        importer_0 = importer = PackageImporter(filename_0) 
+
+        filename_1 = self.temp()
+        with PackageExporter(filename_1, verbose=False) as e:
+            e.save_pickle("res", "mod1.pkl", scripted_mod_bar)
+
+        importer_1 = PackageImporter(filename_1)
+
+        self.assertTrue("torchvision" in str(importer_0.file_structure())) 
+        self.assertFalse("torchvision" in str(importer_1.file_structure()))
 
 if __name__ == '__main__':
     run_tests()
