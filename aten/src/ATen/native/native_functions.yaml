@@ -8440,7 +8440,7 @@
   python_module: special
   variants: function
   dispatch:
-    CompositeExplicitAutograd: special_entr
+    CPU, CUDA: special_entr
 
 - func: special_entr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
