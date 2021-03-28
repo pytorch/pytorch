@@ -282,8 +282,9 @@ int64_t hsum_sq(const uint8_t* A, int len) {
 
 #ifdef CPU_CAPABILITY_AVX2
 
-  int overflow_max_num = 524288;
+  int overflow_max_num = 262144;
   if( (len / 16) > overflow_max_num){
+    TORCH_WARN("----------hit");
       __m256i sum_v_epu32[2];
     // = _mm256_setzero_si256();
     alignas(64) int32_t temp_0[8];
@@ -360,7 +361,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
 
 #ifdef CPU_CAPABILITY_AVX2
 
-  int overflow_max_num = 2097152;
+  int overflow_max_num = 1048576;
 
   if( (len / 16) > overflow_max_num){
     __m256i sum_v_epi32[2]; // = _mm256_setzero_si256();
