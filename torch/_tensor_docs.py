@@ -1696,12 +1696,12 @@ See :func:`torch.histc`
 
 add_docstr_all('index_add_',
                r"""
-index_add_(dim, index, tensor) -> Tensor
+index_add_(dim, index, tensor, *, alpha=1) -> Tensor
 
-Accumulate the elements of :attr:`tensor` into the :attr:`self` tensor by adding
-to the indices in the order given in :attr:`index`. For example, if ``dim == 0``
-and ``index[i] == j``, then the ``i``\ th row of :attr:`tensor` is added to the
-``j``\ th row of :attr:`self`.
+Accumulate the elements of attr:`alpha` times :attr:`tensor` into the :attr:`self`
+tensor by adding to the indices in the order given in :attr:`index`. For example,
+if ``dim == 0``, ``index[i] == j``, and ``alpha=-1``, then the ``i``\ th row of
+:attr:`tensor` is subtracted from the ``j``\ th row of :attr:`self`.
 
 The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
@@ -1715,6 +1715,9 @@ Args:
     index (IntTensor or LongTensor): indices of :attr:`tensor` to select from
     tensor (Tensor): the tensor containing values to add
 
+Keyword args:
+    alpha (Number): the scalar multiplier for :attr:`tensor`
+
 Example::
 
     >>> x = torch.ones(5, 3)
@@ -1726,6 +1729,12 @@ Example::
             [  8.,   9.,  10.],
             [  1.,   1.,   1.],
             [  5.,   6.,   7.]])
+    >>> x.index_add_(0, index, t, alpha=-1)
+    tensor([[  1.,   1.,   1.],
+            [  1.,   1.,   1.],
+            [  1.,   1.,   1.],
+            [  1.,   1.,   1.],
+            [  1.,   1.,   1.]])
 """.format(**reproducibility_notes))
 
 add_docstr_all('index_copy_',
