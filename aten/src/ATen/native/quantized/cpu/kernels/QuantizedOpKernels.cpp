@@ -283,12 +283,20 @@ int64_t hsum_sq(const uint8_t* A, int len) {
 #ifdef CPU_CAPABILITY_AVX2
 
   int overflow_max_num = 262144;
-  if( (len / 16) > overflow_max_num){
+  //int overflow_max_num = 0;
+
+  if( len > overflow_max_num){
+
+    //TORCH_WARN("-----------LeslieDebug: LARGE uint8");
+
       __m256i sum_v_epu32[2];
     // = _mm256_setzero_si256();
     alignas(64) int32_t temp_0[8];
     alignas(64) int32_t temp_1[8];
     int loop = len/overflow_max_num;
+
+    //int loop = 16;
+
     for(int j=1; j<=loop; j++){
       sum_v_epu32[0] = _mm256_setzero_si256();
       sum_v_epu32[1] = _mm256_setzero_si256();
@@ -317,6 +325,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
       }
     }
   }else{  
+    //TORCH_WARN("-----------LeslieDebug: small uint8");
     __m256i sum_v_epu32 = _mm256_setzero_si256();
     // vectorized
     for (; i < len / 16 * 16; i += 16) {
@@ -360,15 +369,20 @@ int64_t hsum_sq(const int8_t* A, int len) {
 
 #ifdef CPU_CAPABILITY_AVX2
 
-  //int overflow_max_num = 1048576;
-  int overflow_max_num = 262144;
+  int overflow_max_num = 1048576;
+  //int overflow_max_num = 262144;
+  //int overflow_max_num = 0;
 
-  if( (len / 16) > overflow_max_num){
+  if( len > overflow_max_num){
+    //TORCH_WARN("-----------LeslieDebug: LARGE int8");
     __m256i sum_v_epi32[2]; // = _mm256_setzero_si256();
     alignas(64) int32_t temp_0[8];
     alignas(64) int32_t temp_1[8];
 
     int loop = len/overflow_max_num;
+
+    //int loop = 16;
+
     for(int j=1; j<=loop; j++){
       sum_v_epi32[0] = _mm256_setzero_si256();
       sum_v_epi32[1] = _mm256_setzero_si256();
@@ -398,6 +412,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
       }
     }
   }else{
+    //TORCH_WARN("-----------LeslieDebug: small int8");
     __m256i sum_v_epi32 = _mm256_setzero_si256();
     // vectorized
     for (; i < len / 16 * 16; i += 16) {
