@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 
 import argparse
-import bz2
-import json
 import subprocess
 import sys
-from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from tools.stats_utils.s3_stat_parser import (Report, get_cases,
-                                              get_S3_bucket_readonly)
+                                              get_test_stats_summaries)
 
 
 def get_git_commit_history(
@@ -25,28 +22,6 @@ def get_git_commit_history(
         (x[0], datetime.fromtimestamp(int(x[1]), tz=timezone.utc))
         for x in [line.split(" ") for line in rc.split("\n")]
     ]
-
-
-def get_object_summaries(*, bucket: Any, sha: str) -> Dict[str, List[Any]]:
-    summaries = list(bucket.objects.filter(Prefix=f'test_time/{sha}/'))
-    by_job = defaultdict(list)
-    for summary in summaries:
-        job = summary.key.split('/')[2]
-        by_job[job].append(summary)
-    return dict(by_job)
-
-def get_jsons(
-    jobs: Optional[List[str]],
-    summaries: Dict[str, Any],
-) -> Dict[str, Report]:
-    if jobs is None:
-        keys = sorted(summaries.keys())
-    else:
-        keys = [job for job in jobs if job in summaries]
-    return {
-        job: json.loads(bz2.decompress(summaries[job].get()['Body'].read()))
-        for job in keys
-    }
 
 
 def make_column(
@@ -149,7 +124,6 @@ def make_lines(
 
 def history_lines(
     *,
-    bucket: Any,
     commits: List[Tuple[str, datetime]],
     jobs: Optional[List[str]],
     filename: Optional[str],
@@ -165,17 +139,17 @@ def history_lines(
         if (prev_time - time).total_seconds() < delta * 3600:
             continue
         prev_time = time
-        summaries = get_object_summaries(bucket=bucket, sha=sha)
-        # we assume that get_object_summaries doesn't return empty lists
-        jsons = get_jsons(
-            jobs=jobs,
-            summaries={job: l[0] for job, l in summaries.items()},
-        )
+        if jobs is None:
+            summaries = get_test_stats_summaries(sha=sha)
+        else:
+            summaries = get_test_stats_summaries(sha=sha, jobs=jobs)
+        # we assume that get_test_stats_summaries here doesn't return empty lists
         omitted = {
             job: len(l) - 1
             for job, l in summaries.items()
             if len(l) > 1
         }
+        jsons = {job: l[0] for job, l in summaries.items()}
         if mode == 'columns':
             assert jobs is not None
             lines = [make_columns(
@@ -345,10 +319,8 @@ def run(raw: List[str]) -> Iterator[str]:
     args = parse_args(raw)
 
     commits = get_git_commit_history(path=args.pytorch, ref=args.ref)
-    bucket = get_S3_bucket_readonly('ossci-metrics')
 
     return history_lines(
-        bucket=bucket,
         commits=commits,
         jobs=args.jobs,
         filename=args.file,

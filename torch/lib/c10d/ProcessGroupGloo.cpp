@@ -136,6 +136,32 @@ void logAndThrow(
   throw std::runtime_error(errorMessage);
 }
 
+// For monitoredBarrier, checks remaining time left to finish processing ranks
+// and throws error if timeout.
+void checkRemainingTime(
+    const std::chrono::milliseconds& monitoredBarrierTimeout,
+    const std::chrono::milliseconds& remainingTime,
+    const std::vector<int>& processedRanks,
+    int currentRank) {
+  const std::string kNoRemainingTimeError = c10::str(
+      "Rank ",
+      currentRank,
+      " timed out in monitoredBarrier after ",
+      monitoredBarrierTimeout.count(),
+      " ms.");
+  if (remainingTime.count() < 0) {
+    std::string rankInfo;
+    if (processedRanks.size() > 0) {
+      rankInfo = c10::str(
+          "Successfully processed ranks: ", c10::Join(", ", processedRanks));
+    } else {
+      rankInfo = "No ranks successfully processed in monitoredBarrier.";
+    }
+    auto error = c10::str(kNoRemainingTimeError, "\n", rankInfo);
+    logAndThrow(error, error);
+  }
+}
+
 // Wrap c10d store as Gloo store
 class GlooStore : public ::gloo::rendezvous::Store {
  public:
@@ -2726,64 +2752,41 @@ void ProcessGroupGloo::monitoredBarrier(const BarrierOptions& opts) {
         {dstRank, std::make_tuple(std::move(recvWork), std::move(sendWork))});
   }
 
-  const std::string kNoRemainingTimeError = c10::str(
-      "Rank ",
-      rank,
-      " timed out in monitoredBarrier after ",
-      monitoredBarrierTimeout.count(),
-      " ms.");
   std::vector<int> processedRanks;
 
   // Wait for send/recv from all ranks
   for (auto& work : works) {
-    for (int i = 0; i < 2; ++i) {
-      // Compute the remaining time for every call to wait() instead of using
-      // the whole timeout every call. Error out if no time remains.
+    // Compute the remaining time for every call to wait() instead of using
+    // the whole timeout every call. Error out if no time remains.
+    try {
       auto remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
-      if (remainingTime.count() < 0) {
-        std::string rankInfo;
-        if (processedRanks.size() > 0) {
-          rankInfo = c10::str(
-              "Successfully processed ranks: ",
-              c10::Join(", ", processedRanks));
-        } else {
-          rankInfo = "No ranks successfully processed in monitoredBarrier.";
-        }
-        auto error = c10::str(kNoRemainingTimeError, "\n", rankInfo);
-        logAndThrow(error, error);
-      }
-      try {
-        c10::intrusive_ptr<ProcessGroup::Work> commWork;
-        // C++ does not support std::get<i> for variable i.
-        if (i == 0) {
-          commWork = std::get<0>(work.second);
-        } else {
-          commWork = std::get<1>(work.second);
-        }
-        commWork->wait(remainingTime);
-      } catch (const std::exception& e) {
-        const std::string error = c10::str(
-            "Rank ",
-            work.first,
-            " failed to pass monitoredBarrier in ",
-            monitoredBarrierTimeout.count(),
-            " ms");
-        logAndThrow(
-            error, c10::str(error, "\n Original exception: \n", e.what()));
-      }
+      checkRemainingTime(
+          monitoredBarrierTimeout, remainingTime, processedRanks, rank);
+      std::get<0>(work.second)->wait(remainingTime);
+      remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
+      checkRemainingTime(
+          monitoredBarrierTimeout, remainingTime, processedRanks, rank);
+      std::get<1>(work.second)->wait(remainingTime);
+    } catch (const std::exception& e) {
+      const std::string error = c10::str(
+          "Rank ",
+          work.first,
+          " failed to pass monitoredBarrier in ",
+          monitoredBarrierTimeout.count(),
+          " ms");
+      logAndThrow(
+          error, c10::str(error, "\n Original exception: \n", e.what()));
     }
     processedRanks.push_back(work.first);
   }
 
   auto remainingTime = getRemainingTime(startTime, monitoredBarrierTimeout);
-  // If there was no remaining time but rank 0 successfully processed all other
-  // ranks, adjust back to 0 to get accurate time information when logging below
-  // message.
-  if (remainingTime.count() < 0) {
-    remainingTime = std::chrono::milliseconds(0);
-  }
   LOG(INFO) << "All ranks passed monitoredBarrier in "
-            << (monitoredBarrierTimeout - remainingTime).count() << " ms.";
+            << (remainingTime.count() > 0
+                    ? (monitoredBarrierTimeout - remainingTime)
+                    : monitoredBarrierTimeout)
+                   .count()
+            << " ms.";
 }
 
 } // namespace c10d

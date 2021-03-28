@@ -10,13 +10,15 @@ from .utils import (
     print_node,
     NodeInputType,
     return_first_non_observer_node,
+    get_number_of_non_param_args,
 )
 
 from .ns_types import (
     NSSingleResultValuesType,
+    NSSubgraph,
 )
 
-from typing import Dict, Tuple, Callable, List, Any, Union
+from typing import Dict, Tuple, Callable, List, Any, Union, Optional
 
 def _insert_logger_after_node(
     node: Node,
@@ -151,11 +153,14 @@ def _insert_dtype_cast_after_node(
     will insert a dequant.
     """
     dtype_cast_op = None
+    dtype_cast_mod_cls = None
     node_input_type_a = get_node_input_type(node_a, gm_a)
     node_input_type_c = get_node_input_type(node_c, gm_b)
 
     if node_input_type_a == NodeInputType.FP32 and node_input_type_c == NodeInputType.INT8:
         dtype_cast_op = torch.dequantize
+    elif node_input_type_a == NodeInputType.FP32 and node_input_type_c == NodeInputType.FP32:
+        dtype_cast_mod_cls = torch.nn.Identity
     else:
         raise AssertionError(
             f"dtype cast from {node_input_type_c} to {node_input_type_a} needs to be implemented")
@@ -163,28 +168,43 @@ def _insert_dtype_cast_after_node(
     if isinstance(prev_node_c, Node):
         new_dtype_cast_name = \
             get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
-
-        return graph_c.create_node(
-            'call_function', dtype_cast_op, (prev_node_c,), {},
-            new_dtype_cast_name)
+        if dtype_cast_op:
+            return graph_c.create_node(
+                'call_function', dtype_cast_op, (prev_node_c,), {},
+                new_dtype_cast_name)
+        else:
+            assert dtype_cast_mod_cls
+            dtype_cast_mod = dtype_cast_mod_cls()
+            setattr(gm_b, new_dtype_cast_name, dtype_cast_mod)
+            return graph_c.create_node(
+                'call_module', new_dtype_cast_name, (prev_node_c,), {},
+                new_dtype_cast_name)
     elif isinstance(prev_node_c, list):
         results = []
         for prev_node_c_inner in prev_node_c:
             new_dtype_cast_name = \
                 get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
-
-            new_dtype_cast_node = graph_c.create_node(
-                'call_function', dtype_cast_op, (prev_node_c_inner,), {},
-                new_dtype_cast_name)
-            results.append(new_dtype_cast_node)
+            if dtype_cast_op:
+                new_dtype_cast_node = graph_c.create_node(
+                    'call_function', dtype_cast_op, (prev_node_c_inner,), {},
+                    new_dtype_cast_name)
+                results.append(new_dtype_cast_node)
+            else:
+                assert dtype_cast_mod_cls
+                dtype_cast_mod = dtype_cast_mod_cls()
+                setattr(gm_b, new_dtype_cast_name, dtype_cast_mod)
+                new_dtype_cast_node = graph_c.create_node(
+                    'call_module', new_dtype_cast_name, (prev_node_c,), {},
+                    new_dtype_cast_name)
+                results.append(new_dtype_cast_node)
         return results
     else:
         raise AssertionError(f"type f{type(prev_node_c)} is not handled")
 
 def _insert_copy_of_subgraph_a_after_input_node_c(
     input_node_c: Union[Node, List[Node]],
-    node_start_a: Node,
-    node_end_a: Node,
+    input_node_c_2: Optional[Union[Node, List[Node]]],
+    subgraph_a: NSSubgraph,
     gm_a: GraphModule,
     gm_b: GraphModule,
     node_name_prefix: str,
@@ -199,9 +219,9 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
 
     # create a sequential list of the subgraphs' nodes from start to end,
     # because we need to add the nodes to graph C in non-reverse order
-    nodes_of_a = [node_end_a]
-    cur_node = node_end_a
-    while cur_node != node_start_a:
+    nodes_of_a = [subgraph_a.end_node]
+    cur_node = subgraph_a.end_node
+    while cur_node != subgraph_a.start_node:
         cur_node = cur_node.args[0]  # type: ignore
         nodes_of_a.insert(0, cur_node)
 
@@ -210,6 +230,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     cur_node_a = nodes_of_a[0]
     cur_node_c = _insert_copy_of_node_a_after_input_node_c(
         input_node_c,
+        input_node_c_2,
         cur_node_a,
         gm_a,
         gm_b,
@@ -219,6 +240,8 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
         prev_node_c = cur_node_c  # previous added node is the input to next node
         cur_node_c = _insert_copy_of_node_a_after_input_node_c(
             prev_node_c,
+            # TODO(future PR): enable multiple inputs for nodes which are not at start of subgraph
+            None,
             cur_node_a,
             gm_a,
             gm_b,
@@ -229,6 +252,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
 
 def _insert_copy_of_node_a_after_input_node_c(
     input_node_c: Union[Node, List[Node]],
+    input_node_c_2: Optional[Union[Node, List[Node]]],
     node_a: Node,
     gm_a: GraphModule,
     gm_b: GraphModule,
@@ -236,8 +260,12 @@ def _insert_copy_of_node_a_after_input_node_c(
 ) -> Node:
     """
     Assume that node_a from graph_a has
-      args (input, arg1, ...), and
+      args (input, (input2)?, arg1, ...), and
       kwargs {kw0: kwarg0, ...}
+
+    Note: input2 is optional. If it equals to None, we assume that the op
+    has a single non-param input.  If it is specified, we assume that the op
+    has two non-param inputs.
 
     Copies the underlying values of arg1..argn and kwarg0..kwargn into gm_b,
     and creates the corresponding nodes in graph_c. Note: observers are ignored,
@@ -255,6 +283,8 @@ def _insert_copy_of_node_a_after_input_node_c(
     ========
 
     input -------------> node_a
+                         / / /
+    (input_2)?----------/ / /
                          / /
     weight -> weight_obs  /
                          /
@@ -264,6 +294,8 @@ def _insert_copy_of_node_a_after_input_node_c(
     =========================
 
     input_node_c --> node_a_copy
+                     / / /
+    (input_node_c_2)? / /
                      / /
     weight_copy ----/ /
                      /
@@ -278,7 +310,8 @@ def _insert_copy_of_node_a_after_input_node_c(
     # Note: this hasn't been tested with many ops, logic may change.
     new_args = []
     # assumes that the first arg is the input
-    for node_a_arg in node_a.args[1:]:
+    num_non_param_args = 1 if input_node_c_2 is None else 2
+    for node_a_arg in node_a.args[num_non_param_args:]:
         if isinstance(node_a_arg, Node):
             arg_a = return_first_non_observer_node(node_a_arg, gm_a)
             arg_a_copy_name = \
@@ -308,6 +341,11 @@ def _insert_copy_of_node_a_after_input_node_c(
     node_a_shadows_c_name = \
         get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
 
+    if input_node_c_2:
+        input_node_c_args = [input_node_c, input_node_c_2]
+    else:
+        input_node_c_args = [input_node_c]
+
     if node_a.op == 'call_module':
         # if target is a module, we point to the module from gm_b
         new_mod_copy_name = \
@@ -317,13 +355,13 @@ def _insert_copy_of_node_a_after_input_node_c(
         mod_a = getattr_from_fqn(gm_a, node_a.target)
         setattr(gm_b, new_mod_copy_name, mod_a)
         node_a_shadows_c = graph_c.create_node(
-            node_a.op, new_mod_copy_name, (input_node_c, *new_args),
+            node_a.op, new_mod_copy_name, (*input_node_c_args, *new_args),
             new_kwargs, node_a_shadows_c_name)  # type: ignore
         return node_a_shadows_c
     else:
         assert node_a.op == 'call_function'
         node_a_shadows_c = graph_c.create_node(
-            node_a.op, node_a.target, (input_node_c, *new_args),
+            node_a.op, node_a.target, (*input_node_c_args, *new_args),
             new_kwargs, node_a_shadows_c_name)  # type: ignore
         return node_a_shadows_c
 
@@ -332,7 +370,7 @@ def create_a_shadows_b(
     gm_a: GraphModule,
     name_b: str,
     gm_b: GraphModule,
-    matched_subgraph_pairs: Dict[str, Tuple[Tuple[Node, Node], Tuple[Node, Node]]],
+    matched_subgraph_pairs: Dict[str, Tuple[NSSubgraph, NSSubgraph]],
     logger_cls: Callable,
     should_log_inputs: bool,
 ) -> GraphModule:
@@ -373,11 +411,11 @@ def create_a_shadows_b(
 
     node_b_to_matched_subgraph_a_and_name = {}
     for match_name, match in matched_subgraph_pairs.items():
-        (node_start_a, node_end_a), (node_start_b, node_end_b) = match
-        assert node_start_b is node_end_b, \
+        subgraph_a, subgraph_b = match
+        assert subgraph_b.start_node is subgraph_b.end_node, \
             "Shadowing subgraphs of B with multiple nodes is not yet handled."
-        node_b_to_matched_subgraph_a_and_name[node_end_b] = \
-            ((node_start_a, node_end_a), match_name)
+        node_b_to_matched_subgraph_a_and_name[subgraph_b.end_node] = \
+            (subgraph_a, match_name)
 
     for node_b in gm_b.graph.nodes:
         if node_b.op == 'output':
@@ -389,14 +427,14 @@ def create_a_shadows_b(
             env_c[node_b.name] = env_c[node_b.args[0].name]  # type: ignore
 
         elif node_b in node_b_to_matched_subgraph_a_and_name:
-            (node_start_a, node_end_a), ref_name = \
+            subgraph_a, ref_name = \
                 node_b_to_matched_subgraph_a_and_name[node_b]
             if False:
                 print('b')
                 print_node(node_b)
                 print('a')
-                print_node(node_start_a)
-                print_node(node_end_a)
+                print_node(subgraph_a.start_node)
+                print_node(subgraph_a.end_node)
 
             # if necessary, log the input of node_c
             if should_log_inputs:
@@ -444,7 +482,7 @@ def create_a_shadows_b(
             # cast dtype from the dtype of node_c's input to the dtype of
             # node_a's input (dequant, etc)
             dtype_cast_node = _insert_dtype_cast_after_node(
-                node_start_a, node_c, node_c.args[0], gm_a, gm_b, graph_c,
+                subgraph_a.start_node, node_c, node_c.args[0], gm_a, gm_b, graph_c,
                 node_b.name + '_dtype_cast_')
             # note: not inserting to env_c because all nodes which use the dtype
             #   casts are copied from graph_a
@@ -486,9 +524,17 @@ def create_a_shadows_b(
 
             # hook up the new mod_a copy to be in the graph, receiving the
             # same inputs as mod_b does, with dtype cast to match a
+            # Some ops, such as LSTMs, have two non-param inputs. If we have
+            # such an op, pass the second param as well. Note: dtype casting
+            # for the second param is not implemented yet, it can be added
+            # later if there is a use case.
+            node_c_second_non_param_arg = None
+            num_non_param_args_node_a = get_number_of_non_param_args(subgraph_a.start_node, gm_a)
+            if num_non_param_args_node_a == 2:
+                node_c_second_non_param_arg = node_c.args[1]
             node_a_shadows_c = _insert_copy_of_subgraph_a_after_input_node_c(
-                dtype_cast_node,
-                node_start_a, node_end_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
+                dtype_cast_node, node_c_second_non_param_arg,
+                subgraph_a, gm_a, gm_b, node_c.name + '_shadow_copy_')
             env_c[node_a_shadows_c.name] = node_a_shadows_c
             # subgraph so far:
             #
