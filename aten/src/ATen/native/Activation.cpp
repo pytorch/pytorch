@@ -211,7 +211,7 @@ Tensor& silu_(Tensor& self) {
   return at::silu_out(self, self);
 }
 
-Tensor& silu_out(Tensor& result, const Tensor& self) {
+Tensor& silu_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(
       result.dtype() == self.dtype(),
       "Output Tensor should have the same type as in Input Tensor.")
@@ -407,7 +407,7 @@ Tensor& threshold_(Tensor& self, const Scalar& threshold, const Scalar& value) {
   return self;
 }
 
-Tensor& threshold_out(Tensor& result, const Tensor& self, const Scalar& threshold, const Scalar& value) {
+Tensor& threshold_out(const Tensor& self, const Scalar& threshold, const Scalar& value, Tensor& result) {
   threshold_out(make_optional(result), self, threshold, value, self);
   return result;
 }
@@ -718,14 +718,26 @@ Tensor softshrink_backward(const Tensor & grad, const Tensor & self, const Scala
 }
 
 Tensor gelu_cpu(const Tensor& self) {
-  Tensor Y = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor Y = at::native::empty_like(
+      self,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::unary_op(Y, self);
   GeluKernel(kCPU, it);
   return Y;
 }
 
 Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
-  Tensor dX = at::native::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor dX = at::native::empty_like(
+      self,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto it = TensorIterator::binary_op(dX, grad, self);
   GeluBackwardKernel(kCPU, it);
   return dX;

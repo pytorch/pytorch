@@ -5,19 +5,12 @@ import logging
 import os
 import warnings
 from contextlib import contextmanager
-from datetime import timedelta
 from typing import NamedTuple
 
 import torch
 import torch.distributed as dist
 
 from . import comm
-
-_GLOO_AVAILABLE = True
-try:
-    from torch._C._distributed_c10d import ProcessGroupGloo  # noqa: F401
-except ImportError:
-    _GLOO_AVAILABLE = False
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -34,7 +27,6 @@ from .parallel_apply import parallel_apply
 from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather, is_namedtuple
 
-_MONITORED_BARRIER_TIMEOUT = timedelta(seconds=30)
 
 def _find_tensors(obj):
     r"""
@@ -472,12 +464,6 @@ class DistributedDataParallel(Module):
             os.environ.get("PYTORCH_DDP_USE_SIDE_STREAM", "1") == "1"
         )
 
-        # CPU-only process group used for debug synchronization in DDP when
-        # debug mode is enabled. Note: need to call this before it is possible
-        # that some ranks crash during comm. such as in _verify_model_across_ranks,
-        # otherwise other ranks will hang at creating pg.
-        if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
-            self._cpu_pg = self._create_gloo_pg()
         # Module replication within process (single-process multi device)
         self._module_copies = self._replicate_modules_within_process()
         # Build parameters for reducer.
@@ -489,14 +475,6 @@ class DistributedDataParallel(Module):
         if self.device_ids is not None and len(self.device_ids) > 1:
             dist._verify_replicas_within_process(parameters, expect_sparse_gradient)
         dist._verify_model_across_ranks(self.process_group, parameters)
-        if _GLOO_AVAILABLE and dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
-            # Run monitored barrier in debug mode. This will ensure all ranks
-            # have same model shapes before continuing with init/training.
-            logging.info(
-                f"Rank {self._distributed_rank} calling monitored_barrier after verifying model consistency."
-            )
-            dist.monitored_barrier(group=self._cpu_pg, timeout=_MONITORED_BARRIER_TIMEOUT)
-
         # Sync params and buffers. Ensures all DDP models start off at the same value.
         self._sync_params_and_buffers(authoritative_rank=0)
         # Builds reducer.
@@ -562,21 +540,14 @@ class DistributedDataParallel(Module):
     def __getstate__(self):
         self._check_default_group()
         attrs = copy.copy(self.__dict__)
-        del attrs['process_group']
-
-        if hasattr(self, '_cpu_pg'):
-            del attrs['_cpu_pg']
-
-        del attrs['reducer']
-        del attrs['logger']
+        del attrs["process_group"]
+        del attrs["reducer"]
+        del attrs["logger"]
         return attrs
 
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
-        if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
-            self._cpu_pg = self._create_gloo_pg()
-
         super(DistributedDataParallel, self).__setstate__(state)
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
@@ -1380,24 +1351,6 @@ class DistributedDataParallel(Module):
     @property
     def _distributed_rank(self):
         return dist.get_rank(self.process_group)
-
-    def _create_gloo_pg(self):
-        """
-        Creates a gloo process group with same ranks as self.process_group.
-        """
-        if _GLOO_AVAILABLE:
-            ranks = list(range(dist.get_world_size(self.process_group)))
-            cpu_pg = dist.new_group(
-                ranks=ranks,
-                backend=dist.Backend.GLOO,
-            )
-        else:
-            logging.info(
-                "DDP could not create gloo process group since PyTorch was not built with gloo."
-            )
-            cpu_pg = None
-
-        return cpu_pg
 
     @staticmethod
     def _set_params_and_buffers_to_ignore_for_model(
