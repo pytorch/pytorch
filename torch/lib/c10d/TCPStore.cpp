@@ -148,16 +148,15 @@ void ListenThread::run() {
       continue;
     }
 
-    if (fds[0].revents == 0) {
+    // if connection is closed gracefully by master, peeked data will return 0
+    char data;
+    int ret = recv(fds[1].fd, &data, 1, MSG_PEEK);
+    if (ret == 0) {
       continue;
     }
-    // otherwise perform callback logic
-    try {
-      callbackHandler(fds[0].fd);
-    }
-    catch(...) {
-      tcputil::closeSocket(fds[0].fd);
-    }
+
+    // valid request, perform callback logic
+    callbackHandler(fds[1].fd);
   }
 }
 #else
@@ -166,8 +165,7 @@ void ListenThread::run() {
   tcputil::addPollfd(fds, controlPipeFd_[0], POLLHUP);
   tcputil::addPollfd(fds, storeListenSocket_, POLLIN);
 
-  bool finished = false;
-  while (!finished) {
+  while (1) {
     SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
 
     // Check control and exit early if triggered
@@ -181,20 +179,18 @@ void ListenThread::run() {
             "Unexpected poll revent on the control pipe's reading fd: " +
                 std::to_string(fds[0].revents));
       }
-      finished = true;
       break;
     }
 
-    if (fds[1].revents == 0) {
+    // if connection is closed gracefully by master, peeked data will return 0
+    char data;
+    int ret = recv(fds[1].fd, &data, 1, MSG_PEEK);
+    if (ret == 0) {
       continue;
     }
-    // otherwise perform callback logic
-    try {
-      callbackHandler(fds[1].fd);
-    }
-    catch(...) {
-      tcputil::closeSocket(fds[1].fd);
-    }
+
+    // valid request, perform callback logic
+    callbackHandler(fds[1].fd);
   }
 }
 #endif
@@ -597,6 +593,12 @@ TCPStore::TCPStore(
         tcputil::closeSocket(masterListenSocket_);
     }
     watchListener_ = nullptr;
+    if (storeSocket_ != -1) {
+      tcputil::closeSocket(storeSocket_);
+    }
+    if (listenSocket_ != -1) {
+      tcputil::closeSocket(listenSocket_);
+    }
     throw;
   }
 }
