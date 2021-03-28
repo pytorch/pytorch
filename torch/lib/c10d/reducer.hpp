@@ -142,8 +142,8 @@ class Reducer {
   void push_rebuilt_params(const VariableIndex& index);
 
   mutable std::mutex mutex_;
-  std::vector<std::vector<at::Tensor>> replicas_;
-  c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
+  const std::vector<std::vector<at::Tensor>> replicas_;
+  const c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
   std::vector<std::vector<bool>> expect_sparse_gradients_;
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
@@ -227,7 +227,7 @@ class Reducer {
     // `bucket_views_in[i].copy_(grad)` and
     // `grad.copy_(bucket_views_out[i])`
     // provide convenient ways to move grad data in/out of contents.
-    // The reason we keep to states for bucket_views is that if DDP
+    // The reason we keep two states for bucket_views is that if DDP
     // communication hook was registered, `bucket_views_out` could be
     // re-initialized with the value of hook's `future_work`. We still need to
     // keep a separate view reference to replica's original contents for
