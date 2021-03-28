@@ -88,6 +88,7 @@ class PackageImporter(Importer):
         self.modules['resources'] = self  # type: ignore
 
         self._mangler = PackageMangler()
+        self.temp_map_location = None
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: PackageUnpickler(self, *args, **kwargs)
@@ -149,6 +150,7 @@ class PackageImporter(Importer):
         """
         pickle_file = self._zipfile_path(package, resource)
         restore_location = _get_restore_location(map_location)
+        self.temp_map_location = map_location # idk how to tell ScriptModule how to get this info
         loaded_storages = {}
 
         def load_tensor(data_type, size, key, location, restore_location):
@@ -437,6 +439,9 @@ class PackageImporter(Importer):
 
     def _add_file(self, filename: str):
         *prefix, last = filename.split('/')
+        # need to not treat torchscript code as module to be interacted with 
+        if len(prefix) > 1 and prefix[0] == ".data" and prefix[1] == "ts_code":
+            return
         package = self._get_or_create_package(prefix)
         if isinstance(package, _ExternNode):
             raise ImportError(f'inconsistent module structure. package contains a module file {filename}'

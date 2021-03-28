@@ -81,6 +81,7 @@ class PackageExporter:
         self.external : List[str] = []
         self.provided : Dict[str, bool] = {}
         self.verbose = verbose
+        self.ts_serializer = torch._C.TorchScriptSerializer(self.zip_file, self)
 
         if isinstance(importer, Importer):
             self.importer = importer
@@ -93,6 +94,8 @@ class PackageExporter:
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
         self._unique_id = 0
+        self._next_ts_id = 0;
+        self._next_storage_id = 0;
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
         """Adds the local file system `file_or_directory` to the source package to provide the code
@@ -154,6 +157,16 @@ class PackageExporter:
         ret = str(self._unique_id)
         self._unique_id += 1
         return ret
+
+    def get_ts_id(self) -> str:
+        ret = self._next_ts_id
+        self._next_ts_id += 1
+        return str(ret)
+
+    def get_storage_id(self) -> str:
+        ret = self._next_storage_id
+        self._next_storage_id += 1
+        return str(ret)
 
     def save_source_string(self, module_name: str, src: str, is_package: bool = False,
                            dependencies: bool = True, orig_file_name: str = None):
@@ -466,6 +479,7 @@ node [shape=box];
             self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
         contents = ('\n'.join(self.external) + '\n')
         self._write('.data/extern_modules', contents)
+        self.ts_serializer.write_files()
         del self.zip_file
         if self.buffer:
             self.buffer.flush()

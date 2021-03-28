@@ -35,6 +35,8 @@ from torch.jit._state import (
 )
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic)
+from torch.package import PackageExporter, PackageImporter
+from ._serialization import validate_map_location
 
 torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
@@ -269,6 +271,12 @@ class ConstMap:
         return self.const_mapping[attr]
 
 
+def reduce_package_script_module(importer: PackageImporter, ts_id: str) -> torch.nn.Module:
+    cu = torch._C.CompilationUnit()
+    cpp_module = torch._C._import_ir_module_from_package(cu, importer.zip_reader, validate_map_location(importer.temp_map_location), ts_id)
+    return wrap_cpp_module(cpp_module)
+
+
 if _enabled:
     # this is a Python 'non-data descriptor' that causes the first access
     # to ScriptModule's forward to lookup the forward method and stash
@@ -340,6 +348,11 @@ if _enabled:
 
         def _replicate_for_data_parallel(self):
             return self._actual_script_module._replicate_for_data_parallel()
+
+        def __reduce_package__(self, exporter: PackageExporter):
+            ts_id = exporter.get_ts_id()
+            exporter.ts_serializer.serialize(self._actual_script_module, ts_id)
+            return (reduce_package_script_module, (ts_id, ))
 
     class RecursiveScriptModule(ScriptModule):
         # XXX: RecursiveScriptModule inherits from ScriptModule for the sole
@@ -493,6 +506,11 @@ if _enabled:
             See :func:`torch.jit.save <torch.jit.save>` for details.
             """
             return self._c.save(str(f), **kwargs)
+
+        def __reduce_package__(self, exporter: PackageExporter):
+            ts_id = exporter.get_ts_id()
+            exporter.ts_serializer.serialize(self._c, ts_id)
+            return (reduce_package_script_module, (ts_id, ))
 
         def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""
