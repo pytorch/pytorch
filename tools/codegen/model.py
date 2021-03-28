@@ -103,8 +103,8 @@ class DispatchKey(Enum):
     NumDispatchKeys = auto()
     Autograd = auto()
     CompositeImplicitAutograd = auto()
-    DefaultBackend = auto()
-    EndOfAliasKeys = DefaultBackend
+    CompositeExplicitAutograd = auto()
+    EndOfAliasKeys = CompositeExplicitAutograd
 
     CPUTensorId = CPU
     CUDATensorId = CUDA
@@ -134,7 +134,7 @@ STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
 def is_generic_dispatch_key(dk: DispatchKey) -> bool:
-    return dk in {DispatchKey.DefaultBackend, DispatchKey.CompositeImplicitAutograd}
+    return dk in {DispatchKey.CompositeExplicitAutograd, DispatchKey.CompositeImplicitAutograd}
 
 # CUDA specific dispatch keys
 def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
@@ -347,10 +347,10 @@ class NativeFunction:
         elif not structured and structured_delegate is None:
             dispatch[DispatchKey.CompositeImplicitAutograd] = cpp.name(func)
 
-        assert not (DispatchKey.DefaultBackend in dispatch and DispatchKey.CompositeImplicitAutograd in dispatch), \
-            "cannot specify both DefaultBackend and CompositeImplicitAutograd on a single kernel; each " \
+        assert not (DispatchKey.CompositeExplicitAutograd in dispatch and DispatchKey.CompositeImplicitAutograd in dispatch), \
+            "cannot specify both CompositeExplicitAutograd and CompositeImplicitAutograd on a single kernel; each " \
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
-            "implementation, specify DefaultBackend; otherwise specify CompositeImplicitAutograd only"
+            "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
 
         e.pop('__line__')
         assert not e, f"leftover entries: {e}"
@@ -1116,6 +1116,22 @@ class Arguments:
             ret.append(self.tensor_options)
         ret.extend(self.post_tensor_options_kwarg_only)
         return ret
+
+    # NB: contains out args.
+    @property
+    def tensor_args(self) -> Sequence[Union[Argument, SelfArgument]]:
+        ret: List[Union[Argument, SelfArgument]] = []
+        candidates: List[Union[Argument, SelfArgument]] = []
+        candidates.extend(self.positional)
+        candidates.extend(self.pre_tensor_options_kwarg_only)
+        candidates.extend(self.post_tensor_options_kwarg_only)
+        candidates.extend(self.out)
+        for arg in candidates:
+            a = arg.argument if isinstance(arg, SelfArgument) else arg
+            if a.type.is_tensor_like():
+                ret.append(arg)
+        return ret
+
 
     def signature(self, *, strip_default: bool = False) -> 'Arguments':
         # dataclasses.replace could be used here, but it is less
