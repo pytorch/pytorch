@@ -784,9 +784,10 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad):
 
     idx = make_arg((S,), dtype=torch.int64, low=0, high=S)
     idx_nonctg = make_arg((S,), dtype=torch.int64, low=0, high=S, discontiguous=True)
-    idx_neg = -idx - 1
     samples = [SampleInput(tensor, args=(1, idx, source))
                for tensor, idx, source in product([t, t_nonctg], [idx, idx_nonctg], [s, s_nonctg])]
+    samples.extend(SampleInput(tensor, args=(1, idx, source), kwargs=dict(alpha=a))
+                   for tensor, idx, source, a in product([t, t_nonctg], [idx, idx_nonctg], [s, s_nonctg], [-1, 0, 2]))
 
     # Add scalar cases
     scalar_sizes = [(), (1,)]
@@ -795,6 +796,7 @@ def sample_inputs_index_add(op_info, device, dtype, requires_grad):
     ss = (make_arg(size) for size in scalar_sizes)
 
     samples.extend(SampleInput(t, args=(0, idx, s)) for t, idx, s in product(ts, idxs, ss))
+    samples.extend(SampleInput(t, args=(0, idx, s), kwargs=dict(alpha=a)) for t, idx, s, a in product(ts, idxs, ss, [-1, 0, 2]))
     return samples
 
 def sample_inputs_sort(op_info, device, dtype, requires_grad):
@@ -1852,7 +1854,6 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
 
     return samples
 
-
 def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -1867,6 +1868,40 @@ def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
     )
 
     return samples
+
+def sample_inputs_unfold(op_info, device, dtype, requires_grad):
+    test_cases = (
+        ((), (0, 1, 1)),
+        ((S, S, S, S), (0, 3, 1)),
+        ((S, S, S, S), (1, 3, 1)),
+        ((S, S, S, S), (2, 3, 1)),
+        ((S, S, S, S), (3, 3, 1)),
+        ((S, S, S, S), (0, 3, 2)),
+        ((S, S, S, S), (1, 3, 2)),
+        ((S, S, S, S), (2, 3, 2)),
+        ((S, S, S, S), (3, 3, 2)),
+        ((S, S, S, S), (0, 4, 1)),
+        ((S, S, S, S), (1, 4, 1)),
+        ((S, S, S, S), (2, 4, 1)),
+        ((S, S, S, S), (3, 4, 1)),
+        ((M,), (0, 3, 1)),
+        ((M,), (0, 3, 2)),
+        ((M,), (0, 3, 3)),
+        ((1000,), (0, 3, 11)),
+        ((1000,), (0, 2, 27)),
+        ((10, 10), (0, 1, 2)),
+        ((10, 10), (1, 2, 3)),
+        ((10, 10), (1, 2, 2)),
+        ((S, S, S), (2, 3, 2)),
+    )
+
+    sample_inputs = []
+    for shape, arguments in test_cases:
+        sample_inputs += [SampleInput(make_tensor(shape, device, dtype,
+                                      low=None, high=None,
+                                      requires_grad=requires_grad),
+                                      args=arguments)]
+    return sample_inputs
 
 def sample_inputs_lerp(op_info, device, dtype, requires_grad):
     def _make_tensor_helper(shape, low=None, high=None):
@@ -3472,6 +3507,19 @@ op_db: List[OpInfo] = [
                # hstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out')),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack),
+    OpInfo('unfold',
+           op=lambda x, *args: x.unfold(*args),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           check_batched_gradgrad=False,
+           skips=(
+               # torch.unfold does not exist so we get a RuntimeError.
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+               # Skip operator schema test because this is a functional and not an operator
+               SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+           ),
+           sample_inputs_func=sample_inputs_unfold),
     OpInfo('vstack',
            # gradcheck expects the input arguments as a flat list
            op=lambda *args, **kwargs: torch.vstack([*args], **kwargs),
@@ -4054,28 +4102,6 @@ def method_tests():
         ('cummin', (), (0,), 'dim0_scalar', (), [0]),
         ('cumsum', (S, S, S), (1,), 'dim1_cast', (), [0], (), ident, {'dtype': torch.float64}),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
-        ('unfold', (), (0, 1, 1), 'scalar', (), [0]),
-        ('unfold', (S, S, S, S), (0, 3, 1), '4d_dim0_step1', (), [0]),
-        ('unfold', (S, S, S, S), (1, 3, 1), '4d_dim1_step1', (), [0]),
-        ('unfold', (S, S, S, S), (2, 3, 1), '4d_dim2_step1', (), [0]),
-        ('unfold', (S, S, S, S), (3, 3, 1), '4d_dim3_step1', (), [0]),
-        ('unfold', (S, S, S, S), (0, 3, 2), '4d_dim0_step2', (), [0]),
-        ('unfold', (S, S, S, S), (1, 3, 2), '4d_dim1_step2', (), [0]),
-        ('unfold', (S, S, S, S), (2, 3, 2), '4d_dim2_step2', (), [0]),
-        ('unfold', (S, S, S, S), (3, 3, 2), '4d_dim3_step2', (), [0]),
-        ('unfold', (S, S, S, S), (0, 4, 1), '4d_dim0_size4', (), [0]),
-        ('unfold', (S, S, S, S), (1, 4, 1), '4d_dim1_size4', (), [0]),
-        ('unfold', (S, S, S, S), (2, 4, 1), '4d_dim2_size4', (), [0]),
-        ('unfold', (S, S, S, S), (3, 4, 1), '4d_dim3_size4', (), [0]),
-        ('unfold', (M,), (0, 3, 1), '1d_step1', (), [0]),
-        ('unfold', (M,), (0, 3, 2), '1d_step2', (), [0]),
-        ('unfold', (M,), (0, 3, 3), '1d_step3', (), [0]),
-        ('unfold', (1000,), (0, 3, 11), '1d_step_gt_size', (), [0]),
-        ('unfold', (1000,), (0, 2, 27), '1d_step_gt_size2', (), [0]),
-        ('unfold', (10, 10), (0, 1, 2), '2d_step_gt_size', (), [0]),
-        ('unfold', (10, 10), (1, 2, 3), '2d_step_gt_size2', (), [0]),
-        ('unfold', (10, 10), (1, 2, 2), '2d_step_ge_size2', (), [0]),
-        ('unfold', (S, S, S), (2, 3, 2), 'lastdim', (), [0]),
         ('addmm', (S, M), ((S, S), (S, M)), '', (True, ['aten::add', 'aten::mm'])),
         ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs', (True, ['aten::add', 'aten::mm'])),
         ('addmm', (S, M), ((S, S), (S, M)), 'coef', (True,), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
