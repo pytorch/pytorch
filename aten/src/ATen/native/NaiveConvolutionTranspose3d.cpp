@@ -929,11 +929,7 @@ Tensor slow_conv_transpose3d_cpu(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cpu(
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias,
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -942,7 +938,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose3d_backward_out_cpu(
     IntArrayRef output_padding,
     IntArrayRef dilation,
     const Tensor& finput,
-    const Tensor& fgrad) {
+    const Tensor& fgrad, 
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias) {
   if (grad_input.defined()) {
     slow_conv_transpose3d_backward_out_cpu_template(
         input,

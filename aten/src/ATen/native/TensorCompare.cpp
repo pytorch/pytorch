@@ -117,7 +117,7 @@ Tensor isposinf(const Tensor &self) {
   return result;
 }
 
-Tensor& isposinf_out(Tensor& result, const Tensor& self) {
+Tensor& isposinf_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
   TORCH_CHECK(result.scalar_type() == at::kBool, "isposinf does not support non-boolean outputs.");
   result.resize_(self.sizes());
@@ -141,7 +141,7 @@ Tensor isneginf(const Tensor &self) {
   return result;
 }
 
-Tensor& isneginf_out(Tensor& result, const Tensor& self) {
+Tensor& isneginf_out(const Tensor& self, Tensor& result) {
   TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
   TORCH_CHECK(result.scalar_type() == at::kBool, "isneginf does not support non-boolean outputs.");
   result.resize_(self.sizes());

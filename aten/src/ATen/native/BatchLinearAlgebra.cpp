@@ -1017,7 +1017,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
 }
 
 // Solves a system of linear equations matmul(input, x) = other in-place
-Tensor& linalg_solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+Tensor& linalg_solve_out(const Tensor& input, const Tensor& other, Tensor& result) {
   auto infos = at::empty({0}, input.options().dtype(kInt));
   result = linalg_solve_out_info(result, infos, input, other);
 
@@ -1189,7 +1189,7 @@ static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& inf
 }
 
 // Computes the inverse matrix of 'input', it is is saved to 'result' in-place
-Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
+Tensor& linalg_inv_out(const Tensor &input, Tensor &result) {
   auto infos_lu = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
   auto infos_getri = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
   result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
@@ -1350,7 +1350,7 @@ Tensor linalg_cholesky(const Tensor &self) {
   return at::_cholesky_helper(self, /*upper=*/false).tril_();
 }
 
-Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
+Tensor& linalg_cholesky_out(const Tensor &self, Tensor &result) {
   checkSameDevice("linalg_cholesky", result, self);
   checkLinalgCompatibleDtype("linalg_cholesky", result, self);
   Tensor result_tmp = at::linalg_cholesky(self);
@@ -1719,7 +1719,7 @@ std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, std::string mode) {
   return at::_linalg_qr_helper(self, mode);
 }
 
-std::tuple<Tensor&,Tensor&> linalg_qr_out(Tensor& Q, Tensor& R, const Tensor& self, std::string mode) {
+std::tuple<Tensor&,Tensor&> linalg_qr_out(const Tensor& self, std::string mode, Tensor& Q, Tensor& R) {
   TORCH_CHECK(self.dim() >= 2,
               "torch.linalg.qr: input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   checkSameDevice("torch.linalg.qr", Q, self, "Q");
@@ -2014,7 +2014,7 @@ std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, std::string uplo) {
 
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-std::tuple<Tensor&, Tensor&> linalg_eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
+std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& self, std::string uplo, Tensor& eigvals, Tensor& eigvecs) {
   checkSameDevice("linalg_eigh", eigvecs, self, "eigenvectors");
   checkSameDevice("linalg_eigh", eigvals, self, "eigenvalues");
   checkLinalgCompatibleDtype("linalg_eigh", eigvecs, self, "eigenvectors");
@@ -2044,7 +2044,7 @@ Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
 
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigvalsh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
+Tensor& linalg_eigvalsh_out(const Tensor& self, std::string uplo, Tensor& result) {
   checkSameDevice("linalg_eigvalsh", result, self);
   ScalarType real_dtype = toValueType(self.scalar_type());
   checkLinalgCompatibleDtype("linalg_eigvalsh", result.scalar_type(), real_dtype);
@@ -2375,8 +2375,7 @@ static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst
   dst.copy_(src);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
-                                                     const Tensor& self, bool full_matrices, bool compute_uv) {
+std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(const Tensor& self, bool full_matrices, bool compute_uv, Tensor& U, Tensor& S, Tensor& VT) {
   checkSameDevice("svd", U, self, "U");
   checkSameDevice("svd", S, self, "S");
   checkSameDevice("svd", VT, self, "VT");
