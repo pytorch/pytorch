@@ -4,7 +4,7 @@
 torch.nn
 ===================================
 
-These are the basic building block for graphs
+These are the basic building blocks for graphs:
 
 .. contents:: torch.nn
     :depth: 2

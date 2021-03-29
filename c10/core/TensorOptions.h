@@ -399,11 +399,6 @@ struct C10_API TensorOptions {
     return merged;
   }
 
-  // Resolves the tensor type set specified by the current construction axes.
-  DispatchKeySet key_set() const noexcept {
-    return DispatchKeySet(computeDispatchKey());
-  }
-
   // INVARIANT: computeDispatchKey returns only the subset of dispatch keys for
   // which dispatchKeyToBackend is injective, if it is defined at all  (for
   // the most part, this just means that this function never returns an
