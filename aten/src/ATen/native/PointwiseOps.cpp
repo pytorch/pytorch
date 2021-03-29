@@ -62,12 +62,11 @@ Tensor& addcdiv_(
   return at::addcdiv_out(self, self, tensor1, tensor2, value);
 }
 
-Tensor& addcdiv_out(
-    Tensor& result,
-    const Tensor& self,
+Tensor& addcdiv_out(const Tensor& self,
     const Tensor& tensor1,
     const Tensor& tensor2,
-    const Scalar& value) {
+    const Scalar& value,
+    Tensor& result) {
   if (isIntegralType(tensor1.scalar_type(), /*includeBool=*/ true)
       && isIntegralType(tensor2.scalar_type(), /*includeBool=*/ true)) {
     TORCH_CHECK(false,

@@ -2154,9 +2154,8 @@ TEST(FuturesTest, CollectAll) {
   s4->setError(
       std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
   ASSERT_TRUE(c5->completed());
-  ASSERT_EQ(c5->value().toList().size(), 4);
   try {
-    (void)c5->value().toList().get(3).toFuture()->value();
+    c5->value();
     ASSERT_TRUE(false); // supposed to throw
   } catch (const std::exception& e) {
     ASSERT_EQ(std::string(e.what()), "Failed");
