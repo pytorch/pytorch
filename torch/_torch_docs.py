@@ -8486,7 +8486,7 @@ always be real-valued, even if :attr:`input` is complex.
 
 .. warning:: If the distance between any two singular values is close to zero, the gradients with respect to
              `U` and `V` will be numerically unstable, as they depends on
-             :math:`\frac{1}{\min_{i \neq j} |\sigma_i^2 - \sigma_j^2|}`. The same happens when the matrix
+             :math:`\frac{1}{\min_{i \neq j} \sigma_i^2 - \sigma_j^2}`. The same happens when the matrix
              has small singular values, as these gradients also depend on `S⁻¹`.
 
 .. warning:: For complex-valued :attr:`input` the singular value decomposition is not unique,
