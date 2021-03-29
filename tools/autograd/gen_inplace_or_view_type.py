@@ -1,14 +1,21 @@
 from tools.codegen.api import cpp
 from tools.codegen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
+    dispatch_strategy,
 )
-from tools.codegen.api.types import Binding
+from tools.codegen.api.types import Binding, DispatcherSignature, CppSignatureGroup
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (
-    Type, NativeFunction, SelfArgument, TensorOptionsArguments, Variant
+    Type, NativeFunction, SelfArgument, TensorOptionsArguments, Variant,
+    SchemaKind, is_foreach_op,
 )
 from typing import List, Optional, Sequence, Tuple
+from tools.codegen.gen import FileManager
+from tools.codegen.utils import mapMaybe
+from .gen_trace_type import (
+    MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
+)
 
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
@@ -98,6 +105,38 @@ func = [=](const at::Tensor& ${input_base}) {
   return ${replay_view_call};
 };
 """)
+
+METHOD_DEFINITION = CodeTemplate("""\
+${return_type} ${type_wrapper_name}(${formals}) {
+  ${type_definition_body}
+}
+""")
+
+WRAPPER_REGISTRATION = CodeTemplate("""\
+m.impl("${unqual_operator_name_with_overload}",
+       TORCH_FN(${class_type}::${type_wrapper_name})
+);
+""")
+
+INPLACE_REDISPATCH = CodeTemplate("""\
+{
+  at::AutoDispatchBelowInplaceOrView guard;
+  at::redispatch::${api_name}(${unpacked_args});
+}
+""")
+
+ASSIGN_RETURN_VALUE = CodeTemplate("""\
+${return_values} = ${rhs_value};
+""")
+
+VIEW_REDISPATCH = CodeTemplate("""\
+${assign_return_values} ([&]() {
+  at::AutoDispatchBelowInplaceOrView guard;
+  return at::redispatch::${api_name}(${unpacked_args});
+})();
+""")
+
+TMP_VAR = '_tmp'
 
 # FIXME: Ideally these functions should be methods on Type class, but we have a
 #        comment in codegen/model.py there saying these concepts are not well defined.
@@ -239,7 +278,8 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         raise TypeError(f'The view info should be a string for {base_name}, but it is: {view_info}')
     if len(differentiable_output_vars) == 0:
         # no output is differentiable (.indices() for SparseTensors for example)
-        rhs_value = f'as_view({view_info}, {var}, /* is_bw_differentiable */ false, /* is_fw_differentiable */ false)'
+        rhs_value = (f'as_view({view_info}, {var}, '
+                     f'/* is_bw_differentiable */ false, /* is_fw_differentiable */ false)')
     elif len(differentiable_output_vars) == 1:
         # Single differentiable output (Tensor or Tensor[])
         return_info = differentiable_outputs[0]
@@ -261,7 +301,9 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         else:
             _, unpacked_bindings = unpack_args(f)
             call += emit_view_lambda(f, unpacked_bindings)
-            creation_meta = 'GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE'
+            creation_meta = ('at::GradMode::is_enabled() ? '
+                             'CreationMeta::DEFAULT : '
+                             'CreationMeta::NO_GRAD_MODE')
             rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                          '/* is_fw_differentiable */ true, '
                          f'/* view_func */ func, /* creation_meta */ {creation_meta})')
@@ -270,3 +312,117 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         raise RuntimeError('Function that return multiple differentiable output '
                            'when at least one of them is view is not supported.')
     return call, rhs_value
+
+def modifies_arguments(f: NativeFunction) -> bool:
+    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
+
+def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
+    f = fn.func
+    inplace_view_body: List[str] = []
+
+    dispatcher_sig = DispatcherSignature.from_schema(f.func)
+    dispatcher_exprs = dispatcher_sig.exprs()
+
+    # code-generated InplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
+    # See Note [Plumbing Keys Through The Dispatcher] for details.
+    dispatch_key_set = 'ks & c10::after_InplaceOrView_keyset'
+    redispatch_args = ', '.join([dispatch_key_set] + [a.expr for a in dispatcher_exprs])
+
+    # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
+    # We could probably work harder to ensure that the fast variants are called instead, but the perf benefit would be minimal.
+    sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
+    if sig_group.faithful_signature is not None:
+        api_name = sig_group.faithful_signature.name()
+    else:
+        api_name = sig_group.signature.name()
+    if modifies_arguments(f):  # inplace op
+        inplace_view_body.append(INPLACE_REDISPATCH.substitute(
+            api_name=api_name,
+            unpacked_args=redispatch_args,
+        ))
+        for r in cpp.return_names(f):
+            inplace_view_body.append(f'increment_version({r});')
+    else:
+        assert(get_view_info(fn) is not None)
+        inplace_view_body.append(VIEW_REDISPATCH.substitute(
+            assign_return_values='auto ' + TMP_VAR + ' = ',
+            api_name=api_name,
+            unpacked_args=redispatch_args,
+        ))
+        call, rhs_value = emit_view_body(fn, TMP_VAR)
+        inplace_view_body.append(call)
+        assert rhs_value is not None
+        inplace_view_body.append(
+            ASSIGN_RETURN_VALUE.substitute(return_values=tie_return_values(f), rhs_value=rhs_value))
+    if f.func.returns:
+        inplace_view_body.append(f'return {get_return_value(f)};')
+    return inplace_view_body
+
+@with_native_function
+def gen_formals(f: NativeFunction) -> str:
+    return ', '.join(
+        # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
+        # See Note [Plumbing Keys Through The Dispatcher] for details.
+        ['c10::DispatchKeySet ks'] +
+        [f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+         for a in f.func.schema_order_arguments()]
+    )
+
+def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
+    f = fn.func
+    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
+        return None
+    return METHOD_DEFINITION.substitute(
+        return_type=cpp.returns_type(f.func.returns),
+        type_wrapper_name=type_wrapper_name(f),
+        formals=gen_formals(f),
+        type_definition_body=emit_inplace_or_view_body(fn),
+    )
+
+def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
+    f = fn.func
+    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
+        return None
+    return WRAPPER_REGISTRATION.substitute(
+        unqual_operator_name_with_overload=f.func.name,
+        type_wrapper_name=type_wrapper_name(f),
+        class_type='InplaceOrView',
+    )
+
+def use_derived(fn: NativeFunctionWithDifferentiabilityInfo) -> bool:
+    f = fn.func
+    name = cpp.name(f.func)
+    return name not in MANUAL_AUTOGRAD and dispatch_strategy(fn) == 'use_derived'
+
+def gen_inplace_or_view_type_shard(
+    fm: FileManager, fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo], suffix: str
+) -> None:
+
+    filtered_fns_with_infos = list(filter(use_derived, fns_with_infos))
+
+    fm.write_with_template('InplaceOrViewType%s.cpp' % suffix, 'InplaceOrViewType.cpp', lambda: {
+        'generated_comment': f'@generated from {fm.template_dir}/InplaceOrViewType.cpp',
+        'inplace_or_view_method_definitions': list(mapMaybe(inplace_or_view_method_definition, filtered_fns_with_infos)),
+        'inplace_or_view_wrapper_registrations': list(mapMaybe(inplace_or_view_method_registration, filtered_fns_with_infos)),
+    })
+
+def gen_inplace_or_view_type(
+    out: str,
+    native_yaml_path: str,
+    fns_with_infos: List[NativeFunctionWithDifferentiabilityInfo],
+    template_path: str
+) -> None:
+    # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
+    # template regarding sharding of the generated files.
+    num_shards = 2
+    shards: List[List[NativeFunctionWithDifferentiabilityInfo]] = [[] for _ in range(num_shards)]
+
+    # functions are assigned arbitrarily but stably to a file based on hash
+    for fn in fns_with_infos:
+        x = sum(ord(c) for c in cpp.name(fn.func.func)) % num_shards
+        shards[x].append(fn)
+
+    fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
+    for i, shard in enumerate(shards):
+        gen_inplace_or_view_type_shard(fm, shard, f'_{i}')
+    gen_inplace_or_view_type_shard(fm, fns_with_infos, 'Everything')

@@ -4,6 +4,7 @@ set -ex
 COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10-cudnn7-py3-test
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+# shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
 
 export IMAGE_COMMIT_ID=$(git rev-parse HEAD)
@@ -20,6 +21,7 @@ export TEST_DIR="${PWD}/test"
 export TEST_DIR_WIN=$(cygpath -w "${TEST_DIR}")
 export PYTORCH_FINAL_PACKAGE_DIR="/c/users/circleci/workspace/build-results"
 export PYTORCH_FINAL_PACKAGE_DIR_WIN=$(cygpath -w "${PYTORCH_FINAL_PACKAGE_DIR}")
+export PYTORCH_TEST_SKIP_NOARCH=1
 
 mkdir -p $TMP_DIR/build/torch
 
@@ -54,8 +56,7 @@ run_tests() {
     done
 
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
-        $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"
-        $SCRIPT_HELPERS_DIR/test_python_all_except_nn.bat "$DETERMINE_FROM"
+        $SCRIPT_HELPERS_DIR/test_python.bat "$DETERMINE_FROM"
         $SCRIPT_HELPERS_DIR/test_custom_script_ops.bat
         $SCRIPT_HELPERS_DIR/test_custom_backend.bat
         $SCRIPT_HELPERS_DIR/test_libtorch.bat
