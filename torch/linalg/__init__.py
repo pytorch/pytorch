@@ -877,7 +877,7 @@ always be real-valued, even if :attr:`input` is complex.
              as `U` and `V` may be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.
              The same happens when :attr:`input` has repeated singular values, where one may multiply
              the columns of the spanning subspace in `U` and `V` by a rotation matrix
-             and `the resulting vectors will span the same subspace <https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD>`_.  # noqa: E501
+             and `the resulting vectors will span the same subspace`_.
              Different platforms, like NumPy, or inputs on different device types,
              may produce different `U` and `Vh` tensors.
 
@@ -924,6 +924,10 @@ Example::
     >>> u, s, vh = torch.linalg.svd(a_big, full_matrices=False)
     >>> torch.dist(a_big, u @ torch.diag_embed(s) @ vh)
     tensor(3.0957e-06)
+
+.. _the resulting vectors will span the same subspace:
+    (https://en.wikipedia.org/wiki/Singular_value_decomposition\
+            #Singular_values,_singular_vectors,_and_their_relation_to_the_SVD)
 """)
 
 cond = _add_docstr(_linalg.linalg_cond, r"""
