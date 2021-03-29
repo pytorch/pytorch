@@ -22,20 +22,22 @@ keys for a single example of each use case. These use cases are listed below:
     kernel defined in pytorch core library. Backend owner is responsible for registering both
     inference & autograd kernels in their extensions(e.g. torch-xla) for the operators they support.
     E.g. XLA, XPU, MLC
-- DefaultBackend: alias key mapped to inference kernels of all backends like CPU, CUDA, XLA etc.
+- CompositeExplicitAutograd: alias key mapped to inference kernels of all backends like CPU, CUDA, XLA etc.
     Kernels registered to this key MUST work for inference for all backends.
 - Autograd: alias key mapped to autograd of all backends like AutogradCPU, AutogradXLA, AutogradOther.
     Kernels registered to this key MUST work for autograd for all backends.
-- Math: alias key Math = DefaultBackend + Autograd
+- CompositeImplicitAutograd: alias key CompositeImplicitAutograd = CompositeExplicitAutograd + Autograd
     Kernels registered to this key MUST work for both inference + autograd for all backends.
 
-Note we only allow registrations to alias keys inside pytorch core library. E.g you shouldn't register
-a Math or DefaultBackend kernel from torch-xla extension, instead you should upstream the kernel into
-pytorch/pytorch repo so that it's available for all backends and continuously tested even without the extension.
+Note we only allow registrations to alias keys inside pytorch core library. E.g
+you shouldn't register a CompositeImplicitAutograd or CompositeExplicitAutograd
+kernel from torch-xla extension, instead you should upstream the kernel into
+pytorch/pytorch repo so that it's available for all backends and continuously
+tested even without the extension.
 
 Usage:
   dispatcher = PythonDispatcher()
-  dispatcher.register(["CPU", "XLA", "Math"])
+  dispatcher.register(["CPU", "XLA", "CompositeImplicitAutograd"])
   print(dispatcher.dispatchTable()) # This tells you exactly which kernel is used for certain backend.
   # For more debugging information
   # print(dispatcher.keys())
@@ -55,9 +57,9 @@ class PythonDispatcher:
         "XLA", "AutogradXLA",
     ]
     alias_keys = [
-        "DefaultBackend",
+        "CompositeExplicitAutograd",
         "Autograd",
-        "Math",
+        "CompositeImplicitAutograd",
     ]
     supported_keys = runtime_keys + alias_keys
 
@@ -85,8 +87,8 @@ class PythonDispatcher:
         if len(set(dispatchKeys)) != len(dispatchKeys):
             raise RuntimeError(f"Overriden is not allowed but found duplicates in {dispatchKeys}.")
         # We currently forbid this in codegen instead of C++ dispatcher.
-        if 'Math' in dispatchKeys and 'DefaultBackend' in dispatchKeys:
-            raise RuntimeError("Registration to both Math and DefaultBackend is not allowed.")
+        if 'CompositeImplicitAutograd' in dispatchKeys and 'CompositeExplicitAutograd' in dispatchKeys:
+            raise RuntimeError("Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed.")
         for key in dispatchKeys:
             if key not in self.supported_keys:
                 raise RuntimeError(f"{key} is not supported, please select a dispatch key in {self.supported_keys}.")

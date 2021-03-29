@@ -27,7 +27,7 @@ constexpr int kUnsetDivFactor = -1;
 } // namespace
 
 Reducer::Reducer(
-    std::vector<std::vector<torch::autograd::Variable>> replicas,
+    std::vector<std::vector<at::Tensor>> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<std::vector<bool>> expect_sparse_gradients,
@@ -177,14 +177,10 @@ Reducer::Reducer(
         at::TensorOptions options;
         options = options.dtype(at::kInt);
 
-        if (replicas_[i][0].is_cuda()) {
-          at::DeviceGuard g(replicas_[i][0].device());
-          local_used_maps_[i] = at::zeros(
-              {static_cast<long>(variable_count)}, options.pinned_memory(true));
-        } else {
-          local_used_maps_[i] =
-              at::zeros({static_cast<long>(variable_count)}, options);
-        }
+        // Deliberately don't pin the memory even if local_used_maps_dev_ will
+        // be cuda. See Note [local_used_maps_ -> local_used_maps_dev copying]
+        local_used_maps_[i] =
+            at::zeros({static_cast<long>(variable_count)}, options);
 
         // This tensor needs to be on the same device as replica because backend
         // such as NCCL may not support CPU tensors, and hence it might not work
@@ -281,7 +277,7 @@ void Reducer::copy_grad_to_bucket(
     auto wrapped = c10::scalar_to_tensor(double(1.) / divFactor_);
     wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
     // Divides while copying into the bucket view.
-    at::native::mul_out(bucket_view, grad, wrapped);
+    at::mul_out(bucket_view, grad, wrapped);
   } else {
     bucket_view.copy_(grad);
   }
@@ -563,9 +559,42 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     if (find_unused_parameters_) {
       // H2D from local_used_maps_ to local_used_maps_dev_
       for (size_t i = 0; i < local_used_maps_.size(); i++) {
-        // We do async H2D to avoid the blocking overhead. The async copy and
-        // allreduce respect the current stream, so will be sequenced correctly.
-        local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
+        if (local_used_maps_dev_[i].is_cuda()) {
+          // Note [local_used_maps_ -> local_used_maps_dev copying]
+          // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+          // We do async H2D to avoid the blocking overhead. The async copy and
+          // allreduce respect the current stream, so will be sequenced correctly.
+          //
+          // Correct sequencing with respect to host operations is also essential.
+          // The H2D copy_ is stream ordered, while the host's changes to local_used_maps_
+          // are host ordered. If a large backlog of cuda-stream work pushes the copy_ far
+          // into the future, and if no blocking calls occur between now and finalize_backward()**
+          // such that finalize_backward() re-zeroes local_used_maps_ on the host
+          // before the stream executes the copy_, copy_ will read those zeros instead of the
+          // values we thought we told it to read here.
+          // Copying local_used_maps_[i] to a pinned temporary (which the pinned caching
+          // allocator should supply asynchronously) avoids this nasty, rare race condition.
+          //
+          // ** In the hoped-for case where all params are used, DDP itself won't do any
+          // blocking work between now and the re-zeroing, so the danger is real.
+          //
+          // Defensively ensures local_used_maps_tmp is distinct from local_used_maps_[i]
+          auto local_used_maps_tmp = at::native::empty_like(
+              local_used_maps_[i],
+              optTypeMetaToScalarType(
+                  local_used_maps_[i].options().dtype_opt()),
+              local_used_maps_[i].options().layout_opt(),
+              local_used_maps_[i].options().device_opt(),
+              true /* pinned_memory */);
+          // Paranoid asserts here because in some workloads, the pinned allocator behaves in a way we
+          // don't understand, and may be bugged. See https://github.com/pytorch/pytorch/pull/54474
+          TORCH_INTERNAL_ASSERT(local_used_maps_tmp.is_pinned());
+          TORCH_INTERNAL_ASSERT(local_used_maps_tmp.data_ptr() != local_used_maps_[i].data_ptr());
+          local_used_maps_tmp.copy_(local_used_maps_[i]);
+          local_used_maps_dev_[i].copy_(local_used_maps_tmp, true);
+        } else {
+          local_used_maps_dev_[i].copy_(local_used_maps_[i], true);
+        }
       }
       local_used_work_ = process_group_->allreduce(local_used_maps_dev_);
     }
@@ -898,7 +927,7 @@ void Reducer::prepare_for_forward() {
 // done immediately because the model output may be ignored, and we only
 // want to start performing reductions on `torch.autograd.backward()`.
 void Reducer::prepare_for_backward(
-    const std::vector<torch::autograd::Variable>& outputs) {
+    const std::vector<at::Tensor>& outputs) {
   std::lock_guard<std::mutex> lock(mutex_);
   std::unordered_set<torch::autograd::Node*> seen;
   std::vector<torch::autograd::Node*> queue;
@@ -981,7 +1010,7 @@ void Reducer::prepare_for_backward(
 }
 
 void Reducer::copy_bucket_to_grad(
-    torch::autograd::Variable& variable,
+    at::Tensor& variable,
     Reducer::BucketReplica& replica,
     size_t intra_bucket_index,
     bool global_unused) {
@@ -1047,6 +1076,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
           local_used_work_->wait();
           // D2H from local_used_maps_dev_ to local_used_maps_
           for (size_t i = 0; i < local_used_maps_.size(); i++) {
+            // Blocking copy, if local_used_maps_dev_ is cuda
             local_used_maps_[i].copy_(local_used_maps_dev_[i]);
           }
           global_unused =
@@ -1166,6 +1196,7 @@ void Reducer::finalize_backward() {
   // See Note [Skip allreducing local_used_maps_dev]
   if (find_unused_parameters_) {
     // Reset unused parameter accounting.
+    // See Note [local_used_maps_ -> local_used_maps_dev copying]
     for (auto& local_used : local_used_maps_) {
       local_used.fill_(0);
     }
@@ -1187,7 +1218,7 @@ void Reducer::finalize_backward() {
 }
 
 void Reducer::runGradCallbackForVariable(
-    torch::autograd::Variable& variable,
+    at::Tensor& variable,
     GradCallback&& cb) {
   auto context_ptr = rpc_context_.context_ptr.load();
   if (context_ptr == nullptr) {
@@ -1649,7 +1680,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
 // all params require grad, and corresponding params across replicas
 // have the same dtype/size/layout.
 void verify_replicas_within_process(
-    std::vector<std::vector<torch::autograd::Variable>> model_replicas,
+    std::vector<std::vector<at::Tensor>> model_replicas,
     std::vector<std::vector<bool>> expect_sparse_gradients) {
   const auto replica_count = model_replicas.size();
   if (replica_count == 1) {
@@ -1697,7 +1728,7 @@ void verify_replicas_within_process(
 // across processes.
 void verify_replica0_across_processes(
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
-    std::vector<std::vector<torch::autograd::Variable>> model_replicas) {
+    std::vector<std::vector<at::Tensor>> model_replicas) {
   size_t i = 0;
   for (const auto& t : model_replicas[0]) {
     i += 2 * t.dim();
