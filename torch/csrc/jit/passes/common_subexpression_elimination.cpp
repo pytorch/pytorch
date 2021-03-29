@@ -36,12 +36,6 @@ struct CommonSubexpressionEliminator {
         continue;
       }
 
-      if (getOrCreateAliasDb().hasWriters(node)) {
-        GRAPH_DEBUG("Node was skipped due to alias analysis result:\n", *node);
-        // Do NOT have enough information to do CSE on these nodes.
-        continue;
-      }
-
       if (!node->blocks().empty()) {
         // Traverse sub-blocks.
         for (auto block : node->blocks()) {
@@ -55,6 +49,12 @@ struct CommonSubexpressionEliminator {
           });
         }
 
+        continue;
+      }
+
+      if (getOrCreateAliasDb().hasWriters(node)) {
+        GRAPH_DEBUG("Node was skipped due to alias analysis result:\n", *node);
+        // Do NOT have enough information to do CSE on these nodes.
         continue;
       }
 
