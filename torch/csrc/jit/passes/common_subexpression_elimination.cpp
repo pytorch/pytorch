@@ -21,6 +21,7 @@ struct CommonSubexpressionEliminator {
 
   // The function implements common subexpression elimination.
   // Since the nodes are visited in topological order, one pass is enough.
+  // returns true if CSE made changes to a graph
   bool run(Block* block, std::function<Node*(Node*)> parent_lookup_fn) {
     std::unordered_set<Node*, HashNode, EqualNode> subexprs;
     bool changed = false;
@@ -34,6 +35,7 @@ struct CommonSubexpressionEliminator {
         GRAPH_DEBUG("Node was skipped due to its non determinism:\n", *node);
         continue;
       }
+
       if (getOrCreateAliasDb().hasWriters(node)) {
         GRAPH_DEBUG("Node was skipped due to alias analysis result:\n", *node);
         // Do NOT have enough information to do CSE on these nodes.
@@ -66,7 +68,7 @@ struct CommonSubexpressionEliminator {
         }
 
         GRAPH_UPDATE("Replacing\n", *node, "with\n", *parent_lookup);
-        changed |= true;
+        changed = true;
         node->replaceAllUsesWith(parent_lookup);
         it.destroyCurrent();
         continue;
@@ -86,7 +88,7 @@ struct CommonSubexpressionEliminator {
         }
 
         GRAPH_UPDATE("Replacing\n", *node, "with\n", *existing);
-        changed |= true;
+        changed = true;
         node->replaceAllUsesWith(existing);
         // Destroy the node.
         it.destroyCurrent();
@@ -111,10 +113,10 @@ struct CommonSubexpressionEliminator {
 
 } // namespace
 
-void EliminateCommonSubexpression(const std::shared_ptr<Graph>& graph) {
+bool EliminateCommonSubexpression(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before CSE", graph);
   CommonSubexpressionEliminator cse(graph);
-  cse.run([](Node*) { return nullptr; });
+  return cse.run([](Node*) { return nullptr; });
 }
 } // namespace jit
 } // namespace torch
