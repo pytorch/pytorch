@@ -32,7 +32,7 @@ def _get_default_rtol_and_atol(a: torch.Tensor, b: torch.Tensor) -> Tuple[float,
     return _DTYPE_PRECISIONS.get(dtype, (0.0, 0.0))
 
 
-def _check_are_tensors(a: Any, b: Any) -> Tuple[bool, Optional[str]]:
+def _check_are_tensors(a: Any, b: Any) -> Optional[AssertionError]:
     """Checks if both inputs are tensors.
 
     Args:
@@ -40,16 +40,13 @@ def _check_are_tensors(a: Any, b: Any) -> Tuple[bool, Optional[str]]:
         b (Any): Second input.
 
     Returns:
-        (bool, Optional[str]): Flag if check passed with optional error message.
+        (Optional[AssertionError]): If check did not pass.
     """
-    if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor):
-        return True, None
-
-    msg = f"Both inputs have to be tensors, but got {type(a)} and {type(b)} instead."
-    return False, msg
+    if not (isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor)):
+        return AssertionError(f"Both inputs have to be tensors, but got {type(a)} and {type(b)} instead.")
 
 
-def _check_supported_tensors(a: torch.Tensor, b: torch.Tensor) -> Tuple[bool, Optional[str]]:
+def _check_supported_tensors(a: torch.Tensor, b: torch.Tensor) -> Optional[UsageError]:
     """Checks if the tensors are supported by the current infrastructure.
 
     All checks are temporary and will be relaxed in the future.
@@ -59,16 +56,14 @@ def _check_supported_tensors(a: torch.Tensor, b: torch.Tensor) -> Tuple[bool, Op
         b (torch.Tensor): Second tensor.
 
     Returns:
-        (bool, Optional[str]): Flag if checks passed with optional error message.
+        (Optional[UsageError]): If check did not pass.
     """
     if any(t.dtype in (torch.complex32, torch.complex64, torch.complex128) for t in (a, b)):
-        return False, "Comparison for complex tensors is not supported yet."
+        return UsageError("Comparison for complex tensors is not supported yet.")
     if any(t.is_quantized for t in (a, b)):
-        return False, "Comparison for quantized tensors is not supported yet."
+        return UsageError("Comparison for quantized tensors is not supported yet.")
     if any(t.is_sparse for t in (a, b)):
-        return False, "Comparison for sparse tensors is not supported yet."
-
-    return True, None
+        return UsageError("Comparison for sparse tensors is not supported yet.")
 
 
 def _check_attributes_equal(
@@ -78,7 +73,7 @@ def _check_attributes_equal(
     check_device: bool = True,
     check_dtype: bool = True,
     check_stride: bool = True,
-) -> Tuple[bool, Optional[str]]:
+) -> Optional[AssertionError]:
     """Checks if the attributes of two tensors match.
 
     Always checks the :attr:`~torch.Tensor.shape`. Checks for :attr:`~torch.Tensor.device`,
@@ -95,23 +90,21 @@ def _check_attributes_equal(
             :meth:`~torch.Tensor.stride`.
 
     Returns:
-        (bool, Optional[str]): Flag if checks passed with optional error message.
+        (Optional[AssertionError]): If check did not pass.
     """
     msg_fmtstr = "The values for attribute '{}' do not match: {} != {}."
 
     if a.shape != b.shape:
-        return False, msg_fmtstr.format("shape", a.shape, b.shape)
+        return AssertionError(msg_fmtstr.format("shape", a.shape, b.shape))
 
     if check_device and a.device != b.device:
-        return False, msg_fmtstr.format("device", a.device, b.device)
+        return AssertionError(msg_fmtstr.format("device", a.device, b.device))
 
     if check_dtype and a.dtype != b.dtype:
-        return False, msg_fmtstr.format("dtype", a.dtype, b.dtype)
+        return AssertionError(msg_fmtstr.format("dtype", a.dtype, b.dtype))
 
     if check_stride and a.stride() != b.stride():
-        return False, msg_fmtstr.format("stride()", a.stride(), b.stride())
-
-    return True, None
+        return AssertionError(msg_fmtstr.format("stride()", a.stride(), b.stride()))
 
 
 def _equalize_attributes(a: torch.Tensor, b: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -187,7 +180,7 @@ def _trace_mismatches(a: torch.Tensor, b: torch.Tensor, mismatches: torch.Tensor
     )
 
 
-def _check_values_equal(a: torch.Tensor, b: torch.Tensor) -> Tuple[bool, Optional[str]]:
+def _check_values_equal(a: torch.Tensor, b: torch.Tensor) -> Optional[AssertionError]:
     """Checks if the values of two tensors are bitwise equal.
 
     Args:
@@ -195,27 +188,26 @@ def _check_values_equal(a: torch.Tensor, b: torch.Tensor) -> Tuple[bool, Optiona
         b (torch.Tensor): Second tensor.
 
     Returns:
-        (bool, Optional[str]): Flag if check passed with optional error message.
+        (Optional[AssertionError]): If check did not pass.
     """
     mismatches = torch.ne(a, b)
     if not torch.any(mismatches):
-        return True, None
+        return
 
     trace = _trace_mismatches(a, b, mismatches)
-    msg = (
+    return AssertionError(
         f"Found {trace.abs} different element(s) out of {trace.total} ({trace.rel:.1%}). "
         f"The greatest difference of {trace.diff} ({trace.a} vs. {trace.b}) occurred at index {trace.idx}"
     )
-    return False, msg
 
 
-def _assert_values_allclose(
+def _check_values_allclose(
     a: torch.Tensor,
     b: torch.Tensor,
     *,
     rtol,
     atol,
-) -> Tuple[bool, Optional[str]]:
+) -> Optional[AssertionError]:
     """Checks if the values of two tensors are close up to a desired tolerance.
 
     Args:
@@ -225,19 +217,18 @@ def _assert_values_allclose(
         atol (float): Absolute tolerance.
 
     Returns:
-        (bool, Optional[str]): Flag if check passed with optional error message.
+        (Optional[AssertionError]): If check did not pass.
     """
     mismatches = ~torch.isclose(a, b, rtol=rtol, atol=atol)
     if not torch.any(mismatches):
-        return True, None
+        return
 
     trace = _trace_mismatches(a, b, mismatches)
-    msg = (
+    return AssertionError(
         f"With rtol={rtol} and atol={atol}, "
         f"found {trace.abs} different element(s) out of {trace.total} ({trace.rel:.1%}). "
         f"The greatest difference of {trace.diff} ({trace.a} vs. {trace.b}) occurred at index {trace.idx}"
     )
-    return False, msg
 
 
 def assert_tensors_equal(
@@ -281,24 +272,22 @@ def assert_tensors_equal(
         To assert that the values in two tensors are are close but are not required to be bitwise equal, use
         :func:`assert_tensors_allclose` instead.
     """
-    ok, msg = _check_are_tensors(a, b)
-    if not ok:
-        raise AssertionError(msg)
+    exc = _check_are_tensors(a, b)
+    if exc:
+        raise exc
 
-    ok, msg = _check_supported_tensors(a, b)
-    if not ok:
-        raise UsageError(msg)
+    exc = _check_supported_tensors(a, b)
+    if exc:
+        raise exc
 
-    ok, msg = _check_attributes_equal(
-        a, b, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
-    )
-    if not ok:
-        raise AssertionError(msg)
+    exc = _check_attributes_equal(a, b, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride)
+    if exc:
+        raise exc
     a, b = _equalize_attributes(a, b)
 
-    ok, msg = _check_values_equal(a, b)
-    if not ok:
-        raise AssertionError(msg)
+    exc = _check_values_equal(a, b)
+    if exc:
+        raise exc
 
 
 def assert_tensors_allclose(
@@ -371,13 +360,13 @@ def assert_tensors_allclose(
 
         To assert that the values in two tensors are bitwise equal, use :func:`assert_tensors_equal` instead.
     """
-    ok, msg = _check_are_tensors(a, b)
-    if not ok:
-        raise AssertionError(msg)
+    exc = _check_are_tensors(a, b)
+    if exc:
+        raise exc
 
-    ok, msg = _check_supported_tensors(a, b)
-    if not ok:
-        raise UsageError(msg)
+    exc = _check_supported_tensors(a, b)
+    if exc:
+        raise exc
 
     if (rtol is None) ^ (atol is None):
         # We require both tolerance to be omitted or specified, because specifying only one might lead to surprising
@@ -388,16 +377,14 @@ def assert_tensors_allclose(
     elif rtol is None:
         rtol, atol = _get_default_rtol_and_atol(a, b)
 
-    ok, msg = _check_attributes_equal(
-        a, b, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride
-    )
-    if not ok:
-        raise AssertionError(msg)
+    exc = _check_attributes_equal(a, b, check_device=check_device, check_dtype=check_dtype, check_stride=check_stride)
+    if exc:
+        raise exc
     a, b = _equalize_attributes(a, b)
 
     if (rtol == 0.0) and (atol == 0.0):
-        ok, msg = _check_values_equal(a, b)
+        exc = _check_values_equal(a, b)
     else:
-        ok, msg = _assert_values_allclose(a, b, rtol=rtol, atol=atol)
-    if not ok:
-        raise AssertionError(msg)
+        exc = _check_values_allclose(a, b, rtol=rtol, atol=atol)
+    if exc:
+        raise exc
