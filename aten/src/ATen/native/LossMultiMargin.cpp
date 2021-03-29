@@ -266,7 +266,7 @@ Tensor& multi_margin_loss_cpu_out(const Tensor& input,
     const Tensor& target,
     const Scalar& p,
     const Scalar& margin, const c10::optional<Tensor>& weight_opt,
-    int64_t reduction, 
+    int64_t reduction,
     Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
@@ -304,7 +304,7 @@ Tensor& multi_margin_loss_cpu_backward_out(const Tensor& grad_output,
     const Tensor& target,
     const Scalar& p,
     const Scalar& margin, const c10::optional<Tensor>& weight_opt,
-    int64_t reduction, 
+    int64_t reduction,
     Tensor& grad_input) {
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
