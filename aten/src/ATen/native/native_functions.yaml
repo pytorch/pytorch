@@ -4986,6 +4986,8 @@
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: polygamma_
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
   variants: method
