@@ -1,3 +1,5 @@
+# If you need to modify this file to make this test pass, please also apply same edits accordingly to
+# https://pytorch.org/tutorials/recipes/cuda_rpc.html
 import os
 import sys
 import time
@@ -12,7 +14,6 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 from torch.testing._internal.dist_utils import (
     dist_init,
 )
-
 from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
