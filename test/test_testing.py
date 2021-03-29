@@ -3,14 +3,13 @@ import torch
 import math
 import random
 import numpy as np
-import unittest
 
 from torch.testing._internal.common_utils import \
     (TestCase, make_tensor, run_tests, slowTest)
 from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
-from torch.testing._internal.common_cuda import TEST_CUDA
+    (instantiate_device_type_tests, onlyCUDA, onlyCPU, onlyOnCPUAndCUDA, dtypes)
+from torch.testing._asserts import UsageError
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -686,98 +685,184 @@ class TestFrameworkUtils(TestCase):
                 self.assertEqual(sorted_tests, sorted_shard_tests)
 
 
-skip_if_no_cuda = unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-
-
 class TestAsserts(TestCase):
-    def test_assert_tensors_equal_not_tensors(self):
-        a = torch.empty(())
+    @staticmethod
+    def _assert_fns(device=None):
+        return [torch.testing.assert_tensors_equal, torch.testing.assert_tensors_close]
+
+    @onlyCPU
+    def test_not_tensors(self, device):
+        a = torch.empty((), device=device)
         b = np.empty(())
 
-        with self.assertRaises(AssertionError):
-            torch.testing.assert_tensors_equal(a, b)
+        for fn in self._assert_fns():
+            with self.assertRaises(AssertionError):
+                fn(a, b)
 
-    @unittest.expectedFailure
-    def test_assert_tensors_equal_complex_support(self):
-        a = torch.ones(1, dtype=torch.float32)
-        b = torch.ones(1, dtype=torch.complex64)
+    @onlyCPU
+    def test_complex_support(self, device):
+        a = torch.ones(1, dtype=torch.float32, device=device)
+        b = torch.ones(1, dtype=torch.complex64, device=device)
 
-        torch.testing.assert_tensors_equal(a, b, check_dtype=False)
+        for fn in self._assert_fns():
+            with self.assertRaises(UsageError):
+                fn(a, b, check_dtype=False)
 
-    @unittest.expectedFailure
-    def test_assert_tensors_equal_sparse_support(self):
-        a = torch.empty(())
-        b = torch.sparse_coo_tensor(size=())
+    @onlyCPU
+    def test_sparse_support(self, device):
+        a = torch.empty((), device=device)
+        b = torch.sparse_coo_tensor(size=(), device=device)
 
-        torch.testing.assert_tensors_equal(a, b)
+        for fn in self._assert_fns():
+            with self.assertRaises(UsageError):
+                fn(a, b)
 
-    @unittest.expectedFailure
-    def test_assert_tensors_equal_quantized_support(self):
-        a = torch.ones(1, dtype=torch.int32)
-        b = torch.ones(1, dtype=torch.qint32)
+    @onlyCPU
+    def test_quantized_support(self, device):
+        val = 1
+        a = torch.tensor([val], dtype=torch.int32, device=device)
+        b = torch._empty_affine_quantized(a.shape, scale=1, zero_point=0, dtype=torch.qint32, device=device)
+        b.fill_(val)
 
-        torch.testing.assert_tensors_equal(a, b)
+        for fn in self._assert_fns():
+            with self.assertRaises(UsageError):
+                fn(a, b)
 
-    def test_assert_tensors_equal_mismatching_shape(self):
-        a = torch.empty(())
+    @onlyCPU
+    def test_mismatching_shape(self, device):
+        a = torch.empty((), device=device)
         b = a.clone().reshape((1,))
 
-        with self.assertRaisesRegex(AssertionError, "shape"):
-            torch.testing.assert_tensors_equal(a, b)
+        for fn in self._assert_fns():
+            with self.assertRaisesRegex(AssertionError, "shape"):
+                fn(a, b)
 
-    @skip_if_no_cuda
-    def test_assert_tensors_equal_mismatching_device(self):
-        a = torch.empty((), device=torch.device("cpu"))
-        b = a.clone().to(torch.device("cuda"))
+    @onlyCUDA
+    def test_mismatching_device(self, device):
+        a = torch.empty((), device=device)
+        b = a.clone().cpu()
 
-        with self.assertRaisesRegex(AssertionError, "device"):
-            torch.testing.assert_tensors_equal(a, b)
+        for fn in self._assert_fns():
+            with self.assertRaisesRegex(AssertionError, "device"):
+                fn(a, b)
 
-    @skip_if_no_cuda
-    def test_assert_tensors_equal_mismatching_device_no_check(self):
-        a = torch.empty((), device=torch.device("cpu"))
-        b = a.clone().to(torch.device("cuda"))
+    @onlyCUDA
+    def test_mismatching_device_no_check(self, device):
+        a = torch.empty((), device=device)
+        b = a.clone().cpu()
 
-        torch.testing.assert_tensors_equal(a, b, check_device=False)
+        for fn in self._assert_fns():
+            fn(a, b, check_device=False)
 
-    def test_assert_tensors_equal_mismatching_dtype(self):
-        a = torch.empty((), dtype=torch.float)
+    @onlyCPU
+    def test_mismatching_dtype(self, device):
+        a = torch.empty((), dtype=torch.float, device=device)
         b = a.clone().to(torch.int)
 
-        with self.assertRaisesRegex(AssertionError, "dtype"):
-            torch.testing.assert_tensors_equal(a, b)
+        for fn in self._assert_fns():
+            with self.assertRaisesRegex(AssertionError, "dtype"):
+                fn(a, b)
 
-    def test_assert_tensors_equal_mismatching_dtype_no_check(self):
-        a = torch.ones((), dtype=torch.float)
+    @onlyCPU
+    def test_mismatching_dtype_no_check(self, device):
+        a = torch.ones((), dtype=torch.float, device=device)
         b = a.clone().to(torch.int)
 
-        torch.testing.assert_tensors_equal(a, b, check_dtype=False)
+        for fn in self._assert_fns():
+            fn(a, b, check_dtype=False)
 
-    # def test_assert_tensors_equal_mismatching_stride(self):
-    #     a = torch.empty((1, 2))
-    #     b = a.clone().as_strided(a.shape, a.stride()[::-1])
-    #
-    #     with self.assertRaisesRegex(AssertionError, "stride"):
-    #         torch.testing.assert_tensors_equal(a, b)
-    #
-    # def test_assert_tensors_equal_mismatching_stride_no_check(self):
-    #     a = torch.ones((), dtype=torch.float)
-    #     b = torch.ones((), dtype=torch.int)
-    #
-    #     torch.testing._assert_attributes_equal(a, b, check_dtype=False)
+    @onlyCPU
+    def test_mismatching_stride(self, device):
+        a = torch.empty((2, 2), device=device)
+        b = torch.as_strided(a.clone().t().contiguous(), a.shape, a.stride()[::-1])
 
-    def test_assert_tensors_equal_mismatching_values(self):
-        a = torch.tensor(1)
-        b = torch.tensor(2)
+        for fn in self._assert_fns():
+            with self.assertRaisesRegex(AssertionError, "stride"):
+                fn(a, b)
 
-        with self.assertRaises(AssertionError):
-            torch.testing.assert_tensors_equal(a, b)
+    @onlyCPU
+    def test_mismatching_stride_no_check(self, device):
+        a = torch.empty((2, 2), device=device)
+        b = torch.as_strided(a.clone().t().contiguous(), a.shape, a.stride()[::-1])
 
-    def test_assert_tensors_equal(self):
-        a = torch.tensor(1)
-        b = torch.tensor(1)
+        for fn in self._assert_fns():
+            fn(a, b, check_stride=False)
+
+    @onlyCPU
+    def test_mismatching_values(self, device):
+        a = torch.tensor(1, device=device)
+        b = torch.tensor(2, device=device)
+
+        for fn in self._assert_fns():
+            with self.assertRaises(AssertionError):
+                fn(a, b)
+
+    @onlyCPU
+    def test_assert_tensors_equal(self, device):
+        a = torch.tensor(1, device=device)
+        b = a.clone()
 
         torch.testing.assert_tensors_equal(a, b)
+
+    @onlyCPU
+    def test_assert_tensors_close(self, device):
+        a = torch.tensor(1.0, device=device)
+        b = a.clone()
+
+        torch.testing.assert_tensors_close(a, b)
+
+    @onlyCPU
+    def test_assert_tensors_close_only_rtol(self, device):
+        a = torch.empty((), device=device)
+        b = a.clone()
+
+        with self.assertRaises(UsageError):
+            torch.testing.assert_tensors_close(a, b, rtol=0.0)
+
+    @onlyCPU
+    def test_assert_tensors_close_only_atol(self, device):
+        a = torch.empty((), device=device)
+        b = a.clone()
+
+        with self.assertRaises(UsageError):
+            torch.testing.assert_tensors_close(a, b, atol=0.0)
+
+    @onlyCPU
+    def test_assert_tensors_close_mismatching_values_rtol(self, device):
+        eps = 1e-3
+        a = torch.tensor(1.0, device=device)
+        b = torch.tensor(1.0 + eps, device=device)
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_tensors_close(a, b, rtol=eps / 2, atol=0.0)
+
+    @onlyCPU
+    def test_assert_tensors_close_matching_values_rtol(self, device):
+        eps = 1e-3
+        a = torch.tensor(1.0, device=device)
+        b = torch.tensor(1.0 + eps, device=device)
+
+        torch.testing.assert_tensors_close(a, b, rtol=eps * 2, atol=0.0)
+
+    @onlyCPU
+    def test_assert_tensors_close_mismatching_values_atol(self, device):
+        eps = 1e-3
+        a = torch.tensor(0.0, device=device)
+        b = torch.tensor(eps, device=device)
+
+        with self.assertRaises(AssertionError):
+            torch.testing.assert_tensors_close(a, b, rtol=0.0, atol=eps / 2)
+
+    @onlyCPU
+    def test_assert_tensors_close_matching_values_atol(self, device):
+        eps = 1e-3
+        a = torch.tensor(0.0, device=device)
+        b = torch.tensor(eps, device=device)
+
+        torch.testing.assert_tensors_close(a, b, rtol=0.0, atol=eps * 2)
+
+
+instantiate_device_type_tests(TestAsserts, globals())
 
 
 if __name__ == '__main__':
