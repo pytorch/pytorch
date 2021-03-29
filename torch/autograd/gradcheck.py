@@ -661,25 +661,26 @@ def gradcheck(
             return False
 
     if check_forward:
-        try:
-            fw_analytical = get_analytical_jacobian_fw(fn, tupled_inputs, o)
-        except RuntimeError as e:
-            msg = str(e)
-            # If the jvp formula isn't implemented, then we will warn the user. Otherwise, if the formula is
-            # implemented, then we check the result for correctness
-            if "Trying to use forward prop with" in msg:
-                warnings.warn("Failed to compute gradcheck using fw mode: {}".format(msg), stacklevel=stacklevel)
-                continue
-            else:
-                raise e
+        for i, o in enumerate(outputs):
+            try:
+                fw_analytical = get_analytical_jacobian_fw(fn, tupled_inputs, o)
+            except RuntimeError as e:
+                msg = str(e)
+                # If the jvp formula isn't implemented, then we will warn the user. Otherwise, if the formula is
+                # implemented, then we check the result for correctness
+                if "Trying to use forward prop with" in msg:
+                    warnings.warn("Failed to compute gradcheck using fw mode: {}".format(msg), stacklevel=stacklevel)
+                    continue
+                else:
+                    raise e
 
-        if fw_analytical is not None:
-            # Test was not aborted while computing the jacobian
-            for j, (a, n) in enumerate(zip(fw_analytical, numerical)):
-                if a.numel() != 0 or n.numel() != 0:
-                    if not torch.allclose(a, n, rtol, atol):
-                        return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
-                                         'numerical:%s\nforward analytical:%s\n' % (i, j, n, a))
+            if fw_analytical is not None:
+                # Test was not aborted while computing the jacobian
+                for j, (a, n) in enumerate(zip(fw_analytical, numerical)):
+                    if a.numel() != 0 or n.numel() != 0:
+                        if not torch.allclose(a, n, rtol, atol):
+                            return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
+                                             'numerical:%s\nforward analytical:%s\n' % (i, j, n, a))
 
     return True
 

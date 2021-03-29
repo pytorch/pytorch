@@ -66,7 +66,7 @@ class ForwardDerivative:
     var_type: Type
 
     # Inputs for which the forward derivatives are required for this formula
-    required_inputs_fw_grad: Tuple[str, ...]
+    required_inputs_fw_grad: Optional[Tuple[str, ...]]
 
     # Inputs for which the primal is required for this formula
     required_inputs_primal: Optional[Tuple[str, ...]]
@@ -265,7 +265,7 @@ def match_differentiability_info(
                 fw_info = info.forward_derivatives[0]
 
                 if re.search(IDENT_REGEX.format("self"), fw_info.formula):
-                    raise RuntimeError(f'The formula for "{f.name}" is using the original value of {inp.name} that is being '
+                    raise RuntimeError(f'The formula for "{f.func.name}" is using the original value of self that is being '
                                        'modified inplace. This would lead to wrong forward gradients. Please use "result" in '
                                        'the formula only.')
 
