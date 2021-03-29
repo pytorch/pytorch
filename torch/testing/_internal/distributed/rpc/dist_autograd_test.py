@@ -1368,7 +1368,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         t3 = torch.nn.functional.linear(t1, t2)
         t4 = torch.nn.functional.linear(t2, t3)
         t5 = torch.nn.functional.linear(t3, t4)
-        return torch.linalg_multi_dot([t1, t2, t3, t4, t5])
+        return torch.linalg.multi_dot([t1, t2, t3, t4, t5])
 
     @dist_init
     def test_backward_complex_python_udf(self):
@@ -1391,7 +1391,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     def _python_udf_with_backward_error(t1, t2):
         t3 = t1 + t2
         t4 = SimulateBackwardError.apply(t3)
-        return torch.linalg_multi_dot([t1, t2, t3, t4])
+        return torch.linalg.multi_dot([t1, t2, t3, t4])
 
     @staticmethod
     def _nested_rpc_call_backward_error(t1, t2, dst):
@@ -1402,7 +1402,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             DistAutogradTest._python_udf_with_backward_error,
             args=(t1, t2),
         )
-        return torch.linalg_multi_dot([t1, t2, res])
+        return torch.linalg.multi_dot([t1, t2, res])
 
     @dist_init
     def test_backward_python_udf_error(self):
