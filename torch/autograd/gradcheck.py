@@ -845,7 +845,7 @@ def gradcheck(
     rtol: float = 1e-3,
     raise_exception: bool = True,
     check_sparse_nnz: bool = False,
-    nondet_tol: float = 1e-12,  # TODO WHY
+    nondet_tol: float = 0.0,  # TODO WHY
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
     check_batched_grad: bool = False,
