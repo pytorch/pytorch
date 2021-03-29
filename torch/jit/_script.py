@@ -274,7 +274,7 @@ class ConstMap:
 def reduce_package_script_module(importer: PackageImporter, ts_id: str) -> torch.nn.Module:
     """
     Called by torch.Package's PackageImporter's Pickler's persistent_load operation,
-    performs work of loading and returning ScriptModule 
+    performs work of loading and returning ScriptModule
     """
     cu = torch._C.CompilationUnit()
     cpp_module = torch._C._import_ir_module_from_package(
@@ -357,7 +357,7 @@ if _enabled:
 
         def __reduce_package__(self, exporter: PackageExporter):
             """
-            Called by torch.Package's PackageExporter's Pickler's persistent_id when 
+            Called by torch.Package's PackageExporter's Pickler's persistent_id when
             saving TorchScript objests. Performs act of saving ScriptModule inside of
             PackageExporter and return method to load the ScriptModule in PackageImporter's
             Pickler's persistent_load operation
@@ -521,7 +521,7 @@ if _enabled:
 
         def __reduce_package__(self, exporter: PackageExporter):
             """
-            Called by torch.Package's PackageExporter's Pickler's persistent_id when 
+            Called by torch.Package's PackageExporter's Pickler's persistent_id when
             saving TorchScript objests. Performs act of saving ScriptModule inside of
             PackageExporter and return method to load the ScriptModule in PackageImporter's
             Pickler's persistent_load operation
