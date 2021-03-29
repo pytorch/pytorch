@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include "test/cpp/tensorexpr/test_base.h"
 
 #include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
