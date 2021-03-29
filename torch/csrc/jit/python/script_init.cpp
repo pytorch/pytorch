@@ -1607,7 +1607,7 @@ void initJitScriptBindings(PyObject* module) {
         return ret;
       });
   m.def(
-      "_import_ir_module_from_package", 
+      "_import_ir_module_from_package",
       [](std::shared_ptr<CompilationUnit> cu,
          caffe2::serialize::PyTorchStreamReader& reader,
          py::object map_location,
@@ -1618,7 +1618,8 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
             reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        return import_ir_module(std::move(cu), reader, optional_device, ts_id);
+        return import_ir_module(
+            std::move(cu), reader, optional_device, std::move(ts_id));
       });
   m.def(
       "import_ir_module_from_buffer",
