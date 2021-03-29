@@ -39,6 +39,12 @@ TORCH_API Module import_ir_module(
 
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
+    caffe2::serialize::PyTorchStreamReader& reader_,
+    c10::optional<at::Device> device,
+    std::string ts_id);
+
+TORCH_API Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files);
@@ -91,6 +97,8 @@ TORCH_API Module load(
 
 TORCH_API IValue readArchiveAndTensors(
     const std::string& archive_name,
+    const std::string& pickle_prefix,
+    const std::string& tensor_prefix,
     c10::optional<TypeResolver> type_resolver,
     c10::optional<ObjLoader> obj_loader,
     c10::optional<at::Device> device,
