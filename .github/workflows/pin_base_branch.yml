@@ -36,8 +36,8 @@ jobs:
       - name: Add label
         uses: actions-ecosystem/action-add-labels@v1
         with:
-          # the GITHUB_BASE_BRANCH_TOKEN secret must be configured on the repo!
+          # the GHA_BASE_BRANCH_TOKEN secret must be configured on the repo!
           # we use this label to trigger pull_request workflows
-          github_token: ${{ secrets.GITHUB_BASE_BRANCH_TOKEN }}
+          github_token: ${{ secrets.GHA_BASE_BRANCH_TOKEN }}
           number: ${{ github.event.number }}
           labels: 'base pinned'
