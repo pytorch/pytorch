@@ -33,9 +33,26 @@ input_name = 'Unknown'
 my_inputs = None
 all_modules = []
 
+
 class SmartModule(nn.Module):
     def __init__(self, model):
         super(SmartModule, self).__init__()
+        if isinstance(model, torch.jit.ScriptModule):
+            self.script_model = model
+        else:
+            self.script_model = torch.jit.script(model)
+
+        self.script_model.eval()
+
+    def forward(self, input, *args):
+        if init_is_not_done:
+            self.script_model._c = torch._C._jit_nezha_convert_module(self.script_model._c, input)
+            
+        return self.script_model._c.forward(input)
+
+class _SmartModule_Old(nn.Module):
+    def __init__(self, model):
+        super(_SmartModule_Old, self).__init__()
         self.inner_model = model
 
     def inference_by_ort(self, m, export_input):

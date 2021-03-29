@@ -87,14 +87,23 @@ def export_c_module(m, inputs, outputs, file_name):
 #####################################################################################################
 
 
-# test_onnx_cls = torch.classes.nezha_classes.ONNXRuntimeClass()
-
 total_input_size=5
 total_hidden_size=4
 total_num_classes=10
 dummy_input = torch.randn(32, 5)
 
 with torch.no_grad():
+
+    my_model = NeuralNet_All(total_input_size, total_hidden_size, total_num_classes)
+    my_model.eval()
+    output = my_model(dummy_input)
+
+    new_module = SmartModule(my_model)
+    new_output = new_module(dummy_input)
+    print(new_output)
+
+    is_same = torch.allclose(output, new_output, rtol=1e-05, atol=1e-08, equal_nan=False)
+    print('Are 2 outputs are matched? - ', is_same)
 
     # torch.onnx.try_ort_inference("first_part.onnx", dummy_input)
 
@@ -119,27 +128,23 @@ with torch.no_grad():
     # fake_results = torch.ops.onnx_ops.ort_inference_ops("/home/jay/repos/first_part.onnx", dummy_input)
     # fake_results = torch.ops.onnx_ops.ort_inference_ops("/home/jay/repos/first_part.onnx", dummy_input)
 
-    my_model = NeuralNet_All(total_input_size, total_hidden_size, total_num_classes)
-    my_model.eval()
-    output = my_model(dummy_input)
+
 
     # torch.onnx.export(my_model, dummy_input, "good_example_01.onnx")
     
     # new_dummy_input = torch.randn(32, 5, 5)
     # torch.onnx.export(my_model, new_dummy_input, "good_example_02.onnx")
 
-    script_module = torch.jit.trace(my_model, dummy_input)
+    # script_module = torch.jit.trace(my_model, dummy_input)
     # script_module = torch.jit.script(my_model)
-    script_module.eval()
+    # script_module.eval()
 
     # script_module._c = torch._C._jit_nezha_update_ops(script_module._c)
-    script_module._c = torch._C._jit_nezha_convert_module(script_module._c, dummy_input)
+    # script_module._c = torch._C._jit_nezha_convert_module(script_module._c, dummy_input)
 
-    new_output=script_module._c.forward(dummy_input)
-    print(new_output)
+    
+    # new_output=script_module._c.forward(dummy_input)
 
-    is_same = torch.allclose(output, new_output, rtol=1e-05, atol=1e-08, equal_nan=False)
-    pritn(is_same)
     # export_c_module(script_module._c, dummy_input, output, "my_nezha_test.onnx")
 
     # torch.onnx.export(script_module, dummy_input, "good_example.onnx", example_outputs=output)
