@@ -58,6 +58,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/Resize.h>
 #include <ATen/Parallel.h>
 
 #include <c10/util/irange.h>
@@ -878,7 +879,7 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
 }
 
 Tensor & gather_out_cpu_cuda(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  result.resize_(index.sizes());
+  resize_output(result, index.sizes());
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_partial_overlap(result, index);
@@ -1233,6 +1234,81 @@ Tensor& take_out_cpu(Tensor& out, const Tensor& self, const Tensor& index) {
 
 Tensor take_backward(const Tensor& grad, const Tensor& input, const Tensor& index) {
   return at::zeros_like(input).put_(index, grad, true);
+}
+
+namespace {
+
+inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
+    const Tensor& self,
+    const Tensor& indices,
+    int64_t dim) {
+  TORCH_CHECK(
+      self.dim() == indices.dim(),
+      "torch.take_along_dim(): input and indices should have the same number of dimensions, ",
+      "but got ", self.dim(), " dimensions for input, and ", indices.dim(), " dimensions for indices")
+  TORCH_CHECK(
+      indices.scalar_type() == ScalarType::Long,
+      "torch.take_along_dim(): dtype of indices should be Long but got ", indices.scalar_type())
+
+  dim = at::maybe_wrap_dim(dim, self.dim());
+
+  DimVector self_sizes{self.sizes()};
+  // update number of elements at dim as per indices
+  self_sizes[dim] = indices.size(dim);
+  auto broadcast_shape = infer_size(self_sizes, indices.sizes());
+  auto indices_broadcasted = at::broadcast_to(indices, broadcast_shape);
+
+  DimVector indices_sizes{indices.sizes()};
+  // update number of elements at dim as per self
+  indices_sizes[dim] = self.size(dim);
+  broadcast_shape = infer_size(indices_sizes, self.sizes());
+  auto self_broadcasted = at::broadcast_to(self, broadcast_shape);
+
+  return std::make_tuple(self_broadcasted, indices_broadcasted, dim);
+}
+
+static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
+  TORCH_CHECK(
+      !t.defined() || t.device() == device,
+      "Expected tensor to have ", device,
+      " Device, but got tensor with ", t.device(), " Device ",
+      "(while checking arguments for ", c, ")");
+}
+
+static inline void checkDevice(CheckedFrom c, at::ArrayRef<Tensor> tensors, Device device) {
+  for (auto &t : tensors) {
+    checkDevice(c, t, device);
+  }
+}
+
+} // anonymous namespace
+
+Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim) {
+  checkDevice("torch.take_along_dim():", {self, indices}, self.device());
+  if (opt_dim.has_value()) {
+    int64_t dim;
+    Tensor self_broadcasted, indices_broadcasted;
+    std::tie(self_broadcasted, indices_broadcasted, dim) =
+        _take_along_dim_helper(self, indices, opt_dim.value());
+    return self_broadcasted.gather(dim, indices_broadcasted);
+  }
+
+  // similar to `take`, but `take` doesn't support the same dtypes as `gather`.
+  return self.view(-1).gather(0, indices.view(-1));
+}
+
+Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim, Tensor& result) {
+  checkDevice("torch.take_along_dim():", {self, indices, result}, self.device());
+  if (opt_dim.has_value()) {
+    int64_t dim;
+    Tensor self_broadcasted, indices_broadcasted;
+    std::tie(self_broadcasted, indices_broadcasted, dim) =
+        _take_along_dim_helper(self, indices, opt_dim.value());
+    return at::gather_out(result, self_broadcasted, dim, indices_broadcasted);
+  }
+
+  // similar to `take`, but `take` doesn't support the same dtypes as `gather`.
+  return at::gather_out(result, self.view(-1), 0, indices.view(-1));
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){

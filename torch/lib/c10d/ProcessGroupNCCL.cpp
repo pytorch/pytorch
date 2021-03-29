@@ -169,7 +169,7 @@ std::string getNcclAbortedCommStoreKey(const std::string ncclIdStr) {
 
 // Returns exception's what() given an exception_ptr instance.
 std::string getExceptionMsgFromExceptionPtr(
-    const std::exception_ptr exceptionPtr) {
+    const std::exception_ptr& exceptionPtr) {
   TORCH_CHECK(exceptionPtr != nullptr);
   try {
     std::rethrow_exception(exceptionPtr);
