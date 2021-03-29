@@ -1213,7 +1213,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
   }
 
   // Compute gI = convT(gO, ggW) if !transposed
-  //         gI = conv(go, ggw)      if transposed
+  //         gI = conv(gO, ggw)  if transposed
   Tensor gI;
   if (input.numel() != 0) {
     if (ggW.defined()) {
