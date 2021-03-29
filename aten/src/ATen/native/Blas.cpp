@@ -63,7 +63,11 @@ Tensor &addmv_out(const Tensor &self, const Tensor &mat, const Tensor &vec, cons
     if (beta.toComplexDouble() == 0.0) {
       result.zero_();
     } else {
-      at::cpu::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
+      at::cpu::mul_out(
+          result,
+          self,
+          at::native::scalar_tensor(
+              beta, self.scalar_type(), c10::nullopt /* layout */, at::kCPU, c10::nullopt /* pin_memory */));
     }
   } else {
     if (!result.is_same(self_)) {
