@@ -890,6 +890,18 @@ class Quantizer:
                     env[node.name] = result
                 continue
             elif root_node is not None:
+                if qconfig is None:
+                    # This branch is hit if all of these conditions are met:
+                    # 1. we are in a fusion pattern of multiple nodes (i.e. add-relu)
+                    # 2. the current node is not the "root_node" of the pattern
+                    # 3. quantization for this pattern is disabled
+                    #
+                    # In this case, we need to make sure to populate the env with
+                    # intermediate nodes manually, because the QuantizeHandler.convert
+                    # function will not be called.
+                    result = self.quantized_graph.node_copy(
+                        node, load_non_quantized)
+                    env[node.name] = result
                 continue
 
             # handle activation post process calls
@@ -988,7 +1000,7 @@ class Quantizer:
         return quantized
 
     def _fold_quant_dequant(self, quantized: QuantizedGraphModule) -> QuantizedGraphModule:
-        """ If quantize op is followed by a dequantize, we fold the ops together since it is a no-op.
+        """ If quantize op is followed by a dequantize, we fold the ops together and remove the dequant.
             In the case where the only consumer of quantize_per_tensor is a dequant op, we erase both
             nodes from the graph, along with the qparams associated with quantize op.
         """
@@ -1001,10 +1013,10 @@ class Quantizer:
         for node in quantized.graph.nodes:
             if node.op == 'call_function' and node.target == torch.quantize_per_tensor:
                 quant_uses = list(node.users)
+                quant_args = node.args
+                float_tensor = quant_args[0]
                 for user in quant_uses:
                     if _is_dequant_op(user):
-                        quant_args = node.args
-                        float_tensor = quant_args[0]
                         user.replace_all_uses_with(float_tensor)
                         quantized.graph.erase_node(user)
                         # If dequant is the only user of quant node, we erase quant node
