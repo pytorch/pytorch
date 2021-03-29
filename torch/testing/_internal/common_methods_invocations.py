@@ -2165,7 +2165,15 @@ def reference_lgamma(x):
     return out
 
 def reference_polygamma(x, n):
-    return scipy.special.polygamma(n, x).astype(np.float32)
+    # WEIRD `scipy.special.polygamma` behavior
+    # >>> scipy.special.polygamma(0, np.array(501, dtype=np.float32)).dtype
+    # dtype('float64')
+    # >>> scipy.special.polygamma(0, np.array([501], dtype=np.float32)).dtype
+    # dtype('float32')
+    #
+    # Thus we cast output to the default torch dtype.
+    np_dtype = torch_to_numpy_dtype_dict[torch.get_default_dtype()]
+    return scipy.special.polygamma(n, x).astype(np_dtype)
 
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
@@ -3508,7 +3516,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_polar),
     UnaryUfuncInfo('polygamma',
-                   op= lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
+                   op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_0',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 7e-1}),),
@@ -3517,10 +3525,10 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=floating_types_and(torch.half),
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
-                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     UnaryUfuncInfo('polygamma',
-                   op= lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
+                   op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_1',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 7e-1}),),
@@ -3529,16 +3537,18 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=floating_types_and(torch.half),
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
-                        SkipInfo('TestGradients'),
-                        SkipInfo('TestOpInfo'),
-                        SkipInfo('TestCommon'),
-                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard'),
-                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal'),
-                        ),
+                       # Redundant tests
+                       SkipInfo('TestGradients'),
+                       SkipInfo('TestOpInfo'),
+                       SkipInfo('TestCommon'),
+                       # Mismatch
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard'),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal'),
+                   ),
                    sample_kwargs=lambda device, dtype, input: ({'n': 1}, {'n': 1})),
     UnaryUfuncInfo('polygamma',
-                   op= lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
+                   op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_2',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 7e-1}),),
@@ -3547,13 +3557,15 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=floating_types_and(torch.half),
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
-                        SkipInfo('TestGradients'),
-                        SkipInfo('TestOpInfo'),
-                        SkipInfo('TestCommon'),
-                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
+                       # Redundant tests
+                       SkipInfo('TestGradients'),
+                       SkipInfo('TestOpInfo'),
+                       SkipInfo('TestCommon'),
+                       # Mismatch
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 2}, {'n': 2})),
     UnaryUfuncInfo('polygamma',
-                   op= lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
+                   op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_3',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 7e-1}),),
@@ -3562,13 +3574,15 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=floating_types_and(torch.half),
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
-                        SkipInfo('TestGradients'),
-                        SkipInfo('TestOpInfo'),
-                        SkipInfo('TestCommon'),
-                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
+                       # Redundant tests
+                       SkipInfo('TestGradients'),
+                       SkipInfo('TestOpInfo'),
+                       SkipInfo('TestCommon'),
+                       # Mismatch
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 3}, {'n': 3})),
     UnaryUfuncInfo('polygamma',
-                   op = lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
+                   op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_4',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
                    decorators=(precisionOverride({torch.float16: 7e-1, torch.float32: 5e-4}),),
@@ -3577,10 +3591,12 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=floating_types_and(torch.half),
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
-                        SkipInfo('TestGradients'),
-                        SkipInfo('TestOpInfo'),
-                        SkipInfo('TestCommon'),
-                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
+                       # Redundant tests
+                       SkipInfo('TestGradients'),
+                       SkipInfo('TestOpInfo'),
+                       SkipInfo('TestCommon'),
+                       # Mismatch
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 4}, {'n': 4})),
     OpInfo('pinverse',
            op=torch.pinverse,
