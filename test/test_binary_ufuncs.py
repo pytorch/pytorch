@@ -706,7 +706,7 @@ class TestBinaryUfuncs(TestCase):
 
     # Tests that a Runtime error occurs when a base tensor cannot be resized
     # by pow's inplace variant due to PyTorch's broadcasting semantics.
-    def test_pow_inplace_resizing_exception(self, device, dtype):
+    def test_pow_inplace_resizing_exception(self, device):
         test_cases = (
             ((), (3,)),
             ((2,), (2, 1)),
