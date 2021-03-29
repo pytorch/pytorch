@@ -35,9 +35,11 @@ from .ns_types import (
 
 from typing import Dict, Tuple, Callable, List, Any
 
+RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 
 class OutputLogger(nn.Module):
     stats: List[torch.Tensor]
+    stats_rnn: List[RNNReturnType]
 
     def __init__(
         self,
@@ -51,6 +53,7 @@ class OutputLogger(nn.Module):
     ):
         super().__init__()
         self.stats: List[torch.Tensor] = []
+        self.stats_rnn: List[RNNReturnType] = []
 
         # name of the node which was responsible for adding this logger
         # Note:
@@ -83,8 +86,14 @@ class OutputLogger(nn.Module):
         # for example, in cat([x1, x2, x3], dim=0), x2 would have index_within_arg == 1
         self.index_within_arg = index_within_arg
 
-    def forward(self, x: torch.Tensor):
-        self.stats.append(x.detach())
+    # Note: cannot annotate the type of x because TorchScript does not support
+    #   the Union type.
+    def forward(self, x):
+        if isinstance(x, torch.Tensor):
+            self.stats.append(x.detach())
+        elif isinstance(x, tuple) and len(x) == 2 and len(x[1]) == 2:
+            new_res = (x[0].detach(), (x[1][0].detach(), x[1][1].detach()))
+            self.stats_rnn.append(new_res)
         return x
 
     def __repr__(self):
@@ -101,7 +110,7 @@ results_type={self.results_type}, index_within_arg={self.index_within_arg})"""
 #       # one of NSSingleResultValuesType
 #       'type': 'weight',
 #       # the values of type specified above
-#       'values': [torch.Tensor(...), ...],
+#       'values': [torch.tensor(...), ...],
 #       # name of the node directly before the logger
 #       'prev_node_name': 'linear1',
 #       # type of the underlying function or module
@@ -223,9 +232,9 @@ def _extract_weights_impl(
     nodes_and_names_to_instrument_a: List[Tuple[Node, str]] = []
     nodes_and_names_to_instrument_b: List[Tuple[Node, str]] = []
     for match_name, match in matched_subgraph_pairs.items():
-        (node_start_a, node_end_a), (node_start_b, node_end_b) = match
-        nodes_and_names_to_instrument_a.append((node_start_a, match_name))
-        nodes_and_names_to_instrument_b.append((node_start_b, match_name))
+        subgraph_a, subgraph_b = match
+        nodes_and_names_to_instrument_a.append((subgraph_a.base_op_node, match_name))
+        nodes_and_names_to_instrument_b.append((subgraph_b.base_op_node, match_name))
 
     # populate the results, one model at a time
     results: NSResultsType = {}
@@ -285,12 +294,10 @@ def _add_loggers_impl(
     nodes_and_names_to_instrument_a = []
     nodes_and_names_to_instrument_b = []
     for match_name, (subgraph_a, subgraph_b) in matched_subgraph_pairs.items():
-        node_start_a, node_end_a = subgraph_a
-        node_start_b, node_end_b = subgraph_b
         # Note: for matching activations we always use the end nodes,
         # such as observing the output of relu in linear-relu
-        nodes_and_names_to_instrument_a.append((node_end_a, match_name))
-        nodes_and_names_to_instrument_b.append((node_end_b, match_name))
+        nodes_and_names_to_instrument_a.append((subgraph_a.end_node, match_name))
+        nodes_and_names_to_instrument_b.append((subgraph_b.end_node, match_name))
 
     new_model_a = _add_loggers_one_model(
         name_a, gm_a, nodes_and_names_to_instrument_a, logger_cls,
@@ -341,9 +348,12 @@ def _extract_logger_info_one_model(
                 results[key][mod.results_type] = {}
             if mod.model_name not in results[key][mod.results_type]:
                 results[key][mod.results_type][mod.model_name] = []
+            stats_to_use = mod.stats
+            if len(mod.stats_rnn) > 0:
+                stats_to_use = mod.stats_rnn
             results[key][mod.results_type][mod.model_name].append({
                 'type': mod.results_type,
-                'values': mod.stats,
+                'values': stats_to_use,
                 'ref_node_name': mod.ref_node_name,
                 'prev_node_name': mod.prev_node_name,
                 'prev_node_target_type': mod.prev_node_target_type,

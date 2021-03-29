@@ -506,6 +506,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::Meta);
   }
 
+  bool is_cpu() const {
+    // NB: This method is not virtual and avoid dispatches for performance reasons.
+    return key_set_.has(DispatchKey::CPU) ||
+        key_set_.has(DispatchKey::SparseCPU) ||
+        key_set_.has(DispatchKey::QuantizedCPU) ||
+        key_set_.has(DispatchKey::MkldnnCPU);
+  }
+
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::CUDA) ||
@@ -553,6 +561,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // file aten/src/ATen/core/boxing/impl/test_helpers.h
   void remove_autograd_key() {
     key_set_ = key_set_ - autograd_dispatch_keyset;
+  }
+
+  // Inference tensor doesn't have autograd or InplaceOrView key.
+  bool is_inference_tensor() {
+    bool no_InplaceOrView = !key_set_.has(c10::DispatchKey::InplaceOrView);
+    bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(no_InplaceOrView == no_Autograd,
+      "InplaceOrView and Autograd keys must be on/off at the same time.");
+    return no_InplaceOrView && no_Autograd;
   }
 
   int64_t get_device() const {
@@ -674,7 +691,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "self" should represent the Tensor whose forward grad is accessed. It is
    *     required when dealing with view.
    */
-  const at::Tensor& fw_grad(uint64_t level, const at::Tensor& self) const;
+  const at::Tensor& _fw_grad(uint64_t level, const at::Tensor& self) const;
 
   /**
    * Sets the forward gradient for this Tensor.
@@ -694,7 +711,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    *   - "is_inplace_op" is a boolean flag that tells if this gradient was generated
    *     by an inplace operation or an out of place one. This allows better error checking.
    */
-  void set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
+  void _set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op);
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
