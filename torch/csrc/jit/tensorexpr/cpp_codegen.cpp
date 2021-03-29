@@ -294,7 +294,7 @@ void CppPrinter::visit(const ExternalCall* v) {
 
   std::vector<const Buf*> bufs(v->buf_args());
   bufs.insert(bufs.begin(), v->buf());
-  auto for_buf = [&](std::function<void(const Buf*)> print_buf) {
+  auto for_buf = [&](const std::function<void(const Buf*)>& print_buf) {
     for (size_t i = 0; i < bufs.size(); i++) {
       if (i > 0) {
         os() << ", ";
