@@ -714,7 +714,9 @@ class Quantizer:
             standalone_module_classes, custom_module_classes)
         quants = self._find_quants(observed_graph, self.modules, matches)
 
-        observed_graph = handle_copy_nodes(observed_graph, matches, quants, self.qconfig_map, self.activation_post_process_map, self.modules)
+        observed_graph = handle_copy_nodes(
+            observed_graph, matches, quants, self.qconfig_map,
+            self.activation_post_process_map, self.modules)
 
         self.save_state(model)
         model = ObservedGraphModule(model, observed_graph)
