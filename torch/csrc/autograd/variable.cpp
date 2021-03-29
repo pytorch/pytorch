@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
+#include <torch/csrc/autograd/utils/error_messages.h>
 
 #include <ATen/core/VariableHooksInterface.h>
 
@@ -342,6 +343,16 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   bool is_view(const Tensor&) const override;
   const Tensor& base(const Tensor&) const override;
   const std::string& name(const Tensor&) const override;
+  bool is_leaf(const Tensor&) const override;
+  int64_t output_nr(const Tensor&) const override;
+  void set_data(const Tensor & self, const Tensor & new_data) const override;
+  Tensor data(const Tensor & self) const override;
+  int64_t _version(const Tensor & self) const override;
+  void retain_grad(const Tensor & self) const override;
+  void _backward(const Tensor& self, at::TensorList inputs,
+    const c10::optional<Tensor>& gradient, c10::optional<bool> keep_graph,
+    bool create_graph) const override;
+  Tensor& requires_grad_(const Tensor& self, bool _requires_grad) const override;
 };
 
 VariableHooks variableHooks;
@@ -362,6 +373,117 @@ Tensor VariableHooks::tensor_data(const Tensor& self) const {
     /*version_counter=*/self.unsafeGetTensorImpl()->version_counter(),
     /*allow_tensor_metadata_change=*/self.unsafeGetTensorImpl()->allow_tensor_metadata_change());
   return at::Tensor(self_impl_copy);
+}
+
+bool VariableHooks::is_leaf(const Tensor & self) const {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->grad_fn_ == nullptr;
+  } else {
+    return true;
+  }
+}
+
+int64_t VariableHooks::output_nr(const Tensor & self) const {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->output_nr_;
+  } else {
+    return 0;
+  }
+}
+
+void VariableHooks::set_data(const Tensor & self, const Tensor & new_data) const {
+  // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
+  // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
+  // tensor type.
+  TORCH_CHECK(
+    _has_compatible_shallow_copy_type(self, new_data),
+    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
+
+  // Resets gradient accumulator if metadata is out of date
+  AutogradMeta* autograd_meta = impl::get_autograd_meta(self);
+  if (autograd_meta) {
+    std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
+    auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
+    if (prior_accumulator) {
+      const auto prior_device = prior_accumulator->input_metadata(0).device();
+      const auto new_device = new_data.device();
+
+      if (!new_data.options().type_equal(self.options()) || prior_device != new_device) {
+        autograd_meta->grad_accumulator_.reset();
+      }
+    }
+  }
+
+  // Version counter is not shared when we replace a `Variable`'s tensor data
+  // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
+  // See NOTE [ Version Counter Sharing ] for details.
+  //
+  // `var.set_data(new_data)` always ignores `var`'s `allow_tensor_metadata_change_`, because
+  // users need this API as an escape hatch for changing a tensor's metadata regardless of its
+  // `allow_tensor_metadata_change_` value, and the users are responsible for ensuring this is
+  // the behavior they want.
+  self.unsafeGetTensorImpl()->shallow_copy_from(new_data.getIntrusivePtr());
+}
+
+Tensor VariableHooks::data(const Tensor & self) const {
+  return self.variable_data();
+}
+
+int64_t VariableHooks::_version(const Tensor & self) const {
+  return self.unsafeGetTensorImpl()->version_counter().current_version();
+}
+
+void VariableHooks::retain_grad(const Tensor & self) const {
+  TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
+  if (self.is_leaf()) {  // no-op for leaves
+    return;
+  }
+  if (impl::get_autograd_meta(self)->retains_grad_) {
+    return;
+  }
+  c10::weak_intrusive_ptr<c10::TensorImpl> weak_self(self.getIntrusivePtr());
+
+  std::function<void(Tensor)> retain_grad_hook([weak_self](const Tensor& grad) {
+    if (weak_self.expired()) {
+      return;
+    } else {
+      auto var = weak_self.lock();
+      if (!var->grad().defined()) {
+        if (grad.is_sparse()) {
+          var->mutable_grad() = grad.clone();
+        } else {
+          var->mutable_grad() = grad.clone(at::MemoryFormat::Contiguous);
+        }
+      } else {
+        var->mutable_grad() = var->grad() + grad;
+      }
+    }
+  });
+
+  self.register_hook(retain_grad_hook);
+  impl::get_autograd_meta(self)->retains_grad_ = true;
+}
+
+void VariableHooks::_backward(
+    const Tensor& self,
+    at::TensorList inputs,
+    const c10::optional<Tensor>& gradient,
+    c10::optional<bool> keep_graph,
+    bool create_graph) const {
+  // TODO torch::autograd::backward should take the c10::optional<Tensor> gradient directly
+  // instead of us having to unwrap it to Tensor _gradient here.
+  Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
+  std::vector<torch::autograd::Variable> input_vars(inputs.begin(), inputs.end());
+  torch::autograd::backward({self}, {_gradient}, keep_graph, create_graph, input_vars);
+}
+
+Tensor& VariableHooks::requires_grad_(const Tensor& self, bool _requires_grad) const {
+  if (!self.is_leaf() && !_requires_grad) {
+    throw std::runtime_error(
+      autograd::utils::requires_grad_leaf_error(_requires_grad)
+    );
+  }
+  return const_cast<Tensor&>(self).set_requires_grad(_requires_grad);
 }
 
 // Backward View Variables
