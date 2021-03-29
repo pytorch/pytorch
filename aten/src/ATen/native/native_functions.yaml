@@ -5434,6 +5434,11 @@
   variants: function
   device_guard: False
 
+- func: take_along_dim.out(Tensor self, Tensor indices, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: take_along_dim(Tensor self, Tensor indices, int? dim=None) -> Tensor
+  variants: method, function
+
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
