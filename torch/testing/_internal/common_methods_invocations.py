@@ -2807,8 +2807,8 @@ op_db: List[OpInfo] = [
            aten_name='linalg_det',
            sample_inputs_func=sample_inputs_linalg_det,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-           test_complex_grad=False,
-           test_inplace_grad=False,
+           supports_complex_autograd=False,
+           supports_inplace_autograd=False,
            skips=(
                # https://github.com/pytorch/pytorch/issues/53361
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda',
