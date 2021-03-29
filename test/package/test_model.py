@@ -191,7 +191,7 @@ class ModelTest(PackageTestCase):
         # Model should script successfully.
         scripted = torch.jit.script(loaded)
 
-        # Scrtiped model should save and load successfully.
+        # Scripted model should save and load successfully.
         f2 = BytesIO()
         torch.jit.save(scripted, f2)
         f2.seek(0)
