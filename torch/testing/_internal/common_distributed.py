@@ -11,7 +11,7 @@ import logging
 import traceback
 import types
 
-from typing import NamedTuple
+from typing import NamedTuple, Union
 from functools import wraps
 
 import torch
@@ -119,17 +119,21 @@ def with_nccl_blocking_wait(func):
     def wrapper(*args, **kwargs):
         # Save and unset NCCL_ASYNC_ERROR_HANDLING
         try:
-            cached_nccl_async_error_handling = os.environ["NCCL_ASYNC_ERROR_HANDLING"]
+            cached_nccl_async_error_handling: Union[str, None] = os.environ[
+                "NCCL_ASYNC_ERROR_HANDLING"
+            ]
             del os.environ["NCCL_ASYNC_ERROR_HANDLING"]
         except KeyError:
             # NCCL_ASYNC_ERROR_HANDLING was unset
-            cached_nccl_async_error_handling = None
+            cached_nccl_async_error_handling: Union[str, None] = None
 
         # Save val of NCCL_BLOCKING_WAIT and set it.
         try:
-            cached_nccl_blocking_wait = os.environ["NCCL_BLOCKING_WAIT"]
+            cached_nccl_blocking_wait: Union[str, None] = os.environ[
+                "NCCL_BLOCKING_WAIT"
+            ]
         except KeyError:
-            cached_nccl_blocking_wait = None
+            cached_nccl_blocking_wait: Union[str, None] = None
         finally:
             os.environ["NCCL_BLOCKING_WAIT"] = "1"
 
@@ -139,7 +143,9 @@ def with_nccl_blocking_wait(func):
         finally:
             # restore old values.
             if cached_nccl_async_error_handling is not None:
-                os.environ["NCCL_ASYNC_ERROR_HANDLING"] = cached_nccl_async_error_handling
+                os.environ[
+                    "NCCL_ASYNC_ERROR_HANDLING"
+                ] = cached_nccl_async_error_handling
 
             if cached_nccl_blocking_wait is not None:
                 os.environ["NCCL_BLOCKING_WAIT"] = cached_nccl_blocking_wait
