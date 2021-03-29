@@ -2091,7 +2091,7 @@ def _wrap_warn_once(regex):
     return decorator
 
 # This is a wrapper that wraps a test to run this test twice, one with
-# coalesced=True, another with coalesced=False for coalesced/uncoalesced sparse tensors. 
+# coalesced=True, another with coalesced=False for coalesced/uncoalesced sparse tensors.
 def coalescedonoff(f):
     nargs = len(inspect.signature(f).parameters)
     if nargs == 3:
