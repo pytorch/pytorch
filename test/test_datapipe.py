@@ -615,7 +615,7 @@ class TestTyping(TestCase):
                 def __iter__(self) -> str:  # type: ignore
                     yield 0
 
-        with self.assertRaisesRegex(TypeError, r"Unmatched type annotation"):
+        with self.assertRaisesRegex(TypeError, r"Expected return type of '__iter__'"):
             class InvalidDP2(IterDataPipe[Tuple]):
                 def __iter__(self) -> Iterator[int]:  # type: ignore
                     yield 0
@@ -683,7 +683,7 @@ class TestTyping(TestCase):
 
         class DP5(IterDataPipe):
             r""" DataPipe with plain Iterator"""
-            def __iter__(self) -> Iterator:
+            def __iter__(self) -> Iterator[str]:
                 raise NotImplementedError
 
         self.assertTrue(issubclass(DP5, IterDataPipe))
