@@ -3659,7 +3659,7 @@ class TestLinalg(TestCase):
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
     @onlyOnCPUAndCUDA
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     # This tests only the cases where torch.chain_matmul differs from torch.linalg.multi_dot which this is an "alias" for.
     def test_chain_matmul(self, device, dtype):
         # chain_matmul accepts a single input tensor while multi_dot does not
