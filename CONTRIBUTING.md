@@ -293,41 +293,90 @@ into the repo directory.
 
 ## Unit testing
 
-`hypothesis` is required to run the tests, `mypy` is an optional dependency,
-and `pytest` may help run tests more selectively. All these packages can be
-installed with `conda` or `pip`.
+### Python Unit Testing
 
-PyTorch's testing is located under `test/`. Run the entire test suite with
+All PyTorch test suites are located in the `test` folder and start with
+`test_`. Run the entire test
+suite with
 
 ```bash
 python test/run_test.py
 ```
 
-or run individual test files, like `python test/test_nn.py`, for individual test suites.
+or run individual test suites using the command `python test/FILENAME.py`,
+where `FILENAME` represents the file containing the test suite you wish
+to run.
 
-### Better local unit tests with pytest
-We don't officially support `pytest`, but it works well with our `unittest` tests and offers
-a number of useful features for local developing. Install it via `pip install pytest`.
+For example, to run all the TorchScript JIT tests (located at
+`test/test_jit.py`), you would run:
 
-If you want to just run tests that contain a specific substring, you can use the `-k` flag:
+```bash
+python test/test_jit.py
+```
+
+You can narrow down what you're testing even further by specifying the
+name of an individual test with `TESTCLASSNAME.TESTNAME`. Here,
+`TESTNAME` is the name of the test you want to run, and `TESTCLASSNAME`
+is the name of the class in which it is defined.
+
+Going off the above example, let's say you want to run
+`test_Sequential`, which is defined as part of the `TestJit` class
+in `test/test_jit.py`. Your command would be:
+
+```bash
+python test/test_jit.py TestJit.test_Sequential
+```
+
+The `hypothesis` library must be installed to run the tests. `mypy` is
+an optional dependency, and `pytest` may help run tests more selectively.
+All these packages can be installed with `conda` or `pip`.
+
+### Better local unit tests with `pytest`
+We don't officially support `pytest`, but it works well with our
+`unittest` tests and offers a number of useful features for local
+developing. Install it via `pip install pytest`.
+
+If you want to just run tests that contain a specific substring, you can
+use the `-k` flag:
 
 ```bash
 pytest test/test_nn.py -k Loss -v
 ```
 
-The above is an example of testing a change to Loss functions: this command runs tests such as
-`TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
+The above is an example of testing a change to all Loss functions: this
+command runs tests such as `TestNN.test_BCELoss` and
+`TestNN.test_MSELoss` and can be useful to save keystrokes.
 
 ### Running `mypy`
 
-One of the test suites runs `mypy` on the codebase:
+`mypy` is an optional static type checker for Python. We have a test
+suite that runs `mypy` on the entire codebase:
+
 ```bash
 python test/test_type_hints.py
 ```
+
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
 for more information on how to set up `mypy` and tackle type annotation
 tasks, as well as other ways to run `mypy` besides running that test suite.
+
+### C++ Unit Testing
+
+PyTorch offers a series of tests located in the `test/cpp` folder.
+These tests are written in C++ and use the Google Test testing framework.
+After compiling PyTorch from source, the test runner binaries will be
+written to the `build/bin` folder. The command to run one of these tests
+is `./build/bin/FILENAME --gtest_filter=TESTNAME`, where `TESTNAME` is
+the name of the test you'd like to run.
+
+For example, if you wanted to run `ContainerAliasingTest` in
+`test_alias_analysis.cpp` (`test/cpp/jit/test_alias_analysis.cpp`),
+the command would be:
+
+```bash
+./build/bin/test_jit --gtest_filter=JitTest.ContainerAliasingTest
+```
 
 ## Writing documentation
 
