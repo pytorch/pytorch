@@ -313,7 +313,7 @@ def max_memory_allocated(device: Union[Device, int] = None) -> int:
     device.
 
     By default, this returns the peak allocated memory since the beginning of
-    this program. :func:`~torch.cuda.reset_peak_stats` can be used to
+    this program. :func:`~torch.cuda.reset_peak_memory_stats` can be used to
     reset the starting point in tracking this metric. For example, these two
     functions can measure the peak allocated memory usage of each iteration in a
     training loop.
@@ -351,7 +351,7 @@ def max_memory_reserved(device: Union[Device, int] = None) -> int:
     for a given device.
 
     By default, this returns the peak cached memory since the beginning of this
-    program. :func:`~torch.cuda.reset_peak_stats` can be used to reset
+    program. :func:`~torch.cuda.reset_peak_memory_stats` can be used to reset
     the starting point in tracking this metric. For example, these two functions
     can measure the peak cached memory amount of each iteration in a training
     loop.
