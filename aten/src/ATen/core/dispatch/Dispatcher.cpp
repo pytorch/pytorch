@@ -112,7 +112,10 @@ RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string d
     "Only a single TORCH_LIBRARY can be used to register the namespace ", ns,
     "; please put all of your definitions in a single TORCH_LIBRARY block.  "
     "If you were trying to specify implementations, consider using TORCH_LIBRARY_IMPL "
-    "(which can be duplicated).  Previous registration of TORCH_LIBRARY was ",
+    "(which can be duplicated).  If you really intended to define operators for a "
+    "single namespace in a distributed way, you can use TORCH_LIBRARY_FRAGMENT to "
+    "explicitly indicate this.  "
+    "Previous registration of TORCH_LIBRARY was ",
     found->second, "; latest registration was ", debug
   );
   libraries_.emplace(ns, std::move(debug));
