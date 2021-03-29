@@ -1,14 +1,11 @@
-import pickle
-from io import BytesIO
-from textwrap import dedent
 from unittest import skipIf
 
 import torch
-from torch.package import PackageExporter, PackageImporter, sys_importer
-from torch.testing._internal.common_utils import run_tests, IS_FBCODE, IS_SANDCASTLE
+from torch.package import PackageExporter, PackageImporter
+from torch.testing._internal.common_utils import run_tests
 
 try:
-    from torchvision.models import resnet18, alexnet
+    from torchvision.models import resnet18
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
@@ -27,7 +24,7 @@ packaging_directory = Path(__file__).parent
 
 class PackagingTsSerTest(PackageTestCase):
     """Torchscript saving and loading in torch.Package tests."""
-    
+
     @skipIfNoTorchVision
     def test_save_ts(self):
         # Test basic saving of TS module
@@ -35,7 +32,7 @@ class PackagingTsSerTest(PackageTestCase):
             def __init__(self, name: str):
                 super().__init__()
                 self.name = name
-                self.tvmod = alexnet()
+                self.tvmod = resnet18()
 
             def forward(self, input: str):
                 input = input + "_modB:" + self.name
@@ -53,7 +50,7 @@ class PackagingTsSerTest(PackageTestCase):
                 return self.modB(input)
 
         scripted_mod = torch.jit.script(ModA("a", "b"))
-        
+
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as e:
             e.save_pickle("res", "mod.pkl", scripted_mod)
@@ -70,7 +67,7 @@ class PackagingTsSerTest(PackageTestCase):
             def __init__(self, name: str):
                 super().__init__()
                 self.name = name
-                self.tvmod = alexnet()
+                self.tvmod = resnet18()
 
             def forward(self, input: str):
                 input = input + "_modB:" + self.name
@@ -89,11 +86,12 @@ class PackagingTsSerTest(PackageTestCase):
 
         scripted_mod_0 = torch.jit.script(ModC("a", "b"))
 
+        # redefintion is intentional
         class ModD(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
                 self.name = name
-                self.tvmod = alexnet()
+                self.tvmod = resnet18()
 
             def forward(self, input: str):
                 input = input + "_modB(changed):" + self.name
@@ -121,7 +119,7 @@ class PackagingTsSerTest(PackageTestCase):
             def __init__(self, name: str):
                 super().__init__()
                 self.name = name
-                self.tvmod = alexnet()
+                self.tvmod = resnet18()
 
             def forward(self, input: str):
                 input = input + "_modB:" + self.name
@@ -144,7 +142,7 @@ class PackagingTsSerTest(PackageTestCase):
             def __init__(self, name: str):
                 super().__init__()
                 self.name = name
-                self.tvmod = alexnet()
+                self.tvmod = resnet18()
 
             def forward(self, input: str):
                 input = input + "_modFoo:" + self.name
@@ -171,7 +169,7 @@ class PackagingTsSerTest(PackageTestCase):
             def __init__(self, name: str):
                 super().__init__()
                 self.name = name
-                self.tvmod = alexnet()
+                self.tvmod = resnet18()
 
             def forward(self, input: str):
                 input = input + "_modB:" + self.name
@@ -195,14 +193,14 @@ class PackagingTsSerTest(PackageTestCase):
             def __init__(self, name: str):
                 super().__init__()
                 self.name = name
-                self.tvmod = alexnet()
+                self.tvmod = resnet18()
 
             def forward(self, input: str):
                 input = input + "_modFoo:" + self.name
                 return input
 
         scripted_mod_foo = torch.jit.script(ModFoo("foo"))
-        
+
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as e:
             e.save_pickle("res", "mod1.pkl", scripted_mod_c)
@@ -232,7 +230,7 @@ class PackagingTsSerTest(PackageTestCase):
             def forward(self, input: str):
                 input = input + "_modFoo:" + self.name
                 return input
-        
+
         class ModBar(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
@@ -279,7 +277,7 @@ class PackagingTsSerTest(PackageTestCase):
             def forward(self, input: str):
                 input = input + "_modFoo:" + self.name
                 return input
-        
+
         class ModBar(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
