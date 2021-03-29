@@ -926,8 +926,7 @@ Example::
     tensor(3.0957e-06)
 
 .. _the resulting vectors will span the same subspace:
-    (https://en.wikipedia.org/wiki/Singular_value_decomposition\
-            #Singular_values,_singular_vectors,_and_their_relation_to_the_SVD)
+       (https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD)
 """)
 
 cond = _add_docstr(_linalg.linalg_cond, r"""
