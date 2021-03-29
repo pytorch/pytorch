@@ -1,6 +1,6 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 import numpy as np
 from hypothesis import given, assume, settings
@@ -11,7 +11,6 @@ import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 import unittest
-import os
 
 
 class TestInstanceNorm(serial.SerializedTestCase):

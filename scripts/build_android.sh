@@ -103,6 +103,14 @@ fi
 # Don't build artifacts we don't need
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
+
+# If there exists env variable and it equals to 1, build lite interpreter.
+# cmd:  BUILD_LITE_INTERPRETER=1 ./scripts/build_android.sh
+if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
+else
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
+fi
 CMAKE_ARGS+=("-DBUILD_MOBILE_BENCHMARK=$BUILD_MOBILE_BENCHMARK")
 CMAKE_ARGS+=("-DBUILD_MOBILE_TEST=$BUILD_MOBILE_TEST")
 CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")

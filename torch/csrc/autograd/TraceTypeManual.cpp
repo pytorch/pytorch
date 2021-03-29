@@ -131,7 +131,7 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
   m.impl("copy_", copy_);
 
   // Skip tracing for the following ops by registering fallthrough kernel explicitly.
-  m.impl("backward", CppFunction::makeFallthrough());
+  m.impl("_backward", CppFunction::makeFallthrough());
   m.impl("set_data", CppFunction::makeFallthrough());
   m.impl("data", CppFunction::makeFallthrough());
   m.impl("is_leaf", CppFunction::makeFallthrough());
@@ -139,6 +139,7 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
   m.impl("_version", CppFunction::makeFallthrough());
   m.impl("requires_grad_", CppFunction::makeFallthrough());
   m.impl("retain_grad", CppFunction::makeFallthrough());
+  m.impl("_fw_primal", CppFunction::makeFallthrough());
 }
 
 }  // namespace

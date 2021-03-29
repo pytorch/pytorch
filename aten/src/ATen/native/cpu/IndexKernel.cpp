@@ -36,9 +36,8 @@ struct Indexer {
     for (int j = 0; j < num_indexers; j++) {
       int64_t value = *(int64_t*)&indexers[j][idx * indexer_strides[j]];
       int64_t size = original_sizes[j];
-      if (value < -size || value >= size) {
-        TORCH_CHECK_INDEX(false, "index ", value, " is out of bounds for dimension ", j, " with size ", size);
-      }
+      TORCH_CHECK_INDEX(value >= -size && value < size,
+                        "index ", value, " is out of bounds for dimension ", j, " with size ", size);
       if (value < 0) {
         value += size;
       }
@@ -111,8 +110,13 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
     iter.dtype(), "index_put", [&] {
     if (accumulate) {
-      bool use_parallel_for = ((iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
-      if (iter.dtype() == ScalarType::Float && use_parallel_for) {
+      // See Note [Enabling Deterministic Operations]
+      // Parallel cpu_index_kernel with accumulation is nondeterministic, so we
+      // must enable serial execution if deterministic algorithms are enabled.
+      bool is_deterministic = at::globalContext().deterministicAlgorithms();
+      bool use_parallel_for = (!is_deterministic) && (
+        (iter.numel() >= internal::GRAIN_SIZE) && (at::get_num_threads() > 1));
+      if (use_parallel_for && iter.dtype() == ScalarType::Float) {
         cpu_index_kernel<float>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
           cpu_atomic_add_float((float*)(dst + offset), *(float*)src);
         });
@@ -128,6 +132,124 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
         *(scalar_t*)(dst + offset) = *(scalar_t*)src;
       });
     }
+  });
+}
+
+void index_fill_kernel(
+  TensorIterator& iter,
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride,
+  const Scalar& source) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+    iter.dtype(), "index_fill_cpu", [&] {
+    auto fill_val = source.to<scalar_t>();
+    auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
+      auto* self_data_bytes = data[0];
+      auto* index_data_bytes = data[1];
+      for (int64_t elem = 0; elem < n; ++elem) {
+        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+        auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
+        TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
+                          "index ", idx, " is out of bounds for dimension ",
+                          dim, " with size ", self_dim_size);
+        if (idx < 0) {
+          idx += self_dim_size;
+        }
+
+        self_data[idx * self_dim_stride] = fill_val;
+
+        self_data_bytes += strides[0];
+        index_data_bytes += strides[1];
+      }
+    };
+    auto handle_zero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
+      auto* self_data_bytes = data[0];
+      auto* index_data_bytes = data[1];
+      auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
+      TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
+                        "index ", idx, " is out of bounds for dimension ",
+                        dim, " with size ", self_dim_size);
+      if (idx < 0) {
+        idx += self_dim_size;
+      }
+      for (int64_t elem = 0; elem < n; ++elem) {
+        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+
+        self_data[idx * self_dim_stride] = fill_val;
+
+        self_data_bytes += strides[0];
+      }
+    };
+
+    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+      auto idx_stride = strides[1];
+      if (idx_stride) {
+        handle_nonzero_idx_stride(data, strides, n);
+      }
+      else {
+        handle_zero_idx_stride(data, strides, n);
+      }
+    };
+    iter.for_each(loop);
+  });
+}
+
+void index_copy_kernel(
+  TensorIterator& iter,
+  int64_t dim,
+  int64_t self_dim_size,
+  int64_t self_dim_stride) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+    iter.dtype(), "index_copy_cpu", [&] {
+    auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
+      auto* self_data_bytes = data[0];
+      auto* index_data_bytes = data[1];
+      auto* source_data_bytes = data[2];
+      for (int64_t elem = 0; elem < n; ++elem) {
+        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+        auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
+        auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
+        TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
+              "index_copy_(): index ", idx, " is out of bounds for dimension ",
+              dim, " with size ", self_dim_size);
+
+        self_data[idx * self_dim_stride] = *source_data;
+
+        self_data_bytes += strides[0];
+        index_data_bytes += strides[1];
+        source_data_bytes += strides[2];
+      }
+    };
+    auto handle_zero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
+      auto* self_data_bytes = data[0];
+      auto* index_data_bytes = data[1];
+      auto* source_data_bytes = data[2];
+      auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
+      TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
+            "index_copy_(): index ", idx, " is out of bounds for dimension ",
+            dim, " with size ", self_dim_size);
+      for (int64_t elem = 0; elem < n; ++elem) {
+        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+        auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
+
+        self_data[idx * self_dim_stride] = *source_data;
+
+        self_data_bytes += strides[0];
+        source_data_bytes += strides[2];
+      }
+    };
+
+    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+      auto idx_stride = strides[1];
+      if (idx_stride) {
+        handle_nonzero_idx_stride(data, strides, n);
+      }
+      else {
+        handle_zero_idx_stride(data, strides, n);
+      }
+    };
+    iter.for_each(loop);
   });
 }
 
@@ -150,7 +272,7 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
   iter.for_each(loop);
 }
 
-void masked_fill_kernel(TensorIterator& iter, Scalar value) {
+void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
     iter.dtype(), "masked_fill", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
@@ -161,6 +283,51 @@ void masked_fill_kernel(TensorIterator& iter, Scalar value) {
         cpu_masked_fill_kernel<scalar_t, unsigned char>(iter, scalar_val);
       }
     });
+}
+
+template <typename scalar_t, typename mask_t>
+void cpu_masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
+  auto is_mask_bool = std::is_same<mask_t, bool>::value;
+  std::ptrdiff_t source_cntr = 0;
+  scalar_t* source_ptr = source.data_ptr<scalar_t>();
+  auto numel = source.numel();
+
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+    char* dst = data[0];
+    const int64_t dst_stride = strides[0];
+    char* mask = data[1];
+    const int64_t mask_stride = strides[1];
+    for (int64_t i = 0; i < n; i++) {
+      mask_t mask_value = *(mask_t*)(mask + mask_stride * i);
+      if (!is_mask_bool) {
+        TORCH_CHECK(mask_value <= static_cast<mask_t>(1), "Mask tensor can take 0 and 1 values only");
+      }
+      if (mask_value) {
+        TORCH_CHECK(source_cntr < numel, "Number of elements of source < number of ones in mask");
+        *(scalar_t*)(dst + dst_stride * i) = *(source_ptr);
+        source_ptr++;
+        source_cntr++;
+      }
+    }
+  };
+  iter.serial_for_each(loop, {0, iter.numel()});
+}
+
+void masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Bool,
+      ScalarType::BFloat16,
+      ScalarType::Half,
+      iter.dtype(),
+      "masked_scatter",
+      [&] {
+        auto mask_dtype = iter.input_dtype(0);
+        if (mask_dtype == ScalarType::Bool) {
+          cpu_masked_scatter_kernel<scalar_t, bool>(iter, source);
+        } else {
+          cpu_masked_scatter_kernel<scalar_t, unsigned char>(iter, source);
+        }
+      });
 }
 
 template <typename scalar_t, typename mask_t, typename func_t>
@@ -244,9 +411,12 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
 } // anonymous namespace
 
 REGISTER_DISPATCH(index_stub, &index_kernel);
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
 REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
 REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
+REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
 
 }} // namespace at::native

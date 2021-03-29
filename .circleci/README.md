@@ -31,7 +31,7 @@ Usage
 1. Make changes to these scripts.
 2. Run the `regenerate.sh` script in this directory and commit the script changes and the resulting change to `config.yml`.
 
-You'll see a build failure on TravisCI if the scripts don't agree with the checked-in version.
+You'll see a build failure on GitHub if the scripts don't agree with the checked-in version.
 
 
 Motivation
@@ -55,7 +55,7 @@ Future direction
 See comment [here](https://github.com/pytorch/pytorch/pull/17323#pullrequestreview-206945747):
 
 In contrast with a full recursive tree traversal of configuration dimensions,
-> in the future future I think we actually want to decrease our matrix somewhat and have only a few mostly-orthogonal builds that taste as many different features as possible on PRs, plus a more complete suite on every PR and maybe an almost full suite nightly/weekly (we don't have this yet). Specifying PR jobs in the future might be easier to read with an explicit list when we come to this.
+> in the future I think we actually want to decrease our matrix somewhat and have only a few mostly-orthogonal builds that taste as many different features as possible on PRs, plus a more complete suite on every PR and maybe an almost full suite nightly/weekly (we don't have this yet). Specifying PR jobs in the future might be easier to read with an explicit list when we come to this.
 
 ----------------
 ----------------
@@ -90,7 +90,7 @@ The binaries are built in CircleCI. There are nightly binaries built every night
 
 We have 3 types of binary packages
 
-* pip packages - nightlies are stored on s3 (pip install -f <a s3 url>). releases are stored in a pip repo (pip install torch) (ask Soumith about this)
+* pip packages - nightlies are stored on s3 (pip install -f \<a s3 url\>). releases are stored in a pip repo (pip install torch) (ask Soumith about this)
 * conda packages - nightlies and releases are both stored in a conda repo. Nighty packages have a '_nightly' suffix
 * libtorch packages - these are zips of all the c++ libraries, header files, and sometimes dependencies. These are c++ only
     * shared with dependencies (the only supported option for Windows)
@@ -104,16 +104,16 @@ All binaries are built in CircleCI workflows except Windows. There are checked-i
 
 Some quick vocab:
 
-* A\**workflow** is a CircleCI concept; it is a DAG of '**jobs**'. ctrl-f 'workflows' on\https://github.com/pytorch/pytorch/blob/master/.circleci/config.yml to see the workflows.
+* A \**workflow** is a CircleCI concept; it is a DAG of '**jobs**'. ctrl-f 'workflows' on https://github.com/pytorch/pytorch/blob/master/.circleci/config.yml to see the workflows.
 * **jobs** are a sequence of '**steps**'
-* **steps** are usually just a bash script or a builtin CircleCI command.* All steps run in new environments, environment variables declared in one script DO NOT persist to following steps*
+* **steps** are usually just a bash script or a builtin CircleCI command. *All steps run in new environments, environment variables declared in one script DO NOT persist to following steps*
 * CircleCI has a **workspace**, which is essentially a cache between steps of the *same job* in which you can store artifacts between steps.
 
 ## How are the workflows structured?
 
 The nightly binaries have 3 workflows. We have one job (actually 3 jobs:  build, test, and upload) per binary configuration
 
-1. binarybuilds
+1. binary_builds
     1. every day midnight EST
     2. linux: https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/linux-binary-build-defaults.yml
     3. macos: https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/macos-binary-build-defaults.yml
@@ -144,7 +144,7 @@ The nightly binaries have 3 workflows. We have one job (actually 3 jobs:  build,
 
 ## How are the jobs structured?
 
-The jobs are in https://github.com/pytorch/pytorch/tree/master/.circleci/verbatim-sources . Jobs are made of multiple steps. There are some shared steps used by all the binaries/smokes. Steps of these jobs are all delegated to scripts in https://github.com/pytorch/pytorch/tree/master/.circleci/scripts .
+The jobs are in https://github.com/pytorch/pytorch/tree/master/.circleci/verbatim-sources. Jobs are made of multiple steps. There are some shared steps used by all the binaries/smokes. Steps of these jobs are all delegated to scripts in https://github.com/pytorch/pytorch/tree/master/.circleci/scripts .
 
 * Linux jobs: https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/linux-binary-build-defaults.yml
     * binary_linux_build.sh
@@ -204,7 +204,7 @@ TODO: fill in stuff
 
 ## Overview
 
-The code that runs the binaries lives in two places, in the normal [github.com/pytorch/pytorch](http://github.com/pytorch/pytorch), but also in [github.com/pytorch/builder](http://github.com/pytorch/builder) , which is a repo that defines how all the binaries are built. The relevant code is
+The code that runs the binaries lives in two places, in the normal [github.com/pytorch/pytorch](http://github.com/pytorch/pytorch), but also in [github.com/pytorch/builder](http://github.com/pytorch/builder), which is a repo that defines how all the binaries are built. The relevant code is
 
 
 ```
@@ -260,7 +260,7 @@ Linux, MacOS and Windows use the same code flow for the conda builds.
 Conda packages are built with conda-build, see https://conda.io/projects/conda-build/en/latest/resources/commands/conda-build.html
 
 Basically, you pass `conda build` a build folder (pytorch-nightly/ above) that contains a build script and a meta.yaml. The meta.yaml specifies in what python environment to build the package in, and what dependencies the resulting package should have, and the build script gets called in the env to build the thing.
-tldr; on conda-build is
+tl;dr on conda-build is
 
 1. Creates a brand new conda environment, based off of deps in the meta.yaml
     1. Note that environment variables do not get passed into this build env unless they are specified in the meta.yaml
@@ -270,7 +270,7 @@ tldr; on conda-build is
 4. Runs some simple import tests (if specified in the meta.yaml)
 5. Saves the finished package as a tarball
 
-The build.sh we use is essentially a wrapper around ```python setup.py build``` , but it also manually copies in some of our dependent libraries into the resulting tarball and messes with some rpaths.
+The build.sh we use is essentially a wrapper around `python setup.py build`, but it also manually copies in some of our dependent libraries into the resulting tarball and messes with some rpaths.
 
 The entrypoint file `builder/conda/build_conda.sh` is complicated because
 
@@ -355,15 +355,15 @@ The Dockerfiles are available in pytorch/builder, but there is no circleci job o
 
 # How to manually rebuild the binaries
 
-tldr; make a PR that looks like https://github.com/pytorch/pytorch/pull/21159
+tl;dr make a PR that looks like https://github.com/pytorch/pytorch/pull/21159
 
 Sometimes we want to push a change to master and then rebuild all of today's binaries after that change. As of May 30, 2019 there isn't a way to manually run a workflow in the UI. You can manually re-run a workflow, but it will use the exact same git commits as the first run and will not include any changes. So we have to make a PR and then force circleci to run the binary workflow instead of the normal tests. The above PR is an example of how to do this; essentially you copy-paste the binarybuilds workflow steps into the default workflow steps. If you need to point the builder repo to a different commit then you'd need to change https://github.com/pytorch/pytorch/blob/master/.circleci/scripts/binary_checkout.sh#L42-L45 to checkout what you want.
 
 ## How to test changes to the binaries via .circleci
 
-Writing PRs that test the binaries is annoying, since the default circleci jobs that run on PRs are not the jobs that you want to run. Likely, changes to the binaries will touch something under .circleci/ and require that .circleci/config.yml be regenerated (.circleci/config.yml controls all .circleci behavior, and is generated using ```.circleci/regenerate.sh``` in python 3.7). But you also need to manually hardcode the binary jobs that you want to test into the .circleci/config.yml workflow, so you should actually make at least two commits, one for your changes and one to temporarily hardcode jobs. See https://github.com/pytorch/pytorch/pull/22928 as an example of how to do this.
+Writing PRs that test the binaries is annoying, since the default circleci jobs that run on PRs are not the jobs that you want to run. Likely, changes to the binaries will touch something under .circleci/ and require that .circleci/config.yml be regenerated (.circleci/config.yml controls all .circleci behavior, and is generated using `.circleci/regenerate.sh` in python 3.7). But you also need to manually hardcode the binary jobs that you want to test into the .circleci/config.yml workflow, so you should actually make at least two commits, one for your changes and one to temporarily hardcode jobs. See https://github.com/pytorch/pytorch/pull/22928 as an example of how to do this.
 
-```
+```sh
 # Make your changes
 touch .circleci/verbatim-sources/nightly-binary-build-defaults.yml
 
@@ -408,7 +408,7 @@ The advantage of this flow is that you can make new changes to the base commit a
 
 You can build Linux binaries locally easily using docker.
 
-```
+```sh
 # Run the docker
 # Use the correct docker image, pytorch/conda-cuda used here as an example
 #
@@ -451,7 +451,7 @@ There’s no easy way to generate reproducible hermetic MacOS environments. If y
 
 But if you want to try, then I’d recommend
 
-```
+```sh
 # Create a new terminal
 # Clear your LD_LIBRARY_PATH and trim as much out of your PATH as you
 # know how to do

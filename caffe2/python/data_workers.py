@@ -1,9 +1,9 @@
 ## @package data_workers
 # Module caffe2.python.data_workers
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 
 '''
@@ -62,11 +62,7 @@ for each GPU. Note that the 'coordinator' returned by the function is same
 each time.
 '''
 
-try:
-    import Queue
-except ImportError:
-    # Py3
-    import queue as Queue
+import queue as Queue
 from itertools import chain
 import logging
 import threading

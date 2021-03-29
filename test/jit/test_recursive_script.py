@@ -1,4 +1,3 @@
-import unittest
 import os
 import sys
 import typing
@@ -159,7 +158,6 @@ class TestRecursiveScript(JitTestCase):
             # Make sure that no entries are left over from the previous failure
             FileCheck().check_count("is being compiled", 2).run(str(e))
 
-    @unittest.skipIf(sys.version_info[:2] < (3, 7), "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
         class M1(torch.nn.Module):
             x : torch.jit.Final[int]
@@ -287,8 +285,7 @@ class TestRecursiveScript(JitTestCase):
         test_module_dir(nn.ModuleDict(OrderedDict([("conv", conv), ("linear", linear)])))
 
     def test_class_compile(self):
-        def other_fn(a, b):
-            # type: (int, Tensor) -> Tensor
+        def other_fn(a: int, b: Tensor) -> Tensor:
             return a * b
 
         class B(object):
@@ -310,8 +307,7 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(N(), (torch.randn(2, 2),))
 
     def test_error_stack(self):
-        def d(x):
-            # type: (int) -> int
+        def d(x: int) -> int:
             return x + 10
 
         def c(x):
@@ -334,8 +330,7 @@ class TestRecursiveScript(JitTestCase):
             checker.run(str(e))
 
     def test_error_stack_module(self):
-        def d(x):
-            # type: (int) -> int
+        def d(x: int) -> int:
             return x + 10
 
         def c(x):
@@ -497,6 +492,59 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(M(), (torch.randn(5, 5),))
 
+    def test_prepare_scriptable_basic(self):
+        class SeluButReluWhenScripted(torch.nn.SELU):
+            def __prepare_scriptable__(self):
+                return nn.ReLU()
+
+        t = torch.randn(5, 5)
+        m = SeluButReluWhenScripted()
+        sm = torch.jit.script(m)
+        eager_out = m(t)
+        script_out = sm(t)
+        self.assertNotEqual(eager_out, script_out)
+
+    def test_prepare_scriptable_iterable_modules(self):
+        class SeluButReluWhenScripted(torch.nn.SELU):
+            def __prepare_scriptable__(self):
+                return nn.ReLU()
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                shared = SeluButReluWhenScripted()
+                self.sequential = nn.Sequential(
+                    SeluButReluWhenScripted(),
+                    SeluButReluWhenScripted(),
+                    nn.Sequential(SeluButReluWhenScripted(), shared, SeluButReluWhenScripted()),
+                    shared,
+                )
+                self.module_list = nn.ModuleList([SeluButReluWhenScripted(),
+                                                  shared,
+                                                  SeluButReluWhenScripted()])
+
+            def forward(self, x):
+                for mod in self.module_list:
+                    x += mod(x)
+                x += self.sequential(x)
+                return x
+
+        t = torch.randn(5, 5)
+        m = M()
+        eager_out = m(t.clone())
+        sm = torch.jit.script(m)
+        script_out = sm(t.clone())
+        self.assertNotEqual(eager_out, script_out)
+
+    def test_prepare_scriptable_cycle(self):
+        t = torch.randn(5, 5)
+        c = torch.nn.Module()
+        p = torch.nn.Module()
+        c.__dict__["_p"] = p
+        p.__dict__["_c"] = c
+
+        sm = torch.jit.script(p)
+
     def test_attributes(self):
         @torch.jit.script
         class Inner2(object):
@@ -515,8 +563,7 @@ class TestRecursiveScript(JitTestCase):
                 self.a = 4
                 self.inner = Inner2()
 
-            def __setstate__(self, obj):
-                # type: (Tuple[int, Inner2]) -> None
+            def __setstate__(self, obj: Tuple[int, Inner2]) -> None:
                 a, inner = obj
                 self.a = a
                 self.inner = inner

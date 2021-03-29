@@ -13,6 +13,13 @@ namespace test_function_traits {
     static_assert(std::is_same<int, typename function_traits<int(int, float)>::return_type>::value, "");
     static_assert(std::is_same<typelist::typelist<int, float>, typename function_traits<void(int, float)>::parameter_types>::value, "");
     static_assert(std::is_same<typelist::typelist<int, float>, typename function_traits<int(int, float)>::parameter_types>::value, "");
+
+    static_assert(std::is_same<bool, typename make_function_traits_t<bool, typelist::typelist<int, float>>::return_type>::value, "");
+    static_assert(std::is_same<void, typename make_function_traits_t<void, typelist::typelist<int, float>>::return_type>::value, "");
+    static_assert(std::is_same<typelist::typelist<int, float>, typename make_function_traits_t<bool, typelist::typelist<int, float>>::parameter_types>::value, "");
+    static_assert(std::is_same<typelist::typelist<int, float>, typename make_function_traits_t<void, typelist::typelist<int, float>>::parameter_types>::value, "");
+    static_assert(std::is_same<bool(int, float), typename make_function_traits_t<bool, typelist::typelist<int, float>>::func_type>::value, "");
+    static_assert(std::is_same<void(int, float), typename make_function_traits_t<void, typelist::typelist<int, float>>::func_type>::value, "");
 }
 
 struct MovableOnly {
@@ -243,14 +250,36 @@ namespace test_tuple_take {
 
   TEST(MetaprogrammingTest, TupleTake_nonemptyPrefix) {
     auto x = std::make_tuple(0, "HEY", 2.0);
-    auto y = tuple_take<std::tuple<int, const char*, double>, 2>(x);
+    auto y = tuple_take<decltype(x), 2>(x);
     auto z = std::make_tuple(0, "HEY");
     EXPECT_EQ(y, z);
   }
 
   TEST(MetaprogrammingTest, TupleTake_fullPrefix) {
     auto x = std::make_tuple(0, "HEY", 2.0);
-    auto y = tuple_take<std::tuple<int, const char*, double>, 3>(x);
+    auto y = tuple_take<decltype(x), 3>(x);
+    EXPECT_EQ(x, y);
+  }
+
+  TEST(MetaprogrammingTest, TupleTake_negative) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_take<decltype(x), -2>(x);
+    auto z = std::make_tuple("HEY", 2.0);
+    EXPECT_EQ(y, z);
+  }
+}
+
+namespace test_tuple_slice {
+  TEST(MetaprogrammingTest, TupleSlice_middle) {
+    auto x = std::make_tuple(0, "HEY", 2.0, false);
+    auto y = tuple_slice<decltype(x), 1, 2>(x);
+    auto z = std::make_tuple("HEY", 2.0);
+    EXPECT_EQ(y, z);
+  }
+
+  TEST(MetaprogrammingTest, TupleSlice_full) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_slice<decltype(x), 0, 3>(x);
     EXPECT_EQ(x, y);
   }
 }
@@ -453,5 +482,23 @@ namespace test_tuple_concat {
     EXPECT_EQ(2, std::get<3>(result).move_count);
   }
 }
+
+namespace test_concat_iseq {
+  using std::index_sequence;
+  using std::integer_sequence;
+  static_assert(std::is_same<index_sequence<>, concat_iseq_t<>>::value, "");
+  static_assert(std::is_same<index_sequence<>, concat_iseq_t<index_sequence<>>>::value, "");
+  static_assert(std::is_same<index_sequence<>, concat_iseq_t<index_sequence<>, index_sequence<>>>::value, "");
+  static_assert(std::is_same<index_sequence<4>, concat_iseq_t<index_sequence<4>>>::value, "");
+  static_assert(std::is_same<index_sequence<4>, concat_iseq_t<index_sequence<4>, index_sequence<>>>::value, "");
+  static_assert(std::is_same<index_sequence<4>, concat_iseq_t<index_sequence<>, index_sequence<4>>>::value, "");
+  static_assert(std::is_same<index_sequence<4>, concat_iseq_t<index_sequence<>, index_sequence<4>, index_sequence<>>>::value, "");
+  static_assert(std::is_same<index_sequence<4, 2>, concat_iseq_t<index_sequence<4>, index_sequence<2>>>::value, "");
+  static_assert(std::is_same<index_sequence<4, 2>, concat_iseq_t<index_sequence<>, index_sequence<4, 2>, index_sequence<>>>::value, "");
+  static_assert(std::is_same<index_sequence<4, 2, 9>, concat_iseq_t<index_sequence<>, index_sequence<4, 2>, index_sequence<9>>>::value, "");
+
+  static_assert(std::is_same<integer_sequence<int8_t, -5, -3>, concat_iseq_t<integer_sequence<int8_t, -5>, integer_sequence<int8_t, -3>>>::value, "");
+}
+
 
 }

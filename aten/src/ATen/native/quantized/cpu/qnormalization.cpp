@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
+#include <ATen/native/layer_norm.h>
+#include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <c10/util/accumulate.h>
 #include <torch/library.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <ATen/native/layer_norm.h>
 
 #include <algorithm>
 #include <vector>
@@ -71,11 +72,8 @@ Tensor quantized_group_norm_impl(
 
   const int64_t batches = input_shape[0];
   const int64_t num_channels = input_shape[1];
-  const int64_t elements_per_batch = std::accumulate(
-      input_shape.cbegin() + 1,
-      input_shape.cend(),
-      1LL,
-      std::multiplies<int64_t>());
+  const int64_t elements_per_batch =
+      c10::multiply_integers(input_shape.cbegin() + 1, input_shape.cend());
 
   const int64_t M = batches * num_groups;
   const int64_t N = elements_per_batch / num_groups;
@@ -120,7 +118,7 @@ Tensor quantized_instance_norm_impl(
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // TODO: this is kind of... blegh
-  m.impl("layer_norm", [](
+  m.impl(TORCH_SELECTIVE_NAME("quantized::layer_norm"), [](
     Tensor input,
     std::vector<int64_t> normalized_shape,  // because IntArrayRef doesn't work
     c10::optional<Tensor> weight,
@@ -134,7 +132,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
           bias.has_value() ? *bias : Tensor(),
           eps, output_scale, output_zero_point);
   });
-  m.impl("group_norm", [](
+  m.impl(TORCH_SELECTIVE_NAME("quantized::group_norm"), [](
       Tensor qx,
       int64_t num_groups,
       c10::optional<Tensor> weight,
@@ -148,7 +146,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
         bias.has_value() ? *bias : Tensor(),
         eps, output_scale, output_zero_point);
   });
-  m.impl("instance_norm", [](
+  m.impl(TORCH_SELECTIVE_NAME("quantized::instance_norm"), [](
       Tensor qx,
       c10::optional<Tensor> weight,
       c10::optional<Tensor> bias,

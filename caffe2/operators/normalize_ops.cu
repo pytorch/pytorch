@@ -95,6 +95,7 @@ void NormalizeOp<float, CUDAContext>::DoNormalize(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(m, n, sf, xData, yData, kEps_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -121,6 +122,8 @@ bool NormalizeGradientOp<float, CUDAContext>::RunOnDevice() {
       dY.data<float>(),
       dX->template mutable_data<float>(),
       kEps_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -171,6 +174,7 @@ void NormalizeL1Op<float, CUDAContext>::DoNormalize(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(m, n, sf, xData, yData);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(Normalize, NormalizeOp<float, CUDAContext>);

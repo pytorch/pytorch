@@ -9,18 +9,26 @@ VariableInfo::VariableInfo(const Variable& var)
   , device(var.device())
   , scalar_type(var.scalar_type())
   , size(var.sizes().vec())
-  , requires_grad(var.requires_grad()) {
+  , requires_grad(var.requires_grad())
+  , is_empty(false) {
 }
+
+VariableInfo::VariableInfo() : requires_grad(false), is_empty(true) {}
 
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
-  return at::zeros(size,
-    at::TensorOptions(scalar_type).device(device).layout(layout));
+  if (is_empty) {
+    // Return undefined tensor.
+    return at::Tensor();
+  } else {
+    return at::zeros(
+        size, at::TensorOptions(scalar_type).device(device).layout(layout));
+  }
 }
 
-variable_list _wrap_outputs(const variable_list &input_vars,
+std::vector<c10::optional<Variable>> _wrap_outputs(const variable_list &input_vars,
   const std::unordered_set<at::TensorImpl*> &non_differentiable,
   const std::unordered_set<at::TensorImpl*> &dirty_inputs,
-  const at::ArrayRef<Variable> raw_outputs,
+  const at::ArrayRef<c10::optional<Variable>> raw_outputs,
   const std::shared_ptr<Node> &cdata) {
 
   std::unordered_set<at::TensorImpl*> inputs;
@@ -96,16 +104,26 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     }
   };
 
-  std::vector<torch::autograd::Variable> outputs;
+  std::vector<c10::optional<Variable>> outputs;
   std::unordered_set<at::TensorImpl*> outputs_impl; // For dirty_inputs check
   outputs.reserve(num_outputs);
   int num_diff_outputs = 0;
 
 
   for (auto i = 0; i < num_outputs; ++i) {
-    Variable var = raw_outputs[i];
+    // For outputs that are not tensors, put a placeholder undefined input.
+    if (!raw_outputs[i].has_value()) {
+      if (cdata) {
+        auto output_nr = cdata->add_input_metadata(Node::undefined_input());
+        AT_ASSERT(i == (int)output_nr);
+      }
+      outputs.emplace_back();
+      continue;
+    }
 
-    auto out_tensor_impl = raw_outputs[i].unsafeGetTensorImpl();
+    Variable var = raw_outputs[i].value();
+
+    auto out_tensor_impl = var.unsafeGetTensorImpl();
     bool is_input = inputs.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
     bool is_differentiable = cdata && non_differentiable.count(out_tensor_impl) == 0
@@ -122,9 +140,9 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     // return and input that is a view as is).
     // See NOTE [ View + Inplace detection ] for why we replace everything by a warning.
     if (!(is_input && is_modified) && var.is_view()) {
-      // NB: is_view() ==> get_autograd_meta()
-      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-      diff_view_meta->creation_meta = CreationMeta::IN_CUSTOM_FUNCTION;
+      // is_view() => diff_view_meta
+      auto diff_view_meta = impl::get_view_autograd_meta(var);
+      diff_view_meta->set_creation_meta(CreationMeta::IN_CUSTOM_FUNCTION);
     }
 
     if (is_differentiable) {
@@ -139,10 +157,11 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   // See NOTE [ View + Inplace detection ] for more details
   if (num_diff_outputs > 1) {
     for (auto& var: outputs) {
-      if (var.is_view()) {
-        // NB: is_view() ==> get_autograd_meta()
-        auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-        diff_view_meta->creation_meta = CreationMeta::MULTI_OUTPUT_NODE;
+      if (var.has_value()) {
+        auto diff_view_meta = impl::get_view_autograd_meta(var.value());
+        if (diff_view_meta) {
+          diff_view_meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
+        }
       }
     }
   }

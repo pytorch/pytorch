@@ -6,7 +6,7 @@ on:
 
 jobs:
   welcome:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
       - uses: actions/github-script@v2
         with:
@@ -19,7 +19,7 @@ jobs:
             // - io: A reference to the @actions/io package
 
             // Check if issue has a JIT label.
-            const kJitLabel = "jit";
+            const kJitLabel = "oncall: jit";
 
             issue = await github.issues.get({
               owner: context.issue.owner,

@@ -1,6 +1,6 @@
 #ifndef THC_DEVICE_ALLOCATOR_INC
 #define THC_DEVICE_ALLOCATOR_INC
-
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAMacros.h>
@@ -111,6 +111,7 @@ C10_CUDA_API void raw_delete(void* ptr);
 
 C10_CUDA_API Allocator* get();
 C10_CUDA_API void init(int device_count);
+C10_CUDA_API void setMemoryFraction(double fraction, int device);
 C10_CUDA_API void emptyCache();
 C10_CUDA_API void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
 C10_CUDA_API void* getBaseAllocation(void *ptr, size_t *size);
@@ -119,6 +120,13 @@ C10_CUDA_API DeviceStats getDeviceStats(int device);
 C10_CUDA_API void resetAccumulatedStats(int device);
 C10_CUDA_API void resetPeakStats(int device);
 C10_CUDA_API std::vector<SegmentInfo> snapshot();
+
+// CUDAGraph interactions
+C10_CUDA_API void notifyCaptureBegin(int device,
+                                     CaptureId_t graph_id,
+                                     MempoolId_t mempool_id);
+C10_CUDA_API void notifyCaptureEnd(int device, CaptureId_t graph_id);
+C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id);
 
 C10_CUDA_API std::mutex* getFreeMutex();
 

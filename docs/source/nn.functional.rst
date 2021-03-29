@@ -137,6 +137,15 @@ Pooling functions
 
 .. autofunction:: adaptive_avg_pool3d
 
+:hidden:`fractional_max_pool2d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: fractional_max_pool2d
+
+:hidden:`fractional_max_pool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: fractional_max_pool3d
 
 Non-linear activation functions
 -------------------------------
@@ -468,6 +477,11 @@ Loss functions
 
 .. autofunction:: nll_loss
 
+:hidden:`huber_loss`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: huber_loss
+
 :hidden:`smooth_l1_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -483,6 +497,11 @@ Loss functions
 
 .. autofunction:: triplet_margin_loss
 
+:hidden:`triplet_margin_with_distance_loss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: triplet_margin_with_distance_loss
+
 Vision functions
 ----------------
 
@@ -490,6 +509,11 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pixel_shuffle
+
+:hidden:`pixel_unshuffle`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pixel_unshuffle
 
 :hidden:`pad`
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -533,5 +557,3 @@ DataParallel functions (multi-GPU, distributed)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.parallel.data_parallel
-
-

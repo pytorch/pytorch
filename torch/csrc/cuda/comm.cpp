@@ -130,7 +130,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
 // When splitting, the view operations will make all Variables broadcast
 // together to share a single version counter, because they are all views of the
 // large Variable. However, that large Variable is immediately discarded and all
-// these Varaibles do not share storage at all.
+// these Variables do not share storage at all.
 //
 // For example, when two buffers are broadcast together in `DataParallel` and
 // one of them is modified in-place during `forward` but the other is needed in
@@ -278,7 +278,7 @@ std::vector<at::Tensor>& scatter_out(
       tensor.split_with_sizes(/*split_sizes=*/chunk_sizes, /*dim=*/dim);
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
   for (size_t i = 0; i < chunks.size(); i++) {
-    if (streams && (*streams)[i]) {
+    if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
       const auto device_index =
           static_cast<int16_t>(out_tensors[i].get_device());
       TORCH_CHECK(
@@ -328,7 +328,7 @@ std::vector<at::Tensor> scatter(
   for (size_t i = 0; i < chunks.size(); ++i) {
     const auto device_index = static_cast<int16_t>(devices[i]);
     if (device_index != tensor.get_device()) {
-      if (streams && (*streams)[i]) {
+      if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
         TORCH_CHECK(
             (*streams)[i]->device_index() == device_index,
             "Expected the device associated with the stream at index ",

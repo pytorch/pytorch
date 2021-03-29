@@ -6,12 +6,12 @@
 
 
 namespace c10 {
-CAFFE2_API std::ostream& operator<<(std::ostream& out, Backend b);
+TORCH_API std::ostream& operator<<(std::ostream& out, Backend b);
 }
 namespace at {
 
-CAFFE2_API std::ostream& operator<<(std::ostream& out, const DeprecatedTypeProperties& t);
-CAFFE2_API std::ostream& print(
+TORCH_API std::ostream& operator<<(std::ostream& out, const DeprecatedTypeProperties& t);
+TORCH_API std::ostream& print(
     std::ostream& stream,
     const Tensor& tensor,
     int64_t linesize);

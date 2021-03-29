@@ -11,13 +11,9 @@ parameters:
   run_binary_tests:
     type: boolean
     default: false
-
-docker_config_defaults: &docker_config_defaults
-  user: jenkins
-  aws_auth:
-    # This IAM user only allows read-write access to ECR
-    aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V4}
-    aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V4}
+  run_build:
+    type: boolean
+    default: true
 
 executors:
   windows-with-nvidia-gpu:

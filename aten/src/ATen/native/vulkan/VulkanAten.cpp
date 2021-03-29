@@ -17,6 +17,12 @@ namespace aten {
 using at::native::vulkan::detail::VulkanTensor;
 using VulkanTensorImpl = VulkanOpaqueTensorImpl<VulkanTensor>;
 
+namespace {
+int64_t normalize_dim(int64_t d, int64_t n) {
+  return (d % n + n) % n;
+}
+} // namespace
+
 Tensor new_with_vtensor_vulkan(
     VulkanTensor&& vt,
     const TensorOptions& options) {
@@ -49,17 +55,20 @@ VulkanTensor& vtensor_from_vulkan(Tensor& tensor) {
 
 Tensor empty(
     IntArrayRef size,
-    const TensorOptions& options,
+    optional<ScalarType> dtype,
+    optional<Layout> layout,
+    optional<Device> device,
+    optional<bool> pin_memory,
     const optional<MemoryFormat> memory_format) {
   TORCH_CHECK(
-      !options.has_pinned_memory(),
+      !pin_memory.has_value(),
       "'pin_memory' argument is incompatible with Vulkan tensor");
   TORCH_CHECK(
-      !options.has_memory_format() && !memory_format,
+      !memory_format.has_value(),
       "'memory_format' argument is incompatible with Vulkan tensor");
   VulkanTensor vt{size.vec()};
   return new_with_vtensor_vulkan(
-      std::move(vt), at::device(at::kVulkan).dtype(options.dtype()));
+      std::move(vt), at::device(at::kVulkan).dtype(dtype));
 }
 
 Tensor empty_strided(
@@ -70,7 +79,7 @@ Tensor empty_strided(
     optional<Device> device,
     optional<bool> pin_memory) {
   return vulkan::aten::empty(
-      size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory), c10::nullopt);
+      size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
 Tensor upsample_nearest2d(
@@ -155,7 +164,7 @@ Tensor avg_pool2d(
       pooling_output_shape<int64_t>(iW, kW, padW, dW, 1, ceil_mode);
 
   pool2d_shape_check(
-      self, kH, kW, dH, dW, padH, padW, 1, 1, iC, iH, iW, oH, oW);
+      self, kH, kW, dH, dW, padH, padW, 1, 1, iC, iH, iW, oH, oW, self.suggest_memory_format());
 
   VulkanTensor y{{iN, iC, oH, oW}};
   vulkan::detail::avg_pool2d(
@@ -225,7 +234,8 @@ Tensor max_pool2d(
       iH,
       iW,
       oH,
-      oW);
+      oW,
+      self.suggest_memory_format());
 
   VulkanTensor y{{iN, iC, oH, oW}};
   vulkan::detail::max_pool2d(
@@ -255,8 +265,9 @@ Tensor reshape(at::Tensor const& input, IntArrayRef shape) {
 }
 
 Tensor cat(const TensorList tensors, int64_t dim) {
+  const auto norm_dim = normalize_dim(dim, 4);
   TORCH_INTERNAL_ASSERT(
-      dim == 0 || dim == 1,
+      norm_dim == 0 || norm_dim == 1,
       "Vulkan cat is implemented only for batch and channels dimensions");
   at::Tensor tensor = tensors[0];
   int64_t cat_dim_size = 0;
@@ -323,7 +334,7 @@ Tensor slice(
       self.options());
 }
 
-Tensor add(const Tensor& self, const Tensor& other, const Scalar alpha) {
+Tensor add(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto xt = self.is_vulkan() ? self : self.vulkan();
   const auto& x = vtensor_from_vulkan(xt);
   auto yt = other.is_vulkan() ? other : other.vulkan();
@@ -351,7 +362,7 @@ const VulkanTensor& vtensor(const Tensor& t) {
   return vtensor_from_vulkan(tv);
 }
 
-Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor& add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto& x = vtensor(self);
   const auto& y = vtensor(other);
   float a = alpha.to<float>();
@@ -362,7 +373,7 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
   return self;
 }
 
-Tensor add_scalar(const Tensor& self, Scalar other, Scalar alpha) {
+Tensor add_scalar(const Tensor& self, const Scalar& other, const Scalar& alpha) {
   const auto& x = vtensor_from_vulkan(self);
   const float s = other.to<float>();
   const float a = alpha.to<float>();
@@ -371,7 +382,7 @@ Tensor add_scalar(const Tensor& self, Scalar other, Scalar alpha) {
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 
-Tensor mul_scalar(const Tensor& self, Scalar other) {
+Tensor mul_scalar(const Tensor& self, const Scalar& other) {
   const auto& x = vtensor_from_vulkan(self);
   const float s = other.to<float>();
   VulkanTensor output{self.sizes().vec()};
@@ -431,8 +442,8 @@ Tensor addmm(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,
-    const Scalar beta,
-    const Scalar alpha) {
+    const Scalar& beta,
+    const Scalar& alpha) {
   const VulkanTensor t =
       vtensor_from_vulkan(self.is_vulkan() ? self : self.vulkan());
   const VulkanTensor m1 =
@@ -467,8 +478,8 @@ Tensor mm(const Tensor& self, const Tensor& mat2) {
 
 Tensor clamp(
     const Tensor& self,
-    const c10::optional<Scalar> min,
-    const c10::optional<Scalar> max) {
+    const c10::optional<Scalar>& min,
+    const c10::optional<Scalar>& max) {
   const auto& x = vtensor_from_vulkan(self);
   VulkanTensor output{self.sizes().vec()};
   vulkan::detail::clamp(
@@ -482,8 +493,8 @@ Tensor clamp(
 
 Tensor& clamp_(
     Tensor& self,
-    const c10::optional<Scalar> min,
-    const c10::optional<Scalar> max) {
+    const c10::optional<Scalar>& min,
+    const c10::optional<Scalar>& max) {
   auto& x = vtensor_from_vulkan(self);
   VulkanTensor output{self.sizes().vec()};
   vulkan::detail::clamp(
@@ -495,11 +506,11 @@ Tensor& clamp_(
   return self;
 }
 
-Tensor hardtanh(const Tensor& self, const Scalar min, const Scalar max) {
+Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
   return vulkan::aten::clamp(self, min, max);
 }
 
-Tensor& hardtanh_(Tensor& self, const Scalar min, const Scalar max) {
+Tensor& hardtanh_(Tensor& self, const Scalar& min, const Scalar& max) {
   return vulkan::aten::clamp_(self, min, max);
 }
 
@@ -512,9 +523,18 @@ Tensor mean(
     const IntArrayRef dim,
     const bool keepdim,
     const optional<ScalarType> dtype) {
+  TORCH_INTERNAL_ASSERT(!keepdim, "keepdim not implemented for Vulkan mean");
   TORCH_INTERNAL_ASSERT(self.is_vulkan(), "mean expects Vulkan tensor input");
-  TORCH_INTERNAL_ASSERT(
-      self.dim() == 4 && dim.size() == 2 && dim[0] == 2 && dim[1] == 3);
+
+  // Mean is implemented only for HW dimensions of 4-d tensor
+  TORCH_INTERNAL_ASSERT(self.dim() == 4);
+  static const std::unordered_set<int64_t> expected_dims_set({2, 3});
+  std::unordered_set<int64_t> dims_set;
+  for (const auto& d : dim) {
+    dims_set.insert(normalize_dim(d, 4));
+  }
+  TORCH_INTERNAL_ASSERT(expected_dims_set == dims_set);
+
   const auto& x = vtensor_from_vulkan(self);
   const auto sizes = self.sizes();
   VulkanTensor output{std::vector<int64_t>{sizes[0], sizes[1]}};
@@ -522,15 +542,17 @@ Tensor mean(
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 
+#ifndef USE_VULKAN_API
+
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("slice.Tensor", TORCH_FN(at::native::vulkan::aten::slice));
-  m.impl("reshape", TORCH_FN(at::native::vulkan::aten::reshape));
+  m.impl("view", TORCH_FN(at::native::vulkan::aten::reshape));
   m.impl("select.int", TORCH_FN(at::native::vulkan::aten::select));
   m.impl("transpose.int", TORCH_FN(at::native::vulkan::aten::transpose));
-  m.impl_UNBOXED("transpose_", at::native::vulkan::aten::transpose_);
+  m.impl("transpose_", at::native::vulkan::aten::transpose_);
   m.impl("view", TORCH_FN(at::native::vulkan::aten::view));
   m.impl("unsqueeze", TORCH_FN(at::native::vulkan::aten::unsqueeze));
-  m.impl_UNBOXED("empty.memory_format", at::native::vulkan::aten::empty);
+  m.impl("empty.memory_format", at::native::vulkan::aten::empty);
   m.impl("empty_strided", TORCH_FN(at::native::vulkan::aten::empty_strided));
   m.impl("add.Tensor", TORCH_FN(at::native::vulkan::aten::add));
   m.impl("clamp", TORCH_FN(at::native::vulkan::aten::clamp));
@@ -548,19 +570,21 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("_cat", TORCH_FN(at::native::vulkan::aten::cat));
   m.impl("mul.Scalar", TORCH_FN(at::native::vulkan::aten::mul_scalar));
   m.impl("add.Scalar", TORCH_FN(at::native::vulkan::aten::add_scalar));
-  m.impl_UNBOXED(
+  m.impl(
       "convolution_overrideable", at::native::vulkan::aten::convolution);
-  m.impl_UNBOXED("hardtanh_", at::native::vulkan::aten::hardtanh_);
-  m.impl_UNBOXED("relu_", at::native::vulkan::aten::relu_);
-  m.impl_UNBOXED("add_.Tensor", at::native::vulkan::aten::add_);
+  m.impl("hardtanh_", at::native::vulkan::aten::hardtanh_);
+  m.impl("relu_", at::native::vulkan::aten::relu_);
+  m.impl("add_.Tensor", at::native::vulkan::aten::add_);
 }
+
+#endif /* USE_VULKAN_API */
 
 Tensor& copy_from_vulkan_(Tensor& self, const Tensor& src) {
   TORCH_INTERNAL_ASSERT(
       src.device().type() == DeviceType::Vulkan,
       "copy_from_vulkan input tensor's device is not Vulkan");
   TORCH_INTERNAL_ASSERT(
-      self.device().type() == DeviceType::CPU,
+      self.device().is_cpu(),
       "copy_from_vulkan is implemented only for CPU device output");
   TORCH_INTERNAL_ASSERT(
       self.layout() == Layout::Strided,
@@ -583,7 +607,7 @@ Tensor& copy_to_vulkan_(Tensor& self, const Tensor& src) {
       self.device().type() == DeviceType::Vulkan,
       "copy_to_vulkan output tensor's device is not Vulkan");
   TORCH_INTERNAL_ASSERT(
-      src.device().type() == DeviceType::CPU,
+      src.device().is_cpu(),
       "copy_to_vulkan is implemented only for CPU device input");
   TORCH_INTERNAL_ASSERT(
       src.layout() == Layout::Strided,

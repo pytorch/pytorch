@@ -493,8 +493,8 @@ TEST(SerializeTest, Optim_Adagrad) {
   std::vector<int64_t> step_buffers;
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
-  for (size_t i = 0; i < params_.size(); i++) {
-    auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
+  for (const auto & param : params_) {
+    auto key_ = c10::guts::to_string(param.unsafeGetTensorImpl());
     const AdagradParamState& curr_state_ = static_cast<const AdagradParamState&>(*(optim1_state.at(key_).get()));
     sum_buffers.emplace_back(curr_state_.sum());
     step_buffers.emplace_back(curr_state_.step());

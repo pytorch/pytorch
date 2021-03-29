@@ -5,7 +5,7 @@ import torch.onnx
 from torch.onnx import utils, OperatorExportTypes, TrainingMode
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
 import torch.utils.cpp_extension
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
 import caffe2.python.onnx.backend as backend
 from verify import verify
 
@@ -23,7 +23,6 @@ skip = unittest.skip
 
 class TestUtilityFuns(TestCase):
     opset_version = 9
-    use_new_jit_passes = False
 
     def setUp(self):
         torch.manual_seed(0)
@@ -41,8 +40,7 @@ class TestUtilityFuns(TestCase):
                                      _disable_torch_constant_prop=True,
                                      operator_export_type=operator_export_type,
                                      training=training,
-                                     example_outputs=example_outputs,
-                                     use_new_jit_passes=self.use_new_jit_passes)
+                                     example_outputs=example_outputs)
 
     def test_is_in_onnx_export(self):
         test_self = self
@@ -216,7 +214,7 @@ class TestUtilityFuns(TestCase):
         class UnsqueezeModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
-                b = torch.unsqueeze(a, 0)
+                b = torch.unsqueeze(a, -2)
                 return b + x
 
         _set_opset_version(self.opset_version)
@@ -225,7 +223,62 @@ class TestUtilityFuns(TestCase):
         graph, _, __ = self._model_to_graph(UnsqueezeModule(), (x, ))
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Unsqueeeze"
+            assert node.kind() != "onnx::Unsqueeze"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
+        assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_unsqueeze_multi_axies(self):
+        class PReluModel(torch.nn.Module):
+            def __init__(self):
+                super(PReluModel, self).__init__()
+                self.prelu = torch.nn.PReLU()
+
+            def forward(self, x):
+                a = torch.randn(2, 3, 4, 5, 8, 7)
+                return self.prelu(x) + a
+
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        x = torch.randn(2, 3, 4, 5, 8, 7)
+        graph, _, __ = self._model_to_graph(PReluModel(), x)
+
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Unsqueeze"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
+        assert len(list(graph.nodes())) == 4
+
+    def test_constant_fold_squeeze_without_axes(self):
+        class SqueezeModule(torch.nn.Module):
+            def forward(self, x):
+                a = torch.tensor([[[1., 2., 3.], [4., 5., 6.]]])
+                return torch.squeeze(a) + x + torch.squeeze(a)
+
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        x = torch.ones(2, 3)
+        graph, _, __ = self._model_to_graph(SqueezeModule(), (x, ))
+        print(graph)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Squeeze"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
+        assert len(list(graph.nodes())) == 2
+
+    def test_constant_fold_squeeze_with_axes(self):
+        class SqueezeAxesModule(torch.nn.Module):
+            def forward(self, x):
+                a = torch.tensor([[[1., 2., 3.], [4., 5., 6.]]])
+                return torch.squeeze(a, dim=-3) + x
+
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        x = torch.ones(2, 3)
+        graph, _, __ = self._model_to_graph(SqueezeAxesModule(), (x, ))
+
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Squeeze"
             assert node.kind() != "onnx::Cast"
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
@@ -284,7 +337,12 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Slice"
             assert node.kind() != "onnx::Concat"
             assert node.kind() != "onnx::Unsqueeze"
-        assert len(list(graph.nodes())) == 3
+
+        if self.opset_version <= 12:
+            assert len(list(graph.nodes())) == 3
+        else:
+            # Unsqueeze op parameter 'axes' as an input instead of as an attribute when opset version >= 13
+            assert len(list(graph.nodes())) == 4
 
     def test_constant_fold_transpose_matmul(self):
         class MatMulNet(torch.nn.Module):
@@ -618,6 +676,8 @@ class TestUtilityFuns(TestCase):
         assert next(iter).kind() == "aten::quantize_per_tensor"
         assert next(iter).kind() == "aten::dequantize"
 
+    # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
+    @skipIfUnsupportedOpsetVersion([11, 12, 13])
     def test_prim_fallthrough(self):
         # Test prim op
         class PrimModule(torch.jit.ScriptModule):
@@ -677,6 +737,31 @@ class TestUtilityFuns(TestCase):
                                                    operator_export_type=OperatorExportTypes.ONNX)
 
         assert len(params_dict) == 2
+
+    def test_scripting_param(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=1, stride=2, padding=3, bias=True)
+                self.bn = torch.nn.BatchNorm2d(16, affine=True)
+
+            def forward(self, x):
+                x = self.conv(x)
+                bn = self.bn(x)
+                return bn
+
+        model = torch.jit.script(MyModule())
+        x = torch.randn(10, 3, 128, 128)
+        example_outputs = model(x)
+        f = io.BytesIO()
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, _, __ = utils._model_to_graph(model, (x,), do_constant_folding=True, example_outputs=example_outputs,
+                                             operator_export_type=OperatorExportTypes.ONNX)
+
+        graph_input_params = [param.debugName() for param in graph.inputs()]
+        assert all(item in graph_input_params for item in dict(model.named_parameters())), \
+            "Graph parameter names does not match model parameters."
 
     def test_modifying_params(self):
         class MyModel(torch.nn.Module):
@@ -754,7 +839,6 @@ TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=10))
 
-
 # opset 11 tests
 TestUtilityFuns_opset11 = type(str("TestUtilityFuns_opset11"),
                                (TestCase,),
@@ -765,17 +849,25 @@ TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=12))
 
+# opset 13 tests
+TestUtilityFuns_opset13 = type(str("TestUtilityFuns_opset13"),
+                               (TestCase,),
+                               dict(TestUtilityFuns.__dict__, opset_version=13))
+
 # opset 11 tests
-TestUtilityFuns_opset9_new_jit_API = type(str("TestUtilityFuns_opset9_new_jit_API"),
-                                          (TestCase,),
-                                          dict(TestUtilityFuns.__dict__, opset_version=9,
-                                          use_new_jit_passes=True))
+TestUtilityFuns_opset11_new_jit_API = type(str("TestUtilityFuns_opset11_new_jit_API"),
+                                           (TestCase,),
+                                           dict(TestUtilityFuns.__dict__, opset_version=11))
 
 # opset 12 tests
 TestUtilityFuns_opset12_new_jit_API = type(str("TestUtilityFuns_opset12_new_jit_API"),
                                            (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=12,
-                                           use_new_jit_passes=True))
+                                           dict(TestUtilityFuns.__dict__, opset_version=12))
+
+# opset 13 tests
+TestUtilityFuns_opset13_new_jit_API = type(str("TestUtilityFuns_opset13_new_jit_API"),
+                                           (TestCase,),
+                                           dict(TestUtilityFuns.__dict__, opset_version=13))
 
 
 if __name__ == '__main__':

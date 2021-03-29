@@ -18,6 +18,14 @@ std::string StripBasename(const std::string& full_path) {
   }
 }
 
+std::string ExcludeFileExtension(const std::string& file_name) {
+  const char sep = '.';
+  auto end_index = file_name.find_last_of(sep) == std::string::npos
+      ? -1
+      : file_name.find_last_of(sep);
+  return file_name.substr(0, end_index);
+}
+
 } // namespace detail
 
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {

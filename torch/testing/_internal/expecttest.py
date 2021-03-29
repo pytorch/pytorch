@@ -3,6 +3,50 @@ import unittest
 import traceback
 import os
 import string
+from typing import Tuple
+
+
+# This file implements expect tests (also known as "golden" tests).
+# Expect tests are a method of writing tests where instead of
+# hard-coding the expected output of a test, you instead run the test to
+# get the output, and the test framework automatically populates the
+# expected output.  If the output of the test changes, you can rerun the
+# test with EXPECTTEST_ACCEPT=1 environment variable to automatically
+# update the expected output.
+#
+# Somewhat unusually, this file implements *inline* expect tests: that
+# is to say, the expected output isn't save to an external file, it is
+# saved directly in the Python file (and we modify your Python the file
+# when updating the expect test.)
+#
+# The general recipe for how to use this is as follows:
+#
+#   1. Write your test and use assertExpectedInline() instead of
+#      a normal assertEqual.  Leave the expected argument blank
+#      with an empty string:
+#
+#       self.assertExpectedInline(some_func(), "")
+#
+#   2. Run your test.  It should fail, and you get an error message
+#      about accepting the output with EXPECTTEST_ACCEPT=1
+#
+#   3. Rerun the test with EXPECTTEST_ACCEPT=1.  Now the previously
+#      blank string literal will now contain the expected value of
+#      the test.
+#
+#       self.assertExpectedInline(some_func(), "my_value")
+#
+# Some tips and tricks:
+#
+#   - Often, you will want to expect test on a multiline string.  This
+#     framework understands triple-quoted strings, so you can just
+#     write """my_value""" and it will turn into triple-quoted
+#     strings.
+#
+#   - Take some time thinking about how exactly you want to design
+#     the output format of the expect test.  It is often profitable
+#     to design an output representation specifically for expect tests.
+#
 
 
 ACCEPT = os.getenv('EXPECTTEST_ACCEPT')
@@ -96,7 +140,8 @@ RE_EXPECT = re.compile(r"^(?P<suffix>[^\n]*?)"
                        r"(?P<raw>r?)", re.DOTALL)
 
 
-def replace_string_literal(src, lineno, new_string):
+def replace_string_literal(src : str, lineno : int,
+                           new_string : str) -> Tuple[str, int]:
     r"""
     Replace a triple quoted string literal with new contents.
     Only handles printable ASCII correctly at the moment.  This
@@ -161,6 +206,17 @@ class TestCase(unittest.TestCase):
     longMessage = True
 
     def assertExpectedInline(self, actual, expect, skip=0):
+        """
+        Assert that actual is equal to expect.  The expect argument
+        MUST be a string literal (triple-quoted strings OK), and will
+        get updated directly in source when you run the test suite
+        with EXPECTTEST_ACCEPT=1.
+
+        If you want to write a helper function that makes use of
+        assertExpectedInline (e.g., expect is not a string literal),
+        set the skip argument to how many function calls we should
+        skip to find the string literal to update.
+        """
         if ACCEPT:
             if actual != expect:
                 # current frame and parent frame, plus any requested skip
@@ -191,12 +247,14 @@ class TestCase(unittest.TestCase):
             help_text = ("To accept the new output, re-run test with "
                          "envvar EXPECTTEST_ACCEPT=1 (we recommend "
                          "staging/committing your changes before doing this)")
-            if hasattr(self, "assertMultiLineEqual"):
-                self.assertMultiLineEqual(expect, actual, msg=help_text)
-            else:
-                self.assertEqual(expect, actual, msg=help_text)
+            self.assertMultiLineEqualMaybeCppStack(expect, actual, msg=help_text)
 
     def assertExpectedRaisesInline(self, exc_type, callable, expect, *args, **kwargs):
+        """
+        Like assertExpectedInline, but tests the str() representation of
+        the raised exception from callable.  The raised exeption must
+        be exc_type.
+        """
         try:
             callable(*args, **kwargs)
         except exc_type as e:
@@ -204,6 +262,17 @@ class TestCase(unittest.TestCase):
             return
         # Don't put this in the try block; the AssertionError will catch it
         self.fail(msg="Did not raise when expected to")
+
+    def assertMultiLineEqualMaybeCppStack(self, expect, actual, *args, **kwargs):
+        self.assertGreaterEqual(len(actual), len(expect), *args, **kwargs)
+        if hasattr(self, "assertMultiLineEqual"):
+            self.assertMultiLineEqual(expect, actual[:len(expect)], *args, **kwargs)
+        else:
+            self.assertEqual(expect, actual[:len(expect)], *args, **kwargs)
+        if len(actual) > len(expect):
+            cpp_stacktrace_header = "\nException raised from"
+            end_header = len(expect) + len(cpp_stacktrace_header)
+            self.assertEqual(actual[len(expect): end_header], cpp_stacktrace_header)
 
 
 if __name__ == "__main__":

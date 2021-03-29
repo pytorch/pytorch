@@ -36,11 +36,19 @@ pytorch_ios_params: &pytorch_ios_params
     op_list:
       type: string
       default: ""
+    use_metal:
+      type: string
+      default: "0"
+    lite_interpreter:
+      type: string
+      default: "0"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     IOS_ARCH: << parameters.ios_arch >>
     IOS_PLATFORM: << parameters.ios_platform >>
     SELECTED_OP_LIST: << parameters.op_list >>
+    USE_PYTORCH_METAL: << parameters.use_metal >>
+    BUILD_LITE_INTERPRETER: << parameters.lite_interpreter >>
 
 pytorch_windows_params: &pytorch_windows_params
   parameters:
@@ -55,7 +63,7 @@ pytorch_windows_params: &pytorch_windows_params
       default: ""
     cuda_version:
       type: string
-      default: "10"
+      default: "10.1"
     python_version:
       type: string
       default: "3.6"

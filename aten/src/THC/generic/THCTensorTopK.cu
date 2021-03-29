@@ -3,15 +3,13 @@
 #else
 
 #include <c10/macros/Macros.h>
+#include <c10/cuda/CUDAException.h>
 
 void THCTensor_(topk)(THCState* state,
                       THCTensor *topK,
                       THCudaLongTensor *indices,
                       THCTensor *input_,
                       int64_t k, int dim, int dir, int sorted) {
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "topk not suppported with BFloat16");
-  #else
   THAssert(topK != NULL && indices != NULL && input_ != NULL);
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input_));
   dim = at::maybe_wrap_dim(dim, input_);
@@ -40,8 +38,8 @@ void THCTensor_(topk)(THCState* state,
   // is provided to the kernel for the arguments.
 
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
-  gatherTopK<scalar_t, INDEX_T, DIM, DIR>                                   \
-    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(             \
+  gatherTopK<scalar_t, INDEX_T, DIM, DIR>                               \
+    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(            \
       inputInfo,                                                        \
       static_cast<INDEX_T>(sliceSize),                                  \
       static_cast<INDEX_T>(k),                                          \
@@ -53,7 +51,8 @@ void THCTensor_(topk)(THCState* state,
       static_cast<INDEX_T>(topKSlices),                                 \
       static_cast<INDEX_T>(topKInfo.strides[collapseTopKDim]),          \
       indicesInfo,                                                      \
-      static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]))
+      static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]));   \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define RUN_DIR(INDEX_T, DIM)                   \
   if (dir) {                                    \
@@ -74,10 +73,10 @@ void THCTensor_(topk)(THCState* state,
   }
 
 #define RUN_T(INDEX_T)                                                  \
-  TensorInfo<scalar_t, INDEX_T> inputInfo =                                 \
-    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, input);              \
-  TensorInfo<scalar_t, INDEX_T> topKInfo =                                  \
-    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, topK);               \
+  TensorInfo<scalar_t, INDEX_T> inputInfo =                             \
+    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, input);          \
+  TensorInfo<scalar_t, INDEX_T> topKInfo =                              \
+    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, topK);           \
   TensorInfo<int64_t, INDEX_T> indicesInfo =                            \
     getTensorInfo<int64_t, THCudaLongTensor, INDEX_T>(state, indices);  \
                                                                         \
@@ -186,7 +185,6 @@ void THCTensor_(topk)(THCState* state,
   THCudaLongTensor_free(state, input);
 
   THCudaCheck(cudaGetLastError());
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 #endif // THC_GENERIC_FILE

@@ -31,12 +31,18 @@ namespace jit {
 
 void packGradient(const Gradient& gradient, Node* dnode);
 bool needsGradient(const std::shared_ptr<const Graph>& graph);
-void runOptimization(std::shared_ptr<Graph>& graph, bool unroll = true);
+void runOptimization(
+    std::shared_ptr<Graph>& graph,
+    bool unroll = true,
+    bool const_prop_user_classes = true);
 void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check = false);
 void debugSetAutodiffSubgraphInlining(bool state);
 bool getAutodiffSubgraphInlining();
+
+void debugSetFusionGroupInlining(bool state);
+bool getFusionGroupInlining();
 
 // Tunable parameters for deciding when to create/keep subgraphs of
 // differentiable code
@@ -66,9 +72,11 @@ struct GraphExecutorImplBase {
 
   // entry point where execution begins
   void run(Stack& stack);
-  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+  c10::intrusive_ptr<Future> runAsync(
+      Stack& stack,
+      TaskLauncher taskLauncher = at::launch);
 
-  virtual ExecutionPlan getPlanFor(
+  virtual const ExecutionPlan& getPlanFor(
       Stack& stack,
       size_t remaining_bailout_depth) = 0;
   virtual GraphExecutorState getDebugState() = 0;

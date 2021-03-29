@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import argparse
 import sys
@@ -450,7 +450,7 @@ for o in options:
     args.append("    const " + InType + "* input,")
     args.append("    const " + IndexType + "* indices,")
     if opts.use_offsets:
-        args.append("    const int64_t* offsets,")
+        args.append("    const " + IndexType + "* offsets,")
     else:
         args.append("    const int* lengths,")
     args.append("    const float* weights,")

@@ -268,7 +268,7 @@ TEST_F(PackedSequenceTest, TotalLength) {
           /*total_length=*/total_length);
       };
       ASSERT_THROWS_WITH(err_fn(),
-        "Expected total_length to be at least the length of the longest sequence in input");     
+        "Expected total_length to be at least the length of the longest sequence in input");
     }
   }
 
@@ -493,7 +493,7 @@ TEST_F(NNUtilsTest, PackPaddedSequence) {
       auto src = padded;
       if (batch_first) {
         src = src.transpose(0, 1);
-      }  
+      }
 
       // check output
       rnn_utils::PackedSequence packed = rnn_utils::pack_padded_sequence(

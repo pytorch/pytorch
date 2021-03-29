@@ -2,10 +2,13 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorScatterGather.cu"
 #else
 
+#include <c10/cuda/CUDAException.h>
+
 #define RUN(TYPE, DIMS, REAL)                                           \
-  THCudaTensor_gatherKernel<TYPE, REAL, DIMS>                                \
-  <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(               \
-    tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
+  THCudaTensor_gatherKernel<TYPE, REAL, DIMS>                           \
+  <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(     \
+    tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);          \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 void THCTensor_(gather)(THCState* state, THCTensor *tensor,
                          THCTensor *src, int dim, THCudaLongTensor *index) {
@@ -61,19 +64,15 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
       switch (indexInfo.dims) {
         case 1:
           RUN(unsigned int, 1, scalar_t);
-          THCudaCheck(cudaGetLastError());
           break;
         case 2:
           RUN(unsigned int, 2, scalar_t);
-          THCudaCheck(cudaGetLastError());
           break;
         case 3:
           RUN(unsigned int, 3, scalar_t);
-          THCudaCheck(cudaGetLastError());
           break;
         default:
           RUN(unsigned int, -1, scalar_t);
-          THCudaCheck(cudaGetLastError());
           break;
       }
     } else {
@@ -84,7 +83,6 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
       TensorInfo<int64_t, uint64_t> indexInfo =
         getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
       RUN(uint64_t, -1, scalar_t);
-      THCudaCheck(cudaGetLastError());
     }
   }
 

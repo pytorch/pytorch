@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
+
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -25,20 +26,21 @@ using namespace ::c10::onnx;
 double getScaleFromInput(Node* input_node) {
   c10::optional<IValue> scale;
   std::string input_name = input_node->kind().toQualString();
-  std::unordered_set<std::string> noscale_ops = {"quantized::max_pool2d",
-                                                 "aten::max_pool2d",
-                                                 "aten::relu",
-                                                 "prim::ListUnpack",
-                                                 "aten::split_with_sizes",
-                                                 "quantized::nchw2nhwc",
-                                                 "quantized::nhwc2nchw",
-                                                 "aten::slice",
-                                                 "aten::avg_pool2d",
-                                                 "quantized::cat",
-                                                 "prim::ListConstruct",
-                                                 "aten::upsample_nearest2d",
-                                                 "aten::sigmoid",
-                                                 "aten::reshape"};
+  std::unordered_set<std::string> noscale_ops = {
+      "quantized::max_pool2d",
+      "aten::max_pool2d",
+      "aten::relu",
+      "prim::ListUnpack",
+      "aten::split_with_sizes",
+      "quantized::nchw2nhwc",
+      "quantized::nhwc2nchw",
+      "aten::slice",
+      "aten::avg_pool2d",
+      "quantized::cat",
+      "prim::ListConstruct",
+      "aten::upsample_nearest2d",
+      "aten::sigmoid",
+      "aten::reshape"};
   if (input_name == "aten::quantize_per_tensor") {
     TORCH_CHECK(
         input_node->inputs().size() > 1,
@@ -273,10 +275,11 @@ void unpackQuantizedWeightsHelper(
     std::vector<int64_t> wt_sizes = unpacked_weight.sizes().vec();
     if (unpacked_weight.ndimension() == 4) {
       unpacked_weight.permute({0, 2, 3, 1});
-      wt_sizes = {unpacked_weight.size(0),
-                  unpacked_weight.size(2),
-                  unpacked_weight.size(3),
-                  unpacked_weight.size(1)};
+      wt_sizes = {
+          unpacked_weight.size(0),
+          unpacked_weight.size(2),
+          unpacked_weight.size(3),
+          unpacked_weight.size(1)};
     }
 
     // Remove packed_params

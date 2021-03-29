@@ -1,6 +1,6 @@
+#include "caffe2/opt/onnxifi_op.h"
 #include "caffe2/operators/slice_op.h"
 #include "caffe2/opt/bound_shape_inferencer.h"
-#include "caffe2/opt/onnxifi_op.h"
 
 namespace caffe2 {
 
@@ -301,6 +301,51 @@ details::OutputReshapeInfo OnnxifiOp<CPUContext>::initOutputReshapeInfo()
 }
 
 template <>
+template <typename DimContainer>
+void OnnxifiOp<CPUContext>::fillOutputReshapeInfo(
+    const DimContainer& real_shape,
+    c10::ArrayRef<uint64_t> max_shape,
+    details::OutputReshapeInfo& output_reshape_info,
+    int currentIndex) {
+  CAFFE_ENFORCE_EQ(real_shape.size(), max_shape.size());
+  const auto dim_size = real_shape.size();
+  auto& begin = output_reshape_info.begins[currentIndex];
+  begin.Resize(dim_size);
+  int32_t* begin_ptr = begin.template mutable_data<int32_t>();
+  auto& end = output_reshape_info.ends[currentIndex];
+  end.Resize(dim_size);
+  int32_t* end_ptr = end.template mutable_data<int32_t>();
+  int32_t mismatch = 0;
+  for (int j = 0; j < dim_size; ++j) {
+    CAFFE_ENFORCE_GE(
+        max_shape[j],
+        real_shape[j],
+        "It is weird that max shape of ",
+        output_names_[currentIndex],
+        " is smaller than real shape at dim ",
+        j,
+        " (",
+        max_shape[j],
+        " vs ",
+        real_shape[j],
+        ")");
+    begin_ptr[j] = 0;
+    if (max_shape[j] > real_shape[j]) {
+      end_ptr[j] = real_shape[j];
+      mismatch += j;
+    } else {
+      end_ptr[j] = max_shape[j];
+    }
+  }
+
+  if (dim_size > 0) {
+    output_reshape_info.fast_path[currentIndex] = !mismatch;
+  } else {
+    output_reshape_info.fast_path[currentIndex] = false;
+  }
+}
+
+template <>
 int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
   if (use_onnx_ || !adjust_output_batch_) {
     return max_batch_size_;
@@ -337,77 +382,68 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     return current_batch_size;
   }
 
-  auto it =
-      output_reshape_info_.emplace(current_batch_size, initOutputReshapeInfo());
-  auto& output_reshape_info = it.first->second;
-  BoundShapeSpec spec(dims[0], max_seq_size_);
-  auto bound_shape_inferencer =
-      BoundShapeInferencerRegistry()->Create("C10", spec);
-  for (int i = 0; i < InputSize(); ++i) {
-    at::IntArrayRef dim0;
-    bool quantized = false;
-    if (this->template InputIsType<int8::Int8TensorCPU>(i)) {
-      const auto& input_tensor_int8 =
-          this->template Input<int8::Int8TensorCPU>(i);
-      const auto& t0 = input_tensor_int8.t;
-      dim0 = t0.sizes();
-      quantized = true;
-    } else {
-      const auto& t0 = Input(i);
-      dim0 = t0.sizes();
+  auto& output_reshape_info =
+      output_reshape_info_.emplace(current_batch_size, initOutputReshapeInfo())
+          .first->second;
+
+  if (use_passed_output_shapes_) {
+    auto shape_info_it = output_shapes_per_bs_.find(current_batch_size);
+    CAFFE_ENFORCE(
+        shape_info_it != output_shapes_per_bs_.end(),
+        "Unable to find outputs shapes for bs=",
+        current_batch_size);
+    CAFFE_ENFORCE_EQ(shape_info_it->second.size(), OutputSize());
+
+    for (int i = 0; i < OutputSize(); ++i) {
+      fillOutputReshapeInfo(
+          shape_info_it->second[i],
+          output_shapes_max_bs_[i],
+          output_reshape_info,
+          i);
     }
-    TensorShape shape;
-    for (const auto d : dim0) {
-      shape.add_dims(d);
-    }
-    std::vector<TensorBoundShape::DimType> dim_type(
-        shape.dims_size(), TensorBoundShape_DimType_CONSTANT);
-    if (dim_type.size()) {
-      dim_type[0] = TensorBoundShape_DimType_BATCH;
-    }
-    input_shape_info_[input_names_[i]] =
-        ShapeInfo(dim_type, std::move(shape), quantized);
-  }
-  bound_shape_inferencer->InferBoundShapeAndType(
-      netdef_, input_shape_info_, nullptr, false);
-  const auto& shape_info = bound_shape_inferencer->shape_info();
-  for (int i = 0; i < OutputSize(); ++i) {
-    const auto it = shape_info.find(output_names_[i]);
-    CAFFE_ENFORCE(it != shape_info.end());
-    const auto& real_shape = it->second.shape;
-    const auto& max_shape = output_shapes_[i];
-    CAFFE_ENFORCE_EQ(real_shape.dims_size(), max_shape.size());
-    const auto dim_size = real_shape.dims_size();
-    auto& begin = output_reshape_info.begins[i];
-    begin.Resize(dim_size);
-    int32_t* begin_ptr = begin.template mutable_data<int32_t>();
-    auto& end = output_reshape_info.ends[i];
-    end.Resize(dim_size);
-    int32_t* end_ptr = end.template mutable_data<int32_t>();
-    int32_t mismatch = 0;
-    for (int j = 0; j < dim_size; ++j) {
-      CAFFE_ENFORCE_GE(
-          max_shape[j],
-          real_shape.dims(j),
-          "It is weird that max shape of ",
-          output_names_[i],
-          " is smaller than real shape at dim ",
-          j,
-          " (",
-          max_shape[j],
-          " vs ",
-          real_shape.dims(j),
-          ")");
-      begin_ptr[j] = 0;
-      if (max_shape[j] >= real_shape.dims(j)) {
-        end_ptr[j] = real_shape.dims(j);
-        mismatch += j;
+  } else {
+    BoundShapeSpec spec(dims[0], max_seq_size_);
+    auto bound_shape_inferencer =
+        BoundShapeInferencerRegistry()->Create("C10", spec);
+    for (int i = 0; i < InputSize(); ++i) {
+      at::IntArrayRef dim0;
+      bool quantized = false;
+      if (this->template InputIsType<int8::Int8TensorCPU>(i)) {
+        const auto& input_tensor_int8 =
+            this->template Input<int8::Int8TensorCPU>(i);
+        const auto& t0 = input_tensor_int8.t;
+        dim0 = t0.sizes();
+        quantized = true;
       } else {
-        end_ptr[j] = -1;
+        const auto& t0 = Input(i);
+        dim0 = t0.sizes();
       }
+      TensorShape shape;
+      for (const auto d : dim0) {
+        shape.add_dims(d);
+      }
+      std::vector<TensorBoundShape::DimType> dim_type(
+          shape.dims_size(), TensorBoundShape_DimType_CONSTANT);
+      if (dim_type.size()) {
+        dim_type[0] = TensorBoundShape_DimType_BATCH;
+      }
+      input_shape_info_[input_names_[i]] =
+          ShapeInfo(dim_type, std::move(shape), quantized);
     }
-    output_reshape_info.fast_path[i] = !mismatch;
+    bound_shape_inferencer->InferBoundShapeAndType(
+        netdef_, input_shape_info_, nullptr, false);
+    const auto& shape_info = bound_shape_inferencer->shape_info();
+    for (int i = 0; i < OutputSize(); ++i) {
+      const auto find_res = shape_info.find(output_names_[i]);
+      CAFFE_ENFORCE(find_res != shape_info.end());
+      fillOutputReshapeInfo(
+          find_res->second.shape.dims(),
+          output_shapes_max_bs_[i],
+          output_reshape_info,
+          i);
+    }
   }
+
   return current_batch_size;
 }
 
@@ -439,8 +475,10 @@ void OnnxifiOp<CPUContext>::adjustOutputBatchSizes(int current_batch_size) {
 }
 
 template <>
-void OnnxifiOp<CPUContext>::setOutputShapeAndType(int output_idx) {
-  tensor_dims_int64_.clear();
+void OnnxifiOp<CPUContext>::setOutputShapeAndType(
+    int output_idx,
+    c10::SmallVector<int64_t, 4>& tensor_dims_int64) {
+  tensor_dims_int64.clear();
   std::vector<size_t> tensor_dims;
   uint64_t type = ONNXIFI_DATATYPE_FLOAT32;
   const auto it = output_shape_hints_.find(output_idx);
@@ -458,7 +496,7 @@ void OnnxifiOp<CPUContext>::setOutputShapeAndType(int output_idx) {
   tensor_descriptor.dimensions = tensor_dims.size();
   CAFFE_ENFORCE(
       tensor_descriptor.dimensions != 0, tensor_descriptor.name, " has 0 dim");
-  auto& output_shape = output_shapes_[output_idx];
+  auto& output_shape = output_shapes_max_bs_[output_idx];
   output_shape.clear();
   output_shape.insert(
       output_shape.begin(), tensor_dims.cbegin(), tensor_dims.cend());
@@ -466,14 +504,14 @@ void OnnxifiOp<CPUContext>::setOutputShapeAndType(int output_idx) {
   std::copy(
       tensor_dims.cbegin(),
       tensor_dims.cend(),
-      std::back_inserter(tensor_dims_int64_));
+      std::back_inserter(tensor_dims_int64));
 
   // Setup the output C2 tensor
   if (!info.quantized) {
     // Normal Tensor
     auto* output_tensor = Output(
         output_idx,
-        tensor_dims_int64_,
+        tensor_dims_int64,
         at::dtype(OnnxifiTypeToDataType(type)).device(CPU));
     setOutputTensorDescriptorTypeAndBuffer(
         type, output_tensor, &tensor_descriptor);
@@ -481,7 +519,7 @@ void OnnxifiOp<CPUContext>::setOutputShapeAndType(int output_idx) {
     // single quantizer, output Int8Tensor
     auto* output_tensor =
         this->template Output<int8::Int8TensorCPU>(output_idx);
-    output_tensor->t.Resize(tensor_dims_int64_);
+    output_tensor->t.Resize(tensor_dims_int64);
     setOutputTensorDescriptorTypeAndBuffer(
         type, &output_tensor->t, &tensor_descriptor);
     tensor_descriptor.quantizationParams = 1;
@@ -492,6 +530,87 @@ void OnnxifiOp<CPUContext>::setOutputShapeAndType(int output_idx) {
     CAFFE_THROW(
         "OnnxifiOp does not support output tensor with multi-quantization params: ",
         output_names_[output_idx]);
+  }
+}
+
+string mapOnnxStatusToString(onnxStatus status) {
+  switch (status) {
+    case ONNXIFI_STATUS_SUCCESS:
+      return "ONNXIFI_STATUS_SUCCESS";
+    case ONNXIFI_STATUS_FALLBACK:
+      return "ONNXIFI_STATUS_FALLBACK";
+    case ONNXIFI_STATUS_INVALID_ID:
+      return "ONNXIFI_STATUS_INVALID_ID";
+    case ONNXIFI_STATUS_INVALID_SIZE:
+      return "ONNXIFI_STATUS_INVALID_SIZE";
+    case ONNXIFI_STATUS_INVALID_POINTER:
+      return "ONNXIFI_STATUS_INVALID_POINTER";
+    case ONNXIFI_STATUS_INVALID_PROTOBUF:
+      return "ONNXIFI_STATUS_INVALID_PROTOBUF";
+    case ONNXIFI_STATUS_INVALID_MODEL:
+      return "ONNXIFI_STATUS_INVALID_MODEL";
+    case ONNXIFI_STATUS_INVALID_BACKEND:
+      return "ONNXIFI_STATUS_INVALID_BACKEND";
+    case ONNXIFI_STATUS_INVALID_GRAPH:
+      return "ONNXIFI_STATUS_INVALID_GRAPH";
+    case ONNXIFI_STATUS_INVALID_EVENT:
+      return "ONNXIFI_STATUS_INVALID_EVENT";
+    case ONNXIFI_STATUS_INVALID_STATE:
+      return "ONNXIFI_STATUS_INVALID_STATE";
+    case ONNXIFI_STATUS_INVALID_NAME:
+      return "ONNXIFI_STATUS_INVALID_NAME";
+    case ONNXIFI_STATUS_INVALID_SHAPE:
+      return "ONNXIFI_STATUS_INVALID_SHAPE";
+    case ONNXIFI_STATUS_INVALID_DATATYPE:
+      return "ONNXIFI_STATUS_INVALID_DATATYPE";
+    case ONNXIFI_STATUS_INVALID_MEMORY_TYPE:
+      return "ONNXIFI_STATUS_INVALID_MEMORY_TYPE";
+    case ONNXIFI_STATUS_INVALID_MEMORY_LOCATION:
+      return "ONNXIFI_STATUS_INVALID_MEMORY_LOCATION";
+    case ONNXIFI_STATUS_INVALID_FENCE_TYPE:
+      return "ONNXIFI_STATUS_INVALID_FENCE_TYPE";
+    case ONNXIFI_STATUS_INVALID_PROPERTY:
+      return "ONNXIFI_STATUS_INVALID_PROPERTY";
+    case ONNXIFI_STATUS_UNSUPPORTED_TAG:
+      return "ONNXIFI_STATUS_UNSUPPORTED_TAG";
+    case ONNXIFI_STATUS_UNSUPPORTED_VERSION:
+      return "ONNXIFI_STATUS_UNSUPPORTED_VERSION";
+    case ONNXIFI_STATUS_UNSUPPORTED_OPERATOR:
+      return "ONNXIFI_STATUS_UNSUPPORTED_OPERATOR";
+    case ONNXIFI_STATUS_UNSUPPORTED_ATTRIBUTE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_ATTRIBUTE";
+    case ONNXIFI_STATUS_UNSUPPORTED_SHAPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_SHAPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_DATATYPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_DATATYPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_MEMORY_TYPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_MEMORY_TYPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_FENCE_TYPE:
+      return "ONNXIFI_STATUS_UNSUPPORTED_FENCE_TYPE";
+    case ONNXIFI_STATUS_UNSUPPORTED_PROPERTY:
+      return "ONNXIFI_STATUS_UNSUPPORTED_PROPERTY";
+    case ONNXIFI_STATUS_UNIDENTIFIED_NAME:
+      return "ONNXIFI_STATUS_UNIDENTIFIED_NAME";
+    case ONNXIFI_STATUS_MISMATCHING_SHAPE:
+      return "ONNXIFI_STATUS_MISMATCHING_SHAPE";
+    case ONNXIFI_STATUS_MISMATCHING_DATATYPE:
+      return "ONNXIFI_STATUS_MISMATCHING_DATATYPE";
+    case ONNXIFI_STATUS_NO_SYSTEM_MEMORY:
+      return "ONNXIFI_STATUS_NO_SYSTEM_MEMORY";
+    case ONNXIFI_STATUS_NO_DEVICE_MEMORY:
+      return "ONNXIFI_STATUS_NO_DEVICE_MEMORY";
+    case ONNXIFI_STATUS_NO_SYSTEM_RESOURCES:
+      return "ONNXIFI_STATUS_NO_SYSTEM_RESOURCES";
+    case ONNXIFI_STATUS_NO_DEVICE_RESOURCES:
+      return "ONNXIFI_STATUS_NO_DEVICE_RESOURCES";
+    case ONNXIFI_STATUS_BACKEND_UNAVAILABLE:
+      return "ONNXIFI_STATUS_BACKEND_UNAVAILABLE";
+    case ONNXIFI_STATUS_INTERNAL_ERROR:
+      return "ONNXIFI_STATUS_INTERNAL_ERROR";
+    case ONNXIFI_STATUS_FATAL_ERROR:
+      return "ONNXIFI_STATUS_FATAL_ERROR";
+    default:
+      return "ONNXIFI_STATUS_STRING_NOT_MAPPED";
   }
 }
 
@@ -524,8 +643,9 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   }
 
   CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
+  c10::SmallVector<int64_t, 4> tensor_dims_int64;
   for (unsigned i = 0U; i < OutputSize(); ++i) {
-    setOutputShapeAndType(i);
+    setOutputShapeAndType(i, tensor_dims_int64);
   }
   bool ext_supported = false;
   onnxMemoryFenceV1 input_fence;
@@ -555,16 +675,21 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
           });
       traces_->numEvents = 0;
     }
+
+    const onnxStatus status = (*onnxSetIOAndRunGraphPointer_)(
+        graph_,
+        input_desc_.size(),
+        input_desc_.data(),
+        output_desc_.size(),
+        output_desc_.data(),
+        &output_fence,
+        traces_.get());
     CAFFE_ENFORCE_EQ(
-        (*onnxSetIOAndRunGraphPointer_)(
-            graph_,
-            input_desc_.size(),
-            input_desc_.data(),
-            output_desc_.size(),
-            output_desc_.data(),
-            &output_fence,
-            traces_.get()),
-        ONNXIFI_STATUS_SUCCESS);
+        status,
+        ONNXIFI_STATUS_SUCCESS,
+        "Reason: onnxSetIOAndRunGraph returned status code ",
+        mapOnnxStatusToString(status));
+
     current_batch_size = extractOutputBatchSizes();
     onnxEventState eventState;
     onnxStatus eventStatus;

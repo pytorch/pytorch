@@ -10,7 +10,7 @@ namespace at { namespace native {
 
 namespace {
 
-void pow_tensor_tensor_kernel(TensorIterator& iter) {
+void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.dtype()) || isComplexType(iter.dtype())) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "pow", [&]() {
       using Vec = Vec256<scalar_t>;
@@ -34,7 +34,7 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
   }
 }
 
-void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
+void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar) {
   if (isFloatingType(iter.dtype())) {
     const auto exp = exp_scalar.to<double>();
     // Floating types allow AVX2 vector optimizations for pow/sqrt/rsqrt:
@@ -63,7 +63,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
         );
       } else if (exp == -0.5) {
         cpu_kernel_vec(iter,
-          [](scalar_t base) -> scalar_t {
+          [](scalar_t base) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
             return 1.0 / std::sqrt(base);
           },
           [](Vec base) -> Vec { return base.rsqrt(); }

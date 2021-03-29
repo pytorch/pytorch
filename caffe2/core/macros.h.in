@@ -44,20 +44,22 @@ static_assert(
 #cmakedefine CAFFE2_USE_NVTX
 #cmakedefine CAFFE2_USE_TRT
 
-#ifndef USE_NUMPY
-#cmakedefine USE_NUMPY
-#endif
-
 #ifndef EIGEN_MPL2_ONLY
 #cmakedefine EIGEN_MPL2_ONLY
 #endif
 
 // Useful build settings that are recorded in the compiled binary
 #define CAFFE2_BUILD_STRINGS { \
+  {"TORCH_VERSION", "${TORCH_VERSION}"}, \
+  {"CXX_COMPILER", "${CMAKE_CXX_COMPILER}"}, \
   {"CXX_FLAGS", "${CMAKE_CXX_FLAGS}"}, \
   {"BUILD_TYPE", "${CMAKE_BUILD_TYPE}"}, \
-  {"BLAS", "${BLAS}"}, \
+  {"BLAS_INFO", "${BLAS_INFO}"}, \
+  {"LAPACK_INFO", "${LAPACK_INFO}"}, \
   {"USE_CUDA", "${USE_CUDA}"}, \
+  {"CUDA_VERSION", "${CUDA_VERSION}"}, \
+  {"USE_CUDNN", "${USE_CUDNN}"}, \
+  {"CUDNN_VERSION", "${CUDNN_VERSION}"}, \
   {"USE_NCCL", "${USE_NCCL}"}, \
   {"USE_MPI", "${USE_MPI}"}, \
   {"USE_GFLAGS", "${USE_GFLAGS}"}, \

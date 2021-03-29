@@ -26,6 +26,13 @@ namespace kernels {
 
 optional<tuple<int64_t, int64_t>> called_with_args;
 
+
+// The calling convention in the dispatcher requires that calls to KernelFunction::call()/callBoxed()
+// take in a DispatchKeySet.
+// The value itself is meaningless for all of the tests that use kernels without a DispatchKeySet argument.
+// See Note [Plumbing Keys Through The Dispatcher] for details.
+c10::DispatchKeySet CPU_TEST_SET = c10::DispatchKeySet(c10::DispatchKey::CPU);
+
 void boxed_func_with_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
   EXPECT_EQ(2, stack->size());
   EXPECT_TRUE(stack->at(0).isInt());
@@ -110,56 +117,74 @@ OperatorHandle makeDummyOperatorHandle() {
 // boxed kernels that return refs to tensor arguments, a la inplace/outplace kernels
 //
 
-void boxed_func_with_tensor_ref_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
+void boxed_func_for_inplace_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
   // (Tensor(a!), Scalar) -> Tensor(a!)
   EXPECT_EQ(2, stack->size());
 
   ASSERT_TRUE(stack->at(0).isTensor());
-  auto a = stack->at(0).toTensor();
+  auto t = stack->at(0).toTensor();
 
   ASSERT_TRUE(stack->at(1).isScalar());
-  auto b = stack->at(1).toScalar();
+  auto s = stack->at(1).toScalar();
 
-  a.add_(b);
+  t.add_(s);
 
   stack->clear();
-  torch::jit::push(stack, a);
+  torch::jit::push(stack, t);
 }
 
-void boxed_func_with_multiple_tensor_ref_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
-  // (Tensor(a!), Tensor(b!), Scalar, Scalar) -> (Tensor(a!), Tensor(b!))
-  EXPECT_EQ(4, stack->size());
+void boxed_func_for_outofplace_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
+  // (Scalar, Tensor(a!)) -> Tensor(a!)
+  EXPECT_EQ(2, stack->size());
 
-  ASSERT_TRUE(stack->at(0).isTensor());
-  auto a = stack->at(0).toTensor();
+  ASSERT_TRUE(stack->at(0).isScalar());
+  auto s = stack->at(0).toScalar();
 
   ASSERT_TRUE(stack->at(1).isTensor());
-  auto b = stack->at(1).toTensor();
+  auto t = stack->at(1).toTensor();
 
-  ASSERT_TRUE(stack->at(2).isScalar());
-  auto c = stack->at(2).toScalar();
-
-  ASSERT_TRUE(stack->at(3).isScalar());
-  auto d = stack->at(3).toScalar();
-
-  a.add_(c);
-  b.add_(d);
+  t.add_(s);
 
   stack->clear();
-  torch::jit::push(stack, a);
-  torch::jit::push(stack, b);
+  torch::jit::push(stack, t);
+}
+
+void boxed_func_for_outofplace_multi_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
+  // (Scalar, Scalar, Tensor(a!), Tensor(b!)) -> (Tensor(a!), Tensor(b!))
+  EXPECT_EQ(4, stack->size());
+
+  ASSERT_TRUE(stack->at(0).isScalar());
+  auto s1 = stack->at(0).toScalar();
+
+  ASSERT_TRUE(stack->at(1).isScalar());
+  auto s2 = stack->at(1).toScalar();
+
+  ASSERT_TRUE(stack->at(2).isTensor());
+  auto t1 = stack->at(2).toTensor();
+
+  ASSERT_TRUE(stack->at(3).isTensor());
+  auto t2 = stack->at(3).toTensor();
+
+  t1.add_(s1);
+  t2.add_(s2);
+
+  stack->clear();
+  torch::jit::push(stack, t1);
+  torch::jit::push(stack, t2);
 }
 
 //
 // boxed calling tests:
 //
 
+// functional
+
 void expectBoxedCallingWithReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -173,7 +198,7 @@ void expectBoxedCallingWithoutReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -185,7 +210,7 @@ void expectBoxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   vector<IValue> stack {3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(dummy, &stack);
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -198,50 +223,56 @@ void expectBoxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   EXPECT_EQ(12, stack[1].toInt());
 }
 
-void expectBoxedCallingWithTensorRefReturnWorks(const KernelFunction& func) {
+// in/out
+
+void expectInPlaceBoxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto a = at::zeros({1});
-  auto b = 1.0f;
-  vector<IValue> stack {a, b};
+  auto t = at::zeros({1});
+  auto s = 1.0f;
+  vector<IValue> stack {t, s};
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
-  func.callBoxed(dummy, &stack);
-
-  // kernel should have updated arg 0
-  EXPECT_EQ(a.item().toFloat(), 1.0f);
-
-  // and returned it on the stack
+  // kernel should have updated out arg and returned it
+  EXPECT_EQ(t.item().toFloat(), 1.0f);
   EXPECT_EQ(1, stack.size());
   EXPECT_TRUE(stack[0].isTensor());
-  auto t = stack[0].toTensor();
-  EXPECT_EQ(t.item().toFloat(), 1.0f);
+  EXPECT_TRUE(stack[0].toTensor().is_same(t));
 }
 
-void expectBoxedCallingWithMultipleTensorRefReturnWorks(const KernelFunction& func) {
+void expectOutOfPlaceBoxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto a = at::zeros({1});
-  auto b = at::zeros({1});
-  auto c = 1.0f;
-  auto d = 2.0f;
-  vector<IValue> stack {a, b, c, d};
+  auto s = 1.0f;
+  auto t = at::zeros({1});
+  vector<IValue> stack {s, t};
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
-  func.callBoxed(dummy, &stack);
-
-  // kernel should have updated args 0 and 1
-  EXPECT_EQ(a.item().toFloat(), 1.0f);
-  EXPECT_EQ(b.item().toFloat(), 2.0f);
-
-  // and pushed them onto the stack
-  EXPECT_EQ(2, stack.size());
-
+  // kernel should have updated out arg and returned it on the stack
+  EXPECT_EQ(t.item().toFloat(), 1.0f);
+  EXPECT_EQ(1, stack.size());
   EXPECT_TRUE(stack[0].isTensor());
-  auto ta = stack[0].toTensor();
-  EXPECT_EQ(ta.item().toFloat(), 1.0f);
+  EXPECT_TRUE(stack[0].toTensor().is_same(t));
+}
 
+void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
+  OperatorHandle dummy = makeDummyOperatorHandle();
+
+  auto s1 = 1.0f;
+  auto s2 = 2.0f;
+  auto t1 = at::zeros({1});
+  auto t2 = at::zeros({1});
+  vector<IValue> stack {s1, s2, t1, t2};
+  func.callBoxed(dummy, CPU_TEST_SET, &stack);
+
+  // kernel should have updated output args and returned them on the stack
+  EXPECT_EQ(t1.item().toFloat(), 1.0f);
+  EXPECT_EQ(t2.item().toFloat(), 2.0f);
+  EXPECT_EQ(2, stack.size());
+  EXPECT_TRUE(stack[0].isTensor());
+  EXPECT_TRUE(stack[0].toTensor().is_same(t1));
   EXPECT_TRUE(stack[1].isTensor());
-  auto tb = stack[1].toTensor();
-  EXPECT_EQ(tb.item().toFloat(), 2.0f);
+  EXPECT_TRUE(stack[1].toTensor().is_same(t2));
 }
 
 void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMessage) {
@@ -250,9 +281,15 @@ void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMe
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   expectThrows<c10::Error>([&] {
-    func.callBoxed(dummy, &stack);
+    func.callBoxed(dummy, CPU_TEST_SET, &stack);
   }, errorMessage);
 }
+
+//
+// unboxed calling tests:
+//
+
+// functional
 
 // make an unboxed call to a kernel that returns a single value.
 //
@@ -260,7 +297,7 @@ void expectUnboxedCallingWithReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  int64_t result = func.call<int64_t, int64_t, int64_t>(dummy, 3, 4);
+  int64_t result = func.call<int64_t, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -273,7 +310,7 @@ void expectUnboxedCallingWithoutReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.call<void, int64_t, int64_t>(dummy, 3, 4);
+  func.call<void, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -286,7 +323,7 @@ void expectUnboxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto result = func.call<std::tuple<int64_t, int64_t>, int64_t, int64_t>(dummy, 3, 4);
+  auto result = func.call<std::tuple<int64_t, int64_t>, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -294,56 +331,58 @@ void expectUnboxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   EXPECT_EQ((tuple<int64_t, int64_t>(7, 12)), result);
 }
 
-// make an unboxed call to a kernel that modifies its first (Tensor) argument
-// and returns a reference to it.
-//
-void expectUnboxedCallingWithTensorRefReturnWorks(const KernelFunction& func) {
+// in/out
+
+void expectInPlaceUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto a = at::zeros({1});
+  auto t = at::zeros({1});
+  at::Tensor& t_out = func.call<at::Tensor&, at::Tensor&, at::Scalar>(dummy, CPU_TEST_SET, t, 1.0f);
 
-  at::Tensor& t = func.call<at::Tensor&, at::Tensor&, at::Scalar>(dummy, a, 1.0f);
-
-  EXPECT_EQ(a.item().toFloat(), 1.0f);
+  // should have updated first arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
-
-  EXPECT_EQ(&a, &t);
+  EXPECT_EQ(&t, &t_out);
 }
 
-// make an unboxed call to a kernel that modifies its first two (Tensor) arguments
-// and returns them. When calling unboxed, these are returned as a tuple.
-//
-void expectUnboxedCallingWithMultipleTensorRefReturnWorks(const KernelFunction& func) {
+void expectOutOfPlaceUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto a = at::zeros({1});
-  auto b = at::zeros({1});
-  auto c = 1.0f;
-  auto d = 2.0f;
+  auto t = at::zeros({1});
+  at::Tensor& t_out = func.call<at::Tensor&, at::Scalar, at::Tensor&>(dummy, CPU_TEST_SET, 1.0f, t);
+
+  // should have updated out arg and returned it
+  EXPECT_EQ(t.item().toFloat(), 1.0f);
+  EXPECT_EQ(&t, &t_out);
+}
+
+void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
+  OperatorHandle dummy = makeDummyOperatorHandle();
+
+  auto s1 = 1.0f;
+  auto s2 = 2.0f;
+  auto t1 = at::zeros({1});
+  auto t2 = at::zeros({1});
 
   std::tuple<at::Tensor&, at::Tensor&> tup = func.call<
-    std::tuple<at::Tensor&, at::Tensor&>,
-    at::Tensor&,
-    at::Tensor&,
-    at::Scalar,
-    at::Scalar
-  >(dummy, a, b, c, d);
+    std::tuple<at::Tensor&, at::Tensor&>, at::Scalar, at::Scalar, at::Tensor&, at::Tensor&
+  >(dummy, CPU_TEST_SET, s1, s2, t1, t2);
 
-  // kernel should have updated args 0 and 1
-  EXPECT_EQ(a.item().toFloat(), 1.0f);
-  EXPECT_EQ(b.item().toFloat(), 2.0f);
+  // kernel should have updated out args and returned them in a tuple
+  EXPECT_EQ(t1.item().toFloat(), 1.0f);
+  EXPECT_EQ(t2.item().toFloat(), 2.0f);
 
-  // and returned a tuple containing them
-  auto ta = std::get<0>(tup);
-  EXPECT_EQ(ta.item().toFloat(), 1.0f);
-  EXPECT_TRUE(a.is_same(ta));
+  auto t1_out = std::get<0>(tup);
+  EXPECT_EQ(t1_out.item().toFloat(), 1.0f);
+  EXPECT_TRUE(t1_out.is_same(t1));
 
-  auto tb = std::get<1>(tup);
-  EXPECT_EQ(tb.item().toFloat(), 2.0f);
-  EXPECT_TRUE(b.is_same(tb));
+  auto t2_out = std::get<1>(tup);
+  EXPECT_EQ(t2_out.item().toFloat(), 2.0f);
+  EXPECT_TRUE(t2_out.is_same(t2));
 }
 
 }
+
+// functional, boxed calling
 
 TEST(KernelFunctionTest, givenBoxedFunction_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_return>();
@@ -360,15 +399,24 @@ TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingBoxed_the
   kernels::expectBoxedCallingWithMultiReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withTensorRefReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_tensor_ref_return>();
-  kernels::expectBoxedCallingWithTensorRefReturnWorks(func);
+// in/out, boxed calling
+
+TEST(KernelFunctionTest, givenBoxedFunction_withInPlaceSignature_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_inplace_op>();
+  kernels::expectInPlaceBoxedCallingWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withMultipleTensorRefReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_multiple_tensor_ref_return>();
-  kernels::expectBoxedCallingWithMultipleTensorRefReturnWorks(func);
+TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceSignature_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_op>();
+  kernels::expectOutOfPlaceBoxedCallingWorks(func);
 }
+
+TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_multi_op>();
+  kernels::expectOutOfPlaceMultiBoxedCallingWorks(func);
+}
+
+// functional, unboxed calling
 
 TEST(KernelFunctionTest, givenBoxedFunction_withReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_return>();
@@ -385,15 +433,24 @@ TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingUnboxed_t
   kernels::expectUnboxedCallingWithMultiReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withTensorRefReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_tensor_ref_return>();
-  kernels::expectUnboxedCallingWithTensorRefReturnWorks(func);
+// in/out, unboxed calling
+
+TEST(KernelFunctionTest, givenBoxedFunction_withInPlaceSignature_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_inplace_op>();
+  kernels::expectInPlaceUnboxedCallingWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withMultipleTensorRefReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_multiple_tensor_ref_return>();
-  kernels::expectUnboxedCallingWithMultipleTensorRefReturnWorks(func);
+TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceSignature_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_op>();
+  kernels::expectOutOfPlaceUnboxedCallingWorks(func);
 }
+
+TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_multi_op>();
+  kernels::expectOutOfPlaceMultiUnboxedCallingWorks(func);
+}
+
+// functors etc.
 
 TEST(KernelFunctionTest, givenUnboxedFunctor_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
@@ -415,26 +472,6 @@ TEST(KernelFunctionTest, givenUnboxedFunctor_withoutReturn_whenCallingUnboxed_th
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedOnlyFunctor_withReturn_whenCallingBoxed_thenFails) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor<kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
-  kernels::expectBoxedCallingFailsWith(func, "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call()");
-}
-
-TEST(KernelFunctionTest, givenUnboxedOnlyFunctor_withoutReturn_whenCallingBoxed_thenFails) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor<kernels::unboxed_functor_without_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_without_return>()));
-  kernels::expectBoxedCallingFailsWith(func, "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call()");
-}
-
-TEST(KernelFunctionTest, givenUnboxedOnlyFunctor_withReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor<kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
-  kernels::expectUnboxedCallingWithReturnWorks(func);
-}
-
-TEST(KernelFunctionTest, givenUnboxedOnlyFunctor_withoutReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor<kernels::unboxed_functor_without_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_without_return>()));
-  kernels::expectUnboxedCallingWithoutReturnWorks(func);
-}
-
 TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingBoxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_with_return));
   kernels::expectBoxedCallingWithReturnWorks(func);
@@ -452,26 +489,6 @@ TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingUnboxed_then
 
 TEST(KernelFunctionTest, givenUnboxedFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
   KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_without_return));
-  kernels::expectUnboxedCallingWithoutReturnWorks(func);
-}
-
-TEST(KernelFunctionTest, givenUnboxedOnlyFunction_withReturn_whenCallingBoxed_thenFails) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction(TORCH_FN(kernels::unboxed_function_with_return));
-  kernels::expectBoxedCallingFailsWith(func, "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call()");
-}
-
-TEST(KernelFunctionTest, givenUnboxedOnlyFunction_withoutReturn_whenCallingBoxed_thenFails) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction(TORCH_FN(kernels::unboxed_function_without_return));
-  kernels::expectBoxedCallingFailsWith(func, "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call()");
-}
-
-TEST(KernelFunctionTest, givenUnboxedOnlyFunction_withReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction(TORCH_FN(kernels::unboxed_function_with_return));
-  kernels::expectUnboxedCallingWithReturnWorks(func);
-}
-
-TEST(KernelFunctionTest, givenUnboxedOnlyFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction(TORCH_FN(kernels::unboxed_function_without_return));
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 

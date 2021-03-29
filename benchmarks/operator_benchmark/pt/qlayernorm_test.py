@@ -25,17 +25,21 @@ class QLayerNormBenchmark(op_bench.TorchBenchmarkBase):
         zero_point = 0
         self.qX = torch.quantize_per_tensor(
             X, scale=scale, zero_point=zero_point, dtype=dtype)
-        self.weight = torch.rand(*self.qX.size()[1:], dtype=torch.float)
-        self.bias = torch.rand(*self.qX.size()[1:], dtype=torch.float)
-        self.eps = 1e-5
-        self.Y_scale = 0.1
-        self.Y_zero_point = 0
 
-    def forward(self):
+        self.inputs = {
+            "qX": self.qX,
+            "weight": torch.rand(*self.qX.size()[1:], dtype=torch.float),
+            "bias": torch.rand(*self.qX.size()[1:], dtype=torch.float),
+            "eps": 1e-5,
+            "Y_scale": 0.1,
+            "Y_zero_point": 0
+        }
+
+    def forward(self, qX, weight, bias, eps: float, Y_scale: float, Y_zero_point: int):
         return torch.ops.quantized.layer_norm(
-            self.qX, self.qX.size()[1:], weight=self.weight, bias=self.bias,
-            eps=self.eps, output_scale=self.Y_scale,
-            output_zero_point=self.Y_zero_point)
+            qX, qX.size()[1:], weight=weight, bias=bias,
+            eps=eps, output_scale=Y_scale,
+            output_zero_point=Y_zero_point)
 
 
 op_bench.generate_pt_test(layernorm_configs_short, QLayerNormBenchmark)

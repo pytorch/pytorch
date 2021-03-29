@@ -201,10 +201,14 @@ bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   LRNFillScaleNCHW<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
       n_threads, Xdata, N, C, H, W, size_, alpha_ / size_, bias_, scale_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   n_threads = X.numel();
   LRNComputeOutput<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                             0, context_.cuda_stream()>>>(
       n_threads, Xdata, scale_data, -beta_, Ydata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -234,9 +238,13 @@ bool LRNOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   LRNFillScaleNHWC<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
       n_threads, Xdata, N, H, W, C, size_, alpha_ / size_, bias_, scale_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   LRNComputeOutput<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                             0, context_.cuda_stream()>>>(
       n_threads, Xdata, scale_data, -beta_, Ydata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -268,6 +276,8 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   LRNFillScaleNCHW<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
       n_threads, Xdata, N, C, H, W, size_, alpha_ / size_, bias_, scale_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
 
@@ -276,6 +286,8 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
                               0, context_.cuda_stream()>>>(
       n_threads, Xdata, Ydata, scale_data, dYdata, N, C, H, W, size_, -beta_,
       2.f * alpha_ * beta_ / size_, dXdata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -306,6 +318,7 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   LRNFillScaleNHWC<float><<<CAFFE_GET_BLOCKS(n_threads), CAFFE_CUDA_NUM_THREADS,
                         0, context_.cuda_stream()>>>(
       n_threads, Xdata, N, H, W, C, size_, alpha_ / size_, bias_, scale_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   LRNComputeDiffNHWC<float>
       <<<CAFFE_GET_BLOCKS(X.numel()),
@@ -325,6 +338,8 @@ bool LRNGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           -beta_,
           2.f * alpha_ * beta_ / size_,
           dX->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

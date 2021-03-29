@@ -80,6 +80,23 @@ void TestAdd(DeprecatedTypeProperties& type) {
   }
 }
 
+void TestZeros(DeprecatedTypeProperties& type) {
+  auto begin = std::chrono::high_resolution_clock::now();
+  Tensor a = zeros({1024, 1024}, type);
+  for (int i = 1; i < 1000; ++i) {
+    a = zeros({128, 128}, type);
+  }
+  auto end = std::chrono::high_resolution_clock::now();
+  std::cout << std::dec << "   "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(
+                   end - begin)
+                   .count()
+            << " ms" << std::endl;
+
+   std::srand(std::time(nullptr));
+   ASSERT_EQ(norm(a).item<double>(), 0.0);
+}
+
 void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
@@ -309,6 +326,7 @@ void test(DeprecatedTypeProperties& type) {
   TestSort(type);
   TestRandperm(type);
   TestAdd(type);
+  TestZeros(type);
   TestLoadsOfAdds(type);
   TestLoadOfAddsWithCopy(type);
   TestIsContiguous(type);
@@ -370,14 +388,8 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_FALSE(tensor0.is_pinned());
 
   // Test setting requires_grad to true.
-  tensor0 = at::empty({4}, at::TensorOptions().requires_grad(true));
-  ASSERT_EQ(tensor0.dtype(), at::kFloat);
-  ASSERT_EQ(tensor0.layout(), at::kStrided);
-  ASSERT_EQ(tensor0.device(), at::kCPU);
-  // This is a bug. Requires_grad was set to TRUE but this is being ignored.
-  // Issue https://github.com/pytorch/pytorch/issues/30405
-  ASSERT_FALSE(tensor0.requires_grad());
-  ASSERT_FALSE(tensor0.is_pinned());
+  // This is a bug. Requires_grad was set to TRUE but this is not implemented.
+  EXPECT_ANY_THROW(at::empty({4}, at::TensorOptions().requires_grad(true)));
 
   // Test setting dtype
   at::Tensor tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf));
@@ -386,6 +398,14 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_EQ(tensor1.device(), at::kCPU);
   ASSERT_FALSE(tensor1.requires_grad());
   ASSERT_FALSE(tensor1.is_pinned());
+
+  // Sparse tensor CPU test to avoid requiring CUDA to catch simple bugs.1
+  tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf).layout(at::kSparse));
+  ASSERT_EQ(tensor1.dtype(), at::kHalf);
+  ASSERT_EQ(tensor1.layout(), at::kSparse);
+  ASSERT_EQ(tensor1.device(), at::kCPU);
+  ASSERT_FALSE(tensor1.requires_grad());
+  ASSERT_ANY_THROW(tensor1.is_pinned());
 
   if (torch::cuda::is_available()) {
     // Test setting pin memory

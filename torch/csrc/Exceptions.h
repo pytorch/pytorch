@@ -71,6 +71,12 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       PyErr_SetString(PyExc_TypeError, torch::processErrorMsg(msg)); \
       retstmnt;                                                      \
     }                                                                \
+    catch (const c10::NotImplementedError& e) {                      \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
+      retstmnt;                                                      \
+    }                                                                \
     catch (const c10::Error& e) {                                    \
       auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
@@ -288,6 +294,14 @@ struct NotImplementedError : public PyTorchError {
   NotImplementedError() {}
   PyObject* python_type() override {
     return PyExc_NotImplementedError;
+  }
+};
+
+// Translates to Python AttributeError
+struct AttributeError : public PyTorchError {
+  AttributeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  PyObject* python_type() override {
+    return PyExc_AttributeError;
   }
 };
 

@@ -1,9 +1,9 @@
 ## @package memonger
 # Module caffe2.python.memonger
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import networkx as nx
 import collections

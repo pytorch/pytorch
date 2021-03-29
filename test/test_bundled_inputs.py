@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import io
+import textwrap
+from typing import List
+
 import torch
 import torch.utils.bundled_inputs
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -27,7 +30,7 @@ class TestBundledInputs(TestCase):
 
         sm = torch.jit.script(SingleTensorModel())
         original_size = model_size(sm)
-        get_expr = []
+        get_expr : List[str] = []
         samples = [
             # Tensor with small numel and small storage.
             (torch.tensor([1]),),
@@ -132,6 +135,131 @@ class TestBundledInputs(TestCase):
         self.assertEqual(inflated, samples)
         self.assertTrue(loaded.run_on_bundled_input(0) == "first 1")
 
+    def test_multiple_methods_with_inputs(self):
+        class MultipleMethodModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+            @torch.jit.export
+            def foo(self, arg):
+                return arg
+
+        mm = torch.jit.script(MultipleMethodModel())
+        samples = [
+            # Tensor with small numel and small storage.
+            (torch.tensor([1]),),
+            # Tensor with large numel and small storage.
+            (torch.tensor([[2, 3, 4]]).expand(1 << 16, -1)[:, ::2],),
+            # Tensor with small numel and large storage.
+            (torch.tensor(range(1 << 16))[-8:],),
+            # Large zero tensor.
+            (torch.zeros(1 << 16),),
+            # Large channels-last ones tensor.
+            (torch.ones(4, 8, 32, 32).contiguous(memory_format=torch.channels_last),),
+        ]
+        info = [
+            'Tensor with small numel and small storage.',
+            'Tensor with large numel and small storage.',
+            'Tensor with small numel and large storage.',
+            'Large zero tensor.',
+            'Large channels-last ones tensor.',
+            'Special encoding of random tensor.',
+        ]
+        torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
+            mm,
+            inputs={
+                mm.forward : samples,
+                mm.foo : samples
+            },
+            info={
+                mm.forward : info,
+                mm.foo : info
+            }
+        )
+        loaded = save_and_load(mm)
+        inflated = loaded.get_all_bundled_inputs()
+
+        # Make sure these functions are all consistent.
+        self.assertEqual(inflated, samples)
+        self.assertEqual(inflated, loaded.get_all_bundled_inputs_for_forward())
+        self.assertEqual(inflated, loaded.get_all_bundled_inputs_for_foo())
+
+        # Check running and size helpers
+        self.assertTrue(loaded.run_on_bundled_input(0) is inflated[0][0])
+        self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
+
+        # Check helper that work on all functions
+        all_info = loaded.get_bundled_inputs_functions_and_info()
+        self.assertEqual(set(all_info.keys()), set(['forward', 'foo']))
+        self.assertEqual(all_info['forward']['get_inputs_function_name'], ['get_all_bundled_inputs_for_forward'])
+        self.assertEqual(all_info['foo']['get_inputs_function_name'], ['get_all_bundled_inputs_for_foo'])
+        self.assertEqual(all_info['forward']['info'], info)
+        self.assertEqual(all_info['foo']['info'], info)
+
+        # example of how to turn the 'get_inputs_function_name' into the actual list of bundled inputs
+        for func_name in all_info.keys():
+            input_func_name = all_info[func_name]['get_inputs_function_name'][0]
+            func_to_run = getattr(loaded, input_func_name)
+            self.assertEqual(func_to_run(), samples)
+
+    def test_multiple_methods_with_inputs_failures(self):
+        class MultipleMethodModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+            @torch.jit.export
+            def foo(self, arg):
+                return arg
+
+        samples = [(torch.tensor([1]),)]
+
+        # Test Failure Case both defined
+        with self.assertRaises(Exception):
+            nn = torch.jit.script(MultipleMethodModel())
+            definition = textwrap.dedent("""
+                def _generate_bundled_inputs_for_forward(self):
+                    return []
+                """)
+            nn.define(definition)
+            torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
+                nn,
+                inputs={
+                    nn.forward : samples,
+                    nn.foo : samples,
+                },
+            )
+
+        # Test Failure Case neither defined
+        with self.assertRaises(Exception):
+            mm = torch.jit.script(MultipleMethodModel())
+            torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
+                mm,
+                inputs={
+                    mm.forward : None,
+                    mm.foo : samples,
+                },
+            )
+
+    def test_bad_inputs(self):
+        class SingleTensorModel(torch.nn.Module):
+            def forward(self, arg):
+                return arg
+
+        # Non list for input list
+        with self.assertRaises(TypeError):
+            m = torch.jit.script(SingleTensorModel())
+            torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+                m,
+                inputs="foo"  # type: ignore
+            )
+
+        # List of non tuples. Most common error using the api.
+        with self.assertRaises(TypeError):
+            m = torch.jit.script(SingleTensorModel())
+            torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+                m,
+                inputs=[torch.ones(1, 2), ]  # type: ignore
+            )
 
 if __name__ == '__main__':
     run_tests()

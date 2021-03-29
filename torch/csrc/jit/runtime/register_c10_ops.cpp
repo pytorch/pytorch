@@ -46,7 +46,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
             node->addInput(none);
             continue;
           } else {
-            type = type->expect<OptionalType>()->getElementType();
+            type = type->expectRef<OptionalType>().getElementType();
           }
         }
         if (type->isSubtypeOf(TensorType::get())) {
@@ -67,7 +67,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
         } else if (type->kind() == TypeKind::NumberType) {
           tracer::addInputs(node, args[i].name().c_str(), iter->toScalar());
         } else if (type->kind() == TypeKind::ListType) {
-          const auto& elem_type = type->expect<ListType>()->getElementType();
+          const auto& elem_type = type->expectRef<ListType>().getElementType();
           if (elem_type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensorList());
             auto list = iter->toTensorVector();
@@ -134,7 +134,7 @@ Operator createOperatorFromC10_withTracingHandledHere(
           AT_ASSERT(iter->isTensor());
           tracer::addOutput(node, iter->toTensor());
         } else if (type->kind() == TypeKind::ListType) {
-          const auto& elem_type = type->expect<ListType>()->getElementType();
+          const auto& elem_type = type->expectRef<ListType>().getElementType();
           if (elem_type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensorList());
             tracer::addOutput(node, iter->toTensorList());

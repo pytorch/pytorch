@@ -99,7 +99,7 @@ void insertCopies(
       if (!newInput) {
         auto data = nn::get<NeuralNetData>(input);
         newInput = nn->dataFlow.createNode(
-            util::make_unique<repr::Tensor>(data->getName() + "_opencl_0"));
+            std::make_unique<repr::Tensor>(data->getName() + "_opencl_0"));
         nn->dataFlow.createEdge(input, copyNode);
         nn->dataFlow.createEdge(copyNode, newInput);
       }
@@ -120,7 +120,7 @@ void insertCopies(
       auto data = nn::get<NeuralNetData>(output);
 
       auto newOutput = nn->dataFlow.createNode(
-          util::make_unique<repr::Tensor>(data->getName() + "_opencl_0"));
+          std::make_unique<repr::Tensor>(data->getName() + "_opencl_0"));
 
       output->removeInEdge(edge);
       edge->setHead(newOutput);

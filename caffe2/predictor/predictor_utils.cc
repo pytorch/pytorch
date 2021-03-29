@@ -9,7 +9,7 @@
 namespace caffe2 {
 namespace predictor_utils {
 
-CAFFE2_API const NetDef& getNet(
+TORCH_API const NetDef& getNet(
     const MetaNetDef& def,
     const std::string& name) {
   for (const auto& n : def.nets()) {

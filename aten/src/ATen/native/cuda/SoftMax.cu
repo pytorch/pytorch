@@ -709,32 +709,50 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
     if (inner_size == 1) {
       dim3 grid(outer_size);
       AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "host_softmax", [&] {
-      using accscalar_t = acc_type<scalar_t, true>;
-      if (!half_to_float) {
-        if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-          dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
-              output.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
+        using accscalar_t = acc_type<scalar_t, true>;
+        if (!half_to_float) {
+          if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
+            auto output_ptr = output.data_ptr<scalar_t>();
+            auto input_ptr = input.data_ptr<scalar_t>();
+            int64_t remaining = outer_size;
+            int64_t chunk_size = (1<<31 - 1) / dim_size;
+            while(remaining > 0) {
+              dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
+                output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
+              input_ptr += chunk_size * dim_size;
+              output_ptr += chunk_size * dim_size;
+              remaining -= chunk_size;
+            }
+          } else {
+            constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
+            dim3 block = SoftMax_getBlockSize(ILP, dim_size);
+            cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
+              <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
+                output.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), dim_size);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          }
         } else {
-          constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
-          dim3 block = SoftMax_getBlockSize(ILP, dim_size);
-          cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
-            <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
-              output.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), dim_size
-          );
+          if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
+            auto output_ptr = output.data_ptr<accscalar_t>();
+            auto input_ptr = input.data_ptr<scalar_t>();
+            int64_t remaining = outer_size;
+            int64_t chunk_size = (1<<31 - 1) / dim_size;
+            while(remaining > 0) {
+              dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
+                  output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
+              input_ptr += chunk_size * dim_size;
+              output_ptr += chunk_size * dim_size;
+              remaining -= chunk_size;
+            }
+          } else {
+            constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
+            dim3 block = SoftMax_getBlockSize(ILP, dim_size);
+            cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
+              <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
+                output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), dim_size);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+          }
         }
-      } else {
-        if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-          dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
-              output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
-        } else {
-          constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
-          dim3 block = SoftMax_getBlockSize(ILP, dim_size);
-          cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
-            <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
-              output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), dim_size
-          );
-        }
-      }
       });
     // This kernel runs in a 2D grid, where each application along y dimension has a fixed
     // outer_size, and runs in parallel over inner_size. Dimension x is parallel over outer_size.
@@ -743,29 +761,28 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
       uint32_t smem_size;
       dim3 grid, block;
       AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "host_softmax", [&] {
-      using accscalar_t = acc_type<scalar_t, true>;
-      if (!half_to_float) {
-          SpatialSoftMax_getLaunchSizes<accscalar_t>(
-              &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, Epilogue>,
-              outer_size, dim_size, inner_size,
-              grid, block, smem_size);
-          cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, Epilogue>
-            <<<grid, block, smem_size, stream>>>(
-             output.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), outer_size, dim_size, inner_size
-      );
-      } else {
-          SpatialSoftMax_getLaunchSizes<accscalar_t>(
-              &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, accscalar_t, Epilogue>,
-              outer_size, dim_size, inner_size,
-              grid, block, smem_size);
-          cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, accscalar_t, Epilogue>
-            <<<grid, block, smem_size, stream>>>(
-             output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), outer_size, dim_size, inner_size
-      );
-      }
+        using accscalar_t = acc_type<scalar_t, true>;
+        if (!half_to_float) {
+            SpatialSoftMax_getLaunchSizes<accscalar_t>(
+                &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, Epilogue>,
+                outer_size, dim_size, inner_size,
+                grid, block, smem_size);
+            cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, Epilogue>
+              <<<grid, block, smem_size, stream>>>(
+              output.data_ptr<scalar_t>(), input.data_ptr<scalar_t>(), outer_size, dim_size, inner_size);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+        } else {
+            SpatialSoftMax_getLaunchSizes<accscalar_t>(
+                &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, accscalar_t, Epilogue>,
+                outer_size, dim_size, inner_size,
+                grid, block, smem_size);
+            cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, accscalar_t, Epilogue>
+              <<<grid, block, smem_size, stream>>>(
+              output.data_ptr<accscalar_t>(), input.data_ptr<scalar_t>(), outer_size, dim_size, inner_size);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+        }
       });
     }
-    AT_CUDA_CHECK(cudaGetLastError());
   }
   return output;
 }
@@ -798,8 +815,19 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     using accscalar_t = acc_type<scalar_t, true>;
     if (!half_to_float) {
       if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-        dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
-            gI.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(), dim_size, dim_size, outer_size);
+        auto gI_ptr = gI.data_ptr<scalar_t>();
+        auto grad_ptr = grad.data_ptr<scalar_t>();
+        auto output_ptr = output.data_ptr<scalar_t>();
+        int64_t remaining = outer_size;
+        int64_t chunk_size = (1<<31 - 1) / dim_size;
+        while(remaining > 0) {
+          dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
+            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
+          gI_ptr += chunk_size * dim_size;
+          grad_ptr += chunk_size * dim_size;
+          output_ptr += chunk_size * dim_size;
+          remaining -= chunk_size;
+        }
       } else {
         constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
         dim3 block = SoftMax_getBlockSize(ILP, dim_size);
@@ -807,11 +835,23 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
             gI.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(), dim_size
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     } else {
       if (dim_size <= 1024 && dim_size*sizeof(scalar_t) <= 4096) {
-        dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax>(
-            gI.data_ptr<scalar_t>(), grad.data_ptr<accscalar_t>(), output.data_ptr<accscalar_t>(), dim_size, dim_size, outer_size);
+        auto gI_ptr = gI.data_ptr<scalar_t>();
+        auto grad_ptr = grad.data_ptr<accscalar_t>();
+        auto output_ptr = output.data_ptr<accscalar_t>();
+        int64_t remaining = outer_size;
+        int64_t chunk_size = (1<<31 - 1) / dim_size;
+        while(remaining > 0) {
+          dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax>(
+            gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
+          gI_ptr += chunk_size * dim_size;
+          grad_ptr += chunk_size * dim_size;
+          output_ptr += chunk_size * dim_size;
+          remaining -= chunk_size;
+        }
       } else {
         constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
         dim3 block = SoftMax_getBlockSize(ILP, dim_size);
@@ -819,6 +859,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
             gI.data_ptr<scalar_t>(), output.data_ptr<accscalar_t>(), grad.data_ptr<accscalar_t>(), dim_size
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     }
     });
@@ -826,33 +867,35 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     uint32_t smem_size;
     dim3 grid, block;
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, gI.scalar_type(), "host_softmax_backward", [&] {
-    using accscalar_t = acc_type<scalar_t, true>;
-    if (!half_to_float) {
-        SpatialSoftMax_getLaunchSizes<accscalar_t>(
-            &cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, scalar_t, Epilogue>,
-            outer_size, dim_size, inner_size,
-            grid, block, smem_size);
+      using accscalar_t = acc_type<scalar_t, true>;
+      if (!half_to_float) {
+          SpatialSoftMax_getLaunchSizes<accscalar_t>(
+              &cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, scalar_t, Epilogue>,
+              outer_size, dim_size, inner_size,
+              grid, block, smem_size);
 
-        cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, scalar_t, Epilogue>
-          <<<grid, block, smem_size, stream>>>(
-            gI.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(),
-            outer_size, dim_size, inner_size
-        );
-    } else {
-        SpatialSoftMax_getLaunchSizes<accscalar_t>(
-            &cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, accscalar_t, Epilogue>,
-            outer_size, dim_size, inner_size,
-            grid, block, smem_size);
+          cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, scalar_t, Epilogue>
+            <<<grid, block, smem_size, stream>>>(
+              gI.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(), grad.data_ptr<scalar_t>(),
+              outer_size, dim_size, inner_size
+          );
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+      } else {
+          SpatialSoftMax_getLaunchSizes<accscalar_t>(
+              &cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, accscalar_t, Epilogue>,
+              outer_size, dim_size, inner_size,
+              grid, block, smem_size);
 
-        cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, accscalar_t, Epilogue>
-          <<<grid, block, smem_size, stream>>>(
-            gI.data_ptr<scalar_t>(), output.data_ptr<accscalar_t>(), grad.data_ptr<accscalar_t>(),
-            outer_size, dim_size, inner_size
-        );
-    }
+          cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, accscalar_t, Epilogue>
+            <<<grid, block, smem_size, stream>>>(
+              gI.data_ptr<scalar_t>(), output.data_ptr<accscalar_t>(), grad.data_ptr<accscalar_t>(),
+              outer_size, dim_size, inner_size
+          );
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
     });
   }
-  AT_CUDA_CHECK(cudaGetLastError());
+
   return gI;
 }
 }

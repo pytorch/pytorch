@@ -122,6 +122,16 @@ int64_t FileStoreHandler::add(
   return 0;
 }
 
+int64_t FileStoreHandler::getNumKeys() {
+  CHECK(false) << "getNumKeys not implemented for FileStoreHandler";
+  return 0;
+}
+
+bool FileStoreHandler::deleteKey(const std::string& /* unused */) {
+  CHECK(false) << "deleteKey not implemented for FileStoreHandler";
+  return false;
+}
+
 bool FileStoreHandler::check(const std::vector<std::string>& names) {
   std::vector<std::string> paths;
   for (const auto& name : names) {

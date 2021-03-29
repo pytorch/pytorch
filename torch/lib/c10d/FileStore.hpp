@@ -17,9 +17,18 @@ class FileStore : public Store {
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
+  std::vector<uint8_t> compareSet(
+      const std::string& key,
+      const std::vector<uint8_t>& currentValue,
+      const std::vector<uint8_t>& newValue) override;
+
   std::vector<uint8_t> get(const std::string& key) override;
 
   int64_t add(const std::string& key, int64_t value) override;
+
+  int64_t getNumKeys() override;
+
+  bool deleteKey(const std::string& key) override;
 
   bool check(const std::vector<std::string>& keys) override;
 

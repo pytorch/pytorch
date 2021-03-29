@@ -15,15 +15,15 @@ bool is_distributed(const Tensor& self) {
 }
 
 bool is_complex(const Tensor& self) {
-  return at::isComplexType(self.scalar_type());
+  return self.is_complex();
 }
 
 bool is_floating_point(const Tensor& self) {
-  return at::isFloatingType(self.scalar_type());
+  return self.is_floating_point();
 }
 
 bool is_signed(const Tensor &self) {
-  return at::isSignedType(self.scalar_type());
+  return self.is_signed();
 }
 
 bool is_sparse(const Tensor& self) {
@@ -114,18 +114,18 @@ ScalarType result_type(const Tensor &tensor, const Tensor &other) {
   return native::result_type(tensors);
 }
 
-ScalarType result_type(const Tensor &tensor, const Scalar other) {
+ScalarType result_type(const Tensor &tensor, const Scalar& other) {
   auto tensor2 = scalar_to_tensor(other);
   tensor2.unsafeGetTensorImpl()->set_wrapped_number(true);
   std::vector<Tensor> tensors{std::move(tensor), std::move(tensor2)};
   return native::result_type(tensors);
 }
 
-ScalarType result_type(const Scalar scalar, const Tensor &tensor) {
+ScalarType result_type(const Scalar& scalar, const Tensor &tensor) {
   return at::result_type(tensor, scalar);
 }
 
-ScalarType result_type(const Scalar scalar1, const Scalar scalar2) {
+ScalarType result_type(const Scalar& scalar1, const Scalar& scalar2) {
   auto tensor1 = scalar_to_tensor(scalar1);
   tensor1.unsafeGetTensorImpl()->set_wrapped_number(true);
   return at::result_type(tensor1, scalar2);

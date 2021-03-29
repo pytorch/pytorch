@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
+#include <c10/util/accumulate.h>
 
 namespace at {
 namespace native {
@@ -52,16 +53,10 @@ std::tuple<Tensor, Tensor, Tensor, int64_t, int64_t> _prepare_layer_norm_inputs(
   }
 
   const int axis = input_ndim - normalized_ndim;
-  const int64_t M = std::accumulate(
-      input_shape.cbegin(),
-      input_shape.cbegin() + axis,
-      1LL,
-      std::multiplies<int64_t>());
-  const int64_t N = std::accumulate(
-      input_shape.cbegin() + axis,
-      input_shape.cend(),
-      1LL,
-      std::multiplies<int64_t>());
+  const int64_t M =
+      c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
+  const int64_t N =
+      c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
 
   const auto& X = input.is_contiguous() ? input : input.contiguous();
   const auto& gamma = weight.is_contiguous() ? weight : weight.contiguous();

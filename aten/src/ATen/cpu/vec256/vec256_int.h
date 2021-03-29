@@ -104,6 +104,8 @@ public:
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
+      // ptr need not to be aligned here. See
+      // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
       __at_align32__ int64_t tmp_values[size()];
@@ -118,9 +120,6 @@ public:
     auto is_larger = _mm256_cmpgt_epi64(zero, values);
     auto inverse = _mm256_xor_si256(values, is_larger);
     return _mm256_sub_epi64(inverse, is_larger);
-  }
-  Vec256<int64_t> angle() const {
-    return _mm256_set1_epi64x(0);
   }
   Vec256<int64_t> real() const {
     return *this;
@@ -228,6 +227,8 @@ public:
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
+      // ptr need not to be aligned here. See
+      // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
       __at_align32__ int32_t tmp_values[size()];
@@ -245,9 +246,6 @@ public:
   int32_t& operator[](int idx)  = delete;
   Vec256<int32_t> abs() const {
     return _mm256_abs_epi32(values);
-  }
-  Vec256<int32_t> angle() const {
-    return _mm256_set1_epi32(0);
   }
   Vec256<int32_t> real() const {
     return *this;
@@ -449,6 +447,8 @@ public:
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
+      // ptr need not to be aligned here. See
+      // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
       __at_align32__ int16_t tmp_values[size()];
@@ -460,9 +460,6 @@ public:
   int16_t& operator[](int idx)  = delete;
   Vec256<int16_t> abs() const {
     return _mm256_abs_epi16(values);
-  }
-  Vec256<int16_t> angle() const {
-    return _mm256_set1_epi16(0);
   }
   Vec256<int16_t> real() const {
     return *this;
@@ -699,6 +696,8 @@ public:
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
+      // ptr need not to be aligned here. See
+      // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
       __at_align32__ int8_t tmp_values[size()];
@@ -710,9 +709,6 @@ public:
   int8_t& operator[](int idx)  = delete;
   Vec256<int8_t> abs() const {
     return _mm256_abs_epi8(values);
-  }
-  Vec256<int8_t> angle() const {
-    return _mm256_set1_epi8(0);
   }
   Vec256<int8_t> real() const {
     return *this;
@@ -879,8 +875,8 @@ Vec256<int16_t> inline operator*(const Vec256<int16_t>& a, const Vec256<int16_t>
 
 template <typename T, typename Op>
 Vec256<T> inline int_elementwise_binary_256(const Vec256<T>& a, const Vec256<T>& b, Op op) {
-  __at_align32__ T values_a[Vec256<T>::size()];
-  __at_align32__ T values_b[Vec256<T>::size()];
+  T values_a[Vec256<T>::size()];
+  T values_b[Vec256<T>::size()];
   a.store(values_a);
   b.store(values_b);
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -1038,6 +1034,10 @@ inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
 template<class T, typename std::enable_if_t<std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
 inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
   return _mm256_xor_si256(a, b);
+}
+template<class T, typename std::enable_if_t<std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator~(const Vec256<T>& a) {
+  return _mm256_xor_si256(a, _mm256_set1_epi32(-1));
 }
 
 Vec256<int64_t> Vec256<int64_t>::eq(const Vec256<int64_t>& other) const {

@@ -31,7 +31,7 @@ namespace caffe2 {
  * own transform, write your implementations for PatternRule, ValidatorRule, and
  * ReplaceRule.
  */
-class CAFFE2_API Transform {
+class TORCH_API Transform {
  public:
   Transform() {}
 
@@ -148,7 +148,7 @@ class CAFFE2_API Transform {
 };
 
 // Creates a Transform based on a key, which should be defined in registry.
-CAFFE2_API unique_ptr<Transform> CreateTransform(string key);
+TORCH_API unique_ptr<Transform> CreateTransform(string key);
 
 C10_DECLARE_REGISTRY(TransformRegistry, Transform);
 #define REGISTER_TRANSFORM(name, ...) \
@@ -156,14 +156,14 @@ C10_DECLARE_REGISTRY(TransformRegistry, Transform);
 
 // Create a Transform object from registry,
 // and immediately apply it to a Netdef.
-CAFFE2_API NetDef ApplyTransform(const string& key, const NetDef& netdef);
+TORCH_API NetDef ApplyTransform(const string& key, const NetDef& netdef);
 
 // Create a Transform object from registry, apply it to a NetDef.
 // Will only return the transformed net if it is faster than the old net.
 // This will run the init net first, will run the two nets warmup_runs times.
 // Then, we will take the average time of main_runs runs, and only keep the
 // transformed net if it is faster by a factor of improvement_threshold.
-CAFFE2_API NetDef ApplyTransformIfFaster(
+TORCH_API NetDef ApplyTransformIfFaster(
     const string& key,
     const NetDef& netdef,
     const NetDef& init_netdef,

@@ -97,8 +97,8 @@ in the tensor:
 Since the cloned tensors are independent of each other, however, they have
 none of the view relationships the original tensors did. If both file size and
 view relationships are important when saving tensors smaller than their
-storage objects, then care must be taken to construct new tensors that minimize 
-the size of their storage objects but still have the desired view relationships 
+storage objects, then care must be taken to construct new tensors that minimize
+the size of their storage objects but still have the desired view relationships
 before saving.
 
 Saving and loading torch.nn.Modules
@@ -270,7 +270,7 @@ explicitly described in
 PyTorch’s `release notes <https://github.com/pytorch/pytorch/releases>`_,
 and modules relying on functionality that has changed may need to be updated
 to continue working properly. In limited cases, detailed below, PyTorch will
-preserve the historic behavior of serialized ScriptModules so they do not require 
+preserve the historic behavior of serialized ScriptModules so they do not require
 an update.
 
 torch.div performing integer division

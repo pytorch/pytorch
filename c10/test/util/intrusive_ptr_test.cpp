@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <map>
+#include <memory>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -693,21 +694,21 @@ TEST(IntrusivePtrTest, Equality_Nullptr) {
   EXPECT_FALSE(var1 != var2);
 }
 
-TEST(IntrusivePtrTest, Nonequality) {
+TEST(IntrusivePtrTest, Inequality) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1 != var2);
   EXPECT_FALSE(var1 == var2);
 }
 
-TEST(IntrusivePtrTest, Nonequality_NullptrLeft) {
+TEST(IntrusivePtrTest, Inequality_NullptrLeft) {
   intrusive_ptr<SomeClass> var1;
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1 != var2);
   EXPECT_FALSE(var1 == var2);
 }
 
-TEST(IntrusivePtrTest, Nonequality_NullptrRight) {
+TEST(IntrusivePtrTest, Inequality_NullptrRight) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> var2;
   EXPECT_TRUE(var1 != var2);
@@ -1652,6 +1653,21 @@ TEST(WeakIntrusivePtrTest, givenPtr_whenLocking_thenReturnsCorrectObject) {
   EXPECT_EQ(var.ptr.get(), locked.get());
 }
 
+TEST(WeakIntrusivePtrTest, expiredPtr_whenLocking_thenReturnsNullType) {
+  IntrusiveAndWeak<SomeClass> var = make_weak_intrusive<SomeClass>();
+  // reset the intrusive_ptr to test if weak pointer still valid
+  var.ptr.reset();
+  EXPECT_TRUE(var.weak.expired());
+  intrusive_ptr<SomeClass> locked = var.weak.lock();
+  EXPECT_FALSE(locked.defined());
+}
+
+TEST(WeakIntrusivePtrTest, weakNullPtr_locking) {
+  auto weak_ptr = make_invalid_weak<SomeClass>();
+  intrusive_ptr<SomeClass> locked = weak_ptr.lock();
+  EXPECT_FALSE(locked.defined());
+}
+
 TEST(
     WeakIntrusivePtrTest,
     givenValidPtr_whenMoveAssigning_thenPointsToSameObject) {
@@ -1671,6 +1687,15 @@ TEST(
   EXPECT_TRUE(obj1.weak.expired());
 }
 
+TEST(
+    WeakIntrusivePtrTest,
+    vector_insert_weak_intrusive) {
+  std::vector<weak_intrusive_ptr<SomeClass>> priorWorks;
+  std::vector<intrusive_ptr<SomeClass>> wips;
+  wips.push_back(make_intrusive<SomeClass>());
+  priorWorks.insert(priorWorks.end(), wips.begin(), wips.end());
+  EXPECT_EQ(priorWorks.size(), 1);
+}
 TEST(
     WeakIntrusivePtrTest,
     givenInvalidPtr_whenMoveAssigning_thenNewInstanceIsValid) {
@@ -2462,28 +2487,28 @@ TEST(WeakIntrusivePtrTest, Equality_Invalid) {
   EXPECT_FALSE(var1 != var2);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality) {
+TEST(WeakIntrusivePtrTest, Inequality) {
   IntrusiveAndWeak<SomeClass> var1 = make_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1.weak != var2.weak);
   EXPECT_FALSE(var1.weak == var2.weak);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality_InvalidLeft) {
+TEST(WeakIntrusivePtrTest, Inequality_InvalidLeft) {
   weak_intrusive_ptr<SomeClass> var1 = make_invalid_weak<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1 != var2.weak);
   EXPECT_FALSE(var1 == var2.weak);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality_InvalidRight) {
+TEST(WeakIntrusivePtrTest, Inequality_InvalidRight) {
   IntrusiveAndWeak<SomeClass> var1 = make_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_invalid_weak<SomeClass>();
   EXPECT_TRUE(var1.weak != var2);
   EXPECT_FALSE(var1.weak == var2);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality_WeakOnly) {
+TEST(WeakIntrusivePtrTest, Inequality_WeakOnly) {
   weak_intrusive_ptr<SomeClass> var1 = make_weak_only<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_weak_only<SomeClass>();
   EXPECT_TRUE(var1 != var2);

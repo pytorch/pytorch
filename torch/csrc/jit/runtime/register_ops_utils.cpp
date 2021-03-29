@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 
 namespace torch {
 namespace jit {
@@ -142,6 +143,15 @@ IValue tensorToListRecursive(
       double scalar =
           scalar_ty == at::ScalarType::Float ? *(float*)data : *(double*)data;
       return IValue(scalar);
+    } else if (ty == ComplexType::get()) {
+      TORCH_INTERNAL_ASSERT(
+          scalar_ty == at::ScalarType::ComplexFloat ||
+              scalar_ty == at::ScalarType::ComplexDouble,
+          "Unexpected scalar type for Tensor");
+      c10::complex<double> scalar = scalar_ty == at::ScalarType::ComplexFloat
+          ? *(c10::complex<float>*)data
+          : *(c10::complex<double>*)data;
+      return IValue(scalar);
     } else if (ty == BoolType::get()) {
       bool scalar = *(bool*)data;
       return IValue(scalar);
@@ -174,6 +184,8 @@ IValue tensorToListRecursive(
 
     if (inner_result.isList()) {
       result.emplace_back(inner_result.toList());
+    } else if (inner_result.isComplexDouble()) {
+      result.emplace_back(inner_result.toComplexDouble());
     } else if (inner_result.isDouble()) {
       result.emplace_back(inner_result.toDouble());
     } else if (inner_result.isInt()) {
@@ -205,7 +217,7 @@ int64_t partProduct(int n, int m) {
     return (int64_t)n;
   if (m == (n + 2))
     return (int64_t)n * m;
-  int k = (n + m) / 2;
+  auto k = n + (m - n) / 2; // Overflow-safe midpoint
   if ((k & 1) != 1)
     k = k - 1;
   return partProduct(n, k) * partProduct(k + 2, m);
@@ -434,22 +446,13 @@ void listSlice(Stack* stack) {
 
   const int64_t list_size = list.size();
 
-  // clamp start and end to the bounds of the list
-  const auto normalized_start =
-      std::max((int64_t)0, normalizeIndex(start, list_size));
-  const auto normalized_end =
-      std::min(list_size, normalizeIndex(end, list_size));
-
   c10::List<IValue> sliced_list = make_result_list<IValue>(list.elementType());
-  if (normalized_end <= normalized_start) {
-    // early exit if the slice is trivially empty
-    push(stack, std::move(sliced_list));
-    return;
-  }
+  const int64_t num_values =
+      slice_indices_adjust(list_size, &start, &end, step);
+  sliced_list.reserve(num_values);
 
-  sliced_list.reserve(normalized_end - normalized_start);
-
-  for (auto i = normalized_start; i < normalized_end;) {
+  int i = start;
+  for (int j = 0; j < num_values; ++j) {
     sliced_list.push_back(list.get(i));
     i += step;
   }

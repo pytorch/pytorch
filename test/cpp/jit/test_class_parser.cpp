@@ -1,4 +1,5 @@
-#include <test/cpp/jit/test_base.h>
+#include <gtest/gtest.h>
+
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 
@@ -15,7 +16,7 @@ const auto testSource = R"JIT(
     an_attribute : Tensor
 )JIT";
 
-void testClassParser() {
+TEST(ClassParserTest, Basic) {
   Parser p(std::make_shared<Source>(testSource));
   std::vector<Def> definitions;
   std::vector<Resolver> resolvers;

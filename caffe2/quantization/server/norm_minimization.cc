@@ -8,11 +8,17 @@
 
 #include <immintrin.h>
 
+#include <c10/util/irange.h>
+
 using namespace std;
 
 namespace dnnlowp {
 
 #undef NDEBUG
+
+// Use fp16_min as the small scale cutoff because we don't want to use scales in fp16 subnormal range.
+// This is to be consistent with Glow and FakeLowP implementation for NNPI.
+constexpr float SMALL_SCALE_THRESHOLD = 6.1e-5f;
 
 static float
 GetNorm(float begin, float end, float density, NormMinimization::Kind kind) {
@@ -57,7 +63,8 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
   vector<float> bins_f(dnnlowp::adjust_hist_to_include_zero(hist, &min, &max));
   int nbins = bins_f.size();
   float bin_width = (max - min) / nbins;
-  if (bin_width == 0) {
+  float scale = (max - min) / float((1 << precision) - 1);
+  if (bin_width == 0 || scale < SMALL_SCALE_THRESHOLD) {
     QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();
     return qfactory->ChooseQuantizationParams(
         min, max, precision, preserve_sparsity);
@@ -190,6 +197,12 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
   int nbins = bins_f.size();
   float bin_width = (max - min) / nbins;
 
+  float scale = (max - min) / float((1 << precision) - 1);
+  if (bin_width == 0 || scale < SMALL_SCALE_THRESHOLD) {
+    QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();
+    return qfactory->ChooseQuantizationParams(
+        min, max, precision, preserve_sparsity);
+  }
   int dst_nbins = 1 << precision;
 
   int zero_bin = round(-min / bin_width);
@@ -295,7 +308,7 @@ TensorQuantizationParams NormMinimization::ChooseQuantizationParams(
   }
 
   float total_sum = 0;
-  for (int i = 0; i < bins_f.size(); ++i) {
+  for (const auto i : c10::irange(bins_f.size())) {
     total_sum += bins_f[i];
   }
   float selected_sum = 0;

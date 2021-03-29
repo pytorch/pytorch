@@ -1,4 +1,5 @@
 #include <c10/util/Exception.h>
+#include <c10/util/Unicode.h>
 #include <ATen/DynamicLibrary.h>
 #include <ATen/Utils.h>
 
@@ -6,7 +7,7 @@
 #include <dlfcn.h>
 #include <libgen.h>
 #else
-#include <Windows.h>
+#include <c10/util/win32-headers.h>
 #endif
 
 namespace at {
@@ -24,9 +25,16 @@ static void* checkDL(void* x) {
 
   return x;
 }
-DynamicLibrary::DynamicLibrary(const char* name) {
+DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
-  handle = checkDL(dlopen(name, RTLD_LOCAL | RTLD_NOW));
+  handle = dlopen(name, RTLD_LOCAL | RTLD_NOW);
+  if (!handle) {
+    if (alt_name) {
+      handle = checkDL(dlopen(alt_name, RTLD_LOCAL | RTLD_NOW));
+    } else {
+        AT_ERROR("Error in dlopen or dlsym: ", dlerror());
+    }
+  }
 }
 
 void* DynamicLibrary::sym(const char* name) {
@@ -44,14 +52,15 @@ DynamicLibrary::~DynamicLibrary() {
 
 // Windows
 
-DynamicLibrary::DynamicLibrary(const char* name) {
+DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
   HMODULE theModule;
   bool reload = true;
+  auto wname = c10::u8u16(name);
   // Check if LOAD_LIBRARY_SEARCH_DEFAULT_DIRS is supported
-  if (GetProcAddress(GetModuleHandle("KERNEL32.DLL"), "AddDllDirectory") != NULL) {
-    theModule = LoadLibraryExA(
-        name,
+  if (GetProcAddress(GetModuleHandleW(L"KERNEL32.DLL"), "AddDllDirectory") != NULL) {
+    theModule = LoadLibraryExW(
+        wname.c_str(),
         NULL,
         LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (theModule != NULL || (GetLastError() != ERROR_MOD_NOT_FOUND)) {
@@ -60,7 +69,7 @@ DynamicLibrary::DynamicLibrary(const char* name) {
   }
 
   if (reload) {
-    theModule = LoadLibraryA(name);
+    theModule = LoadLibraryW(wname.c_str());
   }
 
   if (theModule) {

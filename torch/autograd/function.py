@@ -1,11 +1,12 @@
 import torch
 import torch._C as _C
+from torch._C import _functions
 import torch.utils.hooks as hooks
 from torch._six import with_metaclass
 import functools
 import warnings
 from collections import OrderedDict
-from typing import Any
+from typing import Any, List, Optional
 
 
 class _ContextMethodMixin(object):
@@ -84,7 +85,8 @@ class BackwardCFunction(_C._FunctionBase, _ContextMethodMixin, _HookMixin):
     _is_legacy = False
 
     def apply(self, *args):
-        return self._forward_cls.backward(self, *args)
+        # _forward_cls is defined by derived class
+        return self._forward_cls.backward(self, *args)  # type: ignore
 
 
 class FunctionMeta(type):
@@ -115,8 +117,8 @@ class FunctionMeta(type):
 
         return super(FunctionMeta, cls).__init__(name, bases, attrs)
 
-
-class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):
+# mypy doesn't understand `with_metaclass` from torch._six
+class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):  # type: ignore
     r"""Records operation history and defines formulas for differentiating ops.
 
     See the Note on extending the autograd engine for more details on how to use
@@ -171,8 +173,8 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         It must accept a context ctx as the first argument, followed by any
         number of arguments (tensors or other types).
 
-        The context can be used to store tensors that can be then retrieved
-        during the backward pass.
+        The context can be used to store arbitrary data that can be then
+        retrieved during the backward pass.
         """
         raise NotImplementedError("You must implement the forward function for custom"
                                   " autograd.Function.")
@@ -184,10 +186,13 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         This function is to be overridden by all subclasses.
 
         It must accept a context :attr:`ctx` as the first argument, followed by
-        as many outputs did :func:`forward` return, and it should return as many
-        tensors, as there were inputs to :func:`forward`. Each argument is the
-        gradient w.r.t the given output, and each returned value should be the
-        gradient w.r.t. the corresponding input.
+        as many outputs as the :func:`forward` returned (None will be passed in
+        for non tensor outputs of the forward function),
+        and it should return as many tensors, as there were inputs to
+        :func:`forward`. Each argument is the gradient w.r.t the given output,
+        and each returned value should be the gradient w.r.t. the
+        corresponding input. If an input is not a Tensor or is a Tensor not
+        requiring grads, you can just pass None as a gradient for that input.
 
         The context can be used to retrieve tensors saved during the forward
         pass. It also has an attribute :attr:`ctx.needs_input_grad` as a tuple
@@ -227,7 +232,7 @@ def once_differentiable(fn):
         if not isinstance(outputs, tuple):
             outputs = (outputs,)
 
-        err_fn = torch._C._functions.DelayedError(
+        err_fn = _functions.DelayedError(
             b"trying to differentiate twice a function that was marked"
             b"with @once_differentiable", len(outputs))
 
@@ -330,7 +335,7 @@ def _unflatten(input, proto):
     # unflatten a list or tuple input into a nested list/tuple structure
     # specified by proto
     def unflatten_helper(input, proto):
-        res = []
+        res: List[Optional[torch.Tensor]] = []
         if hasattr(proto, "_jit_wrap"):
             return proto._jit_wrap(input)
         if not isinstance(proto, (list, tuple)):
@@ -379,16 +384,16 @@ class NestedIOFunction(Function):
             del self._to_save_nested
         return result
 
-    def backward(self, *gradients: Any) -> Any:
+    def backward(self, *gradients: Any) -> Any:  # type: ignore
         nested_gradients = _unflatten(gradients, self._nested_output)
-        result = self.backward_extended(*nested_gradients)
+        result = self.backward_extended(*nested_gradients)  # type: ignore
         return tuple(_iter_None_tensors(result))
 
     __call__ = _do_forward
 
-    def forward(self, *args: Any) -> Any:
+    def forward(self, *args: Any) -> Any:  # type: ignore
         nested_tensors = _map_tensor_data(self._nested_input)
-        result = self.forward_extended(*nested_tensors)
+        result = self.forward_extended(*nested_tensors)  # type: ignore
         del self._nested_input
         self._nested_output = result
         return tuple(_iter_tensors(result))

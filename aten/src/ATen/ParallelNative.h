@@ -22,7 +22,7 @@ inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
   return std::make_tuple(num_tasks, chunk_size);
 }
 
-CAFFE2_API void _parallel_run(
+TORCH_API void _parallel_run(
   const int64_t begin,
   const int64_t end,
   const int64_t grain_size,

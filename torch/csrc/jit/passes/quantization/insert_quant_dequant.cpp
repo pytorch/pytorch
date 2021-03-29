@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
+
 #include <c10/core/QScheme.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -242,6 +243,19 @@ at::ScalarType getObserverDtype(Module& module, Value* v) {
   return at::ScalarType::Undefined;
 }
 
+at::ScalarType getObserverComputeDtype(Module& module, Value* v) {
+  auto observer_name = findObserverName(v);
+  if (observer_name.has_value()) {
+    auto observer_module = module.attr(observer_name.value()).toModule();
+    if (observer_module.hasattr("compute_dtype")) {
+      at::ScalarType scalar_type =
+          observer_module.attr("compute_dtype").toScalarType();
+      return scalar_type;
+    }
+  }
+  return at::ScalarType::Undefined;
+}
+
 c10::optional<std::string> getEmbeddingBagObsName(
     script::Module& module,
     Node* n) {
@@ -291,9 +305,13 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   auto observer_out = observer->output();
 
   std::string prepack_fn, quant_fn;
+  std::vector<Value*> prepack_inputs = {observer_out};
   if (op_name == "embedding_bag_4bit") {
+    bool optimized_qparams = false;
+    Value* optimized_qparams_false = g->insertConstant(optimized_qparams);
     prepack_fn = "quantized::embedding_bag_4bit_prepack";
     quant_fn = "quantized::embedding_bag_4bit_rowwise_offsets";
+    prepack_inputs.push_back(optimized_qparams_false);
   } else if (op_name == "embedding_bag_byte") {
     prepack_fn = "quantized::embedding_bag_byte_prepack";
     quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
@@ -302,7 +320,6 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
         "Graph Mode Quantization currently supports 4-bit and 8-bit embedding bag quantization.");
   }
 
-  std::vector<Value*> prepack_inputs = {observer_out};
   std::vector<Use> uses = observer_out->uses();
   Node* embedding_bag_float_op;
   // We expect that the output of the weight observer will be consumed by the
@@ -327,6 +344,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   // Create and insert quantized embedding op.
   Value* none = g->insertConstant(IValue());
   Value* zero = g->insertConstant(IValue(0));
+  bool pruned_wt = false;
+  auto pruned_const = g->insertConstant(pruned_wt);
 
   if (is_aten_op) {
     TORCH_CHECK(
@@ -337,6 +356,10 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     for (auto i = 1; i < inputs_size - 1; ++i) {
       qembedding_bag_inputs.push_back(embedding_bag_inputs[i]);
     }
+    // The sparse field in the float operator denotes sparse gradients.
+    // For inference this stands for pruned weights. We currently don't support
+    // pruning in graph mode API so we set the field to 0 for inference.
+    qembedding_bag_inputs[5] = pruned_const;
   } else {
     TORCH_CHECK(
         inputs_size == 11,
@@ -345,16 +368,13 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     qembedding_bag_inputs.push_back(embedding_bag_inputs[3]); // offsets
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[6]); // scale_grad_by_freq
-    qembedding_bag_inputs.push_back(zero); // zero
-    qembedding_bag_inputs.push_back(embedding_bag_inputs[8]); // sparse
+    qembedding_bag_inputs.push_back(zero); // mode
+    qembedding_bag_inputs.push_back(pruned_const); // pruned_weights
     qembedding_bag_inputs.push_back(
         embedding_bag_inputs[9]); // per_sample_weights
   }
 
-  if (op_name == "embedding_bag_4bit") {
-    // 4-bit op has an extra input compressed_indices_mapping
-    qembedding_bag_inputs.push_back(none);
-  }
+  qembedding_bag_inputs.push_back(none); // compressed_indices_mapping
   qembedding_bag_inputs.push_back(embedding_bag_inputs[inputs_size - 1]);
 
   Node* qembedding_bag =
@@ -421,10 +441,24 @@ void insertQuantizationOps(
     if (getObserverDtype(module, observer_out) == at::ScalarType::Half) {
       dequant = insertFP16CastOps(g, observer_out);
     } else if (!isWeight(module, observer_out)) {
-      // For activation tensors we insert choose_qparams, quant, dequant ops.
-      Value* dtype = g->insertGetAttr(self, qparam_names.back());
-      std::tie(choose_qparams, quant, dequant) = insertChooseQParamQuantDequant(
-          g, observer_out, dtype, at::Symbol::aten(quantize_func));
+      auto observer_dtype = getObserverDtype(module, observer_out);
+      auto observer_compute_dtype =
+          getObserverComputeDtype(module, observer_out);
+      if (observer_dtype == at::ScalarType::QUInt8 ||
+          observer_dtype == at::ScalarType::QInt8 ||
+          observer_compute_dtype == at::ScalarType::QUInt8 ||
+          observer_compute_dtype == at::ScalarType::QInt8) {
+        // For activation tensors we insert choose_qparams, quant, dequant ops.
+        Value* dtype = g->insertGetAttr(self, qparam_names.back());
+        std::tie(choose_qparams, quant, dequant) =
+            insertChooseQParamQuantDequant(
+                g, observer_out, dtype, at::Symbol::aten(quantize_func));
+      } else {
+        // dtype does not require quantization, e.g. float32
+        // will just remove the observer call
+        observer_out->replaceAllUsesWith(original_val);
+        return;
+      }
     } else {
       // For weight tensors we insert quant-dequant ops.
       dequant =
@@ -437,6 +471,7 @@ void insertQuantizationOps(
   observer_out->replaceAllUsesWith(original_val);
 
   original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
+  GRAPH_DUMP("insert nodes:", original_val->owningGraph());
 }
 
 void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
@@ -472,7 +507,7 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
           matched_choose_qparam, matched_quantize, matched_dequantize));
     }
   }
-  for (const auto nodes : nodes_to_rewrite) {
+  for (const auto& nodes : nodes_to_rewrite) {
     auto quant_node = std::get<1>(nodes);
     auto dequant_node = std::get<2>(nodes);
     // get input of quantize call.
@@ -981,12 +1016,18 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
       v->debugName(),
       " exists.");
   QParamVector qparams;
-  c10::QScheme qscheme;
+  c10::QScheme qscheme = c10::kPerTensorAffine;
 
   auto observer_module = module.attr(observer_name.value()).toModule();
   auto scalar_type = observer_module.attr("dtype");
-  if (isPlaceholderObserver(n->input(0)) ||
-      scalar_type == at::ScalarType::Half) {
+  if (isPlaceholderObserver(n->input(0))) {
+    // get compute_dtype for dynamic quantization
+    if (observer_module.hasattr("compute_dtype")) {
+      qparams.push_back(std::make_pair(
+          "_scalar_type", observer_module.attr("compute_dtype")));
+    }
+    return std::make_tuple(qscheme, qparams);
+  } else if (scalar_type == at::ScalarType::Half) {
     return std::make_tuple(qscheme, qparams);
   }
   auto calculate_qparams = observer_module.get_method("calculate_qparams");
@@ -1110,10 +1151,11 @@ void InsertQuantDeQuantHelper::propagateQParams(
         "q_zero_point");
     Node* dtype = insertQParam(
         graph, quantized_input, prim::dtype, IntType::get(), "dtype");
-    quant_inputs = {original_output,
-                    scale->output(),
-                    zero_point->output(),
-                    dtype->output()};
+    quant_inputs = {
+        original_output,
+        scale->output(),
+        zero_point->output(),
+        dtype->output()};
   }
   Node* quant = insertQuant(
       graph, quant_inputs, quant_kind, original_output->debugName() + ".quant");

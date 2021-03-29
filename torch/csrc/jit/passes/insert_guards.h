@@ -15,7 +15,7 @@ namespace jit {
 
 TORCH_API void InsertGuards(std::shared_ptr<Graph> graph);
 
-TORCH_API void RemoveProfilingNodes(std::shared_ptr<Graph> graph);
+TORCH_API void RemoveProfilingNodes(const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

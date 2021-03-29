@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -8,9 +7,11 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 void validateIr(Fusion* fusion);
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

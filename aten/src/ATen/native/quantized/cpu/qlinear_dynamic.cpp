@@ -10,6 +10,8 @@
 
 #include <torch/custom_class.h>
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <string>
 
@@ -135,7 +137,7 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(at::Tensor input, bool reduce_
     // This is the end of the pipeline, pass the resulting matrix through.
     fbgemm::DoNothing<float, float> doNothingObj{};
 
-    for (int task_id = begin; task_id < end; ++task_id) {
+    for (const auto task_id : c10::irange(begin, end)) {
       if (q_scheme == c10::kPerTensorAffine) {
         // Process the per tensor quantization.
         //
@@ -455,13 +457,13 @@ class QLinearDynamicFp16 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl("linear_dynamic", TORCH_FN(QLinearDynamicInt8<false>::run));
-  m.impl("linear_relu_dynamic", TORCH_FN(QLinearDynamicInt8<true>::run));
-  m.impl("linear_dynamic_fp16", TORCH_FN(QLinearDynamicFp16<false>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_dynamic"), TORCH_FN(QLinearDynamicInt8<false>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic"), TORCH_FN(QLinearDynamicInt8<true>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16"), TORCH_FN(QLinearDynamicFp16<false>::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
-  m.impl("linear_dynamic", TORCH_FN(QLinearDynamicInt8<false>::run));
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_dynamic"), TORCH_FN(QLinearDynamicInt8<false>::run));
 }
 
 } // namespace

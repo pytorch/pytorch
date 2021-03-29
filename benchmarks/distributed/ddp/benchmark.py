@@ -9,7 +9,6 @@
 #
 
 import argparse
-import io
 import itertools
 import json
 import os
@@ -26,28 +25,10 @@ import torch.optim as optim
 import torchvision
 
 
-if not torch._six.PY3:
-    raise RuntimeError("DDP benchmark requires Python 3")
-
-
 def allgather_object(obj):
-    buffer = io.BytesIO()
-    torch.save(obj, buffer)
-    input_tensor = torch.ByteTensor(list(buffer.getvalue()))
-    input_length = torch.IntTensor([input_tensor.size(0)])
-    dist.all_reduce(input_length, op=dist.ReduceOp.MAX)
-    input_tensor.resize_(input_length[0])
-    output_tensors = [
-        torch.empty(input_tensor.size(), dtype=torch.uint8)
-        for _ in range(dist.get_world_size())
-    ]
-    dist.all_gather(output_tensors, input_tensor)
-    output = []
-    for tensor in output_tensors:
-        buffer = io.BytesIO(np.asarray(tensor).tobytes())
-        output.append(torch.load(buffer))
-    return output
-
+    out = [None for _ in range(dist.get_world_size())]
+    dist.all_gather_object(out, obj)
+    return out
 
 def allgather_run(cmd):
     proc = subprocess.run(shlex.split(cmd), capture_output=True)

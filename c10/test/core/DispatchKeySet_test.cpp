@@ -88,10 +88,10 @@ TEST(DispatchKeySet, IteratorFull) {
   DispatchKeySet full_set(DispatchKeySet::FULL);
   uint8_t i = 0;
 
-  for (auto it = full_set.begin(); it != full_set.end(); ++it) {
+  for (const auto& it : full_set) {
     i++;
-    ASSERT_TRUE(*it == static_cast<DispatchKey>(i));
-    ASSERT_TRUE(*it != DispatchKey::NumDispatchKeys);
+    ASSERT_TRUE(it == static_cast<DispatchKey>(i));
+    ASSERT_TRUE(it != DispatchKey::NumDispatchKeys);
   }
   ASSERT_EQ(i, static_cast<uint8_t>(DispatchKey::NumDispatchKeys) - 1);
 }
