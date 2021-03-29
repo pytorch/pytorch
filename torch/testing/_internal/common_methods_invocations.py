@@ -2251,8 +2251,6 @@ op_db: List[OpInfo] = [
                # Skips unsupported bfloat16 check because above support check
                #   doesn't work on all platforms
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes', dtypes=(torch.bfloat16,)),
-               # RuntimeError: value cannot be converted to type double without overflow: (2,3)
-               SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=(torch.cfloat,)),
                # TODO: remove redundant method_tests() entries
                SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
                # addmm does not correctly warn when resizing out= inputs
