@@ -2803,6 +2803,7 @@ op_db: List[OpInfo] = [
                     ),
     OpInfo('linalg.det',
            op=torch.linalg.det,
+           aliases=('det', ),
            dtypes=floating_and_complex_types(),
            aten_name='linalg_det',
            sample_inputs_func=sample_inputs_linalg_det,
