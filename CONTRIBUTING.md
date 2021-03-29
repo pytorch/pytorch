@@ -367,15 +367,16 @@ PyTorch offers a series of tests located in the `test/cpp` folder.
 These tests are written in C++ and use the Google Test testing framework.
 After compiling PyTorch from source, the test runner binaries will be
 written to the `build/bin` folder. The command to run one of these tests
-is `./build/bin/FILENAME --gtest_filter=TESTNAME`, where `TESTNAME` is
-the name of the test you'd like to run.
+is `./build/bin/FILENAME --gtest_filter=TESTSUITE.TESTNAME`, where
+`TESTNAME` is the name of the test you'd like to run and `TESTSUITE` is
+the suite that test is defined in.
 
-For example, if you wanted to run `ContainerAliasingTest` in
-`test_alias_analysis.cpp` (`test/cpp/jit/test_alias_analysis.cpp`),
-the command would be:
+For example, if you wanted to run the test ` MayContainAlias`, which
+is part of the test suite `ContainerAliasingTest` in the file
+`test/cpp/jit/test_alias_analysis.cpp`, the command would be:
 
 ```bash
-./build/bin/test_jit --gtest_filter=JitTest.ContainerAliasingTest
+./build/bin/test_jit --gtest_filter=ContainerAliasingTest.UnionAliasing
 ```
 
 ## Writing documentation
