@@ -281,6 +281,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   int i = 0;
 
 #ifdef CPU_CAPABILITY_AVX2
+  // vectorized
   __m256i sum_v_epu32 = _mm256_setzero_si256();
   alignas(64) int32_t temp[8];
 
@@ -337,7 +338,6 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-
 #endif // CPU_CAPABILITY_AVX2
   // scalar
   for (; i < len; ++i) {
@@ -353,7 +353,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   int i = 0;
 
 #ifdef CPU_CAPABILITY_AVX2
-
+  // vectorized
   __m256i sum_v_epi32 = _mm256_setzero_si256();
   alignas(64) int32_t temp[8];
 
@@ -412,14 +412,12 @@ int64_t hsum_sq(const int8_t* A, int len) {
   for (int k = 0; k < 8; ++k) {
     row_sum += temp[k];
   }
-
 #endif // CPU_CAPABILITY_AVX2
 
   // scalar
   for (; i < len; ++i) {
     row_sum += A[i] * A[i];
   }
-
   return row_sum;
 }
 
