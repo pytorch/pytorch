@@ -604,18 +604,21 @@
   self: index_backward(grad.new_zeros(self.sizes(), self.options()), indices, grad)
   result: auto_linear
 
-- name: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
+- name: index_add_.alpha(Tensor(a!) self, int dim, Tensor index, Tensor source, *, Scalar alpha) -> Tensor(a!)
   self: grad
   # The case source.dim() == 0  is necessary to support scalar tensors of the form
   # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
   # This is because source is not broadcastable to index, as source.dim() < index.dim()
-  source: "source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0))"
+  source: "maybe_multiply(source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0)), alpha)"
   index: non_differentiable
   result: self_t.index_add_(dim, index, source_t)
 
 - name: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   self: grad.clone().index_fill_(dim, index, 0)
-  source: grad.index_select(dim, index).expand_as(source)
+  # The case source.dim() == 0  is necessary to support scalar tensors of the form
+  # source.dim() == 0 and index.dim() == 1 and index.size() == (1,),
+  # This is because source is not broadcastable to index, as source.dim() < index.dim()
+  source: "source.dim() > 0 ? grad.index_select(dim, index).expand_as(source) : grad.index_select(dim, index.squeeze(0))"
   index: non_differentiable
 
 - name: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
@@ -1018,6 +1021,9 @@
   self: repeat_backward(grad, repeats, self.sizes())
   result: auto_linear
 
+- name: special_entr(Tensor self) -> Tensor
+  self: grad * (-(1 + self.log()))
+
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
 # Defining a backward will make codegen spit out the forward call as
@@ -1145,12 +1151,12 @@
   result: auto_linear
 
 - name: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
-  self: -grad * alpha
-  other: grad
+  self: handle_r_to_c(other.scalar_type(), -grad * alpha.conj())
+  other: handle_r_to_c(self.scalar_type(), grad)
   result: other_t - maybe_multiply(self_t, alpha)
 
 - name: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
-  self: -grad * alpha
+  self: handle_r_to_c(self.scalar_type(), -grad * alpha.conj())
   result: -maybe_multiply(self_t, alpha)
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor

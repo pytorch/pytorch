@@ -266,8 +266,8 @@ def match_differentiability_info(
 
                 if re.search(IDENT_REGEX.format("self"), fw_info.formula):
                     raise RuntimeError(f'The formula for "{f.name}" is using the original value of {inp.name} that is being '
-                                  'modified inplace. This would lead to wrong forward gradients. Please use "result" in the '
-                                  'formula only.')
+                                       'modified inplace. This would lead to wrong forward gradients. Please use "result" in '
+                                       'the formula only.')
 
                 # replace "result" from the formula by self
                 def repl(m: Match[str]) -> str:
