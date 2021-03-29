@@ -2728,13 +2728,18 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 torch.randn(1, 2, 5, 5, dtype=torch.float))
         quantized_node = ns.call_function(torch.ops.quantized.cat)
         for quant_type in self.static_quant_types:
-            self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node, print_debug_info=True)
-            self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node, print_debug_info=True)
+            self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node)
+            self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node)
 
         # check cat is using the same observer for input and output
         m = QuantizedInput().eval()
         m = prepare_fx(m, {"": default_qconfig})
-        print(m)
+        # two inputs and one output of torch.cat are using same observer, so we have
+        # 2 observers that's replicated
+        all_observers = len(dict(m.named_modules(allow_duplicate=True)))
+        distinct_observers = len(dict(m.named_modules()))
+        self.assertEqual(all_observers, distinct_observers + 2)
+
 
     @skipIfNoFBGEMM
     def test_qbatch_norm(self):

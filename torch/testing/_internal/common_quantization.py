@@ -549,7 +549,6 @@ class QuantizationTestCase(TestCase):
             if node.op == 'call_function' or node.op == 'call_method':
                 n = NodeSpec(node.op, node.target)
             elif node.op == 'call_module':
-                print("modules:", modules)
                 n = NodeSpec(node.op, type(modules[node.target]))
 
             if n is not None:

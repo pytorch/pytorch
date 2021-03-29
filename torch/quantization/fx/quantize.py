@@ -501,8 +501,6 @@ def handle_cat_nodes(
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
         activation_post_process_map: Dict[str, List[str]],
         modules: Dict[str, torch.nn.Module]):
-    print("matches:", matches)
-    print("nodes:", list(observed_graph.nodes))
     observed_nodes: Set[Node] = set()
     # activation_post_process for cat nodes
     app_for_cat_nodes: Dict[Node, torch.nn.Module] = dict()
@@ -516,7 +514,6 @@ def handle_cat_nodes(
     # note that activation_post_process here needs to work for different
     # Tensor dimensions, e.g. MinMaxObserver, HistogramObserver, per tensor FakeQuantize
     for node in observed_graph.nodes:
-        print("node:", node)
         root_node, matched_nodes, pattern, quantize_handler, qconfig = matches.get(
             node.name, (None, None, None, None, None))
 
@@ -525,24 +522,21 @@ def handle_cat_nodes(
             if node.args[0] in app_for_cat_nodes:
                 parent_name, name = _parent_name(node.target)
                 app_for_cat = app_for_cat_nodes[node.args[0]]
-                print("setting", parent_name, name, " to", app_for_cat)
                 setattr(modules[parent_name], name, app_for_cat)
-                print("modules after set:", modules)
-                print("dict:", dict(model.named_modules(allow_duplicate=True)))
 
         if root_node is node and qconfig is not None:
             if isinstance(quantize_handler, CatQuantizeHandler):
-                print("root node:", root_node.format_node(), root_node.args)
                 if in_nodes(node.args[0], observed_nodes):
                     # set the activation post process to be the same
                     # input 0 for cat node is a list
-                    assert isinstance(node.args[0], list) or isinstance(node.args[0], tuple), "Expecting first input of cat to be a list or tuple"
+                    assert isinstance(node.args[0], list) or \
+                        isinstance(node.args[0], tuple), \
+                    "Expecting first input of cat to be a list or tuple"
                     first_act_post_process = modules[node.args[0][0].target]
                     for arg in node.args[0]:
                         assert arg.op == "call_module" and is_activation_post_process(modules[arg.target])
                         parent_name, name = _parent_name(arg.target)
-                        # setattr(modules[parent_name], name, first_act_post_process)
-                        print("setting", name, parent_name, " to", first_act_post_process)
+                        setattr(modules[parent_name], name, first_act_post_process)
                     app_for_cat_nodes[node] = first_act_post_process
 
 
