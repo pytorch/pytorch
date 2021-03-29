@@ -159,10 +159,8 @@ def quantize_node(quantizer: QuantizerCls, in_node: Node, obs_module: torch.nn.M
             qparam_node = create_getattr_from_value(root_module, graph, module_path + prefix + key, value)
             inputs.append(qparam_node)
         else:
-            get_new_attr_name = get_new_attr_name_with_prefix(module_path + prefix + key)
-            qparam_full_path = get_new_attr_name(root_module)
-            setattr(root_module, qparam_full_path, value)
-            inputs.append(graph.create_node('get_attr', qparam_full_path))
+            # for qparams that are not scale/zero_point (like axis, dtype) we store them as literals in the graph.
+            inputs.append(value)
     return graph.create_node(node_type, quantize_op, tuple(inputs), {})
 
 def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key) -> List[Any]:
