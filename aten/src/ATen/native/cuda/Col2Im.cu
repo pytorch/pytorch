@@ -146,7 +146,7 @@ void col2im_backward_out_cuda_template(
     IntArrayRef padding,
     IntArrayRef stride) {
   // im2col_out_cuda checks size of kernel_size, dilation, padding and stride
-  at::native::m2col_out_cuda(
+  at::native::im2col_out_cuda(
       grad_output, kernel_size, dilation, padding, stride, grad_input);
 }
 

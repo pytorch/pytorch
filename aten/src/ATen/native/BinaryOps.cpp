@@ -425,7 +425,7 @@ Tensor sigmoid_backward(const Tensor& grad_output, const Tensor& output) {
 
 Tensor& logit_backward_out(const Tensor& grad_output,
     const Tensor& input,
-    c10::optional<double> eps, 
+    c10::optional<double> eps,
     Tensor& result) {
   auto iter = TensorIterator::binary_op(result, grad_output, input);
   logit_backward_stub(

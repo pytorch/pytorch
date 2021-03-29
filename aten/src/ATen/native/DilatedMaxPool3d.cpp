@@ -475,7 +475,7 @@ std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cpu(const Tensor& input
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
-  bool ceil_mode, 
+  bool ceil_mode,
   Tensor& output,
   Tensor& indices)
 {
@@ -527,7 +527,7 @@ Tensor& max_pool3d_with_indices_backward_out_cpu(const Tensor& gradOutput_,
   IntArrayRef padding,
   IntArrayRef dilation,
   bool ceil_mode,
-  const Tensor& indices, 
+  const Tensor& indices,
   Tensor& gradInput)
 {
   max_pool3d_with_indices_backward_out_cpu_template(

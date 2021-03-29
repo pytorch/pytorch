@@ -406,7 +406,7 @@ std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_cuda(const Tensor& inpu
   IntArrayRef stride,
   IntArrayRef padding,
   IntArrayRef dilation,
-  bool ceil_mode, 
+  bool ceil_mode,
   Tensor& output,
   Tensor& indices)
 {
@@ -458,7 +458,7 @@ Tensor& max_pool3d_with_indices_backward_out_cuda(const Tensor& gradOutput,
   IntArrayRef padding,
   IntArrayRef dilation,
   bool ceil_mode,
-  const Tensor& indices, 
+  const Tensor& indices,
   Tensor& gradInput)
 {
   // See Note [Writing Nondeterministic Operations]

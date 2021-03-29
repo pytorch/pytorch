@@ -934,7 +934,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
 } // namespace
 
 Tensor& replication_pad1d_out_cpu(const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& output)
 {
   replication_pad1d_out_cpu_template(
@@ -954,7 +954,7 @@ Tensor replication_pad1d_cpu(
 
 Tensor& replication_pad1d_backward_out_cpu(const Tensor& gradOutput,
     const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& gradInput)
 {
   gradInput.resize_as_(input);
@@ -975,7 +975,7 @@ Tensor replication_pad1d_backward_cpu(
 }
 
 Tensor& replication_pad2d_out_cpu(const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& output)
 {
   replication_pad2d_out_cpu_template(
@@ -995,7 +995,7 @@ Tensor replication_pad2d_cpu(
 
 Tensor& replication_pad2d_backward_out_cpu(const Tensor& gradOutput,
     const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& gradInput)
 {
   replication_pad2d_backward_out_cpu_template(
@@ -1015,7 +1015,7 @@ Tensor replication_pad2d_backward_cpu(
 }
 
 Tensor& replication_pad3d_out_cpu(const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& output)
 {
   replication_pad3d_out_cpu_template(
@@ -1035,7 +1035,7 @@ Tensor replication_pad3d_cpu(
 
 Tensor& replication_pad3d_backward_out_cpu(const Tensor& gradOutput,
     const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& gradInput)
 {
   replication_pad3d_backward_out_cpu_template(

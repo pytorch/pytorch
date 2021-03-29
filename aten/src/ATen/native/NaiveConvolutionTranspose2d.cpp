@@ -811,7 +811,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(con
     IntArrayRef output_padding,
     IntArrayRef dilation,
     const Tensor& columns,
-    const Tensor& ones, 
+    const Tensor& ones,
     Tensor& grad_input,
     Tensor& grad_weight,
     Tensor& grad_bias) {

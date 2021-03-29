@@ -760,7 +760,7 @@ void replication_pad3d_backward_out_cuda_template(
 } // namespace
 
 Tensor& replication_pad1d_out_cuda(const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& output)
 {
   replication_pad1d_out_cuda_template(
@@ -780,7 +780,7 @@ Tensor replication_pad1d_cuda(
 
 Tensor& replication_pad1d_backward_out_cuda(const Tensor& gradOutput,
     const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& gradInput)
 {
   // See Note [Writing Nondeterministic Operations]
@@ -806,7 +806,7 @@ Tensor replication_pad1d_backward_cuda(
 }
 
 Tensor& replication_pad2d_out_cuda(const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& output)
 {
   replication_pad2d_out_cuda_template(
@@ -826,7 +826,7 @@ Tensor replication_pad2d_cuda(
 
 Tensor& replication_pad2d_backward_out_cuda(const Tensor& gradOutput,
     const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& gradInput)
 {
   // See Note [Writing Nondeterministic Operations]
@@ -852,7 +852,7 @@ Tensor replication_pad2d_backward_cuda(
 }
 
 Tensor& replication_pad3d_out_cuda(const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& output)
 {
   replication_pad3d_out_cuda_template(
@@ -872,7 +872,7 @@ Tensor replication_pad3d_cuda(
 
 Tensor& replication_pad3d_backward_out_cuda(const Tensor& gradOutput,
     const Tensor& input,
-    IntArrayRef paddingSize, 
+    IntArrayRef paddingSize,
     Tensor& gradInput)
 {
   // See Note [Writing Nondeterministic Operations]
