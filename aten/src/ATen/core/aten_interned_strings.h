@@ -314,6 +314,7 @@ _(aten, embedding_sparse_backward) \
 _(aten, empty) \
 _(aten, empty_like) \
 _(aten, empty_strided) \
+_(aten, special_entr) \
 _(aten, eq) \
 _(aten, equal) \
 _(aten, exp) \
@@ -675,6 +676,7 @@ _(aten, svd) \
 _(aten, symeig) \
 _(aten, t) \
 _(aten, take) \
+_(aten, take_along_dim) \
 _(aten, tan) \
 _(aten, tanh) \
 _(aten, tensor) \
