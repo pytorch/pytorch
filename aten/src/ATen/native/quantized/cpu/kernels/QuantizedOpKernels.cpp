@@ -339,11 +339,12 @@ int64_t hsum_sq(const uint8_t* A, int len) {
     row_sum += temp[k];
   }
 #endif // CPU_CAPABILITY_AVX2
+
   // scalar
   for (; i < len; ++i) {
     row_sum += A[i] * A[i];
   }
-  
+
   return row_sum;
 }
 
@@ -418,6 +419,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   for (; i < len; ++i) {
     row_sum += A[i] * A[i];
   }
+
   return row_sum;
 }
 
