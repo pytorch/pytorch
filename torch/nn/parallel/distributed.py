@@ -308,13 +308,13 @@ class DistributedDataParallel(Module):
         device_ids (list of int or torch.device): CUDA devices.
                    1) For single-device modules, ``device_ids`` should only
                    contain exactly one device id, which represents the only
-                   CUDA device where the input module resides.
+                   CUDA device where the input module corresponding to this process resides.
                    Alternatively, ``device_ids`` can also be ``None``.
                    2) For multi-device modules and CPU modules,
                    ``device_ids`` must be ``None``.
                    When ``device_ids`` is ``None`` for both cases,
                    input data for the forward pass must be placed on the correct device.
-                   (default: all visible devices for single-device modules)
+                   (default: ``None``)
         output_device (int or torch.device): Device location of output for
                       single-device CUDA modules. For multi-device modules and
                       CPU modules, it must be ``None``, and the module itself
