@@ -351,11 +351,9 @@ def _validate_iter(sub_cls):
                 raise TypeError("Expected 'Iterator' as the return annotation for `__iter__` of {}"
                                 ", but found {}".format(sub_cls.__name__, _type_repr(hints['return'])))
             data_type = return_hint.__args__[0]
-            # Double-side subtype checking to make sure type matched
-            # e.g. T_co == Any, T_co == S_co
-            if not (issubtype(sub_cls.type.param, data_type) and issubtype(data_type, sub_cls.type.param)):
-                raise TypeError('Unmatched type annotation for {} ({} vs {})'
-                                .format(sub_cls.__name__, sub_cls.type, _type_repr(data_type)))
+            if not issubtype(data_type, sub_cls.type.param):
+                raise TypeError("Expected return type of '__iter__' is a subtype of {}, but found {}"
+                                " for {}".format(sub_cls.type, _type_repr(data_type), sub_cls.__name__))
 
 
 def fixed_type_init(sub_cls, *args, **kwargs):
