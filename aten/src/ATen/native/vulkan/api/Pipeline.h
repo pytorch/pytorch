@@ -1,7 +1,10 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
+#include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
 #include <c10/util/hash.h>
 
@@ -29,7 +32,23 @@ namespace api {
 // these Vulkan objects.
 //
 
-struct C10_EXPORT Pipeline final {
+struct Pipeline final {
+  //
+  // Barrier
+  //
+
+  struct Barrier final {
+    struct Stage final {
+      VkPipelineStageFlags src;
+      VkPipelineStageFlags dst;
+    } stage;
+
+    c10::SmallVector<Resource::Buffer::Barrier, 4u> buffers;
+    c10::SmallVector<Resource::Image::Barrier, 4u> images;
+
+    operator bool() const;
+  };
+
   //
   // Layout
   //
@@ -49,11 +68,11 @@ struct C10_EXPORT Pipeline final {
 
     class Factory final {
      public:
-      explicit Factory(VkDevice device);
+      explicit Factory(const GPU& gpu);
 
       typedef Layout::Descriptor Descriptor;
       typedef VK_DELETER(PipelineLayout) Deleter;
-      typedef Handle<VkPipelineLayout, Deleter> Handle;
+      typedef api::Handle<VkPipelineLayout, Deleter> Handle;
 
       struct Hasher {
         size_t operator()(const Descriptor& descriptor) const;
@@ -72,10 +91,25 @@ struct C10_EXPORT Pipeline final {
     typedef api::Cache<Factory> Cache;
     Cache cache;
 
-    explicit Layout(const VkDevice device)
-      : cache(Factory(device)) {
+    explicit Layout(const GPU& gpu)
+      : cache(Factory(gpu)) {
     }
   } layout;
+
+  //
+  // Stage
+  //
+
+  struct Stage final {
+    typedef uint8_t Flags;
+
+    enum Type : Flags {
+      None = 0u << 0u,
+      Compute = 1u << 0u,
+      Host = 1u << 1u,
+      Transfer = 1u << 2u,
+    };
+  };
 
   /*
     Descriptor
@@ -84,7 +118,7 @@ struct C10_EXPORT Pipeline final {
   struct Descriptor final {
     VkPipelineLayout pipeline_layout;
     VkShaderModule shader_module;
-    Shader::WorkGroup work_group;
+    Shader::WorkGroup local_work_group;
   };
 
   /*
@@ -93,11 +127,11 @@ struct C10_EXPORT Pipeline final {
 
   class Factory final {
    public:
-    explicit Factory(VkDevice device);
+    explicit Factory(const GPU& gpu);
 
     typedef Pipeline::Descriptor Descriptor;
     typedef VK_DELETER(Pipeline) Deleter;
-    typedef Handle<VkPipeline, Deleter> Handle;
+    typedef api::Handle<VkPipeline, Deleter> Handle;
 
     struct Hasher {
       size_t operator()(const Descriptor& descriptor) const;
@@ -111,15 +145,40 @@ struct C10_EXPORT Pipeline final {
   };
 
   /*
+    Object
+  */
+
+  struct Object final {
+    VkPipeline handle;
+    VkPipelineLayout layout;
+    Shader::WorkGroup local_work_group;
+
+    operator bool() const;
+  };
+
+  /*
     Cache
   */
 
-  typedef api::Cache<Factory> Cache;
-  Cache cache;
+  class Cache final {
+   public:
+    explicit Cache(Factory factory);
+    Cache(const Cache&) = delete;
+    Cache& operator=(const Cache&) = delete;
+    Cache(Cache&&) = default;
+    Cache& operator=(Cache&&) = default;
+    ~Cache() = default;
 
-  explicit Pipeline(const VkDevice device)
-    : layout(device),
-      cache(Factory(device)) {
+    Object retrieve(const Descriptor& descriptor);
+    void purge();
+
+   private:
+    api::Cache<Factory> cache_;
+  } cache;
+
+  explicit Pipeline(const GPU& gpu)
+    : layout(gpu),
+      cache(Factory(gpu)) {
   }
 };
 
@@ -127,10 +186,21 @@ struct C10_EXPORT Pipeline final {
 // Impl
 //
 
+inline Pipeline::Barrier::operator bool() const {
+  return (0u != stage.src) ||
+         (0u != stage.dst) ||
+         !buffers.empty() ||
+         !images.empty();
+}
+
 inline bool operator==(
     const Pipeline::Layout::Descriptor& _1,
     const Pipeline::Layout::Descriptor& _2) {
-  return (_1.descriptor_set_layout == _2.descriptor_set_layout);
+  static_assert(
+      std::is_trivially_copyable<Pipeline::Layout::Descriptor>::value,
+      "This implementation is no longer valid!");
+
+  return (0 == memcmp(&_1, &_2, sizeof(Pipeline::Layout::Descriptor)));
 }
 
 inline size_t Pipeline::Layout::Factory::Hasher::operator()(
@@ -141,9 +211,11 @@ inline size_t Pipeline::Layout::Factory::Hasher::operator()(
 inline bool operator==(
     const Pipeline::Descriptor& _1,
     const Pipeline::Descriptor& _2) {
-  return (_1.pipeline_layout == _2.pipeline_layout) &&
-         (_1.shader_module == _2.shader_module) &&
-         (_1.work_group == _2.work_group);
+  static_assert(
+      std::is_trivially_copyable<Pipeline::Descriptor>::value,
+      "This implementation is no longer valid!");
+
+  return (0 == memcmp(&_1, &_2, sizeof(Pipeline::Descriptor)));
 }
 
 inline size_t Pipeline::Factory::Hasher::operator()(
@@ -151,12 +223,28 @@ inline size_t Pipeline::Factory::Hasher::operator()(
   return c10::get_hash(
       descriptor.pipeline_layout,
       descriptor.shader_module,
-      descriptor.work_group.x,
-      descriptor.work_group.y,
-      descriptor.work_group.z);
+      descriptor.local_work_group.data[0u],
+      descriptor.local_work_group.data[1u],
+      descriptor.local_work_group.data[2u]);
+}
+
+inline Pipeline::Object::operator bool() const {
+  return (VK_NULL_HANDLE != handle) &&
+         (VK_NULL_HANDLE != layout);
+}
+
+inline Pipeline::Object Pipeline::Cache::retrieve(
+    const Descriptor& descriptor) {
+  return {
+    cache_.retrieve(descriptor),
+    descriptor.pipeline_layout,
+    descriptor.local_work_group,
+  };
 }
 
 } // namespace api
 } // namespace vulkan
 } // namespace native
 } // namespace at
+
+#endif /* USE_VULKAN_API */

@@ -17,7 +17,7 @@ set_module(Future, "torch.jit")
 
 
 def fork(func, *args, **kwargs):
-    """
+    r"""
     Creates an asynchronous task executing `func` and a reference to the value
     of the result of this execution. `fork` will return immediately,
     so the return value of `func` may not have been computed yet. To force completion
@@ -31,7 +31,7 @@ def fork(func, *args, **kwargs):
         `fork` tasks will execute non-deterministicly. We recommend only spawning
         parallel fork tasks for pure functions that do not modify their inputs,
         module attributes, or global state.
-    Arguments:
+    Args:
         func (callable or torch.nn.Module):  A Python function or `torch.nn.Module`
             that will be invoked. If executed in TorchScript, it will execute asynchronously,
             otherwise it will not. Traced invocations of fork will be captured in the IR.
@@ -42,7 +42,8 @@ def fork(func, *args, **kwargs):
 
     Example (fork a free function):
 
-    .. testcode::
+    .. code-block:: python
+
         import torch
         from torch import Tensor
         def foo(a : Tensor, b : int) -> Tensor:
@@ -60,16 +61,17 @@ def fork(func, *args, **kwargs):
 
     Example (fork a module method):
 
-    .. testcode::
+    .. code-block:: python
+
         import torch
         from torch import Tensor
-        class SubMod(torch.nn.Module):
+        class AddMod(torch.nn.Module):
             def forward(self, a: Tensor, b : int):
                 return a + b
         class Mod(torch.nn.Module):
             def __init__(self):
                 super(self).__init__()
-                self.mod = SubMod()
+                self.mod = AddMod()
             def forward(self, input):
                 fut = torch.jit.fork(self.mod, a, b=2)
                 return torch.jit.wait(fut)
@@ -81,10 +83,10 @@ def fork(func, *args, **kwargs):
 
 
 def wait(future):
-    """
+    r"""
     Forces completion of a `torch.jit.Future[T]` asynchronous task, returning the
     result of the task. See :func:`~fork` for docs and examples.
-    Arguments:
+    Args:
         func (torch.jit.Future[T]): an asynchronous task reference, created through `torch.jit.fork`
     Returns:
         `T`: the return value of the the completed task

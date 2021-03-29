@@ -90,7 +90,7 @@ struct TrivialOffsetCalculator {
 };
 
 template<int N>
-static OffsetCalculator<N> make_offset_calculator(const at::TensorIterator& iter) {
+static OffsetCalculator<N> make_offset_calculator(const at::TensorIteratorBase& iter) {
   AT_ASSERT(N <= iter.ntensors());
   std::array<const int64_t*, N> strides;
   for (int i = 0; i < N; i++) {

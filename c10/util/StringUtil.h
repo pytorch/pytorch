@@ -17,6 +17,18 @@ namespace detail {
 // Obtains the base name from a full path.
 C10_API std::string StripBasename(const std::string& full_path);
 
+C10_API std::string ExcludeFileExtension(const std::string& full_path);
+
+struct CompileTimeEmptyString {
+  operator const std::string&() const {
+    static const std::string empty_string_literal;
+    return empty_string_literal;
+  }
+  operator const char*() const {
+    return "";
+  }
+};
+
 template <typename T>
 struct CanonicalizeStrTypes {
   using type = const T&;
@@ -35,6 +47,11 @@ inline std::ostream& _str(std::ostream& ss) {
 template <typename T>
 inline std::ostream& _str(std::ostream& ss, const T& t) {
   ss << t;
+  return ss;
+}
+
+template <>
+inline std::ostream& _str<CompileTimeEmptyString>(std::ostream& ss, const CompileTimeEmptyString&) {
   return ss;
 }
 
@@ -63,19 +80,18 @@ struct _str_wrapper<std::string> final {
 
 template<>
 struct _str_wrapper<const char*> final {
-  static std::string call(const char* str) {
+  static const char* call(const char* str) {
     return str;
   }
 };
 
 // For c10::str() with an empty argument list (which is common in our assert macros),
 // we don't want to pay the binary size for constructing and destructing a stringstream
-// or even constructing a string. Let's just return a reference to an empty string.
+// or even constructing a string.
 template<>
 struct _str_wrapper<> final {
-  static const std::string& call() {
-    thread_local const std::string empty_string_literal;
-    return empty_string_literal;
+  static CompileTimeEmptyString call() {
+    return CompileTimeEmptyString();
   }
 };
 

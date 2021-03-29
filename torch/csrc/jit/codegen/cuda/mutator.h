@@ -10,6 +10,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /*
  * Mutators are the mechanism used to modify IR nodes. Since most nodes are
@@ -21,6 +22,7 @@ namespace fuser {
  * specialize those nodes which they want to have a particular transformation.
  */
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

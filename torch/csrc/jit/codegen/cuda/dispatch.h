@@ -47,6 +47,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class Fusion;
 
@@ -106,7 +107,7 @@ class Sync;
  * By default, all IR nodes are handled in this dispatch, and will call an empty
  * function on all nodes.
  */
-class TORCH_CUDA_API OptOutConstDispatch {
+class TORCH_CUDA_CU_API OptOutConstDispatch {
  public:
   virtual ~OptOutConstDispatch() = default;
   OptOutConstDispatch() = default;
@@ -166,7 +167,7 @@ class TORCH_CUDA_API OptOutConstDispatch {
   virtual void handle(const kir::Sync*) {}
 };
 
-class TORCH_CUDA_API OptOutDispatch {
+class TORCH_CUDA_CU_API OptOutDispatch {
  public:
   virtual ~OptOutDispatch() = default;
   OptOutDispatch() = default;
@@ -226,7 +227,7 @@ class TORCH_CUDA_API OptOutDispatch {
   virtual void handle(kir::Sync*) {}
 };
 
-class TORCH_CUDA_API OptInConstDispatch {
+class TORCH_CUDA_CU_API OptInConstDispatch {
  public:
   virtual ~OptInConstDispatch() = default;
   OptInConstDispatch() = default;
@@ -360,7 +361,7 @@ class TORCH_CUDA_API OptInConstDispatch {
   }
 };
 
-class TORCH_CUDA_API OptInDispatch {
+class TORCH_CUDA_CU_API OptInDispatch {
  public:
   virtual ~OptInDispatch() = default;
   OptInDispatch() = default;
@@ -493,7 +494,7 @@ class TORCH_CUDA_API OptInDispatch {
   }
 };
 
-class TORCH_CUDA_API OptOutMutator {
+class TORCH_CUDA_CU_API OptOutMutator {
  public:
   virtual ~OptOutMutator() = default;
   OptOutMutator() = default;
@@ -558,7 +559,7 @@ class TORCH_CUDA_API OptOutMutator {
   virtual Statement* mutate(kir::Sync*);
 };
 
-class TORCH_CUDA_API OptInMutator {
+class TORCH_CUDA_CU_API OptInMutator {
  public:
   virtual ~OptInMutator() = default;
   OptInMutator() = default;
@@ -649,6 +650,7 @@ class TORCH_CUDA_API OptInMutator {
   }
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

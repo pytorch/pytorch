@@ -1,21 +1,21 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/compute_at.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
-#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-// #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 
 // Cleanup
-// #include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 DataType aten_opt_type_map(const c10::optional<at::ScalarType>& scalar_type) {
@@ -24,8 +24,8 @@ DataType aten_opt_type_map(const c10::optional<at::ScalarType>& scalar_type) {
 }
 } // namespace
 
-TensorView::TensorView(TensorDomain* _domain, DataType dtype)
-    : Val(ValType::TensorView, dtype), domain_(_domain) {}
+TensorView::TensorView(TensorDomain* _domain, DataType dtype, MemoryType mtype)
+    : Val(ValType::TensorView, dtype), domain_(_domain), memory_type_(mtype) {}
 
 TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
     : Val(ValType::TensorView,
@@ -36,9 +36,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
   TORCH_CHECK(
       tensor_type->dim().has_value(), "Requires static rank for Tensor");
 
-  for (decltype(tensor_type->dim().value()) i = 0;
-       i < tensor_type->dim().value();
-       i++) {
+  for (const auto i : c10::irange(tensor_type->dim().value())) {
     if (tensor_type->sizes()[i].has_value() &&
         tensor_type->sizes()[i].value() == 1) {
       // If size is known to be 1, assuem it needs to be broadcasted.
@@ -58,7 +56,7 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
   // we iterate through stride_index_, which goes from fastest changing
   // dimension to slowest, instead of iterating through sizes. This allows
   // easier contiguity check;
-  for (size_t i = 0; i < tensor_type->dim().value(); i++) {
+  for (const auto i : c10::irange(tensor_type->dim().value())) {
     // if we don't have contiguous dimension at current stride index, don't
     // bother;
     const auto& stride_property_i = tensor_type->stride_properties()[i];
@@ -67,11 +65,6 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
         stride_property_i->contiguous_.has_value() &&
         stride_property_i->contiguous_.value() == true) {
       const size_t index = stride_property_i->stride_index_.value();
-      // TODO: this is a temporary WAR to avoid contiguous_ flag on broadcasted
-      //       dim, which results in wrong indexing math. issue #230
-      if (sizes[index]->isBroadcast()) {
-        continue;
-      }
       if (i == 0) {
         // mark fastest changing dimension collapsible only when it's the last
         // dim;
@@ -81,10 +74,6 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
         if (auto left_index_opt =
                 tensor_type->stride_properties()[static_cast<int>(i) - 1]
                     ->stride_index_) {
-          // TODO: `isBroadcast` -> issue #230
-          if (sizes[left_index_opt.value()]->isBroadcast()) {
-            continue;
-          }
           // collapse if two axes are neighboring in both sizes & stride_index;
           contig_info[index] = (left_index_opt.value() == (index + 1));
         }
@@ -114,6 +103,10 @@ bool TensorView::hasBlockReduction() const {
 
 bool TensorView::hasGridReduction() const {
   return domain()->hasGridReduction();
+}
+
+bool TensorView::hasBlockBroadcast() const {
+  return domain()->hasBlockBroadcast();
 }
 
 bool TensorView::hasBroadcast() const {
@@ -431,7 +424,7 @@ TensorView* TensorView::cache_before() {
     size_t i = 0;
     auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
     std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
-    for (auto dom : no_reduction_root_domain) {
+    for (const auto& dom : no_reduction_root_domain) {
       new_root_domain[i++] = dom->clone();
     }
     consumer->setDomain(new TensorDomain(
@@ -494,7 +487,7 @@ TensorView* TensorView::cache_after() {
   size_t i = 0;
   auto no_reduction_root_domain = TensorDomain::noReductions(getRootDomain());
   std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
-  for (auto dom : no_reduction_root_domain) {
+  for (const auto& dom : no_reduction_root_domain) {
     new_root_domain[i++] = dom->clone();
   }
 
@@ -512,17 +505,8 @@ TensorView* TensorView::cache_after() {
   // After:  This TV -> [Set Op] -> New CA TV -> [Use Op] -> Next TV
 
   // Expr* consumer_uses =
-  size_t count = 0;
   for (auto expr : fusion()->unordered_uses(this)) {
     createExprProducer(expr, this, consumer);
-    ++count;
-  }
-
-  if (count > 1) {
-    std::cout
-        << "WARNING: Cache_After with multiple consumers can create incorrect "
-           "kernels depending on computeAt configuration."
-        << std::endl;
   }
 
   // Expr* consumer_origin =
@@ -541,7 +525,7 @@ TensorView* TensorView::cache_after() {
     consumer->setComputeAt(this_ca_view, rel_ca_pos);
   } else {
     // Check users of this TV for computeAt for cache_after on inputs
-    for (auto expr : fusion()->unordered_uses(consumer)) {
+    for (const auto& expr : fusion()->unordered_uses(consumer)) {
       for (TensorView* output :
            ir_utils::filterByType<TensorView>(expr->outputs())) {
         if (output->hasComputeAt()) {
@@ -562,10 +546,6 @@ void TensorView::setMemoryType(MemoryType mt) {
     TORCH_INTERNAL_ASSERT(
         mt == MemoryType::Global,
         "Tried to set an input or output to the fusion to a non-global memory type.");
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        mt != MemoryType::Global,
-        "Tried to set an intermediate tensor in the fusion to the global memory type.");
   }
 }
 
@@ -722,6 +702,7 @@ void TensorView::createExprProducer(
   CreateExprProducer::create(expr, current, producer);
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

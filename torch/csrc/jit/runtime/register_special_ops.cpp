@@ -295,12 +295,24 @@ RegisterOperators reg({
         double,
         at::native::scalar_tensor(
             scalar_val,
-            at::device(at::kCPU).dtype(c10::get_default_dtype())))
+            typeMetaToScalarType(c10::get_default_dtype()),
+            c10::nullopt /* layout */,
+            at::kCPU,
+            c10::nullopt /* pin_memory*/))
         DEFINE_TORCH_TENSOR_OP(int, int64_t, at::scalar_to_tensor(scalar_val))
             DEFINE_TORCH_TENSOR_OP(
                 bool,
                 bool,
                 at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
+                DEFINE_TORCH_TENSOR_OP(
+                    complex,
+                    c10::complex<double>,
+                    at::native::scalar_tensor(
+                        scalar_val,
+                        typeMetaToScalarType(c10::get_default_complex_dtype()),
+                        c10::nullopt /* layout */,
+                        at::kCPU,
+                        c10::nullopt /* pin_memory */))
 
     // reference python implementation: internal_new_from_data in
     // tensor_new.cpp
@@ -373,6 +385,10 @@ RegisterOperators reg({
         [](Stack* stack) { push(stack, true); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::has_torch_function(...) -> bool"),
+        [](Stack* stack) { push(stack, false); },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
             "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)"),
         [](Stack* stack) {
@@ -431,10 +447,7 @@ RegisterOperators reg({
         aliasAnalysisConservative()),
     Operator(
         "aten::set_grad_enabled(bool val) -> ()",
-        [](Stack* stack) {
-          torch::GradMode::set_enabled(pop(stack).toBool());
-          push(stack, IValue());
-        },
+        [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
 });
 } // namespace

@@ -776,7 +776,7 @@ class TestOperators(TestCase):
                 return x_out
 
         x = {torch.tensor(1.): torch.randn(1, 2, 3)}
-        self.assertONNX(MyModel(), (x,))
+        self.assertONNX(MyModel(), (x, {}))
 
     def test_dict_str(self):
         class MyModel(torch.nn.Module):
@@ -786,7 +786,7 @@ class TestOperators(TestCase):
                 return x_out
 
         x = {"test_key_in": torch.randn(1, 2, 3)}
-        self.assertONNX(MyModel(), (x,))
+        self.assertONNX(MyModel(), (x, {}))
 
     def test_arange_dynamic(self):
         class TestModel(torch.nn.Module):

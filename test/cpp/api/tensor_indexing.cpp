@@ -83,27 +83,27 @@ TEST(TensorIndexingTest, TestNoIndices) {
   ASSERT_THROWS_WITH(tensor.index_put_(indices, value), "Passing an empty index list to Tensor::index_put_() is not valid syntax");
 }
 
-TEST(TensorIndexingTest, TestAdvancedIndexingWithArrayRefOfTensor) {
+TEST(TensorIndexingTest, TestAdvancedIndexingWithListOfTensor) {
   {
     torch::Tensor tensor = torch::randn({20, 20});
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
-    torch::Tensor result_with_array_ref = tensor.index(at::ArrayRef<torch::Tensor>({index}));
+    torch::Tensor result = at::index(tensor, {index});
     torch::Tensor result_with_init_list = tensor.index({index});
-    ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
+    ASSERT_TRUE(result.equal(result_with_init_list));
   }
   {
     torch::Tensor tensor = torch::randn({20, 20});
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
-    torch::Tensor result_with_array_ref = tensor.index_put_(at::ArrayRef<torch::Tensor>({index}), torch::ones({20}));
+    torch::Tensor result = at::index_put_(tensor, {index}, torch::ones({20}));
     torch::Tensor result_with_init_list = tensor.index_put_({index}, torch::ones({20}));
-    ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
+    ASSERT_TRUE(result.equal(result_with_init_list));
   }
   {
     torch::Tensor tensor = torch::randn({20, 20});
     torch::Tensor index = torch::arange(10, torch::kLong).cpu();
-    torch::Tensor result_with_array_ref = tensor.index_put_(at::ArrayRef<torch::Tensor>({index}), torch::ones({1, 20}));
+    torch::Tensor result = at::index_put_(tensor, {index}, torch::ones({1, 20}));
     torch::Tensor result_with_init_list = tensor.index_put_({index}, torch::ones({1, 20}));
-    ASSERT_TRUE(result_with_array_ref.equal(result_with_init_list));
+    ASSERT_TRUE(result.equal(result_with_init_list));
   }
 }
 
@@ -173,7 +173,7 @@ TEST(TensorIndexingTest, TestBoolIndices) {
 TEST(TensorIndexingTest, TestBoolIndicesAccumulate) {
   auto mask = torch::zeros({10}, torch::kBool);
   auto y = torch::ones({10, 10});
-  y.index_put_({mask}, y.index({mask}), /*accumulate=*/true);
+  y.index_put_({mask}, {y.index({mask})}, /*accumulate=*/true);
   assert_tensor_equal(y, torch::ones({10, 10}));
 }
 

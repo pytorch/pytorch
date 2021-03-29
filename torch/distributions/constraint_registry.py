@@ -153,11 +153,23 @@ transform_to = ConstraintRegistry()
 ################################################################################
 
 @biject_to.register(constraints.real)
-@biject_to.register(constraints.real_vector)
 @transform_to.register(constraints.real)
-@transform_to.register(constraints.real_vector)
 def _transform_to_real(constraint):
     return transforms.identity_transform
+
+
+@biject_to.register(constraints.independent)
+def _biject_to_independent(constraint):
+    base_transform = biject_to(constraint.base_constraint)
+    return transforms.IndependentTransform(
+        base_transform, constraint.reinterpreted_batch_ndims)
+
+
+@transform_to.register(constraints.independent)
+def _transform_to_independent(constraint):
+    base_transform = transform_to(constraint.base_constraint)
+    return transforms.IndependentTransform(
+        base_transform, constraint.reinterpreted_batch_ndims)
 
 
 @biject_to.register(constraints.positive)
@@ -213,6 +225,12 @@ def _transform_to_simplex(constraint):
 @transform_to.register(constraints.lower_cholesky)
 def _transform_to_lower_cholesky(constraint):
     return transforms.LowerCholeskyTransform()
+
+
+@biject_to.register(constraints.corr_cholesky)
+@transform_to.register(constraints.corr_cholesky)
+def _transform_to_corr_cholesky(constraint):
+    return transforms.CorrCholeskyTransform()
 
 
 @biject_to.register(constraints.cat)

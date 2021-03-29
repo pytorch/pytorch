@@ -11,9 +11,6 @@ void THNN_(ClassNLLCriterion_updateOutput)(
            THCTensor *weights,
            THCTensor *total_weight,
            int64_t ignore_index) {
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "ClassNLLCriterion_updateOutput not suppported with BFloat16");
-  #else
   if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }
@@ -66,8 +63,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         weights ? THCTensor_(data)(state, weights) : NULL,
         n_classes,
         ignore_index);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-    THCudaCheck(cudaGetLastError());
     if (weights) {
       THCTensor_(free)(state, weights);
     }
@@ -99,7 +96,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         n_classes,
         ignore_index
     );
-
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 2) {
     cunn_ClassNLLCriterion_updateOutput_kernel<scalar_t, accreal>
       <<<1, NTHREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
@@ -114,15 +111,14 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         n_classes,
         ignore_index
     );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  THCudaCheck(cudaGetLastError());
 
   if (weights) {
     THCTensor_(free)(state, weights);
   }
   THCIndexTensor_(free)(state, target);
   THCTensor_(free)(state, input);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(ClassNLLCriterion_updateGradInput)(
@@ -135,9 +131,6 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
            THCTensor *weights,
            THCTensor *total_weight,
            int64_t ignore_index) {
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialConvolutionMM_updateGradInput not suppported with BFloat16");
-  #else
   if (THCIndexTensor_(nDimensionLegacyNoScalars)(state, target) > 1) {
     THError("multi-target not supported");
   }
@@ -193,8 +186,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         weights ? THCTensor_(data)(state, weights) : NULL,
         n_classes,
         ignore_index);
-
-    THCudaCheck(cudaGetLastError());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     if (weights) {
       THCTensor_(free)(state, weights);
@@ -224,6 +216,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         n_classes,
         ignore_index
     );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     cunn_ClassNLLCriterion_updateGradInput_kernel<scalar_t>
       <<<1, NTHREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
@@ -238,14 +231,13 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         n_classes,
         ignore_index
     );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  THCudaCheck(cudaGetLastError());
 
   if (weights) {
     THCTensor_(free)(state, weights);
   }
   THCIndexTensor_(free)(state, target);
-  #endif // THC_REAL_IS_BFLOAT16 && !HIP_PLATFORM_HCC__
 }
 
 #endif

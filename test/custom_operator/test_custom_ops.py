@@ -1,14 +1,14 @@
 import os.path
 import tempfile
-import unittest
 
 import torch
 from torch import ops
 
 from model import Model, get_custom_op_library_path
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
-class TestCustomOperators(unittest.TestCase):
+class TestCustomOperators(TestCase):
     def setUp(self):
         self.library_path = get_custom_op_library_path()
         ops.load_library(self.library_path)
@@ -90,4 +90,4 @@ class TestCustomOperators(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

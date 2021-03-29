@@ -456,7 +456,7 @@ class ComputeUnit final {
   void createComputePipelineCompile(
       const std::string& glslSrc,
       const VkPipelineCache pipelineCache,
-      const VkDescriptorSetLayout& descrSetLayout,
+      const VkDescriptorSetLayout descrSetLayout,
       const WorkGroupSize workGroupSize);
 #endif
 

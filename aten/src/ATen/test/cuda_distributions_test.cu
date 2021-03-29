@@ -40,6 +40,7 @@ void assert_with_expected_uniforms(uint64_t counter_offset) {
 
   // launch kernel to get expected randoms
   expected_uniforms<<<1, 1>>>(x, counter_offset);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Wait for GPU to finish before accessing on host
   cudaDeviceSynchronize();
@@ -79,7 +80,7 @@ TEST(DistributionsTest, TestPhiloxIncrementSmallUniformTensor) {
 
   // get 4 randoms from uniform_(), philox offset is now incremented to 4 by this call
   at::empty({4}, at::TensorOptions(at::kCUDA)).uniform_();
-  
+
   // expected uniforms will start from counter offset of 4
   assert_with_expected_uniforms(4);
 }
@@ -97,12 +98,13 @@ TEST(DistributionsTest, TestPhiloxIncrementBigUniformTensor) {
   //      greater the number of threads launched), it hits the unroll loop in
   //      the uniform_ kernel.
   //    - Hence, we set the size of the tensor in this test to be 8 times the
-  //      maximum number of threads we can launch. This means that, each thread will
-  //      be yielding 8 elements, and as a result, curand_uniform4 will be called twice
-  //      and all the 8 elements in a thread will consume all the float4 from the
-  //      two calls of curand_unfiorm4 as a result of the unroll loop. Therefore,
-  //      after this call to the unform_, counter_offset for the next call to uniform_
-  //      will start from 8. This is what we test next.
+  //      maximum number of threads we can launch. This means that, each thread
+  //      will be yielding 8 elements, and as a result, curand_uniform4 will be
+  //      called twice and all the 8 elements in a thread will consume all the
+  //      float4 from the two calls of curand_uniform4 as a result of the unroll
+  //      loop. Therefore, after this call to the uniform_, counter_offset for
+  //      the next call to uniform_ will start from 8. This is what we test
+  //      next.
   //    - assert that call to uniform_ will start from counter_offset of 8
 
   // if cuda not available, return
@@ -121,7 +123,7 @@ TEST(DistributionsTest, TestPhiloxIncrementBigUniformTensor) {
 
   // get numel randoms from uniform_(), philox offset is now incremented to 8 by this call
   at::empty({numel}, at::TensorOptions(at::kCUDA)).uniform_();
-  
+
   // expected uniforms will start from counter offset of 8
   assert_with_expected_uniforms(8);
 }

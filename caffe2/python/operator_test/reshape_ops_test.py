@@ -1,9 +1,8 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 import numpy as np
-import six
 from numpy.testing import assert_array_equal
 
 from caffe2.python import core, workspace

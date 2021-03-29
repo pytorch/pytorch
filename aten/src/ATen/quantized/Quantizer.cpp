@@ -1,14 +1,16 @@
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/native/TensorFactories.h>
+#include <ATen/Dispatch.h>
 #include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/TensorFactories.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/accumulate.h>
+
 #include <cmath>
 #include <typeinfo>
 
@@ -77,12 +79,24 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
+int64_t get_sub_byte_tensor_size(int64_t size_bytes, at::ScalarType t) {
+  int64_t new_size_bytes;
+  switch(t) {
+    case at::ScalarType::QUInt4x2:
+      new_size_bytes = std::ceil(size_bytes * 0.5);
+      break;
+    default:
+      new_size_bytes = size_bytes;
+  }
+  return new_size_bytes;
+}
+
 inline Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer) {
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
-  at::Allocator* allocator = options.device().type() == DeviceType::CUDA
+  at::Allocator* allocator = options.device().is_cuda()
     ? at::detail::getCUDAHooks().getCUDADeviceAllocator()
     : at::getCPUAllocator();
 
@@ -94,12 +108,14 @@ inline Tensor new_qtensor(
 
   at::DispatchKey tensorDispatchKey = options.computeDispatchKey();
   native::check_size_nonnegative(sizes);
-  int64_t nelements = at::prod_intlist(sizes);
+  int64_t nelements = c10::multiply_integers(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
       "ScalarType is not supported in new_qtensor.");
-  int64_t size_bytes = nelements * dtype.itemsize();
+  auto scalar_type = typeMetaToScalarType(dtype);
+  int64_t size_bytes = get_sub_byte_tensor_size(nelements * dtype.itemsize(), scalar_type);
+
   auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
       size_bytes,
@@ -192,5 +208,9 @@ Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(Tensor qtensor) {
 }
 
 Quantizer::~Quantizer() {}
+
+C10_EXPORT void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer) {
+  get_qtensorimpl(self)->set_quantizer_(quantizer);
+}
 
 } // namespace at

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/serialization/import.h>
+
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue_inl.h>
 #include <c10/util/Exception.h>
@@ -44,7 +45,8 @@ void postSetStateValidate(const IValue& v) {
     // const auto attrType = objType->getAttribute(i);
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
-    if (attrType->kind() != TypeKind::OptionalType) {
+    if (attrType->kind() != TypeKind::OptionalType &&
+        attrType->kind() != TypeKind::NoneType) {
       TORCH_CHECK(
           !slot.isNone(),
           fmt::format(
@@ -108,8 +110,8 @@ class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(
       std::shared_ptr<CompilationUnit> cu,
-      std::unique_ptr<PyTorchStreamReader> reader)
-      : compilation_unit_(cu),
+      std::shared_ptr<PyTorchStreamReader> reader)
+      : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)),
         source_importer_(
             compilation_unit_,
@@ -128,7 +130,7 @@ class ScriptModuleDeserializer final {
   IValue readArchive(const std::string& archive_name);
 
   std::shared_ptr<CompilationUnit> compilation_unit_;
-  std::unique_ptr<PyTorchStreamReader> reader_;
+  std::shared_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
   std::vector<at::IValue> constants_table_;
   SourceImporter source_importer_;
@@ -144,7 +146,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   // Decouple how to get obj from type. In this file it's dependent on
   // Method.run() and graph executor, etc.
   // For bytecode import we need to decouple these dependencies.
-  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+  auto obj_loader = [&](const at::StrongTypePtr& type, IValue input) {
     auto cls = type.type_->expect<at::ClassType>();
     auto qn = cls->name();
     size_t n = cls->numAttributes();
@@ -175,7 +177,6 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       return obj;
     }
   };
-
   return readArchiveAndTensors(
       archive_name, type_resolver, obj_loader, device_, *reader_.get());
 }
@@ -257,8 +258,7 @@ Module ScriptModuleDeserializer::deserialize(
   }
   if (reader_->hasRecord("model.json")) {
 #if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
-    return torch::jit::LEGACY_deserialize(
-        compilation_unit_, std::move(reader_), device_);
+    return torch::jit::LEGACY_deserialize(compilation_unit_, reader_, device_);
 #else
     AT_ERROR("Legacy model format is not supported on mobile.");
 #endif
@@ -271,8 +271,15 @@ Module ScriptModuleDeserializer::deserialize(
   rewriteQuantizedConvForBC(m);
   return m;
 }
-
 } // namespace
+
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::istream& in,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return import_ir_module(std::move(cu), in, device, extra_files);
+}
 
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
@@ -282,6 +289,14 @@ Module import_ir_module(
   auto reader = torch::make_unique<PyTorchStreamReader>(&in);
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
+}
+
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return import_ir_module(std::move(cu), filename, device, extra_files);
 }
 
 Module import_ir_module(
@@ -297,11 +312,24 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return import_ir_module(std::move(cu), std::move(rai), device, extra_files);
+}
+
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
+}
+
+Module load(std::istream& in, c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return load(in, device, extra_files);
 }
 
 Module load(
@@ -311,6 +339,11 @@ Module load(
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   auto module = load(std::move(rai), device, extra_files);
   return module;
+}
+
+Module load(const std::string& filename, c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return load(filename, device, extra_files);
 }
 
 Module load(
@@ -323,7 +356,14 @@ Module load(
 }
 
 Module load(
-    std::unique_ptr<ReadAdapterInterface> rai,
+    std::shared_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device) {
+  ExtraFilesMap extra_files;
+  return load(std::move(rai), device, extra_files);
+}
+
+Module load(
+    std::shared_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files) {
   // Verify that we're loading a zip archive and not a torch.save pickle archive
@@ -347,7 +387,7 @@ Module load(
         " produced by `torch.jit.save()`");
   }
 
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  auto reader = std::make_shared<PyTorchStreamReader>(std::move(rai));
   auto cu = std::make_shared<CompilationUnit>();
 
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));

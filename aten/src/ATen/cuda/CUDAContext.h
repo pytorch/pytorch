@@ -56,20 +56,24 @@ inline bool is_available() {
     return c10::cuda::device_count() > 0;
 }
 
-TORCH_CUDA_API cudaDeviceProp* getCurrentDeviceProperties();
+TORCH_CUDA_CPP_API cudaDeviceProp* getCurrentDeviceProperties();
 
-TORCH_CUDA_API int warp_size();
+TORCH_CUDA_CPP_API int warp_size();
 
-TORCH_CUDA_API cudaDeviceProp* getDeviceProperties(int64_t device);
+TORCH_CUDA_CPP_API cudaDeviceProp* getDeviceProperties(int64_t device);
 
-TORCH_CUDA_API Allocator* getCUDADeviceAllocator();
+TORCH_CUDA_CPP_API bool canDeviceAccessPeer(
+    int64_t device,
+    int64_t peer_device);
+
+TORCH_CUDA_CPP_API Allocator* getCUDADeviceAllocator();
 
 /* Handles */
-TORCH_CUDA_API cusparseHandle_t getCurrentCUDASparseHandle();
-TORCH_CUDA_API cublasHandle_t getCurrentCUDABlasHandle();
+TORCH_CUDA_CPP_API cusparseHandle_t getCurrentCUDASparseHandle();
+TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
 
 #ifdef CUDART_VERSION
-TORCH_CUDA_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
+TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
 #endif
 
 } // namespace cuda

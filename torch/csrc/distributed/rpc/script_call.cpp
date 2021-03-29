@@ -1,5 +1,5 @@
-#include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
@@ -127,7 +127,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
       payload,
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
-      &message.tensors());
+      message.tensors());
 
   auto values = value.toTuple()->elements();
   return fromIValues(values);

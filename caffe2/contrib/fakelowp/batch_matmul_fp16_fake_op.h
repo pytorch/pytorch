@@ -1,16 +1,19 @@
 #ifndef CAFFE2_OPERATORS_BATCH_MATMUL_OP_H_
 #define CAFFE2_OPERATORS_BATCH_MATMUL_OP_H_
 
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
+#include <fbgemm/FbgemmConvert.h>
+
+#include "caffe2/contrib/fakelowp/fp16_gemm_utils.h"
+#include "caffe2/core/context.h"
+#include "caffe2/core/operator.h"
+
 #include <algorithm>
 #include <functional>
 #include <numeric>
 #include <string>
 #include <vector>
-
-#include <fbgemm/FbgemmConvert.h>
-#include "caffe2/contrib/fakelowp/fp16_gemm_utils.h"
-#include "caffe2/core/context.h"
-#include "caffe2/core/operator.h"
 
 C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
@@ -266,21 +269,15 @@ class BatchMatMulFP16FakeOp final : public Operator<Context> {
       CAFFE_ENFORCE(broadcast_);
     }
 
-    const std::int64_t A_batch_size = std::accumulate(
+    const std::int64_t A_batch_size = c10::multiply_integers(
         A_broadcast_dims.cbegin(),
-        A_broadcast_dims.cbegin() + batch_dim,
-        1LL,
-        std::multiplies<std::int64_t>());
-    const std::int64_t B_batch_size = std::accumulate(
+        A_broadcast_dims.cbegin() + batch_dim);
+    const std::int64_t B_batch_size = c10::multiply_integers(
         B_broadcast_dims.cbegin(),
-        B_broadcast_dims.cbegin() + batch_dim,
-        1LL,
-        std::multiplies<std::int64_t>());
-    const std::int64_t Y_batch_size = std::accumulate(
+        B_broadcast_dims.cbegin() + batch_dim);
+    const std::int64_t Y_batch_size = c10::multiply_integers(
         Y_broadcast_dims.cbegin(),
-        Y_broadcast_dims.cbegin() + batch_dim,
-        1LL,
-        std::multiplies<std::int64_t>());
+        Y_broadcast_dims.cbegin() + batch_dim);
     if (Y_batch_size == 0) {
       fbgemm::RoundToFloat16(
           reinterpret_cast<const float*>(Y_data),

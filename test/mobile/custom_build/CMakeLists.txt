@@ -20,4 +20,5 @@ target_link_libraries(Predictor
   ${TORCH_LIBRARIES}
   -Wl,--no-whole-archive
   Threads::Threads
+  ${CMAKE_DL_LIBS}
 )

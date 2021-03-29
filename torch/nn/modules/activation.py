@@ -1,9 +1,9 @@
 import warnings
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
-from .linear import _LinearWithBias
+from .linear import Linear
 from torch.nn.init import xavier_uniform_
 from torch.nn.init import constant_
 from torch.nn.init import xavier_normal_
@@ -359,17 +359,18 @@ class Tanh(Module):
         return torch.tanh(input)
 
 class SiLU(Module):
-    r"""Applies the silu function, element-wise.
+    r"""Applies the Sigmoid Linear Unit (SiLU) function, element-wise.
+    The SiLU function is also known as the swish function.
 
     .. math::
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
 
     .. note::
-        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_ 
-        where the SiLU (Sigmoid Linear Unit) was originally coined, and see 
-        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation 
-        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish: 
-        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_ 
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish:
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_
         where the SiLU was experimented with later.
 
     Shape:
@@ -534,6 +535,12 @@ class SELU(Module):
 
     with :math:`\alpha = 1.6732632423543772848170429916717` and
     :math:`\text{scale} = 1.0507009873554804934193349852946`.
+
+    .. warning::
+        When using ``kaiming_normal`` or ``kaiming_normal_`` for initialisation,
+        ``nonlinearity='linear'`` should be used instead of ``nonlinearity='selu'``
+        in order to get `Self-Normalizing Neural Networks`_.
+        See :func:`torch.nn.init.calculate_gain` for more information.
 
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
@@ -831,11 +838,12 @@ class Softshrink(Module):
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
     from different representation subspaces.
-    See reference: Attention Is All You Need
+    See `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_
 
     .. math::
         \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
-        \text{where} head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)
+
+    where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
     Args:
         embed_dim: total dimension of the model.
@@ -848,8 +856,9 @@ class MultiheadAttention(Module):
         kdim: total number of features in key. Default: None.
         vdim: total number of features in value. Default: None.
 
-        Note: if kdim and vdim are None, they will be set to embed_dim such that
-        query, key, and value have the same number of features.
+    Note that if :attr:`kdim` and :attr:`vdim` are None, they will be set
+    to :attr:`embed_dim` such that query, key, and value have the same
+    number of features.
 
     Examples::
 
@@ -872,9 +881,9 @@ class MultiheadAttention(Module):
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
         if self._qkv_same_embed_dim is False:
-            self.q_proj_weight = Parameter(torch.Tensor(embed_dim, embed_dim))
-            self.k_proj_weight = Parameter(torch.Tensor(embed_dim, self.kdim))
-            self.v_proj_weight = Parameter(torch.Tensor(embed_dim, self.vdim))
+            self.q_proj_weight = Parameter(torch.empty(embed_dim, embed_dim))
+            self.k_proj_weight = Parameter(torch.empty(embed_dim, self.kdim))
+            self.v_proj_weight = Parameter(torch.empty(embed_dim, self.vdim))
             self.register_parameter('in_proj_weight', None)
         else:
             self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
@@ -886,7 +895,7 @@ class MultiheadAttention(Module):
             self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
         else:
             self.register_parameter('in_proj_bias', None)
-        self.out_proj = _LinearWithBias(embed_dim, embed_dim)
+        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
 
         if add_bias_kv:
             self.bias_k = Parameter(torch.empty(1, 1, embed_dim))
@@ -921,9 +930,8 @@ class MultiheadAttention(Module):
 
         super(MultiheadAttention, self).__setstate__(state)
 
-    def forward(self, query, key, value, key_padding_mask=None,
-                need_weights=True, attn_mask=None):
-        # type: (Tensor, Tensor, Tensor, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Optional[Tensor]]
+    def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
+                need_weights: bool = True, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
@@ -937,8 +945,7 @@ class MultiheadAttention(Module):
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
 
-    Shape:
-        - Inputs:
+    Shapes for inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
           the embedding dimension.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
@@ -949,15 +956,17 @@ class MultiheadAttention(Module):
           If a ByteTensor is provided, the non-zero positions will be ignored while the position
           with the zero positions will be unchanged. If a BoolTensor is provided, the positions with the
           value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
-        - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
-          3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
-          S is the source sequence length. attn_mask ensure that position i is allowed to attend the unmasked
-          positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
+        - attn_mask: if a 2D mask: :math:`(L, S)` where L is the target sequence length, S is the
+          source sequence length.
+
+          If a 3D mask: :math:`(N\cdot\text{num\_heads}, L, S)` where N is the batch size, L is the target sequence
+          length, S is the source sequence length. ``attn_mask`` ensure that position i is allowed to attend
+          the unmasked positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
           while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
           is not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
 
-        - Outputs:
+    Shapes for outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
@@ -1040,7 +1049,7 @@ class PReLU(Module):
     def __init__(self, num_parameters: int = 1, init: float = 0.25) -> None:
         self.num_parameters = num_parameters
         super(PReLU, self).__init__()
-        self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
+        self.weight = Parameter(torch.empty(num_parameters).fill_(init))
 
     def forward(self, input: Tensor) -> Tensor:
         return F.prelu(input, self.weight)
@@ -1112,7 +1121,7 @@ class Softmin(Module):
           dimensions
         - Output: :math:`(*)`, same shape as the input
 
-    Arguments:
+    Args:
         dim (int): A dimension along which Softmin will be computed (so every slice
             along dim will sum to 1).
 
@@ -1166,7 +1175,7 @@ class Softmax(Module):
         a Tensor of the same dimension and shape as the input with
         values in the range [0, 1]
 
-    Arguments:
+    Args:
         dim (int): A dimension along which Softmax will be computed (so every slice
             along dim will sum to 1).
 
@@ -1240,7 +1249,7 @@ class LogSoftmax(Module):
           dimensions
         - Output: :math:`(*)`, same shape as the input
 
-    Arguments:
+    Args:
         dim (int): A dimension along which LogSoftmax will be computed.
 
     Returns:

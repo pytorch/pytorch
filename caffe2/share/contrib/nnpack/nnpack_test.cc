@@ -238,9 +238,6 @@ void runConv(
 
 constexpr size_t kIters = 20;
 
-// TODO(#14383029) cblas_sgemm not yet implemented on limited mobile cases.
-#if !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-
 TEST(NNPACK, Conv_3x3s1) {
   for (int i = 0; i < kIters; ++i) {
     runConv(3, 3, 1, 1);
@@ -383,7 +380,5 @@ TEST(NNPACK, Conv_HxWsHxW) {
     runConv(kernelH, kernelW, strideH, strideW);
   }
 }
-
-#endif
 
 } // namespace caffe2

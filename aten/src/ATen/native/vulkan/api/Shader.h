@@ -1,7 +1,10 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Cache.h>
+#include <ATen/native/vulkan/api/Utils.h>
 #include <c10/util/hash.h>
 
 namespace at {
@@ -32,18 +35,24 @@ namespace api {
 // and destruct the aforementioned Vulkan objects.
 //
 
-struct C10_EXPORT Shader final {
+struct Shader final {
   //
   // Layout
   //
 
   struct Layout final {
     /*
+      Signature
+    */
+
+    typedef c10::SmallVector<VkDescriptorType, 6u> Signature;
+
+    /*
       Descriptor
     */
 
     struct Descriptor final {
-      c10::SmallVector<VkDescriptorSetLayoutBinding, 16u> bindings;
+      Signature signature;
     };
 
     /*
@@ -52,11 +61,11 @@ struct C10_EXPORT Shader final {
 
     class Factory final {
      public:
-      explicit Factory(VkDevice device);
+      explicit Factory(const GPU& gpu);
 
       typedef Layout::Descriptor Descriptor;
       typedef VK_DELETER(DescriptorSetLayout) Deleter;
-      typedef Handle<VkDescriptorSetLayout, Deleter> Handle;
+      typedef api::Handle<VkDescriptorSetLayout, Deleter> Handle;
 
       struct Hasher {
         size_t operator()(const Descriptor& descriptor) const;
@@ -68,15 +77,35 @@ struct C10_EXPORT Shader final {
       VkDevice device_;
     };
 
+    struct Object final {
+      VkDescriptorSetLayout handle;
+      Signature signature;
+
+      operator bool() const;
+    };
+
     /*
       Cache
     */
 
-    typedef api::Cache<Factory> Cache;
-    Cache cache;
+    class Cache final {
+     public:
+      explicit Cache(Factory factory);
+      Cache(const Cache&) = delete;
+      Cache& operator=(const Cache&) = delete;
+      Cache(Cache&&) = default;
+      Cache& operator=(Cache&&) = default;
+      ~Cache() = default;
 
-    explicit Layout(const VkDevice device)
-      : cache(Factory(device)) {
+      Object retrieve(const Descriptor& descriptor);
+      void purge();
+
+     private:
+      api::Cache<Factory> cache_;
+    } cache;
+
+    explicit Layout(const GPU& gpu)
+      : cache(Factory(gpu)) {
     }
   } layout;
 
@@ -84,11 +113,7 @@ struct C10_EXPORT Shader final {
   // Work Group
   //
 
-  struct WorkGroup final {
-    uint32_t x;
-    uint32_t y;
-    uint32_t z;
-  };
+  typedef utils::uvec3 WorkGroup;
 
   /*
     Descriptor
@@ -122,7 +147,7 @@ struct C10_EXPORT Shader final {
 
   class Factory final {
    public:
-    explicit Factory(VkDevice device);
+    explicit Factory(const GPU& gpu);
     Factory(const Factory&) = delete;
     Factory& operator=(const Factory&) = delete;
     Factory(Factory&&);
@@ -131,7 +156,7 @@ struct C10_EXPORT Shader final {
 
     typedef Shader::Descriptor Descriptor;
     typedef VK_DELETER(ShaderModule) Deleter;
-    typedef Handle<VkShaderModule, Deleter> Handle;
+    typedef api::Handle<VkShaderModule, Deleter> Handle;
 
     struct Hasher {
       size_t operator()(const Descriptor& descriptor) const;
@@ -152,9 +177,9 @@ struct C10_EXPORT Shader final {
   typedef api::Cache<Factory> Cache;
   Cache cache;
 
-  explicit Shader(const VkDevice device)
-    : layout(device),
-      cache(Factory(device)) {
+  explicit Shader(const GPU& gpu)
+    : layout(gpu),
+      cache(Factory(gpu)) {
   }
 };
 
@@ -165,45 +190,80 @@ struct C10_EXPORT Shader final {
 inline bool operator==(
     const Shader::Layout::Descriptor& _1,
     const Shader::Layout::Descriptor& _2) {
-  return _1.bindings == _2.bindings;
+  return _1.signature == _2.signature;
 }
 
 inline size_t Shader::Layout::Factory::Hasher::operator()(
     const Descriptor& descriptor) const {
   size_t hash = 0u;
 
-  for (const VkDescriptorSetLayoutBinding& binding : descriptor.bindings) {
+  for (const VkDescriptorType type : descriptor.signature) {
     hash = c10::hash_combine(
         hash,
-        c10::get_hash(
-            binding.binding,
-            binding.descriptorType,
-            binding.descriptorCount,
-            binding.stageFlags,
-            binding.pImmutableSamplers));
+        c10::get_hash(type));
   }
 
   return hash;
 }
 
+inline Shader::Layout::Object::operator bool() const {
+  return VK_NULL_HANDLE != handle;
+}
+
+inline Shader::Layout::Object Shader::Layout::Cache::retrieve(
+    const Descriptor& descriptor) {
+  return {
+    cache_.retrieve(descriptor),
+    descriptor.signature,
+  };
+}
+
 inline bool operator==(
-    const Shader::WorkGroup& work_group_1,
-    const Shader::WorkGroup& work_group_2) {
-  return (work_group_1.x == work_group_2.x) &&
-         (work_group_1.y == work_group_2.y) &&
-         (work_group_1.z == work_group_2.z);
+    const Shader::WorkGroup& _1,
+    const Shader::WorkGroup& _2) {
+  static_assert(
+      std::is_trivially_copyable<Shader::WorkGroup>::value,
+      "This implementation is no longer valid!");
+
+  return (0 == memcmp(&_1, &_2, sizeof(Shader::WorkGroup)));
+}
+
+inline Shader::Descriptor::Descriptor(const char* const glsl)
+ : type(Type::Source),
+   shader{
+    .source = {
+      glsl,
+      0u,
+    },
+   } {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      glsl,
+      "Invalid shader source code!");
+}
+
+inline Shader::Descriptor::Descriptor(
+    const uint32_t* const code,
+    const uint32_t size)
+ : type(Type::Binary),
+   shader{
+    .binary = {
+      code,
+      size,
+    },
+   } {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      code && (0u != size),
+      "Invalid shader binary!");
 }
 
 inline bool operator==(
     const Shader::Descriptor& _1,
     const Shader::Descriptor& _2) {
   static_assert(
-      sizeof(Shader::Descriptor::shader.source) == sizeof(Shader::Descriptor::shader.binary),
-      "This implementation requires sizeof(Source) to be equal to sizeof(Binary).");
+      std::is_trivially_copyable<Shader::Descriptor>::value,
+      "This implementation is no longer valid!");
 
-  return (_1.type == _2.type) &&
-         (_1.shader.binary.spirv == _2.shader.binary.spirv) &&
-         (_1.shader.binary.size == _2.shader.binary.size);
+  return (0 == memcmp(&_1, &_2, sizeof(Shader::Descriptor)));
 }
 
 inline size_t Shader::Factory::Hasher::operator()(
@@ -226,9 +286,11 @@ inline size_t Shader::Factory::Hasher::operator()(
 inline bool operator==(
     const VkDescriptorSetLayoutBinding& _1,
     const VkDescriptorSetLayoutBinding& _2) {
-  return (_1.binding == _2.binding) &&
-         (_1.descriptorType == _2.descriptorType) &&
-         (_1.descriptorCount == _2.descriptorCount) &&
-         (_1.stageFlags == _2.stageFlags) &&
-         (_1.pImmutableSamplers == _2.pImmutableSamplers);
+  static_assert(
+      std::is_trivially_copyable<VkDescriptorSetLayoutBinding>::value,
+      "This implementation is no longer valid!");
+
+  return (0 == memcmp(&_1, &_2, sizeof(VkDescriptorSetLayoutBinding)));
 }
+
+#endif /* USE_VULKAN_API */

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ivalue_to.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
@@ -53,6 +54,18 @@ bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
 template<class T, class Iterator>
 bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs);
 
+template<class T>
+struct ListElementConstReferenceTraits {
+  // In the general case, we use IValue::to().
+  using const_reference = typename c10::detail::ivalue_to_const_ref_overload_return<T>::type;
+};
+
+// There is no to() overload for c10::optional<std::string>.
+template<>
+struct ListElementConstReferenceTraits<c10::optional<std::string>> {
+  using const_reference = c10::optional<std::reference_wrapper<const std::string>>;
+};
+
 template<class T, class Iterator>
 class ListElementReference final {
 public:
@@ -64,17 +77,6 @@ public:
 
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
-
-  // returns the underlying std::string by reference (only enabled if this is from a torch::List<std::string>).
-  template<class _T = T>
-  std::enable_if_t<std::is_same<std::string, T>::value && std::is_same<_T, T>::value, const std::string&> toStringRef() {
-    return iterator_->toStringRef();
-  }
-
-  template<class _T = T>
-  std::enable_if_t<std::is_same<c10::optional<std::string>, T>::value && std::is_same<_T, T>::value, c10::optional<std::reference_wrapper<const std::string>>> toOptionalStringRef() {
-    return iterator_->toOptionalStringRef();
-  }
 
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
@@ -197,7 +199,8 @@ private:
 };
 
 template<class T> List<T> toTypedList(List<IValue> list);
-template<class T> List<IValue> toList(List<T> list);
+template<class T> List<IValue> toList(List<T>&& list);
+template<class T> List<IValue> toList(const List<T>& list);
 const IValue* ptr_to_first_element(const List<IValue>& list);
 }
 
@@ -226,6 +229,7 @@ private:
   c10::intrusive_ptr<c10::detail::ListImpl> impl_;
 
   using internal_reference_type = impl::ListElementReference<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using internal_const_reference_type = typename impl::ListElementConstReferenceTraits<T>::const_reference;
 
 public:
   using value_type = T;
@@ -243,7 +247,7 @@ public:
    * Example:
    *   List<int> a({2, 3, 4});
    */
-  explicit List(std::initializer_list<T> initial_values);
+  List(std::initializer_list<T> initial_values);
   explicit List(ArrayRef<T> initial_values);
 
   /**
@@ -289,7 +293,9 @@ public:
    *   list[2] = 5;
    *   int64_t v = list[1];
    */
-  internal_reference_type operator[](size_type pos) const;
+  internal_const_reference_type operator[](size_type pos) const;
+
+  internal_reference_type operator[](size_type pos);
 
   /**
    * Assigns a new value to the element at location pos.
@@ -446,9 +452,11 @@ public:
 
 private:
   explicit List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements);
+  explicit List(const c10::intrusive_ptr<c10::detail::ListImpl>& elements);
   friend struct IValue;
   template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
-  template<class T_> friend List<IValue> impl::toList(List<T_>);
+  template<class T_> friend List<IValue> impl::toList(List<T_>&&);
+  template<class T_> friend List<IValue> impl::toList(const List<T_>&);
   friend const IValue* impl::ptr_to_first_element(const List<IValue>& list);
 };
 

@@ -198,7 +198,7 @@ __global__ void RoIAlignRotatedBackward(
 } // namespace
 
 template <>
-bool RoIAlignRotatedGradientOp<float, CUDAContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignRotatedGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op
@@ -231,6 +231,7 @@ bool RoIAlignRotatedGradientOp<float, CUDAContext>::RunOnDevice() {
             dX->mutable_data<float>(),
             R.data<float>(),
             aligned_);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }

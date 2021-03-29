@@ -13,6 +13,34 @@
 # and the following imported targets:
 #
 #   torch
+macro(append_torchlib_if_found)
+  foreach (_arg ${ARGN})
+    find_library(${_arg}_LIBRARY ${_arg} PATHS "${TORCH_INSTALL_PREFIX}/lib")
+    if(${_arg}_LIBRARY)
+      list(APPEND TORCH_LIBRARIES ${${_arg}_LIBRARY})
+    else()
+      message(WARNING "static library ${${_arg}_LIBRARY} not found.")
+    endif()
+  endforeach()
+endmacro()
+
+macro(append_wholearchive_lib_if_found)
+  foreach (_arg ${ARGN})
+    find_library(${_arg}_LIBRARY ${_arg} PATHS "${TORCH_INSTALL_PREFIX}/lib")
+    if(${_arg}_LIBRARY)
+      if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+        list(APPEND TORCH_LIBRARIES "-Wl,-force_load,${${_arg}_LIBRARY}")
+      elseif(MSVC)
+        list(APPEND TORCH_LIBRARIES "-WHOLEARCHIVE:${${_arg}_LIBRARY}")
+      else()
+        # gcc
+        list(APPEND TORCH_LIBRARIES "-Wl,--whole-archive ${${_arg}_LIBRARY} -Wl,--no-whole-archive")
+      endif()
+    else()
+      message(WARNING "static library ${${_arg}_LIBRARY} not found.")
+    endif()
+  endforeach()
+endmacro()
 
 include(FindPackageHandleStandardArgs)
 
@@ -39,58 +67,69 @@ endif()
 if(@BUILD_SHARED_LIBS@)
   find_package(Caffe2 REQUIRED PATHS ${CMAKE_CURRENT_LIST_DIR}/../Caffe2)
   set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
+  append_torchlib_if_found(c10)
 else()
   add_library(torch STATIC IMPORTED) # set imported_location at the bottom
-  set(TORCH_LIBRARIES torch)
-endif()
+  #library need whole archive
+  append_wholearchive_lib_if_found(torch torch_cpu)
+  if(@USE_CUDA@)
+    append_wholearchive_lib_if_found(torch_cuda c10_cuda)
+  endif()
 
-find_library(C10_LIBRARY c10 PATHS "${TORCH_INSTALL_PREFIX}/lib")
-list(APPEND TORCH_LIBRARIES ${C10_LIBRARY})
-
-# We need manually add dependent libraries when they are not linked into the
-# shared library.
-# TODO: this list might be incomplete.
-if(NOT @BUILD_SHARED_LIBS@)
-  find_library(TORCH_CPU_LIBRARY torch_cpu PATHS "${TORCH_INSTALL_PREFIX}/lib")
-  list(APPEND TORCH_LIBRARIES ${TORCH_CPU_LIBRARY})
+  # We need manually add dependent libraries when they are not linked into the
+  # shared library.
+  # TODO: this list might be incomplete.
+  append_torchlib_if_found(c10)
+  if(@BUILD_CAFFE2@)
+    append_torchlib_if_found(Caffe2_perfkernels_avx512 Caffe2_perfkernels_avx2 Caffe2_perfkernels_avx)
+  endif()
 
   if(@USE_NNPACK@)
-    find_library(NNPACK_LIBRARY nnpack PATHS "${TORCH_INSTALL_PREFIX}/lib")
-    list(APPEND TORCH_LIBRARIES ${NNPACK_LIBRARY})
+    append_torchlib_if_found(nnpack)
   endif()
 
   if(@USE_PYTORCH_QNNPACK@)
-    find_library(PYTORCH_QNNPACK_LIBRARY pytorch_qnnpack PATHS "${TORCH_INSTALL_PREFIX}/lib")
-    list(APPEND TORCH_LIBRARIES ${PYTORCH_QNNPACK_LIBRARY})
+    append_torchlib_if_found(pytorch_qnnpack)
+  endif()
+
+  if(@USE_QNNPACK@)
+    append_torchlib_if_found(qnnpack)
   endif()
 
   if(@USE_XNNPACK@)
-    find_library(XNNPACK_LIBRARY XNNPACK PATHS "${TORCH_INSTALL_PREFIX}/lib")
-    list(APPEND TORCH_LIBRARIES ${XNNPACK_LIBRARY})
+    append_torchlib_if_found(XNNPACK)
   endif()
+
+  append_torchlib_if_found(caffe2_protos protobuf-lite protobuf protoc)
+  append_torchlib_if_found(onnx onnx_proto)
+
+  append_torchlib_if_found(foxi_loader fmt)
+  append_torchlib_if_found(clog cpuinfo)
 
   if(NOT @USE_INTERNAL_PTHREADPOOL_IMPL@)
-    find_library(PTHREADPOOL_LIBRARY pthreadpool PATHS "${TORCH_INSTALL_PREFIX}/lib")
-    list(APPEND TORCH_LIBRARIES ${PTHREADPOOL_LIBRARY})
+    append_torchlib_if_found(pthreadpool)
   endif()
 
-  if(@INTERN_USE_EIGEN_BLAS@)
-    find_library(EIGEN_BLAS_LIBRARY eigen_blas PATHS "${TORCH_INSTALL_PREFIX}/lib")
-    list(APPEND TORCH_LIBRARIES ${EIGEN_BLAS_LIBRARY})
+  append_torchlib_if_found(eigen_blas)
+
+  if(@USE_FBGEMM@)
+    append_torchlib_if_found(fbgemm)
   endif()
 
-  find_library(CPUINFO_LIBRARY cpuinfo PATHS "${TORCH_INSTALL_PREFIX}/lib")
-  list(APPEND TORCH_LIBRARIES ${CPUINFO_LIBRARY})
+  if(@USE_MKLDNN@)
+    append_torchlib_if_found(dnnl mkldnn)
+  endif()
 
-  find_library(CLOG_LIBRARY clog PATHS "${TORCH_INSTALL_PREFIX}/lib")
-  list(APPEND TORCH_LIBRARIES ${CLOG_LIBRARY})
+  append_torchlib_if_found(sleef asmjit)
 endif()
 
 if(@USE_CUDA@)
   if(MSVC)
-    set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
-    if($ENV{NVTOOLEXT_HOME})
-      set(NVTOOLEXT_HOME $ENV{NVTOOLEXT_HOME})
+    if(NOT NVTOOLEXT_HOME)
+      set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
+    endif()
+    if(DEFINED ENV{NVTOOLSEXT_PATH})
+      set(NVTOOLEXT_HOME $ENV{NVTOOLSEXT_PATH})
     endif()
     set(TORCH_CUDA_LIBRARIES
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
@@ -112,8 +151,10 @@ if(@USE_CUDA@)
       ${LIBNVTOOLSEXT}
       ${CUDA_LIBRARIES})
   endif()
-  find_library(C10_CUDA_LIBRARY c10_cuda PATHS "${TORCH_INSTALL_PREFIX}/lib")
-  list(APPEND TORCH_CUDA_LIBRARIES ${C10_CUDA_LIBRARY})
+  if(@BUILD_SHARED_LIBS@)
+    find_library(C10_CUDA_LIBRARY c10_cuda PATHS "${TORCH_INSTALL_PREFIX}/lib")
+    list(APPEND TORCH_CUDA_LIBRARIES ${C10_CUDA_LIBRARY})
+  endif()
   list(APPEND TORCH_LIBRARIES ${TORCH_CUDA_LIBRARIES})
 endif()
 
@@ -123,8 +164,18 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
 endif()
 
 find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
+# the statements below changes target properties on
+# - the imported target from Caffe2Targets.cmake in shared library mode (see the find_package above)
+#    - this is untested whether it is the correct (or desired) methodology in CMake
+# - the imported target created in this file in static library mode
+if(NOT @BUILD_SHARED_LIBS@)
+  # do not set this property on the shared library target, as it will cause confusion in some builds
+  # as the configuration specific property is set in the Caffe2Targets.cmake file
+  set_target_properties(torch PROPERTIES
+      IMPORTED_LOCATION "${TORCH_LIBRARY}"
+  )
+endif()
 set_target_properties(torch PROPERTIES
-    IMPORTED_LOCATION "${TORCH_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES "${TORCH_INCLUDE_DIRS}"
     CXX_STANDARD 14
 )

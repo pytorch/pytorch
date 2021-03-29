@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from hypothesis import assume, given, settings
@@ -9,9 +9,6 @@ from hypothesis import assume, given, settings
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-
-import unittest
-import os
 
 
 class TestReduceFrontSum(hu.HypothesisTestCase):

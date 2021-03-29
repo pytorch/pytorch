@@ -34,7 +34,8 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame  = (blockIdx.z + offsetZ) % output.size(1); // output frame/time
-  int slice   = (blockIdx.z + offsetZ) / output.size(1); // output slice/feature
+  int64_t slice   = (blockIdx.z + offsetZ) / output.size(1); // output slice/feature
+  // For int64_t data type, see https://github.com/pytorch/pytorch/issues/52822
 
   if (oRow < output.size(2) && oColumn < output.size(3))
   {
@@ -112,8 +113,7 @@ void max_pool3d_with_indices_out_frame(
          pT, pH, pW,
          dilationT, dilationH, dilationW,
          offsetZ);
-
-    AT_CUDA_CHECK(cudaGetLastError());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -178,8 +178,7 @@ void max_pool3d_with_indices_backward_out_frame(
         pT, pH, pW,
         dilationT, dilationH, dilationW,
         offsetZ);
-
-    AT_CUDA_CHECK(cudaGetLastError());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     totalZ -= 65535;
     offsetZ += 65535;
@@ -276,20 +275,18 @@ void max_pool3d_with_indices_out_cuda_template(
     input.scalar_type(),
     "max_pool3d_with_indices_out_frame",
     [&]{
-      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "max_pool3d_with_indices_out_frame", [&] {
-        scalar_t *input_data = work_input.data_ptr<scalar_t>();
-        int64_t totalZ = otime * nslices * nbatch;
+      scalar_t *input_data = work_input.data_ptr<scalar_t>();
+      int64_t totalZ = otime * nslices * nbatch;
 
-        max_pool3d_with_indices_out_frame(
-          input_data, work_output, work_indices,
-          totalZ,
-          itime, iheight, iwidth,
-          otime, oheight, owidth,
-          kT, kH, kW,
-          dT, dH, dW,
-          pT, pH, pW,
-          dilationT, dilationH, dilationW);
-      });
+      max_pool3d_with_indices_out_frame(
+        input_data, work_output, work_indices,
+        totalZ,
+        itime, iheight, iwidth,
+        otime, oheight, owidth,
+        kT, kH, kW,
+        dT, dH, dW,
+        pT, pH, pW,
+        dilationT, dilationH, dilationW);
     }
   );
 }
@@ -387,19 +384,17 @@ void max_pool3d_with_indices_backward_out_cuda_template(
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "max_pool3d_with_indices_backward_out_frame",
     [&] {
-      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "max_pool3d_with_indices_backward_out_frame", [&] {
-        const int64_t totalZ = otime * nslices * nbatch;
-        scalar_t *grad_input_data = work_grad_input.data_ptr<scalar_t>();
+      const int64_t totalZ = otime * nslices * nbatch;
+      scalar_t *grad_input_data = work_grad_input.data_ptr<scalar_t>();
 
-        max_pool3d_with_indices_backward_out_frame(
-          grad_input_data, work_grad_output, work_indices,
-          totalZ,
-          itime, iheight, iwidth,
-          oheight, owidth,
-          dT, dH, dW,
-          pT, pH, pW,
-          dilationT, dilationH, dilationW);
-      });
+      max_pool3d_with_indices_backward_out_frame(
+        grad_input_data, work_grad_output, work_indices,
+        totalZ,
+        itime, iheight, iwidth,
+        oheight, owidth,
+        dT, dH, dW,
+        pT, pH, pW,
+        dilationT, dilationH, dilationW);
     }
   );
 }

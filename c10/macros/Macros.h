@@ -77,8 +77,10 @@
  * str and ending with a number that varies with the line.
  */
 #ifdef __COUNTER__
+#define C10_UID __COUNTER__
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
 #else
+#define C10_UID __LINE__
 #define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
 #endif
 
@@ -177,11 +179,19 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 /// C10_NOINLINE - Functions whose declaration is annotated with this will not
 /// be inlined.
 #ifdef __GNUC__
-#define C10_NOINLINE __attribute__((__noinline__))
+#define C10_NOINLINE __attribute__((noinline))
 #elif _MSC_VER
 #define C10_NOINLINE __declspec(noinline)
 #else
 #define C10_NOINLINE
+#endif
+
+#if defined(_MSC_VER)
+#define C10_ALWAYS_INLINE __forceinline
+#elif __has_attribute(always_inline) || defined(__GNUC__)
+#define C10_ALWAYS_INLINE __attribute__((__always_inline__)) inline
+#else
+#define C10_ALWAYS_INLINE inline
 #endif
 
 #include <sstream>
@@ -193,11 +203,14 @@ namespace at { namespace cuda { using namespace c10::hip; }}
 #define C10_DEVICE __device__
 #define C10_HOST __host__
 // constants from (https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#features-and-technical-specifications)
-// The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5)
-// but 2048 for previous architectures. You'll get warnings if you exceed these constants.
+// The maximum number of threads per multiprocessor is 1024 for Turing architecture (7.5),
+// 1536 for Geforce Ampere (8.6),
+// and 2048 for all other architectures. You'll get warnings if you exceed these constants.
 // Hence, the following macros adjust the input values from the user to resolve potential warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
+#elif __CUDA_ARCH__ == 860
+constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1536;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
 #endif
@@ -303,7 +316,7 @@ __host__ __device__
 #define C10_MOBILE 1
 #endif // ANDROID / IOS
 
-// Portably determine if a type T is trivially copyable or not.
+// Portable determination of whether type T is trivially copyable.
 // Warning: __has_trivial_copy for GCC may not always detect the non-POD
 // correctly. For example, T = std::unique_ptr may evaluate to true and be
 // treated as POD. This can cause unexpected behavior.

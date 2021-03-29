@@ -1,8 +1,8 @@
 ## @package data_parallel_model
 # Module caffe2.python.data_parallel_model
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 
 from collections import OrderedDict
 from future.utils import viewitems, viewkeys, viewvalues
@@ -1056,7 +1056,7 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         """Create a Sum op for 2 or more blobs on different devices.
         Saves the result on the first device.
 
-        Arguments:
+        Args:
         dev_indices -- a list of device indices, which can be translated into
                        CUDA identifiers with model._devices
         """

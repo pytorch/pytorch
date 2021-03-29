@@ -40,7 +40,7 @@ void dim_apply(TensorList tensors, int64_t dim, Fn f) {
   });
 }
 
-// ensure we get good values and indices for kthvalue, mode, median
+// ensure we get good values and indices for kthvalue, mode
 // this will always be with the reducing dim as 1-d
 inline void _reduction_with_indices_allocate_or_resize_output(
     Tensor& values,

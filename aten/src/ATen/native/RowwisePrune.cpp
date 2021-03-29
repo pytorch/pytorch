@@ -80,9 +80,9 @@ std::tuple<Tensor, Tensor> _rowwise_prune_helper(
 //    post pruning.
 // 2. An 1D tensor that contains the mapping between original weight row and
 //    the corresponding row in the pruned weights tensor.
-std::tuple<Tensor, Tensor> rowwise_prune(const Tensor& weights,
-                                         const Tensor& mask,
-                                         ScalarType compressed_indices_dtype) {
+std::tuple<Tensor, Tensor> _rowwise_prune(const Tensor& weights,
+                                          const Tensor& mask,
+                                          ScalarType compressed_indices_dtype) {
   TORCH_CHECK(weights.ndimension() == 2,
       "'weights' should have 2 dimensions.");
   TORCH_CHECK(

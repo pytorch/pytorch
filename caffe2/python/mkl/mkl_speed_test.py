@@ -1,12 +1,12 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 import unittest
 
 import numpy as np
 from caffe2.proto import caffe2_pb2
-from caffe2.python import cnn, core, workspace, test_util
+from caffe2.python import core, workspace, test_util
 
 
 @unittest.skipIf(not workspace.C.has_mkldnn, "Skipping as we do not have mkldnn.")

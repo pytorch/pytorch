@@ -78,6 +78,12 @@ if [ -n "${IOS_ARCH:-}" ]; then
   CMAKE_ARGS+=("-DIOS_ARCH=${IOS_ARCH}")
 fi
 
+if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=ON")
+else
+  CMAKE_ARGS+=("-DBUILD_LITE_INTERPRETER=OFF")
+fi
+
 # Don't build binaries or tests (only the library)
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
@@ -92,6 +98,12 @@ CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 CMAKE_ARGS+=("-DUSE_MPI=OFF")
 CMAKE_ARGS+=("-DUSE_NUMPY=OFF")
 CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
+CMAKE_ARGS+=("-DUSE_MKLDNN=OFF")
+
+# Metal
+if [ "${USE_PYTORCH_METAL:-}" == "1" ]; then
+  CMAKE_ARGS+=("-DUSE_PYTORCH_METAL=ON")
+fi
 
 # pthreads
 CMAKE_ARGS+=("-DCMAKE_THREAD_LIBS_INIT=-lpthread")

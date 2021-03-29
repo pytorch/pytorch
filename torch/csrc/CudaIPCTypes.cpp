@@ -1,4 +1,3 @@
-#ifdef USE_CUDA
 #include <torch/csrc/CudaIPCTypes.h>
 #include <TH/THAllocator.h>
 #include <map>
@@ -6,7 +5,7 @@
 #include <random>
 
 #ifdef _MSC_VER
-#include <windows.h>
+#include <c10/util/win32-headers.h>
 #else
 #include <sys/types.h>
 #include <unistd.h>
@@ -35,6 +34,11 @@ struct CudaIPCGlobalEntities {
   CudaIPCGlobalEntities() : ref_counters_files_() {}
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
+    // Clear shared blocks to avoid releasing shared blocks after
+    // ~CudaIPCGlobalEntities is done since circular references causes the
+    // destructor of ~CudaIPCSentData to access the cuda_ipc_global_entities
+    // again.
+    CudaIPCSentDataLimbo_.clear_shared_blocks();
     safe_clean_current_file();
     if (next_available_ref_counters_file_) {
       warnProducerTerminatedBeforeSharedTensorsReleased();
@@ -57,6 +61,10 @@ CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
   if (shared_blocks_.size() > 0) {
     warnProducerTerminatedBeforeSharedTensorsReleased();
   }
+}
+
+void CudaIPCSentDataLimbo::clear_shared_blocks() {
+  shared_blocks_.clear();
 }
 
 bool CudaIPCSentDataLimbo::collect() {
@@ -109,11 +117,13 @@ void CudaIPCSentDataDelete(void* ptr) {
 void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
   std::lock_guard<std::mutex> lock(
       cuda_ipc_global_entities.ref_counters_mutex_);
-  cuda_ipc_global_entities.ref_counters_files_[handle]->return_offset(offset);
-  if (cuda_ipc_global_entities.ref_counters_files_[handle]->offsets_in_use() ==
-          0 &&
-      !cuda_ipc_global_entities.ref_counters_files_[handle]->have_offsets()) {
-    cuda_ipc_global_entities.ref_counters_files_.erase(handle);
+  auto& map = cuda_ipc_global_entities.ref_counters_files_;
+  auto it = map.find(handle);
+  if (it != map.end()) {
+    it->second->return_offset(offset);
+    if (it->second->offsets_in_use() == 0 && !it->second->have_offsets()) {
+      map.erase(handle);
+    }
   }
 }
 
@@ -243,5 +253,3 @@ namespace {
 REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback);
 }
 } // namespace c10
-
-#endif

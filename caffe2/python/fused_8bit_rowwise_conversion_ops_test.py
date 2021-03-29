@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
@@ -30,7 +30,7 @@ def floats_to_bytes(floats):
         if isinstance(as_bytes[0], int):
             byte_matrix[i] = list(as_bytes)
         else:
-            byte_matrix[i] = list(map(ord, as_bytes))
+            byte_matrix[i] = [ord(i) for i in as_bytes]
     return byte_matrix
 
 

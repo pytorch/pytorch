@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -6,6 +7,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -241,7 +243,7 @@ TensorView* arithOpOverloads(
 }
 } // namespace
 
-TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
+TORCH_CUDA_CU_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   auto vals = maybeBroadcast({v1, v2});
   Val* out = newOutputVal({vals[0], vals[1]});
   if (is_logical_op(type)) {
@@ -410,11 +412,12 @@ static TensorView* newForReduction(
       (*(axes_set.rbegin())) < orig_domain.size(),
       "Error setting up reduction, reduction axis is outside nDims. Keep in mind reductions are relative to root domains, not modified views.");
 
+  auto axis_iter = axes_set.begin();
   for (size_t dim = 0; dim < orig_domain.size(); dim++) {
     bool isReduction = false;
-    if (*axes_set.begin() == dim) {
+    if (axis_iter != axes_set.end() && *axis_iter == dim) {
       isReduction = true;
-      axes_set.erase(axes_set.begin());
+      axis_iter++;
     }
 
     const IterDomain* id = orig_domain[dim];
@@ -590,7 +593,7 @@ TensorView* sub_alpha(TensorView* v1, TensorView* v2, Val* v3) {
   return arithOpOverloads(sub_alpha, v1, v2, v3);
 }
 // lerp
-TORCH_CUDA_API Val* lerp(Val* start, Val* end, Val* weight) {
+TORCH_CUDA_CU_API Val* lerp(Val* start, Val* end, Val* weight) {
   auto vals = maybeBroadcast({start, end, weight});
   Val* intrm1 = binaryOp(BinaryOpType::Sub, vals[1], vals[0]);
   Val* intrm2 = binaryOp(BinaryOpType::Mul, vals[2], intrm1);
@@ -730,6 +733,7 @@ TensorView* clamp(TensorView* in, Val* min_val, Val* max_val) {
   return clamp(in->as<Val>(), min_val, max_val)->as<TensorView>();
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

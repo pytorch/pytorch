@@ -3,14 +3,17 @@ import os
 import re
 import shutil
 import random
+import subprocess
 import tempfile
+import textwrap
 import unittest
 import torch
 import torch.nn as nn
 import torch.utils.data
+from torch.utils.data import DataLoader
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
-import torch.utils._benchmark as benchmark_utils
+import torch.utils.cpp_extension
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
@@ -26,7 +29,7 @@ HAS_CUDA = torch.cuda.is_available()
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 
-class RandomDatasetMock(object):
+class RandomDatasetMock(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         return torch.tensor([torch.rand(1).item(), random.uniform(0, 1)])
@@ -188,7 +191,7 @@ class TestCheckpoint(TestCase):
         b = torch.randn(1, 100, requires_grad=True)
 
         with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1, a, b)
+            checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
 
     def test_checkpoint_sequential_deprecated_no_args(self):
         class Noop(nn.Module):
@@ -198,7 +201,7 @@ class TestCheckpoint(TestCase):
         model = nn.Sequential(Noop())
 
         with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1)
+            checkpoint_sequential(model, 1)  # type: ignore[call-arg]
 
     def test_checkpoint_rng_cpu(self):
         for _ in range(5):
@@ -266,8 +269,86 @@ class TestCheckpoint(TestCase):
         out = checkpoint(run_fn, input_var, None)
         out.sum().backward()
 
+    def test_checkpoint_non_tensor_inputs_outputs(self):
+        def foo(t1, t2, scale, t3):
+            t4 = t1 + t2 * t3
+            t5 = t1 * t2 + t3
+            t4 *= scale
+            t5 *= scale
+            return scale, t4, None, True, t5, "bar", t1
 
-class TestDataLoader(TestCase):
+        t1 = torch.rand(10, requires_grad=True)
+        t2 = torch.rand(10, requires_grad=True)
+        t3 = torch.rand(10)
+        scale = random.randint(0, 10)
+        res = checkpoint(foo, t1, t2, scale, t3)
+        self.assertEqual(scale, res[0])
+        self.assertEqual((t1 + t2 * t3) * scale, res[1])
+        self.assertEqual(None, res[2])
+        self.assertEqual(True, res[3])
+        self.assertEqual((t1 * t2 + t3) * scale, res[4])
+        self.assertEqual("bar", res[5])
+        self.assertEqual(t1, res[6])
+
+        # Validate running backward.
+        res[1].sum().backward(retain_graph=True)
+        res[4].sum().backward(retain_graph=True)
+        res[6].sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "Trying to backward through the graph a second time"):
+            res[6].sum().backward()
+        t1_grad = t1.grad
+        t2_grad = t2.grad
+
+        # Reset grads, run without checkpoint and validate we receive same grads.
+        t1.grad = None
+        t2.grad = None
+        res = foo(t1, t2, scale, t3)
+        torch.autograd.backward([res[1].sum(), res[4].sum(), res[6].sum()])
+        self.assertEqual(t1.grad, t1_grad)
+        self.assertEqual(t2.grad, t2_grad)
+
+    def test_checkpoint_no_tensors(self):
+        def foo(t1, t2, scale, t3):
+            t4 = t1 + t2 * t3
+            t5 = t1 * t2 + t3
+            t4 *= scale
+            t5 *= scale
+            return scale, t4, None, True, t5, "bar", t1
+
+        t1 = random.random()
+        t2 = random.random()
+        t3 = random.random()
+        scale = random.randint(0, 10)
+        res = checkpoint(foo, t1, t2, scale, t3)
+        self.assertEqual(scale, res[0])
+        self.assertEqual((t1 + t2 * t3) * scale, res[1])
+        self.assertEqual(None, res[2])
+        self.assertEqual(True, res[3])
+        self.assertEqual((t1 * t2 + t3) * scale, res[4])
+        self.assertEqual("bar", res[5])
+        self.assertEqual(t1, res[6])
+
+    def test_checkpoint_partial_grad(self):
+        def run_fn(tensor1, tensor2):
+            # tensor 2 is used for other application logic
+            return tensor1, tensor2
+        input_var = torch.randn(1, 4, requires_grad=True)
+        input_var2 = torch.randn(1, 4, requires_grad=False)
+        out = checkpoint(run_fn, input_var, input_var2)
+        out[0].sum().backward()
+
+        def run_fn2(tensor1, tensor2):
+            return tensor1
+        input_var = torch.randn(1, 4, requires_grad=False)
+        input_var2 = torch.randn(1, 4, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
+        ):
+            out = checkpoint(run_fn2, input_var, input_var2)
+            out.sum().backward()
+
+class TestDataLoaderUtils(TestCase):
     def setUp(self):
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
@@ -287,35 +368,38 @@ class TestDataLoader(TestCase):
         self.assertEqual(x1, x2)
 
     def test_single_keep(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=0,
-                                                 drop_last=False)
+        # self.dataset is a Tensor here; technically not a valid input because
+        # not a Dataset subclass, but needs to stay working so add ignore's
+        # for type checking with mypy
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=0,
+                                             drop_last=False)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_single_drop(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=0,
-                                                 drop_last=True)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=0,
+                                             drop_last=True)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
     @unittest.skip("FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN")
     def test_multi_keep(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=2,
-                                                 drop_last=False)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=2,
+                                             drop_last=False)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
     def test_multi_drop(self):
-        dataloader = torch.utils.data.DataLoader(self.dataset,
-                                                 batch_size=self.batch_size,
-                                                 num_workers=2,
-                                                 drop_last=True)
+        dataloader : DataLoader = DataLoader(self.dataset,  # type: ignore[arg-type]
+                                             batch_size=self.batch_size,
+                                             num_workers=2,
+                                             drop_last=True)
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
@@ -326,7 +410,7 @@ test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 class TestFFI(TestCase):
     def test_deprecated(self):
         with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension  # noqa: F401
+            from torch.utils.ffi import create_extension  # type: ignore  # noqa: F401
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
@@ -343,9 +427,9 @@ class TestBottleneck(TestCase):
             p.kill()
             output, err = p.communicate()
         rc = p.returncode
-        output = output.decode("ascii")
-        err = err.decode("ascii")
-        return (rc, output, err)
+        output_str = output.decode("ascii")
+        err_str = err.decode("ascii")
+        return (rc, output_str, err_str)
 
     def _run_bottleneck(self, test_file, scriptargs=''):
         curdir = os.path.dirname(os.path.abspath(__file__))
@@ -611,64 +695,97 @@ class TestHub(TestCase):
             self.assertEqual(sum_of_state_dict(loaded_state),
                              SUM_OF_HUB_EXAMPLE)
 
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_commit_from_forked_repo(self):
+        with self.assertRaisesRegex(
+                ValueError,
+                'If it\'s a commit from a forked repo'):
+            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
+
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python # noqa
 
 
-class TestBenchmarkUtils(TestCase):
-    def test_timer(self):
-        timer = benchmark_utils.Timer(
-            stmt="torch.ones(())",
-        )
-        median = timer.blocked_autorange(min_run_time=0.1).median
-        self.assertIsInstance(median, float)
+class TestAssert(TestCase):
+    def test_assert_true(self):
+        # verify assertions work as expected
+        # bool argument
+        torch._assert(True, "foo")
+        with self.assertRaisesRegex(AssertionError, "bar"):
+            torch._assert(False, "bar")
+        # tensor argument
+        torch._assert(torch.tensor([True], dtype=torch.bool), "foo")
+        with self.assertRaisesRegex(AssertionError, "bar"):
+            torch._assert(torch.tensor([False], dtype=torch.bool), "bar")
 
-    def test_adaptive_timer(self):
-        # Validate both on different sizes validate against blocked_autorange
-        # This looks for relative differences btetween orders of magnitude to
-        # provide a stable/portable test which is somewhat informative.
-        timer = benchmark_utils.Timer(
-            stmt="torch.sum(torch.ones((10,10)))",
-        )
-        small = timer.adaptive_autorange(min_run_time=0.1, max_run_time=1.0)
-        timer = benchmark_utils.Timer(
-            stmt="torch.sum(torch.ones((500,500)))",
-        )
-        medium = timer.adaptive_autorange(min_run_time=0.1, max_run_time=1.0)
-        blocked_medium = timer.blocked_autorange(min_run_time=0.1)
-        self.assertLess(small.median, medium.median)
-        # This acts as a control to compare to a different way to measure the same value.
-        self.assertLess(small.median, blocked_medium.median)
+    def test_assert_scriptable(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._assert(x.sum() > 0, "foo")
+                return x
 
-    def test_compare(self):
-        compare = benchmark_utils.Compare([
-            benchmark_utils.Timer(
-                "torch.ones((n,))", globals={"n": n},
-                description="ones", label=str(n)).timeit(3)
-            for n in range(3)
-        ])
-        compare.print()
+        m = M()
+        # scriptable
+        ms = torch.jit.script(m)
+        # data can be passed without errors
+        x = torch.randn(4, 4).fill_(1.0)
+        ms(x)
+        with self.assertRaisesRegex(torch.jit.Error, "foo"):  # type: ignore[type-var]
+            ms(torch.tensor([False], dtype=torch.bool))
 
-    @unittest.skipIf(IS_WINDOWS and os.getenv("VC_YEAR") == "2019", "Random seed only accepts int32")
-    def test_fuzzer(self):
-        fuzzer = benchmark_utils.Fuzzer(
-            parameters=[
-                benchmark_utils.FuzzedParameter(
-                    "n", minval=1, maxval=16, distribution="loguniform")],
-            tensors=[benchmark_utils.FuzzedTensor("x", size=("n",))],
-            seed=0,
-        )
 
-        expected_results = [
-            (0.7821, 0.0536, 0.9888, 0.1949, 0.5242, 0.1987, 0.5094),
-            (0.7166, 0.5961, 0.8303, 0.005),
-        ]
+@unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
+class TestStandaloneCPPJIT(TestCase):
+    def test_load_standalone(self):
+        build_dir = tempfile.mkdtemp()
+        try:
+            src_path = os.path.join(build_dir, "main.cpp")
+            src = textwrap.dedent("""\
+                #include <iostream>
+                #include <torch/torch.h>
+                int main() {
+                    auto x = torch::eye(3);
+                    std::cout << x << std::endl;
+                }
+            """)
+            with open(src_path, "wt") as f:
+                f.write(src)
 
-        for i, (tensors, _, _) in enumerate(fuzzer.take(2)):
-            x = tensors["x"]
+            exec_path = torch.utils.cpp_extension.load(
+                "standalone_load_test",
+                src_path,
+                build_directory=build_dir,
+                is_python_module=False,
+                is_standalone=True,
+            )
+
+            ext = ".exe" if IS_WINDOWS else ""
             self.assertEqual(
-                x, torch.Tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
+                exec_path,
+                os.path.join(build_dir, f"standalone_load_test{ext}")
+            )
+
+            for shell in [True, False]:
+                r = subprocess.run(
+                    [exec_path],
+                    shell=shell,
+                    stdout=subprocess.PIPE,
+                )
+                self.assertEqual(r.returncode, 0)
+                self.assertEqual(
+                    # Windows prints "\r\n" for newlines.
+                    textwrap.dedent(r.stdout.decode("utf-8")).replace("\r\n", "\n"),
+                    textwrap.dedent("""\
+                     1  0  0
+                     0  1  0
+                     0  0  1
+                    [ CPUFloatType{3,3} ]
+                    """)
+                )
+
+        finally:
+            shutil.rmtree(build_dir)
 
 
 if __name__ == '__main__':

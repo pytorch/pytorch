@@ -23,7 +23,7 @@ class DistAutogradTest : public ::testing::Test {
   virtual void TearDown() {
     autogradContainer_->releaseContext(autogradContainer_->currentContext()->contextId());
   }
-  
+
   static DistAutogradContainer* autogradContainer_;
 };
 

@@ -8,6 +8,8 @@ namespace at {
 namespace native {
 namespace vulkan {
 
+#ifndef USE_VULKAN_API
+
 using detail::convolution2d::createConv2dClampPrePackOpContext;
 
 TORCH_LIBRARY(vulkan, m) {
@@ -49,6 +51,9 @@ TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
   m.impl("conv2d_clamp_run", detail::convolution2d::conv2d_clamp_run);
 }
+
+#endif /* USE_VULKAN_API */
+
 } // namespace vulkan
 } // namespace native
 } // namespace at

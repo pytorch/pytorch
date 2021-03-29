@@ -24,7 +24,7 @@ namespace at {
  * the quantized value. For example, affine quantizer is
  * the most commonly used scheme in this category.
  */
-struct CAFFE2_API UniformQuantizer : public Quantizer {
+struct TORCH_API UniformQuantizer : public Quantizer {
   explicit UniformQuantizer(ScalarType scalar_type) : Quantizer(scalar_type) {}
 };
 
@@ -33,7 +33,7 @@ struct CAFFE2_API UniformQuantizer : public Quantizer {
  * These quantization scheme may map float value non-uniformly to the quantized
  * value. K-means quantization is a representative example in this category.
  */
-struct CAFFE2_API NonUniformQuantizer : public Quantizer {
+struct TORCH_API NonUniformQuantizer : public Quantizer {
   explicit NonUniformQuantizer(ScalarType scalar_type) : Quantizer(scalar_type) {}
 };
 
@@ -47,7 +47,7 @@ struct CAFFE2_API NonUniformQuantizer : public Quantizer {
  * For dequantize:
  * X = (Y - zero_point) * scale
  */
-struct CAFFE2_API AffineQuantizer : public UniformQuantizer {
+struct TORCH_API AffineQuantizer : public UniformQuantizer {
   explicit AffineQuantizer(ScalarType scalar_type) : UniformQuantizer(scalar_type) {}
 };
 
@@ -58,7 +58,7 @@ struct CAFFE2_API AffineQuantizer : public UniformQuantizer {
  * PerTensorAffineQuantizer stores a scale and a zero_point, which is used for
  * all the values in the Tensor.
  */
-struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
+struct TORCH_API PerTensorAffineQuantizer : public AffineQuantizer {
   explicit PerTensorAffineQuantizer(ScalarType scalar_type, double scale, int64_t zero_point)
     : AffineQuantizer(scalar_type),
         scale_(scale),
@@ -107,7 +107,7 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
  * processors since it requires each multiplication result within a single
  * dot-product to have a different scale.
  */
-struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
+struct TORCH_API PerChannelAffineQuantizer : public AffineQuantizer {
   explicit PerChannelAffineQuantizer(
       ScalarType scalar_type,
       Tensor scales,
@@ -169,7 +169,7 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
  * be exactly represented in the quantized space. We can get additional precision by
  * using floating point values for zero point.
  */
-struct CAFFE2_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffineQuantizer {
+struct TORCH_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffineQuantizer {
   explicit PerChannelAffineFloatQParamsQuantizer(
       ScalarType scalar_type,
       Tensor scales,
@@ -205,24 +205,26 @@ struct CAFFE2_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffin
 // setters/getters for QTensorImpl fields; otherwise, you should use
 // the low level setters/getters that were implemented using this.
 // This may be called repeatedly, so make sure it's pretty cheap.
-CAFFE2_API QTensorImpl* get_qtensorimpl(const Tensor& self);
+TORCH_API QTensorImpl* get_qtensorimpl(const Tensor& self);
 
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
-CAFFE2_API QuantizerPtr
+TORCH_API QuantizerPtr
 make_per_tensor_affine_quantizer(
     double scale, int64_t zero_point, ScalarType scalar_type);
 
-CAFFE2_API QuantizerPtr make_per_channel_affine_quantizer(
+TORCH_API QuantizerPtr make_per_channel_affine_quantizer(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis,
     ScalarType scalar_type);
 
 // Create a Quantized Tensor given arguments for normal Tensor and a quantizer
-CAFFE2_API Tensor new_qtensor(
+TORCH_API Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer);
+
+TORCH_API void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer);
 
 } // namespace at

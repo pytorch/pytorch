@@ -26,6 +26,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
 #undef IMM_DECLARE
 
 class Cast;
+class BitCast;
 class Var;
 class Buf;
 class Ramp;
@@ -53,6 +54,7 @@ class MinTerm;
 class ReduceOp;
 class AtomicAdd;
 class SyncThreads;
+class ExternalCall;
 
 class TORCH_API IRMutator {
  public:
@@ -75,6 +77,7 @@ class TORCH_API IRMutator {
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
 #undef IMM_MUTATE_DECLARE
   virtual const Expr* mutate(const Cast* v);
+  virtual const Expr* mutate(const BitCast* v);
   virtual const Expr* mutate(const Var* v);
   virtual const Expr* mutate(const Buf* v);
   virtual const Expr* mutate(const Ramp* v);
@@ -105,6 +108,7 @@ class TORCH_API IRMutator {
   virtual Stmt* mutate(const Store* v);
   virtual Stmt* mutate(const AtomicAdd* v);
   virtual Stmt* mutate(const SyncThreads* v);
+  virtual Stmt* mutate(const ExternalCall* v);
 
   virtual Stmt* mutate(const Allocate* v);
   virtual Stmt* mutate(const Free* v);

@@ -37,5 +37,6 @@ inline c10::BFloat16 pow(c10::BFloat16 a, double b) { return std::pow(float(a), 
 inline c10::BFloat16 pow(c10::BFloat16 a, double b) { return std::pow(float(a), b);}
 #endif
 inline c10::BFloat16 pow(c10::BFloat16 a, c10::BFloat16 b) { return std::pow(float(a), float(b));}
+inline c10::BFloat16 fmod(c10::BFloat16 a, c10::BFloat16 b) { return std::fmod(float(a), float(b));}
 
 } // namespace std

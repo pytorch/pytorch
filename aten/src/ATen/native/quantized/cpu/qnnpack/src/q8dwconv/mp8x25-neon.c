@@ -27,14 +27,17 @@ void pytorch_q8dwconv_ukernel_mp8x25__neon(
       vdup_n_u8(quantization_params->neon.kernel_zero_points[0]);
   const float32x4_t requantization_scale_v =
       vdupq_n_f32(quantization_params->neon.requantization_scales[0]);
+#ifdef __aarch64__
   const int16x8_t voutput_zero_point =
       vld1q_dup_s16(&quantization_params->neon.output_zero_point);
   const uint8x8_t voutput_min = vld1_dup_u8(&quantization_params->neon.output_min);
   const uint8x8_t voutput_max = vld1_dup_u8(&quantization_params->neon.output_max);
+#else
   const float32x4_t vfmin = vdupq_n_f32(quantization_params->neon.vfmin);
   const float32x4_t vfmax = vdupq_n_f32(quantization_params->neon.vfmax);
   const float32x4_t vfmagic = vdupq_n_f32(quantization_params->neon.vfmagic);
   const int32x4_t vimagic = vdupq_n_s32(quantization_params->neon.vimagic);
+#endif
 
   do {
     uint8_t* output_start = output;

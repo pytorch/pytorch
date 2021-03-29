@@ -52,6 +52,8 @@ class _InstanceNorm(_NormBase):
     def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
 
+        assert self.running_mean is None or isinstance(self.running_mean, Tensor)
+        assert self.running_var is None or isinstance(self.running_var, Tensor)
         return F.instance_norm(
             input, self.running_mean, self.running_var, self.weight, self.bias,
             self.training or not self.track_running_stats, self.momentum, self.eps)

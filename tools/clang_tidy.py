@@ -12,7 +12,7 @@ tree are also possible. In both cases, the script allows filtering files via
 glob or regular expressions.
 """
 
-from __future__ import print_function
+
 
 import argparse
 import collections
@@ -173,7 +173,7 @@ def run_clang_tidy(options, line_filters, files):
 
         with open(options.config_file) as config:
             # Here we convert the YAML config file to a JSON blob.
-            command += ["-config", json.dumps(yaml.load(config, Loader=yaml.FullLoader))]
+            command += ["-config", json.dumps(yaml.load(config, Loader=yaml.SafeLoader))]
     command += options.extra_args
 
     if line_filters:

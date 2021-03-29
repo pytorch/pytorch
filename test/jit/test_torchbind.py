@@ -12,7 +12,7 @@ from pathlib import Path
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
+from torch.testing._internal.common_utils import TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS, IS_FBCODE
 from torch.testing import FileCheck
 
 if __name__ == "__main__":
@@ -24,10 +24,14 @@ if __name__ == "__main__":
 
 class TestTorchbind(JitTestCase):
     def setUp(self):
-        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+        if IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
             raise unittest.SkipTest("non-portable load_library call used in test")
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+        if TEST_WITH_ROCM:
+            torch_root = Path(torch.__file__).resolve().parent
+            p = torch_root / 'lib' / 'libtorchbind_test.so'
+        else:
+            torch_root = Path(__file__).resolve().parent.parent.parent
+            p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
         torch.ops.load_library(str(p))
 
     def test_torchbind(self):
@@ -57,6 +61,32 @@ class TestTorchbind(JitTestCase):
             ss1.push(ss2.pop())
             return ss1.pop() + ss2.pop()
         test_equality(f, lambda x: x)
+
+        # test nn module with prepare_scriptable function
+        class NonJitableClass(object):
+            def __init__(self, int1, int2):
+                self.int1 = int1
+                self.int2 = int2
+
+            def return_vals(self):
+                return self.int1, self.int2
+
+        class CustomWrapper(torch.nn.Module):
+            def __init__(self, foo):
+                super(CustomWrapper, self).__init__()
+                self.foo = foo
+
+            def forward(self) -> None:
+                self.foo.increment(1)
+                return
+
+            def __prepare_scriptable__(self):
+                int1, int2 = self.foo.return_vals()
+                foo = torch.classes._TorchScriptTesting._Foo(int1, int2)
+                return CustomWrapper(foo)
+
+        foo = CustomWrapper(NonJitableClass(1, 2))
+        jit_foo = torch.jit.script(foo)
 
     def test_torchbind_take_as_arg(self):
         global StackString  # see [local resolution in python]
@@ -100,6 +130,67 @@ class TestTorchbind(JitTestCase):
         self.assertEqual(out[1].pop(), "mom")
         self.assertEqual(out[1].pop(), "hi")
 
+    def test_torchbind_def_property_getter_setter(self):
+        def foo_getter_setter_full():
+            fooGetterSetter = torch.classes._TorchScriptTesting._FooGetterSetter(5, 6)
+            # getX method intentionally adds 2 to x
+            old = fooGetterSetter.x
+            # setX method intentionally adds 2 to x
+            fooGetterSetter.x = old + 4
+            new = fooGetterSetter.x
+            return old, new
+
+        self.checkScript(foo_getter_setter_full, ())
+
+        def foo_getter_setter_lambda():
+            foo = torch.classes._TorchScriptTesting._FooGetterSetterLambda(5)
+            old = foo.x
+            foo.x = old + 4
+            new = foo.x
+            return old, new
+
+        self.checkScript(foo_getter_setter_lambda, ())
+
+    def test_torchbind_def_property_just_getter(self):
+        def foo_just_getter():
+            fooGetterSetter = torch.classes._TorchScriptTesting._FooGetterSetter(5, 6)
+            # getY method intentionally adds 4 to x
+            return fooGetterSetter, fooGetterSetter.y
+
+        scripted = torch.jit.script(foo_just_getter)
+        out, result = scripted()
+        self.assertEqual(result, 10)
+
+        with self.assertRaisesRegex(RuntimeError, 'can\'t set attribute'):
+            out.y = 5
+
+        def foo_not_setter():
+            fooGetterSetter = torch.classes._TorchScriptTesting._FooGetterSetter(5, 6)
+            old = fooGetterSetter.y
+            fooGetterSetter.y = old + 4
+            # getY method intentionally adds 4 to x
+            return fooGetterSetter.y
+
+        with self.assertRaisesRegex(RuntimeError, 'Tried to set read-only attribute: y'):
+            scripted = torch.jit.script(foo_not_setter)
+
+    def test_torchbind_def_property_readwrite(self):
+        def foo_readwrite():
+            fooReadWrite = torch.classes._TorchScriptTesting._FooReadWrite(5, 6)
+            old = fooReadWrite.x
+            fooReadWrite.x = old + 4
+            return fooReadWrite.x, fooReadWrite.y
+
+        self.checkScript(foo_readwrite, ())
+
+        def foo_readwrite_error():
+            fooReadWrite = torch.classes._TorchScriptTesting._FooReadWrite(5, 6)
+            fooReadWrite.y = 5
+            return fooReadWrite
+
+        with self.assertRaisesRegex(RuntimeError, 'Tried to set read-only attribute: y'):
+            scripted = torch.jit.script(foo_readwrite_error)
+
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
             ss = torch.classes._TorchScriptTesting._StackString(["mom"])
@@ -138,6 +229,23 @@ class TestTorchbind(JitTestCase):
 
         scripted = torch.jit.script(foo)
         self.assertEqual(scripted(), "mom")
+
+    def test_torchbind_class_attr_recursive(self):
+        class FooBar(torch.nn.Module):
+            def __init__(self, foo_model):
+                super(FooBar, self).__init__()
+                self.foo_mod = foo_model
+
+            def forward(self) -> int:
+                return self.foo_mod.info()
+
+            def to_ivalue(self):
+                torchbind_model = torch.classes._TorchScriptTesting._Foo(self.foo_mod.info(), 1)
+                return FooBar(torchbind_model)
+
+        inst = FooBar(torch.classes._TorchScriptTesting._Foo(2, 3))
+        scripted = torch.jit.script(inst.to_ivalue())
+        self.assertEqual(scripted(), 6)
 
     def test_torchbind_class_attribute(self):
         class FooBar1234(torch.nn.Module):
@@ -219,6 +327,10 @@ class TestTorchbind(JitTestCase):
         traced = torch.jit.trace(TryTracing(), ())
         self.assertEqual(torch.zeros(4, 4), traced())
 
+    def test_torchbind_pass_wrong_type(self):
+        with self.assertRaisesRegex(RuntimeError, 'missing attribute capsule'):
+            torch.ops._TorchScriptTesting.take_an_instance(torch.rand(3, 4))
+
     def test_torchbind_tracing_nested(self):
         class TryTracingNest(torch.nn.Module):
             def __init__(self):
@@ -282,3 +394,52 @@ class TestTorchbind(JitTestCase):
             if e.name == '_TorchScriptTesting::take_an_instance':
                 found_event = True
         self.assertTrue(found_event)
+
+    def test_torchbind_getattr(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["test"])
+        self.assertEqual(None, getattr(foo, 'bar', None))
+
+    def test_torchbind_attr_exception(self):
+        foo = torch.classes._TorchScriptTesting._StackString(["test"])
+        with self.assertRaisesRegex(AttributeError, 'does not have a field'):
+            foo.bar
+
+    def test_lambda_as_constructor(self):
+        obj_no_swap = torch.classes._TorchScriptTesting._LambdaInit(4, 3, False)
+        self.assertEqual(obj_no_swap.diff(), 1)
+
+        obj_swap = torch.classes._TorchScriptTesting._LambdaInit(4, 3, True)
+        self.assertEqual(obj_swap.diff(), -1)
+
+    def test_staticmethod(self):
+        def fn(inp: int) -> int:
+            return torch.classes._TorchScriptTesting._StaticMethod.staticMethod(inp)
+
+        self.checkScript(fn, (1,))
+
+    def test_default_args(self):
+        def fn() -> int:
+            obj = torch.classes._TorchScriptTesting._DefaultArgs()
+            obj.increment(5)
+            obj.decrement()
+            obj.decrement(2)
+            obj.divide()
+            obj.scale_add(5)
+            obj.scale_add(3, 2)
+            obj.divide(3)
+            return obj.increment()
+
+        self.checkScript(fn, ())
+
+        def gn() -> int:
+            obj = torch.classes._TorchScriptTesting._DefaultArgs(5)
+            obj.increment(3)
+            obj.increment()
+            obj.decrement(2)
+            obj.divide()
+            obj.scale_add(3)
+            obj.scale_add(3, 2)
+            obj.divide(2)
+            return obj.decrement()
+
+        self.checkScript(gn, ())

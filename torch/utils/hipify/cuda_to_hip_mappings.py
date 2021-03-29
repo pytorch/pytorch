@@ -552,26 +552,26 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("vector_types.h", ("hip/hip_vector_types.h", CONV_INCLUDE, API_RUNTIME)),
         ("cublas.h", ("rocblas.h", CONV_INCLUDE_CUDA_MAIN_H, API_BLAS)),
         ("cublas_v2.h", ("rocblas.h", CONV_INCLUDE_CUDA_MAIN_H, API_BLAS)),
-        ("curand.h", ("hiprand.h", CONV_INCLUDE_CUDA_MAIN_H, API_RAND)),
-        ("curand_kernel.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_discrete.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_discrete2.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_globals.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_lognormal.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_mrg32k3a.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_mtgp32.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_mtgp32_host.h", ("hiprand_mtgp32_host.h", CONV_INCLUDE, API_RAND)),
-        ("curand_mtgp32_kernel.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand.h", ("hiprand/hiprand.h", CONV_INCLUDE_CUDA_MAIN_H, API_RAND)),
+        ("curand_kernel.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_discrete.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_discrete2.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_globals.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_lognormal.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_mrg32k3a.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_mtgp32.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_mtgp32_host.h", ("hiprand/hiprand_mtgp32_host.h", CONV_INCLUDE, API_RAND)),
+        ("curand_mtgp32_kernel.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         (
             "curand_mtgp32dc_p_11213.h",
-            ("rocrand_mtgp32_11213.h", CONV_INCLUDE, API_RAND),
+            ("rocrand/rocrand_mtgp32_11213.h", CONV_INCLUDE, API_RAND),
         ),
-        ("curand_normal.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_normal_static.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_philox4x32_x.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_poisson.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_precalc.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("curand_uniform.h", ("hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_normal.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_normal_static.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_philox4x32_x.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_poisson.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_precalc.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
+        ("curand_uniform.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("cusparse.h", ("hipsparse.h", CONV_INCLUDE, API_RAND)),
         ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
         ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
@@ -586,7 +586,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("cub/device/device_radix_sort.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
         ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
-        ("nvToolsExt.h", ("roctx.h", CONV_INCLUDE, API_ROCTX)),
+        ("nvToolsExt.h", ("roctracer/roctx.h", CONV_INCLUDE, API_ROCTX)),
     ]
 )
 
@@ -6501,7 +6501,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ),
         (
             "cublasZtrsmBatched",
-            ("rocblas_dtrsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("rocblas_ztrsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasSmatinvBatched",
@@ -7746,6 +7746,10 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
     [
         ("cusparseStatus_t", ("hipsparseStatus_t", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseHandle_t", ("hipsparseHandle_t", CONV_MATH_FUNC, API_SPARSE)),
+        (
+            "CUSPARSE_POINTER_MODE_HOST",
+            ("HIPSPARSE_POINTER_MODE_HOST", CONV_NUMERIC_LITERAL, API_SPARSE),
+        ),
         ("cusparseOperation_t", ("hipsparseOperation_t", CONV_TYPE, API_SPARSE)),
         (
             "cusparseCreateMatDescr",
@@ -7767,6 +7771,17 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
             "cusparseXcsrsort_bufferSizeExt",
             ("hipsparseXcsrsort_bufferSizeExt", CONV_MATH_FUNC, API_SPARSE),
         ),
+        ("cusparseCreateCsrgemm2Info", ("hipsparseCreateCsrgemm2Info", CONV_MATH_FUNC, API_SPARSE)),
+        (
+            "cusparseDestroyCsrgemm2Info",
+            ("hipsparseDestroyCsrgemm2Info", CONV_MATH_FUNC, API_SPARSE),
+        ),
+        ("cusparseXcsrgemm2Nnz", ("hipsparseXcsrgemm2Nnz", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseDcsrgemm2_bufferSizeExt", ("hipsparseDcsrgemm2_bufferSizeExt", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseScsrgemm2_bufferSizeExt", ("hipsparseScsrgemm2_bufferSizeExt", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseDcsrgemm2", ("hipsparseDcsrgemm2", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseScsrgemm2", ("hipsparseScsrgemm2", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseSetPointerMode", ("hipsparseSetPointerMode", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseXcsrsort", ("hipsparseXcsrsort", CONV_MATH_FUNC, API_SPARSE)),
         (
             "cusparseXcoosort_bufferSizeExt",
@@ -7983,6 +7998,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("CUDNN_LSTM", ("miopenLSTM", API_PYTORCH)),
         ("CUDNN_GRU", ("miopenGRU", API_PYTORCH)),
         ("cudnnRNNMode_t", ("miopenRNNMode_t", API_PYTORCH)),
+        ("magma_queue_create_from_cuda", ("magma_queue_create_from_hip", API_PYTORCH)),
     ]
 )
 
@@ -8075,6 +8091,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
         ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
         ("c10/cuda/CUDAStream.h", ("c10/hip/HIPStream.h", API_C10)),
+        ("c10/cuda/CUDAGraphsC10Utils.h", ("c10/hip/HIPGraphsC10Utils.h", API_C10)),
         ("c10/cuda/CUDACachingAllocator.h", ("c10/hip/HIPCachingAllocator.h", API_C10)),
         ("c10/cuda/impl/CUDATest.h", ("c10/hip/impl/HIPTest.h", API_C10)),
         ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
@@ -8103,6 +8120,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
         ("cuda::CUDACachingAllocator", ("hip::HIPCachingAllocator", API_C10)),
         ("CUDACachingAllocator", ("HIPCachingAllocator", API_C10)),
+        ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10))
     ]
 )
 

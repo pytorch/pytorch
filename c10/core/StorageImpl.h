@@ -23,7 +23,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
         received_cuda_(false),
         allocator_(allocator) {
     if (resizable) {
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT(
           allocator_, "For resizable storage, allocator must be provided");
     }
   }
@@ -92,6 +92,10 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
     std::swap(data_ptr_, data_ptr);
     return std::move(data_ptr);
   };
+
+  void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
+    data_ptr_ = std::move(data_ptr);
+  }
 
   // TODO: Return const ptr eventually if possible
   void* data() {

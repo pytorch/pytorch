@@ -1,5 +1,4 @@
 import os
-import sys
 from glob import glob
 import shutil
 
@@ -8,22 +7,19 @@ from .setup_helpers.cmake import USE_NINJA
 
 
 def _overlay_windows_vcvars(env):
-    if sys.version_info >= (3, 5):
-        from distutils._msvccompiler import _get_vc_env
-        vc_arch = 'x64' if IS_64BIT else 'x86'
-        vc_env = _get_vc_env(vc_arch)
-        # Keys in `_get_vc_env` are always lowercase.
-        # We turn them into uppercase before overlaying vcvars
-        # because OS environ keys are always uppercase on Windows.
-        # https://stackoverflow.com/a/7797329
-        vc_env = {k.upper(): v for k, v in vc_env.items()}
-        for k, v in env.items():
-            uk = k.upper()
-            if uk not in vc_env:
-                vc_env[uk] = v
-        return vc_env
-    else:
-        return env
+    from distutils._msvccompiler import _get_vc_env
+    vc_arch = 'x64' if IS_64BIT else 'x86'
+    vc_env = _get_vc_env(vc_arch)
+    # Keys in `_get_vc_env` are always lowercase.
+    # We turn them into uppercase before overlaying vcvars
+    # because OS environ keys are always uppercase on Windows.
+    # https://stackoverflow.com/a/7797329
+    vc_env = {k.upper(): v for k, v in vc_env.items()}
+    for k, v in env.items():
+        uk = k.upper()
+        if uk not in vc_env:
+            vc_env[uk] = v
+    return vc_env
 
 
 def _create_build_env():

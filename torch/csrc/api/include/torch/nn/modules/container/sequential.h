@@ -107,7 +107,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   explicit SequentialImpl(torch::OrderedDict<std::string, AnyModule>&& ordered_dict) {
     modules_.reserve(ordered_dict.size());
     for (auto& item : ordered_dict) {
-      push_back(std::move(item.key()), std::move(item.value()));
+      push_back(item.key(), std::move(item.value()));
     }
   }
 

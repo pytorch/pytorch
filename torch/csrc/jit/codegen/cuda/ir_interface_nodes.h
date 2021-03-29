@@ -4,6 +4,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -15,13 +16,14 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 /*
  * A Bool value.
  * This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-class TORCH_CUDA_API Bool : public Val {
+class TORCH_CUDA_CU_API Bool : public Val {
  public:
   ~Bool() = default;
 
@@ -59,7 +61,7 @@ class TORCH_CUDA_API Bool : public Val {
  * Float32. This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-class TORCH_CUDA_API Float : public Val {
+class TORCH_CUDA_CU_API Float : public Val {
  public:
   using ScalarType = double;
 
@@ -99,7 +101,7 @@ class TORCH_CUDA_API Float : public Val {
  * This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-class TORCH_CUDA_API Half : public Val {
+class TORCH_CUDA_CU_API Half : public Val {
  public:
   ~Half() = default;
 
@@ -134,7 +136,7 @@ class TORCH_CUDA_API Half : public Val {
 
 // An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
 // inlined literal in the kernel.
-class TORCH_CUDA_API Int : public Val {
+class TORCH_CUDA_CU_API Int : public Val {
  public:
   using ScalarType = int64_t;
 
@@ -198,7 +200,7 @@ class TVDomainGuard;
 // that should be const, const. Gave this a try but expanded really quickly.
 // getComputeAtAxis not being const because it can return a TV that some expect
 // to be non-const is the biggest headache.
-class TORCH_CUDA_API TensorView : public Val {
+class TORCH_CUDA_CU_API TensorView : public Val {
  public:
   ~TensorView() = default;
 
@@ -208,7 +210,10 @@ class TORCH_CUDA_API TensorView : public Val {
   TensorView(TensorView&& other) = delete;
   TensorView& operator=(TensorView&& other) = delete;
 
-  TensorView(TensorDomain* _domain, DataType dtype);
+  TensorView(
+      TensorDomain* _domain,
+      DataType dtype,
+      MemoryType mtype = MemoryType::Local);
 
   TensorView(const std::shared_ptr<c10::TensorType>& tensor_type);
 
@@ -224,6 +229,7 @@ class TORCH_CUDA_API TensorView : public Val {
   bool hasReduction() const;
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
+  bool hasBlockBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
 
@@ -346,9 +352,9 @@ class TORCH_CUDA_API TensorView : public Val {
 
   void setMemoryType(MemoryType mt);
 
-  friend TORCH_CUDA_API TransformReplay;
-  friend TORCH_CUDA_API OptOutMutator;
-  friend TORCH_CUDA_API LoopNestGenerator;
+  friend TORCH_CUDA_CU_API TransformReplay;
+  friend TORCH_CUDA_CU_API OptOutMutator;
+  friend TORCH_CUDA_CU_API LoopNestGenerator;
   friend ComputeAt;
   friend void IrFixComputeAt(Fusion*);
   friend void adjustMemoryTypes(Fusion* fusion);
@@ -405,9 +411,10 @@ class TORCH_CUDA_API TensorView : public Val {
   // compute at axis in compute at view
   unsigned int relative_compute_at_axis_ = 0;
   unsigned int this_compute_at_axis_ = 0;
-  MemoryType memory_type_ = MemoryType::Global;
+  MemoryType memory_type_ = MemoryType::Local;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

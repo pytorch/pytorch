@@ -9,7 +9,7 @@ class MultiPartVersion:
         with the prefix string.
         """
         if self.parts:
-            return [self.prefix + str(self.parts[0])] + list(map(str, self.parts[1:]))
+            return [self.prefix + str(self.parts[0])] + [str(part) for part in self.parts[1:]]
         else:
             return [self.prefix]
 
@@ -29,3 +29,6 @@ class CudaVersion(MultiPartVersion):
         self.minor = minor
 
         super().__init__([self.major, self.minor], "cuda")
+
+    def __str__(self):
+        return f"{self.major}.{self.minor}"

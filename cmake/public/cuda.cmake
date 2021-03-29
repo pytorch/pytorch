@@ -188,6 +188,20 @@ find_library(CUDA_CUDA_LIB cuda
 find_library(CUDA_NVRTC_LIB nvrtc
     PATHS ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64 lib/x64)
+  if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
+ execute_process(
+    COMMAND "${PYTHON_EXECUTABLE}" -c
+    "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
+    RESULT_VARIABLE _retval
+    OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)
+  if(NOT _retval EQUAL 0)
+    message(WARNING "Failed to compute shorthash for libnvrtc.so")
+    set(CUDA_NVRTC_SHORTHASH "XXXXXXXX")
+  else()
+    string(STRIP "${CUDA_NVRTC_SHORTHASH}" CUDA_NVRTC_SHORTHASH)
+    message(STATUS "${CUDA_NVRTC_LIB} shorthash is ${CUDA_NVRTC_SHORTHASH}")
+  endif()
+endif()
 
 # Create new style imported libraries.
 # Several of these libraries have a hardcoded path if CAFFE2_STATIC_LINK_CUDA
@@ -338,6 +352,12 @@ if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
       set_property(
         TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
+      # Add explicit dependency to cudart_static to fix
+      # libcublasLt_static.a.o): undefined reference to symbol 'cudaStreamWaitEvent'
+      # error adding symbols: DSO missing from command line
+      set_property(
+        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        "${CUDA_cudart_static_LIBRARY}" rt dl)
     endif()
 else()
     set_property(
@@ -474,11 +494,13 @@ foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration
              unsigned_compare_with_zero
              declared_but_not_referenced
              bad_friend_decl)
-  list(APPEND CUDA_NVCC_FLAGS -Xcudafe --diag_suppress=${diag})
+  list(APPEND SUPPRESS_WARNING_FLAGS --diag_suppress=${diag})
 endforeach()
+string(REPLACE ";" "," SUPPRESS_WARNING_FLAGS "${SUPPRESS_WARNING_FLAGS}")
+list(APPEND CUDA_NVCC_FLAGS -Xcudafe ${SUPPRESS_WARNING_FLAGS})
 
 # Set C++14 support
-set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
+set(CUDA_PROPAGATE_HOST_FLAGS_BLOCKLIST "-Werror")
 if(MSVC)
   list(APPEND CUDA_NVCC_FLAGS "--Werror" "cross-execution-space-call")
   list(APPEND CUDA_NVCC_FLAGS "--no-host-device-move-forward")
@@ -490,7 +512,7 @@ endif()
 # OpenMP flags for NVCC with Clang-cl
 if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC"
   AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-  list(APPEND CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Xclang" "-fopenmp")
+  list(APPEND CUDA_PROPAGATE_HOST_FLAGS_BLOCKLIST "-Xclang" "-fopenmp")
   if(MSVC_TOOLSET_VERSION LESS 142)
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-openmp")
   else()

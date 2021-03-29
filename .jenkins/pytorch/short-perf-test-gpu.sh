@@ -3,6 +3,7 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="short-perf-test-gpu"
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 pushd .jenkins/pytorch/perf_test
@@ -26,13 +27,12 @@ fi
 git remote add upstream https://github.com/pytorch/pytorch.git
 git fetch upstream
 IFS=$'\n'
-master_commit_ids=($(git rev-list upstream/master))
-for commit_id in "${master_commit_ids[@]}"; do
+while IFS='' read -r commit_id; do
     if aws s3 ls s3://ossci-perf-test/pytorch/gpu_runtime/${commit_id}.json; then
         LATEST_TESTED_COMMIT=${commit_id}
         break
     fi
-done
+done < <(git rev-list upstream/master)
 aws s3 cp s3://ossci-perf-test/pytorch/gpu_runtime/${LATEST_TESTED_COMMIT}.json gpu_runtime.json
 
 if [[ "$COMMIT_SOURCE" == master ]]; then
@@ -42,10 +42,15 @@ if [[ "$COMMIT_SOURCE" == master ]]; then
 fi
 
 # Include tests
+# shellcheck source=./perf_test/test_gpu_speed_mnist.sh
 . ./test_gpu_speed_mnist.sh
+# shellcheck source=./perf_test/test_gpu_speed_word_language_model.sh
 . ./test_gpu_speed_word_language_model.sh
+# shellcheck source=./perf_test/test_gpu_speed_cudnn_lstm.sh
 . ./test_gpu_speed_cudnn_lstm.sh
+# shellcheck source=./perf_test/test_gpu_speed_lstm.sh
 . ./test_gpu_speed_lstm.sh
+# shellcheck source=./perf_test/test_gpu_speed_mlstm.sh
 . ./test_gpu_speed_mlstm.sh
 
 # Run tests

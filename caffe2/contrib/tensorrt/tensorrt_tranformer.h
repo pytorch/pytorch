@@ -14,12 +14,12 @@
 
 namespace caffe2 {
 
-CAFFE2_API void BuildInitializationList(
+TORCH_API void BuildInitializationList(
     Workspace* ws,
     ::ONNX_NAMESPACE::GraphProto* g,
     std::unordered_set<std::string>* initialization_list);
 
-class CAFFE2_API TensorRTTransformer {
+class TORCH_API TensorRTTransformer {
  public:
   TensorRTTransformer(
       size_t max_batch_size,

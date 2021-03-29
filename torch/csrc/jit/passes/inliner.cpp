@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/inliner.h>
+
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -20,6 +21,9 @@ void inlineCalls(Block* block) {
         auto function_constant = cur->input(0)->node();
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
+        if (!fun_type->function()->isGraphFunction()) {
+          continue;
+        }
         cur->removeInput(0);
         GRAPH_UPDATE(
             "Inlining function '", fun_type->function()->name(), "' to ", *cur);

@@ -164,10 +164,12 @@ void ReinitializeTensor(
       if (tensor->dtype() == options.dtype()) {
         tensor->raw_mutable_data();
       } else {
-        C10_LOG_FIRST_N(WARNING, 1)
-            << "Changing the data type of Tensor is discouraged."
-            << " Attempt to change data type from: " << tensor->dtype()
-            << " to: " << options.dtype();
+        // This C10 logging API is not thread-safe, and should not be called here
+        // This can lead to a memory corruption in glog.
+        // C10_LOG_FIRST_N(WARNING, 1)
+        //     << "Changing the data type of Tensor is discouraged."
+        //     << " Attempt to change data type from: " << tensor->dtype()
+        //     << " to: " << options.dtype();
         // create a new Tensor when the data_type doesn't match
         *tensor = caffe2::empty(dims, options);
       }

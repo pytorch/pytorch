@@ -15,7 +15,7 @@ __global__ void BucketizeOpKernel(
   CUDA_1D_KERNEL_LOOP(i, N) {
     int32_t low = -1, high = M;
     while (high - low > 1) {
-      int32_t median = (high + low) / 2;
+      const int32_t median = low + (high - low) / 2;
       if (bounds[median] < X[i]) {
         low = median;
       } else {
@@ -46,6 +46,7 @@ bool BucketizeOp<CUDAContext>::RunOnDevice() {
       boundaries_device_.data<float>(),
       input_data,
       output_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 };

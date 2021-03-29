@@ -8,6 +8,10 @@
 
 #include <ostream>
 
+namespace ONNX_NAMESPACE {
+class ModelProto;
+}
+
 namespace torch {
 namespace jit {
 
@@ -21,7 +25,13 @@ namespace jit {
 // file contents being the raw tensor data.
 using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
-TORCH_API std::tuple<std::string, RawDataExportMap> export_onnx(
+using SymbolDimMap = std::map<c10::ShapeSymbol, std::string>;
+
+TORCH_API std::tuple<
+    std::shared_ptr<::ONNX_NAMESPACE::ModelProto>,
+    RawDataExportMap,
+    SymbolDimMap>
+export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
     int64_t onnx_opset_version,
@@ -37,6 +47,9 @@ TORCH_API std::tuple<std::string, RawDataExportMap> export_onnx(
     bool add_node_names = true,
     bool use_external_data_format = false,
     const std::string& onnx_file_path = std::string());
+
+TORCH_API std::string serialize_model_proto_to_string(
+    const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto);
 
 TORCH_API void check_onnx_proto(const std::string& proto_string);
 
@@ -95,8 +108,30 @@ using ExportModuleMobileInfoConverter =
 TORCH_API void SetExportModuleMobileInfoConverter(
     ExportModuleMobileInfoConverter converter);
 
-// Returns a list of names of all operators in the module and its submodules.
+/**
+ * Generates new bytecode for a Script module and returns what the op list
+ * would be for a LiteScriptModule based off the current code base. If you
+ * have a LiteScriptModule and want to get the currently present
+ * list of ops call _export_operator_list instead.
+ */
 TORCH_API std::vector<std::string> export_opnames(const Module& m);
 
+namespace mobile {
+
+class Module;
+/**
+ * Given a torch::jit::mobile::Module, return a set of operator names
+ * (with overload name) that are used by any method in this mobile
+ * Mobile. This method runs through the bytecode for all methods
+ * in the specified model (module), and extracts all the root
+ * operator names. Root operators are operators that are called
+ * directly by the model (as opposed to non-root operators, which
+ * may be called transitively by the root operators).
+ *
+ */
+TORCH_API std::set<std::string> _export_operator_list(
+    torch::jit::mobile::Module& module);
+
+} // namespace mobile
 } // namespace jit
 } // namespace torch

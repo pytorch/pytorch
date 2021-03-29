@@ -1,14 +1,22 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
 
-#include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
-
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <nvfuser_resources/block_reduction.h>
+#include <nvfuser_resources/broadcast.h>
+#include <nvfuser_resources/fp16_support.h>
+#include <nvfuser_resources/grid_reduction.h>
+#include <nvfuser_resources/helpers.h>
+#include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/tensor.h>
 
 #include <fstream>
 
@@ -20,26 +28,33 @@ namespace executor_utils {
 
 std::string kernelPreamble() {
   std::stringstream ss;
-  ss << code_template_tensor_struct << "\n"
-     << code_fp16_support << "\n"
-     << code_random_number_gen << "\n"
-     << code_helper_funcs << "\n"
-     << code_template_block_reduction << "\n"
-     << code_template_grid_reduction << "\n"
-     << code_template_block_broadcast << "\n";
+
+#ifndef __HIP_PLATFORM_HCC__
+  ss << nvfuser_resources::fp16_support_cu;
+#endif
+
+  ss << nvfuser_resources::tensor_cu;
+  ss << nvfuser_resources::random_numbers_cu;
+  ss << nvfuser_resources::helpers_cu;
+  ss << nvfuser_resources::block_reduction_cu;
+  ss << nvfuser_resources::grid_reduction_cu;
+  ss << nvfuser_resources::broadcast_cu;
+
   return ss.str();
 }
 
 namespace {
 
+// return false if arg's type, number of dimensions, and device, doesn't match
+// param and provided c10:device
 bool validateKernelArgTensor(
     const at::Tensor& arg,
     const Val* param,
-    c10::Device device,
+    const c10::Device& device,
     std::stringstream& msg) {
   // Arg is a tensor. Param must be a tensor too.
   if (*param->getValType() != ValType::TensorView) {
-    msg << "Argument is a tensor, but the parameter is not.";
+    msg << "Argument is a tensor, but the parameter is not.\n";
     return false;
   }
 
@@ -54,12 +69,13 @@ bool validateKernelArgTensor(
   // check as necessary.
   if (arg_dim > param_dim) {
     msg << "Argument tensor's rank is " << arg_dim << ", but the parameter is "
-        << param_dim;
+        << param_dim << "\n";
     return false;
   }
 
   if (arg.device() != device) {
-    msg << "Argument is on device that is not compiled for";
+    msg << "Argument is on device that is not compiled for."
+        << "\n";
     return false;
   }
   // Check element type
@@ -77,22 +93,24 @@ bool validateKernelArgTensor(
       match = param_data_type == DataType::Bool;
       break;
     default:
-      msg << "Argument element type, " << arg_data_type
-          << ", is not supported.";
+      msg << "Argument element type, " << arg_data_type << ", is not supported."
+          << "\n";
       return false;
   }
   if (!match)
     msg << "Argument element type is " << arg_data_type
-        << ", but the parameter is " << param_data_type;
+        << ", but the parameter is " << param_data_type << "\n";
   return match;
 }
 
+// Return false if  arg_type doesn't match the type in param
 bool validateKernelArgScalar(
     const c10::TypePtr& arg_type,
     const Val* param,
     std::stringstream& msg) {
   if (!param->isScalar()) {
-    msg << "Argument is a scalar, but the parameter is not.";
+    msg << "Argument is a scalar, but the parameter is not."
+        << "\n";
     return false;
   }
   DataType param_type = *param->getDataType();
@@ -112,20 +130,22 @@ bool validateKernelArgScalar(
   }
   if (!match) {
     msg << "Argument type is " << *arg_type << ", but the parameter is "
-        << param_type;
+        << param_type << "\n";
   }
   return match;
 }
 
+// Return false if arg and param don't match up and if arg's device (if a
+// tensor) doesn't match provided device
 bool validateKernelArg(
     const c10::IValue& arg,
     const Val* param,
-    c10::Device device,
+    const c10::Device& device,
     std::stringstream& msg) {
-  if (arg.type()->kind() != c10::TypeKind::TensorType) {
-    return validateKernelArgScalar(arg.type(), param, msg);
-  } else {
+  if (arg.isTensor()) {
     return validateKernelArgTensor(arg.toTensor(), param, device, msg);
+  } else {
+    return validateKernelArgScalar(arg.type(), param, msg);
   }
 }
 
@@ -134,30 +154,33 @@ bool validateKernelArg(
 void validateKernelInputs(
     Fusion* fusion,
     const at::ArrayRef<IValue>& inputs,
-    c10::Device device) {
+    const c10::Device& device) {
+  FUSER_PERF_SCOPE("validateKernelInputs");
+
   // This is necessary as we were traversing the fusion graph later in the check
   FusionGuard fg(fusion);
   // Check inputs
   TORCH_INTERNAL_ASSERT(
       inputs.size() == fusion->inputs().size(),
       "Wrong number of kernel inputs.");
+
+  std::stringstream msg;
+  bool mismatch = false;
   for (size_t i = 0; i < inputs.size(); ++i) {
     const IValue& arg = inputs[i];
     const Val* param = fusion->inputs()[i];
-    std::stringstream msg;
-    TORCH_INTERNAL_ASSERT(
-        validateKernelArg(arg, param, device, msg),
-        "Input argument at position ",
-        i,
-        " is invalid; ",
-        msg.str());
+    mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
   }
+  TORCH_INTERNAL_ASSERT(
+      !mismatch, "Found one or more invalid arguments: ", msg.str());
 }
 
 void validateKernelOutputs(
     Fusion* fusion,
     const std::vector<at::Tensor>& outputs,
-    c10::Device device) {
+    const c10::Device& device) {
+  FUSER_PERF_SCOPE("validateKernelOutputs");
+
   TORCH_INTERNAL_ASSERT(
       fusion->outputs().size() != 0,
       "Kernel should have at least one output tensor.");
@@ -165,47 +188,30 @@ void validateKernelOutputs(
   TORCH_INTERNAL_ASSERT(
       outputs.size() == fusion->outputs().size(),
       "Wrong number of kernel outputs.");
+
+  std::stringstream msg;
+  bool mismatch = false;
   for (size_t i = 0; i < outputs.size(); ++i) {
     const at::Tensor& arg = outputs[i];
     const Val* param = fusion->outputs()[i];
-    std::stringstream msg;
-    TORCH_INTERNAL_ASSERT(
-        validateKernelArgTensor(arg, param, device, msg),
-        "Output argument at position ",
-        i,
-        " is invalid; ",
-        msg.str());
+    mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
   }
+  TORCH_INTERNAL_ASSERT(
+      !mismatch, "Found one or more invalid arguments: ", msg.str());
 }
 
-void safeBind(
-    EvaluationContext& ec,
-    const Val* value,
-    Int::ScalarType concrete_value) {
-  auto already_concrete_val = ec.concreteValue(value);
-
-  if (already_concrete_val.has_value()) {
-    TORCH_INTERNAL_ASSERT(
-        concrete_value == already_concrete_val.value(),
-        "Tried to bind ",
-        value,
-        " to ",
-        " concrete value, but it's already set to ",
-        already_concrete_val.value());
-  } else {
-    ec.bind(value, concrete_value);
-  }
-}
-
-EvaluationContext bindInputs(
+StatefulExpressionEvaluator statefulBindInputs(
     const at::ArrayRef<IValue>& aten_inputs,
-    Fusion* fusion) {
+    Fusion* fusion,
+    GpuLower* lower) {
+  FUSER_PERF_SCOPE("statefulBindInputs");
+
   TORCH_INTERNAL_ASSERT(
       fusion->inputs().size() == aten_inputs.size(),
       "Something went wrong configuring launch. Inputs no longer match.");
 
   auto fusion_inputs = fusion->inputs();
-  EvaluationContext eval_context(fusion);
+  StatefulExpressionEvaluator evaluator(fusion);
 
   // This should probably move to EvaluationContext as we may want to bind
   // input values frequently. Bind fusion input values to runtime values.
@@ -224,18 +230,26 @@ EvaluationContext bindInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (size_t dim = 0; dim < root_dom.size(); dim++) {
-        safeBind(
-            eval_context, root_dom[dim]->extent(), aten_tensor.sizes()[dim]);
+        evaluator.safeBind(
+            root_dom[dim]->extent(), aten_tensor.sizes()[dim], lower);
       }
+    } else if (
+        fusion->inputs()[i]->getValType().value() == ValType::Scalar &&
+        fusion->inputs()[i]->getDataType().value() == DataType::Int) {
+      TORCH_INTERNAL_ASSERT(
+          aten_inputs[i].type()->kind() == c10::TypeKind::IntType);
+      evaluator.safeBind(fusion->inputs()[i], aten_inputs[i].toInt(), lower);
     }
   }
-  return eval_context;
+  return evaluator;
 }
 
 NvrtcFunction nvrtcCompile(
     const std::string& code,
     const std::string& func_name,
     int id) {
+  FUSER_PERF_SCOPE("NVRTC");
+
   // lazily construct context if non-existing yet;
   CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
@@ -246,63 +260,140 @@ NvrtcFunction nvrtcCompile(
   }
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
-  int nvrtc_major, nvrtc_minor;
-  AT_CUDA_NVRTC_CHECK(
-      at::globalContext().getNVRTC().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
-  // Short-circuits if NVRTC version too low
-  TORCH_INTERNAL_ASSERT(nvrtc_major >= 6);
-  // Major and minor is determined by device properties and
-  // possibly "downcompiled" to a lower (compatible) compute architecture
-  // based on the NVRTC version
-  const int major = prop->major;
-  const int minor = prop->minor;
-  nvrtcProgram program;
-  AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
-      &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+  int major = 0, minor = 0;
+  bool compile_to_sass = false;
+  codegenOutputQuery(prop, major, minor, compile_to_sass);
+
+  nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
+
+  {
+    FUSER_PERF_SCOPE("nvrtcCreateProgram");
+    AT_CUDA_NVRTC_CHECK(at::globalContext().getNVRTC().nvrtcCreateProgram(
+        &program, code.c_str(), nullptr, 0, nullptr, nullptr));
+  }
+
   ResourceGuard holdProgram([&] {
+    FUSER_PERF_SCOPE("nvrtcDestroyProgram");
     AT_CUDA_NVRTC_CHECK(
         at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
   });
 
-  const std::string compute = "--gpu-architecture=compute_" +
+#ifdef __HIP_PLATFORM_HCC__
+  std::vector<const char*> args = {"--std=c++14"};
+#else
+  const std::string compute = std::string("--gpu-architecture=") +
+#if CUDA_VERSION >= 11010
+      // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
+      // which gives better backwards compatibility to work on older driver,
+      // (since older driver doesn't necessrily recognize PTX emitted by new
+      // toolkit);
+      // Meanwhile, for forward compatibility (future device with
+      // `unsupported_arch==True`), since SASS are not necessarily compatible,
+      // we fallback to PTX instead.
+      (compile_to_sass ? "sm_" : "compute_") +
+#else
+      "compute_" +
+#endif
       std::to_string(major) + std::to_string(minor);
-  const std::vector<const char*> args = {
+  std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
+#endif
+
+  const char* disable_fma = getenv("PYTORCH_CUDA_FUSER_DISABLE_FMA");
+  // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
+  if (disable_fma && atoi(disable_fma)) {
+#ifdef __HIP_PLATFORM_HCC__
+    TORCH_WARN_ONCE(
+        "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
+#else
+    args.push_back("--fmad=false");
+#endif
+  }
+
+  const char* ptxas_opt_level = getenv("PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL");
+  uint32_t jit_opt_level;
+
+  std::vector<CUjit_option> options;
+  std::vector<void*> option_vals;
+
+  if (ptxas_opt_level) {
+    int val = atoi(ptxas_opt_level);
+    if (val <= 4 && val >= 0) {
+      jit_opt_level = static_cast<uint32_t>(val);
+      options.push_back(CU_JIT_OPTIMIZATION_LEVEL);
+      option_vals.emplace_back(&jit_opt_level);
+    } else {
+      TORCH_WARN_ONCE(
+          "acceptable range for PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL is between 0 and 4, but received ",
+          jit_opt_level,
+          ", ignoring the option");
+    }
+  }
 
   at::globalContext().getNVRTC().nvrtcAddNameExpression(
       program, func_name.c_str());
-  const auto result = at::globalContext().getNVRTC().nvrtcCompileProgram(
-      program, args.size(), args.data());
 
-  if (result != NVRTC_SUCCESS) {
-    size_t logsize;
-    at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
-    std::vector<char> log(logsize);
-    at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
+  {
+    FUSER_PERF_SCOPE("nvrtcCompileProgram");
 
-    TORCH_INTERNAL_ASSERT(
-        false, code.c_str(), "\nCUDA NVRTC compile error: ", log.data());
+    const auto result = at::globalContext().getNVRTC().nvrtcCompileProgram(
+        program, args.size(), args.data());
+
+    if (result != NVRTC_SUCCESS) {
+      size_t logsize;
+      at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
+      std::vector<char> log(logsize);
+      at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
+
+      TORCH_INTERNAL_ASSERT(
+          false, code.c_str(), "\nCUDA NVRTC compile error: ", log.data());
+    }
+
+    AT_CUDA_NVRTC_CHECK(result);
   }
-  const char* lowered_kernel_name;
+
+  const char* lowered_kernel_name = nullptr;
   at::globalContext().getNVRTC().nvrtcGetLoweredName(
       program, func_name.c_str(), &lowered_kernel_name);
 
-  AT_CUDA_NVRTC_CHECK(result);
-  size_t ptx_size;
-  AT_CUDA_NVRTC_CHECK(
-      at::globalContext().getNVRTC().nvrtcGetPTXSize(program, &ptx_size));
+  size_t ptx_size = 0;
   std::vector<char> ptx;
-  ptx.resize(ptx_size);
-  AT_CUDA_NVRTC_CHECK(
-      at::globalContext().getNVRTC().nvrtcGetPTX(program, ptx.data()));
+
+  {
+    FUSER_PERF_SCOPE("get PTX");
+#if CUDA_VERSION >= 11010
+    // compile_to_sass determines whether we are generating SASS or PTX, hence
+    // the different API.
+    const auto getSize = compile_to_sass
+        ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
+        : at::globalContext().getNVRTC().nvrtcGetPTXSize;
+    const auto getFunc = compile_to_sass
+        ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+        : at::globalContext().getNVRTC().nvrtcGetPTX;
+#else
+    const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
+    const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
+#endif
+    AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
+    ptx.resize(ptx_size);
+    AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
+  }
 
   NvrtcFunction compiled_kernel_;
 
   // TODO: We do go through different code path, should investigate whether this
   // has an impact on generated binary.
   const char* prefix_env = getenv("PYTORCH_CUDA_FUSER_CUBIN");
+#ifndef __HIP_PLATFORM_HCC__
   if (prefix_env) {
+#if CUDA_VERSION >= 11010
+    TORCH_CHECK(
+        !compile_to_sass,
+        "PYTORCH_NVFUSER_CUBIN cannot be used when compile direct to SASS. Please set PYTORCH_NVFUSER_CUBIN to empty");
+#endif
+    FUSER_PERF_SCOPE("load CUBIN");
+
     // Output ptx file
     std::stringstream ptx_file_name;
     ptx_file_name << prefix_env << "_" << id << ".ptx";
@@ -323,9 +414,9 @@ NvrtcFunction nvrtcCompile(
         ptx.data(),
         ptx_size,
         "compiling PTX",
-        0,
-        nullptr,
-        nullptr));
+        options.size(),
+        options.data(),
+        option_vals.data()));
 
     size_t cubinSize;
     void* cubin;
@@ -347,10 +438,22 @@ NvrtcFunction nvrtcCompile(
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
         &(compiled_kernel_.module), cubin));
   } else {
+    FUSER_PERF_SCOPE("load PTX");
+
     // load ptx directly
-    AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
-        &(compiled_kernel_.module), ptx.data()));
+    AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
+        &(compiled_kernel_.module),
+        ptx.data(),
+        options.size(),
+        options.data(),
+        option_vals.data()));
   }
+#else
+  // load ptx directly
+  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
+      &(compiled_kernel_.module), ptx.data()));
+
+#endif
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleGetFunction(
       &(compiled_kernel_.function),
       compiled_kernel_.module,

@@ -1,11 +1,12 @@
 import bisect
 import warnings
+import functools
 
 from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
+from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
 from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)
@@ -141,6 +142,8 @@ class IterableDataset(Dataset[T_co]):
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
+    functions: Dict[str, Callable] = {}
+    reduce_ex_hook : Optional[Callable] = None
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
@@ -151,19 +154,54 @@ class IterableDataset(Dataset[T_co]):
     # No `def __len__(self)` default?
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
+    def __getattr__(self, attribute_name):
+        if attribute_name in IterableDataset.functions:
+            function = functools.partial(IterableDataset.functions[attribute_name], self)
+            return function
+        else:
+            raise AttributeError
+
+    @classmethod
+    def register_function(cls, function_name, function):
+        IterableDataset.functions[function_name] = function
+
+    @classmethod
+    def register_datapipe_as_function(cls, function_name, cls_to_register):
+        if function_name in IterableDataset.functions:
+            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
+
+        def class_function(cls, source_dp, *args, **kwargs):
+            return cls(source_dp, *args, **kwargs)
+        function = functools.partial(class_function, cls_to_register)
+        IterableDataset.functions[function_name] = function
+
+    def __reduce_ex__(self, *args, **kwargs):
+        if IterableDataset.reduce_ex_hook is not None:
+            try:
+                return IterableDataset.reduce_ex_hook(self)
+            except NotImplementedError:
+                pass
+        return super().__reduce_ex__(*args, **kwargs)
+
+    @classmethod
+    def set_reduce_ex_hook(cls, hook_fn):
+        if IterableDataset.reduce_ex_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing reduce_ex_hook")
+        IterableDataset.reduce_ex_hook = hook_fn
+
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     r"""Dataset wrapping tensors.
 
     Each sample will be retrieved by indexing tensors along the first dimension.
 
-    Arguments:
+    Args:
         *tensors (Tensor): tensors that have the same size of the first dimension.
     """
     tensors: Tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
-        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
+        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors), "Size mismatch between tensors"
         self.tensors = tensors
 
     def __getitem__(self, index):
@@ -178,7 +216,7 @@ class ConcatDataset(Dataset[T_co]):
 
     This class is useful to assemble different existing datasets.
 
-    Arguments:
+    Args:
         datasets (sequence): List of datasets to be concatenated
     """
     datasets: List[Dataset[T_co]]
@@ -231,7 +269,7 @@ class ChainDataset(IterableDataset):
     chainning operation is done on-the-fly, so concatenating large-scale
     datasets with this class will be efficient.
 
-    Arguments:
+    Args:
         datasets (iterable of IterableDataset): datasets to be chained together
     """
     def __init__(self, datasets: Iterable[Dataset]) -> None:
@@ -257,7 +295,7 @@ class Subset(Dataset[T_co]):
     r"""
     Subset of a dataset at specified indices.
 
-    Arguments:
+    Args:
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
     """
@@ -283,7 +321,7 @@ def random_split(dataset: Dataset[T], lengths: Sequence[int],
 
     >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
 
-    Arguments:
+    Args:
         dataset (Dataset): Dataset to be split
         lengths (sequence): lengths of splits to be produced
         generator (Generator): Generator used for the random permutation.

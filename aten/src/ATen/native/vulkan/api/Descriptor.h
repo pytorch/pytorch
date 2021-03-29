@@ -1,8 +1,10 @@
 #pragma once
 
+#ifdef USE_VULKAN_API
+
 #include <ATen/native/vulkan/api/Common.h>
-#include <ATen/native/vulkan/api/Cache.h>
-#include <c10/util/hash.h>
+#include <ATen/native/vulkan/api/Resource.h>
+#include <ATen/native/vulkan/api/Shader.h>
 
 namespace at {
 namespace native {
@@ -49,115 +51,101 @@ namespace api {
 // as well.  This behavior is by design.
 //
 
-struct C10_EXPORT Descriptor final {
+struct Descriptor final {
+  //
+  // Set
+  //
+
+  class Set final {
+   public:
+    Set(
+        VkDevice device,
+        VkDescriptorSet descriptor_set,
+        const Shader::Layout::Signature& shader_layout_signature);
+    Set(const Set&) = delete;
+    Set& operator=(const Set&) = delete;
+    Set(Set&&);
+    Set& operator=(Set&&);
+    ~Set() = default;
+
+    Set& bind(uint32_t binding, const Resource::Buffer::Object& buffer);
+    Set& bind(uint32_t binding, const Resource::Image::Object& image);
+
+    VkDescriptorSet handle() const;
+
+   private:
+    void invalidate();
+
+   private:
+    struct Item final {
+      uint32_t binding;
+      VkDescriptorType type;
+
+      union {
+        VkDescriptorBufferInfo buffer;
+        VkDescriptorImageInfo image;
+      } info;
+    };
+
+    void update(const Item& item);
+
+   private:
+    VkDevice device_;
+    VkDescriptorSet descriptor_set_;
+    Shader::Layout::Signature shader_layout_signature_;
+
+    struct {
+      c10::SmallVector<Item, 6u> items;
+      mutable bool dirty;
+    } bindings_;
+  };
+
   //
   // Pool
   //
 
-  struct Pool final {
-    /*
-      Descriptor
-    */
-
-    struct Descriptor final {
-      uint32_t capacity;
-      c10::SmallVector<VkDescriptorPoolSize, 16u> sizes;
-    };
-
-    static const Descriptor kDefault;
-
-    /*
-      Factory
-    */
-
-    class Factory final {
-     public:
-      explicit Factory(VkDevice device);
-
-      typedef Pool::Descriptor Descriptor;
-      typedef VK_DELETER(DescriptorPool) Deleter;
-      typedef Handle<VkDescriptorPool, Deleter> Handle;
-
-      struct Hasher {
-        size_t operator()(const Descriptor& descriptor) const;
-      };
-
-      Handle operator()(const Descriptor& descriptor) const;
-
-     private:
-      VkDevice device_;
-    };
-
-    /*
-      Cache
-    */
-
-    typedef api::Cache<Factory> Cache;
-    Cache cache;
-
-    explicit Pool(const VkDevice device)
-      : cache(Factory(device)) {
-    }
-
-    static void purge(VkDevice device, VkDescriptorPool descriptor_pool);
-  } pool;
-
-  /*
-    Factory
-  */
-
-  class Factory final {
+  class Pool final {
    public:
-    Factory(VkDevice device, VkDescriptorPool descriptor_pool);
+    explicit Pool(const GPU& gpu);
+    Pool(const Pool&) = delete;
+    Pool& operator=(const Pool&) = delete;
+    Pool(Pool&&);
+    Pool& operator=(Pool&&);
+    ~Pool();
 
-    VkDescriptorSet allocate(VkDescriptorSetLayout descriptor_set_layout);
+    Set allocate(const Shader::Layout::Object& shader_layout);
     void purge();
 
    private:
-    VkDevice device_;
-    VkDescriptorPool descriptor_pool_;
-  } factory;
+    void invalidate();
 
-  explicit Descriptor(const VkDevice device)
-    : pool(device),
-      factory(device, pool.cache.retrieve(Pool::kDefault)) {
+   private:
+    struct Configuration final {
+      static constexpr uint32_t kQuantum = 16u;
+      static constexpr uint32_t kReserve = 64u;
+    };
+
+    VkDevice device_;
+    Handle<VkDescriptorPool, VK_DELETER(DescriptorPool)> descriptor_pool_;
+
+    struct {
+      struct Layout final {
+        std::vector<VkDescriptorSet> pool;
+        size_t in_use;
+      };
+
+      ska::flat_hash_map<VkDescriptorSetLayout, Layout> layouts;
+    } set_;
+  } pool /* [thread_count] */;
+
+  explicit Descriptor(const GPU& gpu)
+    : pool(gpu) {
   }
 };
-
-//
-// Impl
-//
-
-inline bool operator==(
-    const Descriptor::Pool::Descriptor& _1,
-    const Descriptor::Pool::Descriptor& _2) {
-  return (_1.capacity == _2.capacity) &&
-         (_1.sizes == _2.sizes);
-}
-
-inline size_t Descriptor::Pool::Factory::Hasher::operator()(
-    const Descriptor& descriptor) const {
-  size_t hash = c10::get_hash(descriptor.capacity);
-
-  for (const VkDescriptorPoolSize& descriptor_pool_size : descriptor.sizes) {
-    hash = c10::hash_combine(
-        hash,
-        c10::get_hash(
-            descriptor_pool_size.type,
-            descriptor_pool_size.descriptorCount));
-  }
-
-  return hash;
-}
 
 } // namespace api
 } // namespace vulkan
 } // namespace native
 } // namespace at
 
-inline bool operator==(
-    const VkDescriptorPoolSize& descriptor_pool_size_1,
-    const VkDescriptorPoolSize& descriptor_pool_size_2) {
-  return (descriptor_pool_size_1.type == descriptor_pool_size_2.type) &&
-         (descriptor_pool_size_1.descriptorCount == descriptor_pool_size_2.descriptorCount);
-}
+#endif /* USE_VULKAN_API */

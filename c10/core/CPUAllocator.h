@@ -65,4 +65,11 @@ C10_API at::Allocator* GetDefaultCPUAllocator();
 // Get the Default Mobile CPU Allocator
 C10_API at::Allocator* GetDefaultMobileCPUAllocator();
 
+// The CPUCachingAllocator is experimental and might disappear in the future.
+// The only place that uses it is in StaticRuntime.
+// Set the CPU Caching Allocator
+C10_API void SetCPUCachingAllocator(Allocator* alloc, uint8_t priority = 0);
+// Get the CPU Caching Allocator
+C10_API Allocator* GetCPUCachingAllocator();
+
 } // namespace c10

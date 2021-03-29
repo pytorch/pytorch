@@ -410,11 +410,10 @@ class SubgraphMatchResult {
       : isMatch_(isMatch),
         debugMessage_(debugMessage),
         matchedSubgraph_(
-            ownSubgraph ? std::shared_ptr<typename GraphType::SubgraphType>(
-                              new typename GraphType::SubgraphType())
+            ownSubgraph ? std::make_shared<typename GraphType::SubgraphType>()
                         : nullptr),
         matchNodeMap_(
-            ownSubgraph ? std::shared_ptr<MatchNodeMap>(new MatchNodeMap())
+            ownSubgraph ? std::make_shared<MatchNodeMap>()
                         : nullptr) {}
 
   const bool isMatch_;

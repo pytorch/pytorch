@@ -65,3 +65,25 @@ R"msg(This is invalid
   While checking X
   While checking Y)msg");
 }
+
+static int assertionArgumentCounter = 0;
+static int getAssertionArgument() {
+  return ++assertionArgumentCounter;
+}
+
+static void failCheck() {
+  TORCH_CHECK(false, "message ", getAssertionArgument());
+}
+
+static void failInternalAssert() {
+  TORCH_INTERNAL_ASSERT(false, "message ", getAssertionArgument());
+}
+
+TEST(ExceptionTest, DontCallArgumentFunctionsTwiceOnFailure) {
+  assertionArgumentCounter = 0;
+  EXPECT_ANY_THROW(failCheck());
+  EXPECT_EQ(assertionArgumentCounter, 1) << "TORCH_CHECK called argument twice";
+
+  EXPECT_ANY_THROW(failInternalAssert());
+  EXPECT_EQ(assertionArgumentCounter, 2) << "TORCH_INTERNAL_ASSERT called argument twice";
+}

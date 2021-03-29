@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import numpy as np
 
@@ -9,7 +9,7 @@ from hypothesis import given, settings
 import hypothesis.strategies as st
 import unittest
 
-from caffe2.python import core, workspace
+from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
