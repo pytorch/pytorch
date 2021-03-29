@@ -56,8 +56,8 @@ Tensor det(const Tensor& self) {
 }
 
 Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
-  checkSameDevice("linalg_det", out, self, "out");
-  checkLinalgCompatibleDtype("linalg_det", out, self, "out");
+  checkSameDevice("torch.linalg.det", out, self, "out");
+  checkLinalgCompatibleDtype("torch.linalg.det", out, self, "out");
   squareCheckInputs(self);
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
               "Expected a floating point tensor as input");
