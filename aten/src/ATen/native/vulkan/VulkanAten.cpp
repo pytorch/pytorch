@@ -164,7 +164,7 @@ Tensor avg_pool2d(
       pooling_output_shape<int64_t>(iW, kW, padW, dW, 1, ceil_mode);
 
   pool2d_shape_check(
-      self, kH, kW, dH, dW, padH, padW, 1, 1, iC, iH, iW, oH, oW, self.suggest_memory_format());
+      self, kH, kW, dH, dW, padH, padW, 1, 1, iC, iH, iW, oH, oW, count_include_pad, self.suggest_memory_format());
 
   VulkanTensor y{{iN, iC, oH, oW}};
   vulkan::detail::avg_pool2d(
@@ -235,6 +235,7 @@ Tensor max_pool2d(
       iW,
       oH,
       oW,
+      /* count_include_pad */ false,
       self.suggest_memory_format());
 
   VulkanTensor y{{iN, iC, oH, oW}};

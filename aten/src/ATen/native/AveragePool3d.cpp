@@ -161,6 +161,7 @@ void avg_pool3d_out_cpu_template(
     1, 1, 1,
     itime, iheight, iwidth,
     otime, oheight, owidth,
+    count_include_pad,
     /*check_input_size=*/ true);
 
   /* get contiguous input */

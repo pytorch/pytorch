@@ -346,7 +346,8 @@ void max_pool2d_with_indices_out_cuda_template(
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth, memory_format);
+    outputHeight, outputWidth,
+    /* count_include_pad */ false, memory_format);
 
   Tensor input = input_.contiguous(memory_format);
 

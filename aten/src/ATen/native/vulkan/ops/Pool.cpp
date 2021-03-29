@@ -100,7 +100,7 @@ Tensor avg_pool2d(
     IntArrayRef stride_arg,
     const IntArrayRef padding_arg,
     const bool ceil_mode,
-    const bool /* count_include_pad */,
+    const bool count_include_pad,
     const c10::optional<int64_t> /* divisor_override */) {
   if (stride_arg.empty()) {
     stride_arg = kernel_arg;
@@ -154,6 +154,7 @@ Tensor avg_pool2d(
       input_size[Layout::Activation4D::width],
       output_height,
       output_width,
+      count_include_pad,
       self_arg.suggest_memory_format());
 
   api::Context* const context = api::context();

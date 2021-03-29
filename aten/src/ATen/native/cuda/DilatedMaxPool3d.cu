@@ -250,7 +250,8 @@ void max_pool3d_with_indices_out_cuda_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    /* count_include_pad */ false);
 
   if (input.ndimension() == 4) {
     output.resize_({ nslices, otime, oheight, owidth});

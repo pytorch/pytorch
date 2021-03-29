@@ -72,7 +72,8 @@ pool2d_shape_check(
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
-  int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format)
+  int64_t outputHeight, int64_t outputWidth,
+  bool count_include_pad, MemoryFormat memory_format)
 {
   const int64_t ndim = input.ndimension();
   const int64_t nOutputPlane = nInputPlane;
@@ -100,9 +101,11 @@ pool2d_shape_check(
       input.sizes());
   }
 
-  TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
-              "pad should be smaller than or equal to half of kernel size, but got ",
-              "padW = ", padW, ", padH = ", padH, ", kW = ", kW, ", kH = ", kH);
+  if (count_include_pad) {
+    TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
+                "pad should be smaller than or equal to half of kernel size, but got ",
+                "padW = ", padW, ", padH = ", padH, ", kW = ", kW, ", kH = ", kH);
+  }
 
   TORCH_CHECK(outputWidth >= 1 && outputHeight >= 1,
               "Given input size: (",
@@ -128,7 +131,8 @@ max_pool2d_backward_shape_check(
   pool2d_shape_check(
     input,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, memory_format);
+    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+    /* count_include_pad */ false, memory_format);
 
   const int64_t ndim = input.ndimension();
   const int64_t nOutputPlane = nInputPlane;
@@ -152,13 +156,14 @@ avg_pool2d_backward_shape_check(
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
   int64_t outputHeight, int64_t outputWidth,
+  bool count_include_pad,
   MemoryFormat memory_format)
 {
   pool2d_shape_check(
     input,
     kH, kW, dH, dW, padH, padW, 1, 1,
     nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
-    memory_format);
+    count_include_pad, memory_format);
 
   const int64_t ndim = input.ndimension();
   const int64_t nOutputPlane = nInputPlane;
@@ -179,6 +184,7 @@ pool3d_shape_check(
   int dilationT, int dilationH, int dilationW,
   int64_t itime, int64_t iheight, int64_t iwidth,
   int64_t otime, int64_t oheight, int64_t owidth,
+  bool count_include_pad,
   bool check_input_size=false)
 {
   const int64_t ndim = input.ndimension();
@@ -202,9 +208,11 @@ pool3d_shape_check(
                 "kernel size ", "(kT: ", kT, " kH: ", kH, " kW: ", kW, ")");
   }
 
-  TORCH_CHECK(kT/2 >= pT && kW/2 >= pW && kH/2 >= pH,
-              "pad should be smaller than or equal to half of kernel size, but got "
-              "kT: ", kT, " kW: ", kW, " kH: ", kH, " padT: ", pT, " padW: ", pW, " padH: ", pH);
+  if (count_include_pad) {
+    TORCH_CHECK(kT/2 >= pT && kW/2 >= pW && kH/2 >= pH,
+                "pad should be smaller than or equal to half of kernel size, but got "
+                "kT: ", kT, " kW: ", kW, " kH: ", kH, " padT: ", pT, " padW: ", pW, " padH: ", pH);
+  }
 
   TORCH_CHECK(otime >= 1 && owidth >= 1 && oheight >= 1,
               "Given input size: (",
@@ -237,7 +245,8 @@ max_pool3d_backward_shape_check(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    /* count_include_pad */ false);
 
   check_dim_size(gradOutput, ndim, ndim-4, nslices);
   check_dim_size(gradOutput, ndim, ndim-3, otime);
@@ -272,7 +281,7 @@ avg_pool3d_backward_shape_check(
     1, 1, 1,
     itime, iheight, iwidth,
     otime, oheight, owidth,
-    true);
+    /* count_include_pad */ true);
 
   check_dim_size(gradOutput, ndim, ndim-4, nslices);
   check_dim_size(gradOutput, ndim, ndim-3, otime);

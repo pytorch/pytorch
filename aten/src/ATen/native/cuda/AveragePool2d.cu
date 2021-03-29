@@ -280,7 +280,8 @@ void avg_pool2d_out_cuda_template(
     kH, kW, dH, dW, padH, padW, 1, 1,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth, memory_format);
+    outputHeight, outputWidth,
+    count_include_pad, memory_format);
 
   Tensor input = input_.contiguous(memory_format);
 

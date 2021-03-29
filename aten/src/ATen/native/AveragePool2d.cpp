@@ -136,7 +136,8 @@ void avg_pool2d_out_cpu_template(
     kH, kW, dH, dW, padH, padW, 1, 1,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth, input_.suggest_memory_format());
+    outputHeight, outputWidth,
+    count_include_pad, input_.suggest_memory_format());
 
   if (input_.ndimension() == 3) {
     output.resize_({nInputPlane, outputHeight, outputWidth});
@@ -293,6 +294,7 @@ Tensor& avg_pool2d_backward_out_cpu_template(
     nInputPlane,
     inputHeight, inputWidth,
     outputHeight, outputWidth,
+    count_include_pad,
     input.suggest_memory_format());
 
   /* get contiguous gradOutput */

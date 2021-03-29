@@ -194,7 +194,8 @@ void max_pool3d_with_indices_out_cpu_template(
     pT, pH, pW,
     dilationT, dilationH, dilationW,
     itime, iheight, iwidth,
-    otime, oheight, owidth);
+    otime, oheight, owidth,
+    /* count_include_pad */ false);
 
   /* get contiguous input */
   Tensor input = input_.contiguous();

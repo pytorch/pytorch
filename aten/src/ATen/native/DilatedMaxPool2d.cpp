@@ -169,7 +169,8 @@ void max_pool2d_with_indices_out_cpu_template(
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth, input_.suggest_memory_format());
+    outputHeight, outputWidth,
+    /* count_include_pad*/ false, input_.suggest_memory_format());
 
   /* get contiguous input */
   Tensor input = input_.contiguous();
