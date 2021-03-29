@@ -125,7 +125,7 @@ def with_nccl_blocking_wait(func):
             del os.environ["NCCL_ASYNC_ERROR_HANDLING"]
         except KeyError:
             # NCCL_ASYNC_ERROR_HANDLING was unset
-            cached_nccl_async_error_handling: Union[str, None] = None
+            cached_nccl_async_error_handling = None
 
         # Save val of NCCL_BLOCKING_WAIT and set it.
         try:
@@ -133,7 +133,7 @@ def with_nccl_blocking_wait(func):
                 "NCCL_BLOCKING_WAIT"
             ]
         except KeyError:
-            cached_nccl_blocking_wait: Union[str, None] = None
+            cached_nccl_blocking_wait = None
         finally:
             os.environ["NCCL_BLOCKING_WAIT"] = "1"
 
