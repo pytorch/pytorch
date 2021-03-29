@@ -4,7 +4,10 @@ from typing import Any, Optional, Tuple
 
 import torch
 from ._core import _unravel_index
-from ._internal.common_utils import get_comparison_dtype as _get_comparison_dtype, TestCase as _TestCase
+from ._internal.testing_utils import (
+    get_comparison_dtype as _get_comparison_dtype,
+    DTYPE_PRECISIONS as _DTYPE_PRECISIONS,
+)
 
 __all__ = ["assert_tensors_equal", "assert_tensors_allclose"]
 
@@ -26,7 +29,7 @@ except KeyError:
 
 def _get_default_rtol_and_atol(a: torch.Tensor, b: torch.Tensor) -> Tuple[float, float]:
     dtype = a.dtype if a.dtype == b.dtype else _get_comparison_dtype(a, b)
-    return _TestCase.dtype_precisions.get(dtype, (0.0, 0.0))
+    return _DTYPE_PRECISIONS.get(dtype, (0.0, 0.0))
 
 
 def _assert_are_tensors(a: Any, b: Any) -> None:
