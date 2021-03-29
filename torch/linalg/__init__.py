@@ -180,7 +180,7 @@ Example::
     >>> torch.linalg.det(a)
     tensor(0.0934)
 
-    >>> out = torch.Tensor()
+    >>> out = torch.empty(0)
     >>> torch.linalg.det(a, out=out)
     tensor(0.0934)
     >>> out
