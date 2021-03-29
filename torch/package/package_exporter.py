@@ -111,6 +111,7 @@ class PackageExporter:
         self.extern_modules: List[str] = []
         self.provided: Dict[str, bool] = {}
         self.verbose = verbose
+        self.ts_serializer = torch._C.TorchScriptSerializer(self.zip_file, self)
 
         if isinstance(importer, Importer):
             self.importer = importer
@@ -128,6 +129,8 @@ class PackageExporter:
         self.matched_patterns: Set[int] = set()
         self.debug_deps: List[Tuple[str, str]] = []
         self._unique_id = 0
+        self._next_ts_id = 0;
+        self._next_storage_id = 0;
 
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
@@ -214,6 +217,18 @@ class PackageExporter:
         self._unique_id += 1
         return ret
 
+    def get_ts_id(self) -> str:
+        """Get an id for a TorchScript object. This id is guaranteed to only be handed out once for this package."""
+        ret = self._next_ts_id
+        self._next_ts_id += 1
+        return str(ret)
+
+    def get_storage_id(self) -> str:
+        """Get an id for a storage object. This id is guaranteed to only be handed out once for this package."""
+        ret = self._next_storage_id
+        self._next_storage_id += 1
+        return str(ret)
+    
     def save_source_string(
         self,
         module_name: str,
@@ -611,6 +626,7 @@ node [shape=box];
             self.zip_file.write_record(name, storage.data_ptr(), num_bytes)
         contents = "\n".join(self.extern_modules) + "\n"
         self._write(".data/extern_modules", contents)
+        self.ts_serializer.write_files()
         del self.zip_file
         if self.buffer:
             self.buffer.flush()
