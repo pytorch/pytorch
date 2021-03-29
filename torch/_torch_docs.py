@@ -2060,7 +2060,7 @@ add_docstr(torch.conj,
            r"""
 conj(input, *, out=None) -> Tensor
 
-Computes the element-wise conjugate of the given :attr:`input` tensor. If :attr`input` has a non-complex dtype,
+Computes the element-wise conjugate of the given :attr:`input` tensor. If :attr:`input` has a non-complex dtype,
 this function just returns :attr:`input`.
 
 .. warning:: In the future, :func:`torch.conj` may return a non-writeable view for an :attr:`input` of

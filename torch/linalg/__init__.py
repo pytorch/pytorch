@@ -889,7 +889,7 @@ Args:
                                     consequently, the shape of returned `U` and `Vh`. Default: `True`.
     compute_uv (bool, optional): controls whether to compute `U` and `Vh`. Default: `True`.
     out (tuple, optional): a tuple of three tensors to use for the outputs.
-                           If :attr`compute_uv` is `False`, the 1st and 3rd arguments must be tensors,
+                           If :attr:`compute_uv` is `False`, the 1st and 3rd arguments must be tensors,
                            but they are ignored.  For example, you can pass
                            ``(torch.tensor([]), out_S, torch.tensor([]))``
 
