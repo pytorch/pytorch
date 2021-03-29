@@ -268,7 +268,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
           py::init<
-              std::vector<std::vector<torch::autograd::Variable>>,
+              std::vector<std::vector<at::Tensor>>,
               std::vector<std::vector<size_t>>,
               c10::intrusive_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
@@ -297,7 +297,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
-          [](::c10d::Reducer& reducer, const torch::autograd::Variable& output)
+          [](::c10d::Reducer& reducer, const at::Tensor& output)
               -> void { reducer.prepare_for_backward({output}); },
           py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)

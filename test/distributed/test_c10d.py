@@ -4892,7 +4892,7 @@ class CommTest(MultiProcessTestCase):
         self.assertTrue(pg.options.is_high_priority_stream)
         # test the process group works as expected
         t = torch.tensor([self.rank + 1] * 10).cuda(self.rank)
-        pg.allreduce(t)
+        pg.allreduce(t).wait()
         expected_tensor = torch.tensor([3] * 10).cuda(self.rank)
         self.assertEqual(expected_tensor, t)
 
