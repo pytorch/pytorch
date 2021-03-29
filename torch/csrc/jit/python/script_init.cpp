@@ -22,10 +22,9 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/export_universal.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/jit/serialization/export_universal.h>
-#include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
@@ -1616,7 +1615,7 @@ void initJitScriptBindings(PyObject* module) {
         if (!map_location.is(py::none())) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
-            reinterpret_cast<THPDevice*>(map_location.ptr())->device;
+              reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
         return import_ir_module(
             std::move(cu), reader, optional_device, std::move(ts_id));
