@@ -826,7 +826,6 @@ ExternalProject_Add(project_breakpad
   BUILD_IN_SOURCE True
 )
 add_library(breakpad STATIC IMPORTED)
-set_property(TARGET breakpad PROPERTY IMPORTED_LOCATION meow)
 
 add_dependencies(breakpad project_breakpad)
 
