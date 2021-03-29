@@ -1241,7 +1241,7 @@ if(USE_ROCM)
     # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
     if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
       list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
-        roc::rocblas roc::rocfft hip::hipfft hip::hiprand roc::hipsparse)
+        roc::rocblas hip::hipfft hip::hiprand roc::hipsparse)
     else()
       list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
         roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
@@ -1257,9 +1257,10 @@ if(USE_ROCM)
   # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
   include_directories(SYSTEM ${ROCBLAS_PATH}/include)
-  include_directories(SYSTEM ${ROCFFT_PATH}/include)
   if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
     include_directories(SYSTEM ${HIPFFT_PATH}/include)
+  else()
+    include_directories(SYSTEM ${ROCFFT_PATH}/include)
   endif()
   include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
   include_directories(SYSTEM ${HIPRAND_PATH}/include)
