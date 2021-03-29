@@ -176,7 +176,7 @@ endif()
 if(BUILD_SPLIT_CUDA)
   # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
   foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*(CUDASolver|Register.*CUDA|Legacy|THC|CUDAHooks|detail/|TensorShapeCUDA).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
+    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|CUDAHooks|detail/|TensorShapeCUDA).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
       # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
       list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
     else()
@@ -421,6 +421,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/InplaceOrViewType_0.cpp"
+      "${TORCH_SRC_DIR}/csrc/autograd/generated/InplaceOrViewType_1.cpp"
     )
   endif()
 
@@ -477,6 +479,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
+    "${TOOLS_PATH}/autograd/templates/InplaceOrViewType.cpp"
     "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
@@ -909,6 +912,23 @@ if(NOT INTERN_BUILD_MOBILE)
   add_dependencies(torch_cpu Caffe2_PROTO)
 endif()
 
+# Codegen selected_mobile_ops.h for template selective build
+if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
+  add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
+    COMMAND
+    "${PYTHON_EXECUTABLE}"
+    ${TORCH_ROOT}/tools/lite_interpreter/gen_selected_mobile_ops_header.py
+    --yaml_file_path "${SELECTED_OP_LIST}"
+    --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
+    WORKING_DIRECTORY "${TORCH_ROOT}")
+
+  add_custom_target(
+    __selected_mobile_ops_header_gen
+    DEPENDS ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h)
+  add_dependencies(torch_cpu __selected_mobile_ops_header_gen)
+endif()
+
 if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT NO_API)
     target_include_directories(torch_cpu PRIVATE
@@ -1116,6 +1136,10 @@ endif()
 
 if(BUILD_LITE_INTERPRETER)
   target_compile_definitions(torch_cpu PRIVATE BUILD_LITE_INTERPRETER)
+  # Enable template selective build only when SELECTED_OP_LIST is provided.
+  if(SELECTED_OP_LIST)
+    target_compile_definitions(torch_cpu PRIVATE TEMPLATE_SELECTIVE_BUILD)
+  endif()
 endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and

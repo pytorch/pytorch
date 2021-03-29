@@ -556,7 +556,7 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(
-          c10::DeviceTypeName(computeDeviceType(torch::tensors::get_default_dispatch_key()),
+          c10::DeviceTypeName(dispatchKeyToDeviceType(torch::tensors::get_default_dispatch_key()),
                               /*lower_case=*/true));
   END_HANDLE_TH_ERRORS
 }
@@ -948,6 +948,20 @@ Call this whenever a new thread is created in order to propagate values from
     "_valgrind_toggle", [](){
       #if defined(USE_VALGRIND)
       CALLGRIND_TOGGLE_COLLECT;
+      #else
+      TORCH_CHECK(false, "Valgrind is not supported.");
+      #endif
+    }
+  );
+
+  py_module.def(
+    "_valgrind_toggle_and_dump_stats", [](){
+      #if defined(USE_VALGRIND)
+      // NB: If we don't toggle collect around dump stats, callgrind_annotate
+      //     won't process the results correctly. Specifically,
+      //     `callgrind_annotate --inclusive=no` will be almost completely empty.
+      CALLGRIND_TOGGLE_COLLECT;
+      CALLGRIND_DUMP_STATS;
       #else
       TORCH_CHECK(false, "Valgrind is not supported.");
       #endif

@@ -80,9 +80,11 @@ class TensorProto(google.protobuf.message.Message):
     class _SerializationFormat(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[SerializationFormat.V], builtins.type):
         DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
         FMT_PROTOBUF = TensorProto.SerializationFormat.V(0)
+        FMT_BFLOAT16 = TensorProto.SerializationFormat.V(1)
     class SerializationFormat(metaclass=_SerializationFormat):
         V = typing.NewType('V', builtins.int)
     FMT_PROTOBUF = TensorProto.SerializationFormat.V(0)
+    FMT_BFLOAT16 = TensorProto.SerializationFormat.V(1)
 
     class Segment(google.protobuf.message.Message):
         DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
@@ -708,18 +710,32 @@ global___DBReaderProto = DBReaderProto
 
 class BlobSerializationOptions(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor = ...
+    class _FloatFormat(google.protobuf.internal.enum_type_wrapper._EnumTypeWrapper[FloatFormat.V], builtins.type):
+        DESCRIPTOR: google.protobuf.descriptor.EnumDescriptor = ...
+        FLOAT_DEFAULT = BlobSerializationOptions.FloatFormat.V(0)
+        FLOAT_PROTOBUF = BlobSerializationOptions.FloatFormat.V(1)
+        FLOAT_BFLOAT16 = BlobSerializationOptions.FloatFormat.V(2)
+    class FloatFormat(metaclass=_FloatFormat):
+        V = typing.NewType('V', builtins.int)
+    FLOAT_DEFAULT = BlobSerializationOptions.FloatFormat.V(0)
+    FLOAT_PROTOBUF = BlobSerializationOptions.FloatFormat.V(1)
+    FLOAT_BFLOAT16 = BlobSerializationOptions.FloatFormat.V(2)
+
     BLOB_NAME_REGEX_FIELD_NUMBER: builtins.int
     CHUNK_SIZE_FIELD_NUMBER: builtins.int
+    FLOAT_FORMAT_FIELD_NUMBER: builtins.int
     blob_name_regex: typing.Text = ...
     chunk_size: builtins.int = ...
+    float_format: global___BlobSerializationOptions.FloatFormat.V = ...
 
     def __init__(self,
         *,
         blob_name_regex : typing.Optional[typing.Text] = ...,
         chunk_size : typing.Optional[builtins.int] = ...,
+        float_format : typing.Optional[global___BlobSerializationOptions.FloatFormat.V] = ...,
         ) -> None: ...
-    def HasField(self, field_name: typing_extensions.Literal[u"blob_name_regex",b"blob_name_regex",u"chunk_size",b"chunk_size"]) -> builtins.bool: ...
-    def ClearField(self, field_name: typing_extensions.Literal[u"blob_name_regex",b"blob_name_regex",u"chunk_size",b"chunk_size"]) -> None: ...
+    def HasField(self, field_name: typing_extensions.Literal[u"blob_name_regex",b"blob_name_regex",u"chunk_size",b"chunk_size",u"float_format",b"float_format"]) -> builtins.bool: ...
+    def ClearField(self, field_name: typing_extensions.Literal[u"blob_name_regex",b"blob_name_regex",u"chunk_size",b"chunk_size",u"float_format",b"float_format"]) -> None: ...
 global___BlobSerializationOptions = BlobSerializationOptions
 
 class SerializationOptions(google.protobuf.message.Message):

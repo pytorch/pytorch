@@ -114,18 +114,18 @@ ScalarType result_type(const Tensor &tensor, const Tensor &other) {
   return native::result_type(tensors);
 }
 
-ScalarType result_type(const Tensor &tensor, const Scalar other) {
+ScalarType result_type(const Tensor &tensor, const Scalar& other) {
   auto tensor2 = scalar_to_tensor(other);
   tensor2.unsafeGetTensorImpl()->set_wrapped_number(true);
   std::vector<Tensor> tensors{std::move(tensor), std::move(tensor2)};
   return native::result_type(tensors);
 }
 
-ScalarType result_type(const Scalar scalar, const Tensor &tensor) {
+ScalarType result_type(const Scalar& scalar, const Tensor &tensor) {
   return at::result_type(tensor, scalar);
 }
 
-ScalarType result_type(const Scalar scalar1, const Scalar scalar2) {
+ScalarType result_type(const Scalar& scalar1, const Scalar& scalar2) {
   auto tensor1 = scalar_to_tensor(scalar1);
   tensor1.unsafeGetTensorImpl()->set_wrapped_number(true);
   return at::result_type(tensor1, scalar2);

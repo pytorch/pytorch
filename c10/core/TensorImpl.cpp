@@ -44,13 +44,13 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-const at::Tensor& TensorImpl::fw_grad(uint64_t level, const at::Tensor& self) const {
+const at::Tensor& TensorImpl::_fw_grad(uint64_t level, const at::Tensor& self) const {
   // See TensorImpl::grad() above for explanation about the line below
   if (!autograd_meta_) return impl::GetAutogradMetaFactory()->undefined_tensor();
   return autograd_meta_->fw_grad(level, self);
 }
 
-void TensorImpl::set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) {
+void TensorImpl::_set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) {
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
@@ -87,7 +87,7 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   // TODO: Ideally this logic fits best in Variable/Autograd layer so that we only
   // add AutogradBackend key when the tensor requires grad.
   DispatchKey k = key_set.highestPriorityBackendTypeId();
-  key_set_ = key_set.add(getAutogradKeyFromBackend(k));
+  key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
 
   // we would also like to check that non-cpu devices have an index, but some Caffe2 operators create
   // Storages with default devices.
@@ -267,7 +267,7 @@ bool TensorImpl::has_storage() const {
 #endif
 
 void TensorImpl::throw_storage_access_error() const {
-  TORCH_CHECK(false, "Cannot access storage of ", tensorimpl_type_name());
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
 bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
@@ -383,6 +383,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  dest_impl->storage_access_should_throw_ = src_impl->storage_access_should_throw_;
   if (src_impl->named_tensor_meta_ != nullptr) {
     dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
   }
