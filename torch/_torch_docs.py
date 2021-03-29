@@ -8482,8 +8482,9 @@ always be real-valued, even if :attr:`input` is complex.
           be represented as a column-major matrix (i.e. Fortran-contiguous).
 
 .. warning:: Extra care needs to be taken when differentiating with respect to `U` and `V`. Such
-             operation is only well-defined when all singular values are distinct. The backwards
-             pass becomes less stable as it depends on :math:`\frac{1}{\min_{i \neq j} |\sigma_i - \sigma_j|}`r
+             operation is only well-defined when all singular values are distinct. If the distance
+             between any two singular values is close to zero, the backwards pass will be
+             unstable, as it depends on :math:`\frac{1}{\min_{i \neq j} |\sigma_i - \sigma_j|}`.
              When there are repeated singular values, the gradient with respect to `U` and `V`
              will be infinity in some directions.
 
