@@ -28,11 +28,9 @@ static bool hastensor(Module& m, const char* name) {
   return m.hasattr(name) && m.attr(name).isTensor();
 }
 
-void replaceConvBiasWithGetAttr(
-    Module& module,
-    const std::unordered_set<std::string>& methods_to_optimize) {
-  for (const std::string& method_name : methods_to_optimize) {
-    auto graph = module.get_method(method_name).graph();
+void replaceConvBiasWithGetAttr(Module& module) {
+  for (const auto& method : module.get_methods()) {
+    auto graph = method.graph();
     // Only looks for _convolution pattern.
     // Thus assumes that tracing will have always gotten rid of aten::conv2d or
     // aten::conv3d. If it did not, BN folding will fail.
@@ -77,10 +75,7 @@ void replaceConvBiasWithGetAttr(
   }
 }
 
-void addBiasForConvIfNone(
-    Module& module,
-    const std::string& pattern_name,
-    const std::unordered_set<std::string>& methods_to_optimize) {
+void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
   auto t = module.type()->expect<ClassType>();
 
   const std::string real_typename = t->name()->qualifiedName();
@@ -96,11 +91,11 @@ void addBiasForConvIfNone(
       t->addAttribute("bias", optional_tensor_type, true);
       auto optional_tensor = c10::optional<at::Tensor>();
       module.setattr("bias", optional_tensor);
-      replaceConvBiasWithGetAttr(module, methods_to_optimize);
+      replaceConvBiasWithGetAttr(module);
     }
   }
   for (Module m : module.children()) {
-    addBiasForConvIfNone(m, pattern_name, methods_to_optimize);
+    addBiasForConvIfNone(m, pattern_name);
   }
 }
 
@@ -365,18 +360,11 @@ void FoldConvBatchNormHelper::transform() {
 
 } // namespace
 
-Module FoldConvBatchNorm(
-    const Module& module,
-    const std::vector<std::string>& methods_to_optimize_arg) {
-  std::unordered_set<std::string> methods_to_optimize(
-      methods_to_optimize_arg.begin(), methods_to_optimize_arg.end());
-  if (module.find_method("forward")) {
-    methods_to_optimize.insert("forward");
-  }
+Module FoldConvBatchNorm(const Module& module) {
   Module m = module.clone();
 
-  addBiasForConvIfNone(m, "Conv2d", methods_to_optimize);
-  addBiasForConvIfNone(m, "Conv3d", methods_to_optimize);
+  addBiasForConvIfNone(m, "Conv2d");
+  addBiasForConvIfNone(m, "Conv3d");
   // Conv2d + BatchNorm2d
   const PatternInfo pattern2d = PatternInfo::parse_from_str(
       R"(
