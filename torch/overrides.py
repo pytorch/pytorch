@@ -840,6 +840,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.gammaln: lambda input: -1,
         torch.t: lambda input: -1,
         torch.take: lambda input, index: -1,
+        torch.take_along_dim: lambda input, indices, dim=None, out=None: -1,
         torch.tan: lambda input, out=None: -1,
         torch.tanh: lambda input, out=None: -1,
         torch.linalg.tensorinv: lambda a, ind=2: -1,
