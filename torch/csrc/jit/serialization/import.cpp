@@ -84,7 +84,8 @@ IValue readArchiveAndTensors(
     bytes_read += len;
     return len;
   };
-  std::string tensor_dir_path = (tensor_prefix.compare("") != 0) ? tensor_prefix : archive_name + "/";
+  std::string tensor_dir_path =
+      (tensor_prefix.compare("") != 0) ? tensor_prefix : archive_name + "/";
   auto read_record = [&](const std::string& name) {
     std::string ss = tensor_dir_path + name;
     return std::get<0>(stream_reader.getRecord(ss));
@@ -206,7 +207,13 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     }
   };
   return readArchiveAndTensors(
-      archive_name, pickle_dir_prefix_, tensor_dir_prefix_, type_resolver, obj_loader, device_, reader_);
+      archive_name,
+      pickle_dir_prefix_,
+      tensor_dir_prefix_,
+      type_resolver,
+      obj_loader,
+      device_,
+      reader_);
 }
 
 void rewriteQuantizedConvForBC(const Module& module) {
@@ -289,7 +296,8 @@ Module ScriptModuleDeserializer::deserialize(
     TORCH_INTERNAL_ASSERT(
         reader_concrete_ != nullptr,
         "torch.Package importer tried to run legacy deserializer");
-    return torch::jit::LEGACY_deserialize(compilation_unit_, reader_concrete_, device_);
+    return torch::jit::LEGACY_deserialize(
+        compilation_unit_, reader_concrete_, device_);
 #else
     AT_ERROR("Legacy model format is not supported on mobile.");
 #endif
@@ -330,12 +338,11 @@ Module import_ir_module(
     std::string ts_id) {
   std::string ts_package_location = ".data/ts_code/" + ts_id + "/";
   ScriptModuleDeserializer deserializer(
-    std::move(cu),
-    reader_,
-    ts_package_location + "code/",
-    ts_package_location,
-    ".data/"
-  );
+      std::move(cu),
+      reader_,
+      ts_package_location + "code/",
+      ts_package_location,
+      ".data/");
   ExtraFilesMap temp = {};
   return deserializer.deserialize(device, temp);
 }
