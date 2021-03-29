@@ -2818,7 +2818,7 @@ op_db: List[OpInfo] = [
                # unstable if the matrix has repeated singular values, see
                # https://github.com/pytorch/pytorch/issues/53364
                SkipInfo('TestGradients', 'test_fn_grad', device_type='cuda',
-                        dtypes=[torch.float64]),
+                        dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
                SkipInfo('TestCommon', 'test_variant_consistency_jit', device_type='cuda',
                         dtypes=[torch.float64, torch.float32], active_if=TEST_WITH_ROCM),
            )),
