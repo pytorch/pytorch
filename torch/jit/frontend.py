@@ -798,7 +798,7 @@ class ExprBuilder(Builder):
             # NB: this check has to happen before the int check because bool is
             # a subclass of int
             return ExprBuilder.build_NameConstant(ctx, expr)
-        if isinstance(value, (int, float)):
+        if isinstance(value, (int, float, complex)):
             return ExprBuilder.build_Num(ctx, expr)
         elif isinstance(value, str):
             return ExprBuilder.build_Str(ctx, expr)
