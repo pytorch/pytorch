@@ -37,7 +37,6 @@ CC="clang" CXX="clang++" LDSHARED="clang --shared" \
   USE_ASAN=1 USE_CUDA=0 USE_MKLDNN=0 \
   python setup.py install
 
-
 # Test building via the sdist source tarball
 python setup.py sdist
 mkdir -p /tmp/tmp

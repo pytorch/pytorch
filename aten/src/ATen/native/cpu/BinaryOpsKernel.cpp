@@ -95,7 +95,7 @@ void atan2_kernel(TensorIterator& iter) {
 
 // Note: Undefined behavior when performing subtraction is intentionally
 // ignored.
-void sub_kernel(TensorIterator& iter, const Scalar& alpha_scalar) __ubsan_ignore_undefined__ {
+void sub_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) __ubsan_ignore_undefined__ {
   add_kernel(iter, -alpha_scalar);
 }
 
@@ -113,7 +113,7 @@ void mul_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void div_true_kernel(TensorIterator& iter) {
+void div_true_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "div_cpu", [&]() {
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
@@ -125,7 +125,7 @@ void div_true_kernel(TensorIterator& iter) {
   });
 }
 
-void div_trunc_kernel(TensorIterator& iter) {
+void div_trunc_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
   if (isIntegralType(dtype, /*includeBool*/ false)) {
     // There's no SIMD integer division, so don't try to vectorize it.
@@ -159,7 +159,7 @@ void div_trunc_kernel(TensorIterator& iter) {
 // For reference, see CPython's implementation:
 // https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 
-void div_floor_kernel(TensorIterator& iter) {
+void div_floor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
   if (dtype == kByte) {
     // In the special case of unsigned integer division, floor division is
