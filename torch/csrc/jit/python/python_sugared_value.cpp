@@ -245,6 +245,11 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     }
   }
 
+  if (field == "Stream" || field == "Event") {
+    auto class_type = getCustomClass("__torch__.torch.classes.cuda." + field);
+    return std::make_shared<ClassValue>(class_type);
+  }
+
   py::object member = getattr(loc, field);
   // note: is_constant = true because we consider that global properties
   // on modules like math.pi or torch.float to be constants
@@ -938,7 +943,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
   for (const auto& pair : given_fields) {
     auto type = tryToInferType(pair.second);
     auto ival = toIValue(pair.second, type.type());
-    fields.push_back(std::pair<std::string, IValue>(pair.first, ival));
+    fields.emplace_back(std::pair<std::string, IValue>(pair.first, ival));
   }
 
   auto tt = TupleType::createNamed(qualifiedName, fields, annotations);

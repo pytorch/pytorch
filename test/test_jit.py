@@ -119,10 +119,6 @@ def canonical(graph):
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
 
-class Point(NamedTuple):
-    x: Optional[torch.Tensor] = None
-    y: Optional[torch.Tensor] = None
-
 def doAutodiffCheck(testname):
     # TODO: setting false on test itself is not working
     if "test_t_" in testname or testname == "test_t":
@@ -11548,6 +11544,32 @@ dedent """
                 for i in range(.5):
                     print(i)
 
+    def test_parse_empty_tuple_annotation(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x : Tuple[()]) -> Tuple[()]:
+                return x
+        ''')
+
+        foo_code = cu.find_function('foo').code
+        FileCheck().check("Tuple[]").check("Tuple[]").run(foo_code)
+
+    def test_parse_empty_tuple_annotation_element_error(self):
+        with self.assertRaisesRegex(
+                RuntimeError, 'Tuple literal in Tuple type annotation must not have any elements'):
+            cu = torch.jit.CompilationUnit('''
+                def foo(x : Tuple[(int,)]) -> Tuple[(int,)]:
+                    return x
+            ''')
+
+    def test_parse_none_type_annotation(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(x : NoneType) -> NoneType:
+                return x
+        ''')
+
+        foo_code = cu.find_function('foo').code
+        FileCheck().check(": None").check("-> None").run(foo_code)
+
     def test_zip_enumerate_modulelist(self):
         class Sub(torch.nn.Module):
             def __init__(self):
@@ -14471,6 +14493,12 @@ dedent """
             torch.jit.script(test_error)
 
     def test_namedtuple_default_values(self):
+
+        class Point(NamedTuple):
+            x: Optional[torch.Tensor] = None
+            y: Optional[torch.Tensor] = torch.rand(2, 3)
+
+        make_global(Point)
 
         class M(torch.nn.Module):
             def __init__(self):
