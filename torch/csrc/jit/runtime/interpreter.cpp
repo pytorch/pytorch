@@ -1513,7 +1513,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case DICT_CONSTRUCT: {
-            auto type = frame.function->type_table_[inst.X]->expect<DictType>();
+            const auto& type =
+                frame.function->type_table_[inst.X]->expectRef<DictType>();
             dictConstruct(stack, type, inst.N);
             ++frame.pc;
           } break;
@@ -1604,7 +1605,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         }
       }
       bool is_jit_exception = dynamic_cast<JITException*>(&e);
-      handleError(ExceptionMessage(e), is_jit_exception);
+      // Janky af.  See https://github.com/pytorch/pytorch/issues/54612
+      auto* not_implemented_error = dynamic_cast<c10::NotImplementedError*>(&e);
+      handleError(ExceptionMessage(e), is_jit_exception, not_implemented_error);
       return false;
     }
   }
@@ -1613,7 +1616,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     format_stack_trace(out, callstack());
   }
 
-  void handleError(const ExceptionMessage& msg, bool is_jit_exception) {
+  void handleError(
+      const ExceptionMessage& msg,
+      bool is_jit_exception,
+      c10::NotImplementedError* not_implemented_error) {
     std::ostringstream ss;
     ss << "The following operation failed in the TorchScript interpreter.\n";
     formatStackTrace(ss);
@@ -1622,6 +1628,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
       throw JITException(ss.str());
+    } else if (not_implemented_error) {
+      throw c10::NotImplementedError(
+          ss.str(),
+          not_implemented_error->backtrace(),
+          not_implemented_error->caller());
     } else {
       throw std::runtime_error(ss.str());
     }

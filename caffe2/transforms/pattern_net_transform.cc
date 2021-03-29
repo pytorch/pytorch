@@ -5,6 +5,8 @@
 #include "caffe2/core/net.h"
 #include "caffe2/proto/caffe2_pb.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 // First, single source traverse through the netdef.
@@ -150,7 +152,7 @@ bool PatternNetTransform::ReplaceRule(
   std::unordered_map<string, string> external_renaming;
 
   // Figure out blob renamings
-  for (auto i = 0U; i < match.size(); i++) {
+  for (const auto i : c10::irange(match.size())) {
     int g_idx = match[i];
     int p_idx = ordered_ops_[i];
     for (int j = 0; j < p_.node(p_idx).op.input().size(); j++) {
@@ -179,7 +181,7 @@ bool PatternNetTransform::ReplaceRule(
   g.resize_nodes(offset + r_.size());
 
   // Append all the new operators.
-  for (auto i = 0U; i < r_.size(); i++) {
+  for (const auto i : c10::irange(r_.size())) {
     int new_node_idx = offset + i;
 
     OperatorDef new_op = r_.node(i).op;
