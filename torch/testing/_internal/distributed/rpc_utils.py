@@ -48,7 +48,7 @@ from torch.testing._internal.distributed.rpc.examples.parameter_server_test impo
 from torch.testing._internal.distributed.rpc.examples.reinforcement_learning_rpc_test import (
     ReinforcementLearningRpcTest,
 )
-from torch.testing._internal.distributed.rpc.cuda_distributed_rpc_test import CudaDistributedRPCTest
+from torch.testing._internal.distributed.rpc.examples.cuda_distributed_rpc_test import CudaDistributedRPCTest
 
 
 def _check_and_set_tcp_init():
