@@ -739,7 +739,7 @@ at::Tensor convolution_overrideable(
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
 
-  AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "convolution_overrideable not implemented. You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use TORCH_LIBRARY_IMPL to override this function ");
 }
 
 at::Tensor _convolution(
