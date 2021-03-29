@@ -5129,7 +5129,7 @@ class DistributedTest:
             for _ in range(10):
                 dist.all_reduce(torch.cat(tensors))
             # Run monitored barrier
-            timeout = timedelta(seconds=0.1)
+            timeout = timedelta(seconds=2)
             dist.monitored_barrier(timeout=timeout)
             # All ranks besides 1 call into barrier, rank 0 should report failure
             # while others report gloo error.
