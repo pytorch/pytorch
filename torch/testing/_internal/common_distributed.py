@@ -419,16 +419,24 @@ class MultiProcessTestCase(TestCase):
             sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
 
     def _get_timedout_process_traceback(self):
+        pipes = []
         for i, process in enumerate(self.processes):
             if process.exitcode is None:
                 pipe = self.pid_to_pipe[process.pid]
-                pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
-                # Wait for traceback
-                if pipe.poll(5):
-                    traceback = pipe.recv()
-                    logger.error(f'Process {i} timed out with traceback: \n\n{traceback}')
-                else:
-                    logger.error(f'Could not retrieve traceback for timed out process: {i}')
+                try:
+                    pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
+                    pipes.append(pipe)
+                except BrokenPipeError as e:
+                    logger.error(f'Encountered error while trying to get traceback for process {i}: {e}')
+
+        # Wait for results.
+        for pipe in pipes:
+            # Wait for traceback
+            if pipe.poll(5):
+                traceback = pipe.recv()
+                logger.error(f'Process {i} timed out with traceback: \n\n{traceback}')
+            else:
+                logger.error(f'Could not retrieve traceback for timed out process: {i}')
 
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())
