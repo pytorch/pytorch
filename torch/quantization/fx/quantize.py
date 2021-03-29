@@ -987,6 +987,34 @@ class Quantizer:
         quantized = QuantizedGraphModule(quantized_root, folded_graph)
         return quantized
 
+    def _fold_quant_dequant(self, quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+        """ If quantize op is followed by a dequantize, we fold the ops together since it is a no-op.
+            In the case where the only consumer of quantize_per_tensor is a dequant op, we erase both
+            nodes from the graph, along with the qparams associated with quantize op.
+        """
+        def _is_dequant_op(node) -> bool:
+            if node.op == 'call_method' and node.target == "dequantize":
+                return True
+            else:
+                return False
+
+        for node in quantized.graph.nodes:
+            if node.op == 'call_function' and node.target == torch.quantize_per_tensor:
+                quant_uses = list(node.users)
+                for user in quant_uses:
+                    if _is_dequant_op(user):
+                        quant_args = node.args
+                        float_tensor = quant_args[0]
+                        user.replace_all_uses_with(float_tensor)
+                        quantized.graph.erase_node(user)
+                        # If dequant is the only user of quant node, we erase quant node
+                        # and all it's inputs.
+                        if len(quant_uses) == 1:
+                            quantized.graph.erase_node(node)
+                            for arg in quant_args[1 :]:
+                                quantized.graph.erase_node(arg)
+        return quantized
+
     def convert(self, model: GraphModule, is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None,
                 is_standalone_module: bool = False,
@@ -995,6 +1023,7 @@ class Quantizer:
             model, is_reference, convert_custom_config_dict, is_standalone_module, _remove_qconfig_flag=_remove_qconfig)
         if not is_reference:
             quantized = self._fold_weight(quantized)
+            quantized = self._fold_quant_dequant(quantized)
         return quantized
 
     def _find_matches(
