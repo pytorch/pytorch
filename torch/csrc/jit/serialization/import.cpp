@@ -123,7 +123,7 @@ class ScriptModuleDeserializer final {
             &constants_table_,
             [this](const std::string& qualifier) {
               return findSourceInArchiveFromQualifier(
-                  reader_, code_prefix_, qualifier); 
+                  reader_, code_prefix_, qualifier);
             },
             reader_concrete_->version()) {}
 
@@ -287,8 +287,8 @@ Module ScriptModuleDeserializer::deserialize(
   if (reader_.hasRecord("model.json") && code_prefix_.compare("code/") == 0) {
 #if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
     TORCH_INTERNAL_ASSERT(
-      reader_concrete_ != nullptr, 
-      "torch.Package importer tried to run legacy deserializer");
+        reader_concrete_ != nullptr,
+        "torch.Package importer tried to run legacy deserializer");
     return torch::jit::LEGACY_deserialize(compilation_unit_, reader_concrete_, device_);
 #else
     AT_ERROR("Legacy model format is not supported on mobile.");
@@ -328,7 +328,7 @@ Module import_ir_module(
     PyTorchStreamReader& reader_,
     c10::optional<at::Device> device,
     std::string ts_id) {
-  std::string ts_package_location = ".data/ts_code/" + ts_id + "/"; 
+  std::string ts_package_location = ".data/ts_code/" + ts_id + "/";
   ScriptModuleDeserializer deserializer(
     std::move(cu),
     reader_,
@@ -337,7 +337,7 @@ Module import_ir_module(
     ".data/"
   );
   ExtraFilesMap temp = {};
-  return deserializer.deserialize(device, temp); 
+  return deserializer.deserialize(device, temp);
 }
 
 Module import_ir_module(
