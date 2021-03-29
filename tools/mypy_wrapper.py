@@ -26,7 +26,7 @@ from itertools import chain
 from pathlib import Path, PurePath, PurePosixPath
 from typing import List, Set
 
-import mypy.api
+import mypy.api # mypy
 
 
 def config_files() -> Set[str]:
