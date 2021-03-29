@@ -402,6 +402,8 @@ def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
         random_symmetric_psd_matrix(S, 3, **kw),  # batched_symmetric_psd
         random_symmetric_pd_matrix(S, 3, **kw),  # batched_symmetric_pd
         random_fullrank_matrix_distinct_singular_value(S, 3, 3, **kw),  # batched_distinct_singular_values
+        make_tensor((0, 0), **kw),
+        make_tensor((0, S, S), **kw),
     ]
     for t in inputs:
         t.requires_grad = requires_grad
