@@ -10,6 +10,8 @@
 #include <torch/csrc/jit/tensorexpr/mem_arena.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
+#include <ATen/core/functional.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -255,6 +257,18 @@ class TORCH_API BufHandle : public ExprHandle {
   }
   bool empty() const {
     return (this->node() == nullptr);
+  }
+
+  size_t ndim() const {
+    return node()->ndim();
+  }
+
+  std::vector<ExprHandle> dims() const {
+    return c10::fmap<ExprHandle>(node()->dims());
+  }
+
+  ExprHandle dim(size_t index) const {
+    return ExprHandle(node()->dim(index));
   }
 };
 

@@ -269,6 +269,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/tensorexpr/loopnest.cpp",
     "torch/csrc/jit/tensorexpr/mem_arena.cpp",
     "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
+    "torch/csrc/jit/tensorexpr/operators/conv2d.cpp",
     "torch/csrc/jit/tensorexpr/reduction.cpp",
     "torch/csrc/jit/tensorexpr/registerizer.cpp",
     "torch/csrc/jit/tensorexpr/tensor.cpp",
