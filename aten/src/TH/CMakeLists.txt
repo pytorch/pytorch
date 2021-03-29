@@ -9,7 +9,6 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorRandom.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMoreMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorEvenMoreMath.cpp
@@ -94,8 +93,6 @@ install(FILES
   generic/THTensorLapack.h
   generic/THTensorMath.cpp
   generic/THTensorMath.h
-  generic/THTensorRandom.cpp
-  generic/THTensorRandom.h
   generic/THVector.h
   # See Note [TH abstraction violation]
   generic/THTensorFastGetSet.hpp

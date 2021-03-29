@@ -394,10 +394,11 @@ class TestDistBackend(MultiProcessTestCase):
         return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe):
+    def _run(cls, rank, test_name, file_name, pipe, faulthandler_file_name):
         if BACKEND == 'nccl' and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS['no_cuda'].exit_code)
         self = cls(test_name)
+        self._register_fault_handler(faulthandler_file_name)
         self.rank = rank
         self.file_name = file_name
 
@@ -1218,7 +1219,7 @@ class DistributedTest:
             store = dist.PrefixStore(new_port, store)
 
             opts = dist.ProcessGroupNCCL.Options()
-            opts.is_high_priority = False
+            opts.is_high_priority_stream = False
             group_id = dist.ProcessGroupNCCL(store, rank, size, opts)
 
             self._test_broadcast_helper(group, group_id, rank, True, rank_to_GPU, True)
