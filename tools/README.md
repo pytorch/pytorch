@@ -45,6 +45,8 @@ Developer tools which you might find useful:
   can conveniently run diffs on them when working on code-generation.
   (See also [generated_dirs.txt](generated_dirs.txt) which
   specifies the list of directories with generated files.)
+* [mypy_wrapper.py](mypy_wrapper.py) - Run `mypy` on a single file using the
+  appropriate subset of our `mypy*.ini` configs.
 * [test_history.py](test_history.py) - Query S3 to display history of a single
   test across multiple jobs over time.
 

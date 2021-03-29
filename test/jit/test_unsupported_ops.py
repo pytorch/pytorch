@@ -41,16 +41,6 @@ class TestUnsupportedOps(JitTestCase):
             with self.assertRaisesRegex(Exception, "Keyword argument requires_grad unknown"):
                 torch.jit.script(func)
 
-    def test_ops_bound_in_functional(self):
-        def tensordot():
-            a = torch.arange(60.).reshape(3, 4, 5)
-            b = torch.arange(24.).reshape(4, 3, 2)
-            torch.tensordot(a, b, dims=([1, 0], [0, 1]))
-
-        tensordot()
-        with self.assertRaisesRegex(Exception, "Argument dims_self"):
-            torch.jit.script(tensordot)
-
     @unittest.skipIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")
     def test_init_ops(self):
         def calculate_gain():

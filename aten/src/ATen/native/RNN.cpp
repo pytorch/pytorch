@@ -153,10 +153,10 @@ struct QuantizedCellParams : public CellParamsBase {
       Tensor _packed_hh,
       Tensor _col_offsets_ih,
       Tensor _col_offsets_hh,
-      Scalar _scale_ih,
-      Scalar _scale_hh,
-      Scalar _zero_point_ih,
-      Scalar _zero_point_hh)
+      const Scalar& _scale_ih,
+      const Scalar& _scale_hh,
+      const Scalar& _zero_point_ih,
+      const Scalar& _zero_point_hh)
       : w_ih(std::move(_w_ih)),
         w_hh(std::move(_w_hh)),
         b_ih_(std::move(_b_ih)),
@@ -1510,7 +1510,11 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 
 std::tuple<Tensor, Tensor> lstm_cell(
     const Tensor& input, TensorList hx,
-    const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
+    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
   check_rnn_cell_forward_input(input, w_ih.size(1));
   auto hidden_size = w_hh.size(1);
@@ -1521,15 +1525,17 @@ std::tuple<Tensor, Tensor> lstm_cell(
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
-_thnn_differentiable_lstm_cell_backward(
-    const Tensor& grad_hy,
-    const Tensor& grad_cy,
+_thnn_differentiable_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
     const Tensor& input_gates,
-    const Tensor& hidden_gates,
-    const Tensor& input_bias,
-    const Tensor& hidden_bias,
+    const Tensor& hidden_gates, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt,
     const Tensor& cx,
     const Tensor& cy) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& grad_hy = c10::value_or_else(grad_hy_opt, [] {return Tensor();});
+  const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
+  const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
+  const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
+
   if (!grad_hy.defined() && !grad_cy.defined()) {
     return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
   }
@@ -1576,9 +1582,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
     const Tensor& grad_hy,
     const Tensor& input_gates,
     const Tensor& hidden_gates,
-    const Tensor& hx,
-    const Tensor& input_bias,
-    const Tensor& hidden_bias){
+    const Tensor& hx, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt){
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
+  const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
+
   Tensor in_g = input_gates;
   Tensor h_g = hidden_gates;
   if (input_bias.defined()){
@@ -1613,7 +1621,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
 
 Tensor gru_cell(
     const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
+    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
   static at::Tensor undefined;
@@ -1622,7 +1634,11 @@ Tensor gru_cell(
 
 Tensor rnn_tanh_cell(
     const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
+    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+
   static at::Tensor undefined;
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
@@ -1631,7 +1647,11 @@ Tensor rnn_tanh_cell(
 
 Tensor rnn_relu_cell(
     const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const Tensor& b_ih, const Tensor& b_hh) {
+    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& b_ih = c10::value_or_else(b_ih_opt, [] {return Tensor();});
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+
   static at::Tensor undefined;
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
@@ -1837,10 +1857,10 @@ return_type name( \
     const Tensor& packed_hh, \
     const Tensor& col_offsets_ih, \
     const Tensor& col_offsets_hh, \
-    const Scalar scale_ih, \
-    const Scalar scale_hh, \
-    const Scalar zero_point_ih, \
-    const Scalar zero_point_hh) { \
+    const Scalar& scale_ih, \
+    const Scalar& scale_hh, \
+    const Scalar& zero_point_ih, \
+    const Scalar& zero_point_hh) { \
   QuantizedCellParams params( \
       w_ih, \
       w_hh, \

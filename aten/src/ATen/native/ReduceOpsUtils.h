@@ -60,7 +60,7 @@ inline Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
 }
 
 inline bool _dimreduce_return_trivial(Tensor &result, const Tensor &self,
-                                      Scalar ident, int64_t dim, bool keepdim) {
+                                      const Scalar& ident, int64_t dim, bool keepdim) {
   if (self.numel() == 1 && self.ndimension() == 0) {
     result.resize_({});
     result.fill_(self);
@@ -93,7 +93,7 @@ inline bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &sel
 
 inline c10::optional<Tensor> _allreduce_return_trivial(
     const Tensor& self,
-    Scalar ident) {
+    const Scalar& ident) {
   // Return identity
   if (self.numel() == 0) {
     return at::scalar_tensor(ident, self.options());

@@ -17,7 +17,8 @@ def optimize_for_mobile(
         script_module,
         optimization_blocklist: Set[MobileOptimizerType] = None,
         preserved_methods: List[AnyStr] = None,
-        backend: str = 'CPU'):
+        backend: str = 'CPU',
+        methods_to_optimize: List[AnyStr] = None):
     """
     Args:
         script_module: An instance of torch script module with type of ScriptModule.
@@ -26,6 +27,7 @@ def optimize_for_mobile(
             method will run the optimization pass that is not included inside optimization_blocklist.
         perserved_methods: A list of methods that needed to be preserved when freeze_module pass is invoked
         backend: Device type to use for running the result model ('CPU'(default), 'Vulkan' or 'Metal').
+        methods_to_optimize: List of functions to optimize, CPU only, forward is optimized if it exists
     Returns:
         A new optimized torch script module
     """
@@ -39,10 +41,14 @@ def optimize_for_mobile(
     if preserved_methods is None:
         preserved_methods = []
 
+    if methods_to_optimize is None:
+        methods_to_optimize = []
+
     # Convert potential byte arrays into strings (if there is any) to pass type checking
     # Here we use a new name as assigning it back to preserved_methods will invoke
     # mypy errors (i.e. List[AnyStr] = List[str])
     preserved_methods_str: List[str] = [str(method) for method in preserved_methods]
+    methods_to_optimize_str: List[str] = [str(method) for method in methods_to_optimize]
 
     bundled_inputs_attributes = _get_bundled_inputs_preserved_attributes(script_module, preserved_methods_str)
     if all([hasattr(script_module, method) for method in bundled_inputs_attributes]):
@@ -62,7 +68,8 @@ def optimize_for_mobile(
         optimized_cpp_module = torch._C._jit_pass_optimize_for_mobile(
             script_module._c,
             optimization_blocklist,
-            preserved_methods_str)
+            preserved_methods_str,
+            methods_to_optimize_str)
     elif backend == 'vulkan':
         optimized_cpp_module = torch._C._jit_pass_vulkan_optimize_for_mobile(script_module._c, preserved_methods_str)
     elif backend == 'metal':
