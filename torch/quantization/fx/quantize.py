@@ -108,7 +108,6 @@ def insert_observer(
     observer_name = get_new_observer_name(model)
     setattr(model, observer_name, observer)
     # put observer instance activation_post_process map
-    assert activation_post_process_map is not None
     activation_post_process_map[node.name].append(observer_name)
     # initialize index map for activation_post_process
     if node.name not in activation_post_process_indexes:
@@ -448,8 +447,7 @@ class Quantizer:
     def __init__(self):
         # mapping from matched node to full qualified path of activation_post_process
         # must be filled before convert
-        self.activation_post_process_map: Optional[
-            Dict[str, List[str]]] = None
+        self.activation_post_process_map: Dict[str, List[str]]] = {}
 
         # mapping from matched node to the index of activation_post_process that we are
         # using currently
