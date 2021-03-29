@@ -2703,7 +2703,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_cat(self):
-        """ quantization of the output of cat will be depend on the
+        """ quantization of the output of cat will depend on the
         input of cat. we only quantize the output of cat when its inputs are quantized.
         """
         class QuantizedInput(torch.nn.Module):
@@ -2731,6 +2731,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
             self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node, print_debug_info=True)
             self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node, print_debug_info=True)
 
+        # check cat is using the same observer for input and output
+        m = QuantizedInput().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        print(m)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm(self):

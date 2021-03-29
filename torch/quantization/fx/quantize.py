@@ -771,7 +771,9 @@ class Quantizer:
 
         self.modules = dict(model.named_modules())
         matches, quants = self._match(model, observed_graph, standalone_module_names, standalone_module_classes, custom_module_classes)
-        observed_graph = handle_copy_nodes(observed_graph, matches, quants, self.qconfig_map, self.activation_post_process_map, self.modules)
+        observed_graph = handle_copy_nodes(
+            observed_graph, matches, quants, self.qconfig_map,
+            self.activation_post_process_map, self.modules)
 
         self.modules = dict(model.named_modules())
         matches, quants = self._match(model, observed_graph, standalone_module_names, standalone_module_classes, custom_module_classes)
@@ -872,7 +874,7 @@ class Quantizer:
 
         # move to cpu since we only have quantized cpu kernels
         model.eval().cpu()
-        self.modules = dict(model.named_modules())
+        self.modules = dict(model.named_modules(allow_duplicate=True))
 
         custom_module_classes = get_custom_module_class_keys(
             convert_custom_config_dict,
