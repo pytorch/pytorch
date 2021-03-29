@@ -1,5 +1,6 @@
 #include <c10d/ProcessGroupNCCL.hpp>
 
+#include <exception>
 #include <map>
 #include <tuple>
 #include <unordered_set>
@@ -531,10 +532,19 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         for (const auto& ncclComm : ncclComms) {
           allCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
         }
+        std::exception_ptr ncclErrorException = checkForNCCLErrors(ncclComms);
+        if (ncclErrorException) {
+          std::string exceptionMsg = "";
+          try {
+            std::rethrow_exception(ncclErrorException);
+          } catch (const std::exception& e) {
+            exceptionMsg = e.what();
+          }
 
-        if (checkForNCCLErrors(ncclComms)) {
           LOG(INFO) << "[Rank " << rank_
-                    << "] Received NCCL errors for communicators in the cache";
+                    << "] Received NCCL errors for communicators in the cache: \n"
+                    << "NCCL error: \n"
+                    << exceptionMsg;
 
           if (blockingWait_ || asyncErrorHandling_) {
             LOG(INFO) << "[Rank " << rank_
