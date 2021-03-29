@@ -5124,14 +5124,13 @@ class DistributedTest:
         @require_backend({"gloo"})
         @require_backends_available({"gloo"})
         def test_monitored_barrier_gloo(self):
-            process_group = dist.new_group(ranks=list(i for i in range(int(self.world_size))))
             tensors = [torch.ones(10) * self.rank]
             # Kick off some allreduce work on all ranks
             for _ in range(10):
-                process_group.allreduce(tensors).wait()
+                dist.all_reduce(torch.cat(tensors))
             # Run monitored barrier
             timeout = timedelta(seconds=2)
-            process_group.monitored_barrier(timeout)
+            dist.monitored_barrier(timeout=timeout)
             # All ranks besides 1 call into barrier, rank 0 should report failure
             # while others report gloo error.
             failed_rank = 1
@@ -5139,16 +5138,37 @@ class DistributedTest:
                 return
             if self.rank == 0:
                 with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
-                    process_group.monitored_barrier(timeout)
+                    dist.monitored_barrier(timeout=timeout)
             else:
                 # It is permissible for other ranks that did not fail to
                 # successfully exit or crash in the monitored barrier, the main
                 # purpose of monitored barrier is to report the rank that hung
                 # on rank 0.
                 try:
-                    process_group.monitored_barrier(timeout)
+                    dist.monitored_barrier(timeout=timeout)
                 except RuntimeError:
                     pass
+
+        @require_backend({"gloo"})
+        @require_backends_available({"gloo"})
+        def test_monitored_barrier_gloo_subgroup(self):
+            # Tests that monitored_barrier works as expected on non-default
+            # process groups.
+            failed_rank = 1
+            timeout = 0.1
+            subgroup = dist.new_group(ranks=[0, 1])
+
+            if self.rank == failed_rank:
+                return
+
+            if self.rank == 0:
+                with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
+                    dist.monitored_barrier(subgroup, timeout)
+            else:
+                # Other ranks call into monitored_barrier, but this should be a
+                # noop because they are not part of the subgroup. Verify that
+                # there are no errors here.
+                dist.monitored_barrier(subgroup, timeout)
 
         @require_backend({"gloo", "nccl"})
         @require_backends_available({"gloo", "nccl"})
