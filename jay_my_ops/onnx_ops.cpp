@@ -31,16 +31,14 @@ torch::Tensor fake_ops(torch::Tensor testData, int64_t value) {
 torch::Tensor ort_inference_ops(std::string file_name, torch::Tensor inputs) {
     torch::Tensor final_output;
 
-    printf(" ===== finalize interpreter =====\n");
     PyEval_InitThreads();
-    printf(" ===== from ort_inference_ops:init 0 =====\n");
+    printf(" ===== from ort_inference_ops:init =====\n");
     pybind11::gil_scoped_acquire acquire;
 
     py::object py_onnx = py::module::import("torch.onnx");
     printf(" ===== ort_inference_ops: import successfully =====\n");
     py::object my_output = py_onnx.attr("try_ort_inference")(file_name, inputs);
-    printf(" ===== ort_inference_ops: Get attribute successfully =====\n");     
-    printf(" ===== ort_inference_ops: finish binding method. =====\n");        
+    printf(" ===== ort_inference_ops: finish running method. =====\n");        
     final_output = py::cast<torch::autograd::Variable>(my_output);    
     pybind11::gil_scoped_release release;
     return final_output;
