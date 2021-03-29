@@ -1004,11 +1004,6 @@ class Quantizer:
             In the case where the only consumer of quantize_per_tensor is a dequant op, we erase both
             nodes from the graph, along with the qparams associated with quantize op.
         """
-        def _is_dequant_op(node) -> bool:
-            if node.op == 'call_method' and node.target == "dequantize":
-                return True
-            else:
-                return False
 
         for node in quantized.graph.nodes:
             if node.op == 'call_function' and node.target == torch.quantize_per_tensor:
@@ -1016,7 +1011,8 @@ class Quantizer:
                 quant_args = node.args
                 float_tensor = quant_args[0]
                 for user in quant_uses:
-                    if _is_dequant_op(user):
+                    is_dequant = user.op == 'call_method' and user.target == "dequantize"
+                    if is_dequant:
                         user.replace_all_uses_with(float_tensor)
                         quantized.graph.erase_node(user)
                         # If dequant is the only user of quant node, we erase quant node

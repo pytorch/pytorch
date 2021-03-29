@@ -2060,7 +2060,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_fold_quant_dequant(self):
         """ Test that the sequence of quant-dequant nodes in the
-            grap, get folde.
+            graph, get folded and we erase the extra dequant nodes.
         """
         class M(torch.nn.Module):
             def __init__(self):
