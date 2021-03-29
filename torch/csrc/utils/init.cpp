@@ -58,12 +58,7 @@ void initCrashHandlerBindings(PyObject* module) {
   auto m = pybind11::handle(module).cast<pybind11::module>();
 
   m.def("_enable_minidump_collection", _enable_minidump_collection)
-      .def("_get_minidump_directory", _get_minidump_directory)
-      .def("_crash", []() {
-        // TODO: Testing only, remove before landing
-        volatile int* bad = nullptr;
-        return *bad;
-      });
+      .def("_get_minidump_directory", _get_minidump_directory);
 }
 } // namespace crash_handler
 } // namespace torch

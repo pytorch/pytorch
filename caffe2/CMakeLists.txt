@@ -1007,7 +1007,6 @@ endif()
   if(BUILD_TEST AND NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
     add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
-    add_subdirectory(${TORCH_ROOT}/test/cpp/crash_handler ${CMAKE_BINARY_DIR}/test_crash_handler)
   endif()
 
   # XXX This ABI check cannot be run with arm-linux-androideabi-g++

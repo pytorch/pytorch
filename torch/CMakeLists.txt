@@ -53,7 +53,6 @@ if(BUILD_TEST)
       )
 endif()
 
-
 set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${PYTHON_INCLUDE_DIR}
 
@@ -295,7 +294,6 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 add_dependencies(torch_python torch_python_stubs)
-
 
 # Required workaround for generated sources
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
