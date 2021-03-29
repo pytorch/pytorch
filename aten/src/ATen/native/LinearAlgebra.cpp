@@ -76,7 +76,7 @@ Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
 
 Tensor linalg_det(const Tensor& self) {
   auto out = at::empty({0}, self.options());
-  linalg_det_out(self, out);
+  at::native::linalg_det_out(self, out);
   return out;
 }
 
