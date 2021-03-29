@@ -44,7 +44,9 @@ import numpy as np
 
 from torch.testing import floating_types_and, integral_types, complex_types
 from torch.testing._internal import expecttest
-from .._core import _compare_tensors_internal, _compare_scalars_internal, _compare_return_type
+from .._core import \
+    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
+from .testing_utils import get_comparison_dtype, DTYPE_PRECISIONS
 
 import torch
 import torch.cuda
@@ -822,30 +824,6 @@ def check_disabled(test_name):
                 "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
                 " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
 
-# Acquires the comparison dtype, required since isclose
-# requires both inputs have the same dtype, and isclose is not supported
-# for some device x dtype combinations.
-# NOTE: Remaps bfloat16 to float32 since neither the CPU or CUDA device types
-#  support needed bfloat16 comparison methods.
-# NOTE: Remaps float16 to float32 on CPU since the CPU device type doesn't
-#   support needed float16 comparison methods.
-# TODO: Update this once bfloat16 and float16 are better supported.
-def get_comparison_dtype(a, b):
-    # TODO: update this when promote_types supports bfloat16 and/or
-    # isclose supports bfloat16.
-    a_dtype = torch.float32 if a.dtype is torch.bfloat16 else a.dtype
-    b_dtype = torch.float32 if b.dtype is torch.bfloat16 else b.dtype
-
-    compare_dtype = torch.promote_types(a_dtype, b_dtype)
-
-    # non-CUDA (CPU, for example) float16 -> float32
-    # TODO: update this when isclose is implemented for CPU float16
-    if (compare_dtype is torch.float16 and
-        (a.device != b.device or a.device.type != 'cuda' or
-            b.device.type != 'cuda')):
-        compare_dtype = torch.float32
-
-    return compare_dtype
 
 # This implements a variant of assertRaises/assertRaisesRegex where we first test
 # if the exception is NotImplementedError, and if so just skip the test instead
@@ -1039,18 +1017,8 @@ class TestCase(expecttest.TestCase):
 
         self.assertEqual(np_result, torch_result, **kwargs)
 
-    # Some analysis of tolerance by logging tests from test_torch.py can be found
-    # in https://github.com/pytorch/pytorch/pull/32538.
-    # dtype name : (rtol, atol)
-    dtype_precisions = {
-        torch.float16    : (0.001, 1e-5),
-        torch.bfloat16   : (0.016, 1e-5),
-        torch.float32    : (1.3e-6, 1e-5),
-        torch.float64    : (1e-7, 1e-7),
-        torch.complex32  : (0.001, 1e-5),
-        torch.complex64  : (1.3e-6, 1e-5),
-        torch.complex128 : (1e-7, 1e-7),
-    }
+    # for BC
+    dtype_precisions = DTYPE_PRECISIONS
 
     # Returns the "default" rtol and atol for comparing scalars or
     # tensors of the given dtypes.
