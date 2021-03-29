@@ -8694,7 +8694,7 @@
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_lstsq_out
+    CPU, CUDA: linalg_lstsq_out
 
 - func: _lstsq_helper(Tensor(a!) self, Tensor(b!) rank, Tensor(c!) singular_values, Tensor(d!) infos, Tensor a, float rcond, str driver_name) -> Tensor(a!)
   variants: function
