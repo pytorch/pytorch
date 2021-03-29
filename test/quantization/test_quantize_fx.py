@@ -2036,7 +2036,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = torch.cat((x,), 1)
                 tmp = x.size()
                 x = self.mods1(x)
-                y = 10 * tmp[0]
+                y = x * tmp[0]
                 return y
 
         model = M().eval()
