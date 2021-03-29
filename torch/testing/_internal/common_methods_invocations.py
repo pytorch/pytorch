@@ -3,6 +3,7 @@ from itertools import product
 from operator import mul, itemgetter
 import collections
 import operator
+import random
 
 import torch
 import numpy as np
@@ -337,6 +338,7 @@ class UnaryUfuncInfo(OpInfo):
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  supports_complex_to_float=False,  # op supports casting from complex input to real output safely eg. angle
                  sample_inputs_func=sample_inputs_unary,
+                 sample_kwargs=lambda device, dtype, input: ({}, {}),
                  supports_sparse=False,
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
@@ -354,6 +356,14 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
         self.supports_complex_to_float = supports_complex_to_float
+
+        # test_unary_ufuncs.py generates its own inputs to test the consistency
+        # of the operator on sliced tensors, non-contig tensors, etc.
+        # `sample_kwargs` is a utility function to provide kwargs
+        # along with those inputs if required (eg. clamp).
+        # It should return two dictionaries, first holding kwarg for
+        # torch operator and second one for reference NumPy operator.
+        self.sample_kwargs = sample_kwargs
 
         # Epsilon to ensure grad and gradgrad checks don't test values
         #   outside a function's domain.
@@ -934,6 +944,13 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
     inputs.append(SampleInput(make_tensor((), device, dtype,
                                           low=None, high=None,
                                           requires_grad=requires_grad),))
+    return inputs
+
+def sample_inputs_outer(op_info, device, dtype, requires_grad):
+    inputs = []
+    arg_a = make_tensor((S,), device, dtype, requires_grad=requires_grad)
+    arg_b = make_tensor((M,), device, dtype, requires_grad=requires_grad)
+    inputs.append(SampleInput(arg_a, args=(arg_b,)))
     return inputs
 
 # Missing to test the nondeterminism of the operation
@@ -1619,6 +1636,15 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad):
     output += [SampleInput(empty_tensor, args=(0.0, 1.0)), ]
     return output
 
+def sample_kwargs_clamp(device, dtype, input):
+    if dtype is torch.uint8:
+        min_val, max_val = (random.randint(1, 3), random.randint(4, 8))
+    elif dtype.is_floating_point:
+        min_val, max_val = (random.uniform(-8, 0), random.uniform(1, 8))  # type: ignore
+    else:
+        min_val, max_val = (random.randint(-8, 0), random.randint(1, 8))  # type: ignore
+    return {'min': min_val, 'max': max_val}, {'a_min': min_val, 'a_max': max_val}
+
 def sample_inputs_cumprod(op_info, device, dtype, requires_grad):
     def make_arg(shape):
         # shrink values to be in the interval [-1, +1] for better precision in gradgradcheck
@@ -2225,6 +2251,9 @@ op_db: List[OpInfo] = [
                # Skips unsupported bfloat16 check because above support check
                #   doesn't work on all platforms
                SkipInfo('TestOpInfo', 'test_unsupported_dtypes', dtypes=(torch.bfloat16,)),
+               # RuntimeError: value cannot be converted to type double without overflow: (2,3)
+               SkipInfo('TestCommon', 'test_variant_consistency_jit', dtypes=(torch.cfloat,)),
+               # TODO: remove redundant method_tests() entries
                SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
                # addmm does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out')),
@@ -2407,16 +2436,18 @@ op_db: List[OpInfo] = [
                          SkipInfo('TestCommon', 'test_out'),)),
     UnaryUfuncInfo('clamp',
                    aliases=('clip', ),
+                   decorators=(precisionOverride({torch.bfloat16: 7e-2, torch.float16: 1e-2}),),
                    ref=np.clip,
                    dtypes=all_types_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=all_types_and(torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    skips=(
-                       # Skip all unary ufuncs tests as we call op(tensor) and min/max args are not passed
-                       # Reference: https://github.com/pytorch/pytorch/issues/51242
-                       SkipInfo('TestUnaryUfuncs'),
+                       # Reference: https://github.com/pytorch/pytorch/issues/54841
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                device_type='cpu', dtypes=[torch.bfloat16]),
                    ),
+                   sample_kwargs=sample_kwargs_clamp,
                    sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('conj',
                    ref=np.conj,
@@ -3008,6 +3039,11 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,),
+    OpInfo('outer',
+           op=torch.outer,
+           aliases=('ger', ),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_outer,),
     OpInfo('prod',
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -4167,7 +4203,6 @@ def method_tests():
         ('mm', (S, M), ((M, S),), '', (True,)),
         ('bmm', (M, S, M), ((M, M, S),), '', (True,)),
         ('mv', (S, M), ((M,),), '', (True,)),
-        ('ger', (S,), ((M,),)),
         ('inner', (S,), ((S,),), "1d_1d", (False,)),
         ('inner', (), ((S, S),), "scalar_2d", (False,)),
         ('matmul', (L,), ((L,),), '', (True,)),
