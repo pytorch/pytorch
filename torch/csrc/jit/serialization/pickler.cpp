@@ -294,7 +294,9 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
       std::string(toString(tensor.scalar_type())).append("Storage");
   pushGlobal("torch", data_type);
   // root_key
-  std::string root_key = (get_tensor_id_ == nullptr) ? c10::to_string(tensor_data_.size()) : get_tensor_id_();
+  std::string root_key = (get_tensor_id_ == nullptr)
+      ? c10::to_string(tensor_data_.size())
+      : get_tensor_id_();
   pushString(root_key);
   // location
   pushString(tensor.device().str());
