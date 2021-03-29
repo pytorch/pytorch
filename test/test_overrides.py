@@ -556,6 +556,7 @@ def generate_tensor_like_override_tests(cls):
                 return TensorLike()
 
         func_args = []
+        is_method = is_tensor_method_or_property(func)
         if func in annotated_args:
             for arg in annotated_args[func]:
                 # Guess valid input to aten function based on type of argument
@@ -563,7 +564,7 @@ def generate_tensor_like_override_tests(cls):
                 if t.endswith('?'):
                     t = t[:-1]
                 if t == 'Tensor':
-                    if arg['name'] == 'self' and is_tensor_method_or_property(func):
+                    if is_method and arg['name'] == 'self':
                         # See "Note: properties and __get__"
                         func = func.__get__(instance_gen())
                         continue
@@ -621,7 +622,7 @@ def generate_tensor_like_override_tests(cls):
             # This is currently the best check but doesn't work for, for example,
             # Tensor.__add__ because it redirects to Tensor.add.
             # See note "_triggered wrapper"
-            if ret is None:
+            if not is_method or ret is None:
                 self.assertTrue(WRAPPED_TRIGGERED_IMPLS[func]._triggered)
                 return
 
@@ -804,7 +805,6 @@ class TestGradCheckOverride(TestCase):
         # Tensor-likes.
         self.assertEqual(total_used_attrs, {
             'data',
-            'device',
             'dtype',
             'is_complex',
             'is_floating_point',

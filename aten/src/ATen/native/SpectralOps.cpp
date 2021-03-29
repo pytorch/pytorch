@@ -508,7 +508,14 @@ Tensor& fft_fftfreq_out(Tensor& out, int64_t n, double d) {
   return out.mul_(1.0 / (n * d));  // Slightly faster than div_(n*d)
 }
 
-Tensor fft_fftfreq(int64_t n, double d, const TensorOptions& options) {
+Tensor fft_fftfreq(int64_t n, double d,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto out = at::empty({n}, options);
   return native::fft_fftfreq_out(out, n, d);
 }
@@ -522,7 +529,14 @@ Tensor& fft_rfftfreq_out(Tensor& out, int64_t n, double d) {
   return out.mul_(1.0 / (n * d));  // Slightly faster than div_(n*d)
 }
 
-Tensor fft_rfftfreq(int64_t n, double d, const TensorOptions& options) {
+Tensor fft_rfftfreq(int64_t n, double d,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
   auto out = at::empty({n/2 + 1}, options);
   return native::fft_rfftfreq_out(out, n, d);
 }
@@ -606,9 +620,12 @@ static Stream& write_opt(Stream& SS, const optional<T>& value) {
  * in python because it uses torch.nn.functional.pad which is python-only.
  */
 Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-            const optional<int64_t> win_lengthOpt, const Tensor& window,
+            const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
             const bool normalized, const optional<bool> onesidedOpt,
             const optional<bool> return_complexOpt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& window = c10::value_or_else(window_opt, [] {return Tensor();});
+
   #define REPR(SS) \
     SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
@@ -757,9 +774,12 @@ static Tensor as_complex(const Tensor& self) {
  * signals and complex windows.
  */
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
-             const optional<int64_t> win_lengthOpt, const Tensor& window,
+             const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
              const bool center, const bool normalized, const c10::optional<bool> onesidedOpt,
              const optional<int64_t> lengthOpt, const bool return_complex) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& window = c10::value_or_else(window_opt, [] {return Tensor();});
+
   #define REPR(SS) \
     SS << "istft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \

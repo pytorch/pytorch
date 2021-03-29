@@ -9,6 +9,8 @@
 #include "caffe2/operators/text_file_reader_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+#include <c10/util/irange.h>
+
 #include <cstdio>
 #include <cstdlib>
 
@@ -31,20 +33,20 @@ TEST(TextFileReaderUtilsTest, TokenizeTest) {
                                                        {1, "Second"}};
 
   EXPECT_EQ(expected.size(), tokenized.tokens().size());
-  for (int i = 0; i < expected.size(); ++i) {
+  for (const auto i : c10::irange(expected.size())) {
     const auto& token = tokenized.tokens().at(i);
     EXPECT_EQ(expected.at(i).first, token.startDelimId);
     EXPECT_EQ(expected.at(i).second, std::string(token.start, token.end));
   }
 
   // try each of the subsplits
-  for (int i = 0; i < ch.size() - 1; ++i) {
+  for (const auto i : c10::irange(ch.size() - 1)) {
     tokenizer.reset();
     char* mid = &ch.front() + i;
 
     tokenizer.next(&ch.front(), mid, tokenized);
     EXPECT_GE(expected.size(), tokenized.tokens().size());
-    for (int j = 0; j < tokenized.tokens().size(); ++j) {
+    for (const auto j : c10::irange(tokenized.tokens().size())) {
       const auto& token = tokenized.tokens().at(j);
       EXPECT_EQ(expected.at(j).first, token.startDelimId);
       EXPECT_EQ(expected.at(j).second, std::string(token.start, token.end));
@@ -53,7 +55,7 @@ TEST(TextFileReaderUtilsTest, TokenizeTest) {
 
     tokenizer.next(mid, &ch.back() + 1, tokenized);
     EXPECT_EQ(expected.size(), s1 + tokenized.tokens().size());
-    for (int j = 0; j < tokenized.tokens().size(); ++j) {
+    for (const auto j : c10::irange(tokenized.tokens().size())) {
       const auto& token = tokenized.tokens().at(j);
       EXPECT_EQ(expected.at(j + s1).first, token.startDelimId);
       EXPECT_EQ(
