@@ -136,6 +136,13 @@ ${assign_return_values} ([&]() {
 })();
 """)
 
+THROW_IF_VARIABLETYPE_ON = """
+TORCH_CHECK(c10::impl::tls_is_dispatch_keyset_excluded(c10::autograd_dispatch_keyset),
+  "Calling inplace/view ops on inference tensor outside InferenceMode is not allowed, ",
+  "consider making a clone first. ",
+  "If you have a valid use case, please make a feature request to PyTorch.");
+"""
+
 TMP_VAR = '_tmp'
 
 # FIXME: Ideally these functions should be methods on Type class, but we have a
@@ -301,9 +308,9 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
         else:
             _, unpacked_bindings = unpack_args(f)
             call += emit_view_lambda(f, unpacked_bindings)
-            creation_meta = ('at::GradMode::is_enabled() ? '
-                             'CreationMeta::DEFAULT : '
-                             'CreationMeta::NO_GRAD_MODE')
+            creation_meta = ('InferenceMode::is_enabled() ? '
+                             'CreationMeta::INFERENCE_MODE : '
+                             '(at::GradMode::is_enabled() ? CreationMeta::DEFAULT : CreationMeta::NO_GRAD_MODE)')
             rhs_value = (f'as_view(/* base */ {view_info}, /* output */ {var}, /* is_bw_differentiable */ true, '
                          '/* is_fw_differentiable */ true, '
                          f'/* view_func */ func, /* creation_meta */ {creation_meta})')
@@ -335,6 +342,7 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         api_name = sig_group.faithful_signature.name()
     else:
         api_name = sig_group.signature.name()
+    inplace_view_body.append(THROW_IF_VARIABLETYPE_ON)
     if modifies_arguments(f):  # inplace op
         inplace_view_body.append(INPLACE_REDISPATCH.substitute(
             api_name=api_name,
