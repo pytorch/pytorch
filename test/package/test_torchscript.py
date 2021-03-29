@@ -113,8 +113,7 @@ class PackagingTsSerTest(PackageTestCase):
 
     @skipIfNoTorchVision
     def test_save_ts_independent_modules(self):
-        # Test to verify saving multiple modules
-        # who share submodules works
+        # Test to verify saving multiple modules works
         class ModD(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
@@ -163,8 +162,8 @@ class PackagingTsSerTest(PackageTestCase):
 
     @skipIfNoTorchVision
     def test_save_ts_repeat_saving_mod(self):
-        #  Test to verify saving multiple modules in same
-        #  package works
+        #  Test to verify saving multiple different modules and
+        #  repeats of modules in package works 
         class ModD(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
