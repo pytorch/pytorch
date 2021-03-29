@@ -61,7 +61,7 @@ struct CommonSubexpressionEliminator {
       // Check for CSE opportunities in the parent block.
       auto parent_lookup = parent_lookup_fn(node);
       auto g_out = node->owningGraph()->outputs();
-      if (parent_lookup) {
+      if (parent_lookup != nullptr) {
         if (!getOrCreateAliasDb().safeToChangeAliasingRelationship(
                 node->outputs(), parent_lookup->outputs())) {
           continue;
