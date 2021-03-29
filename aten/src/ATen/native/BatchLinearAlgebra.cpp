@@ -2776,12 +2776,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     : _get_epsilon(c10::toValueType(self.scalar_type()));
 
   auto batch_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend() - 2);
-  Tensor rank = at::empty(batch_shape, self.options().dtype(at::kLong));
+  Tensor rank = at::empty({0}, self.options().dtype(at::kLong));
+  if (driver_opt.value() != "gels") {
+    rank.resize_(batch_shape, MemoryFormat::Contiguous);
+  }
 
   auto singular_values_shape = batch_shape.vec();
   singular_values_shape.push_back(std::min(m, n));
   auto real_dtype = c10::toValueType(self.scalar_type());
-  Tensor singular_values = at::empty(singular_values_shape, self.options().dtype(real_dtype));
+  Tensor singular_values = at::empty({0}, self.options().dtype(real_dtype));
+  if (driver_opt.value() == "gelsd" || driver_opt.value() == "gelss") {
+    singular_values.resize_(singular_values_shape, MemoryFormat::Contiguous);
+  }
 
   Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt).device(kCPU));
 
