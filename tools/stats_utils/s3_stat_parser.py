@@ -1,5 +1,6 @@
 import bz2
 import json
+import logging
 import subprocess
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -12,6 +13,9 @@ try:
     HAVE_BOTO3 = True
 except ImportError:
     HAVE_BOTO3 = False
+
+
+logger = logging.getLogger(__name__)
 
 
 OSSCI_METRICS_BUCKET = 'ossci-metrics'
@@ -180,11 +184,11 @@ def get_previous_reports_for_branch(branch: str, ci_job_prefix: str = "") -> Lis
     commit_index = 0
     while len(reports) == 0 and commit_index < len(commits):
         commit = commits[commit_index]
-        print(f'Grabbing reports from commit: {commit}')
+        logger.info(f'Grabbing reports from commit: {commit}')
         summaries = get_test_stats_summaries_for_job(sha=commit, job_prefix=ci_job_prefix)
         for job_name, summary in summaries.items():
             reports.append(summary[0])
             if len(summary) > 1:
-                print(f'Warning: multiple summary objects found for {commit}/{job_name}')
+                logger.info(f'Warning: multiple summary objects found for {commit}/{job_name}')
         commit_index += 1
     return reports
