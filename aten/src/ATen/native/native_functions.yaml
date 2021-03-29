@@ -8694,7 +8694,7 @@
   python_module: linalg
   variants: function
   dispatch:
-    DefaultBackend: linalg_lstsq_out
+    CPU, CUDA: linalg_lstsq_out
 
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
