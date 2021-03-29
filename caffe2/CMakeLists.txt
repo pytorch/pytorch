@@ -579,6 +579,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
+      ${TORCH_SRC_DIR}/csrc/utils/crash_handler.cpp
     )
     # Disable legacy import of building without Caffe2 support
     if(BUILD_CAFFE2)
@@ -900,6 +901,13 @@ if(NOT MSVC AND USE_XNNPACK)
   TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
 endif()
 
+if(USE_BREAKPAD)
+  target_include_directories(torch_cpu PUBLIC
+    /home/davidriazati/local/pytorch/third_party/breakpad/src
+  )
+  target_link_libraries(torch_cpu PUBLIC breakpad)
+endif()
+
 # ==========================================================
 # formerly-libtorch flags
 # ==========================================================
@@ -999,6 +1007,7 @@ endif()
   if(BUILD_TEST AND NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
     add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/crash_handler ${CMAKE_BINARY_DIR}/test_crash_handler)
   endif()
 
   # XXX This ABI check cannot be run with arm-linux-androideabi-g++

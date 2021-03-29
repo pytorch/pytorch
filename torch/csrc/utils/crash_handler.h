@@ -1,13 +1,18 @@
 #pragma once
-#include <pybind11/pybind11.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
-
+#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <string>
 
 
 namespace torch {
 namespace crash_handler {
 
-void initCrashHandlerBindings(PyObject* module);
+
+// TORCH_API void _enable_minidump_collection(const std::string& dir);
+
+TORCH_API void _enable_minidump_collection(const std::string& dir);
+
+TORCH_API const std::string& _get_minidump_directory();
+
 
 
 } // namespace crash_handler

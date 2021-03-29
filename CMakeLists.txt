@@ -396,6 +396,11 @@ if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
 endif()
 
+
+if(LINUX)
+  set(USE_BREAKPAD ON)
+endif()
+
 if(MSVC)
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE

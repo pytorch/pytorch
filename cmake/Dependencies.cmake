@@ -814,23 +814,26 @@ if(USE_REDIS)
 endif()
 
 # ---[ Breakpad
-include(ExternalProject)
+if(USE_BREAKPAD)
+  include(ExternalProject)
 
-# TODO: Don't build outside of build/ directory
-ExternalProject_Add(project_breakpad
-  SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad
-  CONFIGURE_COMMAND cd ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad && ./configure
-  BUILD_COMMAND cd ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad && make -j 20
-  INSTALL_COMMAND cp ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src/client/linux/libbreakpad_client.a ${CMAKE_BINARY_DIR}/lib/libbreakpad_client.a && cp -r ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src ${CMAKE_BINARY_DIR}/third_party/breakpad
-  TEST_COMMAND ""
-  BUILD_IN_SOURCE True
-)
-add_library(breakpad STATIC IMPORTED)
+  # TODO: Don't build outside of build/ directory
+  # TODO: depepdency install: git clone https://chromium.googlesource.com/linux-syscall-support src/third_party/lss
+  ExternalProject_Add(project_breakpad
+    SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad
+    CONFIGURE_COMMAND cd ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad && ./configure
+    BUILD_COMMAND cd ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad && make -j 20
+    INSTALL_COMMAND cp ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src/client/linux/libbreakpad_client.a ${CMAKE_BINARY_DIR}/lib/libbreakpad_client.a && cp -r ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src ${CMAKE_BINARY_DIR}/third_party/breakpad
+    TEST_COMMAND ""
+    BUILD_IN_SOURCE True
+  )
+  add_library(breakpad STATIC IMPORTED)
+  add_dependencies(breakpad project_breakpad)
+  set_target_properties(breakpad PROPERTIES IMPORTED_LOCATION "/home/davidriazati/local/pytorch/build/third_party/breakpad/client/linux/libbreakpad_client.a")
 
-add_dependencies(breakpad project_breakpad)
-
-# Add the include directory
-include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src)
+  # Add the include directory
+  include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src)
+endif()
 
 
 # ---[ OpenCV

@@ -66,7 +66,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${CMAKE_BINARY_DIR}/caffe2/aten/src
     ${CMAKE_BINARY_DIR}/third_party
     ${CMAKE_BINARY_DIR}/third_party/onnx
-    ${CMAKE_BINARY_DIR}/third_party/breakpad/src
 
     ${TORCH_ROOT}/third_party/valgrind-headers
 
@@ -132,8 +131,6 @@ if(USE_CUDA)
     endif()
 
 endif()
-
-list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${CMAKE_BINARY_DIR}/lib/libbreakpad_client.a)
 
 if(USE_ROCM)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)

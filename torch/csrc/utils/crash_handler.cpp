@@ -1,51 +1,50 @@
-#include <client/linux/handler/exception_handler.h>
-#include <torch/csrc/utils/crash_handler.h>
+#include <iostream>
 
-#include <pybind11/pybind11.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
-#include <algorithm>
-#include <memory>
+#include <client/linux/handler/exception_handler.h>
+
+#include <c10/util/Exception.h>
+#include <torch/csrc/utils/crash_handler.h>
 
 static bool dumpCallback(
     const google_breakpad::MinidumpDescriptor& descriptor,
     void* context,
     bool succeeded) {
   if (succeeded) {
-    std::cout << "Wrote minidump to " << descriptor.path() << std::endl;
+    std::cerr << "Wrote minidump to " << descriptor.path() << std::endl;
   }
   return succeeded;
 }
 
-std::unique_ptr<google_breakpad::ExceptionHandler> handler;
-std::string minidump_directory;
-
 namespace torch {
 namespace crash_handler {
 
-void initCrashHandlerBindings(PyObject* module) {
-  auto m = py::handle(module).cast<py::module>();
+static std::unique_ptr<google_breakpad::ExceptionHandler> handler;
+static std::string minidump_directory;
 
-  m.def(
-       "_enable_minidump_collection",
-       [](const std::string& dir) {
-         if (handler == nullptr) {
-           minidump_directory = dir;
-           handler = std::make_unique<google_breakpad::ExceptionHandler>(
-               google_breakpad::MinidumpDescriptor(minidump_directory),
-               nullptr,
-               dumpCallback,
-               nullptr,
-               true,
-               -1);
-         }
-       })
-      .def("_get_minidump_directory", []() { return minidump_directory; })
-      .def("_crash", []() {
-        // TODO: Testing only, remove before landing
-        volatile int* bad = nullptr;
-        return *bad;
-      });
+TORCH_API void _enable_minidump_collection(const std::string& dir) {
+#ifdef __linux__
+  minidump_directory = dir;
+  handler = std::make_unique<google_breakpad::ExceptionHandler>(
+      google_breakpad::MinidumpDescriptor(minidump_directory),
+      nullptr,
+      dumpCallback,
+      nullptr,
+      true,
+      -1);
+#else
+  AT_ERROR(
+      "Minidump collection is currently only implemented for Linux platforms");
+#endif
 }
+
+TORCH_API const std::string& _get_minidump_directory() {
+  if (handler == nullptr) {
+    AT_ERROR(
+        "Minidump handler is uninintialized, make sure to call _enable_minidump_collection first");
+  }
+  return minidump_directory;
+}
+
 
 } // namespace crash_handler
 } // namespace torch
