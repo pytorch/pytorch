@@ -277,7 +277,9 @@ def reduce_package_script_module(importer: PackageImporter, ts_id: str) -> torch
     performs work of loading and returning ScriptModule 
     """
     cu = torch._C.CompilationUnit()
-    cpp_module = torch._C._import_ir_module_from_package(cu, importer.zip_reader, validate_map_location(importer.last_map_location), ts_id)
+    cpp_module = torch._C._import_ir_module_from_package(
+        cu, importer.zip_reader, validate_map_location(importer.last_map_location), ts_id
+    )
     return wrap_cpp_module(cpp_module)
 
 

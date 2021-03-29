@@ -129,8 +129,8 @@ class PackageExporter:
         self.matched_patterns: Set[int] = set()
         self.debug_deps: List[Tuple[str, str]] = []
         self._unique_id = 0
-        self._next_ts_id = 0;
-        self._next_storage_id = 0;
+        self._next_ts_id = 0
+        self._next_storage_id = 0
 
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
@@ -228,7 +228,7 @@ class PackageExporter:
         ret = self._next_storage_id
         self._next_storage_id += 1
         return str(ret)
-    
+
     def save_source_string(
         self,
         module_name: str,
@@ -571,7 +571,7 @@ node [shape=box];
     def _persistent_id(self, obj):
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            obj_key = str(obj._cdata)
+            obj_key = self.get_storage_id()
             location = location_tag(obj)
             self.serialized_storages[obj_key] = obj
 
