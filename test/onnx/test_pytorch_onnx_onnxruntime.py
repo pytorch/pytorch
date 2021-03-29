@@ -82,6 +82,7 @@ def run_ort(ort_sess, input):
 
 
 def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
+    # print("pytorch output:", output, "\nort_outs:", ort_outs)
     output, _ = torch.jit._flatten(output)
     outputs = [to_numpy(outp) for outp in output]
 
@@ -3106,6 +3107,54 @@ class TestONNXRuntime(unittest.TestCase):
     def test_batchnorm3d_noaffine(self):
         x = torch.randn(10, 3, 128, 128, 128)
         model = torch.nn.BatchNorm3d(3, affine=False)
+        self.run_test(model, x)
+
+    def test_instancenorm1d_runningstats(self):
+        x = torch.randn(20, 100, 40)
+        model = torch.nn.InstanceNorm1d(100, affine=True, track_running_stats=True)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm1d(100, affine=False, track_running_stats=True)
+        self.run_test(model, x)
+
+    def test_instancenorm1d_norunningstats(self):
+        x = torch.randn(20, 100, 40)
+        model = torch.nn.InstanceNorm1d(100, affine=True, track_running_stats=False)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm1d(100, affine=False, track_running_stats=False)
+        self.run_test(model, x)
+
+    def test_instancenorm2d_runningstats(self):
+        x = torch.randn(20, 100, 35, 45)
+        model = torch.nn.InstanceNorm2d(100, affine=True, track_running_stats=True)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm2d(100, affine=False, track_running_stats=True)
+        self.run_test(model, x)
+
+    def test_instancenorm2d_norunningstats(self):
+        x = torch.randn(20, 100, 35, 45)
+        model = torch.nn.InstanceNorm2d(100, affine=True, track_running_stats=False)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm2d(100, affine=False, track_running_stats=False)
+        self.run_test(model, x)
+
+    def test_instancenorm3d_runningstats(self):
+        x = torch.randn(20, 100, 35, 45, 10)
+        model = torch.nn.InstanceNorm3d(100, affine=True, track_running_stats=True)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm3d(100, affine=False, track_running_stats=True)
+        self.run_test(model, x)
+
+    def test_instancenorm3d_norunningstats(self):
+        x = torch.randn(20, 100, 35, 45, 10)
+        model = torch.nn.InstanceNorm3d(100, affine=True, track_running_stats=False)
+        self.run_test(model, x)
+
+        model = torch.nn.InstanceNorm3d(100, affine=False, track_running_stats=False)
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
