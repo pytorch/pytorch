@@ -29,8 +29,7 @@ def get_test_case_times() -> Dict[str, float]:
                     name = f'{casename} (__main__.{suitename})'
                     succeeded: bool = test_case['status'] is None
                     if succeeded:
-                        if name not in test_names_to_times:
-                            test_names_to_times[name].append(test_case['seconds'])
+                        test_names_to_times[name].append(test_case['seconds'])
     return {test_case: statistics.mean(times) for test_case, times in test_names_to_times.items()}
 
 
