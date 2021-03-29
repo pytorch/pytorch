@@ -313,10 +313,10 @@ Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_
 Tensor& gather_out(Tensor& result, const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
   reportNYIDimnameOverload("gather");
 }
-Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
   reportNYIDimnameOverload("index_add");
 }
-Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
   reportNYIDimnameOverload("index_add");
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
