@@ -868,7 +868,7 @@ class Quantizer:
 
         # move to cpu since we only have quantized cpu kernels
         model.eval().cpu()
-        self.modules = dict(model.named_modules(allow_duplicate=True))
+        self.modules = dict(model.named_modules(remove_duplicate=False))
 
         custom_module_classes = get_custom_module_class_keys(
             convert_custom_config_dict,

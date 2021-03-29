@@ -2736,7 +2736,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = prepare_fx(m, {"": default_qconfig})
         # two inputs and one output of torch.cat are using same observer, so we have
         # 2 observers that's replicated
-        all_observers = len(dict(m.named_modules(allow_duplicate=True)))
+        all_observers = len(dict(m.named_modules(remove_duplicate=False)))
         distinct_observers = len(dict(m.named_modules()))
         self.assertEqual(all_observers, distinct_observers + 2)
 
