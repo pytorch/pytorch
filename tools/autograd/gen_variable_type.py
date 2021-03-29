@@ -735,7 +735,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 # TODO update this when inplace namings are unified
                 res = "self"
 
-
+            assert derivative.required_inputs_fw_grad is not None
             requires_fw_grad = " || ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)
                                            for inp in differentiable_inputs if inp.name in derivative.required_inputs_fw_grad])
             if not requires_fw_grad:
