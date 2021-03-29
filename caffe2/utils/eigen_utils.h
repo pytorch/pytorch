@@ -8,6 +8,8 @@
 
 #include "caffe2/core/logging.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 // Common Eigen types that we will often use
@@ -146,7 +148,7 @@ void GetSubArray(
   // using T = typename Derived::Scalar;
 
   out_array->derived().resize(indices.size());
-  for (int i = 0; i < indices.size(); i++) {
+  for (const auto i : c10::irange(indices.size())) {
     DCHECK_LT(indices[i], array.size());
     (*out_array)[i] = array[indices[i]];
   }
@@ -179,7 +181,7 @@ void GetSubArrayRows(
     Eigen::ArrayBase<Derived2>* out_array) {
   out_array->derived().resize(row_indices.size(), array2d.cols());
 
-  for (int i = 0; i < row_indices.size(); i++) {
+  for (const auto i : c10::irange(row_indices.size())) {
     DCHECK_LT(row_indices[i], array2d.size());
     out_array->row(i) =
         array2d.row(row_indices[i]).template cast<typename Derived2::Scalar>();
@@ -190,7 +192,7 @@ void GetSubArrayRows(
 template <class Derived>
 std::vector<int> GetArrayIndices(const Eigen::ArrayBase<Derived>& array) {
   std::vector<int> ret;
-  for (int i = 0; i < array.size(); i++) {
+  for (const auto i : c10::irange(array.size())) {
     if (array[i]) {
       ret.push_back(i);
     }

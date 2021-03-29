@@ -152,7 +152,7 @@ IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
         auto cls = source_importer_.loadType(qn)->expect<ClassType>();
         return c10::StrongTypePtr(compilation_unit_, std::move(cls));
       },
-      &tensor_table_);
+      tensor_table_);
   return ivalue;
 }
 
