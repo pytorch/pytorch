@@ -92,8 +92,8 @@ class RegisterDispatchKey:
             if (self.dispatch_key == DispatchKey.Meta and
                     f.func.kind() is SchemaKind.inplace and
                     # Defer to composites for meta implementation
-                    self.dispatch_key.CompositeImplicitAutograd not in f.dispatch and
-                    self.dispatch_key.CompositeExplicitAutograd not in f.dispatch and
+                    DispatchKey.CompositeImplicitAutograd not in f.dispatch and
+                    DispatchKey.CompositeExplicitAutograd not in f.dispatch and
                     # Inplace list operations are not supported
                     len(f.func.returns) == 1):
                 inplace_meta = True
@@ -135,12 +135,13 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             # short circuit for inplace_meta
             if inplace_meta:
                 assert f.func.arguments.self_arg is not None
-                self_arg = f.func.arguments.self_arg.argument.name
+                self_arg_name = f.func.arguments.self_arg.argument.name
                 # TODO: handle in place on tensor list
                 return f"""
 {returns_type} {name}({args_str}) {{
-   TORCH_CHECK_NOT_IMPLEMENTED({self_arg}.is_meta(), "Cannot inplace into non-meta tensor with meta tensor argument");
-   return {self_arg};
+  TORCH_CHECK_NOT_IMPLEMENTED({self_arg_name}.is_meta(),
+    "Cannot inplace into non-meta tensor with meta tensor argument");
+  return {self_arg_name};
 }}
 """
 
