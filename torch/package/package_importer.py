@@ -493,7 +493,7 @@ class PackageImporter(Importer):
 
     def _add_file(self, filename: str):
         *prefix, last = filename.split("/")
-        # need to not treat torchscript code as module to be interacted with 
+        # need to not treat torchscript code as module to be interacted with
         if len(prefix) > 1 and prefix[0] == ".data" and prefix[1] == "ts_code":
             return
         package = self._get_or_create_package(prefix)

@@ -86,7 +86,7 @@ class PackagingTsSerTest(PackageTestCase):
 
         scripted_mod_0 = torch.jit.script(ModC("a", "b"))
 
-        # redefintion is intentional
+        # redefinition is intentional
         class ModD(torch.nn.Module):
             def __init__(self, name: str):
                 super().__init__()
@@ -247,8 +247,8 @@ class PackagingTsSerTest(PackageTestCase):
         with PackageExporter(filename_0, verbose=False) as e:
             e.save_pickle("res", "mod1.pkl", scripted_mod_foo)
 
-        importer_0 = PackageImporter(filename_0) 
-        loaded_module_0 = importer_0.load_pickle("res", "mod1.pkl") 
+        importer_0 = PackageImporter(filename_0)
+        loaded_module_0 = importer_0.load_pickle("res", "mod1.pkl")
 
         filename_1 = self.temp()
         with PackageExporter(filename_1, verbose=False) as e:
@@ -257,7 +257,7 @@ class PackagingTsSerTest(PackageTestCase):
 
         importer_1 = PackageImporter(filename_1)
         loaded_module_1 = importer_1.load_pickle("res", "mod1.pkl")
-        reloaded_module_0 = importer_1.load_pickle("res", "mod2.pkl") 
+        reloaded_module_0 = importer_1.load_pickle("res", "mod2.pkl")
 
         self.assertEqual(loaded_module_0("input"), scripted_mod_foo("input"))
         self.assertEqual(loaded_module_0("input"), reloaded_module_0("input"))
@@ -294,7 +294,7 @@ class PackagingTsSerTest(PackageTestCase):
         with PackageExporter(filename_0, verbose=False) as e:
             e.save_pickle("res", "mod1.pkl", scripted_mod_foo)
 
-        importer_0 = importer = PackageImporter(filename_0) 
+        importer_0 = importer = PackageImporter(filename_0)
 
         filename_1 = self.temp()
         with PackageExporter(filename_1, verbose=False) as e:
@@ -302,8 +302,8 @@ class PackagingTsSerTest(PackageTestCase):
 
         importer_1 = PackageImporter(filename_1)
 
-        self.assertTrue("torchvision" in str(importer_0.file_structure())) 
-        self.assertFalse("torchvision" in str(importer_1.file_structure())) 
+        self.assertTrue("torchvision" in str(importer_0.file_structure()))
+        self.assertFalse("torchvision" in str(importer_1.file_structure()))
 
 if __name__ == "__main__":
     run_tests()
