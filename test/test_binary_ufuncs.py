@@ -692,8 +692,8 @@ class TestBinaryUfuncs(TestCase):
                 self._test_pow(base_tensor, exp_scalar)
                 self._test_pow(base_tensor, exp_tensor)
 
-        _test_int_and_float_pow(torch.int8, -3, 4, device)
-        _test_int_and_float_pow(torch.uint8, 0, 4, device)
+        _test_int_and_float_pow(torch.int8, -2, 2, device)
+        _test_int_and_float_pow(torch.uint8, 0, 3, device)
         _test_int_and_float_pow(torch.int16, -5, 5, device)
         _test_int_and_float_pow(torch.int64, -10, 10, device)
         _test_int_and_float_pow(torch.int32, -10, 10, device)
