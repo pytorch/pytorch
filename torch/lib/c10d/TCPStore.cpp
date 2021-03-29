@@ -363,7 +363,7 @@ void TCPStoreDaemon::compareSetHandler(int socket) {
       pos->second = std::move(newValue);
 
       // Send key update to all watching clients
-      sendKeyUpdatesToClients(key, currentValue, newValue);
+      sendKeyUpdatesToClients(key, currentValue, pos->second);
     }
     tcputil::sendVector<uint8_t>(socket, pos->second);
   }

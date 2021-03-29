@@ -257,20 +257,3 @@ TEST(TCPStoreTest, newTest) {
 
   clientThread.join();
 }
-
-// TEST(TCPStoreTest, myTest) {
-//   c10d::PortType masterPort = 12345;
-//   int masterListenSocket_ = -1;
-//   int tcpStorePort_ = -1;
-//   std::tie(masterListenSocket_, tcpStorePort_) = c10d::tcputil::listen(masterPort);
-
-//   std::string tcpStoreAddr_ = "localhost";
-//   int storeSocket_ = c10d::tcputil::connect(
-//     tcpStoreAddr_, tcpStorePort_, /* wait= */ true, std::chrono::seconds(300));
-//   LOG(ERROR) << "hello!!!";
-//   std::cout << std::to_string(storeSocket_) << std::endl;
-//   c10d::tcputil::closeSocket(storeSocket_);
-//   std::cout << std::to_string(storeSocket_) << std::endl;
-//   c10d::tcputil::closeSocket(storeSocket_);
-//   std::cout << std::to_string(storeSocket_) << std::endl;
-// }
