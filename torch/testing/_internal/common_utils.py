@@ -692,7 +692,7 @@ def is_iterable(obj):
 
 
 def is_iterable_of_tensors(iterable, include_empty=False):
-    """ Returns True if iterable is an iterable of tensors and False o.w. 
+    """ Returns True if iterable is an iterable of tensors and False o.w.
 
         If the iterable is empty, the return value is :attr:`include_empty`
     """
