@@ -5,6 +5,8 @@
 #include <ATen/Functions.h>
 #include <ATen/TensorOperators.h>
 
+#include <c10/util/irange.h>
+
 /// Contains the implementation of parallel reductions in TensorIterator.
 
 namespace at {
@@ -136,7 +138,7 @@ void TensorIteratorBase::foreach_reduced_elt(loop_subiter_t loop, bool paralleli
     auto non_reduced_shape = shape.slice(reduce_dims, shape.size() - reduce_dims);
 
     int64_t non_reduced_numel = 1;
-    for (int i = 0; i < non_reduced_shape.size(); ++i) {
+    for (const auto i : c10::irange(non_reduced_shape.size())) {
       non_reduced_numel *= non_reduced_shape[i];
     }
     DimCounter dims {non_reduced_shape, {0, non_reduced_numel}};
