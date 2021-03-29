@@ -1,3 +1,7 @@
+import bz2
+import json
+from collections import defaultdict
+
 from typing import Dict, List, Optional, Union, Any, cast
 from typing_extensions import Literal, TypedDict
 
@@ -8,6 +12,8 @@ try:
 except ImportError:
     HAVE_BOTO3 = False
 
+
+OSSCI_METRICS_BUCKET = 'ossci-metrics'
 
 Commit = str  # 40-digit SHA-1 hex string
 Status = Optional[Literal['errored', 'failed', 'skipped']]
@@ -101,16 +107,16 @@ def get_cases(
     data: Report,
     filename: Optional[str],
     suite_name: Optional[str],
-    test_name: str,
+    test_name: Optional[str],
 ) -> List[Version2Case]:
     cases: List[Version2Case] = []
     if 'format_version' not in data:  # version 1 implicitly
         v1report = cast(Version1Report, data)
         suites = v1report['suites']
         for sname, v1suite in suites.items():
-            if sname == suite_name or not suite_name:
+            if not suite_name or sname == suite_name:
                 for v1case in v1suite['cases']:
-                    if v1case['name'] == test_name:
+                    if not test_name or v1case['name'] == test_name:
                         cases.append(newify_case(v1case))
     else:
         v_report = cast(VersionedReport, data)
@@ -121,9 +127,34 @@ def get_cases(
                 if fname == filename or not filename:
                     for sname, v2suite in v2file['suites'].items():
                         if sname == suite_name or not suite_name:
-                            v2case = v2suite['cases'].get(test_name)
-                            if v2case:
-                                cases.append(v2case)
+                            for cname, v2case in v2suite['cases'].items():
+                                if not test_name or cname == test_name:
+                                    cases.append(v2case)
         else:
             raise RuntimeError(f'Unknown format version: {version}')
     return cases
+
+
+def _parse_s3_summaries(summaries: Any, jobs: List[str]) -> Dict[str, List[Any]]:
+    summary_dict = defaultdict(list)
+    for summary in summaries:
+        summary_job = summary.key.split('/')[2]
+        if summary_job in jobs or len(jobs) == 0:
+            binary = summary.get()["Body"].read()
+            string = bz2.decompress(binary).decode("utf-8")
+            summary_dict[summary_job].append(json.loads(string))
+    return summary_dict
+
+# Collect and decompress S3 test stats summaries into JSON.
+# data stored on S3 buckets are pathed by {sha}/{job} so we also allow
+# optional jobs filter
+def get_test_stats_summaries(*, sha: str, jobs: Optional[List[str]] = None) -> Dict[str, List[Any]]:
+    bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
+    summaries = bucket.objects.filter(Prefix=f"test_time/{sha}")
+    return _parse_s3_summaries(summaries, jobs=list(jobs or []))
+
+
+def get_test_stats_summaries_for_job(*, sha: str, job_prefix: str) -> Dict[str, List[Any]]:
+    bucket = get_S3_bucket_readonly(OSSCI_METRICS_BUCKET)
+    summaries = bucket.objects.filter(Prefix=f"test_time/{sha}/{job_prefix}")
+    return _parse_s3_summaries(summaries, jobs=list())
