@@ -116,7 +116,7 @@ static bool should_skip(const Tensor& t) {
   return t.numel() == 0 && t.dim() == 1;
 }
 
-Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
+Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
@@ -204,7 +204,8 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   allContiguous = allContiguous && result.is_contiguous(first_tensor_mem_format);
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   ScalarType dtype = notSkippedTensor.scalar_type();
-  if (use_serial_kernel && allContiguous && no_type_promotion && (dtype == ScalarType::Double || dtype == ScalarType::Float)) {
+  bool serial_dtype = (dtype == ScalarType::Double || dtype == ScalarType::Float || dtype == ScalarType::BFloat16);
+  if (use_serial_kernel && allContiguous && no_type_promotion && serial_dtype) {
     cat_serial_stub(kCPU, result, tensors, dim);
     return result;
   }
@@ -266,7 +267,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 Tensor _cat_cpu(TensorList tensors, int64_t dim) {
   ScalarType high_type = result_type(tensors);
   Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
-  return native::_cat_out_cpu(result, tensors, dim);
+  return native::_cat_out_cpu(tensors, dim, result);
 }
 
 static void check_cat_no_zero_dim(TensorList tensors) {
@@ -369,7 +370,14 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
     }
     auto sizes_copy = sizes.vec();
     sizes_copy[wrapped] = cumulative_offset;
-    return native::sparse_coo_tensor(idxs, vals, sizes_copy, tensors[0].options());
+    return native::sparse_coo_tensor(
+        idxs,
+        vals,
+        sizes_copy,
+        optTypeMetaToScalarType(tensors[0].options().dtype_opt()),
+        tensors[0].options().layout_opt(),
+        tensors[0].options().device_opt(),
+        tensors[0].options().pinned_memory_opt());
   }
   else {
     // Catting along a dense dimension requires us to create new values.
@@ -406,16 +414,33 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
       zeros_sizes[0] = t._values().size(0);
       zeros_sizes[values_dim] = cumulative_size;
       cumulative_size += t._values().size(values_dim);
-      auto z1 = native::zeros(zeros_sizes, t._values().options());
+      auto z1 = native::zeros(
+          zeros_sizes,
+          optTypeMetaToScalarType(t._values().options().dtype_opt()),
+          t._values().options().layout_opt(),
+          t._values().options().device_opt(),
+          t._values().options().pinned_memory_opt());
       zeros_sizes[values_dim] = total_size - cumulative_size;
-      auto z2 = native::zeros(zeros_sizes, t._values().options());
+      auto z2 = native::zeros(
+          zeros_sizes,
+          optTypeMetaToScalarType(t._values().options().dtype_opt()),
+          t._values().options().layout_opt(),
+          t._values().options().device_opt(),
+          t._values().options().pinned_memory_opt());
       vals_pieces.push_back(native::cat({z1, t._values(), z2}, values_dim));
       idxs_pieces.push_back(t._indices());
     }
     auto sizes_copy = sizes.vec();
     sizes_copy[wrapped] = total_size;
     // This can create an uncoalesced tensor
-    return native::sparse_coo_tensor(native::cat(idxs_pieces, 1), native::cat(vals_pieces), sizes_copy, tensors[0].options());
+    return native::sparse_coo_tensor(
+        native::cat(idxs_pieces, 1),
+        native::cat(vals_pieces),
+        sizes_copy,
+        optTypeMetaToScalarType(tensors[0].options().dtype_opt()),
+        tensors[0].options().layout_opt(),
+        tensors[0].options().device_opt(),
+        tensors[0].options().pinned_memory_opt());
   }
 }
 
@@ -1059,7 +1084,15 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
         return new_values.sum(0);
       }
     } else {
-      auto dimIndices = (arange(0, sparse_dim, self.device()) != dim).nonzero().view(-1);
+      auto dimIndices = (arange(
+                             0,
+                             sparse_dim,
+                             c10::nullopt /* dtype */,
+                             c10::nullopt /* layout */,
+                             self.device(),
+                             c10::nullopt /* pin_memory */) != dim)
+                            .nonzero()
+                            .view(-1);
       auto new_indices = indices.index_select(1, nzIndices).index_select(0, dimIndices);
       return _sparse_coo_tensor_with_dims_and_tensors(
             sparse_dim - 1, dense_dim, new_sizes, new_indices, new_values, self.options());
@@ -1445,7 +1478,7 @@ Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
 }
 
 // TODO(msubkhankulov): refactor to use _stack_out
-Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
+Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
@@ -1462,7 +1495,7 @@ Tensor hstack(TensorList tensors) {
   return at::cat(rep, 1);
 }
 
-Tensor& hstack_out(Tensor& result, TensorList tensors) {
+Tensor& hstack_out(TensorList tensors, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "hstack expects a non-empty TensorList");
   auto rep = at::atleast_1d(tensors);
@@ -1479,7 +1512,7 @@ Tensor vstack(TensorList tensors) {
   return at::cat(rep, 0);
 }
 
-Tensor& vstack_out(Tensor& result, TensorList tensors) {
+Tensor& vstack_out(TensorList tensors, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "vstack expects a non-empty TensorList");
   auto rep = at::atleast_2d(tensors);
@@ -1492,7 +1525,7 @@ Tensor dstack(TensorList tensors) {
   auto rep = at::atleast_3d(tensors);
   return at::cat(rep, 2);
 }
-Tensor& dstack_out(Tensor& result, TensorList tensors) {
+Tensor& dstack_out(TensorList tensors, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "dstack expects a non-empty TensorList");
   auto rep = at::atleast_3d(tensors);
@@ -1831,11 +1864,15 @@ static Tensor unsqueeze_sparse(Tensor const &self, int64_t dim /* should already
   auto sizes = self.sizes().vec();
   sizes.insert(sizes.begin() + dim, 1);
   if (dim <= sparse_dim) {
-    auto new_indices = native::cat({
-      indices.narrow(0, 0, dim),
-      native::zeros({1, indices.size(1)}, indices.options().dtype(kLong)),
-      indices.narrow(0, dim, indices.size(0) - dim)
-    });
+    auto new_indices = native::cat(
+        {indices.narrow(0, 0, dim),
+         native::zeros(
+             {1, indices.size(1)},
+             kLong,
+             indices.options().layout_opt(),
+             indices.options().device_opt(),
+             indices.options().pinned_memory_opt()),
+         indices.narrow(0, dim, indices.size(0) - dim)});
     return _sparse_coo_tensor_with_dims_and_tensors(
         sparse_dim + 1, dense_dim, sizes, new_indices, self._values(), self.options());
   } else {
@@ -2165,7 +2202,7 @@ Tensor diag(const Tensor& self, int64_t dimension) {
   return result;
 }
 
-Tensor& diag_cpu_out(Tensor &result, const Tensor& self, int64_t dimension) {
+Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, self.scalar_type(), "diag", [&] {
     apply_diag<scalar_t>(result, self, dimension);
   });

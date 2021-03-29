@@ -16,6 +16,8 @@ struct TORCH_API StaticModuleOptions {
   bool cleanup_activations{true};
   bool enable_out_variant{true};
   bool optimize_memory{true};
+  // to enable MemoryPlanner on output tensors
+  bool optimize_output_memory{false};
 };
 
 /// The static runime supports two execution modes.
@@ -76,12 +78,23 @@ class TORCH_API StaticModule {
       const torch::jit::Module& m,
       const StaticModuleOptions& opts = StaticModuleOptions());
 
+  typedef enum {
+    CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
+    INPUT_VALUE = -1, // VALUE nodes representing graph inputs
+  } VALUE_KIND;
+
  private:
   explicit StaticModule(
       std::pair<
           std::shared_ptr<torch::jit::Graph>,
           c10::optional<c10::FunctionSchema>> graph_and_schema,
       const StaticModuleOptions& opts);
+
+  // for <kind, idx>
+  //   if kind == CONSTANT_KIND: map to constants_[idx]
+  //   if kind == INPUT_KIND: map to inputs_[idx]
+  //   otherwise: map to nodes_[kind].outputs()[idx]
+  using DefInfo = std::pair<int, int>;
 
  public:
   std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inps);
@@ -100,13 +113,13 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
-  inline const std::unordered_map<int, std::vector<std::pair<int, int>>>&
-  index_map() const {
-    return index_map_;
+  inline const std::unordered_map<int, std::vector<DefInfo>>& index_map()
+      const {
+    return node_inputs_ssa_def_map_;
   }
 
-  inline const std::vector<std::pair<int, int>>& output_indices() const {
-    return output_indices_;
+  inline const std::vector<DefInfo>& output_indices() const {
+    return output_ssa_defs_;
   }
 
   inline const std::vector<IValue>& constants() const {
@@ -122,8 +135,8 @@ class TORCH_API StaticModule {
   }
 
   inline const std::unordered_map<const Value*, std::vector<const Value*>>&
-  shared_values() const {
-    return shared_values_;
+  values_share_same_storage() const {
+    return value_to_same_storage_values_;
   }
 
   inline const std::unordered_set<const Value*>& external_values() const {
@@ -136,15 +149,19 @@ class TORCH_API StaticModule {
   // Static runtime states
   StaticModuleOptions opts_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
-  // IValue table (including inputs, outputs, intermediates, and weights)
+  // IValue table (defined by prim::Constant nodes)
   std::vector<IValue> constants_;
-  std::vector<std::pair<int, int>> output_indices_;
-  std::unordered_map<int, std::vector<std::pair<int, int>>> index_map_;
+  // a vector of ssa_defs corresponding to graph->outputs()
+  std::vector<DefInfo> output_ssa_defs_;
+  // map a node idx (in graph order) to a vector of ssa_defs for node inputs
+  std::unordered_map<int, std::vector<DefInfo>> node_inputs_ssa_def_map_;
   // The nodes we need to run
   std::vector<ProcessedNode> nodes_;
-  // Output of liveness analyis. A mapping from a value to the set of values
-  // with which it could potentially share memory.
-  std::unordered_map<const Value*, std::vector<const Value*>> shared_values_;
+  // map a value to the set of values that may share the same storage with it
+  std::unordered_map<const Value*, std::vector<const Value*>>
+      value_to_same_storage_values_;
+  // values whose live-time exceeds that of running one inference (e.g., input,
+  // output, prim::Constants, and their aliases)
   std::unordered_set<const Value*> external_values_;
 
   // Original input
@@ -278,7 +295,7 @@ class MemoryPlanner {
   }
 
  private:
-  std::vector<IValue*> unmanaged_values_;
+  std::vector<IValue*> unmanaged_ivalues_;
   // each pair contains the size (in bytes) of data to be allocated
   // and a vector of StorageImpl's that should be backed by that same data
   // Thus, if memonger is disabled, all vectors are of size 1.
