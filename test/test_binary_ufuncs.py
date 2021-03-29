@@ -12,7 +12,7 @@ from functools import partial
 
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
-    TestCase, iter_indices, TEST_WITH_ASAN, run_tests,
+    TestCase, iter_indices, TEST_WITH_ASAN, run_tests, skipIfRocm,
     torch_to_numpy_dtype_dict, make_tensor, TEST_SCIPY, set_default_dtype)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
