@@ -24,7 +24,6 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -372,14 +371,77 @@ void SetExportModuleMobileInfoConverter(
   GetMobileInfoConverter() = std::move(converter);
 }
 
-class ScriptModuleSerializer {
+void ScriptModuleSerializerBase::convertNamedType(const c10::NamedTypePtr& class_type) {  
+  if (converted_types_.count(class_type)) {
+    return;
+  }
+  converted_types_.insert(class_type);
+  auto qualname = type_name_uniquer_.getUniqueName(class_type);
+  std::string qualifier = qualname.prefix();
+  PythonPrint* pp = file_streams_.find(qualifier);
+
+  auto type_printer =
+      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
+    auto namedType = t->cast<c10::NamedType>();
+    if (namedType && namedType->name()) {
+      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+    }
+    return c10::nullopt;
+  };
+  if (!pp) {
+    pp = &file_streams_.insert(
+        std::move(qualifier),
+        PythonPrint(
+            constant_table_,
+            class_deps_,
+            type_printer,
+            true));
+  }
+  pp->printNamedType(class_type);
+}
+
+void ScriptModuleSerializerBase::convertTypes(const at::NamedTypePtr &root_type) {
+  class_deps_.add(root_type);
+  for (size_t i = 0; i < class_deps_.size(); ++i) {
+    // note: convertNameType may extend class_deps_, so re-checking .size() is necessary
+    convertNamedType(class_deps_[i]);
+  }
+}
+
+void ScriptModuleSerializerBase::writeFiles(const std::string& code_dir) {
+  // Mapping of filename => src. We need this because multiple classes may go
+  // in the same file (e.g. foo.bar.Baz and foo.bar.Qux)
+  for (auto &item : file_streams_) {
+    const std::string filename =
+        qualifierToArchivePath(item.key(), code_dir);
+
+    std::string src = item.value().str();    
+    // Only compress these records if they're not tiny.
+    // The cpu cost of generating zip datastructs and compressing isn't
+    // well-spent for very small records.
+    static constexpr size_t kMinToCompress = 200;
+
+    writer_.writeRecord(filename, src.c_str(), src.size(),
+                        src.size() > kMinToCompress);
+
+    // Write out the debug information
+    std::string debugFilename = filename + ".debug_pkl";
+    SourceRangePickler source_range_pickler;
+    auto range_data = source_range_pickler.pickle(item.value().ranges());
+    writer_.writeRecord(debugFilename, range_data.data(), range_data.size(),
+                        range_data.size() > kMinToCompress);
+  }
+}
+
+// Implementation of ScriptModuleSerializerBase to export original TS format
+class ScriptModuleSerializer : public ScriptModuleSerializerBase {
  public:
   explicit ScriptModuleSerializer(const std::string& filename)
-      : writer_(filename) {}
+      : writer_concrete_(filename), ScriptModuleSerializerBase(writer_concrete_) {}
 
   explicit ScriptModuleSerializer(
       const std::function<size_t(const void*, size_t)>& writer_func)
-      : writer_(writer_func) {}
+      : writer_concrete_(writer_func), ScriptModuleSerializerBase(writer_concrete_) {}
 
   void serialize(
       const Module& module,
@@ -391,7 +453,8 @@ class ScriptModuleSerializer {
     // Serialize the model object
     writeArchive("data", module._ivalue());
     // Then we serialize all code info.
-    writeCode(module.type());
+    convertTypes(module.type());
+    writeFiles("code/");
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
@@ -487,45 +550,7 @@ class ScriptModuleSerializer {
       writeArchive("metadata", content_to_write);
     }
   }
-
-  void writeCode(const at::NamedTypePtr& root_type) {
-    class_deps_.add(root_type);
-    for (size_t i = 0; i < class_deps_.size(); ++i) {
-      // note: convertNameType may extend class_deps_, so re-checking
-      // .size() is necessary
-      convertNamedType(class_deps_[i]);
-    }
-
-    // Mapping of filename => src. We need this because multiple classes may go
-    // in the same file (e.g. foo.bar.Baz and foo.bar.Qux)
-    for (auto& item : file_streams_) {
-      const std::string filename = qualifierToArchivePath(item.key(), "code/");
-
-      std::string src = item.value().str();
-
-      // Only compress these records if they're not tiny.
-      // The cpu cost of generating zip datastructs and compressing isn't
-      // well-spent for very small records.
-      static constexpr size_t kMinToCompress = 200;
-
-      writer_.writeRecord(
-          filename,
-          src.c_str(),
-          src.size(),
-          src.size() > kMinToCompress /*compress*/);
-
-      // Write out the debug information
-      std::string debugFilename = filename + ".debug_pkl";
-      SourceRangePickler source_range_pickler;
-      auto range_data = source_range_pickler.pickle(item.value().ranges());
-      writer_.writeRecord(
-          debugFilename,
-          range_data.data(),
-          range_data.size(),
-          range_data.size() > kMinToCompress /*compress*/);
-    }
-  }
-
+  
   void writeByteCode(const Module& module, bool save_mobile_debug_info) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
@@ -547,44 +572,7 @@ class ScriptModuleSerializer {
     }
   }
 
-  void convertNamedType(const c10::NamedTypePtr& class_type) {
-    if (converted_types_.count(class_type)) {
-      return;
-    }
-    converted_types_.insert(class_type);
-    auto qualname = type_name_uniquer_.getUniqueName(class_type);
-    std::string qualifier = qualname.prefix();
-    PythonPrint* pp = file_streams_.find(qualifier);
-
-    auto type_printer =
-        [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-      auto namedType = t->cast<c10::NamedType>();
-      if (namedType && namedType->name()) {
-        return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-      }
-      return c10::nullopt;
-    };
-    if (!pp) {
-      pp = &file_streams_.insert(
-          std::move(qualifier),
-          PythonPrint(
-              constant_table_,
-              class_deps_,
-              type_printer,
-              /*enforce_importable=*/true));
-    }
-    pp->printNamedType(class_type);
-  }
-
-  caffe2::serialize::PyTorchStreamWriter writer_;
-  std::vector<at::IValue> constant_table_;
-  std::unordered_set<c10::NamedTypePtr> converted_types_;
-  PrintDepsTable class_deps_;
-  TypeNameUniquer type_name_uniquer_;
-
-  // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be
-  // created
-  OrderedDict<std::string, PythonPrint> file_streams_;
+  caffe2::serialize::PyTorchStreamWriter writer_concrete_;
 };
 
 void ExportModule(
