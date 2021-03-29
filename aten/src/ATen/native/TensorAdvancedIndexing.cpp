@@ -58,6 +58,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/Resize.h>
 #include <ATen/Parallel.h>
 
 #include <c10/util/irange.h>
@@ -478,7 +479,8 @@ Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source);
 }
 
-Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+
+Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   auto numel = index.numel();
@@ -526,7 +528,7 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
           iter.unsafe_replace_operand(0, self_data);
           iter.unsafe_replace_operand(1, self_data);
           iter.unsafe_replace_operand(2, source_data);
-          add_stub(iter.device_type(), iter, 1);
+          add_stub(iter.device_type(), iter, alpha);
       }
     });
   }
@@ -536,25 +538,34 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-      self.scalar_type(), "index_add_", [&self, &source, &dim, &index_contig, &numel] {
+      self.scalar_type(), "index_add_", [&self, &source, &dim, &index_contig, &numel, &alpha] {
+      auto alpha_value = alpha.to<scalar_t>();
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
       // TODO: Maybe TensorAccessor can beused here?
       auto* self_ptr = self.data_ptr<scalar_t>();
       auto* source_ptr = source.data_ptr<scalar_t>();
       AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_add_cpu_",
-        [&index_contig, &numel, &self, &self_ptr, &self_stride, &source_ptr, &source_stride] {
+        [&index_contig, &numel, &self, &self_ptr, &self_stride, &source_ptr, &source_stride, alpha_value] {
         auto index_data = index_contig.data_ptr<index_t>();
         for (auto i = 0; i < numel; i++) {
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
             scalar_t *self_ip = self_ptr + self_i * self_stride;
-            *self_ip += *(source_ptr + i * source_stride);
+            *self_ip += *(source_ptr + i * source_stride) * alpha_value;
         }
       });
     });
   }
   return self;
+}
+
+Tensor& index_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  return self.index_add_(dim, index, source, 1);
+}
+
+Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, const Scalar &alpha) {
+  return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source, alpha);
 }
 
 Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
@@ -867,8 +878,13 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
 
-Tensor & gather_out_cpu_cuda(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad, Tensor & result) {
-  result.resize_(index.sizes());
+Tensor& gather_out_cpu_cuda(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    bool sparse_grad,
+    Tensor& result) {
+  resize_output(result, index.sizes());
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_partial_overlap(result, index);
@@ -1223,6 +1239,81 @@ Tensor& take_out_cpu(const Tensor& self, const Tensor& index, Tensor& out) {
 
 Tensor take_backward(const Tensor& grad, const Tensor& input, const Tensor& index) {
   return at::zeros_like(input).put_(index, grad, true);
+}
+
+namespace {
+
+inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
+    const Tensor& self,
+    const Tensor& indices,
+    int64_t dim) {
+  TORCH_CHECK(
+      self.dim() == indices.dim(),
+      "torch.take_along_dim(): input and indices should have the same number of dimensions, ",
+      "but got ", self.dim(), " dimensions for input, and ", indices.dim(), " dimensions for indices")
+  TORCH_CHECK(
+      indices.scalar_type() == ScalarType::Long,
+      "torch.take_along_dim(): dtype of indices should be Long but got ", indices.scalar_type())
+
+  dim = at::maybe_wrap_dim(dim, self.dim());
+
+  DimVector self_sizes{self.sizes()};
+  // update number of elements at dim as per indices
+  self_sizes[dim] = indices.size(dim);
+  auto broadcast_shape = infer_size(self_sizes, indices.sizes());
+  auto indices_broadcasted = at::broadcast_to(indices, broadcast_shape);
+
+  DimVector indices_sizes{indices.sizes()};
+  // update number of elements at dim as per self
+  indices_sizes[dim] = self.size(dim);
+  broadcast_shape = infer_size(indices_sizes, self.sizes());
+  auto self_broadcasted = at::broadcast_to(self, broadcast_shape);
+
+  return std::make_tuple(self_broadcasted, indices_broadcasted, dim);
+}
+
+static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
+  TORCH_CHECK(
+      !t.defined() || t.device() == device,
+      "Expected tensor to have ", device,
+      " Device, but got tensor with ", t.device(), " Device ",
+      "(while checking arguments for ", c, ")");
+}
+
+static inline void checkDevice(CheckedFrom c, at::ArrayRef<Tensor> tensors, Device device) {
+  for (auto &t : tensors) {
+    checkDevice(c, t, device);
+  }
+}
+
+} // anonymous namespace
+
+Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim) {
+  checkDevice("torch.take_along_dim():", {self, indices}, self.device());
+  if (opt_dim.has_value()) {
+    int64_t dim;
+    Tensor self_broadcasted, indices_broadcasted;
+    std::tie(self_broadcasted, indices_broadcasted, dim) =
+        _take_along_dim_helper(self, indices, opt_dim.value());
+    return self_broadcasted.gather(dim, indices_broadcasted);
+  }
+
+  // similar to `take`, but `take` doesn't support the same dtypes as `gather`.
+  return self.view(-1).gather(0, indices.view(-1));
+}
+
+Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim, Tensor& result) {
+  checkDevice("torch.take_along_dim():", {self, indices, result}, self.device());
+  if (opt_dim.has_value()) {
+    int64_t dim;
+    Tensor self_broadcasted, indices_broadcasted;
+    std::tie(self_broadcasted, indices_broadcasted, dim) =
+        _take_along_dim_helper(self, indices, opt_dim.value());
+    return at::gather_out(result, self_broadcasted, dim, indices_broadcasted);
+  }
+
+  // similar to `take`, but `take` doesn't support the same dtypes as `gather`.
+  return at::gather_out(result, self.view(-1), 0, indices.view(-1));
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
