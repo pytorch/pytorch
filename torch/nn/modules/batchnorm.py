@@ -38,8 +38,8 @@ class _NormBase(Module):
         self.affine = affine
         self.track_running_stats = track_running_stats
         if self.affine:
-            self.weight = Parameter(torch.Tensor(num_features))
-            self.bias = Parameter(torch.Tensor(num_features))
+            self.weight = Parameter(torch.empty(num_features))
+            self.bias = Parameter(torch.empty(num_features))
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
@@ -142,6 +142,9 @@ class _BatchNorm(_NormBase):
 
 
 class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
+
+    weight: UninitializedParameter  # type: ignore[assignment]
+    bias: UninitializedParameter  # type: ignore[assignment]
 
     def __init__(self, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
         super(_LazyBatchNorm, self).__init__(

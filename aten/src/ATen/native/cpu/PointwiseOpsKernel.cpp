@@ -10,7 +10,7 @@ namespace at {
 namespace native {
 namespace {
 
-static void addcmul_cpu_kernel(TensorIterator& iter, Scalar value) {
+static void addcmul_cpu_kernel(TensorIterator& iter, const Scalar& value) {
   ScalarType dtype = iter.dtype(0);
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcmul_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();
@@ -28,7 +28,7 @@ static void addcmul_cpu_kernel(TensorIterator& iter, Scalar value) {
   });
 }
 
-static void addcdiv_cpu_kernel(TensorIterator& iter, Scalar value) {
+static void addcdiv_cpu_kernel(TensorIterator& iter, const Scalar& value) {
   ScalarType dtype = iter.dtype(0);
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcdiv_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();
@@ -46,7 +46,7 @@ static void addcdiv_cpu_kernel(TensorIterator& iter, Scalar value) {
   });
 }
 
-static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, Scalar norm, double beta) {
+static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, const Scalar& norm, double beta) {
   ScalarType dtype = iter.dtype(0);
   AT_DISPATCH_ALL_TYPES(dtype, "smooth_l1_backward_cpu_out", [&] {
     auto norm_val = norm.to<scalar_t>();
@@ -84,7 +84,7 @@ static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, Scalar norm, dou
   });
 }
 
-static void huber_backward_cpu_kernel(TensorIterator& iter, Scalar norm, double delta) {
+static void huber_backward_cpu_kernel(TensorIterator& iter, const Scalar& norm, double delta) {
   ScalarType dtype = iter.dtype(0);
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "huber_backward_cpu_out", [&] {
     auto norm_val = norm.to<scalar_t>();
@@ -123,7 +123,7 @@ static void huber_backward_cpu_kernel(TensorIterator& iter, Scalar norm, double 
   });
 }
 
-static void mse_backward_cpu_kernel(TensorIterator& iter, Scalar value) {
+static void mse_backward_cpu_kernel(TensorIterator& iter, const Scalar& value) {
   ScalarType dtype = iter.dtype(0);
   AT_DISPATCH_ALL_TYPES(dtype, "mse_backward_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();

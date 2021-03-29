@@ -457,8 +457,8 @@ void ProcessGroupGloo::RecvWork::abort() {
   buffer_->abortWaitRecv();
 }
 
-ProcessGroupGloo::Options::Options()
-    : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
+ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
+    : ProcessGroup::Options(timeout, GLOO_BACKEND_NAME), threads(2) {}
 
 namespace {
 
@@ -580,12 +580,13 @@ ProcessGroupGloo::ProcessGroupGloo(
     const c10::intrusive_ptr<Store>& store,
     int rank,
     int size,
-    Options options)
+    c10::intrusive_ptr<Options> options)
     : ProcessGroup(rank, size),
       store_(new GlooStore(store)),
+      options_(options),
       stop_(false),
       collectiveCounter_(0) {
-  auto& devices = options.devices;
+  auto& devices = options->devices;
   if (devices.empty()) {
     throw std::runtime_error("No device(s) specified");
   }
@@ -602,12 +603,12 @@ ProcessGroupGloo::ProcessGroupGloo(
   // option is needed if you have a fast NIC that cannot be saturated
   // by a single I/O thread.
   //
-  contexts_.reserve(options.devices.size());
-  for (size_t i = 0; i < options.devices.size(); i++) {
+  contexts_.reserve(options->devices.size());
+  for (size_t i = 0; i < options->devices.size(); i++) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
     auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
-    context->setTimeout(options.timeout);
-    context->connectFullMesh(store, options.devices[i]);
+    context->setTimeout(options->timeout);
+    context->connectFullMesh(store, options->devices[i]);
     contexts_.push_back(std::move(context));
   }
 
@@ -615,9 +616,9 @@ ProcessGroupGloo::ProcessGroupGloo(
   // working on in the workInProgress_ vector. It must have size equal
   // to the number of workers such that they can simply index into it
   // using the worker index they are started with.
-  workInProgress_.resize(options.threads);
+  workInProgress_.resize(options->threads);
 
-  threads_.resize(options.threads);
+  threads_.resize(options->threads);
   for (size_t i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }

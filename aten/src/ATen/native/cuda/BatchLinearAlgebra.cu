@@ -1272,7 +1272,8 @@ AT_ERROR("solve: MAGMA library not found in "
 std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& A) {
   auto self_working_copy = cloneBatchedColumnMajor(self);
   auto A_working_copy = cloneBatchedColumnMajor(A);
-  auto infos = at::empty({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
+  // infos might not get filled for empty inputs therefore at::zeros is used instead of at::empty
+  auto infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cuda", [&]{
     apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
   });
@@ -1618,7 +1619,7 @@ AT_ERROR("cholesky: MAGMA library not found in "
 #endif
 }
 
-Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
+Tensor _cholesky_helper_cuda_magma(const Tensor& self, bool upper) {
   std::vector<int64_t> infos(batchCount(self), 0);
 
   Tensor result;
@@ -1648,6 +1649,23 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   }
 
   return upper ? result.transpose_(-1, -2) : result;
+}
+
+// Todo: cusolverDnXpotrfBatched has some numerical issue and is not used
+//     here. Batched cholesky is dispatched to magma.
+//     We will switch to cusolverDnXpotrfBatched after the issue is fixed.
+//     See https://github.com/pytorch/pytorch/issues/53879.
+Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
+#ifdef USE_CUSOLVER
+  if (batchCount(self) == 1 || !use_magma_) {
+    return _cholesky_helper_cuda_cusolver(self, upper);
+  }
+  else {
+    return _cholesky_helper_cuda_magma(self, upper);
+  }
+#else
+  return _cholesky_helper_cuda_magma(self, upper);
+#endif
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -436,7 +436,7 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
 }
 
 static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
-                                   Scalar negval_) {
+                                   const Scalar& negval_) {
   int64_t i_zp = qx.q_zero_point();
   float i_scale = qx.q_scale();
 
@@ -595,8 +595,8 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
 
 void qclamp_kernel(
     const Tensor& qx,
-    Scalar min_scalar,
-    Scalar max_scalar,
+    const Scalar& min_scalar,
+    const Scalar& max_scalar,
     Tensor& qy) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
@@ -629,7 +629,7 @@ void qclamp_kernel(
   });
 }
 
-void qclamp_min_kernel(const Tensor& qx, Scalar min_scalar, Tensor& qy) {
+void qclamp_min_kernel(const Tensor& qx, const Scalar& min_scalar, Tensor& qy) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
         qx.sizes(),
@@ -654,7 +654,7 @@ void qclamp_min_kernel(const Tensor& qx, Scalar min_scalar, Tensor& qy) {
   });
 }
 
-void qclamp_max_kernel(const Tensor& qx, Scalar max_scalar, Tensor& qy) {
+void qclamp_max_kernel(const Tensor& qx, const Scalar& max_scalar, Tensor& qy) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
         qx.sizes(),
@@ -684,8 +684,8 @@ void qthreshold_kernel(
   // the input ones, it might make sense to implement this completely in the
   // quantized domain.
    const Tensor& qx,
-   Scalar threshold_scalar,
-   Scalar value_scalar,
+   const Scalar& threshold_scalar,
+   const Scalar& value_scalar,
    Tensor& qy) {
 
   // defines input and output scales and zero_points
@@ -843,9 +843,9 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
 
 void qelu_kernel(
     const Tensor& qx,
-    Scalar alpha,
-    Scalar scale,
-    Scalar input_scale,
+    const Scalar& alpha,
+    const Scalar& scale,
+    const Scalar& input_scale,
     Tensor& qy) {
   // scale and input_scale arguments refer to a generalized ELU formula
   // if x >= 0, ELU(x) = x * scale
@@ -933,7 +933,7 @@ void qelu_kernel(
 // Note: other is already assumed to be in int32, i.e., it's
 // round(float/self_scale)
 template <bool ReLUFused = false>
-void qadd_scalar_kernel(Tensor& out, const Tensor& self, Scalar other) {
+void qadd_scalar_kernel(Tensor& out, const Tensor& self, const Scalar& other) {
   int64_t zero_point = out.q_zero_point();
   float scale = out.q_scale();
   float inv_scale = 1.0f / scale;
