@@ -24,12 +24,12 @@
 namespace at {
 namespace native {
 
-Tensor& eye_out_cuda(Tensor& result, int64_t n) {
+Tensor& eye_out_cuda(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
-  return at::native::eye_out_cuda(result, n, n);
+  return at::native::eye_out_cuda(n, n, result);
 }
 
-Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
+Tensor& eye_out_cuda(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
@@ -79,7 +79,7 @@ Tensor empty_strided_cuda(IntArrayRef size, IntArrayRef stride, c10::optional<Sc
   return t;
 }
 
-Tensor& randperm_out_cuda(Tensor& result, int64_t n, c10::optional<Generator> generator) {
+Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
   check_supported_max_int_with_precision(n, result);

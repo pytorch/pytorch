@@ -117,7 +117,7 @@ Tensor searchsorted_cpu(const Tensor& sorted_sequence, const Tensor& self, bool 
   return result;
 }
 
-Tensor searchsorted_cpu(const Tensor& sorted_sequence, Scalar self, bool out_int32, bool right) {
+Tensor searchsorted_cpu(const Tensor& sorted_sequence, const Scalar& self, bool out_int32, bool right) {
   return searchsorted_cpu(sorted_sequence, searchsorted_scalar_tensor(self, sorted_sequence.device()), out_int32, right);
 }
 
@@ -135,7 +135,7 @@ Tensor bucketize_cpu(const Tensor& self, const Tensor& boundaries, bool out_int3
   return result;
 }
 
-Tensor bucketize_cpu(Scalar self, const Tensor& boundaries, bool out_int32, bool right) {
+Tensor bucketize_cpu(const Scalar& self, const Tensor& boundaries, bool out_int32, bool right) {
   return bucketize_cpu(searchsorted_scalar_tensor(self, boundaries.device()), boundaries, out_int32, right);
 }
 

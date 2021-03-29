@@ -117,7 +117,10 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   return grad_input;
 }
 
-Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     Tensor loss = at::empty_like(input);
     return at::native::binary_cross_entropy_out_cpu(loss, input, target, weight, reduction);
 }
@@ -158,7 +161,10 @@ Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Te
     return loss;
 }
 
-Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+Tensor binary_cross_entropy_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+
     Tensor grad_input = at::empty_like(input);
     return at::native::binary_cross_entropy_backward_out_cpu(grad_input, grad, input, target, weight, reduction);
 }
@@ -197,7 +203,11 @@ Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& 
     return grad_input;
 }
 
-Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
+Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+
     Tensor loss;
     auto max_val = (-input).clamp_min_(0);
     if (pos_weight.defined()) {
@@ -215,7 +225,11 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
     return apply_loss_reduction(loss, reduction);
 }
 
-Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
+Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+
     Tensor grad_input;
     if (pos_weight.defined()) {
         // pos_weight need to be broadcasted, thus mul(target) is not inplace.

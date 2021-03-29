@@ -6,6 +6,8 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 
@@ -24,7 +26,7 @@ std::vector<Tensor> quantize_per_tensor_list_cpu(
     const Tensor& zero_points,
     ScalarType dtype) {
   std::vector<Tensor> quantized_tensors;
-  for (auto i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     quantized_tensors.push_back(at::quantize_per_tensor(
         tensors[i],
         scales[i].item<double>(),
@@ -54,7 +56,7 @@ Tensor dequantize_quantized_cpu(const Tensor& self) {
 
 std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
   std::vector<Tensor> dequantized_tensors;
-  for (auto i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     dequantized_tensors.push_back(tensors[i].dequantize());
   }
   return dequantized_tensors;

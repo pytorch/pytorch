@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# shellcheck disable=SC1090
+# shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 git submodule sync --recursive

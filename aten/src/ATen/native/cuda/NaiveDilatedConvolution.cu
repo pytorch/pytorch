@@ -387,11 +387,13 @@ void slow_conv_dilated_all_cuda_template(
 Tensor slow_conv_dilated2d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<2>(
       input,
@@ -490,11 +492,13 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cuda(
 Tensor slow_conv_dilated3d_cuda(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<3>(
       input,

@@ -156,7 +156,7 @@ struct PythonArgs {
   inline at::Tensor tensor(int i);
   inline c10::optional<at::Tensor> optionalTensor(int i);
   inline at::Scalar scalar(int i);
-  inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
+  inline at::Scalar scalarWithDefault(int i, const at::Scalar& default_scalar);
   inline std::vector<at::Scalar> scalarlist(int i);
   inline std::vector<at::Tensor> tensorlist(int i);
   inline torch::List<c10::optional<at::Tensor>> list_of_optional_tensors(int i);
@@ -302,7 +302,7 @@ inline std::vector<at::Scalar> PythonArgs::scalarlist(int i) {
   return res;
 }
 
-inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {
+inline at::Scalar PythonArgs::scalarWithDefault(int i, const at::Scalar& default_scalar) {
   if (!args[i]) return default_scalar;
   return scalar_slow(i);
 }

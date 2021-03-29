@@ -1177,6 +1177,38 @@ class TestList(JitTestCase):
         self.checkScript(to_list_float_3D, (torch.randn(5, 6, 7, dtype=torch.double).transpose(0, 1),))
 
         """
+        Complex dtype unit tests.
+        """
+        def to_list_complex_0D(x: torch.Tensor) -> complex:
+            li = torch.jit.annotate(complex, x.tolist())
+            return li
+
+        def to_list_complex_1D(x: torch.Tensor) -> List[complex]:
+            li = torch.jit.annotate(List[complex], x.tolist())
+            return li
+
+        def to_list_complex_2D(x: torch.Tensor) -> List[List[complex]]:
+            li = torch.jit.annotate(List[List[complex]], x.tolist())
+            return li
+
+        def to_list_complex_3D(x: torch.Tensor) -> List[List[List[complex]]]:
+            li = torch.jit.annotate(List[List[List[complex]]], x.tolist())
+            return li
+
+        # Test with torch.complex dtype Tensors to check that they are converted to double automatically.
+        self.checkScript(to_list_complex_0D, (torch.randn(5, dtype=torch.cfloat)[0],))
+        self.checkScript(to_list_complex_1D, (torch.randn(5, dtype=torch.cfloat),))
+        self.checkScript(to_list_complex_2D, (torch.randn(5, 6, dtype=torch.cfloat),))
+        self.checkScript(to_list_complex_3D, (torch.randn(5, 6, 7, dtype=torch.cfloat),))
+        self.checkScript(to_list_complex_3D, (torch.randn(5, 6, 7, dtype=torch.cfloat).transpose(0, 1),))
+
+        self.checkScript(to_list_complex_0D, (torch.randn(5, dtype=torch.cdouble)[0],))
+        self.checkScript(to_list_complex_1D, (torch.randn(5, dtype=torch.cdouble),))
+        self.checkScript(to_list_complex_2D, (torch.randn(5, 6, dtype=torch.cdouble),))
+        self.checkScript(to_list_complex_3D, (torch.randn(5, 6, 7, dtype=torch.cdouble),))
+        self.checkScript(to_list_complex_3D, (torch.randn(5, 6, 7, dtype=torch.cdouble).transpose(0, 1),))
+
+        """
         Non-happy path tests:
             - missing type annotation
             - mismatch between type annotation and input
