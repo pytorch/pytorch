@@ -5425,6 +5425,28 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DimModel(), multi_dim_input)
 
     @skipIfUnsupportedMinOpsetVersion(12)
+    def test_outer(self):
+        class Outer(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.outer(x, y)
+
+        x = torch.arange(1, 5)
+        y = torch.arange(1, 4)
+        self.run_test(Outer(), input=(x, y))
+
+        x = torch.arange(1, 6).to(dtype=torch.float32)
+        y = torch.arange(1, 4).to(dtype=torch.long)
+        self.run_test(Outer(), input=(x, y))
+
+        x = torch.arange(2, 5).to(dtype=torch.float32)
+        y = torch.arange(2, 4).to(dtype=torch.float64)
+        self.run_test(Outer(), input=(x, y))
+
+        x = torch.arange(3, 6).to(dtype=torch.int32)
+        y = torch.arange(4, 7).to(dtype=torch.long)
+        self.run_test(Outer(), input=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(12)
     def test_einsum(self):
         class EinsumModelBatchDiagonal(torch.nn.Module):
             def forward(self, x):
