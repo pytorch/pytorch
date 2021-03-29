@@ -900,7 +900,7 @@ class TestCppExtensionJIT(common.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir, tempfile.NamedTemporaryFile() as stderr:
             # Use multiprocessing to spin up a separate process to make catching
-            # it easier
+            # the segfault easier
             p = Process(target=run_test, args=(stderr.name, temp_dir))
             p.start()
             p.join()

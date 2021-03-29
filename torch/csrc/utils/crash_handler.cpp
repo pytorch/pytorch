@@ -1,6 +1,8 @@
 #include <iostream>
 
+#ifdef __linux__
 #include <client/linux/handler/exception_handler.h>
+#endif
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/utils/crash_handler.h>
