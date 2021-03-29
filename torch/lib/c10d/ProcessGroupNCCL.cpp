@@ -167,6 +167,19 @@ std::string getNcclAbortedCommStoreKey(const std::string ncclIdStr) {
   return std::string(kNCCLAbortedCommStoreKey) + ":" + ncclIdStr;
 }
 
+// Returns exception's what() given an exception_ptr instance.
+std::string getExceptionMsgFromExceptionPtr(
+    const std::exception_ptr& exceptionPtr) {
+  TORCH_CHECK(exceptionPtr != nullptr);
+  try {
+    std::rethrow_exception(exceptionPtr);
+  } catch (const std::exception& e) {
+    return e.what();
+  } catch (...) {
+    return "Unknown exception type";
+  }
+}
+
 } // namespace
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
@@ -248,6 +261,11 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
   auto exception_ptr = checkForNCCLErrors(ncclComms_);
   std::unique_lock<std::mutex> lock(mutex_);
   exception_ = exception_ptr;
+  if (exception_) {
+    LOG(INFO) << "[Rank " << rank_ << "]"
+              << " found async exception when checking for NCCL errors: "
+              << getExceptionMsgFromExceptionPtr(exception_);
+  }
 }
 
 void ProcessGroupNCCL::WorkNCCL::setException(
@@ -534,17 +552,11 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         }
         std::exception_ptr ncclErrorException = checkForNCCLErrors(ncclComms);
         if (ncclErrorException) {
-          std::string exceptionMsg = "";
-          try {
-            std::rethrow_exception(ncclErrorException);
-          } catch (const std::exception& e) {
-            exceptionMsg = e.what();
-          }
 
           LOG(INFO) << "[Rank " << rank_
                     << "] Received NCCL errors for communicators in the cache: \n"
                     << "NCCL error: \n"
-                    << exceptionMsg;
+                    << getExceptionMsgFromExceptionPtr(ncclErrorException);
 
           if (blockingWait_ || asyncErrorHandling_) {
             LOG(INFO) << "[Rank " << rank_
