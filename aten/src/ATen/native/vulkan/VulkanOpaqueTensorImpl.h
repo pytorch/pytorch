@@ -23,16 +23,12 @@ struct VulkanOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             opaque_handle,
             sizes,
             false),
-        strides_(strides.vec()) {}
+        strides_(strides.vec()) {
+    set_is_contiguous_policy(IsContiguousPolicy::ForceContiguousInAllMemoryFormats);
+  }
 
   IntArrayRef strides() const override {
     return strides_;
-  }
-
-  bool is_contiguous(
-      c10::MemoryFormat memory_format =
-          c10::MemoryFormat::Contiguous) const override {
-    return true;
   }
 
   int64_t stride(int64_t d) const override {
