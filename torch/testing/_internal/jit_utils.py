@@ -348,7 +348,7 @@ class JitTestCase(JitCommonTestCase):
 
         torch._C._jit_pass_lint(graph)
         result = getattr(torch._C, '_jit_pass_' + name)(graph)
-        if result is not None:
+        if result is not None and not isinstance(result, bool):
             graph = result
         torch._C._jit_pass_lint(graph)
 
