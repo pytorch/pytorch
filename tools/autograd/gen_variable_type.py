@@ -202,10 +202,6 @@ auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
 (void)_any_requires_grad;
 """)
 
-SETUP_ASSERT_NO_INFERENCE_TENSOR = CodeTemplate("""\
-assert_no_inference_tensor( ${tensor_args} );
-""")
-
 SETUP_DERIVATIVE = CodeTemplate("""\
 if (_any_requires_grad) {
   ${setup}
@@ -662,15 +658,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         return [SETUP_ANY_REQUIRES_GRAD.substitute(
             args_with_derivatives=[arg.name for arg in args_with_derivatives]), ]
 
-    def emit_assert_no_inference_tensor() -> List[str]:
-        tensor_arg_names = []
-        for arg in f.func.arguments.tensor_args:
-            a = arg.argument if isinstance(arg, SelfArgument) else arg
-            tensor_arg_names.append(a.name)
-        return [SETUP_ASSERT_NO_INFERENCE_TENSOR.substitute(
-            tensor_args=tensor_arg_names
-        )]
-
     def emit_check_inplace() -> List[str]:
         if not inplace:
             return []
@@ -682,7 +669,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     body.extend(unpack_args_stats)
     if requires_derivative:
         body.extend(emit_any_requires_grad())
-        body.extend(emit_assert_no_inference_tensor())
         body.extend(emit_check_inplace())
         body.extend(setup_derivative(differentiable_inputs))
     body.append(declare_returned_variables(f))
