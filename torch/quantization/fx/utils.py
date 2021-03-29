@@ -131,17 +131,25 @@ def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
     # Find the first use of the observer node, we use this to get the scope of the module.
     if is_input:
         # if the quantize function is at the input of op, then we find the first user of the observer_node
-        # to get the path
+        # to get the path. If a linear call_function is in the user list, we return the first instance
+        # of linear node to get the FQN.
         users = list(obs_node.users)
-        first_use = users[0] if users else None
+        first_use_or_linear = users[0] if users else None
+        linear_node = None
+        for n in users:
+            if n.op == "call_function" and n.target == torch.nn.functional.linear:
+                linear_node = n
+                break
+        if linear_node:
+            first_use_or_linear = linear_node
         prefix = "_input"
     else:
         # if the quantize function is at the output of the op, we use the observer input node to get the path
-        first_use = in_node
+        first_use_or_linear = in_node
         prefix = "_output"
 
-    if first_use:
-        module_path, _ = quantizer.node_name_to_scope[first_use.name]
+    if first_use_or_linear:
+        module_path, _ = quantizer.node_name_to_scope[first_use_or_linear.name]
     else:
         # TODO: it's not used, so actually we can skip quantization
         # but this requires changing return type of quantize_node
