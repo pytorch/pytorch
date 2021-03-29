@@ -188,9 +188,6 @@ jobs:
         with:
           name: clang-tidy
           path: clang-tidy-output/
-      - name: Fail if there were any warnings
-        run: |
-          [ ! -s clang-tidy-output/warnings.txt ]
 
   cmakelint:
     runs-on: ubuntu-18.04
