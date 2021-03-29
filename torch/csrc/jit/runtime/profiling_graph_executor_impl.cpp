@@ -26,7 +26,6 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_exceptions.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
-#include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -422,9 +421,6 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
       // Rewrite subgraphs with many MMs into expressions that batch them.
       BatchMM(graph);
       GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
-
-      GRAPH_DEBUG("Before RemoveInplaceOps:\n", *copy);
-      RemoveInplaceOps(copy);
 
       FuseTensorExprs(graph, getFusionGroupInlining() ? 2 : 1);
       GRAPH_DEBUG(

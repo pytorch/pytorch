@@ -10,10 +10,7 @@ static const std::unordered_map<NodeKind, NodeKind> inPlaceToOutOfPlace = {
     {aten::mul_, aten::mul},
     {aten::masked_fill_, aten::masked_fill},
     {aten::zero_, aten::zeros_like},
-    {aten::fill_, aten::full_like},
-    {aten::relu_, aten::relu},
-    {aten::hardtanh_, aten::hardtanh},
-};
+    {aten::fill_, aten::full_like}};
 
 // This is a horrible no good awful hack to "fill in" the TensorOptions
 // arguments of zeros_like and full_like so that the defaults are filled
