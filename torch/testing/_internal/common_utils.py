@@ -2089,3 +2089,23 @@ def _wrap_warn_once(regex):
                 fn(self, *args, **kwargs)
         return inner
     return decorator
+
+# This is a wrapper that wraps a test to run this test twice, one with
+# coalesced=True, another with coalesced=False for coalesced/uncoalesced sparse tensors. 
+def coalescedonoff(f):
+    nargs = len(inspect.signature(f).parameters)
+    if nargs == 3:
+
+        @wraps(f)
+        def wrapped(self, device):
+            f(self, device, coalesced=True)
+            f(self, device, coalesced=False)
+    else:
+        assert nargs == 4, "this decorator only support function with signature\
+            (self, device, coalesced) or (self, device, dtype, coalesced)"
+
+        @wraps(f)
+        def wrapped(self, device, dtype):
+            f(self, device, dtype, coalesced=True)
+            f(self, device, dtype, coalesced=False)
+    return wrapped

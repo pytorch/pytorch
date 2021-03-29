@@ -298,7 +298,7 @@ def floating_types():
     return _floating_types
 
 def floating64_type_and(*dtypes):
-    return (torch.float64, *dtypes) #TODO: add torch.cfloat64
+    return (torch.float64, *dtypes)
 
 _floating_types_and_half = _floating_types + (torch.half,)
 def floating_types_and_half():
