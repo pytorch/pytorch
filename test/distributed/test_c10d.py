@@ -3521,15 +3521,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         partial_input = input.split(mult)[self.rank]
         partial_target = target.split(mult)[self.rank]
-        
+
         loss = ddp_model(partial_input)
         # communication hook does not work on gradients adding hook to loss
         loss.register_hook(lambda x: x / self.world_size)
 
         criterion(loss, partial_target).backward()
-
-        vanilla_parameter = next(vanilla_model.parameters())
-        ddp_parameter = next(ddp_model.parameters())
 
         for vanilla_parameter, ddp_parameter in zip(vanilla_model.parameters(), ddp_model.parameters()):
             self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
