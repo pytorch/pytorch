@@ -196,12 +196,12 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
             }
             // Log and ignore exceptions raised through the callback
             LOG(ERROR) << "Got the following error when running the callback: "
-                      << e.what();
+                       << e.what();
 
           } catch (const std::exception& e) {
             // Log and ignore exceptions raised through the callback
             LOG(ERROR) << "Got the following error when running the callback: "
-                      << e.what();
+                       << e.what();
           }
         },
         std::move(pf)));
