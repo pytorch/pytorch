@@ -8481,12 +8481,13 @@ always be real-valued, even if :attr:`input` is complex.
 .. note:: The returned `U` will not be contiguous. The matrix (or batch of matrices) will
           be represented as a column-major matrix (i.e. Fortran-contiguous).
 
-.. warning:: Extra care needs to be taken when differentiating with respect to `U` and `V`. Such
-             operation is only well-defined when all singular values are distinct. If the distance
-             between any two singular values is close to zero, the backwards pass will be
-             unstable, as it depends on :math:`\frac{1}{\min_{i \neq j} |\sigma_i - \sigma_j|}`.
-             When there are repeated singular values, the gradient with respect to `U` and `V`
-             will be infinity in some directions.
+.. warning:: The gradients with respect to `U` and `V` will only be finite when the input does not
+             have zero nor repeated singular values.
+
+.. warning:: If the distance between any two singular values is close to zero, the gradients with respect to
+             `U` and `V` will be numerically unstable, as they depends on
+             :math:`\frac{1}{\min_{i \neq j} |\sigma_i^2 - \sigma_j^2|}`. The same happens when the matrix
+             has small singular values, as these gradients also depend on `S⁻¹`.
 
 .. warning:: For complex-valued :attr:`input` the singular value decomposition is not unique,
              as `U` and `V` may be multiplied by an arbitrary phase factor :math:`e^{i \phi}` on every column.
