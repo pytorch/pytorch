@@ -6123,7 +6123,7 @@ else:
         run_test(3, 3, 4, 4)
         run_test(3, 3, 5, 5)
 
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_chain_matmul(self, device, dtype):
         def product(matrices):
             for mat in matrices[1:]:
