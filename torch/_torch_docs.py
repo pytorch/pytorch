@@ -9597,8 +9597,9 @@ Example::
 """.format(**factory_like_common_args))
 
 add_docstr(torch.empty,
-           r"""
-empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
+           """
+empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False, \
+memory_format=torch.contiguous_format) -> Tensor
 
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`size`.
