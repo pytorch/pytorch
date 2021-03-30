@@ -11,7 +11,7 @@ from torch._six import inf
 from torch.autograd import Variable
 import collections.abc
 
-from typing import List, Tuple, Dict, Any
+from typing import List, Sequence, Tuple, Dict, Any, Union
 
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes, floating_types, floating_types_and,
@@ -86,7 +86,7 @@ class SampleInput(object):
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         # op with TensorList inputs do not support method or inplace variants.
         assert isinstance(input, torch.Tensor) or is_iterable_of_tensors(input)
-        self.input = input if isinstance(input, torch.Tensor) else tuple(input)
+        self.input: Union[torch.Tensor, Sequence] = input
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
