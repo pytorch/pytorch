@@ -116,7 +116,7 @@ static bool should_skip(const Tensor& t) {
   return t.numel() == 0 && t.dim() == 1;
 }
 
-Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
+Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
@@ -267,7 +267,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
 Tensor _cat_cpu(TensorList tensors, int64_t dim) {
   ScalarType high_type = result_type(tensors);
   Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
-  return native::_cat_out_cpu(result, tensors, dim);
+  return native::_cat_out_cpu(tensors, dim, result);
 }
 
 static void check_cat_no_zero_dim(TensorList tensors) {
