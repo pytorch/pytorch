@@ -76,14 +76,7 @@ class TestTensorExprPyBind(JitTestCase):
         jit_f(x, y, z)
 
         graph=torch.jit.last_executed_optimized_graph()
-
-        for n in graph.nodes():
-            if n.kind() == "prim::If":
-                for b in n.blocks():
-                    for m in b.nodes():
-                        if m.kind() =="prim::TensorExprGroup":
-                            node = m
-                            break
+        node =  graph.findNode("prim::TensorExprGroup", True)
 
         with kernel_arena_scope():
             graph = node.g('Subgraph')
