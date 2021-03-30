@@ -1,7 +1,6 @@
 import torch
 
 import math
-from pathlib import PurePosixPath
 import random
 
 from torch.testing._internal.common_utils import \
@@ -9,7 +8,6 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.framework_utils import calculate_shards
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
-from torch.testing._internal import mypy_wrapper
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -591,61 +589,6 @@ if __name__ == '__main__':
 instantiate_device_type_tests(TestTesting, globals())
 
 
-class TestMypyWrapper(TestCase):
-    def test_glob(self):
-        # can match individual files
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename=PurePosixPath('test/test_torch.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename=PurePosixPath('test/test_testing.py'),
-        ))
-
-        # dir matters
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/codegen/utils.py',
-            filename=PurePosixPath('torch/nn/modules.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename=PurePosixPath('setup.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename=PurePosixPath('foo/setup.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='foo/setup.py',
-            filename=PurePosixPath('foo/setup.py'),
-        ))
-
-        # can match dirs
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('torch/random.py'),
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('torch/nn/cpp.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='torch',
-            filename=PurePosixPath('tools/fast_nvcc/fast_nvcc.py'),
-        ))
-
-        # can match wildcards
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename=PurePosixPath('tools/autograd/gen_autograd.py'),
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename=PurePosixPath('tools/autograd/deprecated.yaml'),
-        ))
-
-
 class TestFrameworkUtils(TestCase):
     tests = [
         'super_long_test',
@@ -662,17 +605,17 @@ class TestFrameworkUtils(TestCase):
     ]
 
     test_times = {
-        'super_long_test': (55, 1),
-        'long_test1': (22, 2),
-        'long_test2': (18, 2),
-        'normal_test1': (9, 2),
-        'normal_test2': (7, 2),
-        'normal_test3': (5, 2),
-        'short_test1': (1, 2),
-        'short_test2': (0.6, 3),
-        'short_test3': (0.4, 5),
-        'short_test4': (0.3, 1),
-        'short_test5': (0.01, 2),
+        'super_long_test': 55,
+        'long_test1': 22,
+        'long_test2': 18,
+        'normal_test1': 9,
+        'normal_test2': 7,
+        'normal_test3': 5,
+        'short_test1': 1,
+        'short_test2': 0.6,
+        'short_test3': 0.4,
+        'short_test4': 0.3,
+        'short_test5': 0.01,
     }
 
     def test_calculate_2_shards_with_complete_test_times(self):
@@ -718,12 +661,12 @@ class TestFrameworkUtils(TestCase):
     def test_calculate_2_shards_against_optimal_shards(self):
         for _ in range(100):
             random.seed(120)
-            random_times = {k: (random.random() * 10, 1) for k in self.tests}
+            random_times = {k: random.random() * 10 for k in self.tests}
             # all test times except first two
-            rest_of_tests = [i for (k, (i, _)) in random_times.items() if k != 'super_long_test' and k != 'long_test1']
+            rest_of_tests = [i for k, i in random_times.items() if k != 'super_long_test' and k != 'long_test1']
             sum_of_rest = sum(rest_of_tests)
-            random_times['super_long_test'] = (max(sum_of_rest / 2, max(rest_of_tests)), 1)
-            random_times['long_test1'] = (sum_of_rest - random_times['super_long_test'][0], 1)
+            random_times['super_long_test'] = max(sum_of_rest / 2, max(rest_of_tests))
+            random_times['long_test1'] = sum_of_rest - random_times['super_long_test']
             # An optimal sharding would look like the below, but we don't need to compute this for the test:
             # optimal_shards = [
             #     (sum_of_rest, ['super_long_test', 'long_test1']),
