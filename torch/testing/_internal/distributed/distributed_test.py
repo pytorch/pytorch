@@ -4259,7 +4259,6 @@ class DistributedTest:
             self.validate_net_equivalence(net)
             # Ensure that running with DDP uneven inputs was logged.
             ddp_logging_data = net.get_ddp_logging_data()
-            uneven_inp = ddp_logging_data.join_uneven_inputs
             self.assertTrue(ddp_logging_data.join_uneven_inputs)
             dist.barrier()
 
