@@ -2217,7 +2217,7 @@ torch.cuda.synchronize()
                     if i == skip_iter and scaler.is_enabled():
                         model[1].weight.grad.data.fill_(float('inf'))
                     scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, error_if_nonfinite=False)
                     scaler.step(optimizer)
                     scaler.update()
                 else:
