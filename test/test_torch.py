@@ -29,7 +29,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIfNoMagma, skipCUDAVersionIn,
     onlyCUDA, onlyCPU,
-    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
+    dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast, skipMeta,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
     expectedAlertNondeterministic)
 from typing import Dict, List
@@ -913,10 +913,17 @@ class AbstractTestCases:
                             idx = torch.randperm(num_dest, dtype=dtype, device=device).narrow(0, 0, num_copy)
                             if not index_contig:
                                 idx = torch.testing.make_non_contiguous(idx)
+                            # index_add_ without alpha argument
                             dest2 = dest.clone()
                             dest.index_add_(0, idx, src)
                             for i in range(idx.size(0)):
                                 dest2[idx[i]] += src[i]
+                            self.assertEqual(dest, dest2)
+                            # index_add_ with alpha argument
+                            dest2 = dest.clone()
+                            dest.index_add_(0, idx, src, alpha=2)
+                            for i in range(idx.size(0)):
+                                dest2[idx[i]] += src[i] * 2
                             self.assertEqual(dest, dest2)
 
         # add coverage for issue with atomic add that appeared only for
@@ -939,6 +946,9 @@ class AbstractTestCases:
 
                         added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor)
                         self.assertEqual(added, tensor)
+
+                        added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor, alpha=-1)
+                        self.assertEqual(added, -tensor)
 
         def test_take(self):
             def check(src, idx):
@@ -5948,6 +5958,7 @@ class TestTorchDeviceType(TestCase):
             for x in xs:
                 _test_helper(x, op, unary=True)
 
+    @skipMeta
     def test_dlpack_conversion(self, device):
         x = torch.randn(1, 2, 3, 4, device=device, dtype=torch.float)
         z = from_dlpack(to_dlpack(x))
@@ -7223,10 +7234,22 @@ def generate_test_function(cls,
         # Special case for binary float ops (binary ops that promote int to float)
         if op_str in binary_float_ops_inplace and \
                 'inplace' in subtest_str and dtype in _integer_types:
-            with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
-                cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
-            with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
-                device_result = getattr(device_tensor, op_str)(*device_args)
+            # see https://github.com/pytorch/pytorch/issues/54897
+            try:
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
+                    cpu_result = getattr(cpu_tensor, op_str)(*cpu_args)
+                with self.assertRaisesRegex(RuntimeError, "result type Float can't be cast to "):
+                    device_result = getattr(device_tensor, op_str)(*device_args)
+            except Exception:
+                if self.device_type == 'meta':
+                    return
+                else:
+                    raise
+            else:
+                if self.device_type == 'meta':
+                    self.fail('expected test to fail on meta tensors, but it passed')
+                else:
+                    pass
             return  # Nothing more to check
 
         # Runs the tensor op on CPU and device
