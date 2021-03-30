@@ -112,7 +112,7 @@ Tensor & _th_put_(Tensor & self, const Tensor & index, const Tensor & source, bo
     }
     return self;
 }
-std::tuple<Tensor &,Tensor &> _th_mode_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool keepdim) {
+std::tuple<Tensor &,Tensor &> _th_mode_out(const Tensor & self, int64_t dim, bool keepdim, Tensor & values, Tensor & indices) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -231,7 +231,7 @@ std::tuple<Tensor,Tensor> _th_mode(const Tensor & self, int64_t dim, bool keepdi
     }
     return std::tuple<Tensor, Tensor>(values, indices);
 }
-std::tuple<Tensor &,Tensor &> _th_sort_out_stable(Tensor & values, Tensor & indices, const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
+std::tuple<Tensor &,Tensor &> _th_sort_out_stable(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -300,8 +300,8 @@ std::tuple<Tensor &,Tensor &> _th_sort_out_stable(Tensor & values, Tensor & indi
     }
     return std::tuple<Tensor &, Tensor &>(values, indices);
 }
-std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
-  return _th_sort_out_stable(values, indices, self, /*stable=*/false, dim, descending);
+std::tuple<Tensor &,Tensor &> _th_sort_out(const Tensor & self, int64_t dim, bool descending, Tensor & values, Tensor & indices) {
+  return at::native::legacy::cuda::_th_sort_out_stable(self, /*stable=*/false, dim, descending, values, indices);
 }
 std::tuple<Tensor,Tensor> _th_sort_stable(const Tensor & self, c10::optional<bool> stable, int64_t dim, bool descending) {
     // DeviceGuard omitted
@@ -363,7 +363,7 @@ std::tuple<Tensor,Tensor> _th_sort_stable(const Tensor & self, c10::optional<boo
 std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending) {
   return _th_sort_stable(self, /*stable=*/false, dim, descending);
 }
-std::tuple<Tensor &,Tensor &> _th_topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
+std::tuple<Tensor &,Tensor &> _th_topk_out(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted, Tensor & values, Tensor & indices) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -494,7 +494,7 @@ std::tuple<Tensor,Tensor> _th_topk(const Tensor & self, int64_t k, int64_t dim, 
     }
     return std::tuple<Tensor, Tensor>(values, indices);
 }
-Tensor & _th_renorm_out(Tensor & result, const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm) {
+Tensor & _th_renorm_out(const Tensor & self, const Scalar& p, int64_t dim, const Scalar& maxnorm, Tensor & result) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -717,7 +717,7 @@ Tensor _th_cross_kernel(const Tensor & self, const Tensor & other, int64_t dim) 
     return result;
 }
 
-std::tuple<Tensor &,Tensor &> _th_gels_out(Tensor & res1, Tensor & res2, const Tensor & self, const Tensor & A) {
+std::tuple<Tensor &,Tensor &> _th_gels_out(const Tensor & self, const Tensor & A, Tensor & res1, Tensor & res2) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -768,7 +768,7 @@ std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A) {
     }
     return std::tuple<Tensor, Tensor>(res1, res2);
 }
-std::tuple<Tensor &,Tensor &> _th_geqrf_out(Tensor & res1, Tensor & res2, const Tensor & self) {
+std::tuple<Tensor &,Tensor &> _th_geqrf_out(const Tensor & self, Tensor & res1, Tensor & res2) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -1041,7 +1041,7 @@ Tensor _thnn_multi_margin_loss_backward(const Tensor & grad_output, const Tensor
     }
     return grad_input;
 }
-std::tuple<Tensor &,Tensor &> _thnn_multilabel_margin_loss_forward_out(Tensor & output, Tensor & is_target, const Tensor & self, const Tensor & target, int64_t reduction) {
+std::tuple<Tensor &,Tensor &> _thnn_multilabel_margin_loss_forward_out(const Tensor & self, const Tensor & target, int64_t reduction, Tensor & output, Tensor & is_target) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -1120,7 +1120,7 @@ std::tuple<Tensor,Tensor> _thnn_multilabel_margin_loss_forward(const Tensor & se
     }
     return std::tuple<Tensor, Tensor>(output, is_target);
 }
-Tensor & _thnn_multilabel_margin_loss_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction, const Tensor & is_target) {
+Tensor & _thnn_multilabel_margin_loss_backward_out(const Tensor & grad_output, const Tensor & self, const Tensor & target, int64_t reduction, const Tensor & is_target, Tensor & grad_input) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -1589,7 +1589,7 @@ Tensor _thnn_nll_loss2d_backward(const Tensor & grad_output, const Tensor & self
     }
     return grad_input;
 }
-Tensor & _thnn_glu_forward_out(Tensor & output, const Tensor & self, int64_t dim) {
+Tensor & _thnn_glu_forward_out(const Tensor & self, int64_t dim, Tensor & output) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -1643,7 +1643,7 @@ Tensor _thnn_glu_forward(const Tensor & self, int64_t dim) {
     }
     return output;
 }
-Tensor & _thnn_glu_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, int64_t dim) {
+Tensor & _thnn_glu_backward_out(const Tensor & grad_output, const Tensor & self, int64_t dim, Tensor & grad_input) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -1703,7 +1703,7 @@ Tensor _thnn_glu_backward(const Tensor & grad_output, const Tensor & self, int64
     }
     return grad_input;
 }
-std::tuple<Tensor &,Tensor &> _thnn_log_sigmoid_forward_out(Tensor & output, Tensor & buffer, const Tensor & self) {
+std::tuple<Tensor &,Tensor &> _thnn_log_sigmoid_forward_out(const Tensor & self, Tensor & output, Tensor & buffer) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -1762,7 +1762,7 @@ std::tuple<Tensor,Tensor> _thnn_log_sigmoid_forward(const Tensor & self) {
     }
     return std::tuple<Tensor, Tensor>(output, buffer);
 }
-Tensor & _thnn_log_sigmoid_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, const Tensor & buffer) {
+Tensor & _thnn_log_sigmoid_backward_out(const Tensor & grad_output, const Tensor & self, const Tensor & buffer, Tensor & grad_input) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
 
@@ -1828,7 +1828,7 @@ Tensor _thnn_log_sigmoid_backward(const Tensor & grad_output, const Tensor & sel
     }
     return grad_input;
 }
-Tensor & _thnn_rrelu_with_noise_forward_out(Tensor & output, const Tensor & self, const Tensor & noise, const Scalar& lower, const Scalar& upper, bool training, c10::optional<at::Generator> generator) {
+Tensor & _thnn_rrelu_with_noise_forward_out(const Tensor & self, const Tensor & noise, const Scalar& lower, const Scalar& upper, bool training, c10::optional<at::Generator> generator, Tensor & output) {
     const OptionalDeviceGuard device_guard(device_of(self));
     auto dispatch_scalar_type = infer_scalar_type(self);
 
