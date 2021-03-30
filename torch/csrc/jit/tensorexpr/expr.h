@@ -42,7 +42,7 @@ class TORCH_API Expr : public KernelScopedObject {
   Dtype dtype() const {
     return dtype_;
   }
-  TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
+  virtual void accept(IRVisitor* visitor) const = 0;
   virtual const Expr* accept_mutator(IRMutator* mutator) const = 0;
 
   IRNodeType expr_type() const {
