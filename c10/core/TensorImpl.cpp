@@ -297,7 +297,7 @@ void TensorImpl::throw_is_contiguous_in_other_formats_not_allowed_error() const 
   // HACK: Preserve vmap error text for BatchedTensorImpl.
   if (!strcmp(tensorimpl_type_name(), "BatchedTensorImpl")) {
     TORCH_CHECK_NOT_IMPLEMENTED(
-        "NYI: querying is_contiguous inside of vmap for memory_format other "
+        false, "NYI: querying is_contiguous inside of vmap for memory_format other "
         "than torch.contiguous_format");
   }
   TORCH_CHECK_NOT_IMPLEMENTED(
