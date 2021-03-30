@@ -48,11 +48,14 @@ class TestOpInfo(TestCase):
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
     #   does NOT throw a runtime error
+    # In addition verifies that the generated sample_inputs have the requested device and dtype
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_supported_dtypes(self, device, dtype, op):
         for sample in op.sample_inputs(device, dtype):
             op(sample.input, *sample.args, **sample.kwargs)
+            self.assertTrue(sample.input.dtype == dtype)
+            self.assertTrue(sample.input.device.type == self.device_type)
 
     # Verifies that backward for each supported floating or complex dtype
     #   does NOT throw a runtime error.
