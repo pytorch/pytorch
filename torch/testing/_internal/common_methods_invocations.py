@@ -78,7 +78,6 @@ class SkipInfo(DecorateInfo):
 class SampleInput(object):
     """Represents sample inputs to a function."""
 
-    # output_process_fn_grad is a function that modifies the output of op compatible with input
     __slots__ = ['input', 'args', 'kwargs', 'output_process_fn_grad']
 
     def __init__(self, input, *, args=tuple(), kwargs=None, output_process_fn_grad=None):
@@ -86,7 +85,7 @@ class SampleInput(object):
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         # op with TensorList inputs do not support method or inplace variants.
         assert isinstance(input, torch.Tensor) or is_iterable_of_tensors(input)
-        self.input: Union[torch.Tensor, Sequence] = input
+        self.input: Union[torch.Tensor, Sequence[torch.Tensor]] = input
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
@@ -1309,10 +1308,26 @@ def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.linalg.eigh with UPLO="U" or "L" keyword argument.
     """
-    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
-    for o in out:
-        o.kwargs = {"UPLO": np.random.choice(["L", "U"])}
-    return out
+    def out_fn(output):
+        return output[0], abs(output[1])
+
+    samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
+    for sample in samples:
+        sample.kwargs = {"UPLO": np.random.choice(["L", "U"])}
+        sample.output_process_fn_grad = out_fn
+
+    return samples
+
+
+def sample_inputs_linalg_slogdet(op_info, device, dtype, requires_grad=False):
+    def out_fn(output):
+        return output[1]
+
+    samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
+    for sample in samples:
+        sample.output_process_fn_grad = out_fn
+
+    return samples
 
 
 def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=False):
@@ -2145,12 +2160,6 @@ def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
     return op(input.triu() if upper else input.tril(), upper)
 
 
-def gradcheck_wrapper_linalg_eigh(op, *args, **kwargs):
-    # gauge invariant loss function
-    eigenvalues, eigenvectors = gradcheck_wrapper_hermitian_input(op, *args, **kwargs)
-    return eigenvalues, abs(eigenvectors)
-
-
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -2785,7 +2794,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_eigh,
-           gradcheck_wrapper=gradcheck_wrapper_linalg_eigh,
+           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # cuda gradchecks are slow
@@ -2841,8 +2850,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_slogdet',
            op=torch.linalg.slogdet,
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_invertible,
-           gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs)[1],
+           sample_inputs_func=sample_inputs_linalg_slogdet,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.vector_norm',
            op=torch.linalg.vector_norm,
