@@ -1075,6 +1075,15 @@ Arguments:
               "barrier",
               &::c10d::ProcessGroup::barrier,
               py::arg("opts") = ::c10d::BarrierOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "monitored_barrier",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::chrono::milliseconds& timeout) {
+                ::c10d::BarrierOptions opts;
+                opts.timeout = timeout;
+                return self->monitoredBarrier(opts);
+              },
               py::call_guard<py::gil_scoped_release>());
 
   // base ProcessGroup::Options binding
