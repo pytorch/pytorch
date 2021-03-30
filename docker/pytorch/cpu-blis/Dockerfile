@@ -8,8 +8,11 @@
 #
 # This Dockerfile will build Docker Image with PyTorch + DNNL + AMD BLIS and Torchvision installed for CPU only
 #
-# Example commandline to build PyTorch with AMD BLIS
+# Example commandline to build PyTorch with AMD BLIS:
 # sudo DOCKER_BUILDKIT=1 docker build . -t docker-image-repo-name
+# Example commandline to run the built docker container:
+# sudo docker run --name container-name -it docker-image-repo-name
+
 ARG BASE_IMAGE=ubuntu:18.04
 ARG PYTHON_VERSION=3.8
 
