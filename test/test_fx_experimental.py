@@ -73,16 +73,16 @@ class TestFXExperimental(JitTestCase):
         # Fix for now to add type/shape to output
         for node in traced.graph.nodes:
             if node.op == "output":
-                node.shape = a.shape
-                node.dtype = a.dtype
+                node.meta['shape'] = a.shape
+                node.meta['dtype'] = a.dtype
         for mod in module_with_submodules.modules():
             if isinstance(mod, GraphModule):
                 for node in mod.graph.nodes:
-                    node.shape = a.shape
-                    node.dtype = a.dtype
+                    node.meta['shape'] = a.shape
+                    node.meta['dtype'] = a.dtype
         for node in module_with_submodules.graph.nodes:
-            node.shape = a.shape
-            node.dtype = a.dtype
+            node.meta['shape'] = a.shape
+            node.meta['dtype'] = a.dtype
 
         weights1 = {}
         weights2 = {}
