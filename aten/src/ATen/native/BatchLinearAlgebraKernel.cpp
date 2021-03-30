@@ -226,7 +226,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   int rank_32;
   int64_t* rank_data;
   int64_t* rank_working_ptr = nullptr;
-  if (LapackLstsqDriverType::Gels != driver_type) {
+  if (driver_t::Gels != driver_type) {
     rank_data = rank.data_ptr<int64_t>();
     rank_working_ptr = rank_data;
   }
@@ -236,7 +236,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   value_t* s_data;
   value_t* s_working_ptr = nullptr;
   int64_t s_stride;
-  if (LapackLstsqDriverType::Gelsd == driver_type || LapackLstsqDriverType::Gelss == driver_type) {
+  if (driver_t::Gelsd == driver_type || driver_t::Gelss == driver_type) {
     s_data = singular_values.data_ptr<value_t>();
     s_working_ptr = s_data;
     s_stride = singular_values.size(-1);
@@ -245,7 +245,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   // 'jpvt' workspace array is used only for 'gelsy' which uses QR factorization with column pivoting
   Tensor jpvt;
   int* jpvt_data = nullptr;
-  if (LapackLstsqDriverType::Gelsy == driver_type) {
+  if (driver_t::Gelsy == driver_type) {
     jpvt = at::empty({std::max<int64_t>(1, n)}, A.options().dtype(at::kInt));
     jpvt_data = jpvt.data_ptr<int>();
   }
@@ -274,16 +274,16 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   // 'rwork' only used for complex inputs and 'gelsy', 'gelsd' and 'gelss' drivers
   Tensor rwork;
   value_t* rwork_data;
-  if (A.is_complex() && LapackLstsqDriverType::Gels != driver_type) {
+  if (A.is_complex() && driver_t::Gels != driver_type) {
     int64_t rwork_len;
     switch (driver_type) {
-      case LapackLstsqDriverType::Gelsy:
+      case driver_t::Gelsy:
         rwork_len = std::max<int64_t>(1, 2 * n);
         break;
-      case LapackLstsqDriverType::Gelss:
+      case driver_t::Gelss:
         rwork_len = std::max<int64_t>(1, 5 * std::min(m, n));
         break;
-      // case LapackLstsqDriverType::Gelsd:
+      // case driver_t::Gelsd:
       default:
         rwork_len = std::max<int64_t>(1, rwork_opt);
     }
@@ -294,7 +294,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   // 'iwork' workspace array is relevant only for 'gelsd'
   Tensor iwork;
   int* iwork_data;
-  if (LapackLstsqDriverType::Gelsd == driver_type) {
+  if (driver_t::Gelsd == driver_type) {
     iwork = at::empty({std::max<int>(1, iwork_opt)}, A.options().dtype(at::kInt));
     iwork_data = iwork.data_ptr<int>();
   }
@@ -333,10 +333,10 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name) {
 
   static auto driver_string_to_type = std::unordered_map<std::string, LapackLstsqDriverType>({
-    {"gels", LapackLstsqDriverType::Gels},
-    {"gelsy", LapackLstsqDriverType::Gelsy},
-    {"gelsd", LapackLstsqDriverType::Gelsd},
-    {"gelss", LapackLstsqDriverType::Gelss}
+    {"gels", at::native::LapackLstsqDriverType::Gels},
+    {"gelsy", at::native::LapackLstsqDriverType::Gelsy},
+    {"gelsd", at::native::LapackLstsqDriverType::Gelsd},
+    {"gelss", at::native::LapackLstsqDriverType::Gelss}
   });
   auto driver_type = driver_string_to_type[driver_name];
 
