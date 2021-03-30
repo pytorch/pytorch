@@ -92,7 +92,8 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   void processForwardAutogradReq(
       RpcCommandBase& rpc,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const;
+      const std::shared_ptr<JitFuture>& responseFuture,
+      const std::set<c10::DeviceIndex>& deviceIndices) const;
 
   void processBackwardAutogradReq(
       RpcCommandBase& rpc,

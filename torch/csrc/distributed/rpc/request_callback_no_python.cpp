@@ -348,7 +348,8 @@ void RequestCallbackNoPython::processRRefForkRequest(
 void RequestCallbackNoPython::processForwardAutogradReq(
     RpcCommandBase& rpc,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& responseFuture,
+    const std::set<c10::DeviceIndex>& deviceIndices) const {
   auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
   // Need to reverse the device map for the backward pass of distributed
@@ -387,7 +388,7 @@ void RequestCallbackNoPython::processForwardAutogradReq(
       wrappedMessageType,
       messageId,
       wrappedRpcResponseFuture,
-      {}); // TODO deviceIndices?
+      deviceIndices);
 
   auto fromWorkerId = rpcWithAutograd.fromWorkerId();
   // The original future needs to be marked as completed when the wrapped
@@ -629,7 +630,7 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
-      processForwardAutogradReq(rpc, messageId, responseFuture);
+      processForwardAutogradReq(rpc, messageId, responseFuture, deviceIndices);
       return;
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
