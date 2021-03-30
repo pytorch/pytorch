@@ -392,9 +392,14 @@ def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
         random_symmetric_matrix(S, **kw),  # symmetric
         random_symmetric_psd_matrix(S, **kw),  # symmetric_psd
         random_symmetric_pd_matrix(S, **kw),  # symmetric_pd
-        random_square_matrix_of_rank(S, S - 2, **kw),  # dim2_null
-        random_square_matrix_of_rank(S, 1, **kw),  # rank1
-        random_square_matrix_of_rank(S, 2, **kw),  # rank2
+
+        # dim2_null, rank1 and rank2 are disabled because of
+        # https://github.com/pytorch/pytorch/issues/53364
+        # we should re-enable them once the issue is solved
+        #random_square_matrix_of_rank(S, S - 2, **kw),  # dim2_null
+        #random_square_matrix_of_rank(S, 1, **kw),  # rank1
+        #random_square_matrix_of_rank(S, 2, **kw),  # rank2
+
         random_fullrank_matrix_distinct_singular_value(S, **kw),  # distinct_singular_value
         make_tensor((3, 3, S, S), **kw),  # batched
         make_tensor((3, 3, 1, 1), **kw),  # batched_1x1
@@ -2813,9 +2818,6 @@ op_db: List[OpInfo] = [
            supports_complex_autograd=False,
            supports_inplace_autograd=False,
            skips=(
-               # https://github.com/pytorch/pytorch/issues/53361
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda',
-                        dtypes=[torch.float64]),
                # The following tests fail only on ROCm. This is probably
                # related to the fact that the current linalg.det backward is
                # unstable if the matrix has repeated singular values, see
