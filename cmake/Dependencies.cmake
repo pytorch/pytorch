@@ -817,22 +817,30 @@ endif()
 if(USE_BREAKPAD)
   include(ExternalProject)
 
-  # TODO: Don't build outside of build/ directory
-  # TODO: depepdency install: git clone https://chromium.googlesource.com/linux-syscall-support src/third_party/lss
-  ExternalProject_Add(project_breakpad
-    SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad
-    CONFIGURE_COMMAND cd ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad && ./configure
-    BUILD_COMMAND cd ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad && make -j 20
-    INSTALL_COMMAND cp ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src/client/linux/libbreakpad_client.a ${CMAKE_BINARY_DIR}/lib/libbreakpad_client.a && cp -r ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src ${CMAKE_BINARY_DIR}/third_party/breakpad
-    TEST_COMMAND ""
-    BUILD_IN_SOURCE True
-  )
-  add_library(breakpad STATIC IMPORTED)
-  add_dependencies(breakpad project_breakpad)
-  set_target_properties(breakpad PROPERTIES IMPORTED_LOCATION "/home/davidriazati/local/pytorch/build/third_party/breakpad/client/linux/libbreakpad_client.a")
+  set(BREAKPAD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/breakpad)
+  set(BREAKPAD_BIN ${CMAKE_CURRENT_BINARY_DIR}/third_party/breakpad)
+  set(BREAKPAD_STATIC_LIB ${BREAKPAD_BIN}/lib/libbreakpad_client.a)
+  set(BREAKPAD_INCLUDES ${BREAKPAD_DIR}/src)
 
-  # Add the include directory
-  include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad/src)
+  file(MAKE_DIRECTORY ${BREAKPAD_INCLUDES})
+
+  ExternalProject_Add(
+      libbreakpad
+      PREFIX ${BREAKPAD_BIN}
+      SOURCE_DIR ${BREAKPAD_DIR}
+      # TODO: Add this as a submodule or something instead of cloning it here
+      CONFIGURE_COMMAND rm -r ${BREAKPAD_DIR}/src/third_party/lss && git clone --depth=1 https://chromium.googlesource.com/linux-syscall-support ${BREAKPAD_DIR}/src/third_party/lss && ${BREAKPAD_DIR}/configure --srcdir=${BREAKPAD_DIR} --prefix=${BREAKPAD_BIN}
+      BUILD_COMMAND make
+      INSTALL_COMMAND make install
+      BUILD_BYPRODUCTS ${BREAKPAD_STATIC_LIB}
+  )
+
+  add_library(breakpad STATIC IMPORTED GLOBAL)
+
+  add_dependencies(breakpad libbreakpad)
+
+  set_target_properties(breakpad PROPERTIES IMPORTED_LOCATION ${BREAKPAD_STATIC_LIB})
+  set_target_properties(breakpad PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${BREAKPAD_INCLUDES})
 endif()
 
 

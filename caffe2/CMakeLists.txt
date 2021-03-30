@@ -902,9 +902,6 @@ if(NOT MSVC AND USE_XNNPACK)
 endif()
 
 if(USE_BREAKPAD)
-  target_include_directories(torch_cpu PUBLIC
-    /home/davidriazati/local/pytorch/third_party/breakpad/src
-  )
   target_link_libraries(torch_cpu PUBLIC breakpad)
 endif()
 
