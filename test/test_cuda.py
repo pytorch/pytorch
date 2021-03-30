@@ -3032,8 +3032,10 @@ torch.cuda.synchronize()
                            # TODO: reenable multinomial tests if/when the implementation is capturable.
                            # ("multinomial", (input.clone(), size, True), {}),
                            # ("multinomial", (input.clone(), size // 2, False), {}),
-                           # TODO: reenable normal test when graph test failures are fixed
+                           # TODO: reenable normal test, where std is a device
+                           # tensor, when graph test failures are fixed
                            # ("normal", (input.clone() + 1, input.clone()), {}),
+                           ("normal", (input.clone() + 1, 1.0), {}),
                            ("poisson", (input.clone(),), {}),
                            ("rand", (size,), {"device": "cuda", "dtype": torch.float}),
                            ("randint", (0, 3, (size,)), {"device": "cuda", "dtype": torch.float}),
