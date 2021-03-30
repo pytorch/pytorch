@@ -64,7 +64,7 @@ class TestComplex(JitTestCase):
     def test_complex_constants_and_ops(self):
         vals = ([0.0, 1.0, 2.2, -1.0, -0.0, -2.2, 1, 0, 2]
                 + [10.0 ** i for i in range(2)] + [-(10.0 ** i) for i in range(2)])
-        complex_vals = tuple(complex(x,y) for x, y in product(vals, vals))
+        complex_vals = tuple(complex(x, y) for x, y in product(vals, vals))
 
         funcs_template = dedent('''
             def func(a: complex):
