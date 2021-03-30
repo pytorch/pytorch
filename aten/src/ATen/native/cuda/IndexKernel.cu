@@ -309,7 +309,7 @@ Tensor masked_select_cuda(const Tensor & self, const Tensor & mask) {
   return masked_select_out_cuda_impl(result, self, mask);
 }
 
-Tensor & masked_select_out_cuda(Tensor & result, const Tensor & self, const Tensor & mask) {
+Tensor & masked_select_out_cuda(const Tensor & self, const Tensor & mask, Tensor & result) {
   namedinference::compute_broadcast_outnames(self, mask);
   return masked_select_out_cuda_impl(result, self, mask);
 }
@@ -355,7 +355,7 @@ Tensor take_cuda(const Tensor& self, const Tensor& index) {
     return out;
 }
 
-Tensor& take_out_cuda(Tensor& out, const Tensor& self, const Tensor& index) {
+Tensor& take_out_cuda(const Tensor& self, const Tensor& index, Tensor& out) {
     take_out_cuda_template(out, self, index);
     return out;
 }
