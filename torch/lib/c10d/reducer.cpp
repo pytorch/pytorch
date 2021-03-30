@@ -909,28 +909,8 @@ void Reducer::prepare_for_forward() {
   }
 }
 
-// Traverse the autograd graph starting at the specified output.
-// All parameters for which we have a pointer to their gradient accumulation
-// functions, but don't show up in the autograd graph will be marked ready for
-// for reduction as soon as the first autograd hook is called. This is not
-// done immediately because the model output may be ignored, and we only
-// want to start performing reductions on `torch.autograd.backward()`.
-void Reducer::prepare_for_backward(
-    const std::vector<torch::autograd::Variable>& outputs) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  std::unordered_set<torch::autograd::Node*> seen;
-  std::vector<torch::autograd::Node*> queue;
-
-  // Reset accounting.
-  expect_autograd_hooks_ = true;
+void Reducer::reset_bucket_counting() {
   next_bucket_ = 0;
-
-  cpu_timer_.backward_compute_start_time = current_time_in_nanos();
-
-  if (should_collect_runtime_stats()) {
-    record_backward_compute_start_time();
-  }
-
   // Reset num_buckets_ready_ at the beginning of backward computation
   // in each iteration.
   num_buckets_ready_ = 0;
@@ -941,11 +921,12 @@ void Reducer::prepare_for_backward(
     }
     bucket.pending = bucket.replicas.size();
   }
+}
 
-  // Reset unused parameter accounting.
-  has_marked_unused_parameters_ = false;
-  unused_parameters_.clear();
-
+void Reducer::search_unused_parameters(
+  const std::vector<torch::autograd::Variable>& outputs) {
+  std::unordered_set<torch::autograd::Node*> seen;
+  std::vector<torch::autograd::Node*> queue;
   // If find_unused_parameters_ is false, we assume that autograd hooks for ALL
   // variables will be called, and we don't have to search the autograd graph
   // for presence of these hooks.
@@ -996,6 +977,32 @@ void Reducer::prepare_for_backward(
         "flag off. Note that this warning may be a false positive if your model "
         "has flow control causing later iterations to have unused parameters.");
   }
+
+}
+// Traverse the autograd graph starting at the specified output.
+// All parameters for which we have a pointer to their gradient accumulation
+// functions, but don't show up in the autograd graph will be marked ready for
+// for reduction as soon as the first autograd hook is called. This is not
+// done immediately because the model output may be ignored, and we only
+// want to start performing reductions on `torch.autograd.backward()`.
+void Reducer::prepare_for_backward(
+    const std::vector<torch::autograd::Variable>& outputs) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  cpu_timer_.backward_compute_start_time = current_time_in_nanos();
+  if (should_collect_runtime_stats()) {
+    record_backward_compute_start_time();
+  }
+
+    // Reset accounting.
+  expect_autograd_hooks_ = true;
+
+  reset_bucket_counting();
+
+  // Reset unused parameter accounting.
+  has_marked_unused_parameters_ = false;
+  unused_parameters_.clear();
+  search_unused_parameters(outputs);
 }
 
 void Reducer::copy_bucket_to_grad(
