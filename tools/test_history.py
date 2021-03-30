@@ -195,8 +195,8 @@ In multiline mode, each line next includes the name of a CircleCI job,
 followed by the time of the specified test in that job at that commit.
 Example:
 
-    $ tools/test_history.py multiline --ref=594a66 --sha-length=8 test_set_dir \
-      pytorch_linux_xenial_py3_6_gcc5_4_test pytorch_linux_xenial_py3_6_gcc7_test
+    $ tools/test_history.py --mode=multiline --ref=594a66 --sha-length=8 --test=test_set_dir \
+      --job pytorch_linux_xenial_py3_6_gcc5_4_test --job pytorch_linux_xenial_py3_6_gcc7_test
     2021-02-10 11:13:34Z 594a66d7 pytorch_linux_xenial_py3_6_gcc5_4_test 0.36s
     2021-02-10 11:13:34Z 594a66d7 pytorch_linux_xenial_py3_6_gcc7_test 0.573s errored
     2021-02-10 10:13:25Z 9c0caf03 pytorch_linux_xenial_py3_6_gcc5_4_test 0.819s
@@ -211,8 +211,8 @@ Example:
 
 Another multiline example, this time with the --all flag:
 
-    $ tools/test_history.py multiline --all --ref=321b9 --delta=12 --sha-length=8 \
-      test_qr_square_many_batched_complex_cuda
+    $ tools/test_history.py --mode=multiline --all --ref=321b9 --delta=12 --sha-length=8 \
+      --test=test_qr_square_many_batched_complex_cuda
     2021-01-07 10:04:56Z 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 424.284s
     2021-01-07 10:04:56Z 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
     2021-01-07 10:04:56Z 321b9883 pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_test 402.572s
@@ -226,8 +226,8 @@ In columns mode, the name of the job isn't printed, but the order of the
 columns is guaranteed to match the order of the jobs passed on the
 command line. Example:
 
-    $ tools/test_history.py columns --ref=3cf783 --sha-length=8 test_set_dir \
-      pytorch_linux_xenial_py3_6_gcc5_4_test pytorch_linux_xenial_py3_6_gcc7_test
+    $ tools/test_history.py --mode=columns --ref=3cf783 --sha-length=8 --test=test_set_dir \
+      --job pytorch_linux_xenial_py3_6_gcc5_4_test --job pytorch_linux_xenial_py3_6_gcc7_test
     2021-02-10 12:18:50Z 3cf78395    0.644s    0.312s
     2021-02-10 11:13:34Z 594a66d7    0.360s  errored
     2021-02-10 10:13:25Z 9c0caf03    0.819s    0.449s
@@ -251,9 +251,10 @@ def parse_args(raw: List[str]) -> argparse.Namespace:
         formatter_class=HelpFormatter,
     )
     parser.add_argument(
-        'mode',
+        '--mode',
         choices=['columns', 'multiline'],
         help='output format',
+        default='columns',
     )
     parser.add_argument(
         '--pytorch',
@@ -297,19 +298,21 @@ def parse_args(raw: List[str]) -> argparse.Namespace:
         help='name of the suite containing the test',
     )
     parser.add_argument(
-        'test',
+        '--test',
         help='name of the test',
+        required=True
     )
     parser.add_argument(
-        'job',
-        nargs='*',
+        '--job',
         help='names of jobs to display columns for, in order',
+        action='append',
         default=[],
     )
     args = parser.parse_args(raw)
 
     args.jobs = None if args.all else args.job
-    if args.jobs == []:  # no jobs, and not None (which would mean all jobs)
+    # We dont allow implicit or empty "--jobs", unless "--all" is specified.
+    if args.jobs == []:
         parser.error('No jobs specified.')
 
     return args
