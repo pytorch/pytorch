@@ -855,8 +855,6 @@ class Term;
 class MaxTerm;
 class MinTerm;
 
-class FunctionCall;
-
 TORCH_API std::vector<const Expr*> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>&);
 TORCH_API std::vector<ExprHandle> ExprVectorToExprHandleVector(
