@@ -1,4 +1,4 @@
-from torch.utils.data import IterDataPipe
+from torch.utils.data import IterDataPipe, functional_datapipe
 from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
 from .callable import MapIterDataPipe
@@ -6,6 +6,7 @@ from .callable import MapIterDataPipe
 T_co = TypeVar('T_co', covariant=True)
 
 
+@functional_datapipe('filter')
 class FilterIterDataPipe(MapIterDataPipe[T_co]):
     r""" :class:`FilterIterDataPipe`.
 

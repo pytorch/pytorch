@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/torch.h>
 
@@ -270,7 +271,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitTail)(benchmark::State& state) {
     te::For* tail;
     loop.splitWithTail(m, kChunkSize, &mo, &mi, &tail);
   }
-  
+
   loop.prepareForCodegen();
   te::Stmt* s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
@@ -313,7 +314,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
     te::For* mi;
     loop.splitWithMask(m, kChunkSize, &mo, &mi);
   }
-  
+
   loop.prepareForCodegen();
   te::Stmt* s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
@@ -369,7 +370,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
     auto bt_body = te::NodeFinder<te::ReduceOp>::find(loop.root_stmt())[0];
     loop.rfactor(bt_body, mi->var());
   }
-  
+
   loop.prepareForCodegen();
   te::Stmt* s = loop.root_stmt();
   s = te::IRSimplifier::simplify(s);
@@ -419,7 +420,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV2)(benchmark::State& state) {
 
   {
     // Look for the new For and vectorize, but rfactor didn't return the newly added "For *".
-    // Resort to a hack to find the lost "For *". 
+    // Resort to a hack to find the lost "For *".
     // TODO: make it easier to find the transformed loop after rfactor.
     auto loops = te::NodeFinder<te::For>::find(loop.root_stmt());
     TORCH_CHECK(loops.size() == 4);

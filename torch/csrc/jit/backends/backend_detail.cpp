@@ -10,6 +10,17 @@
 namespace torch {
 namespace jit {
 namespace detail {
+c10::FunctionSchema getIsAvailableSchema() {
+  c10::Argument self("self", c10::AnyType::get());
+  c10::Argument available("available", c10::BoolType::get());
+  c10::FunctionSchema preprocessor_schema(
+      "is_available",
+      /*overload_name=*/"",
+      /*arguments=*/{self},
+      /*returns=*/{available});
+  return preprocessor_schema;
+}
+
 c10::FunctionSchema getCompileSchema() {
   c10::Argument self("self", c10::AnyType::get());
   c10::Argument mod("processed", c10::AnyType::get());
@@ -147,12 +158,29 @@ Module codegen_backend_module(
   loweredModule.define(
       create_backend_ct.format(create_backend_te), loweredModuleResolver());
 
+  // Helper function to expose backend.is_available() to Module generation code.
+  // Assumes self.__backend exists (i.e. __create_backend() has already been
+  // invoked).
+  loweredModule.define(
+      R"(
+            def __is_available(self):
+                return self.__backend.is_available()
+            )",
+      loweredModuleResolver());
+
   // getstate and setstate are for serialization/deserialization of
   // the LoweredModule.
+  // setstate is in charge of initializing self.__backend by invoking
+  // __create_backend().
   loweredModule.define(
       R"(
             def __getstate__(self):
-                return self.__method_compile_spec, self.__processed_module
+                # The third parameter indicates whether __setstate__ must create
+                # the backend instance. It's hardcoded to True since the only
+                # case it can be false is when __setstate__ is called from
+                # outside the module (at module creation time), because
+                # __create_backed has been called already (also directly).
+                return self.__method_compile_spec, self.__processed_module, True
             )",
       loweredModuleResolver());
 
@@ -161,8 +189,13 @@ Module codegen_backend_module(
             def __setstate__(self, state):
                 self.__method_compile_spec = state[0]
                 self.__processed_module = state[1]
-                self.__create_backend()
-                self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
+                # state[2] indicates whether to create the backend instance.
+                if state[2]:
+                    self.__create_backend()
+                if self.__backend.is_available() :
+                    self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
+                else:
+                    raise Exception("Backend is not available.")
             )",
       loweredModuleResolver());
 
@@ -173,9 +206,12 @@ Module codegen_backend_module(
     static const auto method_ct = CodeTemplate(R"(
             def $method(self${,def_inputs}):
                 typed_inputs: List[Any] = [${fwd_inputs,}]
-                $unpack, = self.__backend.execute(self.__handles["$method"], typed_inputs)
-                ${refine,}
-                return $ret
+                if self.__backend.is_available() :
+                  $unpack, = self.__backend.execute(self.__handles["$method"], typed_inputs)
+                  ${refine,}
+                  return $ret
+                else:
+                  raise Exception("Backend is not available.")
             )");
 
     TemplateEnv method_te;
@@ -264,11 +300,24 @@ Module codegen_backend_module(
     loweredModule.define(method_ct.format(method_te), loweredModuleResolver());
   }
 
-  // Call __setstate__ to ensure that the returned Module is ready to
-  // run.
-  auto state = at::ivalue::Tuple::create(
-      method_compile_spec, loweredModule.attr("__processed_module"));
-  loweredModule.run_method("__setstate__", state);
+  // If backend is available, call __setstate__ to ensure that the returned
+  // Module is ready to run.
+  // Otherwise throw a warning indicating that the resulting Module is not
+  // ready for execution until is loaded to a device with the backend.
+  loweredModule.run_method("__create_backend");
+  if (loweredModule.run_method("__is_available").toBool()) {
+    auto state = at::ivalue::Tuple::create(
+        method_compile_spec,
+        loweredModule.attr("__processed_module"),
+        /*create_backend*/ false);
+    loweredModule.run_method("__setstate__", state);
+  } else {
+    TORCH_WARN(
+        "Backend [",
+        backend_name,
+        "] is not available. Execution of this Module is still possible by "
+        "saving and loading on a device where the backend is available.");
+  }
   return loweredModule;
 }
 } // namespace detail

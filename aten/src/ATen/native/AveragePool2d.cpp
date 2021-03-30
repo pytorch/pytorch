@@ -12,7 +12,7 @@ void avg_pool2d_out_cpu_template(
           Tensor &output,
           const Tensor &input,
           IntArrayRef kernel_size,
-          IntArrayRef stride, 
+          IntArrayRef stride,
           IntArrayRef padding,
           bool ceil_mode,
           bool count_include_pad,
@@ -138,15 +138,14 @@ Tensor& avg_pool2d_backward_out_cpu_template(
 
 } // namespace
 
-Tensor& avg_pool2d_out_cpu(
-  Tensor& output,
-  const Tensor& input,
+Tensor& avg_pool2d_out_cpu(const Tensor& input,
   IntArrayRef kernel_size,
   IntArrayRef stride,
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& output)
 {
   avg_pool2d_out_cpu_template(
    output,
@@ -183,7 +182,6 @@ Tensor avg_pool2d_cpu(
 }
 
 Tensor& avg_pool2d_backward_out_cpu(
-  Tensor& gradInput,
   const Tensor& gradOutput,
   const Tensor& input,
   IntArrayRef kernel_size,
@@ -191,7 +189,8 @@ Tensor& avg_pool2d_backward_out_cpu(
   IntArrayRef padding,
   bool ceil_mode,
   bool count_include_pad,
-  c10::optional<int64_t> divisor_override)
+  c10::optional<int64_t> divisor_override,
+  Tensor& gradInput)
 {
   avg_pool2d_backward_out_cpu_template(
     gradInput,
