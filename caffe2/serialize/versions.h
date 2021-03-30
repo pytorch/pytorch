@@ -78,6 +78,9 @@ static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
 // we should support this model_version. For example, we provide a wrapper to
 // handle an updated operator.
 constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
+// Introduce kMinProducedBytecodeVersion for limited forward compatibility
+// support of bytecode. We can support generating model version within
+// [kkMinProducedBytecodeVersion, kProducedFileFormatVersion].
 constexpr uint64_t kMinProducedBytecodeVersion = 0x4L;
 } // namespace serialize
 } // namespace caffe2
