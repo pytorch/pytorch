@@ -590,7 +590,7 @@ class Quantizer:
     def __init__(self):
         # mapping from matched node to full qualified path of activation_post_process
         # must be filled before convert
-        self.activation_post_process_map: Dict[str, List[str]]] = {}
+        self.activation_post_process_map: Dict[str, List[str]] = {}
 
         # mapping from matched node to the index of activation_post_process that we are
         # using currently
