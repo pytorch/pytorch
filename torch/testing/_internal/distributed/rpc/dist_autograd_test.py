@@ -1091,7 +1091,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC, ExecMode.REMOTE]:
             with dist_autograd.context() as context_id:
                 val = self._exec_func(exec_mode, torch.matmul, t1, t2)
-                val = self._exec_func(exec_mode, lambda *tensors: torch.linalg.multi_dot([tensors]), val, t3, t4)
+                val = self._exec_func(exec_mode, lambda *tensors: torch.linalg.multi_dot(tensors), val, t3, t4)
                 loss = val.sum()
 
                 ret = self._verify_backwards(
@@ -1132,7 +1132,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 t2 = tensor_list[2]
                 t3 = tensor_list[4]
 
-                val = self._exec_func(exec_mode, lambda *tensors: torch.linalg.multi_dot([tensors]), t1, t2, t3)
+                val = self._exec_func(exec_mode, lambda *tensors: torch.linalg.multi_dot(tensors), t1, t2, t3)
 
                 loss = val.sum()
                 ret = self._verify_backwards(

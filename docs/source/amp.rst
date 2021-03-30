@@ -192,6 +192,7 @@ autocast casts all inputs to ``float32`` and runs the op in ``float32``.
 ``dot``,
 ``equal``,
 ``index_put``,
+``scatter_add``,
 ``stack``,
 ``tensordot``
 
