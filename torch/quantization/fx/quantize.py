@@ -153,7 +153,7 @@ def maybe_insert_observer_for_special_module(
         observed_standalone_module = \
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
         standalone_module_input_idxs = observed_standalone_module.\
-            _standalone_module_input_quantized_idxs.int().tolist()
+            _standalone_module_input_quantized_idxs.int().tolist()  # type: ignore
         observed_standalone_module = ObservedStandaloneGraphModule(
             observed_standalone_module, observed_standalone_module.graph)
         parent_name, name = _parent_name(node.target)
