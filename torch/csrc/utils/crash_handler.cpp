@@ -7,7 +7,12 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/utils/crash_handler.h>
 
-static bool dumpCallback(
+namespace torch {
+namespace crash_handler {
+
+#ifdef __linux__
+
+bool dumpCallback(
     const google_breakpad::MinidumpDescriptor& descriptor,
     void* context,
     bool succeeded) {
@@ -17,14 +22,10 @@ static bool dumpCallback(
   return succeeded;
 }
 
-namespace torch {
-namespace crash_handler {
-
 static std::unique_ptr<google_breakpad::ExceptionHandler> handler;
 static std::string minidump_directory;
 
 TORCH_API void _enable_minidump_collection(const std::string& dir) {
-#ifdef __linux__
   minidump_directory = dir;
   handler = std::make_unique<google_breakpad::ExceptionHandler>(
       google_breakpad::MinidumpDescriptor(minidump_directory),
@@ -33,11 +34,13 @@ TORCH_API void _enable_minidump_collection(const std::string& dir) {
       nullptr,
       true,
       -1);
+}
 #else
+TORCH_API void _enable_minidump_collection(const std::string& dir) {
   AT_ERROR(
       "Minidump collection is currently only implemented for Linux platforms");
-#endif
 }
+#endif
 
 TORCH_API const std::string& _get_minidump_directory() {
   if (handler == nullptr) {
@@ -46,7 +49,6 @@ TORCH_API const std::string& _get_minidump_directory() {
   }
   return minidump_directory;
 }
-
 
 } // namespace crash_handler
 } // namespace torch
