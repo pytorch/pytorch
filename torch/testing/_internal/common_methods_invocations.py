@@ -3519,19 +3519,31 @@ op_db: List[OpInfo] = [
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_0',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
-                   decorators=(precisionOverride({torch.float16: 7e-1}),),
                    dtypes=floating_types(),
                    dtypesIfCPU=floating_types(),
                    dtypesIfCUDA=floating_types_and(torch.half),
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
+                       # Probably related to the way the function is
+                       # scripted for JIT tests (or maybe not).
+                       # RuntimeError: 
+                       # Arguments for call are not valid.
+                       # The following variants are available:
+                       #   aten::polygamma(int n, Tensor self) -> (Tensor):
+                       #   Expected a value of type 'Tensor' for argument 'self' but instead found type 'int'.
+                       #   aten::polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> (Tensor(a!)):
+                       #   Expected a value of type 'Tensor' for argument 'self' but instead found type 'int'.
+                       # The original call is:
+                       #   File "<string>", line 3
+                       # def the_method(i0):
+                       #     return torch.polygamma(i0, 1)
+                       #            ~~~~~~~~~~~~~~~ <--- HERE
                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_1',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
-                   decorators=(precisionOverride({torch.float16: 7e-1}),),
                    dtypes=floating_types(),
                    dtypesIfCPU=floating_types(),
                    dtypesIfCUDA=floating_types_and(torch.half),
@@ -3551,7 +3563,6 @@ op_db: List[OpInfo] = [
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_2',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
-                   decorators=(precisionOverride({torch.float16: 7e-1}),),
                    dtypes=floating_types(),
                    dtypesIfCPU=floating_types(),
                    dtypesIfCUDA=floating_types_and(torch.half),
@@ -3568,7 +3579,6 @@ op_db: List[OpInfo] = [
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_3',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
-                   decorators=(precisionOverride({torch.float16: 7e-1}),),
                    dtypes=floating_types(),
                    dtypesIfCPU=floating_types(),
                    dtypesIfCUDA=floating_types_and(torch.half),
@@ -3585,7 +3595,7 @@ op_db: List[OpInfo] = [
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_4',
                    ref=reference_polygamma if TEST_SCIPY else _NOTHING,
-                   decorators=(precisionOverride({torch.float16: 7e-1, torch.float32: 5e-4}),),
+                   decorators=(precisionOverride({torch.float16: 5e-4, torch.float32: 5e-4}),),
                    dtypes=floating_types(),
                    dtypesIfCPU=floating_types(),
                    dtypesIfCUDA=floating_types_and(torch.half),
