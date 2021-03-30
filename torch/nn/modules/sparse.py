@@ -134,7 +134,7 @@ class Embedding(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+            self.weight = Parameter(torch.empty(num_embeddings, embedding_dim))
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
@@ -262,8 +262,6 @@ class EmbeddingBag(Module):
     Inputs: :attr:`input` (IntTensor or LongTensor), :attr:`offsets` (IntTensor or LongTensor, optional), and
         :attr:`per_index_weights` (Tensor, optional)
 
-        - :attr:`input` and :attr:`offsets` have to be of the same type, either int or long
-
         - If :attr:`input` is 2D of shape `(B, N)`,
 
           it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
@@ -322,7 +320,7 @@ class EmbeddingBag(Module):
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
         if _weight is None:
-            self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+            self.weight = Parameter(torch.empty(num_embeddings, embedding_dim))
             self.reset_parameters()
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \

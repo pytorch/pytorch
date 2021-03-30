@@ -394,10 +394,11 @@ class TestDistBackend(MultiProcessTestCase):
         return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe):
+    def _run(cls, rank, test_name, file_name, pipe, faulthandler_file_name):
         if BACKEND == 'nccl' and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS['no_cuda'].exit_code)
         self = cls(test_name)
+        self._register_fault_handler(faulthandler_file_name)
         self.rank = rank
         self.file_name = file_name
 
@@ -5119,3 +5120,116 @@ class DistributedTest:
                                 )
                         else:
                             self.assertFalse(True, "DDP error not raised")
+
+        @require_backend({"gloo"})
+        @require_backends_available({"gloo"})
+        def test_monitored_barrier_gloo(self):
+            tensors = [torch.ones(10) * self.rank]
+            # Kick off some allreduce work on all ranks
+            for _ in range(10):
+                dist.all_reduce(torch.cat(tensors))
+            # Run monitored barrier
+            timeout = timedelta(seconds=2)
+            dist.monitored_barrier(timeout=timeout)
+            # All ranks besides 1 call into barrier, rank 0 should report failure
+            # while others report gloo error.
+            failed_rank = 1
+            if self.rank == failed_rank:
+                return
+            if self.rank == 0:
+                with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
+                    dist.monitored_barrier(timeout=timeout)
+            else:
+                # It is permissible for other ranks that did not fail to
+                # successfully exit or crash in the monitored barrier, the main
+                # purpose of monitored barrier is to report the rank that hung
+                # on rank 0.
+                try:
+                    dist.monitored_barrier(timeout=timeout)
+                except RuntimeError:
+                    pass
+
+        @require_backend({"gloo"})
+        @require_backends_available({"gloo"})
+        def test_monitored_barrier_gloo_subgroup(self):
+            # Tests that monitored_barrier works as expected on non-default
+            # process groups.
+            failed_rank = 1
+            timeout = 0.1
+            subgroup = dist.new_group(ranks=[0, 1])
+
+            if self.rank == failed_rank:
+                return
+
+            if self.rank == 0:
+                with self.assertRaisesRegex(RuntimeError, f"Rank {failed_rank}"):
+                    dist.monitored_barrier(subgroup, timeout)
+            else:
+                # Other ranks call into monitored_barrier, but this should be a
+                # noop because they are not part of the subgroup. Verify that
+                # there are no errors here.
+                dist.monitored_barrier(subgroup, timeout)
+
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_rocm
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        def test_monitored_barrier_allreduce_hang(self):
+            # tests expected behavior when nonzero rank hangs.
+            if "NCCL_ASYNC_ERROR_HANDLING" in os.environ:
+                del os.environ["NCCL_ASYNC_ERROR_HANDLING"]
+            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            nccl_pg = dist.new_group(
+                ranks=list(i for i in range(int(self.world_size))),
+                timeout=timedelta(seconds=2),
+                backend=dist.Backend.NCCL,
+            )
+            gloo_pg = dist.new_group(
+                ranks=list(i for i in range(int(self.world_size))),
+                backend=dist.Backend.GLOO,
+            )
+            tensors = [
+                torch.ones(10, device=self.rank) * self.rank
+            ]
+            # Let all ranks call allreduce first to set up communicators etc.
+            # Directly simulating error here will run into store issue described
+            # in https://github.com/pytorch/pytorch/issues/54524.
+            nccl_pg.allreduce(tensors).wait()
+            # All ranks besides 0 call into allreduce. This is to simulate a
+            # desync across the world, where some ranks call into
+            # monitored_barrier() and others are stuck in collective comm. In
+            # practice, we don't need NCCL_BLOCKING_WAIT, but we use it in this
+            # test to ensure it exits cleanly.
+            if self.rank != 0:
+                with self.assertRaisesRegex(RuntimeError, "Caught collective operation timeout"):
+                    nccl_pg.allreduce(tensors).wait(timedelta(seconds=0.1))
+                return
+
+            # Rank 0 should report timed out rank.
+            monitored_barrier_timeout_seconds = timedelta(seconds=0.1)
+            world_size = int(self.world_size)
+            if world_size == 2:
+                err_regex = "Rank 1"
+            else:
+                # monitored_barrier() does not enforce an order it waits on for
+                # the ranks, so accept any rank that should be caught.
+                # TODO: provide an option in monitored_barrier() to collect all
+                # hanging ranks.
+                err_regex = f"Rank [1-{world_size - 1}]"
+
+            with self.assertRaisesRegex(RuntimeError, err_regex):
+                gloo_pg.monitored_barrier(monitored_barrier_timeout_seconds)
+
+        @require_backend({"gloo"})
+        @require_backends_available({"gloo"})
+        def test_monitored_barrier_gloo_rank_0_timeout(self):
+            # tests error when rank 0 exhausts its given timeout.
+            process_group = dist.new_group(
+                ranks=list(i for i in range(int(self.world_size)))
+            )
+            timeout = timedelta(seconds=0)
+            if self.rank == 0:
+                with self.assertRaisesRegex(
+                    RuntimeError, f"Rank {self.rank} timed out in monitoredBarrier"
+                ):
+                    process_group.monitored_barrier(timeout)

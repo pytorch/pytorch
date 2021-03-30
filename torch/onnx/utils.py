@@ -56,7 +56,7 @@ def select_model_mode_for_export(model, mode):
             from torch.onnx.symbolic_helper import _export_onnx_opset_version
             if _export_onnx_opset_version < 12:
                 warnings.warn("You are exporting the model in training mode with onnx opset version {}. "
-                              "Opset versions lower than opset 12 will not be able to export nodes such as"
+                              "Opset versions lower than opset 12 will not be able to export nodes such as "
                               "Dropout and BatchNorm correctly.".format(_export_onnx_opset_version))
             is_export_training = True
 
