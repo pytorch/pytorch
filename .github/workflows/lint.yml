@@ -58,6 +58,8 @@ jobs:
 
   toc:
     runs-on: ubuntu-18.04
+    env:
+      NPM_CONFIG_PREFIX: ~/.npm-global
     steps:
       - name: Setup Node
         uses: actions/setup-node@v2
