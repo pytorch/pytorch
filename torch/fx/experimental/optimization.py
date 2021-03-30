@@ -234,7 +234,7 @@ class UnionFind:
 def prepare_for_inference(
     model: torch.nn.Module,
     use_mkl_heuristic: Callable[[MklSubgraph], bool] = use_mkl_length,
-    tracer: fx.Tracer = fx.Tracer
+    tracer: Type[fx.Tracer] = fx.Tracer
 ) -> torch.nn.Module:
     """
     Performs a set of optimization passes to optimize a model for the
@@ -371,7 +371,7 @@ def prepare_for_inference(
                 prv = node.args[0]
                 node.replace_all_uses_with(prv)
                 fx_graph.erase_node(node)
-            reset_modules(fx_graph.nodes, modules, old_modules)
+            reset_modules(graph.nodes, modules, old_modules)
 
     mkldnn_conversions = 0
     for node in fx_graph.nodes:
