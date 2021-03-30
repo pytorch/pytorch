@@ -678,6 +678,10 @@ def batched_powerSGD_hook(
         if state.use_error_feedback:
             # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
+        # Removing this seemingly unnecessary sync somehow may cause faliures.
+        # See: https://github.com/pytorch/pytorch/pull/54838
+        if torch.cuda.is_available():
+            torch.cuda.synchronize(device)
         if not state.warm_start:
             state.p_memory_dict.clear()
             state.q_memory_dict.clear()
