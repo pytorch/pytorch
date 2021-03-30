@@ -35,12 +35,6 @@ TORCH_API void _enable_minidump_collection(const std::string& dir) {
       true,
       -1);
 }
-#else
-TORCH_API void _enable_minidump_collection(const std::string& dir) {
-  AT_ERROR(
-      "Minidump collection is currently only implemented for Linux platforms");
-}
-#endif
 
 TORCH_API const std::string& _get_minidump_directory() {
   if (handler == nullptr) {
@@ -49,6 +43,18 @@ TORCH_API const std::string& _get_minidump_directory() {
   }
   return minidump_directory;
 }
+#else
+TORCH_API void _enable_minidump_collection(const std::string& dir) {
+  AT_ERROR(
+      "Minidump collection is currently only implemented for Linux platforms");
+}
+TORCH_API const std::string& _get_minidump_directory() {
+  AT_ERROR(
+      "Minidump collection is currently only implemented for Linux platforms");
+}
+#endif
+
+
 
 } // namespace crash_handler
 } // namespace torch
