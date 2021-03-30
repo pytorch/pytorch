@@ -152,8 +152,8 @@ def maybe_insert_observer_for_special_module(
             torch.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore
         observed_standalone_module = \
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
-        standalone_module_input_idxs = observed_standalone_module.\
-            _standalone_module_input_quantized_idxs.int().tolist()
+        standalone_module_input_idxs = \
+            observed_standalone_module._standalone_module_input_quantized_idxs.int().tolist()  # type: ignore
         observed_standalone_module = ObservedStandaloneGraphModule(
             observed_standalone_module, observed_standalone_module.graph)
         parent_name, name = _parent_name(node.target)
@@ -606,7 +606,7 @@ class Quantizer:
         #   'linear': Linear(...),
         #   'linear.weight_fake_quant': PerChannelMinMaxObserver(...),
         # }
-        self.modules: Optional[Dict[str, torch.nn.Module]] = None
+        self.modules: Dict[str, torch.nn.Module] = {}
         # mapping from a tuple of nodes in reverse order to uninitialized
         #   QuantizeHandler subclass. For example,
         # {
@@ -617,7 +617,7 @@ class Quantizer:
         #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
         #     <class 'torch.quantization.fx.quantize.Add'>),
         # }
-        self.patterns: Optional[Dict[Pattern, QuantizeHandler]] = None
+        self.patterns: Dict[Pattern, QuantizeHandler] = {}
         self.prepare_custom_config_dict: Dict[str, Any] = {}
 
         # mapping from node name to the scope of the module which contains the node.
@@ -643,7 +643,6 @@ class Quantizer:
         for node in input_graph.nodes:
             if node.op == "get_attr":
                 module_name, _ = _parent_name(node.target)
-                assert self.modules is not None
                 self.qconfig_map[node.name] = get_qconfig(
                     qconfig_dict, type(self.modules[module_name]), module_name, global_qconfig)
             elif node.op == "call_function":
@@ -664,7 +663,6 @@ class Quantizer:
                     qconfig_dict, module_type, module_path, global_qconfig)
                 self.qconfig_map[node.name] = qconfig
             elif node.op == 'call_module':
-                assert self.modules is not None
                 module_qconfig = get_qconfig(
                     qconfig_dict, type(self.modules[node.target]), node.target, global_qconfig)
                 # regex is not supported eager mode propagate_qconfig_, we'll
@@ -745,7 +743,6 @@ class Quantizer:
         standalone_module_classes = [config[0] for config in standalone_module_class_configs]
         custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
-        assert self.patterns is not None
         matches, quants = self._match(model, model.graph, standalone_module_names, standalone_module_classes, custom_module_classes)
         self.activation_post_process_map = defaultdict(list)
         observed_graph = Graph()
@@ -792,7 +789,7 @@ class Quantizer:
 
     def save_state(self, observed: GraphModule) -> None:
         observed._activation_post_process_map = \
-            self.activation_post_process_map  # type: ignorea
+            self.activation_post_process_map  # type: ignore
         observed._activation_post_process_indexes = \
             self.activation_post_process_indexes  # type: ignore
         observed._patterns = self.patterns  # type: ignore
@@ -871,7 +868,6 @@ class Quantizer:
         custom_module_classes = get_custom_module_class_keys(
             convert_custom_config_dict,
             "observed_to_quantized_custom_module_class")
-        assert self.patterns is not None
         matches = self._find_matches(
             model.graph, self.modules, self.patterns,
             custom_module_classes=custom_module_classes)
