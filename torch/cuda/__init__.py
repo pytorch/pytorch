@@ -339,8 +339,12 @@ class StreamContext(object):
     def __init__(self, stream: Optional['torch.cuda.Stream']):  # type: ignore
         self.stream = stream
         # Initialize the below streams to default stream on the current device
-        self.src_prev_stream = torch.cuda.default_stream(None)
-        self.dst_prev_stream = torch.cuda.default_stream(None)
+        self.src_prev_stream = (
+            None if stream is None else torch.cuda.default_stream(None)
+        )
+        self.dst_prev_stream = (
+            None if stream is None else torch.cuda.default_stream(None)
+        )
 
     def __enter__(self):
         # Local cur_stream variable for type refinement
