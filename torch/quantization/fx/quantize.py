@@ -548,7 +548,7 @@ class Quantizer:
 
         # mapping from node name to qconfig that should be used for that node
         # filled out for a model during _generate_qconfig_map
-        self.qconfig_map: Optional[Dict[str, QConfigAny]] = None
+        self.qconfig_map: Dict[str, QConfigAny] = {}
         # mapping from fully qualified module name to module instance
         # for example,
         # {
@@ -1228,7 +1228,6 @@ class Quantizer:
             else:
                 matched.append(node)
 
-        assert self.qconfig_map is not None
         for node in reversed(graph.nodes):
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
