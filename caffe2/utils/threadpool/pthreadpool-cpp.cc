@@ -1,4 +1,5 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <caffe2/utils/threadpool/thread_pool_guard.h>
 #include <c10/util/Exception.h>
 
 namespace caffe2 {
@@ -62,6 +63,9 @@ PThreadPool* pthreadpool() {
 }
 
 pthreadpool_t pthreadpool_() {
+  if (caffe2::_NoPThreadPoolGuard::is_enabled()) {
+    return nullptr;
+  }
   PThreadPool* const threadpool = pthreadpool();
   TORCH_INTERNAL_ASSERT(
       threadpool, "Failed to acquire an instance of PThreadPool!");

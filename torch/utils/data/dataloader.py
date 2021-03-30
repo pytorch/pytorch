@@ -159,9 +159,9 @@ class DataLoader(Generic[T_co]):
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
                  shuffle: bool = False, sampler: Optional[Sampler[int]] = None,
                  batch_sampler: Optional[Sampler[Sequence[int]]] = None,
-                 num_workers: int = 0, collate_fn: _collate_fn_t = None,
+                 num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
-                 timeout: float = 0, worker_init_fn: _worker_init_fn_t = None,
+                 timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
                  multiprocessing_context=None, generator=None,
                  *, prefetch_factor: int = 2,
                  persistent_workers: bool = False):

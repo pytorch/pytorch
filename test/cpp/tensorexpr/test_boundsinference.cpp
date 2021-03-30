@@ -452,9 +452,9 @@ TEST(BoundsInference, MultipleTopLoopStore) {
   // Same as above but the offsets are on the Store now.
   // Can't do this through ComputeAPI without transforms we don't have yet.
   Stmt* stmt = Block::make(
-      {For::make(x, 0, 64, Store::make(b, {x}, Load::make(a, {x}, 1), 1)),
-       For::make(x, 0, 32, Store::make(c, {x + 10}, Load::make(a, {x}, 1), 1)),
-       For::make(x, 0, 96, Store::make(d, {x + 2}, Load::make(a, {x}, 1), 1))});
+      {For::make(x, 0, 64, Store::make(b, {x}, Load::make(a, {x}))),
+       For::make(x, 0, 32, Store::make(c, {x + 10}, Load::make(a, {x}))),
+       For::make(x, 0, 96, Store::make(d, {x + 2}, Load::make(a, {x})))});
 
   auto bounds_info = inferBounds(stmt);
 
@@ -594,7 +594,7 @@ TEST(BoundsInference, Flattened) {
   ASSERT_TRUE(exprEquals(TABI.stop[0], new IntImm(3 * 4 * 5 - 1)));
 }
 
-void testGetPotentialHazards() {
+TEST(BoundsInference, GetPotentialHazards) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -612,10 +612,10 @@ void testGetPotentialHazards() {
      * C[0] = 5;
      */
 
-    Store* store1 = Store::make(a, {0}, Load::make(b, {0}, 1), 1);
-    Store* store2 = Store::make(b, {0}, 3, 1);
-    Store* store3 = Store::make(a, {0}, Load::make(b, {0}, 1), 1);
-    Store* store4 = Store::make(c, {0}, 5, 1);
+    Store* store1 = Store::make(a, {0}, Load::make(b, {0}));
+    Store* store2 = Store::make(b, {0}, 3);
+    Store* store3 = Store::make(a, {0}, Load::make(b, {0}));
+    Store* store4 = Store::make(c, {0}, 5);
     Stmt* stmt = Block::make({store1, store2, store3, store4});
 
     MemDependencyChecker analyzer;
@@ -646,7 +646,7 @@ void testGetPotentialHazards() {
   }
 }
 
-void testGetPotentialHazardsLoopNoHazard() {
+TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
@@ -674,7 +674,7 @@ void testGetPotentialHazardsLoopNoHazard() {
       getPotentialHazards(analyzer, loopRootA, loopRootB));
 }
 
-void testGetPotentialHazardsLoopCall() {
+TEST(BoundsInference, GetPotentialHazardsLoopCall) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
@@ -701,7 +701,7 @@ void testGetPotentialHazardsLoopCall() {
       getPotentialHazards(analyzer, loopRootA, loopRootB));
 }
 
-void testGetPotentialHazardsLoopSplit() {
+TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
   KernelScope kernel_scope;
 
   Tensor* A = Compute(
@@ -723,6 +723,234 @@ void testGetPotentialHazardsLoopSplit() {
 
   ASSERT_EQ(
       HazardKind::WriteAfterWrite, getPotentialHazards(analyzer, outer, tail));
+}
+
+TEST(BoundsInference, HasPartialOverlapSameBufferWithOverlap) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int j = 10; j < 100; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  //   for (int k = 10; k < 100; k++) {
+  //     A[k-1] = 20 * k;
+  //   }
+  BufHandle a_buf("A", {200}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forK =
+      For::make(k, 10, 100, Store::make(a_buf, {k - 1}, Mul::make(20, k)));
+  auto par = Block::make({forJ, forK});
+
+  tensorexpr::analysis::MemDependencyChecker analyzer;
+  par->accept(&analyzer);
+  ASSERT_TRUE(hasPartialOverlap(analyzer, forJ, forK));
+  ASSERT_TRUE(hasPartialOverlap(analyzer, forK, forJ));
+}
+
+TEST(BoundsInference, HasPartialOverlapSameBufferNotOverlapping) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int j = 10; j < 100; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  //   for (int k = 10; k < 100; k++) {
+  //     A[k+100] = 20 * k;
+  //   }
+  BufHandle a_buf("A", {200}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forK =
+      For::make(k, 10, 100, Store::make(a_buf, {k + 100}, Mul::make(20, k)));
+  auto par = Block::make({forJ, forK});
+
+  tensorexpr::analysis::MemDependencyChecker analyzer;
+  par->accept(&analyzer);
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forJ, forK));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forK, forJ));
+}
+
+TEST(BoundsInference, HasPartialOverlap2DBufferWithOverlap) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 100; j++) {
+  //       A[i,j] = i * j * 500;
+  //     }
+  //   }
+  //   for (int m = 0; m < 20; m++) {
+  //     for (int n = 0; n < 50; n++) {
+  //       A[m+1,n] = m + n * 100;
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 100}, kInt);
+  BufHandle b_buf("B", {20, 50}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  auto storeA1 = Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500));
+  auto forJ = For::make(j, 0, 100, storeA1);
+  auto forI = For::make(i, 0, 20, forJ);
+  auto storeA2 =
+      Store::make(a_buf, {m + 1, n}, Add::make(m, Mul::make(n, 100)));
+  auto forN = For::make(n, 0, 50, storeA2);
+  auto forM = For::make(m, 0, 20, forN);
+  auto par = Block::make({forI, forM});
+
+  tensorexpr::analysis::MemDependencyChecker analyzer;
+  par->accept(&analyzer);
+  ASSERT_TRUE(hasPartialOverlap(analyzer, forI, forM));
+  ASSERT_TRUE(hasPartialOverlap(analyzer, forM, forI));
+  ASSERT_TRUE(hasPartialOverlap(analyzer, forJ, forN));
+  ASSERT_TRUE(hasPartialOverlap(analyzer, forN, forJ));
+  ASSERT_TRUE(hasPartialOverlap(analyzer, storeA1, storeA2));
+  ASSERT_TRUE(hasPartialOverlap(analyzer, storeA2, storeA1));
+  ASSERT_TRUE(hasPartialOverlap(analyzer, forJ, storeA2));
+  ASSERT_TRUE(hasPartialOverlap(analyzer, storeA1, forM));
+}
+
+TEST(BoundsInference, HasPartialOverlap2DBufferWithNoOverlap) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 100; j++) {
+  //       A[i,j] = i * j * 500;
+  //     }
+  //   }
+  //   for (int m = 0; m < 20; m++) {
+  //     for (int n = 0; n < 50; n++) {
+  //       A[m+20,n+100] = m + n * 100;
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 100}, kInt);
+  BufHandle b_buf("B", {20, 50}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  auto storeA1 = Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500));
+  auto forJ = For::make(j, 0, 100, storeA1);
+  auto forI = For::make(i, 0, 20, forJ);
+  auto storeA2 =
+      Store::make(a_buf, {m + 20, n + 100}, Add::make(m, Mul::make(n, 100)));
+  auto forN = For::make(n, 0, 50, storeA2);
+  auto forM = For::make(m, 0, 20, forN);
+  auto par = Block::make({forI, forM});
+
+  tensorexpr::analysis::MemDependencyChecker analyzer;
+  par->accept(&analyzer);
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forI, forM));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forM, forI));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forJ, forN));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forN, forJ));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA1, storeA2));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA2, storeA1));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forJ, storeA2));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA1, forM));
+}
+
+TEST(BoundsInference, HasPartialOverlapDifferentBuffers) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int i = 0; i < 20; i++) {
+  //     for (int j = 0; j < 100; j++) {
+  //       A[i,j] = i * j * 500;
+  //     }
+  //   }
+  //   for (int m = 0; m < 20; m++) {
+  //     for (int n = 0; n < 50; n++) {
+  //       B[m,n] = m + n * 100;
+  //     }
+  //   }
+  BufHandle a_buf("A", {20, 100}, kInt);
+  BufHandle b_buf("B", {20, 50}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle m("m", kInt);
+  VarHandle n("n", kInt);
+  auto storeA1 = Store::make(a_buf, {i, j}, Mul::make(Mul::make(i, j), 500));
+  auto forJ = For::make(j, 0, 100, storeA1);
+  auto forI = For::make(i, 0, 20, forJ);
+  auto storeA2 = Store::make(b_buf, {m, n}, Add::make(m, Mul::make(n, 100)));
+  auto forN = For::make(n, 0, 50, storeA2);
+  auto forM = For::make(m, 0, 20, forN);
+  auto par = Block::make({forI, forM});
+
+  tensorexpr::analysis::MemDependencyChecker analyzer;
+  par->accept(&analyzer);
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forI, forM));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forM, forI));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forJ, forN));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forN, forJ));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA1, storeA2));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA2, storeA1));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, forJ, storeA2));
+  ASSERT_FALSE(hasPartialOverlap(analyzer, storeA1, forM));
+}
+
+TEST(BoundsInference, HasPartialOverlapDueToRAWDependence) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int j = 0; j < 100; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  //   for (int k = 0; k < 100; k++) {
+  //     B[k] = 20 * A[99-k];
+  //   }
+  BufHandle a_buf("A", {100}, kInt);
+  BufHandle b_buf("B", {100}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto forK = For::make(
+      k,
+      10,
+      100,
+      Store::make(
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+  auto par = Block::make({forJ, forK});
+
+  tensorexpr::analysis::MemDependencyChecker analyzer;
+  par->accept(&analyzer);
+  ASSERT_TRUE(hasPartialOverlap(analyzer, forJ, forK));
+  ASSERT_TRUE(hasPartialOverlap(analyzer, forK, forJ));
+}
+
+TEST(BoundsInference, HasPartialOverlapDueToWARDependence) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int k = 0; k < 100; k++) {
+  //     B[k] = 20 * A[99-k];
+  //   }
+  //   for (int j = 0; j < 100; j++) {
+  //     A[j] = 10 * j;
+  //   }
+  BufHandle a_buf("A", {100}, kInt);
+  BufHandle b_buf("B", {100}, kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto forK = For::make(
+      k,
+      10,
+      100,
+      Store::make(
+          b_buf, {k}, Mul::make(20, Load::make(a_buf, {ExprHandle(99) - k}))));
+  auto forJ = For::make(j, 10, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
+  auto par = Block::make({forK, forJ});
+
+  tensorexpr::analysis::MemDependencyChecker analyzer;
+  par->accept(&analyzer);
+  ASSERT_TRUE(hasPartialOverlap(analyzer, forJ, forK));
+  ASSERT_TRUE(hasPartialOverlap(analyzer, forK, forJ));
 }
 
 } // namespace jit
