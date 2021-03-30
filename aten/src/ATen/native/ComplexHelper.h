@@ -2,6 +2,9 @@
 
 #include <ATen/ATen.h>
 
+// WARNING: this header contains non-inline functions and should be only
+// included from ONE cpp file
+
 namespace at { namespace native {
 
 // View tensor with new dtype, storage offset, sizes and strides
@@ -30,7 +33,12 @@ inline DimVector computeStrideForViewAsReal(IntArrayRef oldstride) {
 // with corresponding real dtype containing the complex values
 // in the last two dimensions
 Tensor view_as_real(const Tensor& self) {
-  TORCH_CHECK(self.is_complex(), "view_as_real is only supported for complex tensors");
+  TORCH_CHECK(!self.is_conj(), "view_as_real doesn't work on unresolved conjugated tensors.  To resolve the conjugate tensor so you can view it as real, use self.resolve_conj(); however, be warned that the resulting tensor will NOT alias the original.  To view the true underlying representation, use view_as_real_physical(); this will return a real tensor and a boolean telling you whether or not you should negate the imaginary component of the tensor.");
+  return native::view_as_real_physical(self);
+}
+
+Tensor view_as_real_physical(const Tensor& self) {
+  TORCH_CHECK(self.is_complex(), "view_as_real_physical is only supported for complex tensors");
   auto old_sizes = self.sizes();
   DimVector new_sizes(old_sizes.size() + 1);
   std::copy(old_sizes.begin(), old_sizes.end(), new_sizes.begin());

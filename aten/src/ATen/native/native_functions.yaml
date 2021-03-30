@@ -285,15 +285,23 @@
 
 - func: conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
-
-- func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: conj_out
+    CompositeExplicitAutograd: conj
 
-- func: _conj(Tensor self) -> Tensor
+# - func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+#    dispatch:
+#     CPU, CUDA: conj_out
+
+- func: view_as_real_physical(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _conj
+    CompositeExplicitAutograd: view_as_real_physical
+
+- func: conj_physical_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+
+- func: resolve_conj(Tensor(a) self) -> Tensor(a)
+  variants: function, method
 
 - func: acos(Tensor self) -> Tensor
   variants: function, method
@@ -1953,6 +1961,11 @@
   manual_cpp_binding: True
 
 - func: is_complex(Tensor self) -> bool
+  variants: function, method
+  device_guard: False
+  manual_cpp_binding: True
+
+- func: is_conj(Tensor self) -> bool
   variants: function, method
   device_guard: False
   manual_cpp_binding: True

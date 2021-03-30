@@ -244,7 +244,8 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    auto real_tensor = at::view_as_real(self);
+    // real is never affected by conjugate bit, safe to use physical version
+    auto real_tensor = at::view_as_real_physical(self);
     return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
@@ -260,17 +261,38 @@ Tensor imag(const Tensor& self) {
   }
 }
 
-Tensor& conj_out(const Tensor& self, Tensor& result) {
-  return unary_op_impl_out(result, self, conj_stub);
+Tensor resolve_conj(const Tensor& self) {
+  if (!self.is_conj()) { return self; }
+  auto result = at::empty_like(self, self.options());
+  // conjugation is handled in `copy_()`
+  return result.copy_(self);
 }
 
-Tensor _conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+// Tensor& conj_out(const Tensor& self, Tensor& result) {
+//
+// }
 
 Tensor conj(const Tensor& self) {
   if (!self.is_complex()) {
     return self;
   }
-  return at::_conj(self);
+  Tensor self_;
+  auto impl = c10::make_intrusive<TensorImpl>(
+    Storage(self.storage()), self.key_set(), self.dtype());
+  impl->set_storage_offset(self.storage_offset());
+  impl->set_sizes_and_strides(self.sizes(), self.strides());
+  impl->set_conj(!self.is_conj());
+  self_ = Tensor(std::move(impl));
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
+Tensor& conj_physical_out(Tensor& result, const Tensor& self) {
+  return unary_op_impl_out(result, self, conj_stub);
+}
+
+Tensor& conj_physical_(Tensor& self) {
+  return unary_op_impl_(self, conj_physical_out);
 }
 
 Tensor& bitwise_not_out(const Tensor& self, Tensor& result) { return unary_op_impl_out(result, self, bitwise_not_stub); }
@@ -754,6 +776,7 @@ DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(angle_stub);
 DEFINE_DISPATCH(real_stub);
 DEFINE_DISPATCH(imag_stub);
+// NB: conj_stub IGNORES the conjugate bit on input tensors
 DEFINE_DISPATCH(conj_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(acosh_stub);

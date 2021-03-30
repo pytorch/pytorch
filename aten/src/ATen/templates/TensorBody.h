@@ -359,6 +359,15 @@ class TORCH_API Tensor {
     return !at::impl::variable_excluded_from_dispatch();
   }
 
+  inline bool is_conj() const {
+    return impl_->is_conj();
+  }
+
+  // TODO: do I need to add this method directly on the Tensor to implement conj_view() in UnaryOps?
+  inline void set_conj(bool conjugate) const {
+    impl_->set_conj(conjugate);
+  }
+
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept {
     return impl_->layout();

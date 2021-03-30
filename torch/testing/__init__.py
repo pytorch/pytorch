@@ -122,6 +122,8 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
             b.real[b.imag.isnan()] = math.nan
             b.imag[b.real.isnan()] = math.nan
 
+        a = a.resolve_conj()
+        b = b.resolve_conj()
         real_result, debug_msg = _compare_tensors_internal(a.real, b.real,
                                                            rtol=rtol, atol=atol,
                                                            equal_nan=equal_nan)

@@ -149,7 +149,7 @@ Tensor fft_r2c(c10::string_view function_name,
 
   if (!forward) {
     // FIXME: _fft_r2c doesn't support native r2c IFFT
-    return out.defined() ? at::conj_out(out, ret) : at::conj(ret);
+    return out.defined() ? out.copy_(at::conj(ret)) : at::conj(ret);
   } else {
     return ret;
   }

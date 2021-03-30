@@ -557,6 +557,13 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+       TORCH_SELECTIVE_SCHEMA("aten::is_conj(Tensor self) -> bool"),
+         [](Stack* stack) {
+           at::Tensor arg = pop(stack).toTensor();
+           push(stack, arg.is_conj());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::get_device(Tensor self) -> int"),
          [](Stack* stack) {
            RECORD_FUNCTION("get_device", std::vector<c10::IValue>());

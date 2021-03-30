@@ -305,6 +305,11 @@ def saved_variables(
             'type': 'IntArrayRef',
             'expr': stride_expr,
         }),
+        # replace self.is_conj() with self_conjugate
+        (r'{}.is_conj\(\)', {
+            'suffix': '_conjugate',
+            'type': 'bool',
+        })
     ]
 
     # find which arguments need to be saved
