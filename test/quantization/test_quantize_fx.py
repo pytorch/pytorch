@@ -72,8 +72,6 @@ from torch.testing._internal.common_quantized import (
 
 from torch.testing._internal.common_utils import TemporaryFileName
 
-from torch.testing._internal.common_distributed import skip_if_not_multigpu
-
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
 from torch.testing import FileCheck
