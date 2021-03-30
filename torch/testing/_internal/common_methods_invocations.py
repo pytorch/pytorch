@@ -24,8 +24,8 @@ from torch.testing._internal.common_device_type import \
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride,)
 from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
-    (random_square_matrix_of_rank,
-     random_symmetric_matrix, random_symmetric_psd_matrix,
+    (random_symmetric_matrix, random_symmetric_psd_matrix,
+     # random_square_matrix_of_rank,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed, SEED,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
@@ -396,9 +396,9 @@ def sample_inputs_linalg_det(op_info, device, dtype, requires_grad):
         # dim2_null, rank1 and rank2 are disabled because of
         # https://github.com/pytorch/pytorch/issues/53364
         # we should re-enable them once the issue is solved
-        #random_square_matrix_of_rank(S, S - 2, **kw),  # dim2_null
-        #random_square_matrix_of_rank(S, 1, **kw),  # rank1
-        #random_square_matrix_of_rank(S, 2, **kw),  # rank2
+        # random_square_matrix_of_rank(S, S - 2, **kw),  # dim2_null
+        # random_square_matrix_of_rank(S, 1, **kw),  # rank1
+        # random_square_matrix_of_rank(S, 2, **kw),  # rank2
 
         random_fullrank_matrix_distinct_singular_value(S, **kw),  # distinct_singular_value
         make_tensor((3, 3, S, S), **kw),  # batched
