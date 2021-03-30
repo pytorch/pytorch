@@ -1,5 +1,6 @@
 
 from multiprocessing import Manager
+from caffe2.utils import python_bindings
 from contextlib import contextmanager
 from io import StringIO
 import os
@@ -17,7 +18,6 @@ from functools import wraps
 import torch
 import torch.distributed as c10d
 
-import faulthandler
 from functools import partial, reduce
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA
 
@@ -302,7 +302,6 @@ class MultiProcessTestCase(TestCase):
 
     def setUp(self):
         super().setUp()
-        self.faulthandler_files = []
         self.skip_return_code_checks = []
         self.processes = []
         self.rank = self.MAIN_PROCESS_RANK
@@ -322,10 +321,6 @@ class MultiProcessTestCase(TestCase):
         # processes to prevent an effective file descriptor leak.
         self.processes = []
 
-        # Close all the files
-        for file in self.faulthandler_files:
-            file.close()
-
     def _current_test_name(self):
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
@@ -340,16 +335,14 @@ class MultiProcessTestCase(TestCase):
         self.processes = []
         for rank in range(int(self.world_size)):
             parent_conn, child_conn = torch.multiprocessing.Pipe()
-            faulthandler_file = tempfile.NamedTemporaryFile()
             process = proc(
                 target=self.__class__._run,
                 name='process ' + str(rank),
-                args=(rank, self._current_test_name(), self.file_name, child_conn, faulthandler_file.name))
+                args=(rank, self._current_test_name(), self.file_name, child_conn))
             process.start()
             logger.info(f'Started process {rank} with pid {process.pid}')
             self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
-            self.faulthandler_files.append(faulthandler_file)
 
     def _fork_processes(self):
         proc = torch.multiprocessing.get_context("fork").Process
@@ -360,25 +353,18 @@ class MultiProcessTestCase(TestCase):
         self._start_processes(proc)
 
     @classmethod
-    def _run(cls, rank, test_name, file_name, pipe, faulthandler_file_name):
+    def _run(cls, rank, test_name, file_name, pipe):
         self = cls(test_name)
-        self._register_fault_handler(faulthandler_file_name)
         self.rank = rank
         self.file_name = file_name
-
         self.run_test(test_name, pipe)
         # exit to avoid run teardown() for fork processes
         sys.exit(0)
 
-    def _register_fault_handler(self, faulthandler_file_name):
-        # On windows, you can't reopen the temporary file and we can't pass a
-        # file object to a subprocess since it can't be pickled. As a result,
-        # don't use faulthandler on windows.
-        if sys.platform != 'win32':
-            faulthandler_file = open(faulthandler_file_name, mode='w')
-            faulthandler.enable(file=faulthandler_file)
-
     def run_test(self, test_name, pipe):
+        # Register signal handler to dump stack traces on FATALs.
+        python_bindings.set_print_stack_traces_on_fatal_signal(True)
+
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
         try:
@@ -428,8 +414,6 @@ class MultiProcessTestCase(TestCase):
 
             elapsed_time = time.time() - start_time
 
-            self._check_and_print_faults()
-
             if fn in self.skip_return_code_checks:
                 self._check_no_test_errors(elapsed_time)
             else:
@@ -441,15 +425,6 @@ class MultiProcessTestCase(TestCase):
 
             global TEST_SKIPS
             TEST_SKIPS = self.old_test_skips
-
-    def _check_and_print_faults(self):
-        """
-        Checks fault handler files for any faults and prints them out appropriately.
-        """
-        for i, file in enumerate(self.faulthandler_files):
-            if os.path.getsize(file.name) != 0:
-                contents = file.read().decode('utf-8')
-                logger.error(f'Process {i} encountered the following fault:\n{contents}')
 
     def _check_no_test_errors(self, elapsed_time):
         """
