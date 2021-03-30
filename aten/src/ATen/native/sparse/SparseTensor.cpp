@@ -396,7 +396,7 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
   return self._coalesced_(src.is_coalesced());
 }
 
-SparseTensor coalesce_sparse(const SparseTensor& self) {
+SparseTensor coalesce(const SparseTensor& self) {
   // See NOTE: [ coalesce autograd ]
   if (self.is_coalesced()) {
     return self;
