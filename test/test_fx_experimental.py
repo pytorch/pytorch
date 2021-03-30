@@ -34,7 +34,7 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
-skipIfNoMkl = unittest.skipIf(not torch.backends.mkl.is_available(), "no torchvision")
+skipIfNoMkldnn = unittest.skipIf(not torch.backends.mkldnn.enabled, "no MKLDNN")
 
 
 def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
@@ -1162,7 +1162,7 @@ class {test_classname}(torch.nn.Module):
         self.assertEqual(_count_matmuls(module), 2)
         self.assertEqual(_count_matmuls(opt_module), 2)
 
-    @skipIfNoMkl
+    @skipIfNoMkldnn
     def test_prepare_for_inference_cpu(self):
         import torch.nn as nn
 
@@ -1194,7 +1194,7 @@ class {test_classname}(torch.nn.Module):
             torch.testing.assert_allclose(model(inp), optimized_model(inp))
 
     @skipIfNoTorchVision
-    @skipIfNoMkl
+    @skipIfNoMkldnn
     def test_prepare_for_inference_cpu_torchvision(self):
         models = [
             torchvision.models.resnet18,
