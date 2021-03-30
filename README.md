@@ -249,7 +249,7 @@ Choose Correct Visual Studio Version.
 
 Visual Studio upgrades are very often. Sometimes, there're regressions in some new versions.
 It'd best to use the same Visual Studio Version as [PyTorch CI's](https://github.com/pytorch/pytorch/blob/a1bd7918cc5a06cbef6c5178259bf0a7b5ab1ce3/.circleci/scripts/vs_install.ps1#L4). 
-You can use Visual Stuido Enterprise, Professional or Community though PyTorch CI uses VS BuildTools.
+You can use Visual Studio Enterprise, Professional or Community though PyTorch CI uses Visual Studio BuildTools.
 
 Build with CPU
 
