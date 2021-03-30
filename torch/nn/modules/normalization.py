@@ -141,7 +141,7 @@ class LayerNorm(Module):
         >>> output = m(input)
     """
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
-    normalized_shape: Tuple[int, ...] 
+    normalized_shape: Tuple[int, ...]
     eps: float
     elementwise_affine: bool
 
@@ -154,8 +154,8 @@ class LayerNorm(Module):
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
-            self.weight = Parameter(torch.Tensor(*self.normalized_shape))
-            self.bias = Parameter(torch.Tensor(*self.normalized_shape))
+            self.weight = Parameter(torch.empty(self.normalized_shape))
+            self.bias = Parameter(torch.empty(self.normalized_shape))
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
@@ -230,8 +230,8 @@ class GroupNorm(Module):
         self.eps = eps
         self.affine = affine
         if self.affine:
-            self.weight = Parameter(torch.Tensor(num_channels))
-            self.bias = Parameter(torch.Tensor(num_channels))
+            self.weight = Parameter(torch.empty(num_channels))
+            self.bias = Parameter(torch.empty(num_channels))
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
