@@ -457,7 +457,14 @@ class TORCH_API Tensor {
   QuantizerPtr quantizer() const;
 
   /// Returns if a `Tensor` has any dimension names
-  bool has_names() const;
+  bool has_names() const {
+    // If a user is using unnamed tensors, then we can short-circuit right here.
+    // Otherwise, impl::has_names attempts to retrieve names.
+    if (!impl_->has_named_tensor_meta()) {
+      return false;
+    }
+    return impl::has_names(unsafeGetTensorImpl());
+  }
 
   /// Returns a `Tensor`'s dimension names data structure
   const NamedTensorMeta* get_named_tensor_meta() const;
