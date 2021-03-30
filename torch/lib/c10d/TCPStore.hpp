@@ -99,8 +99,11 @@ class TCPStore : public Store {
   // Waits for all workers to join.
   void waitForWorkers();
 
+  // Returns the hostname used by the TCPStore.
+  const std::string& getHost() const noexcept;
+
   // Returns the port used by the TCPStore.
-  PortType getPort();
+  PortType getPort() const noexcept;
 
  protected:
   int64_t addHelper_(const std::string& key, int64_t value);

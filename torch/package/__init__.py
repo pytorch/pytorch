@@ -5,5 +5,5 @@ from .importer import (
     OrderedImporter,
     sys_importer,
 )
+from .package_exporter import DeniedModuleError, EmptyMatchError, PackageExporter
 from .package_importer import PackageImporter
-from .package_exporter import PackageExporter
