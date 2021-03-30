@@ -42,17 +42,23 @@ void LayerNormKernelImplInternal(
     for (int64_t i = start; i < end; ++i) {
       T* X_ptr = X_data + i * N;
       T* Y_ptr = Y_data + i * N;
+
       T mean_val = vec256::reduce_all<T>(
           [](Vec& x, Vec& y) { return x + y; },
           X_ptr,
           N);
+      mean_val *= c;
+
       T rstd_val = vec256::map_reduce_all<T>(
-          [](Vec x) { return x * x; },
+          [mean_val](Vec x) {
+            auto diff = x - Vec(mean_val);
+            return diff * diff;
+          },
           [](Vec x, Vec y) { return x + y; },
           X_ptr,
           N);
-      mean_val *= c;
-      rstd_val = std::max(rstd_val * c - mean_val * mean_val, T(0));
+      rstd_val = std::max(rstd_val * c, T(0));
+
       rstd_val = T(1) / std::sqrt(rstd_val + eps);
       const T scale = rstd_val;
       const T bias = -rstd_val * mean_val;
