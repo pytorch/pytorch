@@ -1566,10 +1566,7 @@ void initJitScriptBindings(PyObject* module) {
         }
 
         get_python_cu()->define_interface(
-            className,
-            classDef,
-            pythonResolver(rcb),
-            is_module);
+            className, classDef, pythonResolver(rcb), is_module);
       });
 
   py::class_<torch::jit::ErrorReport::CallStack>(
