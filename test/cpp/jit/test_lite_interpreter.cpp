@@ -607,7 +607,7 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
   //  _load_for_mobile("/Users/chenlai/Documents/pytorch/reuse_constant/tmp/zip/example_small.ptl");
 
   std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
+  c._save_for_mobile(ss, {}, caffe2::serialize::kProducedBytecodeVersion, true);
   mobile::Module bc = _load_for_mobile(ss);
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;

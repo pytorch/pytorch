@@ -414,7 +414,7 @@ class ScriptModuleSerializer {
 
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (version.has_value()) {
-      writeByteCode(module, save_mobile_debug_info, constants_from_jit);
+      writeByteCode(module, save_mobile_debug_info, constants_from_jit, version.value());
       writeMobileMetadata(module, extra_files);
     }
 
@@ -559,24 +559,38 @@ class ScriptModuleSerializer {
   void writeByteCode(
       const Module& module,
       bool save_mobile_debug_info,
-      const TensorIndexMap& constants_from_jit) {
+      const TensorIndexMap& constants_from_jit,
+      uint64_t version = caffe2::serialize::kProducedBytecodeVersion) {
+    const uint64_t bytecode_version_5 = 0x5l;
+
+    TORCH_CHECK(
+        caffe2::serialize::kMinProducedBytecodeVersion <= version
+            && version <= caffe2::serialize::kProducedBytecodeVersion,
+        "Lite Interpreter can only produce bytecode version between ",
+        caffe2::serialize::kMinProducedBytecodeVersion,
+        " and ",
+        caffe2::serialize::kProducedBytecodeVersion,
+        ". But the request model version is ",
+        version);
     std::vector<c10::IValue> elements;
     elements.emplace_back(
-        static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+        static_cast<int64_t>(version));
     c10::optional<std::vector<c10::IValue>> debug_info_elements;
     if (save_mobile_debug_info) {
       debug_info_elements = std::vector<c10::IValue>();
       debug_info_elements->emplace_back(
-          static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+          static_cast<int64_t>(version));
     }
 
     moduleMethodsTuple(
         module, elements, debug_info_elements, save_mobile_debug_info);
     auto telements = Tup(std::move(elements));
 
-    // tensors_archive_table_ will be passed to the bytcode's pickler later.
-    tensors_archive_table_.insert(
-        constants_from_jit.begin(), constants_from_jit.end());
+    if (version == bytecode_version_5) {
+      // tensors_archive_table_ will be passed to the bytcode's pickler later.
+      tensors_archive_table_.insert(
+          constants_from_jit.begin(), constants_from_jit.end());
+    }
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
