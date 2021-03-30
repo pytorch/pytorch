@@ -105,17 +105,23 @@ void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef inde
   });
 }
 
-static int64_t dataOffset(const Tensor& tensor, int64_t linearIndex) {
-  auto size = tensor.sizes();
-  auto stride = tensor.strides();
-  int nDim = tensor.dim();
-  int64_t dataOffset = 0;
-  for (int i = nDim - 1; i >= 0; i--) {
-    dataOffset += (linearIndex % size[i]) * stride[i];
-    linearIndex /= size[i];
+struct IndexToOffset {
+  const IntArrayRef sizes;
+  const IntArrayRef strides;
+  const int ndim;
+  IndexToOffset(const Tensor & tensor) : sizes(tensor.sizes()),
+                                         strides(tensor.strides()),
+                                         ndim(tensor.dim()) {}
+
+  int64_t get(int64_t linear_index) const {
+    int64_t offset = 0;
+    for (int i = ndim - 1; i > 0; i--) {
+      offset += (linear_index % sizes[i]) * strides[i];
+      linear_index /= sizes[i];
+    }
+    return offset + linear_index * strides[0];
   }
-  return dataOffset;
-}
+};
 
 template <typename scalar_t, typename func_t>
 void cpu_take_put_kernel(
@@ -135,6 +141,7 @@ void cpu_take_put_kernel(
   constexpr int parallel_grain_size = 3000;
   const bool is_contiguous = indexed.is_contiguous();
   const auto numel = indexed.numel();
+  const auto offset_indexed = IndexToOffset(indexed);
 
   auto* indexed_data = indexed.data_ptr<scalar_t>();
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
@@ -146,8 +153,12 @@ void cpu_take_put_kernel(
 
       TORCH_CHECK_INDEX(idx >= -numel && idx < numel,
                         "out of range: ", idx, " out of ", numel);
-      idx = idx >= 0 ? idx : idx + numel;
-      idx = is_contiguous ? idx : dataOffset(indexed, idx);
+      if (idx < 0) {
+        idx += numel;
+      }
+      if (!is_contiguous) {
+        idx = offset_indexed.get(idx);
+      }
       f(iterated, indexed_data, idx);
       iterated_data_bytes += strides[0];
       index_data_bytes += strides[1];
