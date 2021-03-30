@@ -7,6 +7,8 @@
 #include <ATen/native/im2col.h>
 #include <ATen/native/ConvUtils.h>
 
+#include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 
@@ -306,7 +308,7 @@ void slow_conv_transpose2d_out_cpu_template(
   // Resize output
   output.resize_(output_sizes, memory_format);
 
-  bool skip_col2im = skip_transforming(kernel_size, stride, padding, output_padding);
+  bool skip_col2im = skip_transforming(kernel_size, stride, padding, output_padding, dilation);
 
   if (use_channels_last) {
     slow_conv_transposed2d_channels_last(
@@ -534,7 +536,7 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
   grad_input.resize_({batch_size, n_input_plane, input_height, input_width}, memory_format);
   grad_input.zero_();
 
-  bool skip_im2col = skip_transforming(kernel_size, stride, padding, output_padding);
+  bool skip_im2col = skip_transforming(kernel_size, stride, padding, output_padding, dilation);
 
   if (use_channels_last) {
     slow_conv_transposed2d_backward_channels_last(
@@ -762,7 +764,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
   int64_t n_input_plane = input.size(1);
   int64_t n_output_plane = grad_output.size(1);
 
-  bool skip_im2col = skip_transforming(kernel_size, stride, padding, output_padding);
+  bool skip_im2col = skip_transforming(kernel_size, stride, padding, output_padding, dilation);
 
   if (use_channels_last) {
     slow_conv_transposed_acc_grad_channels_last(
@@ -869,12 +871,14 @@ Tensor& slow_conv_transpose2d_out_cpu(
 Tensor slow_conv_transpose2d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor output = at::empty({0}, input.options());
   Tensor columns = at::empty({0}, input.options());
 

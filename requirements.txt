@@ -1,5 +1,7 @@
+# Python dependencies required for development
 future
 numpy
+psutil
 pyyaml
 requests
 setuptools

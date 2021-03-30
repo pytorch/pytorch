@@ -4,6 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 
 #include <test/cpp/jit/test_utils.h>
 
@@ -2153,9 +2154,8 @@ TEST(FuturesTest, CollectAll) {
   s4->setError(
       std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
   ASSERT_TRUE(c5->completed());
-  ASSERT_EQ(c5->value().toList().size(), 4);
   try {
-    (void)c5->value().toList().get(3).toFuture()->value();
+    c5->value();
     ASSERT_TRUE(false); // supposed to throw
   } catch (const std::exception& e) {
     ASSERT_EQ(std::string(e.what()), "Failed");
@@ -2385,6 +2385,26 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
   flops = computeFlops(std::string("aten::mul"), extra_args);
   ASSERT_EQ(flops, 360);
+}
+
+TEST(TestMutation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %9 : int = prim::Constant[value=4]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %7 : Tensor = aten::add_(%x.3, %2, %2)
+  %y.1 : Tensor = aten::add(%x.3, %9, %2)
+  return (%y.1))IR",
+      &*graph,
+      vmap);
+  RemoveTensorMutation(graph, [](Node*) { return false; });
+  testing::FileCheck().check("aten::add_")->run(*graph);
+  RemoveTensorMutation(graph, [](Node*) { return true; });
+  testing::FileCheck().check_not("aten::add_")->run(*graph);
 }
 
 } // namespace jit

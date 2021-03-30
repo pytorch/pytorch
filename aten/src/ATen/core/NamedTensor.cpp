@@ -141,8 +141,7 @@ DimnameList get_names(const TensorImpl* impl) {
 }
 
 bool has_names(const TensorImpl* impl) {
-  const auto* named_tensor_meta = get_named_tensor_meta(impl);
-  return named_tensor_meta != nullptr;
+  return impl->has_named_tensor_meta() && NamesMode::is_enabled();
 }
 
 } // namespace impl

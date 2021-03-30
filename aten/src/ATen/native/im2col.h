@@ -39,14 +39,17 @@ static inline bool skip_transforming(
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
-    IntArrayRef output_padding) {
+    IntArrayRef output_padding,
+    IntArrayRef dilation) {
   TORCH_CHECK(
       (kernel_size.size() == stride.size()) &&
       (kernel_size.size() == padding.size()) &&
-      (kernel_size.size() == output_padding.size()));
+      (kernel_size.size() == output_padding.size()) &&
+      (kernel_size.size() == dilation.size()));
   bool res = true;
   for (int64_t k = 0; k < kernel_size.size(); k++) {
-    res = res && (kernel_size[k] == 1) && (stride[k] == 1) && (padding[k] == 0) && (output_padding[k] == 0);
+    res = res && (kernel_size[k] == 1) && (stride[k] == 1) && (padding[k] == 0)
+              && (output_padding[k] == 0) && (dilation[k] == 1);
   }
   return res;
 }

@@ -339,7 +339,7 @@ struct alignas(2) Half {
   unsigned short x;
 
   struct from_bits_t {};
-  static constexpr from_bits_t from_bits() {
+  C10_HOST_DEVICE static constexpr from_bits_t from_bits() {
     return from_bits_t();
   }
 
