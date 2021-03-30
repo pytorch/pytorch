@@ -189,6 +189,6 @@ def get_previous_reports_for_branch(branch: str, ci_job_prefix: str = "") -> Lis
         for job_name, summary in summaries.items():
             reports.append(summary[0])
             if len(summary) > 1:
-                logger.info(f'Warning: multiple summary objects found for {commit}/{job_name}')
+                logger.warning(f'WARNING: Multiple summary objects found for {commit}/{job_name}')
         commit_index += 1
     return reports
