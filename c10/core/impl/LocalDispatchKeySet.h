@@ -121,7 +121,5 @@ C10_API bool tls_is_dispatch_key_excluded(DispatchKey x);
 C10_API void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state);
 C10_API bool tls_is_dispatch_key_included(DispatchKey x);
 C10_API void tls_set_dispatch_key_included(DispatchKey x, bool desired_state);
-C10_API bool tls_is_dispatch_keyset_excluded(DispatchKeySet ks);
-C10_API bool tls_is_dispatch_keyset_included(DispatchKeySet ks);
 
 }} // namespace c10::impl
