@@ -1,5 +1,0 @@
-version: 1
-
-labels:
-- label: "ROCm"
-  title: ".*rocm.*@i"
