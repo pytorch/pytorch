@@ -15,7 +15,7 @@ else
   export VC_YEAR=2019
 fi
 
-if [[ "${DESIRED_CUDA}" == "cu111" ]]; then
+if [[ "${DESIRED_CUDA}" == "cu11*" ]]; then
   export BUILD_SPLIT_CUDA="ON"
 fi
 
