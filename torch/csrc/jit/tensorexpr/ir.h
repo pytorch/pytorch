@@ -790,13 +790,10 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   }
 
  private:
-  TORCH_API static int OpArgCount(IntrinsicsOp op_type);
-  TORCH_API static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1);
-  TORCH_API static Dtype IntrinsicsDtype(
-      IntrinsicsOp op_type,
-      Dtype dt1,
-      Dtype dt2);
-  TORCH_API static Dtype IntrinsicsDtype(
+  static int OpArgCount(IntrinsicsOp op_type);
+  static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1);
+  static Dtype IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2);
+  static Dtype IntrinsicsDtype(
       IntrinsicsOp op_type,
       const std::vector<const Expr*>& params);
 
