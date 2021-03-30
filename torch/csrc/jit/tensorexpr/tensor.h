@@ -59,6 +59,8 @@ class TORCH_API Tensor : KernelScopedObject {
 
 class Placeholder {
  public:
+  Placeholder() = default;
+
   Placeholder(const BufHandle& data) : data_(data.node()) {
     if (data_->base_handle()->dtype() != kHandle) {
       throw malformed_input("Placeholder dtype must be Handle");
@@ -74,6 +76,7 @@ class Placeholder {
     }
     strides_ = ExprHandleVectorToExprVector(stride_handles);
   }
+
   Placeholder(
       const std::string& name,
       const Dtype& dtype,
