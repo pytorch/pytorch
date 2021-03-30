@@ -437,6 +437,10 @@ struct TORCH_API Node {
 
   void replaceAllUsesWith(Node* n);
 
+  // replaces `this` with a new node with the same inputs and outputs
+  // but a new node symbol. does not destroy `this`
+  Node* replaceWithNewSymbol(Symbol new_symbol);
+
   // lots of things like chunk have a single input or single output, so we have
   // a helper to make accessing it easier
   Value* input() {
@@ -798,7 +802,9 @@ struct TORCH_API Node {
   }
 
   CREATE_ACCESSOR(Float, f)
+  CREATE_ACCESSOR(Complex, c)
   CREATE_ACCESSOR(Floats, fs)
+  CREATE_ACCESSOR(ComplexVals, cs)
   CREATE_ACCESSOR(String, s)
   CREATE_ACCESSOR(Strings, ss)
   CREATE_ACCESSOR(Int, i)

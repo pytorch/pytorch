@@ -472,7 +472,7 @@ jobs:
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && export CIRCLE_JOB="$CIRCLE_JOB" && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -603,6 +603,7 @@ jobs:
           # =================== The following code will be executed inside Docker container ===================
           set -ex
           export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
+          export CIRCLE_JOB="$CIRCLE_JOB"
           ${PARALLEL_FLAGS}
           cd workspace
           EOL
@@ -697,6 +698,11 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Install VS2019 toolchain
+          no_output_timeout: 10m
+          command: |
+              powershell .circleci/scripts/vs_install.ps1
+      - run:
           name: Install Cuda
           no_output_timeout: 30m
           command: |
@@ -760,6 +766,11 @@ jobs:
       - checkout
       - attach_workspace:
           at: c:/users/circleci/workspace
+      - run:
+          name: Install VS2019 toolchain
+          no_output_timeout: 10m
+          command: |
+              powershell .circleci/scripts/vs_install.ps1
       - run:
           name: Install Cuda
           no_output_timeout: 30m
@@ -2333,6 +2344,50 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/manylinux-rocm:4.0.1"
       - binary_linux_build:
+          name: binary_linux_manywheel_3_6m_rocm4_1_devtoolset7_nightly_build
+          build_environment: "manywheel 3.6m rocm4.1 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-rocm:4.1"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_7m_rocm4_1_devtoolset7_nightly_build
+          build_environment: "manywheel 3.7m rocm4.1 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-rocm:4.1"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_8m_rocm4_1_devtoolset7_nightly_build
+          build_environment: "manywheel 3.8m rocm4.1 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-rocm:4.1"
+      - binary_linux_build:
+          name: binary_linux_manywheel_3_9m_rocm4_1_devtoolset7_nightly_build
+          build_environment: "manywheel 3.9m rocm4.1 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          docker_image: "pytorch/manylinux-rocm:4.1"
+      - binary_linux_build:
           name: binary_linux_conda_3_6_cpu_devtoolset7_nightly_build
           build_environment: "conda 3.6 cpu devtoolset7"
           filters:
@@ -3752,6 +3807,66 @@ workflows:
           requires:
             - binary_linux_manywheel_3_9m_rocm4_0_1_devtoolset7_nightly_build
           docker_image: "pytorch/manylinux-rocm:4.0.1"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_manywheel_3_6m_rocm4_1_devtoolset7_nightly_test
+          build_environment: "manywheel 3.6m rocm4.1 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_linux_manywheel_3_6m_rocm4_1_devtoolset7_nightly_build
+          docker_image: "pytorch/manylinux-rocm:4.1"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_manywheel_3_7m_rocm4_1_devtoolset7_nightly_test
+          build_environment: "manywheel 3.7m rocm4.1 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_linux_manywheel_3_7m_rocm4_1_devtoolset7_nightly_build
+          docker_image: "pytorch/manylinux-rocm:4.1"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_manywheel_3_8m_rocm4_1_devtoolset7_nightly_test
+          build_environment: "manywheel 3.8m rocm4.1 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_linux_manywheel_3_8m_rocm4_1_devtoolset7_nightly_build
+          docker_image: "pytorch/manylinux-rocm:4.1"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - binary_linux_test:
+          name: binary_linux_manywheel_3_9m_rocm4_1_devtoolset7_nightly_test
+          build_environment: "manywheel 3.9m rocm4.1 devtoolset7"
+          filters:
+            branches:
+              only:
+                - /.*/
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          requires:
+            - binary_linux_manywheel_3_9m_rocm4_1_devtoolset7_nightly_build
+          docker_image: "pytorch/manylinux-rocm:4.1"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -5329,6 +5444,62 @@ workflows:
           package_type: manywheel
           upload_subfolder: rocm4.0.1
       - binary_upload:
+          name: binary_linux_manywheel_3_6m_rocm4_1_devtoolset7_nightly_upload
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3_6m_rocm4_1_devtoolset7_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: manywheel
+          upload_subfolder: rocm4.1
+      - binary_upload:
+          name: binary_linux_manywheel_3_7m_rocm4_1_devtoolset7_nightly_upload
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3_7m_rocm4_1_devtoolset7_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: manywheel
+          upload_subfolder: rocm4.1
+      - binary_upload:
+          name: binary_linux_manywheel_3_8m_rocm4_1_devtoolset7_nightly_upload
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3_8m_rocm4_1_devtoolset7_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: manywheel
+          upload_subfolder: rocm4.1
+      - binary_upload:
+          name: binary_linux_manywheel_3_9m_rocm4_1_devtoolset7_nightly_upload
+          context: org-member
+          requires:
+            - binary_linux_manywheel_3_9m_rocm4_1_devtoolset7_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only:
+                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
+          package_type: manywheel
+          upload_subfolder: rocm4.1
+      - binary_upload:
           name: binary_linux_conda_3_6_cpu_devtoolset7_nightly_upload
           context: org-member
           requires:
@@ -6730,12 +6901,6 @@ workflows:
           name: "docker-pytorch-linux-bionic-py3.8-gcc9"
           image_name: "pytorch-linux-bionic-py3.8-gcc9"
       - docker_build_job:
-          name: "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
-          image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
-      - docker_build_job:
-          name: "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-          image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-      - docker_build_job:
           name: "docker-pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7"
           image_name: "pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7"
       - docker_build_job:
@@ -7593,8 +7758,8 @@ workflows:
           name: pytorch_windows_vs2019_py36_cuda10.1_build
           python_version: "3.6"
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
@@ -7606,8 +7771,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda10.1_build
           test_name: pytorch-windows-test1
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
@@ -7619,8 +7784,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda10.1_build
           test_name: pytorch-windows-test2
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -7628,8 +7793,8 @@ workflows:
           name: pytorch_windows_vs2019_py36_cuda11.1_build
           python_version: "3.6"
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -7647,8 +7812,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda11.1_build
           test_name: pytorch-windows-test1
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
@@ -7666,8 +7831,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda11.1_build
           test_name: pytorch-windows-test2
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cpu-py3
@@ -7675,8 +7840,8 @@ workflows:
           name: pytorch_windows_vs2019_py36_cpu_build
           python_version: "3.6"
           use_cuda: "0"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cpu-py3
@@ -7693,8 +7858,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cpu_build
           test_name: pytorch-windows-test1
           use_cuda: "0"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cpu-py3
@@ -7711,8 +7876,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cpu_build
           test_name: pytorch-windows-test2
           use_cuda: "0"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda10-cudnn7-py3
@@ -7729,8 +7894,8 @@ workflows:
             - pytorch_windows_vs2019_py36_cuda10.1_build
           test_name: pytorch-windows-test1
           use_cuda: "0"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
       - update_s3_htmls:
           context: org-member
@@ -8017,6 +8182,54 @@ workflows:
               only:
                 - postnightly
           docker_image: "pytorch/manylinux-rocm:4.0.1"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_6m_rocm4_1_devtoolset7_nightly
+          build_environment: "manywheel 3.6m rocm4.1 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/manylinux-rocm:4.1"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_7m_rocm4_1_devtoolset7_nightly
+          build_environment: "manywheel 3.7m rocm4.1 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/manylinux-rocm:4.1"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_8m_rocm4_1_devtoolset7_nightly
+          build_environment: "manywheel 3.8m rocm4.1 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/manylinux-rocm:4.1"
+          use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
+      - smoke_linux_test:
+          name: smoke_linux_manywheel_3_9m_rocm4_1_devtoolset7_nightly
+          build_environment: "manywheel 3.9m rocm4.1 devtoolset7"
+          requires:
+            - update_s3_htmls
+          filters:
+            branches:
+              only:
+                - postnightly
+          docker_image: "pytorch/manylinux-rocm:4.1"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -9143,32 +9356,6 @@ workflows:
           vc_product: Community
           vc_version: ""
           vc_year: "2019"
-      - docker_build_job:
-          name: "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
-          image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
-      - docker_build_job:
-          name: "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-          image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-      - pytorch_linux_build:
-          name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-          requires:
-            - "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-          build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test
-          requires:
-            - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - pytorch_linux_build:
-          name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc5_4_build
-          requires:
-            - "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
-          build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
 
   # The following allows these jobs to run on ci-all and release branches
   debuggable-scheduled-ci:
@@ -9222,8 +9409,8 @@ workflows:
           name: pytorch_windows_vs2019_py36_cuda11.2_build
           python_version: "3.6"
           use_cuda: "1"
-          vc_product: Community
-          vc_version: ""
+          vc_product: BuildTools
+          vc_version: "14.28.29333"
           vc_year: "2019"
           filters:
             branches:
@@ -9261,57 +9448,6 @@ workflows:
           vc_product: Community
           vc_version: ""
           vc_year: "2019"
-          filters:
-            branches:
-              only:
-                - /ci-all\/.*/
-                - /release\/.*/
-      - docker_build_job:
-          name: "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
-          image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
-          filters:
-            branches:
-              only:
-                - /ci-all\/.*/
-                - /release\/.*/
-      - docker_build_job:
-          name: "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-          image_name: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-          filters:
-            branches:
-              only:
-                - /ci-all\/.*/
-                - /release\/.*/
-      - pytorch_linux_build:
-          name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-          requires:
-            - "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-          build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-          filters:
-            branches:
-              only:
-                - /ci-all\/.*/
-                - /release\/.*/
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test
-          requires:
-            - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-          filters:
-            branches:
-              only:
-                - /ci-all\/.*/
-                - /release\/.*/
-      - pytorch_linux_build:
-          name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc5_4_build
-          requires:
-            - "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
-          build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
           filters:
             branches:
               only:

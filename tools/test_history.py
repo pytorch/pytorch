@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 
 import argparse
-import bz2
-import json
 import subprocess
 import sys
-from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from tools.stats_utils.s3_stat_parser import (Report, get_cases,
-                                              get_S3_bucket_readonly)
+                                              get_test_stats_summaries)
 
 
 def get_git_commit_history(
@@ -25,28 +22,6 @@ def get_git_commit_history(
         (x[0], datetime.fromtimestamp(int(x[1]), tz=timezone.utc))
         for x in [line.split(" ") for line in rc.split("\n")]
     ]
-
-
-def get_object_summaries(*, bucket: Any, sha: str) -> Dict[str, List[Any]]:
-    summaries = list(bucket.objects.filter(Prefix=f'test_time/{sha}/'))
-    by_job = defaultdict(list)
-    for summary in summaries:
-        job = summary.key.split('/')[2]
-        by_job[job].append(summary)
-    return dict(by_job)
-
-def get_jsons(
-    jobs: Optional[List[str]],
-    summaries: Dict[str, Any],
-) -> Dict[str, Report]:
-    if jobs is None:
-        keys = sorted(summaries.keys())
-    else:
-        keys = [job for job in jobs if job in summaries]
-    return {
-        job: json.loads(bz2.decompress(summaries[job].get()['Body'].read()))
-        for job in keys
-    }
 
 
 def make_column(
@@ -149,7 +124,6 @@ def make_lines(
 
 def history_lines(
     *,
-    bucket: Any,
     commits: List[Tuple[str, datetime]],
     jobs: Optional[List[str]],
     filename: Optional[str],
@@ -165,17 +139,17 @@ def history_lines(
         if (prev_time - time).total_seconds() < delta * 3600:
             continue
         prev_time = time
-        summaries = get_object_summaries(bucket=bucket, sha=sha)
-        # we assume that get_object_summaries doesn't return empty lists
-        jsons = get_jsons(
-            jobs=jobs,
-            summaries={job: l[0] for job, l in summaries.items()},
-        )
+        if jobs is None:
+            summaries = get_test_stats_summaries(sha=sha)
+        else:
+            summaries = get_test_stats_summaries(sha=sha, jobs=jobs)
+        # we assume that get_test_stats_summaries here doesn't return empty lists
         omitted = {
             job: len(l) - 1
             for job, l in summaries.items()
             if len(l) > 1
         }
+        jsons = {job: l[0] for job, l in summaries.items()}
         if mode == 'columns':
             assert jobs is not None
             lines = [make_columns(
@@ -221,8 +195,8 @@ In multiline mode, each line next includes the name of a CircleCI job,
 followed by the time of the specified test in that job at that commit.
 Example:
 
-    $ tools/test_history.py multiline --ref=594a66 --sha-length=8 test_set_dir \
-       pytorch_linux_xenial_py3_6_gcc5_4_test pytorch_linux_xenial_py3_6_gcc7_test
+    $ tools/test_history.py --mode=multiline --ref=594a66 --sha-length=8 --test=test_set_dir \
+      --job pytorch_linux_xenial_py3_6_gcc5_4_test --job pytorch_linux_xenial_py3_6_gcc7_test
     2021-02-10 11:13:34Z 594a66d7 pytorch_linux_xenial_py3_6_gcc5_4_test 0.36s
     2021-02-10 11:13:34Z 594a66d7 pytorch_linux_xenial_py3_6_gcc7_test 0.573s errored
     2021-02-10 10:13:25Z 9c0caf03 pytorch_linux_xenial_py3_6_gcc5_4_test 0.819s
@@ -237,8 +211,8 @@ Example:
 
 Another multiline example, this time with the --all flag:
 
-    $ tools/test_history.py multiline --all --ref=321b9 --delta=12 --sha-length=8 \
-      test_qr_square_many_batched_complex_cuda
+    $ tools/test_history.py --mode=multiline --all --ref=321b9 --delta=12 --sha-length=8 \
+      --test=test_qr_square_many_batched_complex_cuda
     2021-01-07 10:04:56Z 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test2 424.284s
     2021-01-07 10:04:56Z 321b9883 pytorch_linux_xenial_cuda10_2_cudnn7_py3_slow_test 0.006s skipped
     2021-01-07 10:04:56Z 321b9883 pytorch_linux_xenial_cuda11_1_cudnn8_py3_gcc7_test 402.572s
@@ -252,8 +226,8 @@ In columns mode, the name of the job isn't printed, but the order of the
 columns is guaranteed to match the order of the jobs passed on the
 command line. Example:
 
-    $ tools/test_history.py columns --ref=3cf783 --sha-length=8 test_set_dir \
-      pytorch_linux_xenial_py3_6_gcc5_4_test pytorch_linux_xenial_py3_6_gcc7_test
+    $ tools/test_history.py --mode=columns --ref=3cf783 --sha-length=8 --test=test_set_dir \
+      --job pytorch_linux_xenial_py3_6_gcc5_4_test --job pytorch_linux_xenial_py3_6_gcc7_test
     2021-02-10 12:18:50Z 3cf78395    0.644s    0.312s
     2021-02-10 11:13:34Z 594a66d7    0.360s  errored
     2021-02-10 10:13:25Z 9c0caf03    0.819s    0.449s
@@ -277,9 +251,10 @@ def parse_args(raw: List[str]) -> argparse.Namespace:
         formatter_class=HelpFormatter,
     )
     parser.add_argument(
-        'mode',
+        '--mode',
         choices=['columns', 'multiline'],
         help='output format',
+        default='columns',
     )
     parser.add_argument(
         '--pytorch',
@@ -323,19 +298,21 @@ def parse_args(raw: List[str]) -> argparse.Namespace:
         help='name of the suite containing the test',
     )
     parser.add_argument(
-        'test',
+        '--test',
         help='name of the test',
+        required=True
     )
     parser.add_argument(
-        'job',
-        nargs='*',
+        '--job',
         help='names of jobs to display columns for, in order',
+        action='append',
         default=[],
     )
     args = parser.parse_args(raw)
 
     args.jobs = None if args.all else args.job
-    if args.jobs == []:  # no jobs, and not None (which would mean all jobs)
+    # We dont allow implicit or empty "--jobs", unless "--all" is specified.
+    if args.jobs == []:
         parser.error('No jobs specified.')
 
     return args
@@ -345,10 +322,8 @@ def run(raw: List[str]) -> Iterator[str]:
     args = parse_args(raw)
 
     commits = get_git_commit_history(path=args.pytorch, ref=args.ref)
-    bucket = get_S3_bucket_readonly('ossci-metrics')
 
     return history_lines(
-        bucket=bucket,
         commits=commits,
         jobs=args.jobs,
         filename=args.file,
