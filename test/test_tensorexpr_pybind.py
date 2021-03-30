@@ -3,6 +3,9 @@ import numpy as np
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
+import unittest
+
+LLVM_ENABLED = torch._C._llvm_enabled()
 
 class kernel_arena_scope(object):
     def __enter__(self):
@@ -12,6 +15,9 @@ class kernel_arena_scope(object):
         self.scope = None
 
 class TestTensorExprPyBind(JitTestCase):
+    def setUp(self):
+        torch._C._jit_override_can_fuse_on_cpu(True)
+
     def test_simple_sum(self):
         with kernel_arena_scope():
             dtype = torch._C._te.Dtype.Float
@@ -61,6 +67,7 @@ class TestTensorExprPyBind(JitTestCase):
             torch.testing.assert_allclose(torch.matmul(tA, tB), tC)
 
 
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel(self):
         def f(a, b, c):
             return a + b + c
@@ -69,15 +76,17 @@ class TestTensorExprPyBind(JitTestCase):
         y = torch.rand(size, device=device)
         z = torch.rand(size, device=device)
 
-        torch._C._jit_override_can_fuse_on_cpu(True)
         scripted_f = torch.jit.script(f, (x, y, z))
 
         scripted_f(x, y, z)
         scripted_f(x, y, z)
 
+        node = None
         graph = torch.jit.last_executed_optimized_graph()
         node = graph.findNode("prim::TensorExprGroup", True)
 
+        if not node:
+            return
         with kernel_arena_scope():
             graph = node.g('Subgraph')
             res1 = torch._C._te.TensorExprKernel.run(graph, (x, y, z))
