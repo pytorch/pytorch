@@ -4293,8 +4293,6 @@
 # Instead, the derivative is registered on the slow-path "_coalesce"
 - func: coalesce(Tensor(a) self) -> Tensor(a)
   variants: method
-  dispatch:
-    Math: coalesce_sparse
 
 - func: _coalesce(Tensor self) -> Tensor
   dispatch:
