@@ -3575,7 +3575,7 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Probably related to the way the function is
                        # scripted for JIT tests (or maybe not).
-                       # RuntimeError: 
+                       # RuntimeError:
                        # Arguments for call are not valid.
                        # The following variants are available:
                        #   aten::polygamma(int n, Tensor self) -> (Tensor):
