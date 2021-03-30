@@ -5,6 +5,7 @@
 #include <map>
 #include <unordered_set>
 
+#include <c10/util/string_view.h>
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/db.h"
@@ -296,121 +297,59 @@ class LoadOp final : public Operator<Context> {
   std::vector<int64_t> shape_;
 };
 
+namespace internal {
+class TORCH_API SaveOpImpl {
+ public:
+  SaveOpImpl(OperatorBase* op, const OperatorDef& operator_def, Workspace* ws);
+
+  bool RunOnDevice();
+
+ private:
+  OperatorBase* operator_;
+  std::string strip_prefix_;
+  std::string full_db_name_;
+  std::string db_type_;
+  std::vector<std::string> blob_names_;
+  SerializationOptions options_;
+};
+} // namespace internal
+
 template <class Context>
 class SaveOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   explicit SaveOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        ws_(ws),
-        absolute_path_(
-            this->template GetSingleArgument<int>("absolute_path", false)),
-        strip_prefix_(
-            this->template GetSingleArgument<string>("strip_prefix", "")),
-        db_name_(this->template GetSingleArgument<string>("db", "")),
-        db_type_(this->template GetSingleArgument<string>("db_type", "")),
-        blob_names_(
-            this->template GetRepeatedArgument<string>("blob_name_overrides")),
-        chunk_size_(this->template GetSingleArgument<int>(
-            "chunk_size",
-            kDefaultChunkSize)) {
-    CAFFE_ENFORCE_GT(db_name_.size(), 0, "Must specify a db name.");
-    CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
-    CAFFE_ENFORCE(
-        blob_names_.empty() ||
-            blob_names_.size() == OperatorBase::Inputs().size(),
-        "Number of blobs and blob_name_overrides mismatch.");
-    CAFFE_ENFORCE(
-        blob_names_.empty() || strip_prefix_.empty(),
-        "strip_prefix and blob_name_overrides are mutually exclusive.");
-
-    if (blob_names_.empty()) {
-      std::set<std::string> input_names;
-      blob_names_.resize(OperatorBase::Inputs().size());
-      for (int i = 0; i < blob_names_.size(); ++i) {
-        std::string name;
-        if (strip_prefix_.empty()) {
-          name = operator_def.input(i);
-        } else {
-          auto match_pos = operator_def.input(i).find(strip_prefix_);
-          if (match_pos == string::npos) {
-            name = operator_def.input(i);
-          } else {
-            name = operator_def.input(i).substr(
-                match_pos + strip_prefix_.size(), string::npos);
-          }
-        }
-        CAFFE_ENFORCE(
-            input_names.insert(name).second, "Duplicated input: ", name);
-        blob_names_[i] = name;
-      }
-    }
-  }
+      : Operator<Context>(operator_def, ws), impl_(this, operator_def, ws) {}
 
   bool RunOnDevice() override {
-    string full_db_name =
-        absolute_path_ ? db_name_ : (ws_->RootFolder() + "/" + db_name_);
-    std::unique_ptr<DB> out_db(
-        caffe2::db::CreateDB(db_type_, full_db_name, caffe2::db::NEW));
-    CAFFE_ENFORCE(
-        out_db.get(),
-        "Cannot find db implementation of type ",
-        db_type_,
-        " (while trying to open ",
-        full_db_name,
-        ")");
-
-    BlobSerializerBase::SerializationAcceptor acceptor =
-        [&](const std::string& blobName, const std::string& data) {
-          // transaction should take care of locking
-          VLOG(2) << "Sending " << blobName << " blob's data of size "
-                  << data.size() << " to db";
-          auto transaction = out_db->NewTransaction();
-          transaction->Put(blobName, data);
-          transaction->Commit();
-        };
-
-    const vector<const Blob*>& inputs = OperatorBase::Inputs();
-    VLOG(0) << "Saving " << inputs.size() << " inputs to " << db_type_ << ": "
-            << full_db_name;
-    for (int i = 0; i < inputs.size(); ++i) {
-      SerializeBlob(*inputs[i], blob_names_[i], acceptor, chunk_size_);
-    }
-    out_db->Close();
-    return true;
+    return impl_.RunOnDevice();
   }
 
  private:
-  Workspace* ws_;
-  bool absolute_path_;
-  string strip_prefix_;
-  string db_name_;
-  string db_type_;
-  std::vector<std::string> blob_names_;
-  int chunk_size_;
+  internal::SaveOpImpl impl_;
 };
 
 template <typename... Ts>
-string FormatString(const string& pattern, Ts... values) {
-  // Note(Yangqing): We believe that 1024 is enough, but who are we to assert
-  // that?
-  // As a result, if things go wrong, we'll just throw the towel and quit loud.
-  // Yeah, I know that there is snprintf, but it is not present in *some*
-  // platforms unfortunately.
-  char buffer[1024];
-  int written = sprintf(buffer, pattern.c_str(), values...);
-  if (written < 0 || written + 1 > 1024) {
-    LOG(FATAL) << "FormatString fails: total bytes written " << written;
+std::string FormatString(const std::string& pattern, Ts... values) {
+  // Start with an initial buffer size that is probably enough most of the time.
+  std::string buffer(256, '\0');
+  auto bytes_written =
+      snprintf(&buffer[0], buffer.size(), pattern.c_str(), values...);
+  if (bytes_written < 0) {
+    throw std::runtime_error("FormatString failed");
   }
-  return string(buffer);
-  /*
-   * The following is the snprintf version that is safe; enable it one day?
-  unsigned int required =
-      std::snprintf(nullptr, 0, pattern.c_str(), values...) + 1;
-  char bytes[required];
-  std::snprintf(bytes, required, pattern.c_str(), values...);
-  return string(bytes);
-  */
+  if (bytes_written > buffer.size()) {
+    // Our initial buffer size wasn't enough, resize and run again.
+    buffer.resize(bytes_written + 1);
+    bytes_written =
+        snprintf(&buffer[0], buffer.size(), pattern.c_str(), values...);
+    if (bytes_written < 0) {
+      throw std::runtime_error("FormatString failed");
+    }
+  }
+  // Truncate the string to the correct size to trim off the nul terminator.
+  buffer.resize(bytes_written);
+  return buffer;
 }
 
 // CheckpointOp is a wrapper over a SaveFloatTensorOp that basically allows
