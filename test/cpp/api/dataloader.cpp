@@ -924,7 +924,7 @@ TEST(DataTest, CanSaveAndLoadDistributedRandomSampler) {
   }
   {
     samplers::DistributedRandomSampler a(10);
-    a.set_epoch(3); 
+    a.set_epoch(3);
     std::stringstream stream;
     torch::save(a, stream);
 

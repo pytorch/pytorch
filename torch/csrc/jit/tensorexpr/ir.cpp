@@ -15,42 +15,18 @@ static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
     // Return something so we can handle scalar buffers.
     return kInt;
   }
-  Dtype dt = indices.at(0)->dtype();
-  for (size_t i = 1; i < indices.size(); ++i) {
-    if (indices.at(i)->dtype() != dt) {
-      throw malformed_input("dtype mismatch in dtypeOfIndices");
+  return indices.at(0)->dtype();
+}
+
+void castIndicesToInts(std::vector<const Expr*>& indices) {
+  // Cast all indices to Int
+  // TODO: Should we use int64 here?
+  auto index_dtype = ScalarType::Int;
+  for (auto& index : indices) {
+    const Dtype& dt = index->dtype();
+    if (is_integral(dt.scalar_type()) && dt.scalar_type() != index_dtype) {
+      index = new Cast(Dtype(index_dtype, dt.lanes()), index);
     }
-  }
-  return dt;
-}
-
-static bool indicesValid(const std::vector<const Expr*>& indices) {
-  if (indices.size() == 0) {
-    return true;
-  }
-  Dtype index_dtype = dtypeOfIndices(indices);
-  if (indices.size() > 1 && index_dtype.lanes() > 1) {
-    // Multilane is only allowed in a flattened (i.e. 1D) index
-    return false;
-  }
-  if (index_dtype.scalar_type() != ScalarType::Int) {
-    return false;
-  }
-  return true;
-}
-
-void Load::verify_dtypes() const {
-  if (indices_.size() > 0 && buf_->base_handle()->dtype() != kHandle) {
-    throw malformed_input(
-        "Load base handle dtype must be Handle", buf_->base_handle());
-  }
-
-  if (!indicesValid(indices_)) {
-    throw malformed_input("invalid indices in Load");
-  }
-  Dtype index_dtype = dtypeOfIndices(indices_);
-  if (index_dtype.lanes() != mask_->dtype().lanes()) {
-    throw malformed_input("lane mismatch in Load mask");
   }
 }
 
@@ -60,7 +36,7 @@ Load::Load(
     const std::vector<const Expr*>& indices,
     const Expr* mask)
     : ExprNodeBase(dtype), buf_(buf), indices_(indices), mask_(mask) {
-  verify_dtypes();
+  castIndicesToInts(indices_);
 }
 
 Load::Load(
@@ -108,30 +84,7 @@ Store::Store(
     const Expr* value,
     const Expr* mask)
     : buf_(buf), indices_(std::move(indices)), value_(value), mask_(mask) {
-  if (indices_.size() > 0 && buf->base_handle()->dtype() != kHandle) {
-    throw malformed_input("Store base handle must be Handle");
-  }
-  /*
-  TODO: Reenable the checks.
-  The reason they are disabled is that kernel.cpp is using Buffers somewhat
-  loosely: we don't set dimensions properly and just construct index expressions
-  directly. We should harden that part and then we'd be able to turn on these
-  checks.
-
-  if (!indicesValid(indices)) {
-    throw malformed_input();
-  }
-  if (!mask || !value) {
-    throw malformed_input();
-  }
-  Dtype index_dtype = dtypeOfIndices(indices);
-  if (index_dtype.lanes() != mask->dtype().lanes()) {
-    throw malformed_input();
-  }
-  if (index_dtype.lanes() != value->dtype().lanes()) {
-    throw malformed_input();
-  }
-  */
+  castIndicesToInts(indices_);
 }
 
 Store* Store::make(

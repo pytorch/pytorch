@@ -26,10 +26,10 @@ using gemm_fn = void(*)(
     at::ScalarType type,
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
-    Scalar alpha,
+    const Scalar& alpha,
     const void *a, int64_t lda,
     const void *b, int64_t ldb,
-    Scalar beta,
+    const Scalar& beta,
     void *c, int64_t ldc);
 
 DECLARE_DISPATCH(gemm_fn, gemm_stub);
@@ -93,5 +93,47 @@ void gemm(
     const int64_t *b, int64_t ldb,
     int64_t beta,
     int64_t *c, int64_t ldc);
+
+using axpy_fn = void(*)(at::ScalarType type, int64_t n, const Scalar& a, const void *x, int64_t incx, void *y, int64_t incy);
+
+DECLARE_DISPATCH(axpy_fn, axpy_stub);
+
+template<typename scalar_t>
+void axpy(int64_t n, scalar_t a, const scalar_t *x, int64_t incx, scalar_t *y, int64_t incy){
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  axpy_stub(
+      kCPU, c10::CppTypeToScalarType<scalar_t>::value,
+      n, a, x, incx, y, incy);
+}
+
+void axpy(int64_t n, double a, const double *x, int64_t incx, double *y, int64_t incy);
+void axpy(int64_t n, float a, const float *x, int64_t incx, float *y, int64_t incy);
+void axpy(int64_t n, c10::complex<double> a, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
+void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
+
+using copy_fn = void(*)(at::ScalarType type, int64_t n, const void *x, int64_t incx, void *y, int64_t incy);
+
+DECLARE_DISPATCH(copy_fn, copy_stub);
+
+template<typename scalar_t>
+void copy(int64_t n, const scalar_t *x, int64_t incx, scalar_t *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  copy_stub(
+      kCPU, c10::CppTypeToScalarType<scalar_t>::value,
+      n, x, incx, y, incy);
+}
+
+void copy(int64_t n, const double *x, int64_t incx, double *y, int64_t incy);
+void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy);
+void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
+void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
 
 }}}  // namespace at::native::cpublas
