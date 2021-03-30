@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -58,6 +59,39 @@ class TestTensorExprPyBind(JitTestCase):
             tC = torch.empty(1, 1)
             codegen.call([tA, tB, tC])
             torch.testing.assert_allclose(torch.matmul(tA, tB), tC)
+
+
+    def test_kernel(self):
+        def f(a, b, c):
+            return a+b+c
+        device, size = 'cpu', (4, 4)
+        x = torch.rand(size, device=device)
+        y = torch.rand(size, device=device)
+        z = torch.rand(size, device=device)
+
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        jit_f = torch.jit.script(f, (x, y, z))
+
+        jit_f(x, y, z)
+        jit_f(x, y, z)
+
+        graph=torch.jit.last_executed_optimized_graph()
+
+        for n in graph.nodes():
+            if n.kind() == "prim::If":
+                for b in n.blocks():
+                    for m in b.nodes():
+                        if m.kind() =="prim::TensorExprGroup":
+                            node = m
+                            break
+
+        with kernel_arena_scope():
+            graph = node.g('Subgraph')
+            res1 = torch._C._te.TensorExprKernel.run(graph, (x, y, z))
+            res2 = torch._C._te.TensorExprKernel.fallback(graph, (x, y, z))
+            correct = f(x, y, z)
+            np.testing.assert_allclose(res1.cpu().numpy(), correct.cpu().numpy(), atol=2e-3)
+            np.testing.assert_allclose(res2.cpu().numpy(), correct.cpu().numpy(), atol=2e-3)
 
 if __name__ == '__main__':
     run_tests()
