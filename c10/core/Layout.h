@@ -22,6 +22,9 @@ inline Layout layout_from_backend(Backend backend) {
       return Layout::Sparse;
     case Backend::MkldnnCPU:
       return Layout::Mkldnn;
+    case Backend::SparseCsrCPU:
+    case Backend::SparseCsrCUDA:
+      return Layout::SparseCsr;
     default:
       return Layout::Strided;
   }

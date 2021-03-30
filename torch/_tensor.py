@@ -57,7 +57,11 @@ class Tensor(torch._C._TensorBase):
         if id(self) in memo:
             return memo[id(self)]
         with torch.no_grad():
-            if self.is_sparse or self.device.type == 'xla' or self.device.type == 'mlc':
+            # TODO: skipping storage copy is wrong for meta, as meta
+            # does accurate alias tracking; however, the code below
+            # doesn't work because of
+            # https://github.com/pytorch/pytorch/issues/47442
+            if self.is_sparse or self.device.type in ['xla', 'mlc', 'meta']:
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
