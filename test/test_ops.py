@@ -6,13 +6,12 @@ import torch
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and)
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor)
+    (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor, gradcheck, gradgradcheck)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, method_tests)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyCPU, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
-from torch.autograd.gradcheck import gradcheck, gradgradcheck
 
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation

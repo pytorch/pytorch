@@ -236,17 +236,17 @@ def prepped_input(input, input_idx, entry, entry_idx, fast_mode=False):
         return input
 
 
-def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, idx, delta):
+def check_outputs_same_dtype_and_shape_in_neighborhood(output1, output2, delta, idx=None):
     # Check that the returned outputs don't have different dtype or shape when you
     # perturb the input
-    on_location = "on index {idx}" if idx is not None else " "
+    on_index = "on index {idx}" if idx is not None else " "
     assert output1.shape == output2.shape, \
         (f"Expected `func` to return outputs with the same shape"
-         f" when inputs are perturbed {on_location}by {delta}, but got:"
+         f" when inputs are perturbed {on_index}by {delta}, but got:"
          f" shapes {output1.shape} and {output2.shape}.")
     assert output1.dtype == output2.dtype, \
         (f"Expected `func` to return outputs with the same dtype"
-         f" when inputs are perturbed {on_location}by {delta}, but got:"
+         f" when inputs are perturbed {on_index}by {delta}, but got:"
          f" dtypes {output1.dtype} and {output2.dtype}.")
 
 
@@ -264,7 +264,7 @@ def get_numerical_jacobian_for_input(fn, input, input_idx, inputs, outputs, delt
             return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
         entry = x[idx]
-        do_checks = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, idx=idx, delta=delta)
+        do_checks = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, delta=delta, idx=idx)
 
         def jvp_fn(delta):
             return compute_gradient(wrapped_fn, entry, delta, eps, do_checks)
@@ -294,7 +294,7 @@ def get_fast_numerical_jacobian_for_input(fn, input_idx, input, inputs, outputs,
                     for i, a in enumerate(_as_tuple(inputs)))
         return tuple(a.clone() for a in _as_tuple(fn(*inp)))
 
-    do_checks = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, idx=None, delta=delta)
+    do_checks = functools.partial(check_outputs_same_dtype_and_shape_in_neighborhood, delta=delta)
 
     def jvp_fn(delta):
         return compute_gradient(wrapped_fn, entry, delta, eps, do_checks)
@@ -463,18 +463,12 @@ def check_no_differentiable_outputs(fail_test, func, inputs, func_out, eps) -> b
     return True
 
 
-def check_no_differentiable_outputs_fast(fail_test, func, func_out, inputs, all_u, eps):
-    diff_idx = 0
-    for i, inp in enumerate(inputs):
-        if not is_tensor_like(inp) or not inp.requires_grad:
-            continue
-        u = all_u[diff_idx]
-        numerical = get_fast_numerical_jacobian_for_input(func, i, inp, inputs, _as_tuple(func_out), eps * u, eps, 1.0)
-        for n in numerical:
-            # TODO: Why do get small non-zero values here
-            if not torch.allclose(n, torch.zeros_like(n), atol=1e-12):
+def check_no_differentiable_outputs_fast(fail_test, func, func_out, all_inputs, input_tensors, inputs_indices, all_u, eps):
+    for inp_idx, inp, u in zip(inputs_indices, input_tensors, all_u):
+        numerical_jacobians = get_fast_numerical_jacobian_for_input(func, inp_idx, inp, all_inputs, _as_tuple(func_out), eps * u, eps, 1.0)
+        for jacobian in numerical_jacobians:
+            if torch.ne(jacobian, 0).sum() > 0:
                 return fail_test('Numerical gradient for function expected to be zero')
-        diff_idx += 1
     return True
 
 
@@ -763,7 +757,7 @@ def fast_gradcheck(fail_test, func, func_out, tupled_inputs, outputs, eps, rtol,
     all_v = [vec_from_tensor(out) for out in outputs]
 
     if not outputs:
-        if not check_no_differentiable_outputs_fast(fail_test, func, func_out, tupled_inputs, all_u, eps):
+        if not check_no_differentiable_outputs_fast(fail_test, func, func_out, tupled_inputs, inp_tensors, inp_tensor_indices, all_u, eps):
             return False
 
     any_complex = any(o.is_complex() for o in outputs)
@@ -845,7 +839,7 @@ def gradcheck(
     rtol: float = 1e-3,
     raise_exception: bool = True,
     check_sparse_nnz: bool = False,
-    nondet_tol: float = 1e-12,  # TODO WHY
+    nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
     check_batched_grad: bool = False,
@@ -895,8 +889,10 @@ def gradcheck(
             are supported and treated as zeros, for ``Tensor`` outputs.
         check_batched_grad (bool, optional): if True, check if we can compute
             batched gradients using prototype vmap support. Defaults to False.
-        fast_mode (bool, optional): if True, run a faster implementation of gradcheck that
-            no longer computes the entire jacobian.
+        fast_mode (bool, optional): Fast mode for gradcheck and gradgradcheck is currently only
+            implemented for R to R functions. If none of the inputs and outputs are complex
+            a faster implementation of gradcheck that no longer computes the entire jacobian
+            is run; otherwise, we fall back to the slow implementation.
 
     Returns:
         True if all differences satisfy allclose condition
@@ -912,6 +908,12 @@ def gradcheck(
         return False
 
     func_out = func(*tupled_inputs)
+
+    if fast_mode and (any(is_tensor_like(o) and o.is_complex() for o in _as_tuple(func_out)) or \
+        any(is_tensor_like(i) and i.is_complex() for i in tupled_inputs)):
+        raise NotImplementedError("Fast mode for gradcheck and gradgradcheck is currently only implemented"
+                                  " for R to R functions.")
+
     outputs = _differentiable_outputs(func_out)
 
     check_outputs(outputs)

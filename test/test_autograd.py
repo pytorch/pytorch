@@ -4013,7 +4013,7 @@ class TestAutograd(TestCase):
         def f(inp):
             return inp.mul(5)
 
-        gradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
+        gradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True,))
         gradgradcheck(f, torch.rand(10, dtype=torch.float64, requires_grad=True))
 
     def test_gradcheck_sparse_input(self):
@@ -4235,6 +4235,45 @@ class TestAutograd(TestCase):
                 return x
         with self.assertRaisesRegex(AssertionError, 'return outputs with the same dtype when inputs are perturbed'):
             self.assertTrue(gradcheck(fn2, (a,)))
+
+    def test_gradcheck_fast_and_slow(self):
+        # This is a very contrived test to illustrate a case when fast gradcheck succeeds but slow gradcheck fails
+        # We have a function whose Jacobian is the identity, but we add a hook so that its analytical jacobian
+        # erroneously computes some Jacobian I + eps for some eps > atol. We also set arbitrary rtol >> atol.
+        # Here we choose eps = 2e-12, atol = 1e-12, and rtol 1e2.
+        #
+        # This works because allclose(a, b, rtol, atol) returns true when |a - b| < atol + rtol * |b|.
+        # And that in the slow case, every element of numerical J (I) is to be compared with its corresponding
+        # element in I + eps. So, since J is the identity, b = 0 for any element not on the diagonal (when dim > 1)
+        # So we effectively do |a - b| < atol for those elements. Because we have set eps > atol, this should fail.
+        #
+        # Fast gradcheck on the other hand, is still computing |a - b| < atol + rtol * |b|, where b is very roughly
+        # uniformly distributed, so the test should always succeed.
+        def make_hook(eps):
+            def hook(x):
+                if x is None:
+                    return None
+                if x.eq(0).all():
+                    return x
+                return x + eps
+            return hook
+
+        def fn(x):
+            y = x.clone()
+            y.register_hook(make_hook(2e-12))
+            return y
+        x = torch.ones(2, 2, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError,
+                                    'fast implementation of gradcheck succeded but the slow implementation failed.'):
+            gradcheck(fn, (x,), check_batched_grad=False, atol=1e-12, rtol=1e2)
+
+        def fn2(x):
+            y = x.clone()
+            y.register_hook(make_hook(1e2))
+            return y
+        # Both fast and slow detect when eps > rtol because b < 1 (dot product of unit vectors)
+        with self.assertRaisesRegex(RuntimeError, 'Jacobian mismatch for output 0 with respect to input 0'):
+            gradcheck(fn2, (x,), check_batched_grad=False, atol=1e-12, rtol=1e2)
 
     def test_version_counter(self):
         x = torch.randn(1, 2)
