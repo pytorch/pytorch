@@ -34,7 +34,7 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
-skipIfNoMkldnn = unittest.skipIf(not torch.backends.mkldnn.enabled, "no MKLDNN")
+skipIfNoMkldnn = unittest.skipIf(not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()), "no MKLDNN")
 
 
 def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> GraphModule:
