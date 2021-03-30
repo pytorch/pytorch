@@ -2012,6 +2012,91 @@ class TestQuantizeFx(QuantizationTestCase):
         m = prepare_fx(m, qconfig_dict)
         m = convert_fx(m)
 
+    def test_qparams_fqn(self):
+        """ Test that the FQN of input_scale/zero_point is set
+        to that of first linear use. """
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+
+            def forward(self, x):
+                x = torch.cat((x,), 1)
+                tmp = x.size()
+                x = self.mods1(x)
+                y = x * tmp[0]
+                return y
+
+        model = M().eval()
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (torch.nn.functional.linear, default_qconfig),
+                (torch.nn.functional.relu, default_qconfig),
+            ],
+        }
+        m = prepare_fx(model, qconfig_dict)
+        m(torch.rand(5, 5))
+        m = convert_fx(m)
+        keys = m.state_dict().keys()
+        m(torch.randn(5, 5))
+        for attr_name in [
+                "mods1_0_input_scale_0", "mods1_0_input_zero_point_0",
+                "mods1_0_scale_0", "mods1_0_zero_point_0",
+                "mods1_1_scale_0", "mods1_1_zero_point_0"]:
+            self.assertTrue(hasattr(m, attr_name))
+
+    def test_fold_quant_dequant(self):
+        """ Test that the sequence of quant-dequant nodes in the
+            graph, get folded and we erase the extra dequant nodes.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                x = torch.cat((x,), 1)
+                tmp = x.size()
+                x = torch.nn.functional.linear(x, self.w, self.b)
+                y = x * tmp[0]
+                return y
+
+        model = M().eval()
+        qconfig_dict = {
+            "": None,
+            "object_type": [
+                (torch.nn.functional.linear, default_qconfig),
+            ],
+        }
+        m = prepare_fx(model, qconfig_dict)
+        m(torch.rand(5, 5))
+        m = convert_fx(m)
+        keys = m.state_dict().keys()
+        m(torch.randn(5, 5))
+        dequant = 0
+        quant = 0
+        for n in m.graph.nodes:
+            if n.op == "call_method" and n.target == "dequantize":
+                dequant = dequant + 1
+            if n.op == "call_function" and n.target == torch.quantize_per_tensor:
+                quant = quant + 1
+        self.assertEqual(dequant, 1)
+        self.assertEqual(quant, 1)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
