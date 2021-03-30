@@ -837,11 +837,7 @@ Tensor slow_conv_transpose2d_cuda(
   return output;
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cuda(
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias,
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cuda(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -850,7 +846,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cuda(
     IntArrayRef output_padding,
     IntArrayRef dilation,
     const Tensor& columns,
-    const Tensor& ones) {
+    const Tensor& ones,
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias) {
   if (grad_input.defined()) {
     slow_conv_transpose2d_backward_out_cuda_template(
         input,

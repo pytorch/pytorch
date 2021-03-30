@@ -656,18 +656,17 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_forward_cpu(
   return std::make_tuple(output, finput, fgrad_input);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias,
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& self,
     const Tensor& weight,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
     const Tensor& finput,
-    const Tensor& fgrad_input) {
+    const Tensor& fgrad_input,
+    Tensor& grad_input,
+    Tensor& grad_weight,
+    Tensor& grad_bias) {
   // TODO: hacky way of determine the group size
   int64_t groups = self.size(1) / weight.size(1);
   if (grad_input.defined()) {
@@ -739,10 +738,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_backward_cpu(
     grad_bias = at::empty({0}, grad_output.options());
   }
 
-  slow_conv3d_backward_out_cpu(
-      grad_input,
-      grad_weight,
-      grad_bias,
+  at::native::slow_conv3d_backward_out_cpu(
       grad_output,
       self,
       weight,
@@ -750,7 +746,10 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_backward_cpu(
       stride,
       padding,
       finput,
-      fgrad_input);
+      fgrad_input,
+      grad_input,
+      grad_weight,
+      grad_bias);
 
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
