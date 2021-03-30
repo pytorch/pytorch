@@ -388,7 +388,7 @@ where
 * Instance data attributes are statically typed, and instance attributes must be declared by assignments inside the ``__init__()`` method
 * Method overloading is not supported (i.e., cannot have multiple methods with the same method name)
 * MethodDefinition must be compilable to TorchScript IR and adhere to TorchScript’s type-checking rules, (e.g., all methods must be valid TorchScript functions and class attribute definitions must be valid TorchScript statements)
-* ``torch.jit.ignore``<placeholder for link to ``torch.jit.ignore``> and ``torch.jit.unused``<placeholder for link to ``torch.jit.unused``> can be used to ignore the method or function that is not fully torchscriptable or should be ignored by the compiler
+* ``torch.jit.ignore`` and ``torch.jit.unused`` can be used to ignore the method or function that is not fully torchscriptable or should be ignored by the compiler
 
 **Compared to Python**
 
@@ -632,7 +632,7 @@ The following shows an incorrect usage of module type. Specifically, this exampl
 
 
 Expressions
-~~~~~~~~~~~
+===========
 
 The following section describes the grammar of expressions that are supported in TorchScript.
 It is modeled after `the expressions chapter of the Python language reference <https://docs.python.org/3/reference/expressions.html>`_.
