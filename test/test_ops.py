@@ -193,70 +193,53 @@ class TestGradients(TestCase):
 class TestCommon(JitCommonTestCase):
     exact_dtype = True
 
-    # variant testing is only done with torch.float and torch.cfloat to avoid
-    #   excessive test times and maximize signal to noise ratio
+    # variant testing is only done with torch.float to avoid excessive
+    #   test times and maximize signal to noise ratio
     _variant_ops = partial(ops, dtypes=OpDTypes.supported,
-                           allowed_dtypes=(torch.float, torch.cfloat))
-
-    # alias testing is only done with troch.float for the same reason
-    _alias_ops = partial(ops, dtypes=OpDTypes.supported,
-                         allowed_dtypes=(torch.float,))
+                           allowed_dtypes=[torch.float])
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
     #   against eager's gold standard op function variant
     @_variant_ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
-        # Acquires variants (method variant, inplace variant, aliases)
-        method = op.get_method()
-        inplace = op.get_inplace()
+        samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
 
-        # list of all inplace ops: inplace variant + alias inplace variants if exist
-        inplace_ops = [inplace, ]
-
-        aliases = []
-        for a_op in op.aliases:
-            aliases.append(a_op.op)
-            aliases.append(a_op.method_variant)
-            aliases.append(a_op.inplace_variant)
-            inplace_ops.append(a_op.inplace_variant)
-        aliases = tuple(aliases)
-
-        inplace_ops = tuple(v for v in inplace_ops if v is not None)
-        variants = (v for v in (method, inplace) + aliases if v is not None)
-
-        _requires_grad = (op.supports_autograd and
-                          (dtype.is_floating_point or op.supports_complex_autograd))
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
         for sample in samples:
+            # Acquires variants (method variant, inplace variant, aliases)
+            method = op.get_method()
+            inplace = op.get_inplace()
+
+            # list of all inplace ops: inplace variant + alias inplace variants if exist
+            inplace_ops = [inplace, ]
+
+            aliases = []
+            for a_op in op.aliases:
+                aliases.append(a_op.op)
+                aliases.append(a_op.method_variant)
+                aliases.append(a_op.inplace_variant)
+                inplace_ops.append(a_op.inplace_variant)
+            aliases = tuple(aliases)
+
+            inplace_ops = tuple(v for v in inplace_ops if v is not None)
+            variants = (v for v in (method, inplace) + aliases if v is not None)
+
             # Computes function forward and backward values
             sample.input.grad = None
             expected_forward = op(sample.input, *sample.args, **sample.kwargs)
             expected_grad = None
-
-            # Skips inplace variants if the output dtype is not the same as
-            #   the input dtype
-            skip_inplace = False
-            if (isinstance(expected_forward, torch.Tensor) and
-                    expected_forward.dtype is not sample.input.dtype):
-                skip_inplace = True
 
             # TODO: backward consistency only supported for single tensor outputs
             # TODO: backward consistency only checked on sample.input, not all
             #   tensor inputs
             # TODO: update to handle checking grads of all tensor inputs as
             #   derived from each tensor output
-            if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)
-                    and (dtype.is_floating_point or op.supports_complex_autograd)):
+            if (op.supports_autograd and isinstance(expected_forward, torch.Tensor)):
                 expected_forward.sum().backward()
                 expected_grad = sample.input.grad
 
             # Test eager consistency
             for variant in variants:
-                # Skips inplace ops
-                if variant in inplace_ops and skip_inplace:
-                    continue
-
                 # Compares variant's forward
                 # Note: copies the to-be-modified input when testing the inplace variant
                 sample.input.grad = None
@@ -277,10 +260,12 @@ class TestCommon(JitCommonTestCase):
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @_variant_ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
-        _requires_grad = op.supports_autograd and (dtype.is_floating_point or op.supports_complex_autograd)
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        samples = op.sample_inputs(device, dtype, requires_grad=op.supports_autograd)
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
 
         for sample in samples:
+
             # Acquires variants to test
             func = op.get_op()
             method = op.get_method()
@@ -312,7 +297,7 @@ class TestCommon(JitCommonTestCase):
                                             op.output_func,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not _requires_grad)
+                                            no_grad=not op.supports_autograd)
 
                     # Check traced forward, grad, and grad grad
                     traced_fn = create_traced_fn(self, variant)
@@ -322,7 +307,7 @@ class TestCommon(JitCommonTestCase):
                                             op.output_func,
                                             (sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=not _requires_grad)
+                                            no_grad=not op.supports_autograd)
 
                     # Check alias annotation schema for correctness (make
                     #   sure inputs that aren't supposed to be modified aren't)
@@ -346,7 +331,7 @@ class TestCommon(JitCommonTestCase):
                         self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
                         self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
 
-    @_alias_ops((op for op in op_db if op.aliases))
+    @_variant_ops([op for op in op_db if op.aliases])
     def test_jit_alias_remapping(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         if len(samples) == 0:
@@ -355,7 +340,6 @@ class TestCommon(JitCommonTestCase):
         # NOTE: only tests on first sample
         sample = samples[0]
 
-        # [Scripting Data Preparation]
         # Prepare data for test scripting
         # Below we prepare strings of args/kwargs with and without type annotations.
         # These strings are inserted into function template strings which is then torch scripted.

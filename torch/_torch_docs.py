@@ -8829,7 +8829,7 @@ takes the same shape as the indices.
 
 Args:
     {input}
-    index (LongTensor): the indices into tensor
+    indices (LongTensor): the indices into tensor
 
 Example::
 
@@ -9597,9 +9597,8 @@ Example::
 """.format(**factory_like_common_args))
 
 add_docstr(torch.empty,
-           """
-empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False, \
-memory_format=torch.contiguous_format) -> Tensor
+           r"""
+empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`size`.

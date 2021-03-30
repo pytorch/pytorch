@@ -287,14 +287,13 @@ class TestUnaryUfuncs(TestCase):
                 self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan=equal_nan, exact_dtype=exact_dtype)
 
         for t in tensors:
-            torch_kwargs, numpy_kwargs = op.sample_kwargs(t.device, dtype, t)
             if dtype is torch.bfloat16:
                 a = t.cpu().to(torch.float32).numpy()
             else:
                 a = t.cpu().numpy()
 
-            actual = op(t, **torch_kwargs)
-            expected = op.ref(a, **numpy_kwargs)
+            actual = op(t)
+            expected = op.ref(a)
 
             # Crafts a custom error message for smaller, printable tensors
             if t.numel() < 10:
@@ -363,8 +362,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(contig.is_contiguous())
         self.assertFalse(non_contig.is_contiguous())
 
-        torch_kwargs, _ = op.sample_kwargs(device, dtype, non_contig)
-        self.assertEqual(op(contig, **torch_kwargs)[::2], op(non_contig, **torch_kwargs))
+        self.assertEqual(op(contig)[::2], op(non_contig))
 
     @ops(unary_ufuncs)
     def test_contig_vs_transposed(self, device, dtype, op):
@@ -375,8 +373,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(contig.is_contiguous())
         self.assertFalse(non_contig.is_contiguous())
 
-        torch_kwargs, _ = op.sample_kwargs(device, dtype, contig)
-        self.assertEqual(op(contig, **torch_kwargs).T, op(non_contig, **torch_kwargs))
+        self.assertEqual(op(contig).T, op(non_contig))
 
     @ops(unary_ufuncs)
     def test_non_contig(self, device, dtype, op):
@@ -390,8 +387,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertTrue(contig.is_contiguous())
             self.assertFalse(non_contig.is_contiguous())
 
-            torch_kwargs, _ = op.sample_kwargs(device, dtype, contig)
-            self.assertEqual(op(contig, **torch_kwargs), op(non_contig, **torch_kwargs))
+            self.assertEqual(op(contig), op(non_contig))
 
     @ops(unary_ufuncs)
     def test_non_contig_index(self, device, dtype, op):
@@ -403,8 +399,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(contig.is_contiguous())
         self.assertFalse(non_contig.is_contiguous())
 
-        torch_kwargs, _ = op.sample_kwargs(device, dtype, contig)
-        self.assertEqual(op(contig, **torch_kwargs), op(non_contig, **torch_kwargs))
+        self.assertEqual(op(contig), op(non_contig))
 
     @ops(unary_ufuncs)
     def test_non_contig_expand(self, device, dtype, op):
@@ -417,9 +412,8 @@ class TestUnaryUfuncs(TestCase):
             self.assertTrue(contig.is_contiguous())
             self.assertFalse(non_contig.is_contiguous())
 
-            torch_kwargs, _ = op.sample_kwargs(device, dtype, contig)
-            contig = op(contig, **torch_kwargs)
-            non_contig = op(non_contig, **torch_kwargs)
+            contig = op(contig)
+            non_contig = op(non_contig)
             for i in range(3):
                 self.assertEqual(contig, non_contig[i],
                                  msg='non-contiguous expand[' + str(i) + ']')
@@ -435,8 +429,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(contig.is_contiguous())
         self.assertTrue(contig2.is_contiguous())
 
-        torch_kwargs, _ = op.sample_kwargs(device, dtype, contig)
-        self.assertEqual(op(contig, **torch_kwargs), op(contig2, **torch_kwargs))
+        self.assertEqual(op(contig), op(contig2))
 
     @ops(unary_ufuncs)
     def test_contig_size1_large_dim(self, device, dtype, op):
@@ -449,8 +442,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(contig.is_contiguous())
         self.assertTrue(contig2.is_contiguous())
 
-        torch_kwargs, _ = op.sample_kwargs(device, dtype, contig)
-        self.assertEqual(op(contig, **torch_kwargs), op(contig2, **torch_kwargs))
+        self.assertEqual(op(contig), op(contig2))
 
     # Tests that computation on a multiple batches is the same as
     # per-batch computation.
@@ -459,13 +451,12 @@ class TestUnaryUfuncs(TestCase):
         input = make_tensor((1024, 512), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
 
-        torch_kwargs, _ = op.sample_kwargs(device, dtype, input)
-        actual = op(input, **torch_kwargs)
-        expected = torch.stack([op(slice, **torch_kwargs) for slice in input])
+        actual = op(input)
+        expected = torch.stack([op(slice) for slice in input])
 
         self.assertEqual(actual, expected)
 
-    def _test_out_arg(self, op, input, output, expected, **kwargs):
+    def _test_out_arg(self, op, input, output, expected):
         if op.safe_casts_outputs:
             expect_fail = not torch.can_cast(expected.dtype, output.dtype)
         else:
@@ -473,9 +464,9 @@ class TestUnaryUfuncs(TestCase):
 
         if expect_fail:
             with self.assertRaises(RuntimeError):
-                op(input, out=output, **kwargs)
+                op(input, out=output)
         else:
-            res = op(input, out=output, **kwargs)
+            res = op(input, out=output)
             self.assertTrue(res is output)
             self.assertEqual(output, expected.to(output.dtype))
 
@@ -486,12 +477,11 @@ class TestUnaryUfuncs(TestCase):
 
         input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
-        torch_kwargs, _ = op.sample_kwargs(device, dtype, input)
-        expected = op(input, **torch_kwargs)
+        expected = op(input)
 
         for out_dtype in all_types_and_complex_and(torch.bool, torch.half):
             out = torch.empty_like(input, dtype=out_dtype)
-            self._test_out_arg(op, input, out, expected, **torch_kwargs)
+            self._test_out_arg(op, input, out, expected)
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
