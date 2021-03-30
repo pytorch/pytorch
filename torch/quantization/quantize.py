@@ -20,12 +20,10 @@ from .quantization_mappings import (
 from .stubs import DeQuantStub, QuantWrapper
 from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_weight_only_qconfig
 
-from ._numeric_suite import Logger
-
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
             isinstance(module, torch.quantization.FakeQuantizeBase) or
-            isinstance(module, Logger))
+            isinstance(module, torch.quantization._numeric_suite.Logger))
 
 def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
                               qconfig_parent=None, prefix=''):
