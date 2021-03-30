@@ -1,0 +1,38 @@
+name: Update slow tests
+on:
+  # This is for testing purposes so that I could run this on my PR.
+  workflow_run:
+    types:
+      - requested
+    workflows:
+      - Lint
+  # schedule:
+  #   # Every day at noon
+  #   - cron: "0 12 * * *"
+  # Have the ability to trigger this job manually through the API
+  workflow_dispatch:
+
+jobs:
+  update-slow-list:
+    runs-on: ubuntu-18.04
+    if: ${{ github.repository_owner == 'pytorch' }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+
+      - name: Generate new slow test stats
+        run: |
+          pip install typing_extensions boto3
+          python tools/export_slow_tests.py -f .pytorch-slow-tests
+
+      - name: Push file to test-infra repository
+        uses: dmnemec/copy_file_to_another_repo_action@5f40763ccee2954067adba7fb8326e4df33bcb92
+        env:
+           API_TOKEN_GITHUB: ${{ secrets.TEST_INFRA_TOKEN }}
+        with:
+          source_file: '.pytorch-slow-tests'
+          destination_repo: 'janeyx99/test-infra'
+          destination_folder: 'stats'
+          user_email: 'janeyx@fb.com'
+          user_name: 'janeyx99'
+          commit_message: 'Updating slow tests stats'
