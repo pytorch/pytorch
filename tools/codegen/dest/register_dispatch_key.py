@@ -87,8 +87,18 @@ class RegisterDispatchKey:
 
     @method_with_native_function
     def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
+        inplace_meta = False
         if self.dispatch_key not in f.dispatch:
-            return None
+            if (self.dispatch_key == DispatchKey.Meta and
+                    f.func.kind() is SchemaKind.inplace and
+                    # Defer to composites for meta implementation
+                    DispatchKey.CompositeImplicitAutograd not in f.dispatch and
+                    DispatchKey.CompositeExplicitAutograd not in f.dispatch and
+                    # Inplace list operations are not supported
+                    len(f.func.returns) == 1):
+                inplace_meta = True
+            else:
+                return None
         if f.manual_kernel_registration:
             return None
 
@@ -122,6 +132,19 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 result += generate_defn(cpp_sig_group.faithful_signature)
             return result
         elif self.target is Target.ANONYMOUS_DEFINITION:
+            # short circuit for inplace_meta
+            if inplace_meta:
+                assert f.func.arguments.self_arg is not None
+                self_arg_name = f.func.arguments.self_arg.argument.name
+                # TODO: handle in place on tensor list
+                return f"""
+{returns_type} {name}({args_str}) {{
+  TORCH_CHECK_NOT_IMPLEMENTED({self_arg_name}.is_meta(),
+    "Cannot inplace into non-meta tensor with meta tensor argument");
+  return {self_arg_name};
+}}
+"""
+
             impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
 
             args_exprs_str = ', '.join(a.name for a in args)
