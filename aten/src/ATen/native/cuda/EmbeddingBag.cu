@@ -257,9 +257,11 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
-                   const int64_t mode, bool sparse,
-                   const Tensor& per_sample_weights,
+                   const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+
   return _embedding_bag_cuda(
       weight,
       indices,
@@ -274,11 +276,24 @@ _embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
 // Assumes all input tensors are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 std::tuple<Tensor, Tensor, Tensor, Tensor>
-_embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
-                   const Tensor &offsets, const bool scale_grad_by_freq,
-                   const int64_t mode, bool sparse,
-                   const Tensor& per_sample_weights,
+_embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
+                   const Tensor &offsets_, const bool scale_grad_by_freq,
+                   const int64_t mode, bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                    bool include_last_offset) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+
+  Tensor indices = indices_;
+  Tensor offsets = offsets_;
+  const auto commonType =
+      promoteTypes(offsets.scalar_type(), indices.scalar_type());
+  if (indices.scalar_type() != commonType) {
+    indices = indices.toType(commonType);
+  }
+  if (offsets.scalar_type() != commonType) {
+    offsets = offsets.toType(commonType);
+  }
+
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag_cuda", indices_arg, {kLong, kInt});
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
@@ -347,8 +362,10 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    const Tensor &bag_size_,
                                    const Tensor &max_indices,
                                    int64_t num_weights,
-                                   bool scale_grad_by_freq, int64_t mode,
-                                   const Tensor& per_sample_weights) {
+                                   bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& per_sample_weights = c10::value_or_else(per_sample_weights_opt, [] {return Tensor();});
+
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("_embedding_bag_dense_backward_cuda");
@@ -430,8 +447,8 @@ __global__ static void _embedding_bag_per_sample_weights_backward_kernel(
 Tensor _embedding_bag_per_sample_weights_backward_cuda(
     const Tensor& grad,
     const Tensor& weight,  // NB: embedding table, not per_sample_weights
-    const Tensor& indices,
-    const Tensor& offsets,
+    const Tensor& indices_,
+    const Tensor& offsets_,
     const Tensor& offset2bag,
     int64_t mode) {
   TORCH_CHECK(
@@ -440,6 +457,17 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
 
   AT_ASSERT(grad.dim() == 2);
   auto embedding_features = grad.size(1);
+
+  Tensor indices = indices_;
+  Tensor offsets = offsets_;
+  const auto commonType =
+      promoteTypes(offsets.scalar_type(), indices.scalar_type());
+  if (indices.scalar_type() != commonType) {
+    indices = indices.toType(commonType);
+  }
+  if (offsets.scalar_type() != commonType) {
+    offsets = offsets.toType(commonType);
+  }
 
   AT_ASSERT(indices.dim() == 1);
   auto num_samples = indices.size(0);

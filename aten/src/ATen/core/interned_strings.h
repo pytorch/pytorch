@@ -88,9 +88,11 @@ namespace c10 {
   _(aten, Bool)                      \
   _(aten, Int)                       \
   _(aten, FloatImplicit)             \
+  _(aten, ComplexImplicit)           \
   _(aten, IntImplicit)               \
   _(aten, ScalarImplicit)            \
   _(aten, Float)                     \
+  _(aten, Complex)                   \
   _(aten, str)                       \
   _(aten, is_pinned)                 \
   _(aten, Delete)                    \
@@ -196,6 +198,8 @@ namespace c10 {
   _(aten, clip_)                     \
   _(aten, det)                       \
   _(aten, linalg_det)                \
+  _(aten, matrix_power)              \
+  _(aten, linalg_matrix_power)       \
   _(aten, linalg_norm)               \
   _(aten, linalg_vector_norm)        \
   _(aten, append)                    \
