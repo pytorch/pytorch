@@ -413,8 +413,10 @@ class ScriptModuleSerializer {
     }
 
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    // Only generate bytecode when a valid version is given.
     if (version.has_value()) {
-      writeByteCode(module, save_mobile_debug_info, constants_from_jit, version.value());
+      writeByteCode(
+          module, save_mobile_debug_info, constants_from_jit, version.value());
       writeMobileMetadata(module, extra_files);
     }
 
@@ -561,11 +563,26 @@ class ScriptModuleSerializer {
       bool save_mobile_debug_info,
       const TensorIndexMap& constants_from_jit,
       uint64_t version = caffe2::serialize::kProducedBytecodeVersion) {
-    const uint64_t bytecode_version_5 = 0x5l;
-
+    // Can only support generating model version within
+    // kMinProducedBytecodeVersion and kProducedBytecodeVersion. bytecode
+    // version difference chart is following: v4 - jit and mobile both write
+    // their own constant tensors, and tensor storage root key is the tensor
+    // index. Example: torch._utils._rebuild_tensor_v2(
+    //     pers.obj(('storage', torch.FloatStorage, '17', 'cpu', 22736),),
+    //     0,
+    //     (1, 464, 7, 7),
+    //     (22736, 49, 7, 1),
+    //     False,
+    //     collections.OrderedDict())
+    // v5 - the constant tensors from constant will be skipped, and the tensor
+    // meta data in bytecode.pkl will refered to the existing tensor path from
+    // jit Example: torch._utils._rebuild_tensor_v2(
+    //     pers.obj(('storage', torch.FloatStorage, 'constants/17', 'cpu',
+    //     22736),), 0, (1, 464, 7, 7), (22736, 49, 7, 1), False,
+    //     collections.OrderedDict())
     TORCH_CHECK(
-        caffe2::serialize::kMinProducedBytecodeVersion <= version
-            && version <= caffe2::serialize::kProducedBytecodeVersion,
+        caffe2::serialize::kMinProducedBytecodeVersion <= version &&
+            version <= caffe2::serialize::kProducedBytecodeVersion,
         "Lite Interpreter can only produce bytecode version between ",
         caffe2::serialize::kMinProducedBytecodeVersion,
         " and ",
@@ -573,20 +590,18 @@ class ScriptModuleSerializer {
         ". But the request model version is ",
         version);
     std::vector<c10::IValue> elements;
-    elements.emplace_back(
-        static_cast<int64_t>(version));
+    elements.emplace_back(static_cast<int64_t>(version));
     c10::optional<std::vector<c10::IValue>> debug_info_elements;
     if (save_mobile_debug_info) {
       debug_info_elements = std::vector<c10::IValue>();
-      debug_info_elements->emplace_back(
-          static_cast<int64_t>(version));
+      debug_info_elements->emplace_back(static_cast<int64_t>(version));
     }
 
     moduleMethodsTuple(
         module, elements, debug_info_elements, save_mobile_debug_info);
     auto telements = Tup(std::move(elements));
 
-    if (version == bytecode_version_5) {
+    if (version == 0x5l) {
       // tensors_archive_table_ will be passed to the bytcode's pickler later.
       tensors_archive_table_.insert(
           constants_from_jit.begin(), constants_from_jit.end());
@@ -643,7 +658,6 @@ void ExportModule(
     const Module& module,
     std::ostream& out,
     const ExtraFilesMap& extra_files,
-//    bool bytecode_format,
     at::optional<uint64_t> version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(
@@ -651,10 +665,7 @@ void ExportModule(
         out.write(static_cast<const char*>(buf), nbytes);
         return !out ? 0 : nbytes;
       });
-//  serializer.serialize(
-//      module, extra_files, bytecode_format, save_mobile_debug_info);
-  serializer.serialize(
-      module, extra_files, version, save_mobile_debug_info);
+  serializer.serialize(module, extra_files, version, save_mobile_debug_info);
 }
 
 void ExportModule(
@@ -664,8 +675,7 @@ void ExportModule(
     at::optional<uint64_t> version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(filename);
-  serializer.serialize(
-      module, extra_files, version, save_mobile_debug_info);
+  serializer.serialize(module, extra_files, version, save_mobile_debug_info);
 }
 
 void ExportModule(
@@ -675,8 +685,7 @@ void ExportModule(
     at::optional<uint64_t> version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(writer_func);
-  serializer.serialize(
-      module, extra_files, version, save_mobile_debug_info);
+  serializer.serialize(module, extra_files, version, save_mobile_debug_info);
 }
 
 namespace {
