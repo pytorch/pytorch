@@ -4799,11 +4799,11 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         x = torch.zeros(2).to(x_from)
         y = torch.ones(2).to(y_from)
 
-        ret = rpc.rpc_sync(
+        ret = rpc.remote(
             dst,
             TensorPipeAgentRpcTest._gpu_add_given_gpus,
             args=(x, y, x_to, y_to, z_to)
-        )
+        ).to_here()
 
         reverse_device_map = {device_map[k] : k for k in device_map}
         z_from = reverse_device_map[z_to]

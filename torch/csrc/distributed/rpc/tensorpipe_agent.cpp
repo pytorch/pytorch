@@ -798,6 +798,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
           std::shared_ptr<JitFuture> futureResponseMessage;
           try {
+            std::cout << "== devices " << ctx->devices().size() << ", request? " << requestMessage.isRequest() << ", type? " << requestMessage.type() << std::endl << std::flush;
             futureResponseMessage = cb_->operator()(requestMessage);
           } catch (const std::exception& /* unused */) {
             futureResponseMessage =
