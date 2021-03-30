@@ -274,6 +274,8 @@ dispatch:
     CompositeImplicitAutograd: func
 
 # overload is ignored, but out functions get suffixed with _out in their name
+# (NB: no out functions in PyTorch today actually support autograd, but if they
+# did, you could call them here and autograd would be inferred)
 func: func.out_overload(...) -> ...
 dispatch:
     CompositeImplicitAutograd: func_out
