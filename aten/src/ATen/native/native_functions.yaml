@@ -776,6 +776,10 @@
   dispatch:
     CPU, CUDA: copysign_
 
+- func: copysign.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: copysign_out
+
 - func: logical_not(Tensor self) -> Tensor
   variants: function, method
 

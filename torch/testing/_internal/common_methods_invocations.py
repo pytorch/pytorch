@@ -1676,6 +1676,38 @@ def sample_inputs_cumprod(op_info, device, dtype, requires_grad):
 
     return list(sample_generator())
 
+def sample_inputs_copysign(op_info, device, dtype, requires_grad):
+    def _make_case(case):
+        if isinstance(case, tuple):
+            return make_tensor(case, device, dtype,
+                               low=None, high=None,
+                               requires_grad=requires_grad)
+        else:
+            return case
+
+    cases = (
+        # no broadcast
+        ((S, S, S), (S, S, S)),
+        # broadcast rhs
+        ((S, S, S), (S, S)),
+
+        # Broadcasts `self` : Issue with inplace-variants
+        # Reference: https://github.com/pytorch/pytorch/issues/50747
+        # We should enable the below lines once the issue is resolved.
+        # ((S, S), (S, S, S)),
+        # ((S, 1, S), (M, S)),
+
+        # scalar
+        ((S, S), 3.14),
+        # scalar positive zero
+        ((S, S), 0.0),
+        # scalar negative zero
+        ((S, S), -0.0),
+    )
+
+    return [SampleInput(_make_case(lhs), args=(_make_case(rhs),))
+            for lhs, rhs in cases]
+
 def sample_inputs_prod(op_info, device, dtype, requires_grad):
     def make_arg(shape):
         # shrink values to be in the interval [-1, +1] for better precision in gradgradcheck
@@ -2465,6 +2497,11 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.int],
                                 active_if=IS_WINDOWS),
                    )),
+    OpInfo('copysign',
+           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_copysign,
+           supports_inplace_autograd=False,
+           ),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -4040,15 +4077,6 @@ def method_tests():
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
-        ('copysign', (S, S, S), ((S, S, S),), '', (False,)),
-        ('copysign', (S, S, S), ((S, S),), 'broadcast_rhs', (False,)),
-        ('copysign', (S, S), ((S, S, S),), 'broadcast_lhs', (False,)),
-        ('copysign', (S, 1, S), ((M, S),), 'broadcast_all', (False,)),
-        ('copysign', (S, S), (3.14,), 'scalar', (False,)),
-        ('copysign', (S, S), (0.0,), 'scalar_pos_zero', (False,)),
-        # TorchScript does not recognize -0.0: Issue #46848
-        # https://github.com/pytorch/pytorch/issues/46848
-        # ('copysign', (S, S), (-0.0,), 'scalar_neg_zero', (False,)),
         ('real', (S, S, S), NO_ARGS, 'complex'),
         ('imag', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
