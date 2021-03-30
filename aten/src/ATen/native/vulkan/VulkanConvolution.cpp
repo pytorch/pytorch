@@ -35,8 +35,8 @@ c10::intrusive_ptr<vulkan::Conv2dOpContext> createConv2dClampPrePackOpContext(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   return vulkan::VulkanConv2dOpContext::create_context(
       std::move(weight),
       std::move(bias),
