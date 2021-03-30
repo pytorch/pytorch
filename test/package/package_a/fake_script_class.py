@@ -1,11 +1,12 @@
+import torch
+
+@torch.jit.script
 class MyScriptClass:
     """Intended to be scripted."""
     def __init__(self, x):
         self.foo = x
 
-    def getFooTest(self):
-        return self.foo
-
+@torch.jit.script
 def uses_script_class(x):
     """Intended to be scripted."""
     foo = MyScriptClass(x)
