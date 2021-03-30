@@ -145,14 +145,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
 
-                if local.use_c10_dispatcher() == UseC10Dispatcher.full:
-                    cuda_guard_from_tensor_options = """\
+                cuda_guard_from_tensor_options = """\
     const DeviceGuard device_guard(device_or_default(device));
-"""
-                else:
-                    assert local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
-                    cuda_guard_from_tensor_options = """\
-    const DeviceGuard device_guard(options.device());
 """
 
                 # TODO: There is probably a simpler version of this that
@@ -189,17 +183,7 @@ namespace {{
             else:
                 dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-                # Figure out which signature the function is
-                if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                    payload = f"TORCH_FN({name})"
-                else:
-                    assert local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
-                    payload = f"""
-c10::impl::hacky_wrapper_for_legacy_signatures<
-    {dispatcher_sig.type()},
-    {len(f.func.arguments.out)}
->(TORCH_FN({name}))
-"""
+                payload = f"TORCH_FN({name})"
 
                 return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
@@ -528,7 +512,6 @@ generate_super=self.g.out.structured_inherits is not None
 """
 
         elif self.target is Target.REGISTRATION:
-            assert local.use_c10_dispatcher() is UseC10Dispatcher.full
             return f'm.impl("{f.func.name}", TORCH_FN({sig.name()}));'
         else:
             assert_never(self.target)
