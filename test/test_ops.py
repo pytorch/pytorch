@@ -294,11 +294,9 @@ class TestCommon(JitCommonTestCase):
             # Acquires variants to test
             func = op.get_op()
             method = op.get_method()
-            inplace = op.get_inplace()
             variants = {
+                # TODO: inplace tests currently fail, fix and add inplace variant
                 'function': func, 'method': method,
-                # TODO: inplace tests currently fail
-                # 'inplace': inplace,
             }
 
             # Test traced and scripted consistency

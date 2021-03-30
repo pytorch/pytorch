@@ -3615,8 +3615,8 @@ op_db: List[OpInfo] = [
     OpInfo('stack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_stack,
+           assert_autodiffed=True,
            skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # stack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('hstack',
@@ -3624,7 +3624,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # hstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('vstack',
@@ -3632,7 +3631,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # vstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('dstack',
@@ -3640,7 +3638,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                # dstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('unfold',
