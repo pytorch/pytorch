@@ -531,7 +531,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(                  \
     aten_op, int_op, float_op, result, string_val)                \
   OperatorGenerator(                                              \
-      TORCH_SELECTIVE_SCHEMA(#aten_op string_val                  \
+      TORCH_SELECTIVE_SCHEMA(#aten_op #string_val                  \
                              "(Scalar a, Scalar b) -> " #result), \
       [](Stack* stack) {                                          \
         IValue x, y;                                              \
@@ -768,7 +768,7 @@ void listSetItem(Stack* stack);
 #define DEFINE_SCALAR_BINARY_OP_WITH_COMPLEX_AVOID_COLLISION(     \
     aten_op, int_op, float_op, complex_op, result, string_val)    \
   OperatorGenerator(                                              \
-      TORCH_SELECTIVE_SCHEMA(#aten_op string_val                  \
+      TORCH_SELECTIVE_SCHEMA(#aten_op #string_val                  \
                              "(Scalar a, Scalar b) -> " #result), \
       [](Stack* stack) {                                          \
         IValue x, y;                                              \
