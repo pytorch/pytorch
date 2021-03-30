@@ -563,6 +563,7 @@ class ScriptModuleSerializer {
       bool save_mobile_debug_info,
       const TensorIndexMap& constants_from_jit,
       uint64_t version = caffe2::serialize::kProducedBytecodeVersion) {
+    const uint64_t bytecode_v5 = 0x5l;
     // Can only support generating model version within
     // kMinProducedBytecodeVersion and kProducedBytecodeVersion. bytecode
     // version difference chart is following: v4 - jit and mobile both write
@@ -601,7 +602,7 @@ class ScriptModuleSerializer {
         module, elements, debug_info_elements, save_mobile_debug_info);
     auto telements = Tup(std::move(elements));
 
-    if (version == 0x5l) {
+    if (version == bytecode_v5) {
       // tensors_archive_table_ will be passed to the bytcode's pickler later.
       tensors_archive_table_.insert(
           constants_from_jit.begin(), constants_from_jit.end());

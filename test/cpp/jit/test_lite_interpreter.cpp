@@ -553,7 +553,8 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   )JIT");
 
   std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
+  c._save_for_mobile(ss, {}, caffe2::serialize::kProducedBytecodeVersion, true);
+
   mobile::Module bc = _load_for_mobile(ss);
 
   std::unordered_set<std::string> module_debug_info_set;
@@ -673,7 +674,8 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   )JIT");
 
   std::stringstream ss;
-  c._save_for_mobile(ss, {}, true);
+  c._save_for_mobile(ss, {}, caffe2::serialize::kProducedBytecodeVersion, true);
+
   mobile::Module bc = _load_for_mobile(ss);
 
   std::unordered_set<std::string> module_debug_info_set;
