@@ -2077,7 +2077,7 @@ def _gradcheck(fn, inputs, **kwargs):
             fast = _gradcheck(fn, inputs, **kwargs, fast_mode=True)
             try:
                 slow = _gradcheck(fn, inputs, **kwargs, fast_mode=False)
-            except:
+            except Exception:
                 raise RuntimeError("Gradcheck Error:" + gradcheck_error_msg)
             # For when raise_exception=False
             if fast is not slow:
@@ -2106,7 +2106,7 @@ def _gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
             fast = _gradgradcheck(fn, inputs, **kwargs, fast_mode=True)
             try:
                 slow = _gradgradcheck(fn, inputs, **kwargs, fast_mode=False)
-            except:
+            except Exception:
                 raise RuntimeError("Gradgradcheck Error:" + gradcheck_error_msg)
             # For when raise_exception=False
             if fast is not slow:

@@ -4247,8 +4247,8 @@ class TestAutograd(TestCase):
         # element in I + eps. So, since J is the identity, b = 0 for any element not on the diagonal (when dim > 1)
         # So we effectively do |a - b| < atol for those elements. Because we have set eps > atol, this should fail.
         #
-        # Fast gradcheck on the other hand, is still computing |a - b| < atol + rtol * |b|, where b is very roughly
-        # uniformly distributed, so the test should always succeed.
+        # Fast gradcheck on the other hand, only needs to compare v^T I u = v^T u. So b = v^T u is very roughly
+        # uniformly distributed [0, 1], so as long as rtol >> eps, the test should succeed with high probability.
         def make_hook(eps):
             def hook(x):
                 if x is None:
