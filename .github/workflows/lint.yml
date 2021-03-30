@@ -58,6 +58,7 @@ jobs:
 
   toc:
     runs-on: ubuntu-18.04
+    # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
     env:
       NPM_CONFIG_PREFIX: ~/.npm-global
     steps:
@@ -70,6 +71,7 @@ jobs:
       - name: Regenerate ToCs
         run: |
           set -eux
+          export PATH=~/.npm-global:"$PATH"
           for FILE in {CONTRIBUTING,README}.md; do
             markdown-toc --bullets='-' -i "$FILE"
           done
