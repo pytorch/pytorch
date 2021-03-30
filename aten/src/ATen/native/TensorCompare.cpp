@@ -320,7 +320,7 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
   Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
   if (self.is_quantized()) {
     Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
-    at::native::max_out(self.int_repr(), dim, keepdim, max, max_indices);
+    at::native::max_out(self.int_repr() , dim, keepdim, max, max_indices);
     // TODO: qscheme
     return std::tuple<Tensor, Tensor>(at::_make_per_tensor_quantized_tensor(max, self.q_scale(), self.q_zero_point()), max_indices);
   } else {

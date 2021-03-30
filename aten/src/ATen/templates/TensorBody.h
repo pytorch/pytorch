@@ -360,10 +360,14 @@ class TORCH_API Tensor {
   }
 
   /// Returns a `Tensor`'s layout. Defined in Type.h
-  Layout layout() const noexcept;
+  Layout layout() const noexcept {
+    return impl_->layout();
+  }
 
   /// Returns a `Tensor`'s dtype (`TypeMeta`). Defined in TensorMethods.cpp
-  caffe2::TypeMeta dtype() const noexcept;
+  caffe2::TypeMeta dtype() const noexcept {
+    return impl_->dtype();
+  }
 
   /// Returns a `Tensor`'s device.
   inline Device device() const {
@@ -371,44 +375,82 @@ class TORCH_API Tensor {
   }
 
   /// Returns a `Tensor`'s device index.
-  int64_t get_device() const;
+  int64_t get_device() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->get_device();
+  }
+
 
   /// Returns if a `Tensor` has CPU backend.
-  bool is_cpu() const;
+  bool is_cpu() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_cpu();
+  }
 
   /// Returns if a `Tensor` has CUDA backend.
-  bool is_cuda() const;
+  bool is_cuda() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_cuda();
+  }
 
   /// Returns if a `Tensor` has XPU backend.
-  bool is_xpu() const;
+  bool is_xpu() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_xpu();
+  }
 
   /// Returns if a `Tensor` has XLA backend.
-  bool is_xla() const;
+  bool is_xla() const {
+    return impl_->is_xla();
+  }
 
   /// Returns if a `Tensor` has HIP backend.
-  bool is_hip() const;
+  bool is_hip() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_hip();
+  }
 
   /// Returns if a `Tensor` has sparse backend.
-  bool is_sparse() const;
+  bool is_sparse() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_sparse();
+  }
 
   /// Returns if a `Tensor` is mkldnn tensor.
-  bool is_mkldnn() const;
+  bool is_mkldnn() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_mkldnn();
+  }
 
   /// Returns if a `Tensor` is mlc tensor.
-  bool is_mlc() const;
+  bool is_mlc() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_mlc();
+  }
 
   /// Returns if a `Tensor` is vulkan tensor.
-  bool is_vulkan() const;
+  bool is_vulkan() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_vulkan();
+  }
 
   /// Returns if a `Tensor` is metal tensor.
-  bool is_metal() const;
+  bool is_metal() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_metal();
+  }
 
   /// Returns if a `Tensor` has quantized backend.
-  bool is_quantized() const;
+  bool is_quantized() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_quantized();
+  }
 
   /// Returns if a `Tensor` is a meta tensor.  Meta tensors can
   /// also have other designations.
-  bool is_meta() const;
+  bool is_meta() const {
+    return impl_->is_meta();
+  }
 
   /// If a tensor is a quantized tensor, returns its quantizer
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
@@ -831,7 +873,9 @@ protected:
 #pragma warning( pop )
 #endif
 
-int64_t get_device(Tensor self);
+inline int64_t get_device(const Tensor& self) {
+  return self.get_device();
+}
 
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
