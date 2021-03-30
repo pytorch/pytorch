@@ -7,6 +7,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorDimApply.h>
@@ -79,7 +80,7 @@ Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
   return result;
 }
 
-Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _cumsum_out_cpu(const Tensor& self, int64_t dim, Tensor& result) {
   cumsum_stub(self.device().type(), result, self, dim);
   return result;
 }
@@ -128,7 +129,7 @@ Tensor _cumprod_cpu(const Tensor& self, int64_t dim) {
   return result;
 }
 
-Tensor& _cumprod_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _cumprod_out_cpu(const Tensor& self, int64_t dim, Tensor& result) {
   cumprod_stub(self.device().type(), result, self, dim);
   return result;
 }
@@ -448,8 +449,8 @@ std::tuple<Tensor&, Tensor&> cummax_out(const Tensor& self, int64_t dim, Tensor&
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
     NoNamesGuard guard;
-    values.resize_(self.sizes());
-    indices.resize_(self.sizes());
+    resize_output(values, self.sizes());
+    resize_output(indices, self.sizes());
     if(self.dim() == 0) {
       values.fill_(self);
       indices.fill_(0);
@@ -483,8 +484,8 @@ std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, int64_t dim, Tensor&
   check_scalar_type_device_layout_equal(indices, at::empty({0}, self.options().dtype(at::kLong)));
   {
     NoNamesGuard guard;
-    values.resize_(self.sizes());
-    indices.resize_(self.sizes());
+    resize_output(values, self.sizes());
+    resize_output(indices, self.sizes());
     if(self.dim() == 0) {
       values.fill_(self);
       indices.fill_(0);
@@ -813,7 +814,7 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
     auto maxes = at::amax(self, dims, true);
     auto maxes_squeezed = (keepdim ? maxes : squeeze_multiple(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
-    at::sum_out(result, at::exp(self - maxes), dims, keepdim);
+    at::sum_out(result, (self - maxes).exp_(), dims, keepdim);
     result.log_().add_(maxes_squeezed);
   } else {
     at::sum_out(result, at::exp(self), dims, keepdim);

@@ -4,6 +4,8 @@
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
+export PYTORCH_TEST_SKIP_NOARCH=1
+
 conda install -y six
 pip install -q hypothesis "librosa>=0.6.2" "numba<=0.49.1" psutil
 
