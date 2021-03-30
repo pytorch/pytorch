@@ -90,6 +90,10 @@ void Logger::set_comm_hook(const std::string& hook) {
   ddp_logging_data_->comm_hook = hook;
 }
 
+void Logger::set_static_graph() {
+  ddp_logging_data_->static_graph = reducer_->static_graph_;
+}
+
 void Logger::set_construction_data_and_log(
     const std::string& module_name,
     const std::vector<int>& device_ids,

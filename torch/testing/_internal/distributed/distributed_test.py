@@ -3705,6 +3705,28 @@ class DistributedTest:
                 ddp_logging_data.avg_backward_comm_time,
                 ddp_logging_data.avg_backward_compute_comm_overlap_time)
 
+        @unittest.skipIf(
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
+        )
+        def test_static_graph_api_cpu(self):
+            model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
+            model_DDP._set_static_graph()
+            self.assertEqual(model_DDP.get_ddp_logging_data().static_graph, True)
+            with self.assertRaisesRegex(RuntimeError, '^num_iterations_ == 0INTERNAL ASSERT FAILED'):
+                local_bs = 2
+                batch_size, input, target, loss = self._prepare_dummy_data(local_bs)
+                offset = dist.get_rank() * local_bs
+
+                # DDP training, DDP scatters subsets of input to nodes/GPUs
+                self._test_DDP_helper(
+                    model_DDP,
+                    input[offset: offset + local_bs],
+                    target[offset: offset + local_bs],
+                    loss,
+                    1,
+                )
+                model_DDP._set_static_graph()
+
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
             # When adopting `convert_sync_batchnorm` to convert a `nn.modules`,

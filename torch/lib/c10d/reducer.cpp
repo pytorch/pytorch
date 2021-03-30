@@ -1559,6 +1559,14 @@ void Reducer::record_backward_comm_end_time() {
   }
 }
 
+void Reducer::set_static_graph() {
+  TORCH_INTERNAL_ASSERT(
+      num_iterations_ == 0,
+      "set_static_graph() should be called before training loop starts "
+      "and after DistributedDataParallel is constructed.");
+  static_graph_ = true;
+}
+
 namespace {
 
 // Tensors may be coalesced into buckets. Buckets must contain tensors of

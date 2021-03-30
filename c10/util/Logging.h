@@ -312,6 +312,7 @@ struct DDPLoggingData {
   // A list of bucket sizes (Bytes) calculated during construction time
   std::vector<int> bucket_sizes = std::vector<int>();
   bool is_multi_device_module = false;
+  bool static_graph = false;
 
   // Environment variables
   std::string master_port = "";

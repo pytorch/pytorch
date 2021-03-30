@@ -328,6 +328,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "_set_ddp_runtime_logging_sample_rate",
           &::c10d::Reducer::set_ddp_runtime_logging_sample_rate,
           py::arg("sample_rate"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_static_graph",
+          &::c10d::Reducer::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -355,6 +359,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "_set_comm_hook_name",
           &::c10d::Logger::set_comm_hook,
           py::arg("comm_hook"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_static_graph",
+          &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
@@ -1457,7 +1465,8 @@ Example::
       .def_readwrite(
           "backward_compute_comm_overlap_time",
           &c10::DDPLoggingData::backward_compute_comm_overlap_time)
-      .def_readwrite("is_multi_device_module", &c10::DDPLoggingData::is_multi_device_module);
+      .def_readwrite("is_multi_device_module", &c10::DDPLoggingData::is_multi_device_module)
+      .def_readwrite("static_graph", &c10::DDPLoggingData::static_graph);
 
   module.def(
       "_compute_bucket_assignment_by_size",
