@@ -322,10 +322,11 @@ class Vectorizer : public IRMutator {
     });
   }
 
-  const Expr* mutate(const BaseCallNode* v) override {
+  const Expr* mutate(const Intrinsics* v) override {
     std::vector<const Expr*> inputs = v->params();
-    return try_vectorize(
-        v, inputs, [&]() { return ExprHandle(DefaultMutator(v, inputs)); });
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(new Intrinsics(v->op_type(), inputs));
+    });
   }
 
   Stmt* mutate(const Store* v) override {
