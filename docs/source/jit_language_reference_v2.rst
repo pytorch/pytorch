@@ -32,8 +32,8 @@ TorchScript Language Reference
 .. _type_system:
 
 
-Type System (I): TorchScript Types
-==================================
+Type System
+===========
 
 This section summarizes TorchScript type system.
 
@@ -131,8 +131,8 @@ Operators supported for ``Any`` type
 * data of ``Any`` type is printable
 * Data of ``List[Any]`` type may be sortable if the data is a list of values of the same type ``T`` and that ``T`` supports comparison operators
 
-Compared to Python
-""""""""""""""""""
+**Compared to Python**
+
 
 ``Any`` is the least constrained type in the TorchScript type system. In that sense, it is quite similar to
 Object class in Python. However, ``Any`` only supports a subset of the operators and methods that are supported by Object.
@@ -158,7 +158,7 @@ because ``x[1]`` is not involved in any computation that requires knowing its pr
 
     @torch.jit.export
     def incFirstElement(x: Tuple[int, Any]):
-    return (x[0]+1, x[1])
+        return (x[0]+1, x[1])
 
     m = torch.jit.script(incFirstElement)
     print(m((1,2.0)))
@@ -194,8 +194,8 @@ The above example produces the following output
 
 .. testoutput::
 
-    1
-    1
+     1
+     1
     [ CPUFloatType{2} ]
     True
 
@@ -235,8 +235,8 @@ where
 * ``namedtuple`` represents Python class  ``collections.namedtuple`` or ``typing.NamedTuple`` .
 * ``Future`` and ``RRef`` represent Python classes  ``torch.futures``, ``torch.distributed.rpc``.
 
-Compared to Python
-""""""""""""""""""
+**Compared to Python**
+
 
 * Apart from being composable with TorchScript types, these TorchScript structural types often support a common subset of the operators and methods of their Python counterparts.
 
@@ -261,6 +261,10 @@ This example uses ``typing.NamedTuple`` syntax:
     scripted_inc = torch.jit.script(inc)
     print("TorchScript:", scripted_inc(t))
 
+.. testoutput::
+
+    TorchScript: (2, 3)
+
 This example uses ``collections.namedtuple`` syntax:
 
 .. testcode::
@@ -279,26 +283,30 @@ This example uses ``collections.namedtuple`` syntax:
     m = torch.jit.script(inc)
     print(inc(_UnannotatedNamedTuple(1,2)))
 
+.. testoutput::
+
+    (2, 3)
+
 **Example**:
 
 This example illustrates a common mistake of annotating structural types, i.e., not importing the composite type
 classes from the ``typing`` module.
 
-.. testcode::
+::
 
     import torch
 
     # ERROR: Tuple not recognized because not imported from typing
     @torch.jit.export
     def inc(x: Tuple[int, int]):
-    return (x[0]+1, x[1]+1)
+        return (x[0]+1, x[1]+1)
 
     m = torch.jit.script(inc)
-    print(inc((1,2)))
+    print(m((1,2)))
 
 Running the above codes yields the following scripting error. The remedy is to add from ``typing import Tuple``.
 
-.. testoutput::
+::
 
     File "test-tuple.py", line 5, in <module>
         def inc(x: Tuple[int, int]):
@@ -342,12 +350,12 @@ they behave more like tuples in TorchScript.
 
 **Example**:
 
-.. testcode::
+::
 
     import torch
 
     @torch.jit.script
-    class A():
+    class A:
         def __init__(self):
             self.x = torch.rand(3)
 
@@ -382,8 +390,8 @@ where
 * MethodDefinition must be compilable to TorchScript IR and adhere to TorchScript’s type-checking rules, (e.g., all methods must be valid TorchScript functions and class attribute definitions must be valid TorchScript statements)
 * ``torch.jit.ignore``<placeholder for link to ``torch.jit.ignore``> and ``torch.jit.unused``<placeholder for link to ``torch.jit.unused``> can be used to ignore the method or function that is not fully torchscriptable or should be ignored by the compiler
 
-Compared to Python
-""""""""""""""""""
+**Compared to Python**
+
 
 TorchScript custom classes are quite limited compared to their Python counterpart.
 
@@ -396,7 +404,8 @@ TorchScript custom classes are quite limited compared to their Python counterpar
 **Example**:
 
 Python classes can be used in TorchScript if they are annotated with ``@torch.jit.script``, similar to how a TorchScript function would be declared:
-.. testcode::
+
+::
 
     @torch.jit.script
     class MyClass:
@@ -411,20 +420,22 @@ Python classes can be used in TorchScript if they are annotated with ``@torch.ji
 
 A TorchScript custom class type must "declare" all its instance attributes by assignments in ``__init__()``. If an instance attribute is not defined in ``__init__()`` but accessed in other methods of the class, the class cannot be compiled as a TorchScript class, as shown in the following example:
 
-.. testcode::
+::
+
+    import torch
 
     @torch.jit.script
     class foo:
         def __init__(self):
             self.y = 1
 
-        # ERROR: self.x is not defined in __init__
-        def assign_x(self):
-            self.x = torch.rand(2, 3)
+    # ERROR: self.x is not defined in __init__
+    def assign_x(self):
+        self.x = torch.rand(2, 3)
 
- The above class will fail to be compiled and issue the following error:
+The above class will fail to compile and issue the following error:
 
-.. testoutput::
+::
 
     RuntimeError:
     Tried to set nonexistent attribute: x. Did you forget to initialize it in __init__()?:
@@ -436,7 +447,7 @@ A TorchScript custom class type must "declare" all its instance attributes by as
 
 In this example, a TorchScript custom class defines a class variable name, which is not allowed.
 
-.. testcode::
+::
 
     import torch
 
@@ -451,7 +462,7 @@ In this example, a TorchScript custom class defines a class variable name, which
 
 It leads to the following compile-time error:
 
-.. testoutput::
+::
 
     RuntimeError:
     Tried to access nonexistent attribute or method 'name' of type '__torch__.MyClass'. Did you forget to initialize an attribute in __init__()?:
@@ -461,7 +472,7 @@ It leads to the following compile-time error:
             ~~~~~~ <--- HERE
 
 Enum Type
-^^^^^^^^^^
+^^^^^^^^^
 
 Like custom classes, semantics of enum type are user-defined and the entire class definition must be compilable to TorchScript IR and adhere to TorchScript type-checking rules.
 
@@ -476,8 +487,8 @@ where
 * Value must be a TorchScript literal of type ``int``, ``float``, or ``str``, and must be of the same TorchScript type
 * ``TSEnumType`` is the name of a TorchScript enumerated type. Similar to Python enum, TorchScript allows restricted ``Enum`` subclassing, that is, subclassing an enumerated is allowed only if it does not define any members.
 
-Compared to Python
-""""""""""""""""""
+**Compared to Python**
+
 
 * TorchScript supports only ``enum.Enum``, but not other variations such as ``enum.IntEnum``, ``enum.Flag``, ``enum.IntFlag``, or  ``enum.auto``
 * Values of TorchScript enum members must be of the same type and can only be of ``int``, ``float``, or ``str`` type, whereas Python enum members can be of any type
@@ -485,7 +496,7 @@ Compared to Python
 
 **Example**:
 
-.. testcode::
+::
 
     import torch
     from enum import Enum
@@ -508,7 +519,7 @@ Compared to Python
 
 The following example shows the case of restricted enum subclassing, where ``BaseColor`` does not define any member, thus can be subclassed by ``Color``.
 
-.. testcode::
+::
 
     import torch
     from enum import Enum
@@ -562,19 +573,19 @@ Unlike custom classes, only the forward method and other methods decorated with 
 
     import torch
 
-class TestModule(torch.nn.Module):
-    def __init__(self, v):
-        super().__init__()
-        self.x = v
+    class TestModule(torch.nn.Module):
+        def __init__(self, v):
+            super().__init__()
+            self.x = v
 
-    def forward(self, inc: int):
-        return self.x + inc
+        def forward(self, inc: int):
+            return self.x + inc
 
-m = torch.jit.script(TestModule(1))
-print(f"First instance: {m(3)}")
+    m = torch.jit.script(TestModule(1))
+    print(f"First instance: {m(3)}")
 
-m = torch.jit.script(TestModule(torch.ones([5])))
-print(f"Second instance: {m(3)}")
+    m = torch.jit.script(TestModule(torch.ones([5])))
+    print(f"Second instance: {m(3)}")
 
 .. testoutput::
 
@@ -614,12 +625,8 @@ The following shows an incorrect usage of module type. Specifically, this exampl
             myModel = TestModule(self.val)
             return myModel(val)
 
-    m = torch.jit.script(MyModel(2))
-    print(m.doSomething(3))
-
-.. testoutput::
-
-    RuntimeError: Could not get name of python class object
+    # m = torch.jit.script(MyModel(2)) # Results in below RuntimeError
+    # RuntimeError: Could not get name of python class object
 
 .. _expressions:
 
