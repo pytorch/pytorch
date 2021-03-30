@@ -1559,8 +1559,14 @@ void initJitScriptBindings(PyObject* module) {
          const ClassDef& classDef,
          const ResolutionCallback& rcb,
          bool is_module) {
+        auto cu = get_python_cu();
+        auto className = c10::QualifiedName(qualifiedName);
+        if (cu->get_type(className) != nullptr) {
+          className = cu->mangle(className);
+        }
+
         get_python_cu()->define_interface(
-            c10::QualifiedName(qualifiedName),
+            className,
             classDef,
             pythonResolver(rcb),
             is_module);
