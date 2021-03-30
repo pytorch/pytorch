@@ -198,14 +198,15 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  using driver_t = at::native::LapackLstsqDriverType;
 
-  auto lapack_func = lapackLstsq<LapackLstsqDriverType::Gelsd, scalar_t, value_t>;
+  auto lapack_func = lapackLstsq<driver_t::Gelsd, scalar_t, value_t>;
   static auto driver_type_to_func
-    = std::unordered_map<LapackLstsqDriverType, decltype(lapack_func), LapackLstsqDriverTypeHash>({
-    {LapackLstsqDriverType::Gels, lapackLstsq<LapackLstsqDriverType::Gels, scalar_t, value_t>},
-    {LapackLstsqDriverType::Gelsy, lapackLstsq<LapackLstsqDriverType::Gelsy, scalar_t, value_t>},
-    {LapackLstsqDriverType::Gelsd, lapackLstsq<LapackLstsqDriverType::Gelsd, scalar_t, value_t>},
-    {LapackLstsqDriverType::Gelss, lapackLstsq<LapackLstsqDriverType::Gelss, scalar_t, value_t>}
+    = std::unordered_map<driver_t, decltype(lapack_func), LapackLstsqDriverTypeHash>({
+    {driver_t::Gels, lapackLstsq<driver_t::Gels, scalar_t, value_t>},
+    {driver_t::Gelsy, lapackLstsq<driver_t::Gelsy, scalar_t, value_t>},
+    {driver_t::Gelsd, lapackLstsq<driver_t::Gelsd, scalar_t, value_t>},
+    {driver_t::Gelss, lapackLstsq<driver_t::Gelss, scalar_t, value_t>}
   });
   lapack_func = driver_type_to_func[driver_type];
 
