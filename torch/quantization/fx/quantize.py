@@ -439,7 +439,7 @@ def handle_copy_nodes(
     observed_nodes: Set[Node] = set()
     copy_nodes: Set[Node] = set()
     non_tensor_input_binary_op_nodes: Set[Node] = set()
-    app_to_remove: Set[Node] = set()
+    actpp_to_remove: Set[Node] = set()
     env: Dict[Any, Any] = {}
 
     def load_arg(a: Argument) -> Argument:
@@ -456,11 +456,11 @@ def handle_copy_nodes(
             if in_nodes(node.args[0], copy_nodes) and in_nodes(node.args[0], observed_nodes):
                 # we'll remove the activation_post_process if the previous node is
                 # an observed copy node
-                app_to_remove.add(node)
+                actpp_to_remove.add(node)
 
             # rule 2: if the previous node is a binary op without tensor input, we can remove the observer
             if in_nodes(node.args[0], non_tensor_input_binary_op_nodes):
-                app_to_remove.add(node)
+                actpp_to_remove.add(node)
             observed_nodes.add(node)
 
         if root_node is node and qconfig is not None:
@@ -480,7 +480,7 @@ def handle_copy_nodes(
             if in_nodes(node.args[0], observed_nodes):
                 prev_node = node.args[0].args[0]
                 if prev_node.name not in qconfig_map or qconfig_map[prev_node.name] is None:
-                    app_to_remove.add(node.args[0])
+                    actpp_to_remove.add(node.args[0])
                     # if the previous node is not quantized, remove node from copy nodes
                     if node in copy_nodes:
                         copy_nodes.remove(node)
@@ -488,7 +488,7 @@ def handle_copy_nodes(
     for node in observed_graph.nodes:
         if node.op == "output":
             result_graph.output(map_arg(node.args[0], load_arg))
-        elif node in app_to_remove:
+        elif node in actpp_to_remove:
             env[node.name] = env[node.args[0].name]
         else:
             env[node.name] = result_graph.node_copy(node, load_arg)
@@ -502,7 +502,7 @@ def handle_cat_nodes(
         modules: Dict[str, torch.nn.Module]):
     observed_nodes: Set[Node] = set()
     # activation_post_process for cat nodes
-    app_for_cat_nodes: Dict[Node, torch.nn.Module] = dict()
+    actpp_for_cat_nodes: Dict[Node, torch.nn.Module] = dict()
 
     # we'll set the activation_post_process for all tensor inputs of cat and output
     # of cat to be the same (the activation_post_process for the first Tensor
@@ -518,10 +518,10 @@ def handle_cat_nodes(
 
         if node.op == "call_module" and is_activation_post_process(modules[node.target]):
             observed_nodes.add(node)
-            if node.args[0] in app_for_cat_nodes:
+            if node.args[0] in actpp_for_cat_nodes:
                 parent_name, name = _parent_name(node.target)
-                app_for_cat = app_for_cat_nodes[node.args[0]]
-                setattr(modules[parent_name], name, app_for_cat)
+                actpp_for_cat = actpp_for_cat_nodes[node.args[0]]
+                setattr(modules[parent_name], name, actpp_for_cat)
 
         if root_node is node and qconfig is not None:
             if isinstance(quantize_handler, CatQuantizeHandler):
@@ -536,7 +536,7 @@ def handle_cat_nodes(
                         assert arg.op == "call_module" and is_activation_post_process(modules[arg.target])
                         parent_name, name = _parent_name(arg.target)
                         setattr(modules[parent_name], name, first_act_post_process)
-                    app_for_cat_nodes[node] = first_act_post_process
+                    actpp_for_cat_nodes[node] = first_act_post_process
 
 
     return observed_graph
