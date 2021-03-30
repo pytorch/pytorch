@@ -5,35 +5,37 @@ namespace torch {
 namespace jit {
 
 void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
-  ExportModule(*this, out, extra_files, false /* bytecode_format */);
+  ExportModule(*this, out, extra_files, at::optional<uint64_t>() /* bytecode_format */);
 }
 
 void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
     const {
-  ExportModule(*this, filename, extra_files, false /* bytecode_format */);
+  ExportModule(*this, filename, extra_files, at::optional<uint64_t>() /* bytecode_format */);
 }
 
 void Module::_save_for_mobile(
     std::ostream& out,
     const ExtraFilesMap& extra_files,
+    at::optional<uint64_t> version,
     bool save_mobile_debug_info) const {
   ExportModule(
       *this,
       out,
       extra_files,
-      true /* bytecode_format */,
+      version /* bytecode_format version */,
       save_mobile_debug_info);
 }
 
 void Module::_save_for_mobile(
     const std::string& filename,
     const ExtraFilesMap& extra_files,
+    at::optional<uint64_t> version,
     bool save_mobile_debug_info) const {
   ExportModule(
       *this,
       filename,
       extra_files,
-      true /* bytecode_format */,
+      version /* bytecode_format version*/,
       save_mobile_debug_info);
 }
 
