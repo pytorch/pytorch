@@ -625,7 +625,7 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   }
 }
 
-inline py::object getScriptedClassOrError(const NamedTypePtr& classType) {
+inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
   auto py_class =
       py::module::import("torch.jit._state")
           .attr("_get_python_class")(classType->name()->qualifiedName());

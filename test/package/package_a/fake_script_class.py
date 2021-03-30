@@ -1,7 +1,7 @@
 import torch
 
 @torch.jit.script
-class MyScriptClass:
+class MyScriptClass:  # flake8: noqa
     """Intended to be scripted."""
     def __init__(self, x):
         self.foo = x
