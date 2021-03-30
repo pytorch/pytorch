@@ -35,7 +35,7 @@ enum IRNodeType {
 };
 
 // The common base between all expression node.
-class Expr : public KernelScopedObject {
+class TORCH_API Expr : public KernelScopedObject {
  public:
   explicit Expr(Dtype dtype, IRNodeType expr_type = kOther)
       : dtype_(dtype), expr_type_(expr_type) {}
@@ -135,7 +135,7 @@ class TORCH_API ExprHandle {
 // The underlying representation node to a Var.
 // Currently, each Var object represents a unique variable, even though the
 // names might be the same. We should consider add a unique_name as well.
-class Var : public ExprNode<Var> {
+class TORCH_API Var : public ExprNode<Var> {
  public:
   static ExprHandle make(const std::string& name_hint, Dtype dtype) {
     return ExprHandle(new Var(name_hint, dtype));
@@ -252,7 +252,7 @@ class TORCH_API BufHandle : public ExprHandle {
 // An expression to construct the underlying variable node.
 // Note: do not store any info here, since it is often possible to slice this
 // object. For example: VarHandle x('x'); ExprHandle x2 = x;
-class VarHandle : public ExprHandle {
+class TORCH_API VarHandle : public ExprHandle {
  public:
   VarHandle() : ExprHandle(nullptr) {}
   explicit VarHandle(Dtype dtype) : ExprHandle(Var::make(dtype)) {}
