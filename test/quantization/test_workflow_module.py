@@ -136,7 +136,12 @@ def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, p
     Xq = Xq.permute(tuple(permute_axis_list))
     mask = (Xq >= quant_min) * (Xq <= quant_max)
     res = torch.zeros_like(dY)
+    print("RES:", res)
+    print("DY", dY)
+    print("DY MASK", dY[mask])
+    print("RES MASK", res[mask])
     res[mask] = dY[mask]
+    print("RES POST UPDATE", res)
     return res
 
 # Reference method for quantization.
@@ -1056,7 +1061,6 @@ class TestFakeQuantize(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skip("temporarily disable the test to see if test_shape_ops is passing or failing?")
     def test_learnable_backward_per_tensor_cpu(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
         X, (_, _, _) = X
@@ -1452,7 +1456,6 @@ class TestFakeQuantize(TestCase):
 
     @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skip("temporarily disable the test to see if test_shape_ops is passing or failing?")
     def test_learnable_backward_per_channel_cpu(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
         X, (_, _, axis, _) = X
