@@ -10186,6 +10186,15 @@ class TestNN(NNTestCase):
 
             self.assertTrue(torch.allclose(grads1, grads2, rtol, atol))
 
+    def test_padding_list(self):
+        # Padding can be a list, or tuple (regression test for gh-54452)
+        x = torch.randn(4, 8, 32, 32)
+        net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=[3, 3])
+        y = net(x)
+
+        net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=(3, 3))
+        y = net(x)
+
 
 class TestNNInit(TestCase):
     def setUp(self):
