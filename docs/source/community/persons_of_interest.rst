@@ -124,6 +124,7 @@ ONNX <-> PyTorch
 
 -  Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
 -  Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
+-  Meghan Lele (`SplitInfinity <https://github.com/SplitInfinity>`__)
 
 Windows
 ~~~~~~~
