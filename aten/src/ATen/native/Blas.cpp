@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/CPUFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ScalarOps.h>
@@ -18,7 +19,7 @@ constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda >= std::max<int64_t>(1L, m);
 }
 
-Tensor &addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta_, Scalar alpha_) {
+Tensor &addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta_, const Scalar& alpha_) {
   auto r_stride = result.stride(0);
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, mat.scalar_type(), "addmv_impl_cpu", [&] {
     auto beta = beta_.to<scalar_t>();
@@ -40,7 +41,7 @@ Tensor &addmv_impl_cpu(Tensor& result, const Tensor &self, const Tensor &mat, co
   return result;
 }
 
-Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
+Tensor &addmv_out(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha, Tensor& result) {
   { // scope of NoNamesGuard
 
   at::NoNamesGuard guard;
@@ -62,7 +63,11 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
     if (beta.toComplexDouble() == 0.0) {
       result.zero_();
     } else {
-      at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
+      at::cpu::mul_out(
+          result,
+          self,
+          at::native::scalar_tensor(
+              beta, self.scalar_type(), c10::nullopt /* layout */, at::kCPU, c10::nullopt /* pin_memory */));
     }
   } else {
     if (!result.is_same(self_)) {
@@ -78,22 +83,22 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
   return result;
 }
 
-Tensor addmv(const Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
+Tensor addmv(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha) {
   Tensor result = at::empty({mat.size(0)}, mat.options());
-  return native::addmv_out(result, self, mat, vec, beta, alpha);
+  return native::addmv_out(self, mat, vec, beta, alpha, result);
 }
 
-Tensor &addmv_(Tensor &self, const Tensor &mat, const Tensor &vec, Scalar beta, Scalar alpha) {
-  return native::addmv_out(self, self, mat, vec, beta, alpha);
+Tensor &addmv_(Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha) {
+  return native::addmv_out(self, mat, vec, beta, alpha, self);
 }
 
-Tensor &mv_out(Tensor& result, const Tensor &self, const Tensor &vec) {
-  return native::addmv_out(result, result, self, vec, 0, 1);
+Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
+  return native::addmv_out(result, self, vec, 0, 1, result);
 }
 
 Tensor mv(const Tensor &self, const Tensor &vec) {
   Tensor result = at::empty({self.size(0)}, self.options());
-  return native::mv_out(result, self, vec);
+  return native::mv_out(self, vec, result);
 }
 
 inline void dot_check(const Tensor& self, const Tensor& other) {

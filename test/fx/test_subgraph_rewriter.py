@@ -38,7 +38,7 @@ class TestSubgraphRewriter(JitTestCase):
         # the underlying logic)
         subgraph_rewriter.replace_pattern(traced, pattern, pattern)
 
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         ref_output = comparison_fn(x)
         test_output = traced.forward(x)
@@ -67,7 +67,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         subgraph_rewriter.replace_pattern(traced, pattern, replacement)
 
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         ref_output = comparison_fn(x)
         test_output = traced.forward(x)
@@ -96,7 +96,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         subgraph_rewriter.replace_pattern(traced, pattern, replacement)
 
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         ref_output = comparison_fn(x)
         test_output = traced.forward(x)
@@ -129,7 +129,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         subgraph_rewriter.replace_pattern(traced, pattern, replacement)
 
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         ref_outs = comparison_fn(x, w1, w2)
         test_outs = traced.forward(x, w1, w2)
@@ -154,7 +154,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         subgraph_rewriter.replace_pattern(traced, pattern, pattern)
 
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         ref_outs = comparison_fn(x, y)
         test_outs = traced.forward(x, y)
@@ -184,7 +184,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         subgraph_rewriter.replace_pattern(traced, pattern, replacement)
 
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         ref_outs = comparison_fn(x, y)
         test_outs = traced.forward(x, y)
@@ -217,7 +217,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         subgraph_rewriter.replace_pattern(traced, traced_pattern, traced_replacement)
 
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         ref_outs = comparison_fn(x)
         test_outs = traced.forward(x)
@@ -244,7 +244,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         subgraph_rewriter.replace_pattern(traced, pattern, replacement)
 
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         ref_outs = comparison_fn(x)
         test_outs = traced.forward(x)
@@ -273,7 +273,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         subgraph_rewriter.replace_pattern(traced, pattern, replacement)
 
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         ref_outs = comparison_fn(x)
         test_outs = traced.forward(x)
@@ -303,6 +303,6 @@ class TestSubgraphRewriter(JitTestCase):
         # Result should be [] since no matches can be found
         res = subgraph_rewriter.replace_pattern(traced, pattern, replacement)
 
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         self.assertEqual(res, [])

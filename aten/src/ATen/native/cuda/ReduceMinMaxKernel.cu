@@ -42,13 +42,13 @@ void min_values_kernel_cuda_impl(TensorIterator& iter) {
 }
 
 void max_values_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "max_values_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "max_values_cuda", [&]() {
     max_values_kernel_cuda_impl<scalar_t>(iter);
   });
 }
 
 void min_values_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "min_values_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "min_values_cuda", [&]() {
     min_values_kernel_cuda_impl<scalar_t>(iter);
   });
 }
@@ -70,10 +70,12 @@ void argmin_kernel_cuda_impl(TensorIterator& iter) {
 };
 
 void argmax_kernel_cuda(TensorIterator& iter) {
+  // For float16 & bfloat16, instead of implementing is_nan and warp_shfl_down,
+  // we can convert float16 & bfloat16 to float and do all the operations in float.
   if (iter.dtype(1) == kHalf) {
-    // Instead of implementing is_nan and warp_shfl_down
-    // we can convert halves to float and do all the operations in float
     argmax_kernel_cuda_impl<at::Half, float>(iter);
+  } else if (iter.dtype(1) == kBFloat16) {
+    argmax_kernel_cuda_impl<at::BFloat16, float>(iter);
   } else {
     AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmax_cuda", [&]() {
       argmax_kernel_cuda_impl<scalar_t>(iter);
@@ -82,10 +84,12 @@ void argmax_kernel_cuda(TensorIterator& iter) {
 }
 
 void argmin_kernel_cuda(TensorIterator& iter) {
+  // For float16 & bfloat16, instead of implementing is_nan and warp_shfl_down,
+  // we can convert float16 & bfloat16 to float and do all the operations in float.
   if (iter.dtype(1) == kHalf) {
-    // Instead of implementing is_nan and warp_shfl_down
-    // we can convert halves to float and do all the operations in float
     argmin_kernel_cuda_impl<at::Half, float>(iter);
+  } else if (iter.dtype(1) == kBFloat16) {
+    argmin_kernel_cuda_impl<at::BFloat16, float>(iter);
   } else {
     AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmin_cuda", [&]() {
       argmin_kernel_cuda_impl<scalar_t>(iter);
@@ -119,14 +123,14 @@ static void _aminmax_kernel_impl(
     const Tensor& self,
     int64_t dim,
     bool keepdim) {
-  at::TensorIterator iter = make_reduction("_aminmax", min_result, 
+  at::TensorIterator iter = make_reduction("_aminmax", min_result,
     max_result, self, dim, keepdim, self.scalar_type());
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, self.scalar_type(), "_aminmax_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       MinMaxOps<scalar_t, scalar_t, int32_t>{},
       thrust::pair<scalar_t, scalar_t>(
-        at::numeric_limits<scalar_t>::upper_bound(), 
+        at::numeric_limits<scalar_t>::upper_bound(),
         at::numeric_limits<scalar_t>::lower_bound()
       )
     );

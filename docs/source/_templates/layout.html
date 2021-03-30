@@ -1,18 +1,31 @@
 {% extends "!layout.html" %}
-
 <link rel="canonical" href="{{ theme_canonical_url }}{{ pagename }}.html" />
+
 {% block menu %}
+{% if release == "master" %}
 <div>
   <a style="color:#F05732" href="{{ theme_canonical_url }}{{ pagename }}.html">
     You are viewing unstable developer preview docs.
     Click here to view docs for latest stable release.
   </a>
 </div>
+{% endif %}
 {{ super() }}
 {% endblock %}
 
+{% block sidebartitle %}
+    <div class="version">
+      <a href='https://pytorch.org/docs/versions.html'>{{ version }} &#x25BC</a>
+    </div>
+    {% include "searchbox.html" %}
+{% endblock %}
+
+
 {% block footer %}
 {{ super() }}
+<script script type="text/javascript">
+  var collapsedSections = ['Notes', 'Language Bindings', 'Libraries', 'Community'];
+</script>
 <script>
   (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
   (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
