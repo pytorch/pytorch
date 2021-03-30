@@ -240,62 +240,65 @@ static void mode_kernel_impl(
   auto self_dim_size = ensure_nonempty_size(self, dim);
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kBool, self.scalar_type(), "mode_cpu", [&] {
-    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-      auto* values_data_bytes = data[0];
-      auto* indices_data_bytes = data[1];
-      const auto* self_data_bytes = data[2];
+  AT_DISPATCH_ALL_TYPES_AND3(
+      kHalf, kBFloat16, kBool, self.scalar_type(), "mode_cpu", [&] {
+        auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+          auto* values_data_bytes = data[0];
+          auto* indices_data_bytes = data[1];
+          const auto* self_data_bytes = data[2];
 
-      std::vector<std::pair<scalar_t, int64_t>> elements(self_dim_size);
+          std::vector<std::pair<scalar_t, int64_t>> elements(self_dim_size);
 
-      for (int64_t k = 0; k < n; ++k) {
-        scalar_t* values_data = (scalar_t*)values_data_bytes;
-        int64_t* indices_data = (int64_t*)indices_data_bytes;
-        const scalar_t* self_data = (scalar_t*)self_data_bytes;
+          for (int64_t k = 0; k < n; ++k) {
+            scalar_t* values_data = (scalar_t*)values_data_bytes;
+            int64_t* indices_data = (int64_t*)indices_data_bytes;
+            const scalar_t* self_data = (scalar_t*)self_data_bytes;
 
-        scalar_t mode = 0;
-        int64_t modei = 0;
-        int64_t temp_freq = 0;
-        int64_t max_freq = 0;
+            scalar_t mode = 0;
+            int64_t modei = 0;
+            int64_t temp_freq = 0;
+            int64_t max_freq = 0;
 
-        for (int64_t i = 0; i < self_dim_size; i++) {
-          elements[i] = std::make_pair(self_data[i * self_dim_stride], i);
-        }
-
-        // Even though, theoretically, we don't need to specify this lambda
-        // (it's basically the same as std::less), doing so degrades
-        // performance. That is because its implementation for std::pair uses 3
-        // comparisons.
-        std::sort(
-            elements.begin(),
-            elements.end(),
-            [=](const auto& i, const auto& j) { return i.first < j.first; });
-
-        for (int64_t i = 0; i < self_dim_size; i++) {
-          temp_freq++;
-          if ((i == self_dim_size - 1) ||
-              (elements[i].first != elements[i + 1].first)) {
-            if (temp_freq > max_freq) {
-              mode = elements[i].first;
-              modei = elements[i].second;
-              max_freq = temp_freq;
+            for (int64_t i = 0; i < self_dim_size; i++) {
+              elements[i] = std::make_pair(self_data[i * self_dim_stride], i);
             }
-            temp_freq = 0;
+
+            // Even though, theoretically, we don't need to specify this lambda
+            // (it's basically the same as std::less), doing so degrades
+            // performance. That is because its implementation for std::pair
+            // uses 3 comparisons.
+            std::sort(
+                elements.begin(),
+                elements.end(),
+                [=](const auto& i, const auto& j) {
+                  return i.first < j.first;
+                });
+
+            for (int64_t i = 0; i < self_dim_size; i++) {
+              temp_freq++;
+              if ((i == self_dim_size - 1) ||
+                  (elements[i].first != elements[i + 1].first)) {
+                if (temp_freq > max_freq) {
+                  mode = elements[i].first;
+                  modei = elements[i].second;
+                  max_freq = temp_freq;
+                }
+                temp_freq = 0;
+              }
+            }
+
+            *values_data = mode;
+            *indices_data = modei;
+
+            values_data_bytes += strides[0];
+            indices_data_bytes += strides[1];
+            self_data_bytes += strides[2];
           }
-        }
+        };
 
-        *values_data = mode;
-        *indices_data = modei;
-
-        values_data_bytes += strides[0];
-        indices_data_bytes += strides[1];
-        self_data_bytes += strides[2];
-      }
-    };
-
-    compare_base_kernel_core<scalar_t>(
-        values, indices, self, dim, keepdim, loop);
-  });
+        compare_base_kernel_core<scalar_t>(
+            values, indices, self, dim, keepdim, loop);
+      });
 }
 
 } // anonymous namespace
