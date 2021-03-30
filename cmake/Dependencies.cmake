@@ -1240,7 +1240,7 @@ if(USE_ROCM)
     # TODO: There is a bug in rocblas's & rocfft's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
     if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
-      list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::rocblas hip::hipfft hip::hiprand roc::hipsparse)
     else()
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
