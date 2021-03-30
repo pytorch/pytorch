@@ -93,7 +93,7 @@ class SampleInput(object):
 
     def __repr__(self):
         arguments = [
-            'input=Tensor' if isinstance(self.input, torch.Tensor) else f'input[{len(self.input)}]',
+            'input=Tensor' if isinstance(self.input, torch.Tensor) else f'input=TensorList[{len(self.input)}]',
             f'args={self.args}' if len(self.args) > 0 else None,
             f'kwargs={self.kwargs}' if len(self.kwargs) > 0 else None,
             (f'output_process_fn_grad={self.output_process_fn_grad}'
@@ -3643,7 +3643,6 @@ op_db: List[OpInfo] = [
                # stack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('hstack',
-           # gradcheck expects the input arguments as a flat list
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
@@ -3651,7 +3650,6 @@ op_db: List[OpInfo] = [
                # hstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('vstack',
-           # gradcheck expects the input arguments as a flat list
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(
@@ -3659,7 +3657,6 @@ op_db: List[OpInfo] = [
                # vstack does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),),),
     OpInfo('dstack',
-           # gradcheck expects the input arguments as a flat list
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            skips=(

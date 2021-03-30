@@ -114,7 +114,7 @@ class TestGradients(TestCase):
 
             def fn(*inputs):
                 # Pack input back into TensorList since we splat it when passing to gradcheck
-                if not isinstance(sample.input, torch.Tensor):
+                if is_iterable_of_tensors(sample.input):
                     n = len(sample.input)
                     inputs = (inputs[:n], *inputs[n:])
                 output = variant_out_fn(*inputs, **sample.kwargs)
@@ -237,7 +237,7 @@ class TestCommon(JitCommonTestCase):
                           (dtype.is_floating_point or op.supports_complex_autograd))
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
         for sample in samples:
-            # Check grad only on the first input Tensor
+            # TODO: Check grad for all Tensors requiring grad if sample.input is TensorList
             tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
 
             # Computes function forward and backward values
