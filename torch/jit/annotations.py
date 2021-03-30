@@ -10,7 +10,7 @@ from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingLi
 from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
-    ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
+    ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, NoneType, \
     DeviceObjType, StreamObjType, FutureType, EnumType
 
 
