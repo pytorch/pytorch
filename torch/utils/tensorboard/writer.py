@@ -312,7 +312,9 @@ class SummaryWriter(object):
             for k, v in metric_dict.items():
                 w_hp.add_scalar(k, v)
 
-    def add_scalar(self, tag, scalar_value, global_step=None, walltime=None):
+    def add_scalar(
+        self, tag, scalar_value, global_step=None, walltime=None, new_style=False
+    ):
         """Add scalar data to summary.
 
         Args:
@@ -321,7 +323,8 @@ class SummaryWriter(object):
             global_step (int): Global step value to record
             walltime (float): Optional override default walltime (time.time())
               with seconds after epoch of event
-
+            new_style (boolean): Whether to use new style (tensor field) or old
+              style (simple_value field). New style could lead to faster data loading.
         Examples::
 
             from torch.utils.tensorboard import SummaryWriter
@@ -341,8 +344,9 @@ class SummaryWriter(object):
         if self._check_caffe2_blob(scalar_value):
             from caffe2.python import workspace
             scalar_value = workspace.FetchBlob(scalar_value)
-        self._get_file_writer().add_summary(
-            scalar(tag, scalar_value), global_step, walltime)
+
+        summary = scalar(tag, scalar_value, new_style=new_style)
+        self._get_file_writer().add_summary(summary, global_step, walltime)
 
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
         """Adds many scalar data to summary.

@@ -90,7 +90,7 @@ static PyObject * THPGenerator_getState(PyObject *_self, PyObject *noargs)
 static PyObject * THPGenerator_setState(PyObject *_self, PyObject *_new_state)
 {
   using namespace torch::autograd;
-  
+
   HANDLE_TH_ERRORS
   if (!THPVariable_Check(_new_state)) {
     throw torch::TypeError("expected a torch.ByteTensor, but got %s", Py_TYPE(_new_state)->tp_name);
@@ -98,11 +98,11 @@ static PyObject * THPGenerator_setState(PyObject *_self, PyObject *_new_state)
   auto self = (THPGenerator*)_self;
   auto& gen = self->cdata;
   auto& new_state_tensor = ((THPVariable*)_new_state)->cdata;
-  
+
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen.mutex());
   gen.set_state(new_state_tensor);
-  
+
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS

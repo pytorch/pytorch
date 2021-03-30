@@ -5,8 +5,8 @@ from torch import Tensor, vmap
 import functools
 import itertools
 import warnings
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
+    skipCUDAIfNoMagma
 import types
 
 
@@ -153,6 +153,7 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(out_op)(tensor, tensor)
 
+        tensor = torch.randn(2)
         # The fallback doesn't support TensorList
         with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
             vmap(lambda t: torch.atleast_1d([t]))(tensor)
@@ -1584,6 +1585,19 @@ class TestVmapOperators(Namespace.TestVmapBase):
         self.assertEqual(vmap(foo)(ctensor), torch.tensor([1, 1, 1]))
         self.assertEqual(vmap(foo)(tensor), torch.tensor([0, 0, 0]))
 
+    def test_is_floating_point(self):
+        float_tensor = torch.tensor([1., 2., 3.])
+        long_tensor = torch.tensor([1, 2, 3])
+
+        def foo(x):
+            if x.is_floating_point():
+                return torch.tensor(1)
+            else:
+                return torch.tensor(0)
+
+        self.assertEqual(vmap(foo)(float_tensor), torch.tensor([1, 1, 1]))
+        self.assertEqual(vmap(foo)(long_tensor), torch.tensor([0, 0, 0]))
+
     def test_is_contiguous(self):
         def foo(x):
             if x.is_contiguous():
@@ -2396,6 +2410,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(Tensor.trace, (x,))
 
+    @skipCUDAIfNoMagma
     @allowVmapFallbackUsage
     def test_symeig(self, device):
         def op(x):
@@ -2480,8 +2495,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
     globals(),
-    # Excluding ROCM
-    except_for='cuda' if TEST_WITH_ROCM else None,
+    None,
 )
 
 if __name__ == '__main__':
