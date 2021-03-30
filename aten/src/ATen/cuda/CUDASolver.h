@@ -2,7 +2,6 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-// See https://github.com/pytorch/pytorch/pull/53040
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11000
 // cuSOLVER version >= 11000 includes 64-bit API
 #define USE_CUSOLVER_64_BIT
@@ -195,6 +194,214 @@ void xpotrf(
     cusolverDnHandle_t handle, cusolverDnParams_t params, cublasFillMode_t uplo, int64_t n, cudaDataType dataTypeA, void *A,
     int64_t lda, cudaDataType computeType, void *bufferOnDevice, size_t workspaceInBytesOnDevice, void *bufferOnHost, size_t workspaceInBytesOnHost,
     int *info);
+
+#endif // USE_CUSOLVER_64_BIT
+
+#define CUDASOLVER_SYEVD_BUFFERSIZE_ARGTYPES(scalar_t, value_t)             \
+  cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
+      int n, const scalar_t *A, int lda, const value_t *W, int *lwork
+
+template <class scalar_t, class value_t = scalar_t>
+void syevd_bufferSize(CUDASOLVER_SYEVD_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevd_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void syevd_bufferSize<float>(
+    CUDASOLVER_SYEVD_BUFFERSIZE_ARGTYPES(float, float));
+template <>
+void syevd_bufferSize<double>(
+    CUDASOLVER_SYEVD_BUFFERSIZE_ARGTYPES(double, double));
+template <>
+void syevd_bufferSize<c10::complex<float>, float>(
+    CUDASOLVER_SYEVD_BUFFERSIZE_ARGTYPES(c10::complex<float>, float));
+template <>
+void syevd_bufferSize<c10::complex<double>, double>(
+    CUDASOLVER_SYEVD_BUFFERSIZE_ARGTYPES(c10::complex<double>, double));
+
+#define CUDASOLVER_SYEVD_ARGTYPES(scalar_t, value_t)                        \
+  cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
+      int n, scalar_t *A, int lda, value_t *W, scalar_t *work, int lwork,   \
+      int *info
+
+template <class scalar_t, class value_t = scalar_t>
+void syevd(CUDASOLVER_SYEVD_ARGTYPES(scalar_t, value_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevd: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void syevd<float>(CUDASOLVER_SYEVD_ARGTYPES(float, float));
+template <>
+void syevd<double>(CUDASOLVER_SYEVD_ARGTYPES(double, double));
+template <>
+void syevd<c10::complex<float>, float>(
+    CUDASOLVER_SYEVD_ARGTYPES(c10::complex<float>, float));
+template <>
+void syevd<c10::complex<double>, double>(
+    CUDASOLVER_SYEVD_ARGTYPES(c10::complex<double>, double));
+
+#define CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(scalar_t, value_t)             \
+  cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
+      int n, const scalar_t *A, int lda, const value_t *W, int *lwork,      \
+      syevjInfo_t params
+
+template <class scalar_t, class value_t = scalar_t>
+void syevj_bufferSize(CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevj_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void syevj_bufferSize<float>(
+    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(float, float));
+template <>
+void syevj_bufferSize<double>(
+    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(double, double));
+template <>
+void syevj_bufferSize<c10::complex<float>, float>(
+    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(c10::complex<float>, float));
+template <>
+void syevj_bufferSize<c10::complex<double>, double>(
+    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(c10::complex<double>, double));
+
+#define CUDASOLVER_SYEVJ_ARGTYPES(scalar_t, value_t)                        \
+  cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
+      int n, scalar_t *A, int lda, value_t *W, scalar_t *work, int lwork,   \
+      int *info, syevjInfo_t params
+
+template <class scalar_t, class value_t = scalar_t>
+void syevj(CUDASOLVER_SYEVJ_ARGTYPES(scalar_t, value_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevj: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void syevj<float>(CUDASOLVER_SYEVJ_ARGTYPES(float, float));
+template <>
+void syevj<double>(CUDASOLVER_SYEVJ_ARGTYPES(double, double));
+template <>
+void syevj<c10::complex<float>, float>(
+    CUDASOLVER_SYEVJ_ARGTYPES(c10::complex<float>, float));
+template <>
+void syevj<c10::complex<double>, double>(
+    CUDASOLVER_SYEVJ_ARGTYPES(c10::complex<double>, double));
+
+#define CUDASOLVER_SYEVJ_BATCHED_BUFFERSIZE_ARGTYPES(scalar_t, value_t)     \
+  cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
+      int n, const scalar_t *A, int lda, const value_t *W, int *lwork,      \
+      syevjInfo_t params, int batchsize
+
+template <class scalar_t, class value_t = scalar_t>
+void syevjBatched_bufferSize(
+    CUDASOLVER_SYEVJ_BATCHED_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevjBatched_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void syevjBatched_bufferSize<float>(
+    CUDASOLVER_SYEVJ_BATCHED_BUFFERSIZE_ARGTYPES(float, float));
+template <>
+void syevjBatched_bufferSize<double>(
+    CUDASOLVER_SYEVJ_BATCHED_BUFFERSIZE_ARGTYPES(double, double));
+template <>
+void syevjBatched_bufferSize<c10::complex<float>, float>(
+    CUDASOLVER_SYEVJ_BATCHED_BUFFERSIZE_ARGTYPES(c10::complex<float>, float));
+template <>
+void syevjBatched_bufferSize<c10::complex<double>, double>(
+    CUDASOLVER_SYEVJ_BATCHED_BUFFERSIZE_ARGTYPES(c10::complex<double>, double));
+
+#define CUDASOLVER_SYEVJ_BATCHED_ARGTYPES(scalar_t, value_t)                \
+  cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
+      int n, scalar_t *A, int lda, value_t *W, scalar_t *work, int lwork,   \
+      int *info, syevjInfo_t params, int batchsize
+
+template <class scalar_t, class value_t = scalar_t>
+void syevjBatched(CUDASOLVER_SYEVJ_BATCHED_ARGTYPES(scalar_t, value_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevjBatched: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void syevjBatched<float>(CUDASOLVER_SYEVJ_BATCHED_ARGTYPES(float, float));
+template <>
+void syevjBatched<double>(CUDASOLVER_SYEVJ_BATCHED_ARGTYPES(double, double));
+template <>
+void syevjBatched<c10::complex<float>, float>(
+    CUDASOLVER_SYEVJ_BATCHED_ARGTYPES(c10::complex<float>, float));
+template <>
+void syevjBatched<c10::complex<double>, double>(
+    CUDASOLVER_SYEVJ_BATCHED_ARGTYPES(c10::complex<double>, double));
+
+#ifdef USE_CUSOLVER_64_BIT
+
+#define CUDASOLVER_XSYEVD_BUFFERSIZE_ARGTYPES(scalar_t, value_t) \
+  cusolverDnHandle_t handle, cusolverDnParams_t params,          \
+      cusolverEigMode_t jobz, cublasFillMode_t uplo, int64_t n,  \
+      const scalar_t *A, int64_t lda, const value_t *W,          \
+      size_t *workspaceInBytesOnDevice, size_t *workspaceInBytesOnHost
+
+template <class scalar_t, class value_t = scalar_t>
+void xsyevd_bufferSize(
+    CUDASOLVER_XSYEVD_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::xsyevd_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void xsyevd_bufferSize<float>(
+    CUDASOLVER_XSYEVD_BUFFERSIZE_ARGTYPES(float, float));
+template <>
+void xsyevd_bufferSize<double>(
+    CUDASOLVER_XSYEVD_BUFFERSIZE_ARGTYPES(double, double));
+template <>
+void xsyevd_bufferSize<c10::complex<float>, float>(
+    CUDASOLVER_XSYEVD_BUFFERSIZE_ARGTYPES(c10::complex<float>, float));
+template <>
+void xsyevd_bufferSize<c10::complex<double>, double>(
+    CUDASOLVER_XSYEVD_BUFFERSIZE_ARGTYPES(c10::complex<double>, double));
+
+#define CUDASOLVER_XSYEVD_ARGTYPES(scalar_t, value_t)                        \
+  cusolverDnHandle_t handle, cusolverDnParams_t params,                      \
+      cusolverEigMode_t jobz, cublasFillMode_t uplo, int64_t n, scalar_t *A, \
+      int64_t lda, value_t *W, scalar_t *bufferOnDevice,                     \
+      size_t workspaceInBytesOnDevice, scalar_t *bufferOnHost,               \
+      size_t workspaceInBytesOnHost, int *info
+
+template <class scalar_t, class value_t = scalar_t>
+void xsyevd(CUDASOLVER_XSYEVD_ARGTYPES(scalar_t, value_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::xsyevd: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void xsyevd<float>(CUDASOLVER_XSYEVD_ARGTYPES(float, float));
+template <>
+void xsyevd<double>(CUDASOLVER_XSYEVD_ARGTYPES(double, double));
+template <>
+void xsyevd<c10::complex<float>, float>(
+    CUDASOLVER_XSYEVD_ARGTYPES(c10::complex<float>, float));
+template <>
+void xsyevd<c10::complex<double>, double>(
+    CUDASOLVER_XSYEVD_ARGTYPES(c10::complex<double>, double));
 
 #endif // USE_CUSOLVER_64_BIT
 
