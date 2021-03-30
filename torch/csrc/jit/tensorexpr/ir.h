@@ -379,7 +379,7 @@ class Ramp : public ExprNode<Ramp> {
   }
 
   Ramp(const Expr* base, const Expr* stride, int lanes)
-      : ExprNodeBase(Dtype(base->dtype(), lanes), kRamp),
+      : ExprNodeBase(Dtype(base->dtype(), lanes)),
         base_(base),
         stride_(stride),
         lanes_(lanes) {}
@@ -453,7 +453,7 @@ class Broadcast : public ExprNode<Broadcast> {
     return ExprHandle(new Broadcast(value.node(), lanes));
   }
   Broadcast(const Expr* value, int lanes)
-      : ExprNodeBase(Dtype(value->dtype(), lanes), kBroadcast),
+      : ExprNodeBase(Dtype(value->dtype(), lanes)),
         value_(value),
         lanes_(lanes) {}
 
