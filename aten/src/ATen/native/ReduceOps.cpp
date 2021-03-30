@@ -79,7 +79,7 @@ Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
   return result;
 }
 
-Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _cumsum_out_cpu(const Tensor& self, int64_t dim, Tensor& result) {
   cumsum_stub(self.device().type(), result, self, dim);
   return result;
 }
@@ -128,7 +128,7 @@ Tensor _cumprod_cpu(const Tensor& self, int64_t dim) {
   return result;
 }
 
-Tensor& _cumprod_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+Tensor& _cumprod_out_cpu(const Tensor& self, int64_t dim, Tensor& result) {
   cumprod_stub(self.device().type(), result, self, dim);
   return result;
 }
@@ -813,7 +813,7 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
     auto maxes = at::amax(self, dims, true);
     auto maxes_squeezed = (keepdim ? maxes : squeeze_multiple(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
-    at::sum_out(result, at::exp(self - maxes), dims, keepdim);
+    at::sum_out(result, (self - maxes).exp_(), dims, keepdim);
     result.log_().add_(maxes_squeezed);
   } else {
     at::sum_out(result, at::exp(self), dims, keepdim);
