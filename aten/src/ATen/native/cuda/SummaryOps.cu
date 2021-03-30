@@ -419,7 +419,7 @@ Tensor _histc_cuda(
   });
 }
 
-Tensor& _histc_out_cuda(Tensor& result, const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max) {
+Tensor& _histc_out_cuda(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max, Tensor& result) {
   auto ret = _histc_cuda(self, bins, min, max);
   result.resize_as_(ret);
   result.copy_(ret);
