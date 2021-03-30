@@ -409,7 +409,8 @@ Tensor& avg_pool2d_backward_out_cuda_template(
     kH, kW, dH, dW, padH, padW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth, memory_format);
+    outputHeight, outputWidth,
+    count_include_pad, memory_format);
 
   gradInput.resize_as_(input);
   const int32_t count = safe_downcast<int32_t, int64_t>(input.numel());
