@@ -7,6 +7,8 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_utils import set_default_dtype
+from torch.utils import mkldnn as mkldnn_utils
+
 
 from torch.jit._recursive import wrap_cpp_module
 from typing import Any
@@ -1608,6 +1610,14 @@ class TestFrozenOptimizations(JitTestCase):
         self.assertEqual(output_s, output_f)
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_freeze_mkdlnn(self):
+        conv = torch.nn.Conv2d(3, 32, kernel_size=3, stride=2).eval().float()
+        convmkl = mkldnn_utils.to_mkldnn(conv)
+        out = torch.jit.freeze(torch.jit.script(convmkl.eval()))
+        inp = torch.rand([4, 3, 4, 4]).float()
+        self.assertEqual(out(inp.to_mkldnn()).to_dense(), conv(inp))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_conv_to_mkldnn(self):
         with set_default_dtype(torch.float):
             for module, trace in product([nn.Conv2d, nn.Conv3d], [False, True]):
@@ -1795,7 +1805,7 @@ class TestFrozenOptimizations(JitTestCase):
 
             mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
 
-            inps = [5, 3, 10, 10]
+            inps = [5, 3, 4, 4]
             if conv == nn.Conv3d:
                 inps.append(inps[-1])
             inp = torch.rand(inps).cuda()

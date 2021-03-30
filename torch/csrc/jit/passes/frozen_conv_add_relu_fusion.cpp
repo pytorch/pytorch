@@ -21,6 +21,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 #if AT_CUDNN_ENABLED()
   SubgraphRewriter rewriter;
 
+  // CUDNN does not support conv1d
   std::array<std::string, 2> conv_operators = {"conv2d", "conv3d"};
 
   auto conv_relu_rstring = CodeTemplate(R"(
