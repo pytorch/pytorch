@@ -4730,16 +4730,19 @@ class TestTorchDeviceType(TestCase):
         # Less numbers to avoid overflow with low_precision
         # Grainsize is 3000 for the for_loop to be parallized on CPU
         sizes = ((100,)) if low_precision else ((200,), (3002,))
+        # Bfloat16 has a particularly bad performance here
+        # This operation is nondeterministic on GPU, so we are generous with the rtol
+        rtol, atol = 1e-1, 1e-2 if low_precision else 1e-3, 1e-4
 
         make_arg = partial(make_tensor, low=-2, high=3, device=device, dtype=dtype)
         # Dump everything into the 0-th position
         make_idx = partial(torch.zeros, device=device, dtype=torch.int64)
+        args = ((make_idx(size), make_arg(size)) for size in sizes)
 
-        for idx, source in ((make_idx(size), make_arg(size)) for size in sizes):
+        for idx, source in args:
             orig = make_arg((1,))
             out = orig.put(idx, source, accumulate=True)
-            # This is nondeterministic on GPU, so we are generous with the rtol
-            self.assertEqual(out, orig + source.sum(), rtol=1e-2, atol=1e-3)
+            self.assertEqual(out, orig + source.sum(), rtol=rtol, atol=atol)
 
     def test_take_empty(self, device):
         for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
