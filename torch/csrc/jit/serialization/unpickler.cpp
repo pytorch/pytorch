@@ -430,8 +430,7 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.type() == DeviceType::CUDA ||
-          device.type() == DeviceType::XPU) {
+      if (device.is_cuda() || device.is_xpu()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
@@ -462,9 +461,9 @@ void Unpickler::readGlobal(
         auto setitem_data = stack_.back();
         stack_.pop_back();
         TORCH_INTERNAL_ASSERT(
-            tensor_table_,
+            !tensor_table_.empty(),
             "Pickler tried to write a tensor but had no tensor table to write to");
-        stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
+        stack_.emplace_back(tensor_table_.at(setitem_data.toInt()));
       });
     } else if (class_name == "IntList") {
       globals_.emplace_back([this] {
@@ -480,10 +479,10 @@ void Unpickler::readGlobal(
         auto data = stack_.back().toTuple()->elements().at(0);
         stack_.pop_back();
         TORCH_CHECK(
-            tensor_table_,
+            !tensor_table_.empty(),
             "Found a tensor table reference but Unpickler"
             " has no tensor table\n");
-        stack_.emplace_back(tensor_table_->at(data.toInt()));
+        stack_.emplace_back(tensor_table_.at(data.toInt()));
       });
     } else if (class_name == "restore_type_tag") {
       globals_.emplace_back([this] {
@@ -788,7 +787,7 @@ void Unpickler::readList(IValue list_ivalue) {
   size_t start = marks_.back();
   marks_.pop_back();
   auto num_elements = stack_.size() - start;
-  auto elements = at::ArrayRef<IValue>(stack_).slice(start);
+  auto elements = c10::ArrayRef<IValue>(stack_).slice(start);
   if (list_ivalue.isIntList()) {
     auto list = std::move(list_ivalue).toIntList();
     list.reserve(num_elements);

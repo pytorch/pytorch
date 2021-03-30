@@ -14,6 +14,8 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
 using Tensor = at::Tensor;
 
 bool nonConstantParameters(Node* n) {
@@ -356,6 +358,8 @@ void FoldFrozenConvMulOrDiv(Block* b) {
     }
   }
 }
+
+} // namespace
 
 void FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
   FoldFrozenConvBatchnorm(graph->block());

@@ -14,6 +14,7 @@ IMAGE_NAMES = [
     "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7",
     "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
     "pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
+    "pytorch-linux-xenial-cuda11.2-cudnn8-py3-gcc7",
     "pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
     "pytorch-linux-xenial-py3-clang5-asan",
     "pytorch-linux-xenial-py3-clang7-onnx",

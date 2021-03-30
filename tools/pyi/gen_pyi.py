@@ -415,7 +415,6 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
         'clamp_': ["def clamp_(self, min: _float=-inf, max: _float=inf) -> Tensor: ..."],
-        '__get__': ["def __get__(self, instance, owner=None) -> Tensor: ..."],
         '__getitem__': ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
         '__setitem__': ["def __setitem__(self, {}, val: Union[Tensor, Number])"
                         " -> None: ...".format(INDICES)],

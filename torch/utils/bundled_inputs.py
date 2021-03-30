@@ -157,7 +157,6 @@ def augment_many_model_functions_with_bundled_inputs(
             # Back-channel return this expr for debugging.
             if _receive_inflate_expr is not None:
                 _receive_inflate_expr.append(expr)
-            model._bundled_inputs_deflated = deflated_inputs
             setattr(model, "_bundled_inputs_deflated_{name}".format(name=function_name), deflated_inputs)
             definition = textwrap.dedent("""
                 def _generate_bundled_inputs_for_{name}(self):
