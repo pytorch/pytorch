@@ -24,6 +24,7 @@ __global__ void randperm_handle_duplicate_keys_kernel(T *keys, scalar_t *data, T
 
   // do random permutation inside each island.
   data += tid;
+  return;
   auto seeds = at::cuda::philox::unpack(philox_args);
   curandStatePhilox4_32_10_t state;
   curand_init(std::get<0>(seeds), tid, std::get<1>(seeds), &state);
@@ -48,11 +49,9 @@ void randperm_handle_duplicate_keys(T *keys, scalar_t *data, int bits, int64_t n
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(counter_offset);
   }
-#if 0
   T mask = static_cast<T>((1UL << bits) - 1);
   randperm_handle_duplicate_keys_kernel<<<(n + 511) / 512, 512, 0, at::cuda::getCurrentCUDAStream()>>>(
     keys, data, mask, n, rng_engine_inputs);
-#endif
 }
 
 }
