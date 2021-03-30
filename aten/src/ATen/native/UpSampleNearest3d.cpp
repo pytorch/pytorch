@@ -20,7 +20,7 @@ TORCH_META_FUNC(upsample_nearest3d) (
       "Non-empty 5D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options());
+  set_output(full_output_size, input.options().memory_format(input.suggest_memory_format()));
 }
 
 TORCH_META_FUNC(upsample_nearest3d_backward) (
@@ -91,7 +91,7 @@ Tensor upsample_nearest3d_cpu(
   return at::upsample_nearest3d(input, osize, scale_d, scale_h, scale_w);
 }
 
-// when structured kernels can handle QuantizedCPU, update these overloads to be DefaultBackend
+// when structured kernels can handle QuantizedCPU, update these overloads to be CompositeExplicitAutograd
 Tensor upsample_nearest3d_backward_cpu(
     const Tensor& grad_output,
     c10::optional<IntArrayRef> output_size,

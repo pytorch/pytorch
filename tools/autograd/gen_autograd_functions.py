@@ -4,10 +4,9 @@
 #  Functions.h/cpp: subclasses of autograd::Node
 #  python_functions.h/cpp: Python bindings for the above classes
 #
-import re
-from .gen_autograd import VIEW_FUNCTIONS
+from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
-from typing import List, Sequence, Tuple, Optional
+from typing import List, Sequence, Tuple
 
 from tools.codegen.api.autograd import *
 from tools.codegen.api.types import *
@@ -144,13 +143,13 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 # Getter body
 GETTER_BODY_SAVEDVAR = """\
-return THPVariable_Wrap(prop.unpack());
+return THPVariable_Wrap(prop.unpack(self->cdata));
 """
 
 GETTER_BODY_VEC_SAVEDVAR = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
 for (int i = 0; i < prop.size(); i++) {
-  PyTuple_SetItem(tup, (Py_ssize_t) i, THPVariable_Wrap(prop[i].unpack()));
+  PyTuple_SetItem(tup, (Py_ssize_t) i, THPVariable_Wrap(prop[i].unpack(self->cdata)));
 }
 return tup;
 """
@@ -448,18 +447,3 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         all_getter_definitions=all_getter_definitions,
         all_getsetdef_structs=all_getsetdef_structs
     )
-
-def uses_ident(info: Optional[DifferentiabilityInfo], ident: str) -> bool:
-    if info is None:
-        return False
-    for derivative in info.derivatives:
-        formula = derivative.formula
-        if re.search(IDENT_REGEX.format(ident), formula):
-            return True
-    return False
-
-def uses_retain_variables(info: Optional[DifferentiabilityInfo]) -> bool:
-    return uses_ident(info, 'retain_variables')
-
-def uses_single_grad(info: Optional[DifferentiabilityInfo]) -> bool:
-    return uses_ident(info, 'grad')

@@ -5,9 +5,9 @@ import torch
 
 
 class InterpolateBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, input_size, output_size, channels_last=False, interp_mode='linear'):
+    def init(self, input_size, output_size, channels_last=False, mode='linear', dtype=torch.float):
 
-        input_image = torch.randint(0, 256, size=input_size, dtype=torch.float, device='cpu',
+        input_image = torch.randint(0, 256, size=input_size, dtype=dtype, device='cpu',
                                     requires_grad=self.auto_set())
         if channels_last:
             if input_image.ndim == 4:
@@ -19,19 +19,15 @@ class InterpolateBenchmark(op_bench.TorchBenchmarkBase):
                     f"Can not set channels_last to the input of {input_image.ndim} dims"
                 )
 
-        ndim_to_mode = {
-            3: 'linear',
-            4: 'bilinear',
-            5: 'trilinear',
-        }
 
-        mode = interp_mode
-        align_corners = False
+        align_corners = None if mode == "nearest" else False
 
-        if "nearest" == mode:
-            align_corners = None
-        if "linear" == mode:
-            mode = ndim_to_mode[input_image.ndim]
+        if mode == "linear":
+            mode = {
+                3: 'linear',
+                4: 'bilinear',
+                5: 'trilinear',
+            }[input_image.ndim]
 
         self.inputs = {
             "input_image": input_image,
@@ -56,7 +52,22 @@ config_short = op_bench.config_list(
     ],
     cross_product_configs={
         'channels_last': [True, False],
-        'interp_mode': ["nearest", "linear", "bicubic"],
+        'mode': ["nearest", "linear", "bicubic"],
+    },
+    tags=["short"],
+)
+
+config_short += op_bench.config_list(
+    attr_names=["input_size", "output_size"],
+    attrs=[
+        [(1, 3, 60, 40), (24, 24)],
+        [(1, 3, 600, 400), (240, 240)],
+        [(1, 3, 320, 320), (256, 256)],
+    ],
+    cross_product_configs={
+        'channels_last': [True, False],
+        'mode': ["nearest", ],
+        'dtype': [torch.uint8, ],
     },
     tags=["short"],
 )
@@ -69,12 +80,13 @@ config_long = op_bench.config_list(
         [(1, 3, 500, 500), (256, 256)],
         [(1, 3, 500, 500), (800, 800)],
 
+        # vectorization test-case
         [(2, 128, 64, 46), (128, 128)],
         [(2, 128, 64, 46), (32, 24)],
     ],
     cross_product_configs={
         'channels_last': [True, False],
-        'interp_mode': ["nearest", "linear", "bicubic"],
+        'mode': ["nearest", "linear", "bicubic"],
     },
     tags=["long"],
 )
@@ -88,21 +100,25 @@ config_3d = op_bench.config_list(
         [(4, 512, 320), (512,)],
     ],
     cross_product_configs={
-        'interp_mode': ["nearest", "linear"],
+        'mode': ["nearest", "linear"],
     },
     tags=["long"],
 )
 
 
-config_5d = op_bench.config_list(    
+config_5d = op_bench.config_list(
     attr_names=["input_size", "output_size"],
     attrs=[
         [(1, 3, 16, 320, 320), (8, 256, 256)],
         [(1, 3, 16, 320, 320), (32, 512, 512)],
+
+        # vectorization test-case
+        [(1, 16, 32, 64, 64), (16, 32, 32)],
+        [(1, 16, 32, 64, 64), (64, 128, 128)],
     ],
     cross_product_configs={
         'channels_last': [True, False],
-        'interp_mode': ["nearest", "linear"],
+        'mode': ["nearest", "linear"],
     },
     tags=["long"],
 )

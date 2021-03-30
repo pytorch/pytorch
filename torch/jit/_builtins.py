@@ -1,4 +1,5 @@
 import math
+import cmath
 import warnings
 
 import torch
@@ -12,7 +13,7 @@ from typing import Dict, Optional
 
 _builtin_table: Optional[Dict[int, str]] = None
 
-_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg)  # type: ignore
+_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg, torch._C._special)  # type: ignore
 
 _builtin_ops = [
     # Pairs of (function, op_name)
@@ -55,17 +56,30 @@ _builtin_ops = [
     (math.asinh, "aten::asinh"),
     (math.atanh, "aten::atanh"),
     (math.acosh, "aten::acosh"),
-    (math.sinh, "aten::sinh"),
-    (math.cosh, "aten::cosh"),
-    (math.tanh, "aten::tanh"),
     (math.fmod, "aten::fmod"),
     (math.modf, "aten::modf"),
     (math.factorial, "aten::factorial"),
     (math.frexp, "aten::frexp"),
-    (math.isnan, "aten::isnan"),
     (math.isinf, "aten::isinf"),
     (math.degrees, "aten::degrees"),
     (math.radians, "aten::radians"),
+    (cmath.phase, "aten::angle"),
+    (cmath.log, "aten::log"),
+    (cmath.log10, "aten::log10"),
+    (cmath.sqrt, "aten::sqrt"),
+    (cmath.exp, "aten::exp"),
+    (cmath.sin, "aten::sin"),
+    (cmath.tan, "aten::tan"),
+    (cmath.cos, "aten::cos"),
+    (cmath.asin, "aten::asin"),
+    (cmath.acos, "aten::acos"),
+    (cmath.atan, "aten::atan"),
+    (cmath.sinh, "aten::sinh"),
+    (cmath.cosh, "aten::cosh"),
+    (cmath.tanh, "aten::tanh"),
+    (cmath.asinh, "aten::asinh"),
+    (cmath.acosh, "aten::acosh"),
+    (cmath.atanh, "aten::atanh"),
     (math.ldexp, "aten::ldexp"),
     (torch._assert, "aten::_assert"),
     (torch.autograd.grad, "aten::grad"),
@@ -87,6 +101,7 @@ _builtin_ops = [
     (torch._VF.unique_consecutive, "aten::unique_consecutive"),  # type: ignore
     (torch._VF.nuclear_norm, "aten::nuclear_norm"),  # type: ignore
     (torch._VF.frobenius_norm, "aten::frobenius_norm"),  # type: ignore
+    (torch._VF.tensordot, "aten::tensordot"),  # type: ignore
 ]
 
 # ops in torch.functional are bound to torch
@@ -98,7 +113,7 @@ def _gen_torch_functional_registered_ops():
     # but we are currently only able to compile some of the functions. additionally,
     # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
-    ops = ["stft", "istft", "lu", "lu_unpack", "cdist", "norm", "unique", "unique_consecutive"]
+    ops = ["stft", "istft", "lu", "lu_unpack", "cdist", "norm", "unique", "unique_consecutive", "tensordot"]
     return set(getattr(torch.functional, name) for name in ops)
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()

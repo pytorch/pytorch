@@ -572,6 +572,126 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 }
 #endif
 
+template <>
+void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasStrsm(
+      handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb));
+}
+
+template <>
+void trsm<double>(CUDABLAS_TRSM_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDtrsm(
+      handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb));
+}
+
+template <>
+void trsm<c10::complex<float>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCtrsm(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuComplex*>(alpha),
+      reinterpret_cast<const cuComplex*>(A),
+      lda,
+      reinterpret_cast<cuComplex*>(B),
+      ldb));
+}
+
+template <>
+void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZtrsm(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuDoubleComplex*>(alpha),
+      reinterpret_cast<const cuDoubleComplex*>(A),
+      lda,
+      reinterpret_cast<cuDoubleComplex*>(B),
+      ldb));
+}
+
+template <>
+void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float)) {
+  TORCH_CUDABLAS_CHECK(cublasStrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      alpha,
+      A,
+      lda,
+      B,
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double)) {
+  TORCH_CUDABLAS_CHECK(cublasDtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      alpha,
+      A,
+      lda,
+      B,
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<c10::complex<float>>(
+    CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDABLAS_CHECK(cublasCtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuComplex*>(alpha),
+      reinterpret_cast<cuComplex**>(A),
+      lda,
+      reinterpret_cast<cuComplex**>(B),
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<c10::complex<double>>(
+    CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDABLAS_CHECK(cublasZtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const cuDoubleComplex*>(alpha),
+      reinterpret_cast<cuDoubleComplex**>(A),
+      lda,
+      reinterpret_cast<cuDoubleComplex**>(B),
+      ldb,
+      batchCount));
+}
+
 /* LEVEL 2 BLAS FUNCTIONS */
 
 #define GEMV_CHECK_ARGVALUES(Dtype)           \
