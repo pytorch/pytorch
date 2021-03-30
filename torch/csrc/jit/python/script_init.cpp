@@ -973,6 +973,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& m,
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap(),
+             uint64_t _version = caffe2::serialize::kProducedBytecodeVersion,
              bool _save_mobile_debug_info = false) {
             m._save_for_mobile(filename, _extra_files, _save_mobile_debug_info);
           },
@@ -983,6 +984,7 @@ void initJitScriptBindings(PyObject* module) {
           "_save_to_buffer_for_mobile",
           [](Module& m,
              const ExtraFilesMap& _extra_files = ExtraFilesMap(),
+             uint64_t _version = caffe2::serialize::kProducedBytecodeVersion,
              bool _save_mobile_debug_info = false) {
             std::ostringstream buf;
             m._save_for_mobile(buf, _extra_files, _save_mobile_debug_info);
