@@ -279,10 +279,8 @@ bool TensorImpl::is_contiguous_customized(at::MemoryFormat memoryFormat) const {
         return is_contiguous_;
       }
       throw_is_contiguous_in_other_formats_not_allowed_error();
-    case IsContiguousPolicy::ForceContiguousInContiguousMemoryFormatFalseOtherwise:
+    case IsContiguousPolicy::ForceContiguous:
       return memoryFormat == MemoryFormat::Contiguous;
-    case IsContiguousPolicy::ForceContiguousInAllMemoryFormats:
-      return true;
     case IsContiguousPolicy::DefaultBehavior:
       TORCH_INTERNAL_ASSERT(
           false, "is_contiguous_customized somehow called with default behavior policy!");
@@ -296,6 +294,12 @@ void TensorImpl::throw_is_contiguous_not_allowed_error() const {
 }
 
 void TensorImpl::throw_is_contiguous_in_other_formats_not_allowed_error() const {
+  // HACK: Preserve vmap error text for BatchedTensorImpl.
+  if (!strcmp(tensorimpl_type_name(), "BatchedTensorImpl")) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        "NYI: querying is_contiguous inside of vmap for memory_format other "
+        "than torch.contiguous_format");
+  }
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "Tensors of type ", tensorimpl_type_name(),
       " only allow is_contiguous() with torch.contiguous_format");

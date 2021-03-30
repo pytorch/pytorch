@@ -23,7 +23,8 @@ struct TORCH_API MetalTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             opaque_handle,
             sizes),
         strides_(strides.vec()) {
-    set_is_contiguous_policy(IsContiguousPolicy::ForceContiguousInAllMemoryFormats);
+    TensorImpl::set_is_contiguous_policy(
+        TensorImpl::IsContiguousPolicy::ForceContiguous);
   }
 
   IntArrayRef strides() const override {

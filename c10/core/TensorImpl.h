@@ -1735,9 +1735,10 @@ public:
     storage_access_should_throw_ = true;
   }
 
+protected:
   // Policy for adjusting the behavior of is_contiguous(). Allows
   // subclass customization while still being able to inline is_contiguous().
-  enum class IsContiguousPolicy : int8_t {
+  enum class IsContiguousPolicy : uint8_t {
     // Allow is_contiguous to work normally,.
     DefaultBehavior,
     // is_contiguous() is not allowed; throw an exception.
@@ -1747,9 +1748,7 @@ public:
     ThrowUnlessContiguousMemoryFormat,
     // is_contiguous() will return true if and only if passed
     // MemoryFormat::Contiguous.
-    ForceContiguousInContiguousMemoryFormatFalseOtherwise,
-    // is_contiguous() will always return true.
-    ForceContiguousInAllMemoryFormats,
+    ForceContiguous,
   };
 
   void set_is_contiguous_policy(IsContiguousPolicy p) {
@@ -1836,7 +1835,7 @@ protected:
   bool is_contiguous_ : 1;
 
   // Subclass customization policy for is_contiguous().
-  IsContiguousPolicy is_contiguous_policy_ : 3;
+  IsContiguousPolicy is_contiguous_policy_ : 2;
 
   // Tensor is a subclass that does not permit storage access.
   bool storage_access_should_throw_ = false;
