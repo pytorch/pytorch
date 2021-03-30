@@ -894,16 +894,17 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
 
 } // namespace
 
-Tensor& slow_conv_transpose3d_out_cuda(
-    Tensor& output,
-    const Tensor& input,
+Tensor& slow_conv_transpose3d_out_cuda(const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
-    IntArrayRef dilation) {
+    IntArrayRef dilation,
+    Tensor& output) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+
   Tensor finput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor fgrad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
