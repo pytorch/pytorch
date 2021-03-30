@@ -231,8 +231,8 @@ static void slow_conv2d_update_output_channels_last(
     int64_t output_height,
     int64_t output_width) {
   // Note: channels last memory format:
-  //   im2col: x {N*IH*IW, IC} => fx {N*OH*OW, KW*KW*IC}
-  //   gemm: y {N*OW*OW, OC} = fx {N*OH*OW, KW*KW*IC} * w.t {KH*KW*IC, OC}
+  //   im2col: x {N*IH*IW, IC} => fx {N*OH*OW, KH*KW*IC}
+  //   gemm: y {N*OW*OW, OC} = fx {N*OH*OW, KH*KW*IC} * w.t {KH*KW*IC, OC}
   // so basically we can fold batch_size into gemm, no need to separate per batch dimension.
   //
   auto output2d = view_channels_last_2d(output);
