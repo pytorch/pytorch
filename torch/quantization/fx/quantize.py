@@ -326,7 +326,7 @@ def insert_observer_for_input_arg_of_observed_node(
                     env, observed_graph, load_arg, observed_node_names_set, quants)
 
 def insert_observers_for_model(
-        model: torch.nn.Module,
+        model: GraphModule,
         modules: Dict[str, torch.nn.Module],
         matches: Dict[str, MatchResult],
         quants: Dict[str, List[Tuple[DefaultQuantizeHandler, Callable]]],
