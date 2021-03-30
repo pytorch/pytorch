@@ -10,6 +10,8 @@
 
 namespace at { namespace native {
 
+enum class LapackLstsqDriverType : int64_t { Gels, Gelsd, Gelsy, Gelss};
+
 #ifdef USE_LAPACK
 // Define per-batch functions to be used in the implementation of batched
 // linear algebra operations
@@ -50,8 +52,6 @@ void lapackGelss(int m, int n, int nrhs,
     value_t *s, value_t rcond, int *rank,
     scalar_t *work, int lwork,
     value_t *rwork, int *info);
-
-enum class LapackLstsqDriverType : int64_t { Gels, Gelsd, Gelsy, Gelss};
 
 template <LapackLstsqDriverType, class scalar_t, class value_t = scalar_t>
 struct lapackLstsq_impl;
