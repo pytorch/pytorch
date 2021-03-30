@@ -233,7 +233,8 @@ class UnionFind:
 
 def prepare_for_inference(
     model: torch.nn.Module,
-    use_mkl_heuristic: Callable[[MklSubgraph], bool] = use_mkl_length
+    use_mkl_heuristic: Callable[[MklSubgraph], bool] = use_mkl_length,
+    tracer: fx.Tracer = fx.Tracer
 ) -> torch.nn.Module:
     """
     Performs a set of optimization passes to optimize a model for the
@@ -250,8 +251,10 @@ def prepare_for_inference(
     """
     model = fuse(model)
     model = remove_dropout(model)
-    fx_model = fx.symbolic_trace(copy.deepcopy(model))
-    modules: Dict[str, nn.Module] = dict(fx_model.named_modules())
+    cur_tracer = tracer()
+    fx_graph = cur_tracer.trace(copy.deepcopy(model))
+    fx_model = fx.GraphModule(cur_tracer.root, fx_graph)
+    modules: Dict[str, nn.Module] = dict(model.named_modules())
 
     class MklSupport(Enum):
         NO = 1
@@ -262,7 +265,7 @@ def prepare_for_inference(
     # If the op is in `mkldnn_supported` then we always treat it as a MKLDNN node.
     # However, if it's in `mkldnn_supported_unknown`, then we only treat it as
     # a MKLDNN node if its inputs are MKLDNN nodes.
-    for node in list(fx_model.graph.nodes):
+    for node in list(fx_graph.nodes):
         supports_mkldnn = MklSupport.NO
         if node.op == 'call_module':
             cur_module = modules[node.target]
@@ -282,35 +285,34 @@ def prepare_for_inference(
             if supports_mkldnn == MklSupport.UNKNOWN:
                 if not any([arg.target == 'to_dense' for arg in node.args]):
                     continue
-            with fx_model.graph.inserting_before(node):
-                mkldnn_args = fx.map_arg(node.args, lambda n: fx_model.graph.call_method('to_mkldnn', (n, )))
+            with fx_graph.inserting_before(node):
+                mkldnn_args = fx.map_arg(node.args, lambda n: fx_graph.call_method('to_mkldnn', (n, )))
 
             node.args = cast(Tuple[fx.node.Argument], mkldnn_args)
 
-            with fx_model.graph.inserting_after(node):
-                dense_x = fx_model.graph.create_node('call_method', 'to_dense', (node,))
+            with fx_graph.inserting_after(node):
+                dense_x = fx_graph.create_node('call_method', 'to_dense', (node,))
                 node.replace_all_uses_with(dense_x)
                 dense_x.args = (node,)
 
     # Does pre-conversion of all modules into MKLDNN (when possible)
-    old_modules = modules_to_mkldnn(list(fx_model.graph.nodes), modules)
-    fx_model.graph.old_modules = old_modules  # type: ignore
+    old_modules = modules_to_mkldnn(list(fx_graph.nodes), modules)
+    fx_graph.old_modules = old_modules  # type: ignore
 
     # optimizes all a -> to_dense -> to_mkldnn -> b patterns into a -> b
-    for node in fx_model.graph.nodes:
+    for node in fx_graph.nodes:
         if node.op == 'call_method' and node.target == 'to_dense':
             prv_node = node.args[0]
             users = list(node.users)
             for user in users:
                 if user.op == 'call_method' and user.target == 'to_mkldnn':
                     user.replace_all_uses_with(prv_node)
-                    fx_model.graph.erase_node(user)
+                    fx_graph.erase_node(user)
             if len(node.users) == 0:
-                fx_model.graph.erase_node(node)
+                fx_graph.erase_node(node)
 
-    fx_model.recompile()
 
-    num_nodes = len(fx_model.graph.nodes)
+    num_nodes = len(fx_graph.nodes)
     uf = UnionFind(num_nodes)
 
     def get_color(n):
@@ -332,7 +334,7 @@ def prepare_for_inference(
     # the case that a node has multiple inputs coming from different start
     # nodes (i.e. colors), we need to join these 2 colors into 1. That's done
     # using a Disjoint Set Union.
-    for cur_idx, node in enumerate(fx_model.graph.nodes):
+    for cur_idx, node in enumerate(fx_graph.nodes):
         if node.op == 'call_method' and node.target == 'to_mkldnn':
             node.start_color = cur_idx
             uf.make_set(cur_idx)
@@ -351,8 +353,8 @@ def prepare_for_inference(
                 uf.join(cur_colors[0], other_color)
 
 
-    mkldnn_graphs: Dict[int, MklSubgraph] = defaultdict(lambda: MklSubgraph(fx_model.graph))
-    for node in fx_model.graph.nodes:
+    mkldnn_graphs: Dict[int, MklSubgraph] = defaultdict(lambda: MklSubgraph(fx_graph))
+    for node in fx_graph.nodes:
         if hasattr(node, 'color'):
             mkldnn_graphs[uf.find(node.color)].nodes.append(node)
         if hasattr(node, 'start_color'):
@@ -368,15 +370,15 @@ def prepare_for_inference(
             for node in graph.start_nodes + graph.end_nodes:
                 prv = node.args[0]
                 node.replace_all_uses_with(prv)
-                fx_model.graph.erase_node(node)
-            reset_modules(graph.nodes, modules, old_modules)
+                fx_graph.erase_node(node)
+            reset_modules(fx_graph.nodes, modules, old_modules)
 
     mkldnn_conversions = 0
-    for node in fx_model.graph.nodes:
+    for node in fx_graph.nodes:
         if node.target == 'to_mkldnn' or node.target == 'to_dense':
             mkldnn_conversions += 1
 
     logging.info(f"mkldnn conversions: {mkldnn_conversions}")
-    fx_model.graph.lint()
-    result = fx.GraphModule(fx_model, fx_model.graph)
+    fx_graph.lint()
+    result = fx.GraphModule(model, fx_graph)
     return result
