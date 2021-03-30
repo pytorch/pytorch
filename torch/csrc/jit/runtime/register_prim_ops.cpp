@@ -775,7 +775,7 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA("aten::dequantize.any(Any tensors) -> Any"),
          [](Stack* stack) { dequantize(*stack); },
          aliasAnalysisFromSchema()),
-     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
+     DEFINE_UNARY_OP_WITH_COMPLEX(aten::log, std::log(a), float, float),
      DEFINE_STRING_OP(aten::add, a + b, str),
      DEFINE_COMPARISON_OP(aten::eq, a == b),
      DEFINE_COMPARISON_OP(aten::ne, a != b),
@@ -792,8 +792,8 @@ RegisterOperators reg(
      DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
      DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
      DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
-     DEFINE_UNARY_OP(aten::neg, -a, int, float),
-     DEFINE_UNARY_OP(aten::exp, std::exp(a), float, float),
+     DEFINE_UNARY_OP_WITH_COMPLEX(aten::neg, -a, int, float),
+     DEFINE_UNARY_OP_WITH_COMPLEX(aten::exp, std::exp(a), float, float),
      // Pass in two ops for handling int and float separately as % in C++ only
      // works for int The modulus calculation is different between C++ and
      // Python (on negative), we preserve the python behavior as it's more
