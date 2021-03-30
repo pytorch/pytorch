@@ -25,21 +25,38 @@ void main() {
   if (all(lessThan(opos00, uBlock.size.xyz))) {
     const ivec2 ipos00 = 4*pos.xy;
 
-    vec4 dg[16];
-    for (int i = 0; i < 16; ++i) {
-      dg[i] = vec4(0);
-    }
+    vec4 dg[16] = {
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0),
+      vec4(0,0,0,0)
+    };
 
-    for (int z4 = 0; z4 < uBlock.size.w; ++z4) {
-      for (int y = 0; y < 4; ++y) {
-        for (int x = 0; x < 4; ++x) {
+    for (int y = 0; y < 4; ++y) {
+      for (int x = 0; x < 4; ++x) {
+        const ivec2 iposxy = ipos00.xy + ivec2(x,y);
+        for (int z4 = 0; z4 < uBlock.size.w; ++z4) {
           const ivec2 wpos00 = ivec2(16*z4 + 4*x, 4*pos.z);
-          const vec4 intex = texelFetch(uInput, ivec3(ipos00.x+x, ipos00.y+y, z4), 0);
+          const int wposy = wpos00.y+y;
+          const ivec4 wposx = wpos00.x + ivec4(0,1,2,3);
+          const vec4 intex = texelFetch(uInput, ivec3(iposxy, z4), 0);
           dg[4*y+x] += vec4(
-            dot(intex, texelFetch(uKernel, ivec3(wpos00.x  , wpos00.y+y, 0), 0)),
-            dot(intex, texelFetch(uKernel, ivec3(wpos00.x+1, wpos00.y+y, 0), 0)),
-            dot(intex, texelFetch(uKernel, ivec3(wpos00.x+2, wpos00.y+y, 0), 0)),
-            dot(intex, texelFetch(uKernel, ivec3(wpos00.x+3, wpos00.y+y, 0), 0)));
+            dot(intex, texelFetch(uKernel, ivec3(wposx.x, wposy, 0), 0)),
+            dot(intex, texelFetch(uKernel, ivec3(wposx.y, wposy, 0), 0)),
+            dot(intex, texelFetch(uKernel, ivec3(wposx.z, wposy, 0), 0)),
+            dot(intex, texelFetch(uKernel, ivec3(wposx.w, wposy, 0), 0)));
         }
       }
     }
@@ -53,12 +70,13 @@ void main() {
     const vec4 o12 = dg[6] - dg[10] - dg[14];
     const vec4 o13 = dg[7] - dg[11] - dg[15];
 
-    imageStore(uOutput, ivec3(opos00.x, opos00.y, opos00.z), o00 + o01 + o02);
+    const vec4 b = uBias.data[pos.z];
+    imageStore(uOutput, ivec3(opos00.x, opos00.y, opos00.z), clamp(b + o00 + o01 + o02, uBlock.clamp.x, uBlock.clamp.y));
     if (opos00.x+1 < uBlock.size.x)
-      imageStore(uOutput, ivec3(opos00.x+1, opos00.y, opos00.z), o01 - o02 - o03);
+      imageStore(uOutput, ivec3(opos00.x+1, opos00.y, opos00.z), clamp(b + o01 - o02 - o03, uBlock.clamp.x, uBlock.clamp.y));
     if (opos00.y+1 < uBlock.size.y)
-      imageStore(uOutput, ivec3(opos00.x, opos00.y+1, opos00.z), o10 + o11 + o12);
+      imageStore(uOutput, ivec3(opos00.x, opos00.y+1, opos00.z), clamp(b + o10 + o11 + o12, uBlock.clamp.x, uBlock.clamp.y));
     if (opos00.x+1 < uBlock.size.x && opos00.y+1 < uBlock.size.y)
-      imageStore(uOutput, ivec3(opos00.x+1, opos00.y+1, opos00.z), o11 - o12 - o13);
+      imageStore(uOutput, ivec3(opos00.x+1, opos00.y+1, opos00.z), clamp(b + o11 - o12 - o13, uBlock.clamp.x, uBlock.clamp.y));
   }
 }

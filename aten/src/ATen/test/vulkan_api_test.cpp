@@ -630,7 +630,7 @@ TEST(VulkanAPITest, conv2d_winograd) {
         height,
       };
     }
-  } input {1, 16, 8, 8};
+  } input {1, 3, 177, 232};
 
   constexpr struct {
     uint32_t output_channels;
@@ -646,14 +646,11 @@ TEST(VulkanAPITest, conv2d_winograd) {
         height,
       };
     }
-  } weights {6, input.channels, 3, 3};
+  } weights {13, input.channels, 3, 3};
 
-  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
-  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
-  //const auto input_cpu = at::arange(16*1*3, at::device(at::kCPU).dtype(at::kFloat)).reshape(input.size());
-  //const auto weights_cpu = at::arange(9*1*3, at::device(at::kCPU).dtype(at::kFloat)).reshape(weights.size());
-  //const auto bias_cpu = at::randn({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_cpu = at::zeros({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_cpu = at::rand(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::rand(weights.size(), at::device(at::kCPU).dtype(at::kFloat))*2;
+  const auto bias_cpu = at::rand({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
   const auto output_cpu = at::conv2d(
       input_cpu,
@@ -677,8 +674,6 @@ TEST(VulkanAPITest, conv2d_winograd) {
   if (!check) {
     showRtol(output_cpu, output_vulkan);
   }
-  std::cout << output_cpu << std::endl;
-  std::cout << output_vulkan << std::endl;
 
   ASSERT_TRUE(check);
 }

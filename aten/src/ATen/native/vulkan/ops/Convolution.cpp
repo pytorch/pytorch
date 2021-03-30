@@ -46,7 +46,6 @@ inline bool is_winograd_n_3(
          (3 == filter[Layout::Filter::width]) &&
          all_lessthan(stride, 2) &&
          all_lessthan(dilation, 2);
-  //return false;
 }
 
 Conv2dMethod determine_method(
@@ -881,25 +880,26 @@ void conv2d_winograd_2_3(
     const float output_min,
     const float output_max) {
   // Winograd(2x2, 3x3) calculates 2x2 tile of output for every subprogram
-  const int64_t out_w_units = div_up(v_output.sizes()[Layout::Activation4D::width], INT64_C(2));
   const int64_t out_h_units = div_up(v_output.sizes()[Layout::Activation4D::height], INT64_C(2));
+  const int64_t out_w_units = div_up(v_output.sizes()[Layout::Activation4D::width], INT64_C(2));
 
   bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image());
   TORCH_CHECK(valid, "Not Implemented!")
+
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
 
   vTensor v_input_winograd{
     context,
     {
       v_input.sizes()[Layout::Activation4D::batch],
       v_input.sizes()[Layout::Activation4D::channels],
-      out_w_units*4,
       out_h_units*4,
+      out_w_units*4,
     },
-    v_input.options(),
+    v_output.options(),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& trans_buffer = command_pool.stream();
   {
     const struct TransformBlock final {
       uvec3 extents;
@@ -920,7 +920,7 @@ void conv2d_winograd_2_3(
     };
 
     context->dispatch(
-        trans_buffer,
+        command_buffer,
         {
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -934,18 +934,15 @@ void conv2d_winograd_2_3(
         },
         context->gpu().adapter->local_work_group_size(),
         v_input_winograd.image(
-            trans_buffer,
+            command_buffer,
             vTensor::Stage::Compute,
             vTensor::Access::Write),
         v_input.image(
-            trans_buffer,
+            command_buffer,
             vTensor::Stage::Compute),
         context->resource().pool.uniform(transform_block).object);
 
   }
-  command_pool.submit(context->gpu().queue, trans_buffer);
-
-  api::Command::Buffer& conv_buffer = command_pool.stream();
   {
     const struct Block final {
       uvec3 extents;
@@ -959,8 +956,9 @@ void conv2d_winograd_2_3(
         output_max,
       },
     };
+
     context->dispatch(
-        conv_buffer,
+        command_buffer,
         {
           VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
           VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -968,7 +966,7 @@ void conv2d_winograd_2_3(
           VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
-        VK_KERNEL(conv2d_winograd_2_3),
+        VK_KERNEL(conv2d_winograd_2_3_test),
         {
           out_w_units,
           out_h_units,
@@ -976,21 +974,21 @@ void conv2d_winograd_2_3(
         },
         context->gpu().adapter->local_work_group_size(),
         v_output.image(
-            conv_buffer,
+            command_buffer,
             vTensor::Stage::Compute,
             vTensor::Access::Write),
         v_input_winograd.image(
-            conv_buffer,
+            command_buffer,
             vTensor::Stage::Compute),
         v_weight.image(
-            conv_buffer,
+            command_buffer,
             vTensor::Stage::Compute),
         v_bias.buffer(
-            conv_buffer,
+            command_buffer,
             vTensor::Stage::Compute),
         context->resource().pool.uniform(block).object);
   }
-  command_pool.submit(context->gpu().queue, conv_buffer);
+  command_pool.submit(context->gpu().queue, command_buffer);
 }
 
 void conv2d_old(
