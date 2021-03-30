@@ -11,8 +11,9 @@ class TORCH_API LRScheduler {
 public:
 
   //This class needs to take a reference of an optimizer from outside such that it can
-  //modify its learning rates; due to this the lifetime of said optimizer must be maintained
-  LRScheduler(torch::optim::Optimizer& optimizer);
+  //modify its learning rates; due to this the lifetime of said optimizer must be
+  //maintained
+  LRScheduler(torch::optim::Optimizer& optimizer, const bool verbose = false);
 
   virtual ~LRScheduler() = default;
 
@@ -28,12 +29,18 @@ protected:
   //Get current learning rates from the optimizer
   std::vector<double> get_current_lrs() const;
 
-  unsigned step_count_;
+  unsigned get_step_count() const;
 
 private:
   void set_optimizer_lrs(const std::vector<double>& learning_rates);
 
+  void print_lrs(const std::vector<double>& learning_rates) const;
+
   torch::optim::Optimizer& optimizer_;
+
+  unsigned step_count_;
+
+  const bool verbose_;
 
 };
 } // namespace optim
