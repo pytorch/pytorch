@@ -1,4 +1,5 @@
 import torch
+import operator
 import unittest
 import sys
 from typing import Callable, Dict, Union, List
@@ -22,7 +23,8 @@ from torch.fx.experimental.partitioner_utils import (
 )
 from torch.fx.experimental.fuser import fuse
 from torch.fx.experimental import merge_matmul
-from torch.fx.experimental.normalize import NormalizeArgs
+from torch.fx.experimental.normalize import NormalizeArgs, NormalizeOperators
+from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 
 try:
@@ -107,7 +109,7 @@ class TestFXExperimental(JitTestCase):
         assert serialized_graph1["nodes"][0]["target"] == "a"
         assert serialized_graph1["nodes"][0]["op_code"] == "placeholder"
         assert serialized_graph1["nodes"][0]["name"] == "a"
-        assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_2"
+        assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_1"
         assert serialized_graph1["nodes"][6]["args"][0]["is_node"] is True
 
         # Test quantization info serialization.
@@ -215,10 +217,10 @@ class TestFXExperimental(JitTestCase):
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         partition = partitioner.partitions[0]
         assert partition.used_mem_bytes == 112
-        # Select add_3 node to remove
+        # Select add_2 node to remove
         selected_node = None
         for node in partition.nodes:
-            if node.name == 'add_3':
+            if node.name == 'add_2':
                 selected_node = node
         partition.remove_node(selected_node)
         assert(partition.used_mem_bytes == 80)
@@ -594,7 +596,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
@@ -622,7 +624,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
@@ -650,7 +652,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
@@ -682,7 +684,7 @@ terrible spacing
         traced = symbolic_trace_with_rewrite(m)
 
         # Make sure the graph is well-formed
-        traced.graph.lint(traced)
+        traced.graph.lint()
 
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
@@ -750,6 +752,47 @@ terrible spacing
         a = torch.rand(64, 3, 7, 7)
         module_with_submodules = split_module(traced, m, lambda node: 0)
         module_with_submodules(a)
+
+    def test_normalize_binary_operators(self):
+        ops_to_test = {
+            torch.add,
+            torch.mul,
+            torch.sub,
+            torch.div,
+            torch.floor_divide,
+            torch.remainder,
+            torch.eq,
+            torch.ne,
+            torch.lt,
+            torch.le,
+            torch.gt,
+            torch.ge,
+        }
+
+        # Test Tensor/Tensor callsite
+        for op in ops_to_test:
+            class WrapperMod(torch.nn.Module):
+                def forward(self, x, y):
+                    return op(x, y)
+
+            traced = symbolic_trace(WrapperMod())
+            normalized = NormalizeOperators(traced).transform()
+            x, y = torch.randn(3, 4), torch.randn(3, 4)
+            torch.testing.assert_allclose(traced(x, y), normalized(x, y))
+            self.assertFalse(any(n.target in ops_to_test for n in normalized.graph.nodes))
+
+
+        # Test Tensor/scalar callsite
+        for op in ops_to_test:
+            class WrapperMod(torch.nn.Module):
+                def forward(self, x):
+                    return op(x, 42)
+
+            traced = symbolic_trace(WrapperMod())
+            normalized = NormalizeOperators(traced).transform()
+            x = torch.randn(3, 4)
+            torch.testing.assert_allclose(traced(x), normalized(x))
+            self.assertFalse(any(n.target in ops_to_test for n in normalized.graph.nodes))
 
     @skipIfNoTorchVision
     def test_normalize_args(self):
@@ -854,6 +897,47 @@ class {test_classname}(torch.nn.Module):
                     if submod_class == nn_class:
                         self.assertEqual(len(node.args), 0)
 
+    @skipIfNoTorchVision
+    def test_annotate_returns_with_schema(self):
+        m = resnet18()
+
+        traced_modules = symbolic_trace(m)
+        traced_modules_annotated = AnnotateTypesWithSchema(traced_modules).transform()
+        for node in traced_modules_annotated.graph.nodes:
+            if node.type is None:
+                check = (node.op, node.target)
+                self.assertTrue(check in {('placeholder', 'x'), ('call_function', operator.add),
+                                          ('call_function', torch.flatten), ('output', 'output')})
+
+        # Smoke test torchscript compilation since now we're emitting type annotations
+        torch.jit.script(traced_modules_annotated)
+
+        class FunctionalTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                # `leaves` contains the set of standard `nn.Modules` that are not
+                # currently symbolically traceable. Ideally this set would be empty
+                leaves = set([torch.nn.BatchNorm2d])
+                return type(m) in leaves
+
+        traced_functionals = torch.fx.GraphModule(m, FunctionalTracer().trace(m))
+
+        traced_functionals_annotated = AnnotateTypesWithSchema(traced_functionals).transform()
+        for node in traced_functionals_annotated.graph.nodes:
+            if node.type is None:
+                check = (node.op, node.target)
+                excluded_nodes = {
+                    ('placeholder', 'x'),
+                    ('call_function', torch.conv2d),
+                    # Return type differs based on boolean dispatch :(
+                    ('call_function', torch.nn.functional.max_pool2d),
+                    ('call_function', operator.add),
+                    ('call_function', torch.flatten),
+                    ('output', 'output'),
+                }
+                self.assertTrue(check in excluded_nodes)
+
+        # Smoke test torchscript compilation since now we're emitting type annotations
+        torch.jit.script(traced_functionals_annotated)
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):

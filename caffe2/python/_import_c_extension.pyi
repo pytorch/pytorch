@@ -157,6 +157,7 @@ class Annotation:
 is_asan: bool
 has_mkldnn: bool
 use_mkldnn: bool
+has_fbgemm: bool
 use_rocm: bool
 use_trt: bool
 define_caffe2_no_operator_schema: bool

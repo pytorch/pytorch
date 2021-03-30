@@ -49,7 +49,7 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
 
     if(NOT GLSLC_PATH)
       message(FATAL_ERROR "USE_VULKAN glslc not found")
-    endif(GLSLC_PATH)
+    endif(NOT GLSLC_PATH)
   endif()
 
   set(PYTHONPATH "$ENV{PYTHONPATH}")

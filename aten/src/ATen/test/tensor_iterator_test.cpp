@@ -210,3 +210,27 @@ TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
   config.add_input(at::ones({1,1}, at::dtype(at::kInt)));
   ASSERT_ANY_THROW(config.build());
 }
+
+#define MULTIPLE_OUTPUTS_TEST_ITER_FOR_TYPE(ctype,name)                                             \
+TEST(TensorIteratorTest, CpuKernelMultipleOutputs_##name) {                                         \
+  auto in1 = random_tensor_for_type(k##name);                                                       \
+  auto in2 = random_tensor_for_type(k##name);                                                       \
+  Tensor out1 = at::empty({0}, in1.options());                                                      \
+  Tensor out2 = at::empty({0}, in1.options());                                                      \
+  auto expected1 = in1.add(in2);                                                                    \
+  auto expected2 = in1.mul(in2);                                                                    \
+  auto iter = at::TensorIteratorConfig()                                                            \
+    .add_output(out1)                                                                               \
+    .add_output(out2)                                                                               \
+    .add_input(in1)                                                                                 \
+    .add_input(in2)                                                                                 \
+    .build();                                                                                       \
+  at::native::cpu_kernel_multiple_outputs(iter, [=](ctype a, ctype b) -> std::tuple<ctype, ctype> { \
+    ctype add = a + b;                                                                              \
+    ctype mul = a * b;                                                                              \
+    return std::tuple<ctype, ctype>(add, mul);                                                      \
+  });                                                                                               \
+  EXPECT_TRUE(out1.equal(expected1));                                                               \
+  EXPECT_TRUE(out2.equal(expected2));                                                               \
+}
+AT_FORALL_SCALAR_TYPES(MULTIPLE_OUTPUTS_TEST_ITER_FOR_TYPE)

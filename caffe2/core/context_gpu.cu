@@ -89,9 +89,9 @@ void CUDAContext::CopyBytesAsync(
   // events, so it's fine.  In order to make it a standalone function proper
   // synchronization between stream is required
   int gpu_id = 0;
-  if (dst_device.type() == DeviceType::CUDA) {
+  if (dst_device.is_cuda()) {
     gpu_id = dst_device.index();
-  } else if (src_device.type() == DeviceType::CUDA) {
+  } else if (src_device.is_cuda()) {
     gpu_id = src_device.index();
   } else {
     LOG(FATAL) << "shouldn't be called with non-cuda device";
