@@ -63,28 +63,28 @@ class TestTensorExprPyBind(JitTestCase):
 
     def test_kernel(self):
         def f(a, b, c):
-            return a+b+c
+            return a + b + c
         device, size = 'cpu', (4, 4)
         x = torch.rand(size, device=device)
         y = torch.rand(size, device=device)
         z = torch.rand(size, device=device)
 
         torch._C._jit_override_can_fuse_on_cpu(True)
-        jit_f = torch.jit.script(f, (x, y, z))
+        scripted_f = torch.jit.script(f, (x, y, z))
 
-        jit_f(x, y, z)
-        jit_f(x, y, z)
+        scripted_f(x, y, z)
+        scripted_f(x, y, z)
 
-        graph=torch.jit.last_executed_optimized_graph()
-        node =  graph.findNode("prim::TensorExprGroup", True)
+        graph = torch.jit.last_executed_optimized_graph()
+        node = graph.findNode("prim::TensorExprGroup", True)
 
         with kernel_arena_scope():
             graph = node.g('Subgraph')
             res1 = torch._C._te.TensorExprKernel.run(graph, (x, y, z))
             res2 = torch._C._te.TensorExprKernel.fallback(graph, (x, y, z))
             correct = f(x, y, z)
-            np.testing.assert_allclose(res1.cpu().numpy(), correct.cpu().numpy(), atol=2e-3)
-            np.testing.assert_allclose(res2.cpu().numpy(), correct.cpu().numpy(), atol=2e-3)
+            np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+            np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
 
 if __name__ == '__main__':
     run_tests()
