@@ -81,6 +81,7 @@ static inline __host__ __device__ typename std::enable_if<!std::is_same<scalar_t
   copysign_(scalar_t1 a, scalar_t2 b) {
   return std::copysignf(static_cast<float>(a), static_cast<float>(b));
 }
+template <typename scalar_t1, typename scalar_t2>
 static inline __host__ __device__ typename std::enable_if<std::is_same<scalar_t1, double>::value || std::is_same<scalar_t2, double>::value, scalar_t1>::type
   copysign_(scalar_t1 a, scalar_t2 b) {
   return std::copysign(static_cast<double>(a), static_cast<double>(b));
