@@ -822,6 +822,9 @@ if(USE_BREAKPAD)
   set(BREAKPAD_STATIC_LIB ${BREAKPAD_BIN}/lib/libbreakpad_client.a)
   set(BREAKPAD_INCLUDES ${BREAKPAD_DIR}/src)
 
+  set(LSS_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/linux-syscall-support)
+  set(LSS_DEST ${CMAKE_CURRENT_BINARY_DIR}/third_party/breakpad/src/libbreakpad-build/src/third_party/lss)
+
   file(MAKE_DIRECTORY ${BREAKPAD_INCLUDES})
 
   ExternalProject_Add(
@@ -829,9 +832,9 @@ if(USE_BREAKPAD)
       PREFIX ${BREAKPAD_BIN}
       SOURCE_DIR ${BREAKPAD_DIR}
       # TODO: Add this as a submodule or something instead of cloning it here
-      CONFIGURE_COMMAND rm -rf ${BREAKPAD_DIR}/src/third_party/lss && git clone --depth=1 https://chromium.googlesource.com/linux-syscall-support ${BREAKPAD_DIR}/src/third_party/lss && ${BREAKPAD_DIR}/configure --srcdir=${BREAKPAD_DIR} --prefix=${BREAKPAD_BIN}
-      BUILD_COMMAND make
-      INSTALL_COMMAND make install
+      CONFIGURE_COMMAND mkdir -p ${LSS_DEST} && cp ${LSS_SOURCE}/linux_syscall_support.h ${LSS_DEST} && ${BREAKPAD_DIR}/configure --silent --srcdir=${BREAKPAD_DIR} --prefix=${BREAKPAD_BIN}
+      BUILD_COMMAND make --silent
+      INSTALL_COMMAND make install >/dev/null || make install
       BUILD_BYPRODUCTS ${BREAKPAD_STATIC_LIB}
   )
 

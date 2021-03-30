@@ -22,8 +22,8 @@ bool dumpCallback(
   return succeeded;
 }
 
-static std::unique_ptr<google_breakpad::ExceptionHandler> handler;
-static std::string minidump_directory;
+static std::unique_ptr<google_breakpad::ExceptionHandler> handler; // NOLINT
+static std::string minidump_directory; // NOLINT
 
 TORCH_API void _enable_minidump_collection(const std::string& dir) {
   minidump_directory = dir;
@@ -53,8 +53,6 @@ TORCH_API const std::string& _get_minidump_directory() {
       "Minidump collection is currently only implemented for Linux platforms");
 }
 #endif
-
-
 
 } // namespace crash_handler
 } // namespace torch

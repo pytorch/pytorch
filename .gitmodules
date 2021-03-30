@@ -136,3 +136,6 @@
 [submodule "third_party/breakpad"]
 	path = third_party/breakpad
 	url = https://chromium.googlesource.com/breakpad/breakpad
+[submodule "third_party/linux-syscall-support"]
+	path = third_party/linux-syscall-support
+	url = https://chromium.googlesource.com/linux-syscall-support
