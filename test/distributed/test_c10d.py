@@ -4132,7 +4132,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     def _test_ddp_comm_hook_gradients(self, vanilla_model):
         """
-        Runs "test_sparse_gradients" unit test with DDP communication hook. We define a
+        Runs "test_gradients" unit test with DDP communication hook. We define a
         simple hook that does allreduce and works with gloo backend for this test.
         """
         store = c10d.FileStore(self.file_name, self.world_size)
