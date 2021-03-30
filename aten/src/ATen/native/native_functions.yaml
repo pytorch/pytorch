@@ -8310,6 +8310,22 @@
   dispatch:
     CPU, CUDA: special_entr_out
 
+- func: special_expm1(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_expm1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_exp2(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_exp2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
 - func: special_gammaln(Tensor self) -> Tensor
   python_module: special
   variants: function
@@ -8540,12 +8556,6 @@
   python_module: linalg
   dispatch:
     CPU, CUDA: linalg_slogdet_out
-
-- func: _syevd_helper(Tensor self, bool compute_eigenvectors, str uplo) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: _syevd_helper_cpu
-    CUDA: _syevd_helper_cuda
 
 - func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg
