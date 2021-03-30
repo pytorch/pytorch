@@ -2,6 +2,7 @@
 #include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_impl.h>
@@ -257,6 +258,23 @@ void OwnerRRef::setValue(IValue&& value) {
 void OwnerRRef::setError(std::exception_ptr eptr) {
   future_->setErrorIfNeeded(std::move(eptr));
 }
+
+#ifdef USE_CUDA_NOT_ROCM
+void recordAllDevices(const std::set<c10::DeviceIndex>& deviceIndices) {
+  events_.clear();
+  for (auto deviceIndex : deviceIndices) {
+    at::cuda::CUDAEvent event;
+    event.record(getCurrentCUDAStream(deviceIndex));
+    events_.insert(event);
+  }
+}
+
+void waitAllDevices() {
+  for (auto event : events_) {
+    event.block(getCurrentCUDAStream(event.device_index()));
+  }
+}
+#endif
 
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {
   if (rref.isOwner()) {

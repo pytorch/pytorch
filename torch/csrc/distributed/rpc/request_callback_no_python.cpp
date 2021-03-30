@@ -49,7 +49,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackNoPython::
 }
 
 std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
-    Message& request) const {
+    Message& request, const std::set<c10::DeviceIndex>& deviceIndices) const {
   // We need two futures here because it could pause twice when processing a
   // RPC message:
   //  1) waiting for all RRefs in the arguments to become confirmed;
@@ -70,7 +70,8 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
          // a shared_ptr here.
          rpc = (std::shared_ptr<RpcCommandBase>)std::move(rpc),
          messageType = request.type(),
-         id = request.id()]() {
+         id = request.id(),
+         deviceIndices]() {
           // The cost of pre-request check is minimal thanks to
           // std::shared_lock. The cost is in magnitude
           // of 10us.
@@ -86,7 +87,7 @@ std::shared_ptr<JitFuture> RequestCallbackNoPython::processMessage(
                     ->config());
           }
 
-          processRpcWithErrors(*rpc, messageType, id, retFuture);
+          processRpcWithErrors(*rpc, messageType, id, retFuture, deviceIndices);
 
           // Response message has been sent at this moment, this post-response
           // work doesn't affect RPC trip time.
@@ -111,9 +112,10 @@ void RequestCallbackNoPython::processRpcWithErrors(
     RpcCommandBase& rpc,
     const MessageType& messageType,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& responseFuture,
+    const std::set<c10::DeviceIndex>& deviceIndices) const {
   try {
-    processRpc(rpc, messageType, messageId, responseFuture);
+    processRpc(rpc, messageType, messageId, responseFuture, deviceIndices);
   } catch (std::exception& e) {
     responseFuture->markCompleted(handleError(e, messageType, messageId));
   }
@@ -169,7 +171,8 @@ void RequestCallbackNoPython::processPythonRemoteCall(
     RpcCommandBase& rpc,
     const std::function<void(Message)>& markComplete,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& /* unused */) const {
+    const std::shared_ptr<JitFuture>& /* unused */,
+    const std::set<c10::DeviceIndex>& deviceIndices) const {
   C10_THROW_ERROR(Error, "Python call not supported!");
 }
 
@@ -383,7 +386,8 @@ void RequestCallbackNoPython::processForwardAutogradReq(
       rpcWithAutograd.wrappedRpc(),
       wrappedMessageType,
       messageId,
-      wrappedRpcResponseFuture);
+      wrappedRpcResponseFuture,
+      {}); // TODO deviceIndices?
 
   auto fromWorkerId = rpcWithAutograd.fromWorkerId();
   // The original future needs to be marked as completed when the wrapped
@@ -519,7 +523,8 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
         rpcWithProfilingReq.wrappedRpc(),
         wrappedMsgType,
         messageId,
-        wrappedRpcResponseFuture);
+        wrappedRpcResponseFuture,
+        {}); // TODO deviceIndices?
 
     wrappedRpcResponseFuture->addCallback(
         at::wrapPropagateTLSState<void>([wrappedRpcResponseFuture,
@@ -573,7 +578,8 @@ void RequestCallbackNoPython::processRpc(
     RpcCommandBase& rpc,
     const MessageType& messageType,
     const int64_t messageId,
-    const std::shared_ptr<JitFuture>& responseFuture) const {
+    const std::shared_ptr<JitFuture>& responseFuture,
+    const std::set<c10::DeviceIndex>& deviceIndices) const {
   auto markComplete = [messageId, &responseFuture](Message m) {
     m.setId(messageId);
     responseFuture->markCompleted(
@@ -599,7 +605,7 @@ void RequestCallbackNoPython::processRpc(
       return;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
-      processPythonRemoteCall(rpc, markComplete, messageId, responseFuture);
+      processPythonRemoteCall(rpc, markComplete, messageId, responseFuture, deviceIndices);
       return;
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {

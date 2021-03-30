@@ -39,7 +39,8 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       RpcCommandBase& rpc,
       const std::function<void(Message)>& markComplete,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const override;
+      const std::shared_ptr<JitFuture>& responseFuture,
+      const std::set<c10::DeviceIndex>& deviceIndices) const override;
 
   void processPythonRRefFetchCall(
       RpcCommandBase& rpc,
@@ -52,7 +53,8 @@ class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
       RpcCommandBase& rpc,
       const MessageType& messageType,
       const int64_t messageId,
-      const std::shared_ptr<JitFuture>& responseFuture) const override;
+      const std::shared_ptr<JitFuture>& responseFuture,
+      const std::set<c10::DeviceIndex>& deviceIndices) const override;
 
   bool cudaAvailable() const override;
 
