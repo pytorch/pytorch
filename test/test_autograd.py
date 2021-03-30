@@ -3022,18 +3022,19 @@ class TestAutograd(TestCase):
         gradgradcheck(torch.igamma, (s, x))
 
     def test_chain_matmul(self):
-        def gen_matrices(p):
+        def gen_matrices(p, dtype):
             matrices = []
             for (pi, pi_1) in zip(p[:-1], p[1:]):
-                matrices.append(torch.randn(pi, pi_1).requires_grad_())
+                matrices.append(torch.randn(pi, pi_1, dtype=dtype).requires_grad_())
             return matrices
 
-        gradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
-        gradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
-        gradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
-        gradgradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
-        gradgradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
-        gradgradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
+        for dtype in [torch.double, torch.cdouble]:
+            gradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5], dtype))
+            gradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6], dtype))
+            gradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10], dtype))
+            gradgradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5], dtype))
+            gradgradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6], dtype))
+            gradgradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10], dtype))
 
     def test_profiler_tracing(self):
         t1, t2 = torch.ones(1), torch.ones(1)
@@ -5298,7 +5299,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-separate_complex_tests = ['view_as_real', 'real', 'imag', 'div', 'pow', 'rsqrt', '__rdiv__', 'add', 'sub']
+separate_complex_tests = ['view_as_real', 'real', 'imag', 'div', 'pow', '__rdiv__', 'add', 'sub']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
@@ -5312,21 +5313,19 @@ if _get_torch_cuda_version() != (11, 2):
 
 # allow list for complex
 complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
-                'repeat', 'expand', 'rot90', 'transpose',
+                'expand', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
-                'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_',
-                'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'mul',
-                '__rmul__', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
+                'chunk', 'split', 'split_with_sizes', 'zero_',
+                'eq_', 'ne_', 'add', '__radd__', 'sum', 'mul',
+                '__rmul__', 'dot', 'vdot', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'fill_', 'sub',
-                'mean', 'inverse', 'solve', 'addcmul',
-                'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr',
-                'narrow', 'swapaxes', 'swapdims', 'tensor_split', 'tile',
+                'mean', 'inverse', 'addcmul',
+                'addcdiv', 'linalg.tensorinv', 'matrix_exp',
+                'narrow', 'swapaxes', 'swapdims', 'tensor_split',
                 'baddbmm', 'addbmm', 'addmv'] + complex_list_filter + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
-    'test_unfold_scalar',
-    'test_unfold_scalar_neg0',
     'test_to_sparse',
 ])
 
