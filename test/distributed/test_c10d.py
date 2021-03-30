@@ -2230,7 +2230,7 @@ class MixedDenseSparseGradientModule(nn.Module):
         self.fc = nn.Linear(10, 10)
 
     def forward(self, x):
-        x = self.embedding(x.to())
+        x = self.embedding(x)
         return F.softmax(self.fc(x), dim=1)
 
 
