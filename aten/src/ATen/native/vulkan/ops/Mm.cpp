@@ -281,7 +281,6 @@ Tensor LinearOpContext::run(
   vTensor v_output {
       context,
       {
-        1,
         v_input.sizes()[Layout::Parameter::height],
         unpacked_.weight.sizes()[Layout::Parameter::width],
       },

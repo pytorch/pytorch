@@ -57,42 +57,6 @@ TensorOptions Tensor::options() const {
 
 ${tensor_method_definitions}
 
-caffe2::TypeMeta Tensor::dtype() const noexcept {
-  return impl_->dtype();
-}
-
-Layout Tensor::layout() const noexcept {
-  return impl_->layout();
-}
-
-int64_t Tensor::get_device() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->get_device();
-}
-
-int64_t get_device(Tensor self) {
-  return self.get_device();
-}
-
-bool Tensor::is_cuda() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_cuda();
-}
-
-bool Tensor::is_xpu() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_xpu();
-}
-
-bool is_xpu(Tensor self) {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return self.is_xpu();
-}
-
-bool Tensor::is_xla() const {
-    return impl_->is_xla();
-}
-
 NamedTensorMeta* Tensor::get_named_tensor_meta() {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
@@ -108,82 +72,6 @@ bool Tensor::has_names() const {
     return false;
   }
   return impl::has_names(unsafeGetTensorImpl());
-}
-
-bool is_cuda(Tensor self) {
-  return self.is_cuda();
-}
-
-bool is_xla(Tensor self) {
-    return self.is_xla();
-}
-
-bool Tensor::is_hip() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_hip();
-}
-
-bool is_hip(Tensor self) {
-  return self.is_hip();
-}
-
-bool Tensor::is_sparse() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_sparse();
-}
-
-bool is_sparse(Tensor self) {
-  return self.is_sparse();
-}
-
-bool Tensor::is_mkldnn() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_mkldnn();
-}
-
-bool is_mkldnn(Tensor self) {
-  return self.is_mkldnn();
-}
-
-bool Tensor::is_mlc() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_mlc();
-}
-
-bool is_mlc(Tensor self) {
-  return self.is_mlc();
-}
-
-bool Tensor::is_vulkan() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_vulkan();
-}
-
-bool Tensor::is_metal() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_metal();
-}
-
-
-bool is_vulkan(Tensor self) {
-  return self.is_vulkan();
-}
-
-bool is_metal(Tensor self) {
-  return self.is_metal();
-}
-
-bool Tensor::is_quantized() const {
-  // NB: this is not a native function to avoid dispatching overhead.
-  return impl_->is_quantized();
-}
-
-bool Tensor::is_meta() const {
-  return impl_->is_meta();
-}
-
-bool is_quantized(Tensor self) {
-  return self.is_quantized();
 }
 
 #define DEFINE_CAST(T, name)                                        \

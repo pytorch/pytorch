@@ -588,8 +588,8 @@ class Quantizer:
             # converting List[int] to Tensor since module attribute is
             # Union[Tensor, Module]
             model._standalone_module_input_quantized_idxs = \
-                torch.Tensor(input_quantized_idxs)
-            model._standalone_module_output_quantized_idxs = torch.Tensor(output_quantized_idxs)
+                torch.tensor(input_quantized_idxs)
+            model._standalone_module_output_quantized_idxs = torch.tensor(output_quantized_idxs)
         return model
 
     def save_state(self, observed: GraphModule) -> None:
@@ -890,6 +890,18 @@ class Quantizer:
                     env[node.name] = result
                 continue
             elif root_node is not None:
+                if qconfig is None:
+                    # This branch is hit if all of these conditions are met:
+                    # 1. we are in a fusion pattern of multiple nodes (i.e. add-relu)
+                    # 2. the current node is not the "root_node" of the pattern
+                    # 3. quantization for this pattern is disabled
+                    #
+                    # In this case, we need to make sure to populate the env with
+                    # intermediate nodes manually, because the QuantizeHandler.convert
+                    # function will not be called.
+                    result = self.quantized_graph.node_copy(
+                        node, load_non_quantized)
+                    env[node.name] = result
                 continue
 
             # handle activation post process calls

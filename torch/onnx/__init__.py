@@ -255,7 +255,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             to 1 by default.
         enable_onnx_checker (bool, default True): If True the onnx model checker will be run
             as part of the export, to ensure the exported model is a valid ONNX model.
-        external_data_format (bool, default False): If True, then the model is exported
+        use_external_data_format (bool, default False): If True, then the model is exported
             in ONNX external data format, in which case some of the model parameters are stored
             in external binary files and not in the ONNX model file itself. See link for format
             details:
