@@ -1956,18 +1956,20 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, variant='tensor'):
 
     return samples
 
-def sample_inputs_cumsum(op_info, device, dtype, requires_grad):
+def sample_inputs_cumulative_ops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
 
-    samples = (
+    samples = [
         SampleInput(_make_tensor_helper((S, S, S)), args=(0,)),
         SampleInput(_make_tensor_helper((S, S, S)), args=(1,)),
+        SampleInput(_make_tensor_helper(()), args=(0,)),
+    ]
+
+    if supports_dtype_kwargs:
         # NOTE: if `dtype` is not same as input, then inplace variants fail with
         # `provided dtype must match the dtype of self tensor in cumsum`
-        SampleInput(_make_tensor_helper((S, S, S)), args=(1,), kwargs={'dtype': dtype}),
-        SampleInput(_make_tensor_helper(()), args=(0,)),
-    )
+        samples.append(SampleInput(_make_tensor_helper((S, S, S)), args=(1,), kwargs={'dtype': dtype}))
 
     return samples
 
@@ -2557,13 +2559,11 @@ op_db: List[OpInfo] = [
                         dtypes=(torch.bool,)),
                # cumsum does not correctly warn when resizing out= inputs
                SkipInfo('TestCommon', 'test_out'),
-               SkipInfo('TestOpInfo', 'test_duplicate_method_tests'),
            ),
-           sample_inputs_func=sample_inputs_cumsum),
+           sample_inputs_func=sample_inputs_cumulative_ops),
     OpInfo('cumprod',
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16),
-           supports_inplace_autograd=False,
            skips=(
                # "cumprod_out_{cpu, cuda}" not implemented for 'Bool'
                SkipInfo('TestOpInfo', 'test_supported_dtypes',
@@ -2573,6 +2573,14 @@ op_db: List[OpInfo] = [
                         dtypes=[torch.float32]),
            ),
            sample_inputs_func=sample_inputs_cumprod),
+    OpInfo('cummax',
+           dtypesIfCPU=all_types_and(torch.bool),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+           sample_inputs_func=partial(sample_inputs_cumulative_ops, supports_dtype_kwargs=False)),
+    OpInfo('cummin',
+           dtypesIfCPU=all_types_and(torch.bool),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+           sample_inputs_func=partial(sample_inputs_cumulative_ops, supports_dtype_kwargs=False)),
     UnaryUfuncInfo('deg2rad',
                    ref=np.radians,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -4223,13 +4231,6 @@ def method_tests():
         ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
         ('logcumsumexp', (S, S, S), (1,), 'dim1', (), [0]),
         ('logcumsumexp', (), (0,), 'dim0_scalar', (), [0]),
-        ('cummax', (S, S, S), (0,), 'dim0', (), [0]),
-        ('cummax', (S, S, S), (1,), 'dim1', (), [0]),
-        ('cummax', (), (0,), 'dim0_scalar', (), [0]),
-        ('cummin', (S, S, S), (0,), 'dim0', (), [0]),
-        ('cummin', (S, S, S), (1,), 'dim1', (), [0]),
-        ('cummin', (), (0,), 'dim0_scalar', (), [0]),
-        ('cumsum', (S, S, S), (1,), 'dim1_cast', (), [0], (), ident, {'dtype': torch.float64}),
         ('log_softmax', (S, S, S), (1, torch.float64,), 'kwarg_dtype_would_break_jit_loader', (True,)),
         ('addmm', (S, M), ((S, S), (S, M)), '', (True, ['aten::add', 'aten::mm'])),
         ('addmm', (1,), ((S, S), (S, M)), 'broadcast_lhs', (True, ['aten::add', 'aten::mm'])),
