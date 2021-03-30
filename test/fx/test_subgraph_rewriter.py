@@ -320,7 +320,7 @@ class TestSubgraphRewriter(JitTestCase):
             call_method    dequantize                                                  (add,)                    {}
             call_function  <built-in method sigmoid of type object at 0x7f7c1f440fe0>  (dequantize,)             {}
             call_method    to                                                          (sigmoid, torch.float16)  {}
-            output         output                                                      (to,)                     {}                                         (to,)                     {}
+            output         output                                                      (to,)                     {}
 
         while the pattern we want to match looks like this:
 
