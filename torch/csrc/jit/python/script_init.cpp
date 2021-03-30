@@ -979,6 +979,7 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::arg("filename"),
           py::arg("_extra_files") = ExtraFilesMap(),
+          py::arg("_version") = caffe2::serialize::kProducedBytecodeVersion,
           py::arg("_save_mobile_debug_info") = false)
       .def(
           "_save_to_buffer_for_mobile",
@@ -991,6 +992,7 @@ void initJitScriptBindings(PyObject* module) {
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap(),
+          py::arg("_version") = caffe2::serialize::kProducedBytecodeVersion,
           py::arg("_save_mobile_debug_info") = false)
       .def("_set_optimized", &Module::set_optimized)
       .def(

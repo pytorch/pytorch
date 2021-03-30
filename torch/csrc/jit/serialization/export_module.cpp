@@ -384,7 +384,7 @@ class ScriptModuleSerializer {
   void serialize(
       const Module& module,
       const ExtraFilesMap& extra_files,
-      bool bytecode_format,
+      at::optional<uint64_t> version,
       bool save_mobile_debug_info) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
@@ -413,7 +413,7 @@ class ScriptModuleSerializer {
     }
 
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
-    if (bytecode_format) {
+    if (version.has_value()) {
       writeByteCode(module, save_mobile_debug_info, constants_from_jit);
       writeMobileMetadata(module, extra_files);
     }
@@ -629,37 +629,40 @@ void ExportModule(
     const Module& module,
     std::ostream& out,
     const ExtraFilesMap& extra_files,
-    bool bytecode_format,
+//    bool bytecode_format,
+    at::optional<uint64_t> version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(
       [&](const void* buf, size_t nbytes) -> size_t {
         out.write(static_cast<const char*>(buf), nbytes);
         return !out ? 0 : nbytes;
       });
+//  serializer.serialize(
+//      module, extra_files, bytecode_format, save_mobile_debug_info);
   serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+      module, extra_files, version, save_mobile_debug_info);
 }
 
 void ExportModule(
     const Module& module,
     const std::string& filename,
     const ExtraFilesMap& extra_files,
-    bool bytecode_format,
+    at::optional<uint64_t> version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(filename);
   serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+      module, extra_files, version, save_mobile_debug_info);
 }
 
 void ExportModule(
     const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& extra_files,
-    bool bytecode_format,
+    at::optional<uint64_t> version,
     bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+      module, extra_files, version, save_mobile_debug_info);
 }
 
 namespace {

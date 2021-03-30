@@ -70,21 +70,21 @@ TORCH_API void ExportModule(
     const Module& module,
     std::ostream& out,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
-    at::optional<uint64_t> bytecode_version = at::optional<uint64_t>(),
+    at::optional<uint64_t> bytecode_version = caffe2::serialize::kProducedBytecodeVersion,
     bool save_mobile_debug_info = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::string& filename,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
-    at::optional<uint64_t> bytecode_version = at::optional<uint64_t>(),
+    at::optional<uint64_t> bytecode_version = caffe2::serialize::kProducedBytecodeVersion,
     bool save_mobile_debug_info = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
-    at::optional<uint64_t> bytecode_version = at::optional<uint64_t>(),
+    at::optional<uint64_t> bytecode_version = caffe2::serialize::kProducedBytecodeVersion,
     bool save_mobile_debug_info = false);
 
 // Write the bytes of a pickle archive and the tensors referenced inside that

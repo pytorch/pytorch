@@ -18,6 +18,7 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <caffe2/serialize/versions.h>
 
 #include <functional>
 #include <memory>
@@ -222,13 +223,13 @@ struct TORCH_API Module : public Object {
   void _save_for_mobile(
       std::ostream& out,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      at::optional<uint64_t> version = at::optional<uint64_t>(),
+      at::optional<uint64_t> version = caffe2::serialize::kProducedBytecodeVersion,
       bool save_mobile_debug_info = false) const;
 
   void _save_for_mobile(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      at::optional<uint64_t> version = at::optional<uint64_t>(),
+      at::optional<uint64_t> version = caffe2::serialize::kProducedBytecodeVersion,
       bool save_mobile_debug_info = false) const;
 
   Module copy() const;
