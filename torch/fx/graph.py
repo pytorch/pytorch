@@ -951,10 +951,10 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             print("`print_tabular` relies on the library `tabulate`, "
                   "which could not be found on this machine. Run `pip "
                   "install tabulate` to install the library.")
-        node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
+        node_specs = [[n.op, n.target, n.args, n.kwargs]
                       for n in self.nodes]
         print(tabulate(node_specs,
-              headers=['opcode', 'name', 'target', 'args', 'kwargs']))
+              headers=['opcode', 'target', 'args', 'kwargs']))
 
     def lint(self):
         """

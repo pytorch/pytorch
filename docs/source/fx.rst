@@ -619,11 +619,12 @@ examine our traced module:
     traced.graph.print_tabular()
     # This gives us:
     """
-    opcode         name    target                   args      kwargs
-    -------------  ------  -----------------------  --------  --------
-    placeholder    x       x                        ()        {}
-    placeholder    y       y                        ()        {}
-    call_function  add_1   <built-in function add>  (x, y)    {}
+    opcode         target                   args    kwargs
+    -------------  -----------------------  ------  --------
+    placeholder    x                        ()      {}
+    placeholder    y                        ()      {}
+    call_function  <built-in function add>  (x, y)  {}
+    output         output                   (add,)  {}
     """
 
 Using the utility functions above, we can compare our traced Module
