@@ -829,7 +829,7 @@ if(USE_BREAKPAD)
       PREFIX ${BREAKPAD_BIN}
       SOURCE_DIR ${BREAKPAD_DIR}
       # TODO: Add this as a submodule or something instead of cloning it here
-      CONFIGURE_COMMAND rm -r ${BREAKPAD_DIR}/src/third_party/lss && git clone --depth=1 https://chromium.googlesource.com/linux-syscall-support ${BREAKPAD_DIR}/src/third_party/lss && ${BREAKPAD_DIR}/configure --srcdir=${BREAKPAD_DIR} --prefix=${BREAKPAD_BIN}
+      CONFIGURE_COMMAND rm -rf ${BREAKPAD_DIR}/src/third_party/lss && git clone --depth=1 https://chromium.googlesource.com/linux-syscall-support ${BREAKPAD_DIR}/src/third_party/lss && ${BREAKPAD_DIR}/configure --srcdir=${BREAKPAD_DIR} --prefix=${BREAKPAD_BIN}
       BUILD_COMMAND make
       INSTALL_COMMAND make install
       BUILD_BYPRODUCTS ${BREAKPAD_STATIC_LIB}
