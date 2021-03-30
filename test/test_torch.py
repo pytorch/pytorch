@@ -4732,7 +4732,7 @@ class TestTorchDeviceType(TestCase):
         sizes = ((100,)) if low_precision else ((200,), (3002,))
         # Bfloat16 has a particularly bad performance here
         # This operation is nondeterministic on GPU, so we are generous with the rtol
-        rtol, atol = 1e-1, 1e-2 if low_precision else 1e-3, 1e-4
+        rtol, atol = (1e-1, 1e-2) if low_precision else (1e-3, 1e-4)
 
         make_arg = partial(make_tensor, low=-2, high=3, device=device, dtype=dtype)
         # Dump everything into the 0-th position

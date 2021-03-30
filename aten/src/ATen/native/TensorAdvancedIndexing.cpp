@@ -396,7 +396,7 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
   return self;
 }
 
-Tensor& take_out(Tensor& out, const Tensor& self, const Tensor& index) {
+Tensor& take_out(const Tensor& self, const Tensor& index, Tensor& out) {
   // Type and device checks
   TORCH_CHECK(index.scalar_type() == ScalarType::Long, "take(): Expected a long tensor for index, but got ", index.scalar_type())
   TORCH_CHECK(self.scalar_type() == self.scalar_type(), "take(): self and self expected to have the same dtype, but got (self) ", self.scalar_type(), " and (self) ", self.scalar_type());
@@ -429,7 +429,7 @@ Tensor& take_out(Tensor& out, const Tensor& self, const Tensor& index) {
 
 Tensor take(const Tensor& self, const Tensor& index) {
     auto out = at::empty(index.sizes(), self.options());
-    at::native::take_out(out, self, index);
+    at::native::take_out(self, index, out);
     return out;
 }
 
