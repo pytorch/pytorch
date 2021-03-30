@@ -311,7 +311,7 @@ def run_tests(argv=UNITTEST_ARGS):
         for i in range(RUN_PARALLEL):
             env = os.environ.copy()
             if torch.version.cuda or torch.version.hip:
-                env['CUDA_VISIBLE_DEVICES'] = i
+                env['CUDA_VISIBLE_DEVICES'] = str(i)
             command = [sys.executable] + argv + ['--log-suffix=-shard-{}'.format(i + 1)] + test_batches[i]
             processes.append(subprocess.Popen(command, universal_newlines=True, env=env))
         failed = False
