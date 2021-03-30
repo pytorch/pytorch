@@ -105,6 +105,9 @@ void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef inde
   });
 }
 
+// Given a linear index, returns the offset of the tensor.
+// Implements the same algorithm as its (legacy) GPU version cuda::detail::IndexToOffset
+// OffsetCalculator implements yet again the same algorithm but in a column-major order
 struct IndexToOffset {
   const IntArrayRef sizes;
   const IntArrayRef strides;
