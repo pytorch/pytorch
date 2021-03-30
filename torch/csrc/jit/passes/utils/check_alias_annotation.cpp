@@ -60,8 +60,8 @@ Stack deepCopy(const Stack& stack) {
 bool deepEquals(const IValue& lhs, const IValue& rhs) {
   if (lhs.isTensor() && rhs.isTensor()) {
     return lhs.toTensor().equal(rhs.toTensor());
-  } 
-  
+  }
+
   if (lhs.isTensorList() && rhs.isTensorList()) {
     const auto a = lhs.toTensorList();
     const auto b = rhs.toTensorList();

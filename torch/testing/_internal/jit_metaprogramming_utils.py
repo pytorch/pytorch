@@ -1,6 +1,3 @@
-from torch.testing._internal.common_utils import is_iterable_of_tensors
-from typing import List, Sequence, Union
-
 # Torch
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 from torch.testing._internal.common_methods_invocations import non_differentiable, create_input, \
@@ -12,7 +9,10 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.testing._internal.common_utils import is_iterable_of_tensors
+
 from copy import deepcopy
+from typing import List, Union
 import math  # noqa: F401
 
 # Testing utils

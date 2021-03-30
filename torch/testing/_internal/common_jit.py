@@ -1,5 +1,4 @@
 # Torch
-from typing import List, Union
 import torch
 import torch.cuda
 import torch.jit
@@ -15,6 +14,7 @@ from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: 
 
 # Standard library
 from itertools import chain
+from typing import List, Union
 
 import io
 
