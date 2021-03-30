@@ -1502,6 +1502,16 @@ class TestUnaryUfuncs(TestCase):
                 # Ensure we are notified when NumPy changes its behavior
                 self.compare_with_numpy(torch.exp, np.exp, nan_real_inf_imag_in)
 
+    def test_clamp_raises_arg_errors(self, device):
+        X = torch.randn(100, dtype=torch.float, device=device)
+        error_msg = 'At least one of \'min\' or \'max\' must not be None'
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            X.clamp()
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            X.clamp_()
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.clamp(X)
+
     # This function tests that a nan value is returned for input values not in domain
     @dtypes(torch.float32, torch.float64)
     def test_acosh_domain_float(self, device, dtype):

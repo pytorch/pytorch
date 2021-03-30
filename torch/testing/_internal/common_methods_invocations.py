@@ -1682,14 +1682,22 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad):
     output += [SampleInput(empty_tensor, args=(0.0, 1.0)), ]
     return output
 
-def sample_kwargs_clamp(device, dtype, input):
+def sample_kwargs_clamp(device, dtype, input, outputs='both'):
     if dtype is torch.uint8:
         min_val, max_val = (random.randint(1, 3), random.randint(4, 8))
     elif dtype.is_floating_point:
         min_val, max_val = (random.uniform(-8, 0), random.uniform(1, 8))  # type: ignore
     else:
         min_val, max_val = (random.randint(-8, 0), random.randint(1, 8))  # type: ignore
-    return {'min': min_val, 'max': max_val}, {'a_min': min_val, 'a_max': max_val}
+
+    if outputs == 'both':
+        return {'min': min_val, 'max': max_val}, {'a_min': min_val, 'a_max': max_val}
+    elif outputs == 'min':
+        return {'min': min_val}, {'a_min': min_val, 'a_max': None}
+    elif outputs == 'max':
+        return {'max': max_val}, {'a_max': max_val, 'a_min': None}
+    else:
+        raise ValueError("invalid value for `outputs`")
 
 def sample_inputs_cumprod(op_info, device, dtype, requires_grad):
     def make_arg(shape):
@@ -2494,6 +2502,44 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.bfloat16]),
                    ),
                    sample_kwargs=sample_kwargs_clamp,
+                   sample_inputs_func=sample_inputs_clamp),
+    UnaryUfuncInfo('clamp',
+                   variant_test_name="clamp_max_only",
+                   aliases=('clip', ),
+                   decorators=(precisionOverride({torch.bfloat16: 7e-2, torch.float16: 1e-2}),),
+                   ref=np.clip,
+                   dtypes=all_types_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and(torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+                   assert_autodiffed=True,
+                   skips=(
+                       SkipInfo('TestCommon'),
+                       SkipInfo('TestGradient'),
+                       SkipInfo('TestOpInfo'),
+                       # Reference: https://github.com/pytorch/pytorch/issues/54841
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                device_type='cpu', dtypes=[torch.bfloat16]),
+                   ),
+                   sample_kwargs=partial(sample_kwargs_clamp, outputs='max'),
+                   sample_inputs_func=sample_inputs_clamp),
+    UnaryUfuncInfo('clamp',
+                   variant_test_name="clamp_min_only",
+                   aliases=('clip', ),
+                   decorators=(precisionOverride({torch.bfloat16: 7e-2, torch.float16: 1e-2}),),
+                   ref=np.clip,
+                   dtypes=all_types_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and(torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+                   assert_autodiffed=True,
+                   skips=(
+                       SkipInfo('TestCommon'),
+                       SkipInfo('TestGradient'),
+                       SkipInfo('TestOpInfo'),
+                       # Reference: https://github.com/pytorch/pytorch/issues/54841
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                device_type='cpu', dtypes=[torch.bfloat16]),
+                   ),
+                   sample_kwargs=partial(sample_kwargs_clamp, outputs='min'),
                    sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('conj',
                    ref=np.conj,
