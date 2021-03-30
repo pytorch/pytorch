@@ -136,7 +136,12 @@ def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, p
     Xq = Xq.permute(tuple(permute_axis_list))
     mask = (Xq >= quant_min) * (Xq <= quant_max)
     res = torch.zeros_like(dY)
+    print("RES:", res)
+    print("DY", dY)
+    print("DY MASK", dY[mask])
+    print("RES MASK", res[mask])
     res[mask] = dY[mask]
+    print("RES POST UPDATE", res)
     return res
 
 # Reference method for quantization.
