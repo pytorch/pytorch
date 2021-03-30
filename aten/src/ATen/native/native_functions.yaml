@@ -558,7 +558,7 @@
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   variants: function, method
   dispatch:
-    CPU, CUDA: as_strided_tensorimpl
+    CPU, CUDA, Meta: as_strided_tensorimpl
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
   device_guard: False
 
@@ -1522,10 +1522,9 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: resize_
+    CPU, Meta: resize_
     CUDA: resize_cuda_
     QuantizedCPU: quantized_resize_cpu_
-    Meta: resize_meta_
 
 - func: empty_quantized(int[] size, Tensor qtensor) -> Tensor
   variants: function
@@ -1660,11 +1659,13 @@
   variants: function, method
   dispatch:
     CPU, CUDA, QuantizedCPU, QuantizedCUDA: fill_
+    Meta: fill_meta_
 
 - func: fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)
   variants: function, method
   dispatch:
     CPU, CUDA, QuantizedCPU, QuantizedCUDA: fill_
+    Meta: fill_meta_
 
 - func: floor(Tensor self) -> Tensor
   variants: function, method
@@ -3998,6 +3999,7 @@
   variants: method, function
   dispatch:
     CPU, CUDA: zero_
+    Meta: zero_meta_
     SparseCPU, SparseCUDA: zero_sparse_
     MkldnnCPU: mkldnn_zero_
 
@@ -4699,7 +4701,7 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU, CUDA, QuantizedCPU, QuantizedCUDA: view
+    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: view
     MkldnnCPU: mkldnn_view
 
 # Warning: If you want to change the name or overload name of this
@@ -5048,21 +5050,25 @@
   variants: method
   dispatch:
     CPU, CUDA: random_
+    Meta: random_meta_
 
 - func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU, CUDA: random_
+    Meta: random_meta_
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU, CUDA: random_
+    Meta: random_meta_
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
   dispatch:
     CPU, CUDA: uniform_
+    Meta: uniform_meta_
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   variants: method
@@ -6235,6 +6241,7 @@
   variants: method
   dispatch:
     CPU, CUDA: normal_
+    Meta: normal_meta_
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -8451,7 +8458,7 @@
   python_module: special
   variants: function
   dispatch:
-    CompositeExplicitAutograd: special_entr
+    CPU, CUDA: special_entr
 
 - func: special_entr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special

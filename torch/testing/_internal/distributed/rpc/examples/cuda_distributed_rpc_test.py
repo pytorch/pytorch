@@ -1,7 +1,6 @@
 # If you need to modify this file to make this test pass, please also apply same edits accordingly to
 # https://pytorch.org/tutorials/recipes/cuda_rpc.html
 import os
-import sys
 import time
 import torch
 import torch.distributed.autograd as autograd
@@ -15,7 +14,7 @@ from torch.testing._internal.dist_utils import (
     dist_init,
 )
 from torch.testing._internal.common_distributed import (
-    TEST_SKIPS,
+    skip_if_lt_x_gpu,
 )
 
 
@@ -62,13 +61,8 @@ class CudaDistributedRPCTest(RpcAgentTestFixture):
         return 2
 
     @dist_init(setup_rpc=False)
+    @skip_if_lt_x_gpu(2)
     def test_cuda_distributed_rpc(self):
-
-        if not torch.cuda.is_available():
-            sys.exit(TEST_SKIPS['no_cuda'].exit_code)
-
-        if torch.cuda.is_available() and torch.cuda.device_count() < 2:
-            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
 
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '29500'
