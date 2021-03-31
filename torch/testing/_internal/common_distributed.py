@@ -1,4 +1,3 @@
-import caffe2.python._import_c_extension as C
 from multiprocessing import Manager
 from contextlib import contextmanager
 from io import StringIO
@@ -361,8 +360,11 @@ class MultiProcessTestCase(TestCase):
         sys.exit(0)
 
     def run_test(self, test_name, pipe):
-        # Register signal handler to dump stack traces on FATALs.
-        C.set_print_stack_traces_on_fatal_signal(True)
+        if sys.platform != 'win32' and sys.platform != 'darwin':
+            # Register signal handler to dump stack traces on FATALs.
+            # Windows and MacOS do not support the signal handlers.
+            import caffe2.python._import_c_extension as C  # type: ignore
+            C.set_print_stack_traces_on_fatal_signal(True)  # type: ignore
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.

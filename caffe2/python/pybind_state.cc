@@ -1922,8 +1922,10 @@ void addGlobalMethods(py::module& m) {
     return py::bytes(out);
   });
 
+#if defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
   m.def("set_print_stack_traces_on_fatal_signal",
     &caffe2::setPrintStackTracesOnFatalSignal);
+#endif
 
   auto initialize = [&]() {
   // Initialization of the module
