@@ -49,7 +49,7 @@ struct InplaceConverter {
 
     void init(const std::shared_ptr<Graph>& graph);
     void registerSetValue(Value* old_v, Value* new_v);
-    void updateInputsWithAlias(Node* n);
+    void correctAliasReferenceForInputs(Node* n);
 
     std::string toString() const;
 
@@ -470,7 +470,7 @@ void InplaceConverter::correctAliasReferences(Block* block) {
     Node* n = *it;
     it++; // node n can be destroyed
 
-    vt_.updateInputsWithAlias(n);
+    vt_.correctAliasReferenceForInputs(n);
 
     auto nkind = n->kind();
     if (nkind == prim::If || nkind == prim::Loop) {
@@ -479,10 +479,10 @@ void InplaceConverter::correctAliasReferences(Block* block) {
       }
     }
   }
-  vt_.updateInputsWithAlias(block->return_node());
+  vt_.correctAliasReferenceForInputs(block->return_node());
 }
 
-void InplaceConverter::ValueTracker::updateInputsWithAlias(Node* n) {
+void InplaceConverter::ValueTracker::correctAliasReferenceForInputs(Node* n) {
   for (size_t i = 0; i < n->inputs().size(); ++i) {
     auto* in = n->input(i);
     auto* alias = findAliasForValueAtNode(in, n);
