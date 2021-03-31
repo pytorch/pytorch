@@ -8,7 +8,7 @@ from torch.utils.data.datapipes.iter.routeddecoder import RoutedDecoderIterDataP
 from torch.utils.data.datapipes.iter.callable import \
     (MapIterDataPipe as Map, CollateIterDataPipe as Collate, TransformsIterDataPipe as Transforms)
 from torch.utils.data.datapipes.iter.combining import \
-    (ConcatIterDataPipe as Concat)
+    (ConcatIterDataPipe as Concat, ZipIterDataPipe as Zip)
 from torch.utils.data.datapipes.iter.combinatorics import \
     (SamplerIterDataPipe as Sampler, ShuffleIterDataPipe as Shuffle)
 from torch.utils.data.datapipes.iter.grouping import \
@@ -19,4 +19,4 @@ from torch.utils.data.datapipes.iter.selecting import \
 
 
 __all__ = ['ListDirFiles', 'LoadFilesFromDisk', 'ReadFilesFromTar', 'ReadFilesFromZip', 'RoutedDecoder', 'GroupByKey',
-           'Batch', 'BucketBatch', 'Collate', 'Concat', 'Filter', 'Map', 'Sampler', 'Shuffle', 'Transforms']
+           'Batch', 'BucketBatch', 'Collate', 'Concat', 'Filter', 'Map', 'Sampler', 'Shuffle', 'Transforms', 'Zip']

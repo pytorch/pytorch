@@ -7,34 +7,34 @@ namespace native {
 
 using qrelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qrelu_leaky_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
-                                Scalar /*negval_*/);
+                                const Scalar& /*negval_*/);
 using qsigmoid_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/, double output_scale, int64_t output_zero_point);
 using qhardsigmoid_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qclamp_fn = void (*)(
     const at::Tensor& /*qx*/,
-    Scalar min,
-    Scalar max,
+    const Scalar& min,
+    const Scalar& max,
     at::Tensor& /*qy*/);
 using qclamp_minmax_fn = void (*)(
     const at::Tensor& /*qx*/,
-    Scalar /*min or max*/,
+    const Scalar& /*min or max*/,
     at::Tensor& /*qy*/);
 using qthreshold_fn = void (*)(
     const at::Tensor& /*qx*/,
-    Scalar threshold,
-    Scalar value,
+    const Scalar& threshold,
+    const Scalar& value,
     at::Tensor& /*qy*/);
 using qtanh_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qelu_fn = void(*)(
     const at::Tensor& /*qx*/,
-    Scalar /*alpha*/,
-    Scalar /*scale*/,
-    Scalar /*input_scale*/,
+    const Scalar& /*alpha*/,
+    const Scalar& /*scale*/,
+    const Scalar& /*input_scale*/,
     at::Tensor& /*qy*/);
 using qbinary_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
 using qadd_scalar_fn =
-    void (*)(Tensor& /*out*/, const Tensor& /*self*/, Scalar other /*other*/);
+    void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Scalar& other /*other*/);
 using qhardswish_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qmaxpool_2d_fn = void (*)(
     const Tensor& qx,

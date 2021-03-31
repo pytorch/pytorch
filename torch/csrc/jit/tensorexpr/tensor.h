@@ -59,6 +59,8 @@ class TORCH_API Tensor : KernelScopedObject {
 
 class Placeholder {
  public:
+  Placeholder() = default;
+
   Placeholder(const BufHandle& data) : data_(data.node()) {
     if (data_->base_handle()->dtype() != kHandle) {
       throw malformed_input("Placeholder dtype must be Handle");
@@ -74,6 +76,7 @@ class Placeholder {
     }
     strides_ = ExprHandleVectorToExprVector(stride_handles);
   }
+
   Placeholder(
       const std::string& name,
       const Dtype& dtype,
@@ -104,6 +107,8 @@ class Placeholder {
 
   template <typename T>
   inline ExprHandle load(const std::vector<T>& args) const;
+
+  inline ExprHandle load(const std::vector<ExprHandle>& args) const;
 
   inline ExprHandle loadWithMask(
       const std::vector<ExprHandle>& args,
@@ -173,11 +178,12 @@ inline void unpack_dim_args(
 }
 
 // Handle reductions over a Reducer and a body_func which produces values.
-template <typename BodyFunc>
+template <typename InitFunc, typename BodyFunc>
 Tensor* Reduce(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
+    const InitFunc& init_func,
     const BodyFunc& body_func,
     const std::vector<DimArg>& reduce_args) {
   std::vector<const Expr*> dims;
@@ -195,13 +201,30 @@ Tensor* Reduce(
   ExprHandle body =
       Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(all_vars));
   std::vector<const Expr*> output_args(vars.begin(), vars.end());
-  const Expr* init_expr = new Cast(body.dtype(), reducer.initializer());
+  const Expr* init_expr = new Cast(
+      body.dtype(), init_func(VarVectorToVarHandleVector(vars)).node());
   Buf* func_result = new Buf(func_name, dims, body.dtype(), init_expr);
   const ReduceOp* reduce_op =
       reducer(func_result, body, output_args, reduce_vars);
   Tensor* t =
       new Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
   return t;
+}
+
+template <typename BodyFunc>
+Tensor* Reduce(
+    const std::string& func_name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    const BodyFunc& body_func,
+    const std::vector<DimArg>& reduce_args) {
+  return Reduce(
+      func_name,
+      dim_args,
+      reducer,
+      [&](ParameterList p) { return ExprHandle(reducer.initializer()); },
+      body_func,
+      reduce_args);
 }
 
 // Overload which allows inline lambda functions for the body_func.
@@ -305,6 +328,10 @@ inline ExprHandle Placeholder::load(const std::vector<T>& args) const {
   std::vector<ExprHandle> params(args.begin(), args.end());
   return ExprHandle(
       new Load(data(), ExprHandleVectorToExprVector(params), new IntImm(1)));
+}
+
+inline ExprHandle Placeholder::load(const std::vector<ExprHandle>& args) const {
+  return this->template load<ExprHandle>(args);
 }
 
 template <typename... Ts>

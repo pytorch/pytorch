@@ -223,11 +223,11 @@ class AttributePropagator {
           blocks.push(sub_block);
         }
 
-        // Modules with prim::ModuleDictIndex cannot be frozen because they
+        // Modules with prim::ModuleContainerIndex cannot be frozen because they
         // return InterfaceTypes.
         TORCH_CHECK(
-            n->kind() != prim::ModuleDictIndex,
-            "Freezing modules containing prim::ModuleDictIndex is not supported");
+            n->kind() != prim::ModuleContainerIndex,
+            "Freezing modules containing prim::ModuleContainerIndex is not supported");
 
         if (n->kind() == prim::SetAttr || n->kind() == prim::GetAttr) {
           // By default if interface attributes are present then fail freezing.

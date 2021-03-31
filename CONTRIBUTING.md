@@ -26,6 +26,7 @@
       - [Use CCache](#use-ccache)
       - [Use a faster linker](#use-a-faster-linker)
     - [C++ frontend development tips](#c-frontend-development-tips)
+    - [GDB integration](#gdb-integration)
   - [CUDA development tips](#cuda-development-tips)
   - [Windows development tips](#windows-development-tips)
     - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
@@ -38,6 +39,7 @@
     - [Why no leak detection?](#why-no-leak-detection)
   - [Caffe2 notes](#caffe2-notes)
   - [CI failure tips](#ci-failure-tips)
+    - [Which commit is used in CI?](#which-commit-is-used-in-ci)
 
 ## Contributing to PyTorch
 
@@ -735,6 +737,68 @@ framework, which you can read up about to learn how to configure the test runner
 submitting a new feature, we care very much that you write appropriate tests.
 Please follow the lead of the other tests to see how to write a new test case.
 
+### GDB integration
+
+If you are debugging pytorch inside GDB, you might be interested in
+[pytorch-gdb](tools/gdb/pytorch-gdb.py). This script introduces some
+pytorch-specific commands which you can use from the GDB prompt. In
+particular, `torch-tensor-repr` prints a human-readable repr of an at::Tensor
+object. Example of usage:
+
+```
+$ gdb python
+GNU gdb (Ubuntu 9.2-0ubuntu1~20.04) 9.2
+[...]
+(gdb) # insert a breakpoint when we call .neg()
+(gdb) break at::native:neg
+No source file named at::native.
+Make breakpoint pending on future shared library load? (y or [n]) y
+Breakpoint 1 (at::native:neg) pending.
+
+(gdb) run
+[...]
+>>> import torch
+>>> t = torch.tensor([1, 2, 3, 4], dtype=torch.float64)
+>>> t
+tensor([1., 2., 3., 4.], dtype=torch.float64)
+>>> t.neg()
+
+Breakpoint 1, at::native::neg (self=...) at [...]/pytorch/aten/src/ATen/native/UnaryOps.cpp:520
+520     Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
+(gdb) # the default repr of 'self' is not very useful
+(gdb) p self
+$1 = (const at::Tensor &) @0x7ffff72ed780: {impl_ = {target_ = 0x5555559df6e0}}
+(gdb) torch-tensor-repr self
+Python-level repr of self:
+tensor([1., 2., 3., 4.], dtype=torch.float64)
+```
+
+GDB tries to automatically load `pytorch-gdb` thanks to the
+[.gdbinit](.gdbinit) at the root of the pytorch repo. Howevever, auto-loadings is disabled by default, because of security reasons:
+
+```
+$ gdb
+warning: File "/path/to/pytorch/.gdbinit" auto-loading has been declined by your `auto-load safe-path' set to "$debugdir:$datadir/auto-load".
+To enable execution of this file add
+        add-auto-load-safe-path /path/to/pytorch/.gdbinit
+line to your configuration file "/home/YOUR-USERNAME/.gdbinit".
+To completely disable this security protection add
+        set auto-load safe-path /
+line to your configuration file "/home/YOUR-USERNAME/.gdbinit".
+For more information about this security protection see the
+"Auto-loading safe path" section in the GDB manual.  E.g., run from the shell:
+        info "(gdb)Auto-loading safe path"
+(gdb)
+```
+
+As gdb itself suggests, the best way to enable auto-loading of `pytorch-gdb`
+is to add the following line to your `~/.gdbinit` (i.e., the `.gdbinit` file
+which is in your home directory, **not** `/path/to/pytorch/.gdbinit`):
+```
+add-auto-load-safe-path /path/to/pytorch/.gdbinit
+```
+
+
 ## CUDA development tips
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
@@ -1074,8 +1138,9 @@ Once you submit a PR or push a new commit to a branch that is in
 an active PR, CI jobs will be run automatically. Some of these may
 fail and you will need to find out why, by looking at the logs.
 
-Fairly often, a CI failure might be unrelated to your changes. In this
-case, you can usually ignore the failure.
+Fairly often, a CI failure might be unrelated to your changes. In this case, you
+can usually ignore the failure. See [the following
+subsection](#which-commit-is-used-in-ci) for more details.
 
 Some failures might be related to specific hardware or environment
 configurations. In this case, if the job is run by CircleCI, you can
@@ -1106,3 +1171,56 @@ following steps:
 For certain Windows failures, it may be useful to have a full [Remote
 Desktop](https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/remote-desktop-clients) connection. See detailed instructions [here](https://github.com/pytorch/pytorch/wiki/Debugging-Windows-with-Remote-Desktop-or-CDB-(CLI-windbg)-on-CircleCI)
 for how to set that up after rerunning the job.
+
+### Which commit is used in CI?
+
+For CI run on `master`, this repository is checked out for a given `master`
+commit, and CI is run on that commit (there isn't really any other choice). For
+PRs, however, it's a bit more complicated. Consider this commit graph, where
+`master` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
+commit `B`:
+
+```
+       o---o---B (refs/pull/42/head)
+      /         \
+     /           C (refs/pull/42/merge)
+    /           /
+---o---o---o---A (refs/heads/master)
+```
+
+There are two possible choices for which commit to use:
+
+1. Checkout commit `B`, the head of the PR (manually committed by the PR
+   author).
+2. Checkout commit `C`, the hypothetical result of what would happen if the PR
+   were merged into `master` (automatically generated by GitHub).
+
+This choice depends on several factors; here is the decision tree as of
+2021-03-30:
+
+- For CI jobs on CircleCI:
+  - If the name of the job (or one of its ancestors in the workflow DAG)
+    contains "xla" or "gcc5", choice **2** is used. This includes the following
+    jobs:
+    - pytorch_linux_xenial_py3_6_gcc5_4_build
+      - pytorch_cpp_doc_build
+      - pytorch_doc_test
+      - pytorch_linux_backward_compatibility_check_test
+      - pytorch_linux_xenial_py3_6_gcc5_4_jit_legacy_test
+      - pytorch_linux_xenial_py3_6_gcc5_4_test
+      - pytorch_python_doc_build
+    - pytorch_xla_linux_bionic_py3_6_clang9_build
+      - pytorch_xla_linux_bionic_py3_6_clang9_test
+  - Otherwise, choice **1** is used.
+- For CI jobs on GitHub Actions:
+  - If the PR was created using [`ghstack`](https://github.com/ezyang/ghstack),
+    choice **1** is used.
+  - Otherwise, choice **2** is used.
+
+This is important to be aware of, because if you see a CI failure on your PR and
+choice **2** is being used for that CI job, it is possible that the failure is
+nondeterministically caused by a commit that does not exist in the ancestry of
+your PR branch. If you happen to have write access to this repo, you can choose
+to use `ghstack` to eliminate this nondeterminism for GitHub Actions jobs on
+your PRs, but it will still be present for the select CircleCI jobs listed
+above.

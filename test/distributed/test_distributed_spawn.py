@@ -3,7 +3,10 @@ import os
 import sys
 import unittest
 
+import torch
 import torch.distributed as dist
+
+torch.backends.cuda.matmul.allow_tf32 = False
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -29,6 +32,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         def setUp(self):
             super().setUp()
             self._spawn_processes()
+            torch.backends.cudnn.flags(allow_tf32=False).__enter__()
 
 
 if __name__ == "__main__":
