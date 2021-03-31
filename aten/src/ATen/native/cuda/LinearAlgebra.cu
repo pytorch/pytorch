@@ -71,15 +71,16 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU("addmm", args);
 
+  IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef mat2_sizes = mat2.sizes();
   Tensor self_;
   if (&result != &self) {
-    std::tie(self_) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+    // TORCH_CHECK at top of function guarantees indexing into sizes() is correct.
+    std::tie(self_) = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
   } else {
     self_ = self;
   }
 
-  IntArrayRef mat1_sizes = mat1.sizes();
-  IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes = self_.sizes();
   TORCH_CHECK(
       mat1_sizes[1] == mat2_sizes[0],
