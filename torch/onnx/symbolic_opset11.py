@@ -439,7 +439,7 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
-def det(g, self):
+def linalg_det(g, self):
     return g.op("Det", self)
 
 
