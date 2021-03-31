@@ -271,17 +271,17 @@ class TestCommon(JitCommonTestCase):
                     # Compares variant's forward
                     # Note: copies the to-be-modified input when testing the inplace variant
                     sample.input.grad = None
-                    expected_forward = op(sample.input, *sample.args, **sample.kwargs)
-                    expected_grad = None
+                    cloned = clone_input_helper(sample.input) if variant in inplace_ops else sample.input
+                    variant_forward = variant(cloned,
+                                              *sample.args,
+                                              **sample.kwargs)
+                    self.assertEqual(expected_forward, variant_forward)
 
-                    # TODO: backward consistency only supported for single tensor outputs
-                    # TODO: backward consistency only checked on sample.input, not all
-                    #   tensor inputs
-                    # TODO: update to handle checking grads of all tensor inputs as
-                    #   derived from each tensor output
-                    if (_requires_grad and isinstance(expected_forward, torch.Tensor)):
-                        expected_forward.sum().backward()
-                        expected_grad = sample.input.grad
+                    # Compares variant's backward
+                    if expected_grad is not None and \
+                            (variant not in inplace_ops or op.supports_inplace_autograd):
+                        variant_forward.sum().backward()
+                        self.assertEqual(expected_grad, sample.input.grad)
 
         _test_consistency_helper(samples, outplace_variants)
 
