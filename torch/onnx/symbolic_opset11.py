@@ -445,7 +445,7 @@ def linalg_det(g, self):
 
 def logdet(g, input):
     from torch.onnx.symbolic_opset9 import log
-    return log(g, det(g, input))
+    return log(g, linalg_det(g, input))
 
 
 def arange(g, *args):
