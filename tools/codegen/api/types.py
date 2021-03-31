@@ -27,14 +27,9 @@ ArgName = Union[str, SpecialArgName]
 # structure.
 
 
-# Prints an enum without the enum class name
-class PrintEnum(Enum):
-    def __str__(self):
-        return self.name
-
 # The set of all non-templated, valid, fully-qualified names of C++ types that are used in the codegen.
 # Templated types get their own dataclass, mainly to make namespace parsing easier.
-BaseCppType = PrintEnum('BaseCppType', (
+BaseCppType = Enum('BaseCppType', (
     'int64_t',
     'double',
     'bool',
@@ -77,7 +72,7 @@ class BaseCType:
         self.name = name
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
-        return str(self.type)
+        return str(self.type.name)
 
     # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
     # TODO: Kill this when we eventually remove it!
@@ -194,7 +189,7 @@ class ArrayCType:
 
 @dataclass(frozen=True)
 class TupleCType:
-    elems: 'CType'
+    elems: List['CType']
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
@@ -206,10 +201,9 @@ class TupleCType:
     @property
     def name(self) -> ArgName:
         # N.B. this isn't currently used anywhere: std::tuple is only used as a return type, which doesn't use names.
-        assert_never("std::tuple isn't currently used as an argument anywhere, and doesn't require a name.")
-        return self.name
+        raise AssertionError("std::tuple isn't currently used as an argument anywhere, and doesn't require a name.")
 
-CType = Union[BaseCType, OptionalCType, ConstRefCType, MutRefCType, ListCType, ArrayRefCType, VectorCType, TupleCType]
+CType = Union[BaseCType, OptionalCType, ConstRefCType, MutRefCType, ListCType, ArrayRefCType, ArrayCType, VectorCType, TupleCType]
 
 # A binding represents any C++ binding site for a formal parameter.
 # We don't distinguish between binding sites for different APIs;
