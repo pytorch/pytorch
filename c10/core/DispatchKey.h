@@ -270,19 +270,20 @@ enum class DispatchKey : uint8_t {
 
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
-  Math, // registered at build/aten/src/ATen/RegisterMath.cpp
-  DefaultBackend, // registered at
-                  // build/aten/src/ATen/RegisterDefaultBackend.cpp
+  CompositeImplicitAutograd, // registered at build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
+  CompositeExplicitAutograd, // registered at
+                  // build/aten/src/ATen/RegisterCompositeExplicitAutograd.cpp
 
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.
-  EndOfAliasKeys = DefaultBackend, //
+  EndOfAliasKeys = CompositeExplicitAutograd, //
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // The aliases exist for backwards compatibility reasons, they shouldn't
   // be used
   CPUTensorId = CPU,
   CUDATensorId = CUDA,
+  DefaultBackend = CompositeExplicitAutograd,
   PrivateUse1_PreAutograd = AutogradPrivateUse1,
   PrivateUse2_PreAutograd = AutogradPrivateUse2,
   PrivateUse3_PreAutograd = AutogradPrivateUse3,

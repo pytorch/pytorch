@@ -143,6 +143,15 @@ IValue tensorToListRecursive(
       double scalar =
           scalar_ty == at::ScalarType::Float ? *(float*)data : *(double*)data;
       return IValue(scalar);
+    } else if (ty == ComplexType::get()) {
+      TORCH_INTERNAL_ASSERT(
+          scalar_ty == at::ScalarType::ComplexFloat ||
+              scalar_ty == at::ScalarType::ComplexDouble,
+          "Unexpected scalar type for Tensor");
+      c10::complex<double> scalar = scalar_ty == at::ScalarType::ComplexFloat
+          ? *(c10::complex<float>*)data
+          : *(c10::complex<double>*)data;
+      return IValue(scalar);
     } else if (ty == BoolType::get()) {
       bool scalar = *(bool*)data;
       return IValue(scalar);
@@ -175,6 +184,8 @@ IValue tensorToListRecursive(
 
     if (inner_result.isList()) {
       result.emplace_back(inner_result.toList());
+    } else if (inner_result.isComplexDouble()) {
+      result.emplace_back(inner_result.toComplexDouble());
     } else if (inner_result.isDouble()) {
       result.emplace_back(inner_result.toDouble());
     } else if (inner_result.isInt()) {
