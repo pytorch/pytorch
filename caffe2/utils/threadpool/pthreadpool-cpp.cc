@@ -2,7 +2,41 @@
 #include <caffe2/utils/threadpool/thread_pool_guard.h>
 #include <c10/util/Exception.h>
 
+#include <atomic>
+
+namespace {
+// Number of threads in the thread-pool before fork
+std::atomic<int> num_threads_before_fork{-1};
+
+} // namespace
+
 namespace caffe2 {
+
+// Handler used by pthread_atfork that's executed before fork starts processing.
+// Saves the value of the number of threads prior to fork, so that the Caffe2
+// threadpool can be leaked, and restored via after_fork handler, after fork.
+// It's done in order to prevent segfaults in worker processes, which otherwise
+// segfault, as they try to handle inherited data-structures of parent's Caffe2
+// thread-pool, although those threads don't exist in child processes.
+// Ref: https://github.com/pytorch/pytorch/issues/54752#issuecomment-810315302
+static void before_fork() {
+#ifdef USE_PTHREADPOOL
+  PThreadPool* const pool = caffe2::pthreadpool();
+  TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
+  num_threads_before_fork.store(pool->get_thread_count());
+  pool->set_thread_count(1);
+#endif
+ }
+
+// Handler used by pthread_atfork that's executed after fork starts processing
+// Restores the Caffe2 thread-pool after fork.
+static void after_fork() {
+#ifdef USE_PTHREADPOOL
+  PThreadPool* const pool = caffe2::pthreadpool();
+  TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
+  pool->set_thread_count(num_threads_before_fork.load());
+#endif
+}
 
 PThreadPool::PThreadPool(const size_t thread_count)
     : threadpool_(pthreadpool_create(thread_count), pthreadpool_destroy) {}
@@ -59,6 +93,11 @@ size_t getDefaultNumThreads();
 PThreadPool* pthreadpool() {
   static std::unique_ptr<PThreadPool> threadpool =
       std::make_unique<PThreadPool>(getDefaultNumThreads());
+#ifndef WIN32
+  // Register pthread_atfork handlers to prevent segfaults in worker processes
+  // after fork.
+  pthread_atfork(before_fork, after_fork, nullptr);
+#endif
   return threadpool.get();
 }
 
